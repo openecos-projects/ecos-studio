@@ -1,3 +1,4 @@
+package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "build_gui_script",
@@ -31,6 +32,7 @@ genrule(
         ":build_gui_script",
     ],
     outs = ["ecos_studio_bundle/ecos_studio_bundle.tar"],
+    local = True,
     cmd = """
         set -euo pipefail
 
