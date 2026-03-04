@@ -1,0 +1,172 @@
+/* Tailwind CSS v4 with PrimeVue CSS Layer Integration */
+@import "tailwindcss";
+
+
+:root {
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* Theme variables - Light (Default) */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-sidebar: #f3f4f6;
+  --border-color: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --accent-color: #00bfa5;
+  --accent-text: #ffffff;
+  --topbar-bg: #ffffff;
+  --topbar-text: #374151;
+
+  color-scheme: light dark;
+  
+  /* 禁用浏览器的自动缩放 */
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* 全局禁用文字选择（桌面应用体验） */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 允许输入类元素和代码块中的文字选择 */
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.dark {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-sidebar: #333333;
+  --border-color: #3e3e42;
+  --text-primary: #cccccc;
+  --text-secondary: #999999;
+  --accent-color: #00897b;
+  --accent-text: #ffffff;
+  --topbar-bg: #1e1e1e;
+  --topbar-text: #cccccc;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  /* 透明背景支持窗口圆角 */
+  background: transparent;
+  color: var(--text-primary);
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  /* 透明背景 */
+  background: transparent;
+  /* 使用 flex 布局确保内容填充 */
+  display: flex;
+  flex-direction: column;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 防止选中文本 - 用于拖拽区域 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+[data-tauri-drag-region] button {
+  -webkit-app-region: no-drag;
+}
+
+/* Tauri 性能优化 */
+* {
+  /* 启用硬件加速 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 优化滚动性能 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* 优化过渡和动画性能 */
+.transition-colors,
+.transition-all,
+.transition-transform {
+  will-change: auto;
+}
+
+/* 减少重绘 */
+img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* 优化 Splitter 性能 */
+.p-splitter-panel {
+  will-change: auto;
+  contain: layout style paint;
+}
+
+/* 拖拽 Splitter 分割条时锁定光标 + 覆盖层防选 */
+body.splitter-resizing {
+  cursor: col-resize !important;
+}
+body.splitter-resizing * {
+  cursor: col-resize !important;
+  /* 屏蔽子元素的 pointer-events 防止 WebKitGTK 拖选 */
+  pointer-events: none !important;
+}
+/* 保留 gutter 自身的交互 */
+body.splitter-resizing .p-splitter-gutter {
+  pointer-events: auto !important;
+}
+
+/* 垂直分割条拖拽时使用 row-resize 光标 */
+body.splitter-resizing-vertical,
+body.splitter-resizing-vertical * {
+  cursor: row-resize !important;
+}
+
+/* 调整窗口大小时禁用全局文本选择 */
+body.window-resizing,
+body.window-resizing * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}

@@ -1,0 +1,17 @@
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "tauri_rust_sources",
+    # Why: root tauri_bundle genrule cannot glob into this subpackage directly.
+    # Export source/config inputs so cache keys include Rust-side changes.
+    srcs = glob([
+        "src/**/*",
+        "capabilities/**/*",
+        "icons/**/*",
+        "resources/**/*",
+        "Cargo.toml",
+        "Cargo.lock",
+        "tauri.conf.json",
+        "build.rs",
+    ]),
+)

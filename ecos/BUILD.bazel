@@ -1,0 +1,45 @@
+
+filegroup(
+    name = "build_gui_script",
+    srcs = ["build-gui.sh"],
+)
+
+# TODO: Replace with actual Python api-server target
+filegroup(
+    name = "server_bundle",
+    srcs = ["server/dummy-server.sh"],
+)
+
+# Tauri bundle - ChipCompiler specific
+genrule(
+    name = "ecos_studio_bundle",
+    srcs = glob([
+        "gui/src/**/*",
+        "gui/public/**/*",
+        "gui/index.html",
+        "gui/package.json",
+        "gui/pnpm-lock.yaml",
+        "gui/tsconfig*.json",
+        "gui/vite.config.ts",
+        "gui/tailwind.config.ts",
+    ]) + [
+        "//ecos/gui/src-tauri:tauri_rust_sources",
+        ":server_bundle",
+        "@appimagetool_x86_64_linux//file",
+        "@oss_cad_suite//:all_files",
+        "@oss_cad_suite//:yosys_bin",
+        ":build_gui_script",
+    ],
+    outs = ["ecos_studio_bundle/ecos_studio_bundle.tar"],
+    cmd = """
+        set -euo pipefail
+
+        bash "$(location :build_gui_script)" \\
+            --gui-src-dir "$$(dirname $(location gui/package.json))" \\
+            --api-server-bin "$(location :server_bundle)" \\
+            --appimagetool-bin "$(location @appimagetool_x86_64_linux//file)" \\
+            --oss-cad-bin "$(location @oss_cad_suite//:yosys_bin)" \\
+            --out-tar "$@" \\
+            --work-root "$(@D)/ecos_studio_bundle_work"
+    """,
+)

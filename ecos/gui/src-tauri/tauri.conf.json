@@ -1,0 +1,49 @@
+{
+  "productName": "ECOS-Studio",
+  "version": "0.1.0",
+  "identifier": "com.ecos.studio",
+  "build": {
+    "beforeDevCommand": "pnpm run dev",
+    "beforeBuildCommand": "pnpm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "ECOS Studio",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1280,
+        "minHeight": 800,
+        "maxWidth": 2560,
+        "maxHeight": 1600,
+        "decorations": false,
+        "transparent": true,
+        "center": true,
+        "visible": false,
+        "alwaysOnTop": false,
+        "focus": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "resources": [
+      "resources/oss-cad-suite/**/*",
+      "resources/oss-cad-suite/README"
+    ],
+    "externalBin": [
+      "binaries/api-server"
+    ]
+  }
+}

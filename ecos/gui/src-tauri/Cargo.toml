@@ -1,0 +1,47 @@
+[package]
+name = "ecc-client"
+version = "0.1.0"
+description = "ECOS Studio"
+authors = ["Ekko"]
+license = ""
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-store = "2"
+ureq = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# 性能优化配置
+[profile.dev]
+opt-level = 2  # 开发时启用更多优化
+debug = 0     # 减少调试信息
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3  # 最高级别的性能优化
+strip = true     # 移除调试符号
+panic = 'abort'  # 发生panic时直接终止，减少运行时开销
+incremental = false
+rpath = false
+overflow-checks = false  # 禁用整数溢出检查，提升性能
+[profile.release.package.tauri]
+overflow-checks = false
+[profile.release.package.tauri-runtime-wry]
+opt-level = 3
+[profile.release.package.wry]
+opt-level = 3
+
