@@ -7,13 +7,43 @@ name = "ecos-server"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "chipcompiler",
-    "fastapi>=0.109",
-    "uvicorn>=0.27",
+  "ecc==0.1.0",
+  "fastapi>=0.109",
+  "uvicorn>=0.27",
+]
+
+[dependency-groups]
+dev = [
+  "auditwheel>=6",
+  "black>=23",
+  "mypy>=1",
+  "prek>=0.2.20",
+  "pyinstaller>=6",
+  "pyright>=1.1.407",
+  "pytest>=7",
+  "pytest-cov>=4",
+  "ruff>=0.14.10",
+  "ty>=0.0.9"
 ]
 
 [tool.uv.sources]
-chipcompiler = { workspace = true }
+ecc = { path = "../../ecc", editable = true }
 
-[tool.uv.workspace]
-members = ["ecc"]
+[tool.ruff]
+line-length = 100
+lint.select = [
+  "B",   # flake8-bugbear
+  "E",   # pycodestyle
+  "F",   # Pyflakes
+  "I",   # isort
+  "SIM", # flake8-simplify
+  "UP",  # pyupgrade
+]
+extend-include = ["*.spec"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ecos_server"]
+
+[tool.ty]
+environment.python-version = "3.11"
+src.include = [ "ecos_server/**/*.py" ]
