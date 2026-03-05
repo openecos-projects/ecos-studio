@@ -1,3 +1,5 @@
+load("@ecos-bazel//rules:python_packaging.bzl", "python_pyinstaller_bundle")
+
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
@@ -5,10 +7,19 @@ filegroup(
     srcs = ["build-gui.sh"],
 )
 
-# TODO: Replace with actual Python api-server target
-filegroup(
-    name = "server_bundle",
-    srcs = ["server/dummy-server.sh"],
+python_pyinstaller_bundle(
+    name = "build_ecos_server",
+    spec_file = "server/ecos.spec",
+    srcs = [
+        "server/ecos.spec",
+        "server/pyproject.toml",
+        "server/run_server.py",
+        "server/uv.lock",
+    ] + glob([
+        "server/ecos_server/**/*.py",
+    ]),
+    output_name = "ecos-server",
+    pyinstaller = "@ecos-bazel//tools:pyinstaller",
 )
 
 # Tauri bundle - ChipCompiler specific
@@ -25,7 +36,7 @@ genrule(
         "gui/tailwind.config.ts",
     ]) + [
         "//ecos/gui/src-tauri:tauri_rust_sources",
-        ":server_bundle",
+        ":build_ecos_server",
         "@appimagetool_x86_64_linux//file",
         "@oss_cad_suite//:all_files",
         "@oss_cad_suite//:yosys_bin",
@@ -38,7 +49,7 @@ genrule(
 
         bash "$(location :build_gui_script)" \\
             --gui-src-dir "$$(dirname $(location gui/package.json))" \\
-            --api-server-bin "$(location :server_bundle)" \\
+            --api-server-bin "$(location :build_ecos_server)" \\
             --appimagetool-bin "$(location @appimagetool_x86_64_linux//file)" \\
             --oss-cad-bin "$(location @oss_cad_suite//:yosys_bin)" \\
             --out-tar "$@" \\

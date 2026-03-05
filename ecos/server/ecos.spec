@@ -139,7 +139,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="chipcompiler",
+    name="ecos-server",
     strip=False,
     upx=True,
     console=True,
