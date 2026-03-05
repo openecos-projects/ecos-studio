@@ -4,9 +4,9 @@
 [submodule "ip/retroSoC"]
 	path = ip/retroSoC
 	url = git@github.com:retroSoC/retroSoC.git
-[submodule "eda/ecc"]
-	path = eda/ecc
-	url = git@github.com:openecos-projects/ecc.git
 [submodule "pdk/icsprout55-pdk"]
 	path = pdk/icsprout55-pdk
 	url = git@github.com:0xharry/icsprout55-pdk.git
+[submodule "ecc"]
+	path = ecc
+	url = git@github.com:openecos-projects/ecc.git
