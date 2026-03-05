@@ -3,7 +3,7 @@
 
 
 :root {
-  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Inter Variable", Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -48,16 +48,16 @@ code,
 }
 
 .dark {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-sidebar: #333333;
-  --border-color: #3e3e42;
-  --text-primary: #cccccc;
-  --text-secondary: #999999;
-  --accent-color: #00897b;
+  --bg-primary: #18181c;
+  --bg-secondary: #222226;
+  --bg-sidebar: #222226;
+  --border-color: #36363a;
+  --text-primary: #e3e3e8;
+  --text-secondary: #a1a1aa;
+  --accent-color: #00bfa5;
   --accent-text: #ffffff;
-  --topbar-bg: #1e1e1e;
-  --topbar-text: #cccccc;
+  --topbar-bg: #18181c;
+  --topbar-text: #e3e3e8;
 }
 
 html, body {

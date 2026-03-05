@@ -248,6 +248,10 @@ export class RulerPlugin implements IPlugin {
     // 绘制刻度
     this.hTicks.setStrokeStyle({ width: 1, color: tickColor })
 
+    // 为了避免文字重叠，保证相邻文字在屏幕上的间距至少 40 像素
+    const minLabelScreenInterval = 40
+    let lastLabelScreenX = -Infinity
+
     for (let worldX = startTick; worldX <= worldEndX; worldX += subInterval) {
       const screenX = worldX * transform.scale + transform.x
 
@@ -260,8 +264,8 @@ export class RulerPlugin implements IPlugin {
       this.hTicks.lineTo(screenX, thickness)
       this.hTicks.stroke()
 
-      // 主刻度添加文字
-      if (isMajor) {
+      // 主刻度添加文字（根据屏幕间距筛选，避免重叠）
+      if (isMajor && screenX - lastLabelScreenX >= minLabelScreenInterval) {
         const label = new Text({
           text: this.formatNumber(worldX),
           style: this.textStyle
@@ -269,6 +273,7 @@ export class RulerPlugin implements IPlugin {
         label.x = screenX + 2
         label.y = 2
         this.hLabels.addChild(label)
+        lastLabelScreenX = screenX
       }
     }
   }
@@ -305,6 +310,10 @@ export class RulerPlugin implements IPlugin {
     // 绘制刻度
     this.vTicks.setStrokeStyle({ width: 1, color: tickColor })
 
+    // 垂直方向同样避免文字重叠
+    const minLabelScreenInterval = 40
+    let lastLabelScreenY = -Infinity
+
     for (let worldY = startTick; worldY <= worldEndY; worldY += subInterval) {
       const screenY = worldY * transform.scale + transform.y
 
@@ -317,8 +326,8 @@ export class RulerPlugin implements IPlugin {
       this.vTicks.lineTo(thickness, screenY)
       this.vTicks.stroke()
 
-      // 主刻度添加文字
-      if (isMajor) {
+      // 主刻度添加文字（根据屏幕间距筛选，避免重叠）
+      if (isMajor && screenY - lastLabelScreenY >= minLabelScreenInterval) {
         const label = new Text({
           text: this.formatNumber(worldY),
           style: this.textStyle
@@ -329,6 +338,7 @@ export class RulerPlugin implements IPlugin {
         label.y = screenY - 2
         label.anchor.set(0, 1)
         this.vLabels.addChild(label)
+        lastLabelScreenY = screenY
       }
     }
   }

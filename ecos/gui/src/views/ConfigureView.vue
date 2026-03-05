@@ -180,9 +180,15 @@ const toggleSection = (key: keyof typeof expandedSections) => {
             <span>Constraints</span>
           </div>
           <div class="card-body">
-            <div class="field">
-              <label>Max Fanout</label>
-              <InputNumber v-model="config.maxFanout" size="small" :min="1" />
+            <div class="field-row">
+              <div class="field">
+                <label>Max Fanout</label>
+                <InputNumber v-model="config.maxFanout" size="small" :min="1" />
+              </div>
+              <div class="field">
+                <label>Global right padding</label>
+                <InputNumber v-model="config.globalRightPadding" size="small" :min="0" />
+              </div>
             </div>
             <div class="field">
               <div class="label-row">

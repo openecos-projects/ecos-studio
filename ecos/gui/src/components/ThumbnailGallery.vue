@@ -44,7 +44,7 @@
       <!-- Info Keys 列表 -->
       <div v-else class="p-3 w-full">
         <!-- Analysis 网格布局 -->
-        <div v-if="activeTab === InfoEnum.analysis" class="grid grid-cols-2 gap-2">
+        <div v-if="activeTab === InfoEnum.analysis || activeTab === InfoEnum.sta" class="grid grid-cols-2 gap-2">
           <a v-for="(value, key) in currentTabInfo" :key="key" @click="handleKeyClick(key as string, value)" :class="[
             'group flex items-center gap-2.5 p-2.5 rounded-lg cursor-pointer',
             'transition-all duration-200 ease-out',
@@ -116,7 +116,8 @@ const { currentProject } = useWorkspace()
 const tabs = [
   { id: InfoEnum.analysis, label: 'Analysis', icon: 'ri-pie-chart-line' },
   { id: InfoEnum.maps, label: 'Maps', icon: 'ri-map-2-line' },
-  { id: InfoEnum.checklist, label: 'Checklist', icon: 'ri-list-check-line' }
+  { id: InfoEnum.checklist, label: 'Checklist', icon: 'ri-list-check-line' },
+  { id: InfoEnum.sta, label: 'STA', icon: 'ri-timer-line' }
 ]
 
 const activeTab = ref<InfoEnum>(InfoEnum.analysis)

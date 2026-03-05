@@ -267,6 +267,26 @@ export class Editor {
     return this.setZoom(this.getScale() / (1 + step))
   }
 
+  /**
+   * Update viewport world dimensions and zoom limits.
+   * Call this when loading content with different coordinate ranges (e.g., layout DBU).
+   */
+  public setWorldBounds(worldWidth: number, worldHeight: number): this {
+    if (!this.viewport) return this
+    this.options.worldWidth = worldWidth
+    this.options.worldHeight = worldHeight
+    this.viewport.worldWidth = worldWidth
+    this.viewport.worldHeight = worldHeight
+
+    const screenW = this.app?.screen.width ?? 800
+    const screenH = this.app?.screen.height ?? 600
+    const fitScale = Math.min(screenW / worldWidth, screenH / worldHeight)
+    const minScale = fitScale * 0.5
+    this.viewport.clampZoom({ minScale, maxScale: 100 })
+
+    return this
+  }
+
   /** 适应所有元素/世界范围 */
   public fitToWorld(padding = 40): this {
     if (!this.viewport || !this.app) return this

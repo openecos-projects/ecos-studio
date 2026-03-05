@@ -6,7 +6,11 @@ import Aura from '@primevue/themes/aura'
 import router from './router'
 import App from './App.vue'
 import { initApiPort } from './api/client'
-import { isTauri } from './composables/useTauri'
+import '@fontsource-variable/inter'
+import '@fontsource/noto-sans-sc/400.css'
+import '@fontsource/noto-sans-sc/500.css'
+import '@fontsource/noto-sans-sc/600.css'
+import '@fontsource/noto-sans-sc/700.css'
 import './styles/index.css'
 import 'remixicon/fonts/remixicon.css'
 
@@ -37,27 +41,6 @@ initApiPort()
     console.error('[app] API port init failed, mounting with defaults:', err)
   })
   .finally(() => {
-    // 无论端口初始化成功或失败，始终挂载应用
     app.mount('#app')
-
-    // 在 Tauri 环境中，通知后端应用已准备就绪
-    const inTauri = isTauri();
-
-    if (inTauri) {
-      // 异步触发窗口显示，不阻塞主流程
-      (async () => {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await router.isReady();
-          // 等待 DOM 渲染
-          requestAnimationFrame(() => {
-            invoke('show_main_window').catch(console.error);
-            console.log('ECC Window show signal sent');
-          });
-        } catch (e) {
-          console.error('Failed to signal window show:', e);
-        }
-      })();
-    }
   })
 

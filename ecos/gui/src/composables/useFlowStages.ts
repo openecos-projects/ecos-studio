@@ -210,6 +210,23 @@ export function useFlowStages() {
   }
 
   /**
+   * 乐观更新：将第一个非 Success 的 run 步骤设为 Ongoing
+   * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
+   */
+  function setFirstRunStepOngoing(): void {
+    const idx = dynamicFlowStages.value.findIndex(
+      s => s.state !== 'Success'
+    )
+    if (idx !== -1) {
+      dynamicFlowStages.value[idx] = {
+        ...dynamicFlowStages.value[idx],
+        state: 'Ongoing'
+      }
+    }
+  }
+
+
+  /**
    * 重新加载流程步骤
    */
   async function refreshFlowStages(): Promise<void> {
@@ -299,6 +316,7 @@ export function useFlowStages() {
     loadFlowStages,
     loadFlowStagesFromPath,
     refreshFlowStages,
-    clearFlowStages
+    clearFlowStages,  
+    setFirstRunStepOngoing
   }
 }

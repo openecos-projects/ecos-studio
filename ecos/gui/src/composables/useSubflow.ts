@@ -244,11 +244,24 @@ export function useSubflow() {
   /**
    * 获取当前路由对应的 step 名称
    */
-  function getCurrentRouteStep(): string | undefined {
+  function getCurrentRouteStep(): StepEnum | undefined {
     const pathParts = route.path.split('/')
     const currentPath = pathParts[pathParts.length - 1] || ''
     const stepEnum = getStepEnumFromPath(currentPath)
     return stepEnum
+  }
+
+  /**
+   * 刷新当前路由对应的子流程数据
+   */
+  async function refreshCurrentSubflow(): Promise<void> {
+    const stepEnum = getCurrentRouteStep()
+    if (stepEnum) {
+      updateCurrentStep(stepEnum)
+      await fetchSubflowInfo(stepEnum)
+    } else {
+      clearSubflow()
+    }
   }
 
   /**
@@ -338,6 +351,7 @@ export function useSubflow() {
 
     // 方法
     fetchSubflowInfo,
+    refreshCurrentSubflow,
     loadSubflowFromPath,
     clearSubflow,
     updateCurrentStep

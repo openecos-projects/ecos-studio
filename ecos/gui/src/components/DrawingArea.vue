@@ -1,20 +1,43 @@
 <script setup lang="ts">
-import { shallowRef, watch } from 'vue'
+import { shallowRef, markRaw, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { EditorContainer, type Editor } from '@/applications/editor'
+import {
+  LayoutDataStore,
+  LayoutRenderer,
+  LayerStyleManager,
+  SpatialIndex,
+  InteractionManager,
+} from '@/applications/editor/layout'
+import {
+  SelectPlugin,
+  MeasurePlugin,
+  LayerManagerPlugin,
+  HighlightPlugin,
+} from '@/applications/editor/plugins'
+import type { RawHeaderJSON, RawDataJSON } from '@/applications/editor/layout'
 import DrawingToolbar from './DrawingToolbar.vue'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useEDA } from '@/composables/useEDA'
+import { useLayoutState } from '@/composables/useLayoutState'
 import { getInfoApi } from '@/api/flow'
 import { CMDEnum, InfoEnum, StepEnum, ResponseEnum } from '@/api/type'
 
 const route = useRoute()
 const { currentProject } = useWorkspace()
 const { getResourceUrl } = useEDA()
+const layoutState = useLayoutState()
 
 const editor = shallowRef<Editor | null>(null)
 
-// 从 StepEnum 动态生成路由路径映射（忽略大小写）
+// Layout modules (not reactive — managed imperatively)
+let dataStore: LayoutDataStore | null = null
+let renderer: LayoutRenderer | null = null
+let styleManager: LayerStyleManager | null = null
+let spatialIndex: SpatialIndex | null = null
+let interactionManager: InteractionManager | null = null
+let styleStateUnlisten: (() => void) | null = null
+
 const stepEnumValues = Object.values(StepEnum)
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
@@ -22,69 +45,202 @@ function getStepEnumFromPath(path: string): StepEnum | undefined {
 }
 
 const onEditorReady = (editorInstance: Editor) => {
-  console.log('Editor ready:', editorInstance)
   editor.value = editorInstance
 
-  // 初始加载当前路径对应的数据
+  const layerMgrPlugin = editorInstance.getPlugin<LayerManagerPlugin>('layerManager')
+  if (layerMgrPlugin) {
+    layoutState.layerManager.value = markRaw(layerMgrPlugin)
+  }
+
   const pathParts = route.path.split('/')
   const stage = pathParts[pathParts.length - 1] || 'home'
   handleStageChange(stage)
 }
 
-/**
- * 处理阶段切换，加载对应的 EDA 结果
- */
-const handleStageChange = async (stage: string) => {
-  if (!editor.value || !stage) return
-
-  // 从路由路径获取对应的 StepEnum
-  const stepEnum = getStepEnumFromPath(stage)
-  if (!stepEnum) {
-    console.log('No step enum found for stage:', stage)
-    editor.value.clearBackground()
-    return
+function cleanupLayout(): void {
+  if (styleStateUnlisten) {
+    styleStateUnlisten()
+    styleStateUnlisten = null
   }
 
+  interactionManager?.destroy()
+  renderer?.destroy()
+  spatialIndex?.clear()
+  dataStore?.clear()
+  styleManager?.clear()
+
+  interactionManager = null
+  renderer = null
+  spatialIndex = null
+  dataStore = null
+  styleManager = null
+
+  layoutState.selectedGroups.value = []
+  layoutState.dataStore.value = null
+  layoutState.renderMode.value = 'image'
+}
+
+async function loadLayoutData(headerJson: RawHeaderJSON, dataJson: RawDataJSON): Promise<void> {
+  const ed = editor.value
+  if (!ed?.view) return
+
+  cleanupLayout()
+
+  layoutState.loadingState.value = 'loading'
+  layoutState.loadingMessage.value = 'Parsing header...'
 
   try {
-    // 1. 调用 getInfoApi 获取 layout 图片路径
-    const response = await getInfoApi({
-      cmd: CMDEnum.get_info,
-      data: {
-        step: stepEnum,
-        id: InfoEnum.layout
+    const t0 = performance.now()
+
+    // 1. Parse data
+    dataStore = markRaw(new LayoutDataStore())
+    dataStore.loadHeader(headerJson)
+    layoutState.dataStore.value = dataStore
+
+    layoutState.loadingMessage.value = 'Parsing layout data...'
+    dataStore.loadData(dataJson)
+
+    // 2. Build style manager
+    styleManager = markRaw(new LayerStyleManager())
+    styleManager.buildFromLayerDefs(dataStore.header!.layerList)
+    styleManager.applySnapshot(layoutState.layerStyleSnapshot.value)
+    styleStateUnlisten = styleManager.onChange(() => {
+      if (styleManager) {
+        layoutState.layerStyleSnapshot.value = styleManager.serialize()
       }
     })
 
-    console.log('getInfoApi layout response:', response)
+    // 3. Build spatial index
+    layoutState.loadingMessage.value = 'Building spatial index...'
+    spatialIndex = markRaw(new SpatialIndex())
+    const allBoxes = Array.from({ length: dataStore.totalGroups }, (_, i) => dataStore!.groups[i].children).flat()
+    spatialIndex.buildFromBoxes(allBoxes)
 
-    if (response.response !== ResponseEnum.success) {
-      console.warn('Failed to get layout info:', response.message)
-      editor.value.clearBackground()
-      return
+    // 4. Render
+    layoutState.loadingMessage.value = 'Rendering layout...'
+    renderer = markRaw(new LayoutRenderer())
+    renderer.init(ed.view, dataStore, styleManager)
+
+    // 5. Interaction manager
+    interactionManager = markRaw(new InteractionManager())
+    interactionManager.init(ed.view, dataStore, renderer, spatialIndex)
+
+    interactionManager.onSelectionChange((e) => {
+      layoutState.selectedGroups.value = e.selectedGroups
+    })
+
+    // 6. Configure plugins
+    const selectPlugin = ed.getPlugin<SelectPlugin>('select')
+    if (selectPlugin) {
+      selectPlugin.configure(interactionManager, renderer)
+    }
+    const highlightPlugin = ed.getPlugin<HighlightPlugin>('highlight')
+    if (highlightPlugin) {
+      highlightPlugin.configure(dataStore, renderer)
+    }
+    const measurePlugin = ed.getPlugin<MeasurePlugin>('measure')
+    if (measurePlugin) {
+      measurePlugin.setDbuPerMicron(dataStore.dbuPerMicron)
+    }
+    const layerMgrPlugin = ed.getPlugin<LayerManagerPlugin>('layerManager')
+    if (layerMgrPlugin) {
+      layerMgrPlugin.configure(dataStore, renderer, styleManager)
+      layoutState.layerManager.value = markRaw(layerMgrPlugin)
     }
 
-    const imagePath = response.data?.info?.image
-    if (!imagePath) {
-      console.warn('No image path in response')
-      editor.value.clearBackground()
-      return
+    // 7. Update world bounds and fit to die area
+    const dieArea = dataStore.dieArea
+    if (dieArea && dieArea.width > 0) {
+      ed.setWorldBounds(dieArea.width, dieArea.height)
+
+      const vp = ed.view!
+      const padding = 40
+      const sw = ed.size.width - padding * 2
+      const sh = ed.size.height - padding * 2
+      const scale = Math.min(sw / dieArea.width, sh / dieArea.height)
+      vp.scale.set(scale)
+      vp.moveCenter(dieArea.x + dieArea.width / 2, dieArea.y + dieArea.height / 2)
     }
 
-    // 2. 将本地文件路径转换为可访问的 blob URL
-    const imageUrl = await getResourceUrl(imagePath, currentProject.value?.path || '')
-    console.log('Image URL:', imageUrl)
+    const elapsed = performance.now() - t0
+    console.log(`Layout loaded in ${elapsed.toFixed(0)}ms: ${dataStore.totalGroups} groups, ${dataStore.totalBoxes} boxes`)
 
-    // 3. 更新编辑器背景
-    await editor.value.setBackgroundImage(imageUrl)
-
-  } catch (error) {
-    console.error('Failed to load stage results:', error)
-    editor.value?.clearBackground()
+    layoutState.renderMode.value = 'layout'
+    layoutState.loadingState.value = 'ready'
+    layoutState.loadingMessage.value = ''
+  } catch (err) {
+    console.error('Failed to load layout data:', err)
+    layoutState.loadingState.value = 'error'
+    layoutState.loadingMessage.value = String(err)
+    cleanupLayout()
   }
 }
 
-// 监听路由路径变化
+const handleStageChange = async (stage: string) => {
+  if (!editor.value || !stage) return
+
+  const stepEnum = getStepEnumFromPath(stage)
+  if (!stepEnum) {
+    editor.value.clearBackground()
+    cleanupLayout()
+    return
+  }
+
+  try {
+    // Try to load structured layout JSON first
+    const layoutResponse = await getInfoApi({
+      cmd: CMDEnum.get_info,
+      data: { step: stepEnum, id: InfoEnum.layout }
+    })
+
+    if (layoutResponse.response === ResponseEnum.success && layoutResponse.data?.info) {
+      const info = layoutResponse.data.info
+
+      // Check if structured JSON data is available
+      if (info.header_json && info.data_json) {
+        const projectPath = currentProject.value?.path || ''
+
+        const [headerUrl, dataUrl] = await Promise.all([
+          getResourceUrl(info.header_json, projectPath),
+          getResourceUrl(info.data_json, projectPath),
+        ])
+
+        const [headerResp, dataResp] = await Promise.all([
+          fetch(headerUrl),
+          fetch(dataUrl),
+        ])
+
+        const headerJson: RawHeaderJSON = await headerResp.json()
+        const dataJson: RawDataJSON = await dataResp.json()
+
+        await loadLayoutData(headerJson, dataJson)
+        return
+      }
+      // 暂时先使用 固定的数据 
+      // const headerJson: RawHeaderJSON = await import('../../assets/05_layout_json_top_layout_json-header.json') as unknown as RawHeaderJSON
+      // const dataJson: RawDataJSON = await import('../../assets/05_layout_json_top_layout_json-0.json') as unknown as RawDataJSON
+      // await loadLayoutData(headerJson, dataJson)
+      // return
+      // Fallback to image mode
+      const imagePath = info.image
+      if (imagePath) {
+        cleanupLayout()
+        const imageUrl = await getResourceUrl(imagePath, currentProject.value?.path || '')
+        await editor.value?.setBackgroundImage(imageUrl)
+        layoutState.renderMode.value = 'image'
+        return
+      }
+    }
+
+    editor.value?.clearBackground()
+    cleanupLayout()
+  } catch (error) {
+    console.error('Failed to load stage results:', error)
+    editor.value?.clearBackground()
+    cleanupLayout()
+  }
+}
+
 watch(() => route.path, (newPath) => {
   const pathParts = newPath.split('/')
   const stage = pathParts[pathParts.length - 1] || 'home'
@@ -94,12 +250,37 @@ watch(() => route.path, (newPath) => {
 
 <template>
   <div class="flex flex-col h-full overflow-hidden">
-    <!-- 顶部工具栏 -->
     <DrawingToolbar :editor="editor" />
 
-    <!-- 编辑器容器 -->
     <div class="relative flex-1 overflow-hidden">
       <EditorContainer @ready="onEditorReady" />
+
+      <!-- Loading overlay -->
+      <div
+        v-if="layoutState.loadingState.value === 'loading'"
+        class="absolute inset-0 flex items-center justify-center bg-black/40 z-10"
+      >
+        <div class="flex flex-col items-center gap-2 text-white/80 text-sm">
+          <div class="w-6 h-6 border-2 border-white/30 border-t-white/80 rounded-full animate-spin"></div>
+          <span>{{ layoutState.loadingMessage.value || 'Loading...' }}</span>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div
+        v-if="layoutState.loadingState.value === 'error'"
+        class="absolute bottom-4 left-4 px-3 py-2 bg-red-900/80 text-red-200 text-xs rounded z-10"
+      >
+        Load error: {{ layoutState.loadingMessage.value }}
+      </div>
+
+      <!-- Mode indicator -->
+      <div
+        v-if="layoutState.renderMode.value === 'layout'"
+        class="absolute top-2 right-2 px-2 py-1 bg-green-900/60 text-green-300 text-[10px] rounded z-10"
+      >
+        Layout Mode
+      </div>
     </div>
   </div>
 </template>

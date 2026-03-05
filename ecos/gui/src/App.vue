@@ -13,7 +13,7 @@
     <!-- 主应用容器 -->
     <div class="app-container">
       <!-- 全局顶部菜单栏 -->
-      <TopBar :project-name="currentProject?.name" @menu-action="handleMenuAction" />
+      <TopBar :project-name="isWelcome ? null : currentProject?.name" @menu-action="handleMenuAction" />
       <!-- 页面内容 -->
       <div class="app-content">
         <router-view />
@@ -29,8 +29,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { useThemeStore } from '@/stores/themeStore'
@@ -44,6 +44,8 @@ import type { WorkspaceConfig } from '@/types'
 
 const router = useRouter()
 const themeStore = useThemeStore()
+const route = useRoute()
+const isWelcome = computed(() => route.path === '/')
 const { loadRecentProjects, currentProject, openProject, newProject } = useWorkspace()
 const { loadPdks } = usePdkManager()
 
@@ -68,7 +70,7 @@ const handleMenuAction = async (action: string) => {
       break
     }
     case 'documentation':
-      shellOpen('https://github.com/openecos-projects/ecc')
+      shellOpen('https://github.com/openecos-projects/ecc/blob/main/docs/user-guide.md')
       break
     case 'about':
       // TODO: 打开关于对话框

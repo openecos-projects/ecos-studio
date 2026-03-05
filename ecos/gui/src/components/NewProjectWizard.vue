@@ -1,504 +1,502 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+  <div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-xl transition-all p-4 sm:p-6">
     <div
-      class="relative w-full max-w-5xl mx-4 bg-(--bg-primary) rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden max-h-[90vh] flex flex-col">
+      class="relative w-full max-w-5xl bg-(--bg-primary)/95 backdrop-blur-2xl rounded-[24px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] border border-white/10 dark:border-white/5 overflow-hidden flex flex-col h-[85vh] max-h-[850px] ring-1 ring-black/5 dark:ring-white/5">
+      
+      <!-- Top Decorative Gradient -->
+      <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500/80 via-(--accent-color)/80 to-purple-500/80"></div>
+
       <!-- Close Button -->
       <button @click="$emit('close')"
-        class="absolute top-4 right-4 z-10 p-2 rounded-lg hover:bg-(--bg-secondary) transition-colors cursor-pointer">
-        <i class="ri-close-line text-xl text-(--text-secondary) hover:text-(--text-primary)"></i>
+        class="absolute top-6 right-6 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-(--bg-secondary)/80 hover:bg-(--border-color) text-(--text-secondary) hover:text-(--text-primary) transition-colors duration-200 cursor-pointer">
+        <i class="ri-close-line text-lg"></i>
       </button>
 
-      <!-- Stepper Header -->
-      <div class="px-8 pt-8 pb-6 border-b border-(--border-color) bg-(--bg-secondary)/50">
-        <div class="flex items-center justify-between max-w-3xl mx-auto">
-          <template v-for="(step, index) in steps" :key="step.id">
-            <!-- Step Circle -->
-            <div class="flex items-center">
-              <div class="flex flex-col items-center">
-                <div :class="[
-                  'w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold transition-all duration-300',
-                  currentStep > step.id
-                    ? 'bg-(--accent-color) text-white'
-                    : currentStep === step.id
-                      ? 'bg-(--accent-color) text-white ring-4 ring-(--accent-color)/20'
-                      : 'bg-(--bg-secondary) text-(--text-secondary) border-2 border-(--border-color)'
-                ]">
-                  <i v-if="currentStep > step.id" class="ri-check-line text-lg"></i>
-                  <span v-else>{{ step.id }}</span>
-                </div>
-                <span :class="[
-                  'mt-2 text-xs font-medium whitespace-nowrap transition-colors duration-300',
-                  currentStep >= step.id ? 'text-(--text-primary)' : 'text-(--text-secondary)'
-                ]">{{ step.title }}</span>
-              </div>
-            </div>
+      <div class="flex flex-col md:flex-row h-full">
+        <!-- Sidebar Stepper -->
+        <div class="w-full md:w-80 bg-(--bg-secondary)/40 border-r border-(--border-color)/40 p-8 md:p-10 flex flex-col shrink-0 relative">
+          <!-- Subtle lighting reflection effect -->
+          <div class="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
 
-            <!-- Connector Line -->
-            <div v-if="index < steps.length - 1" :class="[
-              'flex-1 h-0.5 mx-4 transition-all duration-500',
-              currentStep > step.id ? 'bg-(--accent-color)' : 'bg-(--border-color)'
-            ]"></div>
-          </template>
-        </div>
-      </div>
-
-      <!-- Step Content -->
-      <div class="flex-1 overflow-y-auto p-8">
-        <Transition name="slide-fade" mode="out-in">
-          <!-- Step 1: Basic Info -->
-          <div v-if="currentStep === 1" key="step1" class="max-w-2xl mx-auto">
-            <div class="mb-8">
-              <span class="text-xs font-medium text-(--accent-color) uppercase tracking-wider">Step 1</span>
-              <h2 class="text-2xl font-bold text-(--text-primary) mt-1">Project Basics</h2>
-              <p class="text-(--text-secondary) mt-2">Set the project name, description, and save location</p>
-            </div>
-
-            <div class="space-y-6">
-              <!-- Project Name -->
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Project Name <span class="text-red-500">*</span>
-                </label>
-                <input v-model="config.parameters.design" type="text" placeholder="e.g. my_chip_design"
-                  class="w-full px-4 py-3 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary) focus:outline-none focus:border-(--accent-color) focus:ring-2 focus:ring-(--accent-color)/20 transition-all" />
-                <p class="mt-1 text-xs text-(--text-secondary)">Project name can only contain letters, numbers, and underscores</p>
-              </div>
-
-              <!-- Project Description -->
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Project Description
-                </label>
-                <textarea v-model="config.parameters.description" rows="3" placeholder="Briefly describe your chip design project..."
-                  class="w-full px-4 py-3 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary) focus:outline-none focus:border-(--accent-color) focus:ring-2 focus:ring-(--accent-color)/20 transition-all resize-none"></textarea>
-              </div>
-
-              <!-- Project Location -->
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Save Location <span class="text-red-500">*</span>
-                </label>
-                <div class="flex gap-3">
-                  <input v-model="config.directory" type="text" readonly placeholder="Click to select a folder..."
-                    @click="selectLocation()"
-                    class="flex-1 px-4 py-3 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary) cursor-pointer" />
-                  <button @click="selectLocation"
-                    class="px-6 py-3 bg-(--accent-color) text-white rounded-lg hover:opacity-90 transition-opacity font-medium cursor-pointer flex items-center gap-2">
-                    <i class="ri-folder-open-line"></i>
-                    Browse
-                  </button>
-                </div>
-              </div>
-            </div>
+          <div class="mb-12 relative z-10">
+            <h1 class="text-3xl font-bold text-(--text-primary) tracking-tight">New Project</h1>
+            <p class="text-sm text-(--text-secondary) mt-2">Configure your chip design environment</p>
           </div>
-
-          <!-- Step 2: Design Files -->
-          <div v-else-if="currentStep === 2" key="step2" class="max-w-2xl mx-auto">
-            <div class="mb-8">
-              <span class="text-xs font-medium text-(--accent-color) uppercase tracking-wider">Step 2</span>
-              <h2 class="text-2xl font-bold text-(--text-primary) mt-1">Design Files</h2>
-              <p class="text-(--text-secondary) mt-2">Upload or select your RTL design files</p>
-            </div>
-
-            <!-- Drag & Drop Zone -->
-            <div @dragover.prevent="isDragging = true" @dragleave.prevent="isDragging = false"
-              @drop.prevent="handleFileDrop" :class="[
-                'relative border-2 border-dashed rounded-xl p-12 text-center transition-all duration-300 cursor-pointer',
-                isDragging
-                  ? 'border-(--accent-color) bg-(--accent-color)/5'
-                  : 'border-(--border-color) hover:border-(--accent-color)/50 hover:bg-(--bg-secondary)/50'
-              ]" @click="selectDesignFiles">
-              <div class="flex flex-col items-center">
-                <div
-                  class="w-16 h-16 rounded-full bg-(--accent-color)/10 flex items-center justify-center mb-4 transition-transform"
-                  :class="{ 'scale-110': isDragging }">
-                  <i class="ri-upload-cloud-2-line text-3xl text-(--accent-color)"></i>
+          
+          <div class="flex flex-col gap-8 relative z-10">
+            <template v-for="(step, index) in steps" :key="step.id">
+              <div class="relative flex items-start gap-4 group"
+                   :class="[
+                     step.id <= highestStep && step.id !== currentStep ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'
+                   ]"
+                   @click="handleStepClick(step.id)">
+                <!-- Connector Line -->
+                <div v-if="index < steps.length - 1" 
+                     class="absolute left-5 top-12 bottom-[-32px] w-[2px] -translate-x-1/2 rounded-full transition-colors duration-200"
+                     :class="currentStep > step.id ? 'bg-(--accent-color)' : 'bg-(--border-color)/60'">
                 </div>
-                <h3 class="text-lg font-semibold text-(--text-primary) mb-2">Drag and drop files here</h3>
-                <p class="text-sm text-(--text-secondary) mb-4">Supports Verilog (.v), SystemVerilog (.sv), and VHDL (.vhd) files</p>
-                <button type="button"
-                  class="px-6 py-2.5 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) hover:border-(--accent-color) transition-colors font-medium">
-                  Browse Files
-                </button>
-              </div>
-            </div>
 
-            <!-- File List -->
-            <div v-if="config.rtl_list.length > 0" class="mt-6 space-y-2">
-              <h4 class="text-sm font-medium text-(--text-primary) mb-3">
-                Added Files ({{ config.rtl_list.length }})
-              </h4>
-              <TransitionGroup name="list">
-                <div v-for="file in config.rtl_list" :key="file"
-                  class="flex items-center justify-between px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) group">
-                  <div class="flex items-center gap-3 min-w-0">
-                    <i :class="[
-                      'text-xl',
-                      file.endsWith('.v') || file.endsWith('.sv')
-                        ? 'ri-file-code-line text-blue-500'
-                        : file.endsWith('.vhd')
-                          ? 'ri-file-code-line text-purple-500'
-                          : 'ri-file-line text-(--text-secondary)'
-                    ]"></i>
-                    <div class="min-w-0">
-                      <p class="font-medium text-(--text-primary) truncate">{{ file }}</p>
+                <!-- Step Indicator -->
+                <div class="relative z-10 flex flex-col items-center shrink-0">
+                  <div :class="[
+                    'w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold transition-colors duration-200 shadow-sm',
+                    currentStep > step.id ? 'bg-(--accent-color) text-white ring-4 ring-(--accent-color)/20 border border-transparent' : 
+                    currentStep === step.id ? 'bg-(--accent-color) text-white ring-4 ring-(--accent-color)/30 border border-transparent' : 
+                    'bg-(--bg-primary)/80 text-(--text-secondary) border border-(--border-color)'
+                  ]">
+                    <i v-if="currentStep > step.id" class="ri-check-line text-lg"></i>
+                    <span v-else>{{ step.id }}</span>
+                  </div>
+                </div>
+
+                <!-- Step Text -->
+                <div class="flex flex-col pt-2 transition-transform duration-200" :class="currentStep === step.id ? 'translate-x-1' : ''">
+                  <span :class="[
+                    'text-base font-semibold transition-colors duration-200',
+                    currentStep >= step.id ? 'text-(--text-primary)' : 'text-(--text-secondary)'
+                  ]">{{ step.title }}</span>
+                  <span v-if="currentStep === step.id" class="text-xs text-(--accent-color) mt-1 font-medium tracking-wide uppercase">In Progress</span>
+                </div>
+              </div>
+            </template>
+          </div>
+          
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex-1 flex flex-col min-w-0 bg-transparent relative">
+          <!-- Step Content Scrollable Area -->
+          <div class="flex-1 overflow-y-auto p-8 md:p-12 custom-scrollbar">
+            <Transition name="fade-slide" mode="out-in">
+              <!-- Step 1: Basic Info -->
+              <div v-if="currentStep === 1" key="step1" class="max-w-2xl mx-auto w-full">
+                <div class="mb-10">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">Project Basics</h2>
+                  <p class="text-(--text-secondary) mt-2">Set up the fundamental details for your new workspace.</p>
+                </div>
+
+                <div class="space-y-8">
+                  <!-- Project Name -->
+                  <div class="group">
+                    <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                      Project Name <span class="text-red-500">*</span>
+                    </label>
+                    <input v-model="config.parameters.design" type="text" placeholder="e.g. my_chip_design"
+                      class="w-full px-4 py-3.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm" />
+                    <p class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
+                      <i class="ri-error-warning-line"></i> Only use letters, numbers, and underscores
+                    </p>
+                  </div>
+
+                  <!-- Project Description -->
+                  <div class="group">
+                    <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                      Project Description
+                    </label>
+                    <textarea v-model="config.parameters.description" rows="3" placeholder="Briefly describe your chip design project..."
+                      class="w-full px-4 py-3.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm resize-none"></textarea>
+                  </div>
+
+                  <!-- Project Location -->
+                  <div class="group">
+                    <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                      Save Location <span class="text-red-500">*</span>
+                    </label>
+                    <div class="flex gap-3">
+                      <div class="relative flex-1">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                          <i class="ri-folder-line text-(--text-secondary)"></i>
+                        </div>
+                        <input v-model="config.directory" type="text" readonly placeholder="Choose a folder..."
+                          @click="selectLocation()"
+                          class="w-full pl-10 pr-4 py-3.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 cursor-pointer focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm truncate" />
+                      </div>
+                      <button @click="selectLocation"
+                        class="px-6 py-3.5 bg-(--bg-primary)/50 border border-(--border-color) text-(--text-primary) rounded-xl hover:bg-(--bg-secondary) hover:border-(--text-secondary) transition-colors duration-200 font-medium cursor-pointer shadow-sm flex items-center gap-2 shrink-0">
+                        Browse
+                      </button>
                     </div>
                   </div>
-                  <button @click.stop="removeFile(file)"
-                    class="p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-(--bg-primary) transition-all cursor-pointer">
-                    <i class="ri-delete-bin-line text-(--text-secondary) hover:text-red-500"></i>
-                  </button>
                 </div>
-              </TransitionGroup>
-            </div>
-
-            <!-- Top Module and Clock Selection -->
-            <div v-if="config.rtl_list.length > 0" class="mt-6 space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Top Module Name <span class="text-red-500">*</span>
-                </label>
-                <input v-model="config.parameters.top_module" type="text" placeholder="e.g. top_module"
-                  class="w-full px-4 py-3 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary) focus:outline-none focus:border-(--accent-color) focus:ring-2 focus:ring-(--accent-color)/20 transition-all" />
               </div>
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Clock Signal Name <span class="text-red-500">*</span>
-                </label>
-                <input v-model="config.parameters.clock" type="text" placeholder="e.g. clk"
-                  class="w-full px-4 py-3 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary) focus:outline-none focus:border-(--accent-color) focus:ring-2 focus:ring-(--accent-color)/20 transition-all" />
-                <p class="mt-1 text-xs text-(--text-secondary)">Main clock signal name used for timing constraints</p>
-              </div>
-            </div>
-          </div>
 
-          <!-- Step 3: Technology Config -->
-          <div v-else-if="currentStep === 3" key="step3" class="max-w-2xl mx-auto">
-            <div class="mb-8">
-              <span class="text-xs font-medium text-(--accent-color) uppercase tracking-wider">Step 3</span>
-              <h2 class="text-2xl font-bold text-(--text-primary) mt-1">Technology Setup</h2>
-              <p class="text-(--text-secondary) mt-2">Choose target process libraries and design constraints</p>
-            </div>
+              <!-- Step 2: Design Files -->
+              <div v-else-if="currentStep === 2" key="step2" class="max-w-2xl mx-auto w-full">
+                <div class="mb-10">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">Design Files</h2>
+                  <p class="text-(--text-secondary) mt-2">Upload or select your RTL design files to be synthesized.</p>
+                </div>
 
-            <div class="space-y-6">
-              <!-- PDK Selection -->
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-3">
-                  Process Design Kit (PDK) <span class="text-red-500">*</span>
-                </label>
+                <!-- Drag & Drop Zone -->
+                <div @dragover.prevent="isDragging = true" @dragleave.prevent="isDragging = false"
+                  @drop.prevent="handleFileDrop" :class="[
+                    'relative border-2 border-dashed rounded-2xl p-10 text-center transition-colors duration-200 cursor-pointer group',
+                    isDragging
+                      ? 'border-(--accent-color) bg-(--accent-color)/5'
+                      : 'border-(--border-color) hover:border-(--accent-color)/50 hover:bg-(--bg-secondary)/40'
+                  ]" @click="selectDesignFiles">
+                  <div class="flex flex-col items-center">
+                    <div
+                      class="w-20 h-20 rounded-2xl bg-(--bg-secondary)/50 border border-(--border-color) flex items-center justify-center mb-5 shadow-sm transition-colors duration-200"
+                      :class="{ 'border-(--accent-color) text-(--accent-color)': isDragging }">
+                      <i class="ri-upload-cloud-2-line text-4xl" :class="isDragging ? 'text-(--accent-color)' : 'text-(--text-secondary) group-hover:text-(--accent-color)'"></i>
+                    </div>
+                    <h3 class="text-lg font-bold text-(--text-primary) mb-2">Click or drag files here</h3>
+                    <p class="text-sm text-(--text-secondary) mb-6 max-w-sm">Supports Verilog (.v), SystemVerilog (.sv), and VHDL (.vhd) files</p>
+                    <button type="button"
+                      class="px-8 py-3 bg-(--accent-color) text-white rounded-xl hover:opacity-90 shadow-sm transition-opacity duration-200 font-medium cursor-pointer">
+                      Browse Files
+                    </button>
+                  </div>
+                </div>
 
-                <!-- 已导入的 PDK 列表 -->
-                <div v-if="importedPdks.length > 0" class="space-y-3">
-                  <div class="grid grid-cols-1 gap-3">
-                    <button v-for="pdk in importedPdks" :key="pdk.id" @click="selectPdk(pdk)" :class="[
-                      'flex items-start gap-4 p-4 rounded-xl border-2 transition-all cursor-pointer text-left group relative',
-                      selectedPdkId === pdk.id
-                        ? 'border-(--accent-color) bg-(--accent-color)/5'
-                        : 'border-(--border-color) hover:border-(--accent-color)/50 bg-(--bg-secondary)'
-                    ]">
-                      <div :class="[
-                        'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                        selectedPdkId === pdk.id ? 'bg-(--accent-color) text-white' : 'bg-(--bg-primary) text-(--text-secondary)'
-                      ]">
-                        <i class="ri-cpu-line text-xl"></i>
-                      </div>
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h4 class="font-semibold text-(--text-primary)">{{ pdk.name }}</h4>
-                          <span v-if="pdk.techNode"
-                            class="text-[10px] px-1.5 py-0.5 rounded bg-(--accent-color)/10 text-(--accent-color) font-medium">
-                            {{ pdk.techNode }}
-                          </span>
+                <!-- File List -->
+                <div v-if="config.rtl_list.length > 0" class="mt-8 space-y-3">
+                  <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-sm font-semibold text-(--text-primary)">
+                      Added Files <span class="bg-(--bg-secondary) px-2 py-0.5 rounded-full text-xs ml-2">{{ config.rtl_list.length }}</span>
+                    </h4>
+                  </div>
+                  <div class="max-h-48 overflow-y-auto custom-scrollbar pr-2 space-y-2">
+                    <TransitionGroup name="list">
+                      <div v-for="file in config.rtl_list" :key="file"
+                        class="flex items-center justify-between px-4 py-3 bg-(--bg-secondary)/30 rounded-xl border border-(--border-color) group hover:bg-(--bg-secondary)/60 transition-colors duration-200 shadow-sm cursor-default">
+                        <div class="flex items-center gap-4 min-w-0">
+                          <div class="w-10 h-10 rounded-lg bg-(--bg-primary)/80 flex items-center justify-center border border-(--border-color)/50 shadow-sm">
+                            <i :class="[
+                              'text-lg',
+                              file.endsWith('.v') || file.endsWith('.sv')
+                                ? 'ri-file-code-line text-blue-500'
+                                : file.endsWith('.vhd')
+                                  ? 'ri-file-code-line text-purple-500'
+                                  : 'ri-file-line text-(--text-secondary)'
+                            ]"></i>
+                          </div>
+                          <div class="min-w-0">
+                            <p class="font-medium text-(--text-primary) truncate text-sm" :title="file">{{ file.split('/').pop() || file }}</p>
+                            <p class="text-xs text-(--text-secondary) truncate opacity-70">{{ file }}</p>
+                          </div>
                         </div>
-                        <p v-if="pdk.description" class="text-xs text-(--text-secondary) mt-1">{{ pdk.description }}</p>
-                        <p class="text-[11px] text-(--text-secondary) mt-1.5 truncate font-mono opacity-60">
-                          <i class="ri-folder-line mr-1"></i>{{ pdk.path }}
-                        </p>
+                        <button @click.stop="removeFile(file)"
+                          class="w-8 h-8 flex items-center justify-center rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-colors duration-200 cursor-pointer text-(--text-secondary) hover:text-red-500 shrink-0">
+                          <i class="ri-delete-bin-line"></i>
+                        </button>
+                      </div>
+                    </TransitionGroup>
+                  </div>
+                </div>
+
+                <!-- Top Module and Clock Selection -->
+                <div class="mt-8 grid grid-cols-2 gap-6 p-6 bg-(--bg-secondary)/20 rounded-2xl border border-(--border-color)">
+                  <div class="group">
+                    <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                      Top Module Name <span class="text-red-500">*</span>
+                    </label>
+                    <input v-model="config.parameters.top_module" type="text" placeholder="e.g. top_module"
+                      class="w-full px-4 py-3 bg-(--bg-primary)/60 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:border-(--accent-color) transition-colors duration-200 shadow-sm" />
+                  </div>
+                  <div class="group">
+                    <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                      Clock Signal Name <span class="text-red-500">*</span>
+                    </label>
+                    <input v-model="config.parameters.clock" type="text" placeholder="e.g. clk"
+                      class="w-full px-4 py-3 bg-(--bg-primary)/60 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:border-(--accent-color) transition-colors duration-200 shadow-sm" />
+                    <p class="mt-2 text-[11px] text-(--text-secondary) leading-tight">Used for timing constraints</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 3: Technology Config -->
+              <div v-else-if="currentStep === 3" key="step3" class="max-w-2xl mx-auto w-full">
+                <div class="mb-10">
+                  <h2 class="text-2xl font-bold text-(--text-primary)">Technology Setup</h2>
+                  <p class="text-(--text-secondary) mt-2">Choose target process libraries and define your design constraints.</p>
+                </div>
+
+                <div class="space-y-8">
+                  <!-- PDK Selection -->
+                  <div>
+                    <div class="flex items-center justify-between mb-4">
+                      <label class="block text-sm font-semibold text-(--text-primary)">
+                        Process Design Kit (PDK) <span class="text-red-500">*</span>
+                      </label>
+                      <button v-if="importedPdks.length > 0" @click="handleImportPdk" class="text-xs font-medium text-(--accent-color) hover:text-(--accent-color)/80 transition-colors duration-200 flex items-center gap-1 cursor-pointer">
+                        <i class="ri-add-line"></i> Import New
+                      </button>
+                    </div>
+
+                    <div v-if="importedPdks.length > 0" class="grid grid-cols-1 gap-4">
+                      <div v-for="pdk in importedPdks" :key="pdk.id" @click="selectPdk(pdk)" :class="[
+                        'flex flex-col p-5 rounded-2xl border transition-colors duration-200 cursor-pointer text-left group relative overflow-hidden',
+                        selectedPdkId === pdk.id
+                          ? 'border-(--accent-color) bg-(--accent-color)/5 shadow-sm'
+                          : 'border-(--border-color) hover:bg-(--bg-secondary)/40 bg-(--bg-secondary)/20'
+                      ]">
+                        <!-- Select indicator line -->
+                        <div v-if="selectedPdkId === pdk.id" class="absolute left-0 top-0 bottom-0 w-1 bg-(--accent-color)"></div>
+
+                        <div class="flex items-start gap-4 w-full">
+                          <div :class="[
+                            'w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-sm transition-colors duration-200',
+                            selectedPdkId === pdk.id ? 'bg-(--accent-color) text-white' : 'bg-(--bg-primary)/80 text-(--text-secondary) border border-(--border-color)'
+                          ]">
+                            <i class="ri-cpu-line text-2xl"></i>
+                          </div>
+                          
+                          <div class="flex-1 min-w-0 pr-8">
+                            <div class="flex items-center gap-3">
+                              <h4 class="font-bold text-(--text-primary) text-base">{{ pdk.name }}</h4>
+                              <span v-if="pdk.techNode"
+                                class="text-xs px-2 py-0.5 rounded-full bg-(--accent-color)/10 text-(--accent-color) font-bold border border-(--accent-color)/20">
+                                {{ pdk.techNode }}
+                              </span>
+                            </div>
+                            <p v-if="pdk.description" class="text-sm text-(--text-secondary) mt-1.5">{{ pdk.description }}</p>
+                            <p class="text-xs text-(--text-secondary) mt-2 truncate font-mono bg-(--bg-primary)/60 px-2 py-1 rounded inline-block border border-(--border-color)/50">
+                              <i class="ri-folder-line mr-1 opacity-70"></i>{{ pdk.path }}
+                            </p>
+                          </div>
+                        </div>
+
                         <!-- 目录结构摘要 -->
                         <div v-if="selectedPdkId === pdk.id && pdk.detectedFiles"
-                          class="mt-3 pt-3 border-t border-(--border-color)">
-                          <p class="text-[11px] font-medium text-(--text-secondary) mb-1.5">Directory Contents:</p>
-                          <div class="flex flex-wrap gap-1.5">
+                          class="mt-4 pt-4 border-t border-(--border-color)/50 w-full">
+                          <p class="text-[11px] font-semibold text-(--text-secondary) mb-2 uppercase tracking-wider">Contents Detected</p>
+                          <div class="flex flex-wrap gap-2">
                             <span v-for="dir in pdk.detectedFiles.directories" :key="dir"
-                              class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-(--bg-primary) text-(--text-secondary)">
-                              <i class="ri-folder-line text-yellow-500"></i>{{ dir }}
+                              class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-(--bg-primary)/80 text-(--text-secondary) border border-(--border-color)/50 shadow-sm">
+                              <i class="ri-folder-fill text-yellow-500/80"></i>{{ dir }}
                             </span>
-                            <span v-for="file in pdk.detectedFiles.files.slice(0, 5)" :key="file"
-                              class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-(--bg-primary) text-(--text-secondary)">
-                              <i class="ri-file-line"></i>{{ file }}
+                            <span v-for="file in pdk.detectedFiles.files.slice(0, 4)" :key="file"
+                              class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-(--bg-primary)/80 text-(--text-secondary) border border-(--border-color)/50 shadow-sm">
+                              <i class="ri-file-text-line opacity-70"></i>{{ file }}
+                            </span>
+                            <span v-if="pdk.detectedFiles.files.length > 4" class="text-xs text-(--text-secondary) px-1 py-1">
+                              +{{ pdk.detectedFiles.files.length - 4 }} more
                             </span>
                           </div>
                         </div>
-                      </div>
-                      <!-- 选中标记 -->
-                      <div v-if="selectedPdkId === pdk.id"
-                        class="absolute top-3 right-3 w-5 h-5 rounded-full bg-(--accent-color) flex items-center justify-center">
-                        <i class="ri-check-line text-white text-xs"></i>
-                      </div>
-                      <!-- 删除按钮 -->
-                      <div @click.stop="handleRemovePdk(pdk.id)"
-                        class="absolute bottom-3 right-3 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all cursor-pointer"
-                        title="Remove this PDK">
-                        <i class="ri-delete-bin-line text-sm text-(--text-secondary) hover:text-red-500"></i>
-                      </div>
-                    </button>
-                  </div>
-
-                  <!-- 导入更多 PDK -->
-                  <button @click="handleImportPdk"
-                    class="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-(--border-color) hover:border-(--accent-color)/50 rounded-xl text-sm text-(--text-secondary) hover:text-(--accent-color) transition-all cursor-pointer">
-                    <i class="ri-add-line"></i>
-                    Import Another PDK
-                  </button>
-                </div>
-
-                <!-- 无 PDK 时的空状态 -->
-                <div v-else
-                  class="flex flex-col items-center py-10 px-6 border-2 border-dashed border-(--border-color) rounded-xl bg-(--bg-secondary)/30">
-                  <div class="w-16 h-16 rounded-full bg-(--accent-color)/10 flex items-center justify-center mb-4">
-                    <i class="ri-database-2-line text-3xl text-(--accent-color)"></i>
-                  </div>
-                  <h4 class="font-semibold text-(--text-primary) mb-2">No PDK Imported</h4>
-                  <p class="text-sm text-(--text-secondary) text-center mb-5 max-w-sm">
-                    Import a Process Design Kit (PDK) directory first. The system will automatically detect the PDK type and included process files.
-                  </p>
-                  <button @click="handleImportPdk"
-                    class="px-6 py-2.5 bg-(--accent-color) text-white rounded-lg hover:opacity-90 transition-opacity font-medium cursor-pointer flex items-center gap-2">
-                    <i class="ri-folder-open-line"></i>
-                    Select PDK Directory
-                  </button>
-                </div>
-              </div>
-
-              <!-- Target Frequency -->
-              <div>
-                <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                  Target Frequency (MHz)
-                </label>
-                <div class="flex items-center gap-4">
-                  <input v-model.number="config.parameters.frequency_max" type="range" min="10" max="1000" step="10"
-                    class="flex-1 h-2 bg-(--bg-secondary) rounded-lg appearance-none cursor-pointer accent-(--accent-color)" />
-                  <div
-                    class="w-24 px-3 py-2 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-center text-(--text-primary) font-mono">
-                    {{ config.parameters.frequency_max }}
-                  </div>
-                </div>
-              </div>
-
-              <!-- Advanced Settings -->
-              <div class="pt-4 border-t border-(--border-color)">
-                <h3 class="text-sm font-semibold text-(--text-primary) mb-4 flex items-center gap-2">
-                  <i class="ri-settings-4-line text-(--accent-color)"></i>
-                  Advanced Settings
-                </h3>
-                <div class="grid grid-cols-2 gap-6">
-                  <!-- Core Utilization -->
-                  <div>
-                    <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                      Core Utilization
-                    </label>
-                    <div class="flex items-center gap-3">
-                      <input v-model.number="config.parameters.core_utilization" type="range" min="0.1" max="0.9"
-                        step="0.05"
-                        class="flex-1 h-2 bg-(--bg-secondary) rounded-lg appearance-none cursor-pointer accent-(--accent-color)" />
-                      <div
-                        class="w-16 px-2 py-1.5 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-center text-(--text-primary) font-mono text-sm">
-                        {{ ((config.parameters.core_utilization as number || 0.5) * 100).toFixed(0) }}%
+                        
+                        <!-- 选中标记 -->
+                        <div v-if="selectedPdkId === pdk.id"
+                          class="absolute top-5 right-5 w-6 h-6 rounded-full bg-(--accent-color) flex items-center justify-center shadow-sm">
+                          <i class="ri-check-line text-white text-sm"></i>
+                        </div>
+                        
+                        <!-- 删除按钮 -->
+                        <div @click.stop="handleRemovePdk(pdk.id)"
+                          class="absolute top-5 right-5 p-2 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-colors duration-200 cursor-pointer z-10"
+                          :class="{'hidden': selectedPdkId === pdk.id}"
+                          title="Remove PDK">
+                          <i class="ri-delete-bin-line text-(--text-secondary) hover:text-red-500"></i>
+                        </div>
                       </div>
                     </div>
-                    <p class="mt-1 text-xs text-(--text-secondary)">Area utilization ratio of the chip core region</p>
+
+                    <!-- 无 PDK 时的空状态 -->
+                    <div v-else
+                      class="flex flex-col items-center py-12 px-6 border-2 border-dashed border-(--border-color) rounded-2xl bg-(--bg-secondary)/20 hover:bg-(--bg-secondary)/40 transition-colors duration-200">
+                      <div class="w-16 h-16 rounded-2xl bg-(--accent-color)/10 flex items-center justify-center mb-5">
+                        <i class="ri-database-2-line text-3xl text-(--accent-color)"></i>
+                      </div>
+                      <h4 class="font-bold text-(--text-primary) mb-2">No PDK Imported</h4>
+                      <p class="text-sm text-(--text-secondary) text-center mb-6 max-w-sm">
+                        Import a Process Design Kit directory to get started. We'll automatically detect process files.
+                      </p>
+                      <button @click="handleImportPdk"
+                        class="px-6 py-3 bg-(--accent-color) text-white rounded-xl hover:opacity-90 transition-opacity duration-200 font-medium cursor-pointer flex items-center gap-2 shadow-sm">
+                        <i class="ri-folder-add-line"></i>
+                        Select PDK Directory
+                      </button>
+                    </div>
                   </div>
 
-                  <!-- Target Density -->
-                  <div>
-                    <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                      Target Density
-                    </label>
-                    <div class="flex items-center gap-3">
-                      <input v-model.number="config.parameters.target_density" type="range" min="0.1" max="0.9"
-                        step="0.05"
-                        class="flex-1 h-2 bg-(--bg-secondary) rounded-lg appearance-none cursor-pointer accent-(--accent-color)" />
-                      <div
-                        class="w-16 px-2 py-1.5 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-center text-(--text-primary) font-mono text-sm">
-                        {{ ((config.parameters.target_density as number || 0.6) * 100).toFixed(0) }}%
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Target Frequency -->
+                    <div>
+                      <div class="flex items-center justify-between mb-3">
+                        <label class="block text-sm font-semibold text-(--text-primary)">
+                          Target Frequency
+                        </label>
+                        <span class="text-sm font-bold text-(--accent-color) bg-(--accent-color)/10 px-2 py-0.5 rounded-md font-mono">{{ config.parameters.frequency_max }} MHz</span>
+                      </div>
+                      <input v-model.number="config.parameters.frequency_max" type="range" min="10" max="1000" step="10"
+                        class="w-full h-2.5 bg-(--bg-secondary)/60 rounded-full appearance-none cursor-pointer accent-(--accent-color)" />
+                    </div>
+                    
+                    <!-- Max Fanout -->
+                    <div class="group">
+                      <label class="block text-sm font-semibold text-(--text-primary) mb-2 group-focus-within:text-(--accent-color) transition-colors duration-200">
+                        Max Fanout
+                      </label>
+                      <input v-model.number="config.parameters.max_fanout" type="number" min="1" max="100"
+                        class="w-full px-4 py-2.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) focus:outline-none focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm" />
+                    </div>
+                  </div>
+
+                  <!-- Advanced Settings -->
+                  <div class="p-6 rounded-2xl bg-(--bg-secondary)/20 border border-(--border-color)">
+                    <h3 class="text-sm font-bold text-(--text-primary) mb-5 flex items-center gap-2">
+                      <i class="ri-settings-3-line text-(--accent-color)"></i>
+                      Physical Constraints
+                    </h3>
+                    <div class="grid grid-cols-2 gap-8">
+                      <!-- Core Utilization -->
+                      <div>
+                        <div class="flex items-center justify-between mb-3">
+                          <label class="block text-sm font-medium text-(--text-primary)">
+                            Core Utilization
+                          </label>
+                          <span class="text-sm font-bold text-(--text-primary) font-mono">{{ ((config.parameters.core_utilization as number || 0.5) * 100).toFixed(0) }}%</span>
+                        </div>
+                        <input v-model.number="config.parameters.core_utilization" type="range" min="0.1" max="0.9" step="0.05"
+                          class="w-full h-2 bg-(--border-color) rounded-full appearance-none cursor-pointer accent-(--accent-color)" />
+                      </div>
+
+                      <!-- Target Density -->
+                      <div>
+                        <div class="flex items-center justify-between mb-3">
+                          <label class="block text-sm font-medium text-(--text-primary)">
+                            Target Density
+                          </label>
+                          <span class="text-sm font-bold text-(--text-primary) font-mono">{{ ((config.parameters.target_density as number || 0.6) * 100).toFixed(0) }}%</span>
+                        </div>
+                        <input v-model.number="config.parameters.target_density" type="range" min="0.1" max="0.9" step="0.05"
+                          class="w-full h-2 bg-(--border-color) rounded-full appearance-none cursor-pointer accent-(--accent-color)" />
                       </div>
                     </div>
-                    <p class="mt-1 text-xs text-(--text-secondary)">Target density for place and route</p>
-                  </div>
-
-                  <!-- Max Fanout -->
-                  <div>
-                    <label class="block text-sm font-medium text-(--text-primary) mb-2">
-                      Max Fanout
-                    </label>
-                    <input v-model.number="config.parameters.max_fanout" type="number" min="1" max="100"
-                      class="w-full px-4 py-2.5 bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) focus:outline-none focus:border-(--accent-color) focus:ring-2 focus:ring-(--accent-color)/20 transition-all" />
-                    <p class="mt-1 text-xs text-(--text-secondary)">Maximum load count per driver</p>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Tips Card -->
-            <div class="mt-8 p-4 bg-(--accent-color)/5 border border-(--accent-color)/20 rounded-xl">
-              <div class="flex gap-3">
-                <i class="ri-lightbulb-line text-xl text-(--accent-color)"></i>
-                <div>
-                  <h4 class="font-medium text-(--text-primary)">Tip</h4>
-                  <p class="text-sm text-(--text-secondary) mt-1">
-                    Choosing the right process library has a major impact on design results. The current ICS55 PDK is suitable for learning and prototyping.
-                  </p>
+              <!-- Step 4: Review -->
+              <div v-else-if="currentStep === 4" key="step4" class="max-w-2xl mx-auto w-full">
+                <div class="mb-10 text-center">
+                  <div class="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-4 border border-green-500/20 shadow-sm">
+                    <i class="ri-check-double-line text-3xl text-green-500"></i>
+                  </div>
+                  <h2 class="text-2xl font-bold text-(--text-primary)">Review & Create</h2>
+                  <p class="text-(--text-secondary) mt-2">Almost there! Review your configuration before finalizing.</p>
+                </div>
+
+                <!-- Review Cards -->
+                <div class="space-y-5">
+                  <!-- Section 1 & 2 combined -->
+                  <div class="bg-(--bg-secondary)/20 rounded-2xl border border-(--border-color) overflow-hidden backdrop-blur-sm">
+                    <div class="px-6 py-4 border-b border-(--border-color)/60 flex items-center justify-between bg-(--bg-secondary)/40">
+                      <h3 class="font-bold text-(--text-primary) flex items-center gap-2">
+                        <i class="ri-folder-info-line text-(--accent-color)"></i>
+                        Project details
+                      </h3>
+                      <button @click="jumpToStep(1)" class="text-sm font-medium text-(--accent-color) hover:text-(--accent-color)/80 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-(--accent-color)/10 cursor-pointer">
+                        Edit
+                      </button>
+                    </div>
+                    <div class="p-6 grid grid-cols-2 gap-y-6 gap-x-8">
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Project Name</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5">{{ config.parameters.design || '-' }}</p>
+                      </div>
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Top Module</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono">{{ config.parameters.top_module || '-' }}</p>
+                      </div>
+                      <div class="col-span-2">
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Save Location</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono text-sm bg-(--bg-primary)/60 p-2.5 rounded-lg border border-(--border-color)/50 truncate">{{ config.directory || '-' }}</p>
+                      </div>
+                      <div class="col-span-2">
+                         <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Design Files ({{ config.rtl_list.length }})</span>
+                         <div class="mt-2 max-h-24 overflow-y-auto pr-2 custom-scrollbar bg-(--bg-primary)/40 rounded-lg border border-(--border-color)/50 p-2">
+                           <p v-for="file in config.rtl_list" :key="file" class="text-sm text-(--text-primary) py-1.5 px-2 hover:bg-(--bg-secondary)/50 rounded transition-colors duration-200 truncate flex items-center gap-2">
+                             <i class="ri-file-code-line text-(--text-secondary)"></i>{{ file.split('/').pop() }}
+                           </p>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Technology Card -->
+                  <div class="bg-(--bg-secondary)/20 rounded-2xl border border-(--border-color) overflow-hidden backdrop-blur-sm">
+                    <div class="px-6 py-4 border-b border-(--border-color)/60 flex items-center justify-between bg-(--bg-secondary)/40">
+                      <h3 class="font-bold text-(--text-primary) flex items-center gap-2">
+                        <i class="ri-cpu-line text-(--accent-color)"></i>
+                        Technology & Constraints
+                      </h3>
+                      <button @click="jumpToStep(3)" class="text-sm font-medium text-(--accent-color) hover:text-(--accent-color)/80 transition-colors duration-200 px-3 py-1 rounded-md hover:bg-(--accent-color)/10 cursor-pointer">
+                        Edit
+                      </button>
+                    </div>
+                    <div class="p-6 grid grid-cols-2 md:grid-cols-4 gap-6">
+                      <div class="col-span-2">
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">PDK</span>
+                        <p class="font-bold text-(--text-primary) mt-1.5 flex items-center gap-2 bg-(--bg-primary)/60 px-3 py-1.5 rounded-lg border border-(--border-color)/50 w-fit">
+                           {{ getPdkName(config.pdk) }}
+                           <i class="ri-checkbox-circle-fill text-green-500"></i>
+                        </p>
+                      </div>
+                      <div class="col-span-2">
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Clock Signal</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono bg-(--bg-primary)/60 px-3 py-1.5 rounded-lg border border-(--border-color)/50 w-fit">{{ config.parameters.clock || '-' }}</p>
+                      </div>
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Target Freq</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono">{{ config.parameters.frequency_max }} MHz</p>
+                      </div>
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Max Fanout</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono">{{ config.parameters.max_fanout }}</p>
+                      </div>
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Utilization</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono">{{ ((config.parameters.core_utilization as number || 0.5) * 100).toFixed(0) }}%</p>
+                      </div>
+                      <div>
+                        <span class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider">Density</span>
+                        <p class="font-medium text-(--text-primary) mt-1.5 font-mono">{{ ((config.parameters.target_density as number || 0.6) * 100).toFixed(0) }}%</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </Transition>
           </div>
 
-          <!-- Step 4: Review -->
-          <div v-else-if="currentStep === 4" key="step4" class="max-w-2xl mx-auto">
-            <div class="mb-8">
-              <span class="text-xs font-medium text-(--accent-color) uppercase tracking-wider">Step 4</span>
-              <h2 class="text-2xl font-bold text-(--text-primary) mt-1">Review and Create</h2>
-              <p class="text-(--text-secondary) mt-2">Review the configuration, then click Create</p>
-            </div>
+          <!-- Footer Actions -->
+          <div class="px-8 md:px-12 py-6 border-t border-(--border-color)/60 bg-(--bg-primary)/80 backdrop-blur-md flex items-center justify-between shrink-0 shadow-[0_-10px_30px_-15px_rgba(0,0,0,0.1)] z-10">
+            <button v-if="currentStep > 1" @click="prevStep"
+              class="px-6 py-3 text-(--text-primary) bg-(--bg-secondary)/40 border border-(--border-color) hover:bg-(--bg-secondary)/80 rounded-xl transition-colors duration-200 font-semibold cursor-pointer flex items-center gap-2 shadow-sm">
+              <i class="ri-arrow-left-line"></i>
+              Back
+            </button>
+            <div v-else></div>
 
-            <!-- Review Cards -->
-            <div class="space-y-4">
-              <!-- Basic Info Card -->
-              <div class="p-5 bg-(--bg-secondary) rounded-xl border border-(--border-color)">
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="font-semibold text-(--text-primary) flex items-center gap-2">
-                    <i class="ri-information-line text-(--accent-color)"></i>
-                    Basic Info
-                  </h3>
-                  <button @click="currentStep = 1" class="text-sm text-(--accent-color) hover:underline cursor-pointer">
-                    Edit
-                  </button>
-                </div>
-                <div class="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span class="text-(--text-secondary)">Project Name</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ config.parameters.design || '-' }}</p>
-                  </div>
-                  <div>
-                    <span class="text-(--text-secondary)">Save Location</span>
-                    <p class="font-medium text-(--text-primary) mt-1 truncate">{{ config.directory || '-' }}</p>
-                  </div>
-                  <div class="col-span-2">
-                    <span class="text-(--text-secondary)">Project Description</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ config.parameters.description || 'No description' }}</p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Design Files Card -->
-              <div class="p-5 bg-(--bg-secondary) rounded-xl border border-(--border-color)">
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="font-semibold text-(--text-primary) flex items-center gap-2">
-                    <i class="ri-file-code-line text-(--accent-color)"></i>
-                    Design Files
-                  </h3>
-                  <button @click="currentStep = 2" class="text-sm text-(--accent-color) hover:underline cursor-pointer">
-                    Edit
-                  </button>
-                </div>
-                <div class="text-sm space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-(--text-secondary)">File Count</span>
-                    <span class="font-medium text-(--text-primary)">{{ config.rtl_list.length }} files</span>
-                  </div>
-                  <div class="flex items-center justify-between">
-                    <span class="text-(--text-secondary)">Top Module</span>
-                    <span class="font-medium text-(--text-primary)">{{ config.parameters.top_module || '-' }}</span>
-                  </div>
-                  <div class="flex items-center justify-between">
-                    <span class="text-(--text-secondary)">Clock Signal</span>
-                    <span class="font-medium text-(--text-primary)">{{ config.parameters.clock || '-' }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Technology Card -->
-              <div class="p-5 bg-(--bg-secondary) rounded-xl border border-(--border-color)">
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="font-semibold text-(--text-primary) flex items-center gap-2">
-                    <i class="ri-cpu-line text-(--accent-color)"></i>
-                    Technology Setup
-                  </h3>
-                  <button @click="currentStep = 3" class="text-sm text-(--accent-color) hover:underline cursor-pointer">
-                    Edit
-                  </button>
-                </div>
-                <div class="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <span class="text-(--text-secondary)">PDK</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ getPdkName(config.pdk) }}</p>
-                  </div>
-                  <div>
-                    <span class="text-(--text-secondary)">Target Frequency</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ config.parameters.frequency_max }} MHz</p>
-                  </div>
-                  <div>
-                    <span class="text-(--text-secondary)">Core Utilization</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ ((config.parameters.core_utilization as number
-                      ||
-                      0.5) * 100).toFixed(0) }}%</p>
-                  </div>
-                  <div>
-                    <span class="text-(--text-secondary)">Target Density</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ ((config.parameters.target_density as number ||
-                      0.6)
-                      * 100).toFixed(0) }}%</p>
-                  </div>
-                  <div>
-                    <span class="text-(--text-secondary)">Max Fanout</span>
-                    <p class="font-medium text-(--text-primary) mt-1">{{ config.parameters.max_fanout }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Ready to Create -->
-            <div
-              class="mt-6 p-5 bg-linear-to-r from-(--accent-color)/10 to-(--accent-color)/5 border border-(--accent-color)/20 rounded-xl">
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-full bg-(--accent-color)/20 flex items-center justify-center">
-                  <i class="ri-rocket-line text-2xl text-(--accent-color)"></i>
-                </div>
-                <div>
-                  <h4 class="font-semibold text-(--text-primary)">Ready to Create</h4>
-                  <p class="text-sm text-(--text-secondary)">All settings are complete. Click the button below to create your chip design project.</p>
-                </div>
-              </div>
+            <div class="flex items-center gap-4">
+              <button @click="$emit('close')"
+                class="px-6 py-3 text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-secondary)/50 rounded-xl transition-colors duration-200 font-semibold cursor-pointer">
+                Cancel
+              </button>
+              
+              <button v-if="highestStep === 4 && currentStep < 4" @click="returnToReview" :disabled="!canProceed"
+                class="px-6 py-3 bg-(--bg-secondary)/50 text-(--text-primary) border border-(--border-color) rounded-xl hover:bg-(--bg-secondary) hover:border-(--text-secondary) shadow-sm hover:shadow-md transition-all duration-200 font-semibold cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                <i class="ri-check-double-line"></i>
+                Save & Return
+              </button>
+              
+              <button v-if="currentStep < 4" @click="nextStep" :disabled="!canProceed"
+                class="px-8 py-3 bg-(--accent-color) text-white rounded-xl hover:bg-(--accent-color)/90 shadow-sm hover:shadow-md transition-all duration-200 font-semibold cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-sm">
+                Continue
+                <i class="ri-arrow-right-line"></i>
+              </button>
+              
+              <button v-else @click="createProject" :disabled="isCreating"
+                class="px-8 py-3 bg-gradient-to-r from-(--accent-color) to-purple-600 text-white rounded-xl hover:opacity-90 shadow-md hover:shadow-lg transition-all duration-200 font-bold cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                <i v-if="isCreating" class="ri-loader-4-line animate-spin"></i>
+                <i v-else class="ri-rocket-line"></i>
+                {{ isCreating ? 'Creating Project...' : 'Create Project' }}
+              </button>
             </div>
           </div>
-        </Transition>
-      </div>
-
-      <!-- Footer Actions -->
-      <div class="px-8 py-5 border-t border-(--border-color) bg-(--bg-secondary)/30 flex items-center justify-between">
-        <button v-if="currentStep > 1" @click="prevStep"
-          class="px-6 py-2.5 text-(--text-primary) hover:bg-(--bg-secondary) rounded-lg transition-colors font-medium cursor-pointer flex items-center gap-2">
-          <i class="ri-arrow-left-line"></i>
-          Previous
-        </button>
-        <div v-else></div>
-
-        <div class="flex items-center gap-3">
-          <button @click="$emit('close')"
-            class="px-6 py-2.5 text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-secondary) rounded-lg transition-colors font-medium cursor-pointer">
-            Cancel
-          </button>
-          <button v-if="currentStep < 4" @click="nextStep" :disabled="!canProceed"
-            class="px-6 py-2.5 bg-(--accent-color) text-white rounded-lg hover:opacity-90 transition-opacity font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-            Next
-            <i class="ri-arrow-right-line"></i>
-          </button>
-          <button v-else @click="createProject" :disabled="isCreating"
-            class="px-8 py-2.5 bg-(--accent-color) text-white rounded-lg hover:opacity-90 transition-opacity font-medium cursor-pointer flex items-center gap-2 disabled:opacity-50">
-            <i v-if="isCreating" class="ri-loader-4-line animate-spin"></i>
-            <i v-else class="ri-add-line"></i>
-            {{ isCreating ? 'Creating...' : 'Create Project' }}
-          </button>
         </div>
       </div>
     </div>
@@ -519,6 +517,7 @@ interface Emits {
 const emit = defineEmits<Emits>()
 
 const currentStep = ref(1)
+const highestStep = ref(1)
 const isDragging = ref(false)
 const isCreating = ref(false)
 
@@ -553,10 +552,10 @@ const config = ref<WorkspaceConfig>({
     top_module: '',       // 顶层模块名 -> "Top module"
     clock: '',            // 时钟信号名 -> "Clock"
     // 工艺参数
-    frequency_max: 100,   // 目标频率 -> "Frequency max [MHz]"
-    core_utilization: 0.5, // 核心利用率 -> "Core.Utilitization"
-    target_density: 0.6,  // 目标密度 -> "Target density"
-    max_fanout: 20        // 最大扇出 -> "Max fanout"
+    frequency_max: 50,   // 目标频率 -> "Frequency max [MHz]"
+    core_utilization: 0.2, // 核心利用率 -> "Core.Utilitization"
+    target_density: 0.3,  // 目标密度 -> "Target density"
+    max_fanout: 32        // 最大扇出 -> "Max fanout"
   },
   origin_def: '',
   origin_verilog: '',
@@ -667,6 +666,28 @@ const getPdkName = (pdkIdentifier: string) => {
 const nextStep = () => {
   if (currentStep.value < 4 && canProceed.value) {
     currentStep.value++
+    highestStep.value = Math.max(highestStep.value, currentStep.value)
+  }
+}
+
+const jumpToStep = (step: number) => {
+  highestStep.value = Math.max(highestStep.value, currentStep.value)
+  currentStep.value = step
+}
+
+const handleStepClick = (targetStep: number) => {
+  if (targetStep === currentStep.value) return;
+  
+  if (targetStep < currentStep.value) {
+    jumpToStep(targetStep);
+  } else if (targetStep <= highestStep.value && canProceed.value) {
+    jumpToStep(targetStep);
+  }
+}
+
+const returnToReview = () => {
+  if (canProceed.value) {
+    jumpToStep(4)
   }
 }
 
@@ -687,26 +708,22 @@ const createProject = async () => {
 </script>
 
 <style scoped>
-/* Slide fade transition */
-.slide-fade-enter-active {
-  transition: all 0.3s ease-out;
+/* Transition Effects */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-.slide-fade-leave-active {
-  transition: all 0.2s ease-in;
-}
-
-.slide-fade-enter-from {
+.fade-slide-enter-from {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateY(10px);
 }
 
-.slide-fade-leave-to {
+.fade-slide-leave-to {
   opacity: 0;
-  transform: translateX(-20px);
+  transform: translateY(-10px);
 }
 
-/* List transition */
 .list-enter-active,
 .list-leave-active {
   transition: all 0.3s ease;
@@ -718,33 +735,61 @@ const createProject = async () => {
   transform: translateX(-20px);
 }
 
-/* Custom range slider */
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Range Slider */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  background: var(--bg-secondary);
-  border-radius: 8px;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 6px;
+  background: transparent;
+  border-radius: 9999px;
+  border: 1px solid var(--border-color);
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   background: var(--accent-color);
   border-radius: 50%;
   cursor: pointer;
-  border: 2px solid white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 0 1px var(--border-color), 0 2px 4px rgba(0, 0, 0, 0.2);
+  margin-top: -6px;
+  transition: box-shadow 0.2s;
 }
 
-input[type="range"]::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  background: var(--accent-color);
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 1px var(--accent-color), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Hide scrollbar utility */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 </style>

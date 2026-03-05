@@ -3,29 +3,84 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="./icons/icon.png" />
-    <!-- 移除 viewport meta，在桌面应用中不需要 -->
     <title>ECOS Studio</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      /* 确保在 Tauri 中正确显示，兼容 Retina 屏幕 */
       html, body {
         width: 100%;
         height: 100%;
         margin: 0;
         padding: 0;
         overflow: hidden;
-        /* 禁用系统缩放 */
+        background: transparent;
         -webkit-text-size-adjust: 100%;
         -moz-text-size-adjust: 100%;
         -ms-text-size-adjust: 100%;
         text-size-adjust: 100%;
       }
+
+      #splash-screen {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 20px;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid rgba(128, 128, 128, 0.3);
+        font-family: system-ui, "Noto Sans SC", sans-serif;
+      }
+
+      html.dark #splash-screen {
+        background: #1e1e1e;
+      }
+      html.dark .splash-text {
+        color: #666666;
+      }
+      html.dark .splash-spinner {
+        border-color: rgba(255, 255, 255, 0.08);
+        border-top-color: #00897b;
+      }
+
+      .splash-spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid rgba(0, 0, 0, 0.06);
+        border-top-color: #00bfa5;
+        border-radius: 50%;
+        animation: splash-spin 0.8s linear infinite;
+      }
+
+      .splash-text {
+        font-size: 13px;
+        color: #9ca3af;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+      }
+
+      @keyframes splash-spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
+    <script>
+      // 在首次绘制前同步应用主题，避免闪烁
+      ;(function () {
+        var t = localStorage.getItem('theme')
+        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme:dark)').matches)) {
+          document.documentElement.classList.add('dark')
+        }
+      })()
+    </script>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <!-- Vue 挂载后会替换此内容 -->
+      <div id="splash-screen">
+        <div class="splash-spinner"></div>
+        <div class="splash-text">ECOS Studio</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

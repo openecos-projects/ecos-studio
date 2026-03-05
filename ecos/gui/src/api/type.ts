@@ -16,7 +16,8 @@ export enum InfoEnum {
   subflow = "subflow",
   analysis = "analysis",
   maps = "maps",
-  checklist = "checklist"
+  checklist = "checklist",
+  sta = "sta"
 }
 
 export enum StepEnum {

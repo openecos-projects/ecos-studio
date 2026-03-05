@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import type { Editor } from '@/applications/editor'
+import { SelectPlugin, MeasurePlugin } from '@/applications/editor/plugins'
 
 interface Props {
   editor?: Editor | null
@@ -8,24 +9,53 @@ interface Props {
 
 const props = defineProps<Props>()
 
+const emit = defineEmits<{
+  toolChange: [toolId: string]
+}>()
+
 const activeTool = ref('hand')
 const isRulerEnabled = ref(true)
 const zoomLevel = ref(100)
 let unlistenTransform: (() => void) | null = null
 
 const tools = [
-  { id: 'hand', icon: 'ri-hand', tooltip: 'Pan' },
-  { id: 'select', icon: 'ri-cursor-fill', tooltip: 'Select' },
-  { id: 'marquee', icon: 'ri-shape-line', tooltip: 'Marquee' },
-  { id: 'route', icon: 'ri-route-line', tooltip: 'Route' },
-  { id: 'measure', icon: 'ri-ruler-2-line', tooltip: 'Measure' },
-  { id: 'highlight', icon: 'ri-focus-3-line', tooltip: 'Highlight' },
-  { id: 'layers', icon: 'ri-stack-line', tooltip: 'Layers' },
-  { id: 'annotation', icon: 'ri-markup-line', tooltip: 'Annotate' }
+  { id: 'hand', icon: 'ri-hand', tooltip: 'Pan (H)', shortcut: 'h' },
+  { id: 'select', icon: 'ri-cursor-fill', tooltip: 'Select (S)', shortcut: 's' },
+  { id: 'measure', icon: 'ri-ruler-2-line', tooltip: 'Measure (M)', shortcut: 'm' },
+  { id: 'highlight', icon: 'ri-focus-3-line', tooltip: 'Highlight', shortcut: '' },
+  { id: 'layers', icon: 'ri-stack-line', tooltip: 'Layers', shortcut: '' },
 ]
 
 const setActiveTool = (toolId: string) => {
+  const prev = activeTool.value
   activeTool.value = toolId
+
+  const editor = props.editor
+  if (!editor) return
+
+  // Deactivate previous tool plugins
+  if (prev === 'select') {
+    const selectPlugin = editor.getPlugin<SelectPlugin>('select')
+    selectPlugin?.deactivate()
+  }
+  if (prev === 'measure') {
+    const measurePlugin = editor.getPlugin<MeasurePlugin>('measure')
+    measurePlugin?.deactivate()
+  }
+
+  // Activate new tool
+  if (toolId === 'select') {
+    const selectPlugin = editor.getPlugin<SelectPlugin>('select')
+    selectPlugin?.activate()
+  } else if (toolId === 'measure') {
+    const measurePlugin = editor.getPlugin<MeasurePlugin>('measure')
+    measurePlugin?.activate()
+  } else if (toolId === 'hand') {
+    const viewport = editor.view
+    if (viewport) viewport.plugins.resume('drag')
+  }
+
+  emit('toolChange', toolId)
 }
 
 const toggleRuler = () => {
@@ -45,16 +75,34 @@ const handleFitToWorld = () => {
   props.editor?.fitToWorld()
 }
 
-// 监听 editor 变化，初始化状态和监听器
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+  for (const tool of tools) {
+    if (tool.shortcut && e.key.toLowerCase() === tool.shortcut) {
+      e.preventDefault()
+      setActiveTool(tool.id)
+      return
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  if (unlistenTransform) {
+    unlistenTransform()
+  }
+})
+
 watch(() => props.editor, (editor) => {
   if (editor) {
-    // 确保编辑器标尺状态与 UI 同步
     editor.setPluginEnabled('ruler', isRulerEnabled.value)
-
-    // 监听缩放变化更新 UI
     zoomLevel.value = Math.round(editor.getScale() * 100)
 
-    // 清理旧的监听器
     if (unlistenTransform) {
       unlistenTransform()
     }
@@ -64,12 +112,6 @@ watch(() => props.editor, (editor) => {
     })
   }
 }, { immediate: true })
-
-onUnmounted(() => {
-  if (unlistenTransform) {
-    unlistenTransform()
-  }
-})
 </script>
 
 <template>

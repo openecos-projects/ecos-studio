@@ -36,14 +36,14 @@ export const lightTheme: EditorTheme = {
 /** 暗色主题 */
 export const darkTheme: EditorTheme = {
   name: 'dark',
-  backgroundColor: 0x1a1a2e,
-  rulerBackground: 0x252536,
-  rulerTickColor: 0x888888,
-  rulerTextColor: '#aaaaaa',
-  gridColor: 0x444444,
-  gridAlpha: 0.3,
-  debugBorderColor: 0x5dade2,
-  debugCenterColor: 0xec7063
+  backgroundColor: 0x18181c,
+  rulerBackground: 0x222226,
+  rulerTickColor: 0x55555a,
+  rulerTextColor: '#a1a1aa',
+  gridColor: 0x36363a,
+  gridAlpha: 0.6,
+  debugBorderColor: 0x00bfa5,
+  debugCenterColor: 0xe74c3c
 }
 
 /** 预设主题 */

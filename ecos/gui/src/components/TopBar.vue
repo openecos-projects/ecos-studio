@@ -1,5 +1,5 @@
 <template>
-  <div class="topbar" @dblclick="handleDoubleClick" @mousedown="handleMouseDown">
+  <div class="topbar" @mousedown="handleMouseDown">
     <!-- 左侧：应用图标和菜单栏 -->
     <div class="topbar-left" @mousedown.stop>
       <!-- 应用图标 -->
@@ -37,7 +37,7 @@
 
     <!-- 右侧：窗口控制按钮 -->
     <div class="topbar-right" @mousedown.stop>
-      <button @click="toggleTheme" class="window-btn theme-btn"
+      <button v-if="isWelcome" @click="toggleTheme" class="window-btn theme-btn"
         :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'">
         <i :class="isDark ? 'ri-sun-line' : 'ri-moon-line'" class="text-base"></i>
       </button>
@@ -68,6 +68,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useThemeStore } from '@/stores/themeStore'
+import { useRoute } from 'vue-router'
 
 // ---- 类型定义 ----
 interface DropdownItem {
@@ -85,9 +86,11 @@ interface Menu {
   children?: DropdownItem[]
 }
 
+const route = useRoute()
+const isWelcome = computed(() => route.path === '/')
 // ---- Props & Emits ----
 const props = defineProps<{
-  projectName?: string
+  projectName?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -181,39 +184,45 @@ const handleClose = () => {
   invoke('window_close')
 }
 
-// 拖拽窗口 - 阻止文字选择并启动拖拽
+// 通过 mousedown 时间戳手动检测双击
+// Linux 上 startDragging() 会让窗口管理器接管鼠标，浏览器收不到 mouseup，
+// 导致 dblclick 事件永远无法合成，因此只能在 mousedown 层面自行判断。
+let lastMouseDownTime = 0
+const DOUBLE_CLICK_INTERVAL = 400
+
 const handleMouseDown = async (event: MouseEvent) => {
   event.preventDefault()
   const target = event.target as HTMLElement
   if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
     return
   }
-  await getCurrentWindow().startDragging()
-}
 
-// 双击标题栏空白区域切换最大化/还原
-const handleDoubleClick = (event: MouseEvent) => {
-  const target = event.target as HTMLElement
-  if (target.closest('button')) {
+  const now = Date.now()
+  if (now - lastMouseDownTime < DOUBLE_CLICK_INTERVAL) {
+    lastMouseDownTime = 0
+    invoke('window_maximize')
     return
   }
-  invoke('window_maximize')
+  lastMouseDownTime = now
+
+  await getCurrentWindow().startDragging()
 }
 </script>
 
 <style scoped>
 .topbar {
   height: 40px;
-  background: var(--topbar-bg);
+  width: 100%;
+  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   justify-content: space-between;
   user-select: none;
   -webkit-user-select: none;
+  background: var(--topbar-bg);
   border-radius: 9px 9px 0 0;
   border-bottom: 1px solid var(--border-color);
   position: relative;
-  -webkit-app-region: drag;
   cursor: default;
 }
 

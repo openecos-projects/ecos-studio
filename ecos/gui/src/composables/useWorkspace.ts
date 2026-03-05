@@ -230,11 +230,6 @@ export function useWorkspace() {
       // 置顶：把最新的放到第一位
       recentProjects.value = [normalizedProject, ...filtered]
 
-      // 限额：只保留最近 10 个
-      if (recentProjects.value.length > 4) {
-        recentProjects.value = recentProjects.value.slice(0, 4)
-      }
-
       // 序列化并持久化到磁盘
       const serialized = recentProjects.value.map(serializeProject)
       await store.set('recent_projects', serialized)
@@ -274,10 +269,17 @@ export function useWorkspace() {
       // 3. 通过 HTTP API 加载项目状态
       const response = await loadWorkspaceApi(selectedPath)
       if (response.response === 'success') {
+        const resolvedPath = normalizePath(response.data.directory || selectedPath)
+        const existingProject = recentProjects.value.find(
+          p => normalizePath(p.path) === resolvedPath
+        )
+        const fallbackName = resolvedPath.split('/').filter(Boolean).pop() || resolvedPath
+        const resolvedName = project?.name || existingProject?.name || fallbackName
+
         const loadedProject: Project = {
-          id: response.data.directory,
-          name: response.data.directory,
-          path: response.data.directory,
+          id: resolvedPath,
+          name: resolvedName,
+          path: resolvedPath,
           lastOpened: new Date()
         }
 

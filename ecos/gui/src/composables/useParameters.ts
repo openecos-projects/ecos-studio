@@ -64,6 +64,7 @@ export interface ParametersData {
   'Max fanout': number
   'Target density': number
   'Target overflow': number
+  'Global right padding': number
   Clock: string
   'Frequency max [MHz]': number
   'Bottom layer': string
@@ -117,6 +118,7 @@ export interface ConfigData {
   maxFanout: number
   targetDensity: number
   targetOverflow: number
+  globalRightPadding: number
   clock: string
   frequencyMax: number
   bottomLayer: string
@@ -154,6 +156,7 @@ function getDefaultConfig(): ConfigData {
     maxFanout: 20,
     targetDensity: 0.3,
     targetOverflow: 0.1,
+    globalRightPadding: 0,
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET1',
@@ -195,6 +198,7 @@ function transformParametersToConfig(data: ParametersData): ConfigData {
     maxFanout: data['Max fanout'] || 20,
     targetDensity: data['Target density'] || 0.3,
     targetOverflow: data['Target overflow'] || 0.1,
+    globalRightPadding: data['Global right padding'] || 0,
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] || 100,
     bottomLayer: data['Bottom layer'] || 'MET1',
@@ -267,6 +271,7 @@ function transformConfigToParameters(config: ConfigData): ParametersData {
     'Max fanout': config.maxFanout,
     'Target density': config.targetDensity,
     'Target overflow': config.targetOverflow,
+    'Global right padding': config.globalRightPadding,
     Clock: config.clock,
     'Frequency max [MHz]': config.frequencyMax,
     'Bottom layer': config.bottomLayer,

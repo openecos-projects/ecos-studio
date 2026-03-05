@@ -175,13 +175,23 @@ fn is_api_server_healthy(port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// Wait for the API server to become healthy, retrying up to `max_retries` times.
-/// Each retry waits 500ms, so total timeout is roughly `max_retries * 0.5` seconds.
-fn wait_for_server_ready(port: u16, max_retries: u32) -> bool {
+/// Wait for the API server to become healthy, with exponential backoff.
+///
+/// Starts polling at 100ms intervals, increasing by 1.5x each attempt up to 1000ms.
+/// Total timeout is approximately `timeout_secs` seconds.
+fn wait_for_server_ready(port: u16, timeout_secs: u64) -> bool {
+    use std::time::Instant;
+
     println!("Waiting for FastAPI server to be ready on port {}...", port);
-    for attempt in 1..=max_retries {
-        thread::sleep(Duration::from_millis(500));
-        // Quick TCP probe before the heavier HTTP health check
+    let start = Instant::now();
+    let deadline = Duration::from_secs(timeout_secs);
+    let mut delay_ms: u64 = 100;
+    let mut attempt: u32 = 0;
+
+    while start.elapsed() < deadline {
+        attempt += 1;
+        thread::sleep(Duration::from_millis(delay_ms));
+
         let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
         if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
             && is_api_server_healthy(port)
@@ -190,16 +200,20 @@ fn wait_for_server_ready(port: u16, max_retries: u32) -> bool {
                 "✅ FastAPI server ready on port {} after {} attempts ({:.1}s)",
                 port,
                 attempt,
-                attempt as f32 * 0.5
+                start.elapsed().as_secs_f32()
             );
             return true;
         }
-        if attempt % 4 == 0 {
+
+        if start.elapsed().as_secs() >= 4 && attempt % 3 == 0 {
             println!(
-                "⏳ Still waiting for server on port {}... (attempt {}/{})",
-                port, attempt, max_retries
+                "⏳ Still waiting for server on port {}... ({:.1}s elapsed)",
+                port,
+                start.elapsed().as_secs_f32()
             );
         }
+
+        delay_ms = (delay_ms * 3 / 2).min(1000);
     }
     false
 }
@@ -284,6 +298,8 @@ fn start_api_server(
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
+        let chipcompiler_dir = project_root.join("chipcompiler");
+        let tauri_dir = project_root.join("gui").join("src-tauri");
 
         #[cfg(target_os = "windows")]
         let venv_python = project_root
@@ -308,21 +324,43 @@ fn start_api_server(
             }
         };
 
+        let oss_cad_dir = project_root
+            .join("chipcompiler")
+            .join("thirdparty")
+            .join("oss-cad-suite");
+
         println!(
             "Starting FastAPI server (dev mode) from: {:?} on port {}",
             server_script, port
         );
 
-        match Command::new(&interpreter)
-            .arg(&server_script)
+        let mut cmd = Command::new(&interpreter);
+        cmd.arg(&server_script)
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
             .arg(port.to_string())
             .arg("--reload")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .arg("--reload-dir")
+            .arg(chipcompiler_dir.to_string_lossy().to_string())
+            .arg("--reload-dir")
+            .arg(tauri_dir.to_string_lossy().to_string())
+            .arg("--disable-stdio-redirect")
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .current_dir(&project_root);
+
+        if oss_cad_dir.join("bin").join("yosys").exists() {
+            println!("Setting CHIPCOMPILER_OSS_CAD_DIR to {:?}", oss_cad_dir);
+            cmd.env("CHIPCOMPILER_OSS_CAD_DIR", &oss_cad_dir);
+        } else {
+            eprintln!(
+                "⚠️ OSS CAD Suite not found at {:?}, yosys must be available in PATH.",
+                oss_cad_dir
+            );
+        }
+
+        match cmd.spawn()
         {
             Ok(child) => {
                 println!(
@@ -550,13 +588,6 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
     }
 }
 
-#[tauri::command]
-fn show_main_window(window: tauri::Window) {
-    window.show().unwrap();
-    window.set_focus().unwrap();
-    println!("Window shown via frontend signal");
-}
-
 /// 窗口最小化
 #[tauri::command]
 fn window_minimize(window: tauri::Window) {
@@ -753,9 +784,6 @@ async fn request_project_permission(app: tauri::AppHandle, path: String) -> Resu
     scope
         .allow_directory(&path_buf, true)
         .map_err(|e| format!("无法授予文件系统访问权限 {}: {}", path_buf.display(), e))?;
-
-    // 在 Tauri v2 中，convertFileSrc 自动使用 fs scope，不需要单独的 asset protocol scope
-    // println!("✅ 已授予文件系统访问权限: {}", path);
     Ok(())
 }
 
@@ -804,16 +832,19 @@ fn main() {
                     }
                 };
 
-                // Wait for the server to become healthy (max ~15s)
-                if using_external_server {
-                    println!(
-                        "Using externally started API server (debugger mode) on port {}",
-                        actual_port
-                    );
-                }
-                if !wait_for_server_ready(actual_port, 30) {
-                    eprintln!("⚠️ FastAPI server may not be fully ready after 15s");
-                }
+                // Wait for the server in the background so the webview can start
+                // loading immediately (splash screen visible sooner).
+                thread::spawn(move || {
+                    if using_external_server {
+                        println!(
+                            "Using externally started API server (debugger mode) on port {}",
+                            actual_port
+                        );
+                    }
+                    if !wait_for_server_ready(actual_port, 15) {
+                        eprintln!("⚠️ FastAPI server may not be fully ready after 15s");
+                    }
+                });
 
                 // Grant fs scope for the built-in data directory (demo data)
                 let mut data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -827,16 +858,6 @@ fn main() {
                         Err(e) => eprintln!("❌ Failed to grant fs scope: {}", e),
                     }
                 }
-
-                // Safety timeout: show window after 1s even if frontend hasn't signalled
-                let window_clone = window.clone();
-                thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(1));
-                    if let Ok(false) = window_clone.is_visible() {
-                        let _ = window_clone.show();
-                        println!("Window shown via safety timeout");
-                    }
-                });
 
                 #[cfg(debug_assertions)]
                 {
@@ -854,6 +875,16 @@ fn main() {
                 Ok(())
             }
         })
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                let window = webview.window();
+                if let Ok(false) = window.is_visible() {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    println!("Window shown via page load finished");
+                }
+            }
+        })
         .on_window_event(move |_window, event| {
             // Stop the API server when the window is destroyed
             if let tauri::WindowEvent::Destroyed = event {
@@ -863,7 +894,6 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            show_main_window,
             request_project_permission,
             window_minimize,
             window_maximize,

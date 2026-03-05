@@ -31,3 +31,5 @@ src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
 
 .shared/
+
+assets/*.json
