@@ -1,10 +1,16 @@
 load("@ecos-bazel//rules:python_packaging.bzl", "python_pyinstaller_bundle")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "build_gui_script",
     srcs = ["build-gui.sh"],
+)
+
+sh_binary(
+    name = "prepare_ecos_server",
+    srcs = ["prepare-ecos-server.sh"],
 )
 
 python_pyinstaller_bundle(
