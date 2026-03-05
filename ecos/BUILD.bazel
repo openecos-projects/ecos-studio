@@ -11,7 +11,6 @@ python_pyinstaller_bundle(
     name = "build_ecos_server",
     spec_file = "server/ecos.spec",
     srcs = [
-        "server/ecos.spec",
         "server/pyproject.toml",
         "server/run_server.py",
         "server/uv.lock",
