@@ -290,6 +290,7 @@ fn start_api_server(
         let mut server_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         server_script.push("..");
         server_script.push("..");
+        server_script.push("chipcompiler");
         server_script.push("server");
         server_script.push("run_server.py");
 
@@ -297,7 +298,7 @@ fn start_api_server(
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..");
-        let server_dir = project_root.join("server");
+        let chipcompiler_dir = project_root.join("chipcompiler");
         let tauri_dir = project_root.join("gui").join("src-tauri");
 
         #[cfg(target_os = "windows")]
@@ -341,7 +342,7 @@ fn start_api_server(
             .arg(port.to_string())
             .arg("--reload")
             .arg("--reload-dir")
-            .arg(server_dir.to_string_lossy().to_string())
+            .arg(chipcompiler_dir.to_string_lossy().to_string())
             .arg("--reload-dir")
             .arg(tauri_dir.to_string_lossy().to_string())
             .arg("--disable-stdio-redirect")
