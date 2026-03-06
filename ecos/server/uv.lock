@@ -319,7 +319,7 @@ wheels = [
 [[package]]
 name = "ecc"
 version = "0.1.0"
-source = { editable = "../../ecc" }
+source = { path = "ecc-0.1.0-py3-none-manylinux_2_39_x86_64.whl" }
 dependencies = [
     { name = "fastapi" },
     { name = "klayout" },
@@ -333,6 +333,9 @@ dependencies = [
     { name = "scipy" },
     { name = "tqdm" },
     { name = "uvicorn" },
+]
+wheels = [
+    { filename = "ecc-0.1.0-py3-none-manylinux_2_39_x86_64.whl", hash = "sha256:e68ccc7e63e942f698d2d6e7c4cd5f2ac6de702680a389c08aadf5d179a1a007" },
 ]
 
 [package.metadata]
@@ -349,21 +352,6 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.7" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "uvicorn", specifier = ">=0.27" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "auditwheel", specifier = ">=6" },
-    { name = "black", specifier = ">=23" },
-    { name = "mypy", specifier = ">=1" },
-    { name = "prek", specifier = ">=0.2.20" },
-    { name = "pyinstaller", specifier = "==6.17" },
-    { name = "pyinstaller", specifier = ">=6" },
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "pytest", specifier = ">=7" },
-    { name = "pytest-cov", specifier = ">=4" },
-    { name = "ruff", specifier = ">=0.14.10" },
-    { name = "ty", specifier = ">=0.0.9" },
 ]
 
 [[package]]
@@ -392,7 +380,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ecc", editable = "../../ecc" },
+    { name = "ecc", path = "ecc-0.1.0-py3-none-manylinux_2_39_x86_64.whl" },
     { name = "fastapi", specifier = ">=0.109" },
     { name = "uvicorn", specifier = ">=0.27" },
 ]

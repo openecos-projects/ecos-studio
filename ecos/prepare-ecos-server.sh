@@ -17,7 +17,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "==> Building ECC wheel..."
-bazel run //ecc:build_wheel
+(
+    cd "$WS/ecc"
+    bazel run //:build_wheel
+)
 
 wheel_dir="$WS/ecc/dist/wheel/repaired"
 latest_wheel="$(ls -1t "$wheel_dir"/ecc-*.whl 2>/dev/null | head -n 1 || true)"

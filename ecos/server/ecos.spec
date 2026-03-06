@@ -16,11 +16,15 @@ Usage:
 
 import os
 import sys
+from importlib import metadata
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # Server directory (ecos/server/)
 SERVER_DIR = Path(SPECPATH)
+
+# PyInstaller hooks directory
+HOOKS_DIR = SERVER_DIR / "hooks"
 
 # macOS code signing identity (optional)
 CODESIGN_IDENTITY = os.environ.get("APPLE_SIGNING_IDENTITY")
@@ -126,6 +130,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
+    hookspath=[str(HOOKS_DIR)],
     excludes=["tkinter", "test"],
     noarchive=False,
 )
