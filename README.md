@@ -2,24 +2,30 @@
 
 ECOS Studio is an integrated, one-stop silicon design solution that democratizes access to custom silicon. It vertically integrates open-source IP libraries, a robust EDA toolchain, and accessible PDKs into a unified framework, providing an "FPGA-like" experience for ASIC design.
 
-![ECOS Studio Overview](docs/figs/ecos-studio-solution.png)
+![ECOS Studio Overview](ecos/docs/figs/ecos-studio-solution.png)
 
 Our goal is to lower the barrier of chip design for researchers, engineers, and students, bridging the gap from RTL design to physical realization.
 
 ## Project Structure
 
-This repository is organized into three main pillars:
+This repository is organized into four main components:
 
-### 1. Open Source IP (`ip/`)
+### 1. GUI Application (`ecos/`)
+Desktop application providing an integrated development environment for chip design.
+- **Frontend**: Vue 3 + Tauri
+- **Backend**: FastAPI server (`ecos_server` package)
+- See [ecos/README.md](ecos/README.md) for development setup
+
+### 2. Open Source IP (`ip/`)
 Pre-verified infrastructure for composable design, including configurable SoC templates and common peripherals.
 - [SoCExamples](ip/SoCExamples)
 - [retroSoC](ip/retroSoC)
 
-### 2. Open Source EDA (`eda/`)
-The **ECC** toolchain: a seamless RTL-to-GDSII pipeline optimized for solution maturity and engineering robustness.
-- [ECC](eda/ecc)
+### 3. Open Source EDA (`ecc/`)
+**ECOS Chip Compiler (ECC)**: An open-source chip design automation solution that integrates EDA tools (Yosys, ECC-Tools, KLayout) to achieve complete RTL-to-GDS design flow.
+- [ECC Documentation](ecc/README.md)
 
-### 3. Open Source PDK (`pdk/`)
+### 4. Open Source PDK (`pdk/`)
 Enabling mainstream manufacturing processes.
 - [ICsprout 55nm Open PDK](pdk/icsprout55-pdk)
 
@@ -29,34 +35,56 @@ Enabling mainstream manufacturing processes.
 
 ## Quick Start
 
-Run from the repository root:
+### GUI Application
 
 ```bash
-# 1) Initialize submodules, setup ICsprout55 PDK assets, and build ECC CLI
+# Setup and launch GUI
 make setup
+make gui
+```
 
-# 2) Run ECC CLI flow for the GCD demo
+### CLI Demos
+
+Run ECC CLI flow for various examples:
+
+```bash
+# GCD demo
 make demo-gcd
 
-# 3) Run ECC CLI flow for the SoC example (filelist mode)
+# SoC example (filelist mode)
 make demo-soc
 
-# (Optional) Verify in a clean Docker environment
-# gcd only
-make docker-verify
+# retroSoC example
+make demo-retrosoc
+```
 
-# soc only
-make docker-verify-soc
+### Development
 
-# full (gcd + soc)
+```bash
+# Setup development environment
+make dev
+
+# Build release bundle
+make build
+```
+
+### Docker Verification
+
+Verify demos in a clean Docker environment:
+
+```bash
+# Build verification image
+make docker-build
+
+# Run all demos
 make docker-verify-all
 ```
 
-The CLI demos follow ECC's CLI Flow Runner usage (`nix run .#cli -- ...` style):
-- [ECC CLI Flow Runner](eda/ecc/README.md#cli-flow-runner)
+## Documentation
 
-For GUI usage and more advanced flows/features, refer to ECC documentation:
-- [ECC Quick Start (Desktop Application)](eda/ecc/README.md#quick-start)
+- [ECOS GUI Development](ecos/README.md)
+- [ECC CLI Flow Runner](eda/ecc/README.md#cli-flow-runner)
 - [ECC User Guide](eda/ecc/docs/user-guide.md)
 - [ECC Documentation Index](eda/ecc/docs/index.md)
+
 
