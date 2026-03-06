@@ -409,7 +409,7 @@ import { useFlowStages } from '@/composables/useFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useCurrentStage } from '@/composables/useCurrentStage'
-// import { useWorkspace } from '@/composables/useWorkspace'
+import { useWorkspace } from '@/composables/useWorkspace'
 
 // ============ Composables ============
 
@@ -422,6 +422,7 @@ const { flowStages, refreshFlowStages, setFirstRunStepOngoing } = useFlowStages(
 const {
   subflowSteps,
   isLoading: isLoadingSubflow,
+  refreshCurrentSubflow,
   currentStepTitle,
   currentStepEngine,
   completedSteps,
@@ -429,7 +430,6 @@ const {
   totalTime,
   overallStatus,
   totalSteps,
-  refreshCurrentSubflow
 } = useSubflow()
 
 // 流程运行器
@@ -495,22 +495,24 @@ const closeMenu = () => { showModeMenu.value = false }
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 
+// 跨组件刷新信号
+const { triggerStepRefresh } = useWorkspace()
+
 // ============ 事件处理 ============
 const handleRunFlow = async () => {
   closeMenu()
   if (currentStage.value === 'home') {
-    // 乐观更新：立即将第一个待运行步骤显示为 Ongoing
     setFirstRunStepOngoing()
     await runAllFlow()
-    // Home 面板刷新 flow.json 派生的总流程状态
     await refreshFlowStages()
   } else {
     await runFlow()
-    // 子流程页同步刷新子流程与侧栏总流程状态
     await Promise.all([
       refreshCurrentSubflow(),
       refreshFlowStages()
     ])
+    // 通知 DrawingArea / ThumbnailGallery 等组件刷新数据
+    triggerStepRefresh()
   }
 }
 </script>

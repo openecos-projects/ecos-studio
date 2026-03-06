@@ -370,7 +370,8 @@ export function useHomeData() {
     error.value = null
 
     try {
-      // 通过共享缓存获取 home.json 数据（去重，不会重复请求）
+      invalidateSharedHomeData()
+
       const homeData = await fetchSharedHomeData(currentProject.value.path, isInTauri)
       if (!homeData) {
         console.warn('Failed to get home data from shared cache')
@@ -521,10 +522,12 @@ export function useHomeData() {
     }
   })
 
-  // 组件卸载时清理 blob URL
+  // 组件卸载时清理 blob URL 并失效共享缓存
+  // 确保下次 mount 时从磁盘重新读取最新 home.json
   onUnmounted(() => {
     cleanupBlobUrl()
     cleanupMetricsBlobUrls()
+    invalidateSharedHomeData()
   })
 
   return {

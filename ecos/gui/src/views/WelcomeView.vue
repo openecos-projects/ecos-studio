@@ -1,46 +1,19 @@
 <template>
-  <div class="flex flex-col h-full overflow-hidden">
-    <!-- 欢迎页面内容 -->
-    <WelcomePage :recent-projects="recentProjects" @open-project="handleOpenProject" @new-project="handleNewProject"
-      @import-project="handleImportProject" @open-recent="handleOpenRecent" @remove-recent="handleRemoveRecent" />
+  <div class="flex flex-col h-full overflow-hidden bg-(--bg-primary)">
+    <!-- 装饰性背景渐变 -->
+    <div class="absolute inset-0 opacity-5 pointer-events-none welcome-gradient"></div>
+
+    <!-- 装饰性网格背景 -->
+    <div class="absolute inset-0 opacity-[0.02] pointer-events-none"
+      style="background-image: linear-gradient(var(--text-primary) 1px, transparent 1px), linear-gradient(90deg, var(--text-primary) 1px, transparent 1px); background-size: 50px 50px;">
+    </div>
+
+    <router-view />
   </div>
 </template>
 
-<script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import WelcomePage from '../components/WelcomePage.vue'
-import { useWorkspace } from '../composables/useWorkspace'
-import type { Project, WorkspaceConfig } from '../types'
-
-const router = useRouter()
-const { recentProjects, openProject, newProject, importProject, loadRecentProjects, removeRecentProject } = useWorkspace()
-
-const handleOpenProject = async () => {
-  const success = await openProject()
-  if (success) router.push('/workspace')
+<style scoped>
+.welcome-gradient {
+  background: radial-gradient(ellipse at 50% 30%, var(--accent-color) 0%, transparent 60%);
 }
-
-const handleNewProject = async (config?: WorkspaceConfig) => {
-  const success = await newProject(config)
-  if (success) router.push('/workspace')
-}
-
-const handleImportProject = async () => {
-  const success = await importProject()
-  if (success) router.push('/workspace')
-}
-
-const handleOpenRecent = async (project: Project) => {
-  const success = await openProject(project)
-  if (success) router.push('/workspace')
-}
-
-const handleRemoveRecent = async (projectId: string) => {
-  await removeRecentProject(projectId)
-}
-
-onMounted(async () => {
-  await loadRecentProjects();
-})
-</script>
+</style>

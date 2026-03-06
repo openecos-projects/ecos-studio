@@ -82,9 +82,15 @@
                       Project Name <span class="text-red-500">*</span>
                     </label>
                     <input v-model="config.parameters.design" type="text" placeholder="e.g. my_chip_design"
-                      class="w-full px-4 py-3.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm" />
-                    <p class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
-                      <i class="ri-error-warning-line"></i> Only use letters, numbers, and underscores
+                      :class="[
+                        'w-full px-4 py-3.5 bg-(--bg-secondary)/40 border rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:outline-none focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm',
+                        designNameError ? 'border-red-500 focus:border-red-500' : 'border-(--border-color) focus:border-(--accent-color)'
+                      ]" />
+                    <p v-if="designNameError" class="mt-2 text-xs text-red-500 flex items-center gap-1">
+                      <i class="ri-error-warning-fill"></i> {{ designNameError }}
+                    </p>
+                    <p v-else class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
+                      <i class="ri-error-warning-line"></i> Only letters, numbers, and underscores are allowed; spaces and Chinese characters are not permitted.
                     </p>
                   </div>
 
@@ -109,13 +115,22 @@
                         </div>
                         <input v-model="config.directory" type="text" readonly placeholder="Choose a folder..."
                           @click="selectLocation()"
-                          class="w-full pl-10 pr-4 py-3.5 bg-(--bg-secondary)/40 border border-(--border-color) rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 cursor-pointer focus:border-(--accent-color) focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm truncate" />
+                          :class="[
+                            'w-full pl-10 pr-4 py-3.5 bg-(--bg-secondary)/40 border rounded-xl text-(--text-primary) placeholder:text-(--text-secondary)/50 cursor-pointer focus:bg-(--bg-primary)/80 transition-colors duration-200 shadow-sm truncate',
+                            directoryError ? 'border-red-500 focus:border-red-500' : 'border-(--border-color) focus:border-(--accent-color)'
+                          ]" />
                       </div>
                       <button @click="selectLocation"
                         class="px-6 py-3.5 bg-(--bg-primary)/50 border border-(--border-color) text-(--text-primary) rounded-xl hover:bg-(--bg-secondary) hover:border-(--text-secondary) transition-colors duration-200 font-medium cursor-pointer shadow-sm flex items-center gap-2 shrink-0">
                         Browse
                       </button>
                     </div>
+                    <p v-if="directoryError" class="mt-2 text-xs text-red-500 flex items-center gap-1">
+                      <i class="ri-error-warning-fill"></i> {{ directoryError }}
+                    </p>
+                    <p v-else-if="!config.directory" class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
+                      <i class="ri-information-line"></i> The path cannot contain spaces or Chinese characters.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -562,12 +577,32 @@ const config = ref<WorkspaceConfig>({
   rtl_list: []
 })
 
+const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
+const HAS_SPACE_RE = /\s/
+
+const designNameError = computed(() => {
+  const name = (config.value.parameters.design as string) || ''
+  if (!name) return ''
+  if (HAS_SPACE_RE.test(name)) return 'Project name cannot contain spaces'
+  if (CHINESE_CHAR_RE.test(name)) return 'Project name cannot contain Chinese characters'
+  return ''
+})
+
+const directoryError = computed(() => {
+  const dir = config.value.directory
+  if (!dir) return ''
+  if (HAS_SPACE_RE.test(dir)) return 'Save path cannot contain spaces'
+  if (CHINESE_CHAR_RE.test(dir)) return 'Save path cannot contain Chinese characters'
+  return ''
+})
+
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
-      // 项目名称和保存位置都是必需的
       return config.value.directory.trim() !== '' &&
-        (config.value.parameters.design as string)?.trim() !== ''
+        (config.value.parameters.design as string)?.trim() !== '' &&
+        !designNameError.value &&
+        !directoryError.value
     case 2:
       // RTL 文件、顶层模块和时钟信号都是必需的
       return config.value.rtl_list.length > 0 &&

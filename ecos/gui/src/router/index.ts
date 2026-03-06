@@ -5,16 +5,20 @@ import type { RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    name: 'Welcome',
     component: () => import('../views/WelcomeView.vue'),
+    children: [
+      { path: '', name: 'ECOS', component: () => import('../views/ECOSView.vue') },
+      { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
+      { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') }
+    ],
     meta: {
-      title: 'ECC '
+      title: 'ECOS-Studio'
     }
   },
   {
     path: '/workspace',
     name: 'Workspace',
-    component: () => import('../views/WorkspaceView.vue'),
+    component: () => import('../views/WorkspaceViewWrapper.vue'),
     redirect: '/workspace/home',
     children: [
       // 固定的设置页面
@@ -25,7 +29,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: ':step',
         name: ':step',
-        component: () => import('../views/EditorView.vue')
+        component: () => import('../views/WorkspaceView.vue')
       }
     ],
     meta: {

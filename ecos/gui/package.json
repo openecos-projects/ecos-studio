@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "pnpm": {
+    "overrides": {
+      "pixi.js": "$pixi.js"
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
@@ -47,5 +52,10 @@
     "vite": "^7.3.0",
     "vitest": "^4.0.18",
     "vue-tsc": "^2.0.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

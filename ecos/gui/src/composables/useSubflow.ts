@@ -3,6 +3,7 @@ import { useRoute } from 'vue-router'
 import { readTextFile } from '@tauri-apps/plugin-fs'
 import { useTauri } from './useTauri'
 import { useWorkspace } from './useWorkspace'
+import { convertRemoteToLocalPath } from './useHomeData'
 import { getInfoApi } from '@/api/flow'
 import { CMDEnum, InfoEnum, StepEnum, ResponseEnum } from '@/api/type'
 import type { ECCResponse } from '@/api/sse'
@@ -111,7 +112,7 @@ function parseTimeString(timeStr: string): number {
  */
 export function useSubflow() {
   const { isInTauri } = useTauri()
-  const { sseMessages } = useWorkspace()
+  const { sseMessages, currentProject } = useWorkspace()
   const route = useRoute()
 
   // 状态
@@ -226,18 +227,20 @@ export function useSubflow() {
     }
 
     try {
-      console.log('Loading subflow from SSE path:', subflowPath)
+      const localPath = currentProject.value?.path
+        ? convertRemoteToLocalPath(subflowPath, currentProject.value.path)
+        : subflowPath
 
-      const fileContent = await readTextFile(subflowPath)
+      console.log('Loading subflow from SSE path:', localPath)
+
+      const fileContent = await readTextFile(localPath)
       const subflowData: SubflowData = JSON.parse(fileContent)
 
       console.log('Subflow data from SSE path:', subflowData)
 
-      // 转换数据格式并更新步骤
       subflowSteps.value = convertSubflowToSteps(subflowData)
     } catch (err) {
       console.error('Failed to load subflow from path:', subflowPath, err)
-      // 不清空现有数据，保留上一次成功加载的状态
     }
   }
 
@@ -303,33 +306,38 @@ export function useSubflow() {
     { immediate: true }
   )
 
-  // 监听 SSE 通知，当收到 subflow 通知时自动刷新当前步骤的子流程数据
+  // 监听 SSE 通知，当收到 step 或 subflow 通知时自动刷新当前步骤的子流程数据
   watch(
     () => sseMessages.value.length,
     async (newLen, oldLen) => {
       if (newLen <= (oldLen ?? 0)) return
 
-      // 获取最新一条 SSE 消息
       const latest: ECCResponse = sseMessages.value[newLen - 1]
-      if (!latest) return
+      if (!latest || latest.cmd !== 'notify') return
 
-      // 判断是否为 subflow 通知（后端 notify_subflow 发送的格式：cmd="notify", data.id="subflow"）
-      if (latest.cmd !== 'notify' || latest.data?.id !== 'subflow') return
-
+      const notifyId = latest.data?.id as string | undefined
       const sseStep = latest.data?.step as string | undefined
       const info = latest.data?.info as Record<string, unknown> | undefined
-      const subflowPath = info?.subflow_path as string | undefined
 
-      if (!subflowPath) return
+      if (notifyId === 'subflow') {
+        const subflowPath = info?.subflow_path as string | undefined
+        if (!subflowPath) return
 
-      console.log('Received SSE subflow notification, step:', sseStep, 'path:', subflowPath)
+        console.log('Received SSE subflow notification, step:', sseStep, 'path:', subflowPath)
 
-      // 判断当前路由是否在该 step 的页面上
-      const currentRouteStep = getCurrentRouteStep()
-      if (currentRouteStep && sseStep &&
-          currentRouteStep.toLowerCase() === sseStep.toLowerCase()) {
-        // 用户正在查看该 step，直接从路径刷新 subflow 数据
-        await loadSubflowFromPath(subflowPath)
+        const currentRouteStep = getCurrentRouteStep()
+        if (currentRouteStep && sseStep &&
+            currentRouteStep.toLowerCase() === sseStep.toLowerCase()) {
+          await loadSubflowFromPath(subflowPath)
+        }
+      } else if (notifyId === 'step') {
+        console.log('Received SSE step notification in useSubflow, step:', sseStep)
+
+        const currentRouteStep = getCurrentRouteStep()
+        if (currentRouteStep && sseStep &&
+            currentRouteStep.toLowerCase() === sseStep.toLowerCase()) {
+          await fetchSubflowInfo(currentRouteStep)
+        }
       }
     }
   )

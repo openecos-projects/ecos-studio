@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  pixi.js: ^8.15.0
+
 importers:
 
   .:
@@ -1555,7 +1558,7 @@ packages:
   pixi-viewport@6.0.3:
     resolution: {integrity: sha512-2+qPJ0/n+8hQYhWvY+795+x9y3MiUrCOWacK0DY53whowWaGdx9iDocy7z1pBwjkZhC52YvrJQuZKK0sdVLtBw==}
     peerDependencies:
-      pixi.js: '>=8'
+      pixi.js: ^8.15.0
 
   pixi.js@8.15.0:
     resolution: {integrity: sha512-J/Ghze/K9fjHRlfwC2EMZ7vnMIhGo4ByKCsKMcS0AB12iT79nf9zzWKUTzMJ8QAQFqQfDOl5ULwmHMUdeih2zQ==}

@@ -56,6 +56,8 @@ export interface Thumbnail {
   format?: string
 }
 
+export type ProjectStatus = 'success' | 'failed' | 'running' | 'in_progress' | 'not_started'
+
 export interface Project {
   id: string
   name: string
@@ -63,6 +65,19 @@ export interface Project {
   lastOpened: Date
   /** 路径是否存在（加载时异步检测，undefined 表示尚未检测） */
   pathExists?: boolean
+
+  // Workspace summary — written on closeProject()
+  pdk?: string
+  topModule?: string
+  frequencyTarget?: number
+  coreUtilization?: number
+  status?: ProjectStatus
+  totalSteps?: number
+  completedSteps?: number
+  currentStep?: string
+  totalRuntime?: string
+  cellCount?: number
+  frequency?: number
 }
 
 // New Project Wizard Types

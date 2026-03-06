@@ -1,22 +1,32 @@
 import { ref, getCurrentInstance } from 'vue'
-import type { Project, WorkspaceConfig } from '../types'
+import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { LazyStore } from '@tauri-apps/plugin-store'
-import { exists } from '@tauri-apps/plugin-fs'
+import { exists, readTextFile } from '@tauri-apps/plugin-fs'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useToast } from 'primevue/usetoast'
 import { loadWorkspaceApi, createWorkspaceApi } from '../api'
 import { createSSEClient, type SSEClient, type ECCResponse } from '../api/sse'
 import { isTauri } from './useTauri'
 
-// 序列化对象（将 Date 转换为 ISO 字符串）
 interface SerializedProject {
   id: string
   name: string
   path: string
-  lastOpened: string // 存储为 ISO 字符串
+  lastOpened: string
+  pdk?: string
+  topModule?: string
+  frequencyTarget?: number
+  coreUtilization?: number
+  status?: ProjectStatus
+  totalSteps?: number
+  completedSteps?: number
+  currentStep?: string
+  totalRuntime?: string
+  cellCount?: number
+  frequency?: number
 }
 
 // 共享的状态实例（单例模式）
@@ -27,6 +37,9 @@ const recentProjects = ref<Project[]>([])
 // SSE 连接（workspace 级别，跟随 workspace 生命周期）
 const sseClient = ref<SSEClient | null>(null)
 const sseMessages = ref<ECCResponse[]>([])
+
+// 跨组件刷新信号：runFlow 完成后递增，DrawingArea / ThumbnailGallery 等组件监听以刷新数据
+const stepRefreshCounter = ref(0)
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -243,6 +256,10 @@ export function useWorkspace() {
   }
   const openProject = async (project?: Project) => {
     try {
+      if (currentProject.value) {
+        await closeProject()
+      }
+
       let selectedPath: string | null = null
 
       if (project) {
@@ -318,6 +335,10 @@ export function useWorkspace() {
    */
   const newProject = async (config?: WorkspaceConfig) => {
     try {
+      if (currentProject.value) {
+        await closeProject()
+      }
+
       let selectedPath: string
 
       if (config) {
@@ -416,13 +437,104 @@ export function useWorkspace() {
     return await openProject()
   }
 
+  /**
+   * 从磁盘读取 workspace 数据，生成项目摘要快照
+   */
+  async function snapshotCurrentProject(): Promise<void> {
+    const project = currentProject.value
+    if (!project) return
+
+    const projectPath = normalizePath(project.path)
+    const idx = recentProjects.value.findIndex(p => normalizePath(p.path) === projectPath)
+    if (idx === -1) return
+
+    const snapshot: Partial<Project> = {}
+
+    try {
+      const flowContent = await readTextFile(`${project.path}/home/flow.json`)
+      const flowData = JSON.parse(flowContent)
+      const steps: Array<{ name: string; state: string; runtime: string }> = flowData.steps || []
+
+      const completedSteps = steps.filter(s => s.state === 'Success').length
+      const totalSteps = steps.length
+      const failedStep = steps.find(s => s.state === 'Incomplete' || s.state === 'Invalid')
+      const ongoingStep = steps.find(s => s.state === 'Ongoing')
+      const firstPending = steps.find(s => s.state === 'Unstart' || s.state === 'Pending')
+
+      let status: ProjectStatus = 'not_started'
+      if (ongoingStep) status = 'running'
+      else if (completedSteps === totalSteps && totalSteps > 0) status = 'success'
+      else if (failedStep) status = 'failed'
+      else if (completedSteps > 0) status = 'in_progress'
+
+      let totalSeconds = 0
+      for (const step of steps) {
+        if (step.runtime) {
+          const parts = step.runtime.split(':').map(Number)
+          if (parts.length === 3) totalSeconds += parts[0] * 3600 + parts[1] * 60 + parts[2]
+        }
+      }
+      const h = Math.floor(totalSeconds / 3600)
+      const m = Math.floor((totalSeconds % 3600) / 60)
+      const s = totalSeconds % 60
+      const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
+
+      snapshot.status = status
+      snapshot.totalSteps = totalSteps
+      snapshot.completedSteps = completedSteps
+      snapshot.currentStep = ongoingStep?.name || failedStep?.name || firstPending?.name
+      snapshot.totalRuntime = totalSteps > 0 ? totalRuntime : undefined
+    } catch {
+      console.warn('Failed to read flow.json for snapshot')
+    }
+
+    try {
+      const paramsContent = await readTextFile(`${project.path}/home/parameters.json`)
+      const params = JSON.parse(paramsContent)
+      snapshot.pdk = params['PDK'] || undefined
+      snapshot.topModule = params['Top module'] || undefined
+      snapshot.frequencyTarget = params['Frequency max [MHz]'] || undefined
+      snapshot.coreUtilization = params['Core']?.['Utilitization'] || undefined
+    } catch {
+      console.warn('Failed to read parameters.json for snapshot')
+    }
+
+    try {
+      const homeContent = await readTextFile(`${project.path}/home/home.json`)
+      const homeData = JSON.parse(homeContent)
+      const monitor = homeData.monitor
+      if (monitor) {
+        if (Array.isArray(monitor.instance) && monitor.instance.length > 0) {
+          snapshot.cellCount = monitor.instance[monitor.instance.length - 1]
+        }
+        if (Array.isArray(monitor.frequency) && monitor.frequency.length > 0) {
+          const lastFreq = monitor.frequency[monitor.frequency.length - 1]
+          if (typeof lastFreq === 'number' && lastFreq > 0) snapshot.frequency = lastFreq
+        }
+      }
+    } catch {
+      console.warn('Failed to read home.json for snapshot')
+    }
+
+    Object.assign(recentProjects.value[idx], snapshot)
+    const serialized = recentProjects.value.map(serializeProject)
+    await store.set('recent_projects', serialized)
+    await store.save()
+  }
+
   const closeProject = async () => {
+    if (currentProject.value) {
+      try {
+        await snapshotCurrentProject()
+      } catch (err) {
+        console.error('Failed to snapshot project data on close:', err)
+      }
+    }
+
     currentProject.value = null
     disconnectSSE()
-    // 清除持久化的当前项目
     await store.delete('current_project_path')
     await store.save()
-    // 重置窗口标题为默认
     await updateWindowTitle()
   }
 
@@ -459,6 +571,10 @@ export function useWorkspace() {
     sseMessages.value = []
   }
 
+  function triggerStepRefresh() {
+    stepRefreshCounter.value++
+  }
+
   return {
     loadRecentProjects,
     removeRecentProject,
@@ -472,6 +588,9 @@ export function useWorkspace() {
     // SSE
     sseClient,
     sseMessages,
+    // 跨组件刷新
+    stepRefreshCounter,
+    triggerStepRefresh,
     // Toast
     showToast,
   }

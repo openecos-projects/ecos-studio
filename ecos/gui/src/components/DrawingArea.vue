@@ -24,7 +24,7 @@ import { getInfoApi } from '@/api/flow'
 import { CMDEnum, InfoEnum, StepEnum, ResponseEnum } from '@/api/type'
 
 const route = useRoute()
-const { currentProject } = useWorkspace()
+const { currentProject, sseMessages, stepRefreshCounter } = useWorkspace()
 const { getResourceUrl } = useEDA()
 const layoutState = useLayoutState()
 
@@ -243,6 +243,33 @@ const handleStageChange = async (stage: string) => {
 
 watch(() => route.path, (newPath) => {
   const pathParts = newPath.split('/')
+  const stage = pathParts[pathParts.length - 1] || 'home'
+  handleStageChange(stage)
+})
+
+// SSE 通知驱动：subflow/step 通知到达时刷新当前 step 的版图
+watch(
+  () => sseMessages.value.length,
+  async (newLen, oldLen) => {
+    if (newLen <= (oldLen ?? 0)) return
+    const latest = sseMessages.value[newLen - 1]
+    if (!latest || latest.cmd !== 'notify') return
+
+    const notifyId = latest.data?.id as string | undefined
+    const sseStep = latest.data?.step as string | undefined
+    if (notifyId !== 'subflow' && notifyId !== 'step') return
+
+    const pathParts = route.path.split('/')
+    const currentStage = pathParts[pathParts.length - 1] || ''
+    if (sseStep && currentStage.toLowerCase() === sseStep.toLowerCase()) {
+      await handleStageChange(currentStage)
+    }
+  }
+)
+
+// runFlow 完成后的手动刷新信号（兜底：SSE 通知未就绪时使用）
+watch(stepRefreshCounter, () => {
+  const pathParts = route.path.split('/')
   const stage = pathParts[pathParts.length - 1] || 'home'
   handleStageChange(stage)
 })

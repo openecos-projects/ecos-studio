@@ -156,6 +156,29 @@ export function useFlowStages() {
   }
 
   /**
+   * 从 home.json 路径间接加载 flow stages
+   * 用于 SSE subflow 通知中的 home_page 路径
+   */
+  async function loadFlowStagesFromHomePath(homePath: string): Promise<void> {
+    if (!isInTauri || !homePath) return
+
+    try {
+      const localHomePath = convertToLocalPath(homePath)
+      const projectPath = currentProject.value?.path
+      if (projectPath) await requestPermission(projectPath)
+
+      const homeContent = await readTextFile(localHomePath)
+      const homeData = JSON.parse(homeContent)
+      const flowPath = homeData.flow
+      if (flowPath) {
+        await loadFlowStagesFromPath(flowPath)
+      }
+    } catch (err) {
+      console.error('Failed to load flow stages from home path:', homePath, err)
+    }
+  }
+
+  /**
    * 从 flow.json 加载流程步骤
    * 通过共享缓存获取 home.json 数据（不重复调用 API），从中提取 flow 路径
    */
@@ -254,7 +277,7 @@ export function useFlowStages() {
     { immediate: true }
   )
 
-  // 监听 SSE 通知，当收到 step 完成通知时自动刷新流程步骤
+  // 监听 SSE 通知，当收到 step/subflow 通知时自动刷新流程步骤
   const { sseMessages } = useWorkspace()
 
   watch(
@@ -262,38 +285,41 @@ export function useFlowStages() {
     async (newLen, oldLen) => {
       if (newLen <= (oldLen ?? 0)) return
 
-      // 获取最新一条 SSE 消息
       const latest: ECCResponse = sseMessages.value[newLen - 1]
-      if (!latest) return
+      if (!latest || latest.cmd !== 'notify') return
 
-      // 判断是否为 step 完成通知（后端 notify_step 发送的格式：cmd="notify", data.id="step"）
-      const isStepNotify = latest.cmd === 'notify' && latest.data?.id === 'step'
-      if (!isStepNotify) return
-
-      const stepName = latest.data?.step as string | undefined
+      const notifyId = latest.data?.id as string | undefined
       const info = latest.data?.info as Record<string, unknown> | undefined
-      const stepPath = info?.step_path as string | undefined
 
-      console.log('Received SSE step notification, step:', stepName, 'path:', stepPath)
+      if (notifyId === 'step') {
+        const stepName = latest.data?.step as string | undefined
+        const stepPath = info?.step_path as string | undefined
 
-      // 乐观更新：先将对应步骤状态设为 Success，避免等待文件读取的延迟
-      if (stepName) {
-        const stepNameLower = stepName.toLowerCase()
-        const idx = dynamicFlowStages.value.findIndex(s => s.path.toLowerCase() === stepNameLower)
-        if (idx !== -1) {
-          dynamicFlowStages.value[idx] = {
-            ...dynamicFlowStages.value[idx],
-            state: 'Success'
+        console.log('Received SSE step notification, step:', stepName, 'path:', stepPath)
+        console.log('latest:', latest)
+
+        // 乐观更新：先将对应步骤状态设为 Success，避免等待文件读取的延迟
+        if (stepName) {
+          const stepNameLower = stepName.toLowerCase()
+          const idx = dynamicFlowStages.value.findIndex(s => s.path.toLowerCase() === stepNameLower)
+          if (idx !== -1) {
+            dynamicFlowStages.value[idx] = {
+              ...dynamicFlowStages.value[idx],
+              state: 'Success'
+            }
           }
         }
-      }
 
-      // 使用通知中的 step_path 直接加载 flow.json，确保数据一致性
-      if (stepPath) {
-        await loadFlowStagesFromPath(stepPath)
-      } else {
-        // 没有 step_path 时回退到 API 方式
-        await refreshFlowStages()
+        if (stepPath) {
+          await loadFlowStagesFromPath(stepPath)
+        } else {
+          await refreshFlowStages()
+        }
+      } else if (notifyId === 'subflow') {
+        const homePage = info?.home_page as string | undefined
+        if (homePage) {
+          await loadFlowStagesFromHomePath(homePage)
+        }
       }
     }
   )

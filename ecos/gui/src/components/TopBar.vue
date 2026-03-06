@@ -69,7 +69,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useThemeStore } from '@/stores/themeStore'
 import { useRoute } from 'vue-router'
-
+import { useWorkspace } from '@/composables/useWorkspace'
 // ---- 类型定义 ----
 interface DropdownItem {
   label?: string
@@ -180,7 +180,9 @@ const handleMaximize = () => {
   invoke('window_maximize')
 }
 
-const handleClose = () => {
+const { closeProject } = useWorkspace()
+const handleClose = async () => {
+  await closeProject()
   invoke('window_close')
 }
 
