@@ -171,6 +171,10 @@ if [[ "${ENABLE_OSS_CAD_SUITE:-true}" == "true" ]] && [[ -n "$OSS_CAD_BIN" ]]; t
     cp -a "$OSS_CAD_ROOT" "$OSS_CAD_BUNDLE_DIR"
 fi
 
+# cp -RL above dereferences pnpm's symlinked node_modules, breaking module
+# resolution. Remove the broken copy so pnpm install recreates proper symlinks.
+rm -rf "$GUI_DIR/node_modules"
+
 (cd "$GUI_DIR" && pnpm install --frozen-lockfile)
 
 if [[ "$TARGET_TRIPLE" == *linux* ]] && [[ ",$TAURI_BUNDLES," == *",appimage,"* ]]; then
