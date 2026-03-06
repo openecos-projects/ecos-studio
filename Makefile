@@ -1,114 +1,86 @@
-.PHONY: help setup init-submodules setup-pdk install-ecc demo-gcd demo-soc demo-retrosoc docker-build docker-verify docker-verify-gcd docker-verify-soc docker-verify-retrosoc docker-verify-all
+.PHONY: help setup build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all
+
+BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
+BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
+APPIMAGE_MARKER := $(BUNDLE_EXTRACT_DIR)/.extracted
 
 PDK_ROOT ?= ./pdk/icsprout55-pdk
-ECC_DIR ?= ./eda/ecc
-ECC_CLI ?= $(ECC_DIR)\#cli
+ECC_CLI ?= ./eda/ecc\#cli
 GCD_WS ?= ./ws/gcd
 SOC_WS ?= ./ws/soc
 RETROSOC_WS ?= ./ws/retrosoc
-RETROSOC_FLIST ?= $(RETROSOC_WS)/retrosoc_ics55_minimal.f
-RETROSOC_MINI_FLIST_DIR ?= $(CURDIR)/ip/retroSoC/rtl/mini/filelist
-RETROSOC_PDK_FLIST ?= $(CURDIR)/ip/retroSoC/rtl/filelist/pdk_ics55.fl
 
 help:
 	@echo "Targets:"
-	@echo "  make setup      - Init submodules, setup PDK assets, and build ECC CLI"
-	@echo "  make demo-gcd   - Run ECC CLI flow for gcd example"
-	@echo "  make demo-soc   - Run ECC CLI flow for SoCExamples filelist"
-	@echo "  make demo-retrosoc - Run ECC CLI flow for retroSoC (mini, ICS55, minimal config)"
-	@echo "  make docker-build  - Build clean Docker verification image"
-	@echo "  make docker-verify - Alias of docker-verify-gcd"
-	@echo "  make docker-verify-gcd - Run setup + gcd demo in clean Docker, verify workspace stages"
-	@echo "  make docker-verify-soc - Run setup + soc demo in clean Docker, verify workspace stages"
-	@echo "  make docker-verify-retrosoc - Run setup + retroSoC mini/ICS55 demo in clean Docker, verify workspace stages"
-	@echo "  make docker-verify-all - Run setup + gcd + soc demos in clean Docker, verify workspace stages"
-	@echo "                      (optional override: RUN_GCD=0/1 RUN_SOC=0/1 RUN_RETROSOC=0/1 make docker-verify)"
-	@echo "                      (optional: UPDATE_SUBMODULES=1 make docker-verify)"
-	@echo "                      (optional: USE_SSH_KEY=1 make docker-verify)"
-	@echo "                      (optional: SSH_DIR=~/.ssh USE_SSH_KEY=1 make docker-verify)"
-	@echo "                      (optional: USE_PROXY=true make docker-verify)"
-	@echo "                      (optional: GH_PROXY=https://gh-proxy.org/ USE_PROXY=true make docker-verify)"
-	@echo "                      (optional: TOOL=wget USE_PROXY=true make docker-verify)"
+	@echo "  make setup      - Init submodules and setup PDK"
+	@echo "  make build      - Build ECOS Studio bundle (Bazel)"
+	@echo "  make dev        - Setup development environment"
+	@echo "  make gui        - Launch GUI (release version)"
+	@echo "  make clean-gui  - Clean extracted GUI bundle"
+	@echo "  make demo-gcd   - Run GCD demo"
+	@echo "  make demo-soc   - Run SoC demo"
+	@echo "  make demo-retrosoc - Run retroSoC demo"
+	@echo "  make docker-build  - Build Docker verification image"
+	@echo "  make docker-verify-all - Run all demos in Docker"
 
-setup: init-submodules setup-pdk install-ecc
-
-init-submodules:
+setup:
 	git submodule update --init --recursive
-
-setup-pdk:
 	$(MAKE) -C pdk/icsprout55-pdk unzip
 
-install-ecc:
-	nix build $(ECC_CLI)
+build:
+	bazel build //:ecos_studio_bundle
+
+dev:
+	cd ecos/server && uv sync
+	cd ecos/gui && pnpm install
+
+$(BUNDLE_TAR):
+	bazel build //:ecos_studio_bundle
+
+$(APPIMAGE_MARKER): $(BUNDLE_TAR)
+	@mkdir -p $(BUNDLE_EXTRACT_DIR)
+	@tar -xf $(BUNDLE_TAR) -C $(BUNDLE_EXTRACT_DIR)
+	@touch $(APPIMAGE_MARKER)
+
+gui: $(APPIMAGE_MARKER)
+	@APPIMAGE=$$(find $(BUNDLE_EXTRACT_DIR) -name "*.AppImage" | head -1); \
+	chmod +x "$$APPIMAGE" && "$$APPIMAGE"
+
+clean-gui:
+	rm -rf $(BUNDLE_EXTRACT_DIR)
 
 demo-gcd:
 	nix run $(ECC_CLI) -- --workspace $(GCD_WS) \
 		--rtl ./eda/ecc/docs/examples/gcd/gcd.v \
-		--design gcd \
-		--top gcd \
-		--clock clk \
+		--design gcd --top gcd --clock clk \
 		--pdk-root $(PDK_ROOT)
 
 demo-soc:
 	nix run $(ECC_CLI) -- --workspace $(SOC_WS) \
 		--rtl ./ip/SoCExamples/soc/filelist.f \
-		--design ysyxSoCASIC \
-		--top ysyxSoCASIC \
-		--clock clock \
-		--pdk-root $(PDK_ROOT) \
-		--freq 200
+		--design ysyxSoCASIC --top ysyxSoCASIC --clock clock \
+		--pdk-root $(PDK_ROOT) --freq 200
 
 demo-retrosoc:
-	mkdir -p $(dir $(RETROSOC_FLIST))
-	( \
-		while IFS= read -r line; do \
-			[ -z "$$line" ] && continue; \
-			case "$$line" in \
-				\#*) ;; \
-				/pdk/*) printf '%s\n' "$(abspath $(PDK_ROOT))$$line" ;; \
-				*) printf '%s\n' "$$line" ;; \
-			esac; \
-		done < $(RETROSOC_PDK_FLIST); \
-		printf '%s\n' \
-			'+define+PDK_ICS55' \
-			'+define+CORE_PICORV32' \
-			'+define+IP_NONE' \
-			'+define+SIMU_VCS' \
-			'+define+SV_ASSRT_DISABLE' \
-			'+define+SYNTHESIS'; \
-		cat $(RETROSOC_MINI_FLIST_DIR)/sys_def.fl; \
-		for fl in inc.fl ip.fl tech.fl core_picorv32.fl top.fl; do \
-			while IFS= read -r line; do \
-				[ -z "$$line" ] && continue; \
-				case "$$line" in \
-					\#*) ;; \
-					+incdir+*) p="$${line#+incdir+}"; printf '+incdir+%s/%s\n' "$(RETROSOC_MINI_FLIST_DIR)" "$$p" ;; \
-					*) printf '%s/%s\n' "$(RETROSOC_MINI_FLIST_DIR)" "$$line" ;; \
-				esac; \
-			done < $(RETROSOC_MINI_FLIST_DIR)/$$fl; \
-		done; \
-	) > $(RETROSOC_FLIST)
+	@echo "Building retroSoC filelist..."
+	@mkdir -p $(dir $(RETROSOC_WS)/retrosoc.f)
+	@( \
+		cat $(CURDIR)/ip/retroSoC/rtl/filelist/pdk_ics55.fl | sed "s|^/pdk/|$(abspath $(PDK_ROOT))/|"; \
+		echo '+define+PDK_ICS55 +define+CORE_PICORV32 +define+IP_NONE +define+SYNTHESIS'; \
+		for fl in sys_def.fl inc.fl ip.fl tech.fl core_picorv32.fl top.fl; do \
+			cat $(CURDIR)/ip/retroSoC/rtl/mini/filelist/$$fl | \
+			sed "s|^+incdir+|+incdir+$(CURDIR)/ip/retroSoC/rtl/mini/filelist/|" | \
+			sed "s|^[^+#]|$(CURDIR)/ip/retroSoC/rtl/mini/filelist/&|"; \
+		done \
+	) > $(RETROSOC_WS)/retrosoc.f
 	nix run $(ECC_CLI) -- --workspace $(RETROSOC_WS) \
-		--rtl $(RETROSOC_FLIST) \
-		--design retrosoc_asic \
-		--top retrosoc_asic \
-		--clock extclk_i_pad \
+		--rtl $(RETROSOC_WS)/retrosoc.f \
+		--design retrosoc_asic --top retrosoc_asic --clock extclk_i_pad \
 		--pdk-root $(PDK_ROOT)
 
 docker-build:
 	docker build --no-cache -f Dockerfile.verify -t ecos-studio-verify:latest .
 
-docker-verify:
-	RUN_GCD=1 RUN_SOC=0 bash ./scripts/verify-demos-in-docker.sh
-
-docker-verify-gcd:
-	RUN_GCD=1 RUN_SOC=0 bash ./scripts/verify-demos-in-docker.sh
-
-docker-verify-soc:
-	RUN_GCD=0 RUN_SOC=1 bash ./scripts/verify-demos-in-docker.sh
-
-docker-verify-retrosoc:
-	RUN_GCD=0 RUN_SOC=0 RUN_RETROSOC=1 bash ./scripts/verify-demos-in-docker.sh
-
 docker-verify-all:
 	RUN_GCD=1 RUN_SOC=1 RUN_RETROSOC=1 bash ./scripts/verify-demos-in-docker.sh
+
