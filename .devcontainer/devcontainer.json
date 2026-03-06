@@ -1,0 +1,27 @@
+{
+  "name": "ecos-studio",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "target": "devcontainer"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "rust-lang.rust-analyzer",
+        "tauri-apps.tauri-vscode",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "forwardPorts": [8765, 5173, 1420],
+  "containerEnv": {
+    "PROJECT_ROOT": "${containerWorkspaceFolder}"
+  },
+  "postCreateCommand": "cd ecc && bazel build //:build_wheel && cd ../ecos/server && uv sync --all-groups --python 3.11 && cd ../gui && pnpm install",
+  "remoteUser": "root"
+}
