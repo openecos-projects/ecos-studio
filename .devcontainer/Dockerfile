@@ -61,6 +61,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 ENV PATH="/root/.cargo/bin:${PATH}"
 ENV PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
 
+# Configure git to use GitHub proxy for all operations
+# RUN git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"
+
 FROM base AS devcontainer
 
 FROM base AS runtime
