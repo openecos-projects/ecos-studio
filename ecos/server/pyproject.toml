@@ -27,8 +27,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-# Stable local wheel path maintained by `bazel run //ecos:prepare_ecos_server`
-ecc = { path = "../../ecc/dist/wheel/repaired/ecc-latest.whl" }
+ecc = { path = "../../ecc", editable = true }
 
 [tool.ruff]
 line-length = 100

@@ -22,6 +22,13 @@ cd ecos/gui && pnpm install && pnpm tauri dev
 ### Release Build
 
 ```bash
+# Build the ECC wheel first (in ecc/)
+cd ecc && bazel run //:build_wheel
+
+# Install ecos-server using pre-built wheel
+cd ecos/server && uv sync --find-links ../../ecc/dist/wheel/repaired/
+
+# Build the full bundle
 bazel build //:ecos_studio_bundle
 ```
 
