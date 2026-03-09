@@ -26,7 +26,7 @@ help:
 setup:
 	git submodule update --init --recursive
 	$(MAKE) -C pdk/icsprout55-pdk unzip
-	cd ecc && uv sync --all-groups --python 3.11
+	cd ecc && SKIP_VENV=1 bazel run //:prepare_dev
 
 build:
 	bazel build //:ecos_studio_bundle

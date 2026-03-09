@@ -22,6 +22,6 @@
   "containerEnv": {
     "PROJECT_ROOT": "${containerWorkspaceFolder}"
   },
-  "postCreateCommand": "cd ecc && bazel run //:prepare_dev && cd ../ecos/server && uv sync && cd ../gui && pnpm install",
+  "postCreateCommand": "cd ecc && SKIP_VENV=1 bazel run //:prepare_dev && cd ../ecos/server && uv sync && cd ../gui && pnpm install",
   "remoteUser": "root"
 }
