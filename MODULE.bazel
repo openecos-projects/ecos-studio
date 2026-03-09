@@ -9,7 +9,7 @@ bazel_dep(name = "ecos-bazel")
 git_override(
     module_name = "ecos-bazel",
     remote = "https://github.com/Emin017/ecos-bazel.git",
-    commit = "6a1fbd31b0255f80b0c429984d92a41a221e15e1",
+    commit = "53fbe16e11c5150d96bdd3302a10b95ff20344e2",
 )
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
