@@ -24,6 +24,7 @@ python_pyinstaller_bundle(
         "server/ecos_server/**/*.py",
     ]),
     output_name = "ecos-server",
+    env = {"PYTHON_INTERPRETER": "ecos/server/.venv/bin/python"},
     pyinstaller = "@ecos-bazel//tools:pyinstaller",
 )
 
