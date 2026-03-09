@@ -15,9 +15,6 @@ from ..schemas import (
 from ..sse import server_notify
 gui_notify = server_notify()
 
-from chipcompiler.tools import set_gui_notify
-set_gui_notify(gui_notify)
-
 logger = logging.getLogger(__name__)
 
 
