@@ -56,14 +56,13 @@ inject_oss_cad_into_appimage() {
 
 usage() {
     cat <<EOF
-Usage: $0 --gui-src-dir <dir> --api-server-bin <path> --out-tar <path> --work-root <dir> [--appimagetool-bin <path>] [--oss-cad-bin <path>]
+Usage: $0 --gui-src-dir <dir> --api-server-bin <path> --out-tar <path> [--appimagetool-bin <path>] [--oss-cad-bin <path>]
 EOF
 }
 
 GUI_SRC_DIR=""
 API_SERVER_BIN=""
 OUT_TAR=""
-WORK_ROOT=""
 APPIMAGETOOL_BIN=""
 OSS_CAD_BIN=""
 
@@ -79,10 +78,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --out-tar)
             OUT_TAR="$2"
-            shift 2
-            ;;
-        --work-root)
-            WORK_ROOT="$2"
             shift 2
             ;;
         --appimagetool-bin)
@@ -105,7 +100,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$GUI_SRC_DIR" || -z "$API_SERVER_BIN" || -z "$OUT_TAR" || -z "$WORK_ROOT" ]]; then
+if [[ -z "$GUI_SRC_DIR" || -z "$API_SERVER_BIN" || -z "$OUT_TAR" ]]; then
     echo "ERROR: missing required arguments" >&2
     usage >&2
     exit 1
@@ -113,6 +108,8 @@ fi
 
 API_SERVER_BIN="$(readlink -f "$API_SERVER_BIN")"
 TARGET_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+WORK_ROOT="$(mktemp -d)"
+trap 'rm -rf "$WORK_ROOT"' EXIT
 GUI_DIR="$WORK_ROOT/gui"
 
 if [[ -n "$APPIMAGETOOL_BIN" ]]; then

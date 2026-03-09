@@ -57,7 +57,6 @@ genrule(
             --api-server-bin "$(location :build_ecos_server)" \\
             --appimagetool-bin "$(location @appimagetool_x86_64_linux//file)" \\
             --oss-cad-bin "$(location @oss_cad_suite//:yosys_bin)" \\
-            --out-tar "$@" \\
-            --work-root "$(@D)/ecos_studio_bundle_work"
+            --out-tar "$@"
     """,
 )
