@@ -149,9 +149,26 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[str(HOOKS_DIR)],
-    excludes=["tkinter", "test"],
+    excludes=[
+        "tkinter",
+        "test",
+        "chipcompiler.thirdparty",
+        "setuptools",
+        "distutils",
+        "_distutils_hack",
+        "mypy",
+        "pip",
+        "pkg_resources",
+    ],
     noarchive=False,
 )
+
+# Remove thirdparty files that collect_all("chipcompiler") pulled in.
+# The needed ECC binaries (ecc_py*.so, lib/*.so) are already collected via
+# collect_all into ecc_binaries, but the full thirdparty source tree
+# (ecc-tools: ~1.1 GB of build scripts/src/docs) is not needed at runtime.
+a.datas = [d for d in a.datas if not d[0].startswith("chipcompiler/thirdparty")]
+a.binaries = [b for b in a.binaries if not b[0].startswith("chipcompiler/thirdparty")]
 
 pyz = PYZ(a.pure, a.zipped_data)
 
