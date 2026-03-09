@@ -121,7 +121,25 @@ hiddenimports = [
 ]
 hiddenimports.extend(ecc_hiddenimports)
 hiddenimports.extend(klayout_hiddenimports)
-hiddenimports.extend(collect_submodules("ecos_server"))
+hiddenimports.extend([
+    "ecos_server",
+    "ecos_server.main",
+    "ecos_server.ecc",
+    "ecos_server.ecc.routers",
+    "ecos_server.ecc.routers.sse",
+    "ecos_server.ecc.routers.workspace",
+    "ecos_server.ecc.schemas",
+    "ecos_server.ecc.schemas.ecc",
+    "ecos_server.ecc.schemas.info",
+    "ecos_server.ecc.services",
+    "ecos_server.ecc.services.ecc",
+    "ecos_server.ecc.services.info",
+    "ecos_server.ecc.sse",
+    "ecos_server.ecc.sse.models",
+    "ecos_server.ecc.sse.notify_service",
+    "ecos_server.sse",
+    "ecos_server.sse.manager",
+])
 
 # --- Analysis & packaging ---
 a = Analysis(
