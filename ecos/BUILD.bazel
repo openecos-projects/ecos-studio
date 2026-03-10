@@ -43,7 +43,7 @@ genrule(
     ]) + [
         "//ecos/gui/src-tauri:tauri_rust_sources",
         ":build_ecos_server",
-        "@appimagetool_x86_64_linux//file",
+        "@appimagetool_x86_64_linux//:appimagetool",
         "@oss_cad_suite_pruned//:all_files",
         "@oss_cad_suite_pruned//:yosys_bin",
         ":build_gui_script",
@@ -56,7 +56,7 @@ genrule(
         bash "$(location :build_gui_script)" \\
             --gui-src-dir "$$(dirname $(location gui/package.json))" \\
             --api-server-bin "$(location :build_ecos_server)" \\
-            --appimagetool-bin "$(location @appimagetool_x86_64_linux//file)" \\
+            --appimagetool-bin "$(location @appimagetool_x86_64_linux//:appimagetool)" \\
             --oss-cad-bin "$(location @oss_cad_suite_pruned//:yosys_bin)" \\
             --out-tar "$@"
     """,

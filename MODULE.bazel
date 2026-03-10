@@ -9,16 +9,11 @@ bazel_dep(name = "ecos-bazel")
 git_override(
     module_name = "ecos-bazel",
     remote = "https://github.com/Emin017/ecos-bazel.git",
-    commit = "53fbe16e11c5150d96bdd3302a10b95ff20344e2",
+    commit = "db88cd95392ae56e99ceb1cc584eccf3881a2f2f",
 )
 
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
-http_file(
-    name = "appimagetool_x86_64_linux",
-    urls = ["https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"],
-    sha256 = "b90f4a8b18967545fda78a445b27680a1642f1ef9488ced28b65398f2be7add2",
-    executable = True,
-)
+appimage_tool = use_extension("@ecos-bazel//rules:appimage-tool.bzl", "appimage_tool")
+use_repo(appimage_tool, "appimagetool_x86_64_linux")
 
 oss_cad_suite = use_extension("@ecos-bazel//rules:oss_cad_suite.bzl", "oss_cad_suite")
 use_repo(oss_cad_suite, "oss_cad_suite", "oss_cad_suite_pruned")

@@ -146,6 +146,22 @@
   },
   "selectedYankedVersions": {},
   "moduleExtensions": {
+    "@@ecos-bazel+//rules:appimage-tool.bzl%appimage_tool": {
+      "general": {
+        "bzlTransitiveDigest": "PNR0LYRvoPIaEvYGn5B+v/0b0lPRaBfroqxpzQQK+R4=",
+        "usagesDigest": "2lKJdNFL48xez/QRAdRHcU/PwOPSzZNHrqrFsu0mqjg=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "appimagetool_x86_64_linux": {
+            "repoRuleId": "@@ecos-bazel+//rules:appimage-tool.bzl%_appimagetool_repo",
+            "attributes": {}
+          }
+        },
+        "recordedRepoMappingEntries": []
+      }
+    },
     "@@ecos-bazel+//rules:oss_cad_suite.bzl%oss_cad_suite": {
       "general": {
         "bzlTransitiveDigest": "03Inx7wQyprKJ4MWxzsdFZLuQH3MHKojPiyQ94ViMA4=",
