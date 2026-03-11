@@ -9,6 +9,7 @@ This guide will walk you through using ECOS Studio to design and implement your 
   - [Getting Started](#getting-started)
     - [Launching ECOS Studio](#launching-ecos-studio)
     - [Welcome Screen](#welcome-screen)
+  - [Starting a Backend Design](#starting-a-backend-design)
   - [Creating a New Workspace](#creating-a-new-workspace)
     - [Step 1: Project Basics](#step-1-project-basics)
     - [Step 2: Design Files](#step-2-design-files)
@@ -62,6 +63,12 @@ When you first launch ECOS Studio, you'll see the welcome screen with options to
 </br>
 
 ---
+
+## Starting a Backend Design
+
+<div align="center">
+  <img src="asset/start-backend-design.png" alt="Start Backend Design" style="max-width: 80%; height: auto;">
+</div>
 
 ## Creating a New Workspace
 
