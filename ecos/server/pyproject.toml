@@ -41,8 +41,14 @@ lint.select = [
 ]
 extend-include = ["*.spec"]
 
+[project.scripts]
+ecos-server = "ecos_server.run_server:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["ecos_server"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"run_server.py" = "ecos_server/run_server.py"
 
 [tool.ty]
 environment.python-version = "3.11"

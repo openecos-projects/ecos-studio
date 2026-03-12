@@ -1,7 +1,7 @@
 [package]
-name = "ecc-client"
+name = "ecos-studio"
 version = "0.1.0"
-description = "ECOS Studio"
+description = "ECOS-Studio"
 authors = ["Ekko"]
 license = ""
 repository = ""
