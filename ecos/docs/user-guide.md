@@ -162,10 +162,6 @@ Upload your RTL design files:
 - **Clock Signal Name** - Main clock signal for timing constraints
   - Example: `clk`, `clock`, `sys_clk`
 
-<div align="center">
-  <img src="asset/wizard-step2-design-info.png" alt="Step 2: Design Info" style="max-width: 60%; height: auto;">
-</div>
-</br>
 
 **File Management:**
 - View all added files in the file list
