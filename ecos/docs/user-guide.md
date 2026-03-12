@@ -53,9 +53,33 @@ ecc-client
 ### Welcome Screen
 
 When you first launch ECOS Studio, you'll see the welcome screen with options to:
-- **New Workspace** - Create a new chip design project
-- **Open Workspace** - Open an existing project
-- **Recent Projects** - Quick access to recently opened projects
+
+**Design Tools:**
+
+The home screen presents two design tool cards:
+
+- **Frontend Design** *(Coming Soon)* - RTL / Verilog / SystemVerilog design entry (not yet available)
+- **Backend Design** - The main chip implementation tool covering **Synthesis → P&R → GDS**. Click this card to enter the backend design environment.
+
+**Resources:**
+
+- **IP Catalog** *(Coming Soon)* - Browse reusable IP blocks
+- **PDK Manager** - Manage your Process Design Kits
+
+**Explore:**
+
+- **Benchmarks** *(Coming Soon)* - Compare design metrics
+- **Documentation** *(Coming Soon)* - Access guides and references
+
+**Project Access:**
+
+- **Continue Working:** a **Resume** Click it to quickly resume where you left off in your last project.
+- **Project Management:** Click the **Project Management** button at the bottom to view and manage all your projects.
+
+> [!NOTE]
+> The **Frontend Design tool** and some **Resources** sections are still under development and will be available in future releases. Stay tuned for updates!
+> You can try out the backend design flow with your own RTL files and the provided PDK to experience the core features of ECOS Studio.
+>
 
 <div align="center">
   <img src="asset/overview-light.png" alt="Welcome Screen" style="max-width: 80%; height: auto;">
@@ -66,44 +90,12 @@ When you first launch ECOS Studio, you'll see the welcome screen with options to
 
 ## Starting a Backend Design
 
-After launching ECOS Studio, you'll see the home screen with the following sections:
+After launching ECOS Studio, you'll see the home screen with the backend design card. Click on the **"Backend Design"** card to start creating your chip design project.
 
 <div align="center">
   <img src="asset/start-backend-design.png" alt="Start Backend Design" style="max-width: 80%; height: auto;">
 </div>
 </br>
-
-**Design Tools:**
-
-The home screen presents two design tool cards:
-
-- **Frontend Design** *(Coming Soon)* - RTL / Verilog / SystemVerilog design entry (not yet available)
-- **Backend Design** - The main chip implementation tool covering **Synthesis → P&R → GDS**. Click this card to enter the backend design environment, where you can create or open workspaces.
-
-**Resources:**
-
-- **IP Catalog** *(Coming Soon)* - Browse reusable IP blocks
-- **PDK Manager** - Manage your Process Design Kits:
-  - Click **Import** to add a new PDK from your file system
-  - View all imported PDKs with their technology node information
-  - Remove PDKs by clicking the close icon on hover
-
-**Explore:**
-
-- **Benchmarks** *(Coming Soon)* - Compare design metrics
-- **Documentation** *(Coming Soon)* - Access guides and references
-
-**Continue Working:**
-
-If you have previously opened a project, a **Resume** card appears showing your last workspace with its name, PDK, status, and progress. Click it to quickly resume where you left off.
-
-**Project Management:**
-
-Click the **Project Management** button at the bottom to view and manage all your projects. The project management page lets you:
-- Filter projects by PDK, status, or search keywords
-- Sort by last modified, name, status, or progress
-- View project details including top module, frequency, utilization, cell count, and runtime
-- Remove projects from the list
 
 ## Creating a New Workspace
 
