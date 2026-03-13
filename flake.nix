@@ -1,10 +1,5 @@
 {
-  nixConfig = {
-    extra-trusted-substituters = [
-      "https://serve.eminrepo.cc/"
-    ];
-    extra-trusted-public-keys = [ "serve.eminrepo.cc:fgdTGDMn75Z0NOvTmus/Z9Fyh6ExgoqddNVkaYVi5qk=" ];
-  };
+  description = "Flake for ECOS Studio";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
