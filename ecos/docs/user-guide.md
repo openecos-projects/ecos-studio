@@ -46,8 +46,8 @@ chmod +x ./ECOS-Studio_*.AppImage
 
 **From Nix:**
 ```bash
-nix shell github:openecos-projects/ecc#ecos-studio
-ecc-client
+nix shell .#ecos-studio
+ecos-studio
 ```
 
 ### Welcome Screen
