@@ -178,7 +178,8 @@
       "inputs": {
         "ecc": "ecc",
         "nixpkgs": "nixpkgs_2",
-        "parts": "parts_3"
+        "parts": "parts_3",
+        "treefmt-nix": "treefmt-nix_3"
       }
     },
     "treefmt-nix": {
@@ -207,6 +208,26 @@
       "inputs": {
         "nixpkgs": [
           "ecc",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773297127,
+        "narHash": "sha256-6E/yhXP7Oy/NbXtf1ktzmU8SdVqJQ09HC/48ebEGBpk=",
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "rev": "71b125cd05fbfd78cab3e070b73544abe24c5016",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "treefmt-nix_3": {
+      "inputs": {
+        "nixpkgs": [
           "nixpkgs"
         ]
       },

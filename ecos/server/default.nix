@@ -26,7 +26,8 @@ python3Packages.buildPythonPackage {
 
   dependencies = [
     chipcompiler
-  ] ++ (with python3Packages; [
+  ]
+  ++ (with python3Packages; [
     fastapi
     uvicorn
   ]);
