@@ -41,7 +41,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ];
     };
 
-  cargoHash = "sha256-J785DrV8sQlalitnl5eaFRAeX0z4dpXwUHiSOwP/vzk=";
+  cargoHash = "sha256-FWwjXeTCXqGUfOv+EZUGCFm0iHeFuMqYLaFaUf9W4lo=";
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
@@ -82,7 +82,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     mkdir -p $out/lib/ECOS-Studio/resources/oss-cad-suite/bin
     ln -s ${yosysWithSlang}/bin/yosys $out/lib/ECOS-Studio/resources/oss-cad-suite/bin/yosys
 
-    wrapProgram $out/bin/ecc-client \
+    wrapProgram $out/bin/ecos-studio \
       --set CHIPCOMPILER_OSS_CAD_DIR "${yosysWithSlang}"
   '';
 
