@@ -24,6 +24,8 @@
         ecos-server = final.callPackage ./ecos/server { };
         ecos-studio = final.callPackage ./ecos/gui { };
       });
+      eccOverlay = inputs.ecc.overlays.default;
+      infraOverlay = inputs.ecc.inputs.infra.overlays.default;
     in
     parts.lib.mkFlake { inherit inputs; } {
       imports = [ ];
@@ -42,30 +44,9 @@
           _module.args.pkgs = import inputs.nixpkgs {
             inherit system;
             overlays = [
-              (final: prev: {
-                ecc-tools = (inputs'.ecc.packages.ecc-tools).overrideAttrs (old: {
-                  postPatch =
-                    (old.postPatch or "") + ''
-                      sed -i '1i find_package(Boost REQUIRED)' src/operation/iPA/test/CMakeLists.txt
-                      sed -i 's/boost_system/Boost::headers/g' src/operation/iPA/test/CMakeLists.txt
-                    '';
-                });
-                chipcompiler =
-                  (inputs'.ecc.packages.chipcompiler).override
-                    {
-                      ecc-tools = final.ecc-tools;
-                    }
-                    .overrideAttrs
-                    (old: {
-                      postPatch =
-                        (old.postPatch or "")
-                        + ''
-                          sed -i 's/uv-build>=0.8.5,<0.10/uv-build>=0.8.5/' pyproject.toml
-                        '';
-                    });
-              })
-              ecc.inputs.infra.overlays.default # yosysWithSlang
               overlay
+              eccOverlay
+              infraOverlay
             ];
           };
           packages = {
