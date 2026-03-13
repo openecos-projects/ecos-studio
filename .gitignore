@@ -2,3 +2,6 @@ ws
 bazel-*
 .pnpm-store
 .setup-done
+# Nix result
+result
+
