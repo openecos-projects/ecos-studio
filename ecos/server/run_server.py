@@ -31,14 +31,16 @@ def _setup_logging(args) -> str:
     """
     log_file = os.path.abspath(os.path.expanduser(args.log_file))
 
+    if args.timestamp_log_file:
+        log_file = build_timestamped_log_file(log_file=log_file, pid=os.getpid())
+
     if args.disable_stdio_redirect:
-        os.environ.pop(API_RUNTIME_LOG_ENV_KEY, None)
+        # Don't redirect this process's stdio, but still expose the log path
+        # to EDA subprocesses so they can redirect their own output.
+        os.environ[API_RUNTIME_LOG_ENV_KEY] = log_file
         print("[API_LOG] stdio redirect disabled; logs stay on console.",
               file=sys.stderr, flush=True)
         return log_file
-
-    if args.timestamp_log_file:
-        log_file = build_timestamped_log_file(log_file=log_file, pid=os.getpid())
 
     print(f"[API_LOG] log -> {log_file} (tail -f {log_file})",
           file=sys.stderr, flush=True)
