@@ -99,14 +99,16 @@ class NotifyService:
         event_manager.notify(workspace_id=workspace_id,
                              response=response)
 
-    def notify_step(self, step : str, step_path : str, home_page : str):
+    def notify_step(self, step : str, step_path : str, home_page : str, log_file : str = ""):
         """
         update step status for home page
         "response" : {
             "step" : "",
             "id" : "",
             "info" : {
-                "step_path" : ""
+                "step_path" : "",
+                "home_page" : "",
+                "log_file" : ""
             }
         }
         """
@@ -120,7 +122,8 @@ class NotifyService:
                 "id" : NotifyEnum.step.value,
                 "info": {
                     "step_path" : step_path,
-                    "home_page" : home_page
+                    "home_page" : home_page,
+                    "log_file" : log_file
                 }
             },
 

@@ -501,6 +501,7 @@ fn start_api_server(
             // Rust only needs to drain the pipes to prevent buffer blocking.
             println!("📋 Server logs → {}", API_SERVER_LOG_FILE);
         }
+        println!("📋 Workspace logs will be saved to <workspace>/log/ when a project is opened");
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 

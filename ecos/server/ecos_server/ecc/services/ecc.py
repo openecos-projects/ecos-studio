@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import wraps
+from logging.handlers import RotatingFileHandler
 
 from ..schemas import (
     CMDEnum,
@@ -40,26 +41,52 @@ def _log_api_command(func):
     def wrapper(self, request: ECCRequest, *args, **kwargs):
         cmd = getattr(request, "cmd", "?")
         data = getattr(request, "data", {})
-        logger.info("[CMD] %s %s", cmd, _summarize_request(data))
+        logger.info("[CMD:start] cmd=%s %s", cmd, _summarize_request(data))
 
         start = time.time()
         try:
             response = func(self, request, *args, **kwargs)
         except Exception:
-            logger.exception("[CMD] %s failed (%.0fms)", cmd, (time.time() - start) * 1000)
+            elapsed_ms = (time.time() - start) * 1000
+            logger.exception("[CMD:error] cmd=%s elapsed=%.0fms", cmd, elapsed_ms)
             raise
 
         elapsed_ms = (time.time() - start) * 1000
         result = getattr(response, "response", type(response).__name__)
-        logger.info("[CMD] %s -> %s (%.0fms)", cmd, result, elapsed_ms)
+        logger.info("[CMD:done] cmd=%s result=%s elapsed=%.0fms", cmd, result, elapsed_ms)
         return response
     return wrapper
 
 
 class ECCService:
+    # Logger subtree that receives workspace-level file logging
+    _WS_LOGGER_NAME = "ecos_server.ecc"
+
     def __init__(self):
         self.workspace = None
         self.engine_flow = None
+        self._workspace_log_handler = None
+
+    def _attach_workspace_log(self, workspace_dir: str):
+        """Attach a rotating file handler that mirrors API logs into {workspace}/log/server.log."""
+        self._detach_workspace_log()
+        log_dir = os.path.join(os.path.abspath(workspace_dir), "log")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "server.log")
+        handler = RotatingFileHandler(log_path, maxBytes=10 * 1024 * 1024, backupCount=5)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        ))
+        logging.getLogger(self._WS_LOGGER_NAME).addHandler(handler)
+        self._workspace_log_handler = handler
+        logger.info("Server API logs -> %s", log_path)
+
+    def _detach_workspace_log(self):
+        """Remove the previous workspace file handler, if any."""
+        if self._workspace_log_handler:
+            logging.getLogger(self._WS_LOGGER_NAME).removeHandler(self._workspace_log_handler)
+            self._workspace_log_handler.close()
+            self._workspace_log_handler = None
 
     @staticmethod
     def _normalize_rtl_list(rtl_list) -> list[str]:
@@ -206,6 +233,9 @@ class ECCService:
             # 设置 gui_notify 的 workspace_id
             gui_notify.set_workspace(workspace.directory)
 
+            # Attach workspace-level log handler
+            self._attach_workspace_log(workspace.directory)
+
             response_data = {
                 "directory" : data.get("directory", ""),
                 "workspace_id": workspace.directory  # 前端用于订阅 SSE
@@ -340,6 +370,9 @@ class ECCService:
             # 设置 gui_notify 的 workspace_id
             gui_notify.set_workspace(workspace.directory)
 
+            # Attach workspace-level log handler
+            self._attach_workspace_log(workspace.directory)
+
             response_data = {
                 "directory" : data.get("directory", ""),
                 "workspace_id": workspace.directory  # 前端用于订阅 SSE
@@ -382,6 +415,7 @@ class ECCService:
             )
 
         # process cmd
+        self._detach_workspace_log()
         self.engine_flow = None
         self.workspace = None
 
@@ -465,9 +499,11 @@ class ECCService:
                     failed_step = workspace_step.name
                     break
                 else:
+                    log_file = workspace_step.log.get("file", "")
                     gui_notify.notify_step(step=workspace_step.name,
                                                step_path=self.workspace.flow.path,
-                                               home_page=self.workspace.home.path)
+                                               home_page=self.workspace.home.path,
+                                               log_file=os.path.abspath(log_file) if log_file else "")
             # self.engine_flow.run_steps()
         except Exception as e:
             logger.exception("rtl2gds: execution failed")
