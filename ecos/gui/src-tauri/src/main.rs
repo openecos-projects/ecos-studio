@@ -694,15 +694,16 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
 /// 窗口最小化
 #[tauri::command]
 fn window_minimize(window: tauri::Window) {
-    debug!("cmd=window_minimize");
+    debug!("cmd=window_minimize window={}", window.label());
     let _ = window.minimize();
 }
 
 /// 窗口最大化/还原
 #[tauri::command]
 fn window_maximize(window: tauri::Window) {
-    debug!("cmd=window_maximize");
-    if window.is_maximized().unwrap_or(false) {
+    let is_maximized = window.is_maximized().unwrap_or(false);
+    debug!("cmd=window_maximize window={} action={}", window.label(), if is_maximized { "unmaximize" } else { "maximize" });
+    if is_maximized {
         let _ = window.unmaximize();
     } else {
         let _ = window.maximize();
@@ -712,15 +713,15 @@ fn window_maximize(window: tauri::Window) {
 /// 窗口关闭
 #[tauri::command]
 fn window_close(window: tauri::Window) {
-    debug!("cmd=window_close");
+    debug!("cmd=window_close window={}", window.label());
     let _ = window.close();
 }
 
 /// 获取 API 服务器状态
 #[tauri::command]
 fn get_api_server_status(port_state: tauri::State<'_, ActualApiPort>) -> serde_json::Value {
-    debug!("cmd=get_api_server_status");
     let port = *port_state.lock().unwrap();
+    debug!("cmd=get_api_server_status port={}", port);
     let port_available = is_port_available(port);
     let server_running = !port_available; // If port is not available, server might be running
 
@@ -747,7 +748,9 @@ fn restart_api_server(
     state: tauri::State<'_, ApiServerProcess>,
     port_state: tauri::State<'_, ActualApiPort>,
 ) -> Result<String, String> {
-    info!("cmd=restart_api_server");
+    let current_port = *port_state.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let has_server = state.lock().map_err(|e| format!("Lock error: {}", e))?.is_some();
+    info!("cmd=restart_api_server current_port={} has_server={}", current_port, has_server);
     let mut server = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     // Stop our managed child process (if any).
@@ -813,8 +816,8 @@ fn get_debug_info(
     app: tauri::AppHandle,
     port_state: tauri::State<'_, ActualApiPort>,
 ) -> serde_json::Value {
-    debug!("cmd=get_debug_info");
     let port = *port_state.lock().unwrap();
+    debug!("cmd=get_debug_info port={} is_debug={}", port, cfg!(debug_assertions));
 
     let mut info = serde_json::json!({
         "api_port": port,
@@ -874,8 +877,9 @@ fn get_debug_info(
 
 #[tauri::command]
 fn get_api_port(port_state: tauri::State<'_, ActualApiPort>) -> u16 {
-    debug!("cmd=get_api_port");
-    *port_state.lock().unwrap()
+    let port = *port_state.lock().unwrap();
+    debug!("cmd=get_api_port port={}", port);
+    port
 }
 
 #[tauri::command]
