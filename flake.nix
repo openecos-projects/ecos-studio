@@ -51,6 +51,16 @@
               infraOverlay
             ];
           };
+          devShells.default = pkgs.mkShell {
+            inputsFrom = [
+              pkgs.ecos-server
+            ];
+            buildInputs = [
+              pkgs.nixfmt
+              pkgs.git
+              pkgs.uv
+            ];
+          };
           treefmt = {
             projectRootFile = "flake.nix";
             programs = {
