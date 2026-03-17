@@ -41,7 +41,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ];
     };
 
-  cargoHash = "sha256-FWwjXeTCXqGUfOv+EZUGCFm0iHeFuMqYLaFaUf9W4lo=";
+  cargoHash = "sha256-P3EAtI+ZyKM+cZK/ybzPmRTiKAkZ8fhAvrmhzl6nlI8=";
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
