@@ -19,7 +19,6 @@ import argparse
 import uvicorn
 
 from chipcompiler.utility.log import (
-    API_RUNTIME_LOG_ENV_KEY,
     build_timestamped_log_file,
     init_api_runtime_log,
 )
@@ -35,9 +34,6 @@ def _setup_logging(args) -> str:
         log_file = build_timestamped_log_file(log_file=log_file, pid=os.getpid())
 
     if args.disable_stdio_redirect:
-        # Don't redirect this process's stdio, but still expose the log path
-        # to EDA subprocesses so they can redirect their own output.
-        os.environ[API_RUNTIME_LOG_ENV_KEY] = log_file
         print("[API_LOG] stdio redirect disabled; logs stay on console.",
               file=sys.stderr, flush=True)
         return log_file
@@ -50,7 +46,6 @@ def _setup_logging(args) -> str:
         max_bytes=args.log_max_bytes,
         backup_count=args.log_backup_count,
     )
-    os.environ[API_RUNTIME_LOG_ENV_KEY] = log_file
     return log_file
 
 
