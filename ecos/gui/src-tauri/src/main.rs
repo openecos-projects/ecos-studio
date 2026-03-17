@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
+use log::{info, warn, error, debug};
 
 /// Fixed log file path for the API server (matches Python's --log-file default).
 /// In terminal mode Rust tees here; in desktop mode Python writes here directly.
@@ -126,15 +127,15 @@ fn kill_process_on_port(port: u16) -> bool {
         match output {
             Ok(out) => {
                 if out.status.success() {
-                    println!("✅ Killed process on port {}", port);
+                    info!("Killed process on port {}", port);
                     true
                 } else {
-                    eprintln!("⚠️ Could not kill process on port {}", port);
+                    warn!("Could not kill process on port {}", port);
                     false
                 }
             }
             Err(e) => {
-                eprintln!("❌ Failed to execute kill command: {}", e);
+                error!("Failed to execute kill command: {}", e);
                 false
             }
         }
@@ -157,26 +158,26 @@ fn kill_process_on_port(port: u16) -> bool {
                     .collect();
 
                 if pids.is_empty() {
-                    println!("No process found on port {}", port);
+                    debug!("No process found on port {}", port);
                     return true;
                 }
 
                 let mut all_killed = true;
                 for pid in pids {
-                    println!("Found process {} on port {}, killing...", pid, port);
+                    info!("Found process {} on port {}, killing...", pid, port);
                     let kill_result = Command::new("kill").args(["-9", pid]).output();
 
                     match kill_result {
                         Ok(kill_out) => {
                             if kill_out.status.success() {
-                                println!("✅ Killed process {} on port {}", pid, port);
+                                info!("Killed process {} on port {}", pid, port);
                             } else {
-                                eprintln!("⚠️ Failed to kill process {}", pid);
+                                warn!("Failed to kill process {}", pid);
                                 all_killed = false;
                             }
                         }
                         Err(e) => {
-                            eprintln!("❌ Failed to execute kill command: {}", e);
+                            error!("Failed to execute kill command: {}", e);
                             all_killed = false;
                         }
                     }
@@ -184,7 +185,7 @@ fn kill_process_on_port(port: u16) -> bool {
                 all_killed
             }
             Err(e) => {
-                eprintln!("❌ Failed to execute lsof: {}", e);
+                error!("Failed to execute lsof: {}", e);
                 false
             }
         }
@@ -199,8 +200,8 @@ fn find_available_port(preferred: u16) -> Option<u16> {
         return Some(preferred);
     }
 
-    println!(
-        "⚠️ Preferred port {} is in use, scanning for available port...",
+    warn!(
+        "Preferred port {} is in use, scanning for available port...",
         preferred
     );
 
@@ -208,14 +209,14 @@ fn find_available_port(preferred: u16) -> Option<u16> {
     for offset in 1..=PORT_SEARCH_RANGE {
         if let Some(port) = preferred.checked_add(offset) {
             if is_port_available(port) {
-                println!("✅ Found available port: {}", port);
+                info!("Found available port: {}", port);
                 return Some(port);
             }
         }
     }
 
-    eprintln!(
-        "❌ Could not find any available port in range {}-{}",
+    error!(
+        "Could not find any available port in range {}-{}",
         preferred,
         preferred.saturating_add(PORT_SEARCH_RANGE)
     );
@@ -258,7 +259,7 @@ fn is_api_server_healthy(port: u16) -> bool {
 fn wait_for_server_ready(port: u16, timeout_secs: u64) -> bool {
     use std::time::Instant;
 
-    println!("Waiting for FastAPI server to be ready on port {}...", port);
+    info!("Waiting for FastAPI server to be ready on port {}...", port);
     let start = Instant::now();
     let deadline = Duration::from_secs(timeout_secs);
     let mut delay_ms: u64 = 100;
@@ -272,8 +273,8 @@ fn wait_for_server_ready(port: u16, timeout_secs: u64) -> bool {
         if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
             && is_api_server_healthy(port)
         {
-            println!(
-                "✅ FastAPI server ready on port {} after {} attempts ({:.1}s)",
+            info!(
+                "FastAPI server ready on port {} after {} attempts ({:.1}s)",
                 port,
                 attempt,
                 start.elapsed().as_secs_f32()
@@ -282,8 +283,8 @@ fn wait_for_server_ready(port: u16, timeout_secs: u64) -> bool {
         }
 
         if start.elapsed().as_secs() >= 4 && attempt % 3 == 0 {
-            println!(
-                "⏳ Still waiting for server on port {}... ({:.1}s elapsed)",
+            debug!(
+                "Still waiting for server on port {}... ({:.1}s elapsed)",
                 port,
                 start.elapsed().as_secs_f32()
             );
@@ -327,14 +328,14 @@ fn start_api_server(
             .unwrap_or_default()
             == "1";
         if reuse {
-            println!(
-                "✅ Healthy API server on port {} and ECOS_REUSE_API_SERVER=1, reusing it",
+            info!(
+                "Healthy API server on port {} and ECOS_REUSE_API_SERVER=1, reusing it",
                 DEFAULT_API_PORT
             );
             return ApiStartResult::ExternalDetected(DEFAULT_API_PORT);
         }
-        println!(
-            "⚠️ Port {} has a healthy API server but ECOS_REUSE_API_SERVER is not set — \
+        warn!(
+            "Port {} has a healthy API server but ECOS_REUSE_API_SERVER is not set - \
              will start on a different port (set ECOS_REUSE_API_SERVER=1 to reuse)",
             DEFAULT_API_PORT
         );
@@ -344,8 +345,8 @@ fn start_api_server(
     let port = match find_available_port(DEFAULT_API_PORT) {
         Some(p) => p,
         None => {
-            eprintln!(
-                "❌ Cannot start API server: no available port found (tried {} - {})",
+            error!(
+                "Cannot start API server: no available port found (tried {} - {})",
                 DEFAULT_API_PORT,
                 DEFAULT_API_PORT + PORT_SEARCH_RANGE
             );
@@ -354,8 +355,8 @@ fn start_api_server(
     };
 
     if port != DEFAULT_API_PORT {
-        println!(
-            "📌 Using alternative port {} (default port {} was occupied)",
+        info!(
+            "Using alternative port {} (default port {} was occupied)",
             port, DEFAULT_API_PORT
         );
     }
@@ -377,10 +378,10 @@ fn start_api_server(
         let venv_python = server_dir.join(".venv").join("bin").join("python3");
 
         let interpreter = if venv_python.exists() {
-            println!("Using venv Python: {:?}", venv_python);
+            debug!("Using venv Python: {:?}", venv_python);
             venv_python.to_string_lossy().to_string()
         } else {
-            println!("Venv not found at {:?}, using system Python", venv_python);
+            debug!("Venv not found at {:?}, using system Python", venv_python);
             #[cfg(target_os = "windows")]
             {
                 "python".to_string()
@@ -391,7 +392,7 @@ fn start_api_server(
             }
         };
 
-        println!(
+        info!(
             "Starting FastAPI server (dev mode) from: {:?} on port {}",
             server_script, port
         );
@@ -412,15 +413,15 @@ fn start_api_server(
 
         match cmd.spawn() {
             Ok(child) => {
-                println!(
-                    "✅ FastAPI server started with PID: {} on port {}",
+                info!(
+                    "FastAPI server started with PID: {} on port {}",
                     child.id(),
                     port
                 );
                 return ApiStartResult::Started(child, port);
             }
             Err(e) => {
-                eprintln!("❌ Failed to start FastAPI server: {}", e);
+                error!("Failed to start FastAPI server: {}", e);
                 return ApiStartResult::Failed;
             }
         }
@@ -438,7 +439,7 @@ fn start_api_server(
         for binary_name in &binary_candidates {
             let possible_paths = get_possible_binary_paths(app_handle, binary_name);
             for path in possible_paths {
-                println!("Checking for api-server at: {:?}", path);
+                debug!("Checking for api-server at: {:?}", path);
                 checked_paths.push(path.clone());
                 if path.exists() {
                     server_binary = Some(path);
@@ -453,11 +454,11 @@ fn start_api_server(
         let server_binary = match server_binary {
             Some(path) => path,
             None => {
-                eprintln!("❌ API server binary not found. Checked locations:");
+                error!("API server binary not found. Checked locations:");
                 let mut seen = std::collections::HashSet::new();
                 for path in checked_paths {
                     if seen.insert(path.clone()) {
-                        eprintln!("   - {:?}", path);
+                        error!("   - {:?}", path);
                     }
                 }
                 return ApiStartResult::Failed;
@@ -466,7 +467,7 @@ fn start_api_server(
 
         let launched_from_terminal = is_launched_from_terminal();
 
-        println!(
+        info!(
             "Starting FastAPI server (prod mode) from: {:?} on port {} (terminal: {})",
             server_binary, port, launched_from_terminal
         );
@@ -474,11 +475,11 @@ fn start_api_server(
         let mut cmd = Command::new(&server_binary);
 
         if let Some(oss_dir) = get_oss_cad_dir(app_handle) {
-            println!("Setting CHIPCOMPILER_OSS_CAD_DIR to {:?}", oss_dir);
+            debug!("Setting CHIPCOMPILER_OSS_CAD_DIR to {:?}", oss_dir);
             cmd.env("CHIPCOMPILER_OSS_CAD_DIR", &oss_dir);
         } else {
-            eprintln!("⚠️ Expected oss-cad-suite at <resource_dir>/resources/oss-cad-suite, but it was not found.");
-            eprintln!("⚠️ Synthesis may fail if yosys is unavailable in PATH.");
+            warn!("Expected oss-cad-suite at <resource_dir>/resources/oss-cad-suite, but it was not found.");
+            warn!("Synthesis may fail if yosys is unavailable in PATH.");
         }
 
         // Always pass a fixed log-file path so we know where to look on errors.
@@ -495,20 +496,20 @@ fn start_api_server(
             // Python will NOT redirect to file; Rust handles writing to both
             // the terminal and the log file via the tee threads below.
             cmd.arg("--disable-stdio-redirect");
-            println!("📋 Server logs → terminal + {}", API_SERVER_LOG_FILE);
+            info!("Server logs -> terminal + {}", API_SERVER_LOG_FILE);
         } else {
             // Desktop launch: Python redirects its own stdio to the log file.
             // Rust only needs to drain the pipes to prevent buffer blocking.
-            println!("📋 Server logs → {}", API_SERVER_LOG_FILE);
+            info!("Server logs -> {}", API_SERVER_LOG_FILE);
         }
-        println!("📋 Workspace logs will be saved to <workspace>/log/ when a project is opened");
+        info!("Workspace logs will be saved to <workspace>/log/ when a project is opened");
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         match cmd.spawn() {
             Ok(mut child) => {
-                println!(
-                    "✅ FastAPI server started with PID: {} on port {}",
+                info!(
+                    "FastAPI server started with PID: {} on port {}",
                     child.id(),
                     port
                 );
@@ -536,9 +537,9 @@ fn start_api_server(
                 ApiStartResult::Started(child, port)
             }
             Err(e) => {
-                eprintln!("❌ Failed to start FastAPI server: {}", e);
-                eprintln!("   Binary path: {:?}", server_binary);
-                eprintln!("   Error details: {:?}", e.kind());
+                error!("Failed to start FastAPI server: {}", e);
+                error!("   Binary path: {:?}", server_binary);
+                error!("   Error details: {:?}", e.kind());
                 // Write the error into the log file so desktop users can see it
                 // when the file is opened automatically.
                 if !launched_from_terminal {
@@ -548,7 +549,7 @@ fn start_api_server(
                         .append(true)
                         .open(API_SERVER_LOG_FILE)
                     {
-                        let _ = writeln!(f, "❌ Failed to start FastAPI server: {}", e);
+                        let _ = writeln!(f, "Failed to start FastAPI server: {}", e);
                         let _ = writeln!(f, "   Binary path: {:?}", server_binary);
                         let _ = writeln!(f, "   Error details: {:?}", e.kind());
                     }
@@ -636,7 +637,7 @@ fn get_possible_binary_paths(
 fn stop_api_server(process: &mut Option<Child>, port: u16) {
     if let Some(ref mut child) = process {
         let pid = child.id();
-        println!("Stopping FastAPI server (PID: {}, port: {})...", pid, port);
+        info!("Stopping FastAPI server (PID: {}, port: {})...", pid, port);
 
         // On Unix, kill the entire process group so that child workers
         // (e.g. uvicorn reloader/workers spawned by `--reload`) are also
@@ -649,7 +650,7 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
                 .output();
             match pgid_kill {
                 Ok(out) if out.status.success() => {
-                    println!("Sent SIGTERM to process group -{}", pid);
+                    info!("Sent SIGTERM to process group -{}", pid);
                 }
                 _ => {
                     // Process group kill failed; fall back to single-process kill
@@ -662,10 +663,10 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
 
         // Force-kill the direct child (SIGKILL on Unix, TerminateProcess on Windows)
         match child.kill() {
-            Ok(_) => println!("✅ FastAPI server process killed"),
+            Ok(_) => info!("FastAPI server process killed"),
             Err(e) => {
                 // "InvalidInput" / "not running" is fine — process already exited
-                eprintln!("⚠️ child.kill(): {} (process may have already exited)", e);
+                warn!("child.kill(): {} (process may have already exited)", e);
             }
         }
 
@@ -677,15 +678,15 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
         // up via port-based lookup (lsof + kill) so the port is free on next start.
         thread::sleep(Duration::from_millis(300));
         if !is_port_available(port) {
-            println!("⚠️ Port {} still occupied after stopping server, cleaning up orphaned processes...", port);
+            warn!("Port {} still occupied after stopping server, cleaning up orphaned processes...", port);
             kill_process_on_port(port);
             thread::sleep(Duration::from_millis(300));
         }
 
         if is_port_available(port) {
-            println!("✅ Port {} is now free", port);
+            info!("Port {} is now free", port);
         } else {
-            eprintln!("❌ Port {} is still occupied after cleanup", port);
+            error!("Port {} is still occupied after cleanup", port);
         }
     }
 }
@@ -693,12 +694,14 @@ fn stop_api_server(process: &mut Option<Child>, port: u16) {
 /// 窗口最小化
 #[tauri::command]
 fn window_minimize(window: tauri::Window) {
+    debug!("cmd=window_minimize");
     let _ = window.minimize();
 }
 
 /// 窗口最大化/还原
 #[tauri::command]
 fn window_maximize(window: tauri::Window) {
+    debug!("cmd=window_maximize");
     if window.is_maximized().unwrap_or(false) {
         let _ = window.unmaximize();
     } else {
@@ -709,12 +712,14 @@ fn window_maximize(window: tauri::Window) {
 /// 窗口关闭
 #[tauri::command]
 fn window_close(window: tauri::Window) {
+    debug!("cmd=window_close");
     let _ = window.close();
 }
 
 /// 获取 API 服务器状态
 #[tauri::command]
 fn get_api_server_status(port_state: tauri::State<'_, ActualApiPort>) -> serde_json::Value {
+    debug!("cmd=get_api_server_status");
     let port = *port_state.lock().unwrap();
     let port_available = is_port_available(port);
     let server_running = !port_available; // If port is not available, server might be running
@@ -742,6 +747,7 @@ fn restart_api_server(
     state: tauri::State<'_, ApiServerProcess>,
     port_state: tauri::State<'_, ActualApiPort>,
 ) -> Result<String, String> {
+    info!("cmd=restart_api_server");
     let mut server = state.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     // Stop our managed child process (if any).
@@ -785,6 +791,7 @@ fn kill_port_process(port_state: tauri::State<'_, ActualApiPort>) -> Result<Stri
     let port = *port_state
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
+    info!("cmd=kill_port_process port={}", port);
 
     if is_port_available(port) {
         return Ok(format!("Port {} is already available", port));
@@ -806,6 +813,7 @@ fn get_debug_info(
     app: tauri::AppHandle,
     port_state: tauri::State<'_, ActualApiPort>,
 ) -> serde_json::Value {
+    debug!("cmd=get_debug_info");
     let port = *port_state.lock().unwrap();
 
     let mut info = serde_json::json!({
@@ -866,6 +874,7 @@ fn get_debug_info(
 
 #[tauri::command]
 fn get_api_port(port_state: tauri::State<'_, ActualApiPort>) -> u16 {
+    debug!("cmd=get_api_port");
     *port_state.lock().unwrap()
 }
 
@@ -873,6 +882,7 @@ fn get_api_port(port_state: tauri::State<'_, ActualApiPort>) -> u16 {
 async fn request_project_permission(app: tauri::AppHandle, path: String) -> Result<(), String> {
     use std::path::PathBuf;
 
+    info!("cmd=request_project_permission path={}", path);
     let scope = app.fs_scope();
     let path_buf = PathBuf::from(&path);
 
@@ -884,6 +894,11 @@ async fn request_project_permission(app: tauri::AppHandle, path: String) -> Resu
 
 fn main() {
     use std::path::PathBuf;
+
+    // Initialize logger with default filter level "info"
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info")
+    ).init();
 
     // Shared state for the API server process and discovered port
     let api_server: ApiServerProcess = Arc::new(Mutex::new(None));
@@ -919,8 +934,8 @@ fn main() {
                         ApiStartResult::Failed => {
                             *server = None;
                             *api_port.lock().unwrap() = DEFAULT_API_PORT;
-                            eprintln!(
-                                "⚠️ No API server available — GUI may not function correctly"
+                            warn!(
+                                "No API server available — GUI may not function correctly"
                             );
                             (false, DEFAULT_API_PORT)
                         }
@@ -931,18 +946,18 @@ fn main() {
                 // loading immediately (splash screen visible sooner).
                 thread::spawn(move || {
                     if using_external_server {
-                        println!(
+                        info!(
                             "Using externally started API server (debugger mode) on port {}",
                             actual_port
                         );
                     }
                     if !wait_for_server_ready(actual_port, 15) {
-                        eprintln!("⚠️ FastAPI server may not be fully ready after 15s");
+                        warn!("FastAPI server may not be fully ready after 15s");
                         // In release desktop mode, open the log file so the user
                         // can see what went wrong without needing a terminal.
                         #[cfg(not(debug_assertions))]
                         if !is_launched_from_terminal() {
-                            eprintln!("Opening server log: {}", API_SERVER_LOG_FILE);
+                            warn!("Opening server log: {}", API_SERVER_LOG_FILE);
                             open_log_file(API_SERVER_LOG_FILE);
                         }
                     }
@@ -956,8 +971,8 @@ fn main() {
                     let final_path = data_path.canonicalize().unwrap_or(data_path.clone());
                     let scope = app.fs_scope();
                     match scope.allow_directory(&final_path, true) {
-                        Ok(()) => println!("✅ Granted fs scope: {:?}", final_path),
-                        Err(e) => eprintln!("❌ Failed to grant fs scope: {}", e),
+                        Ok(()) => info!("Granted fs scope: {:?}", final_path),
+                        Err(e) => error!("Failed to grant fs scope: {}", e),
                     }
                 }
 
@@ -965,8 +980,8 @@ fn main() {
                 {
                     let scale_factor = window.scale_factor().unwrap_or(1.0);
                     if let Ok(size) = window.inner_size() {
-                        println!("=== Window Debug Info ===");
-                        println!(
+                        debug!("=== Window Debug Info ===");
+                        debug!(
                             "Logical size: {}x{}",
                             size.width as f64 / scale_factor,
                             size.height as f64 / scale_factor
@@ -983,7 +998,7 @@ fn main() {
                 if let Ok(false) = window.is_visible() {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    println!("Window shown via page load finished");
+                    debug!("Window shown via page load finished");
                 }
             }
         })

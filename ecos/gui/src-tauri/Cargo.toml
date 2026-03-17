@@ -19,6 +19,8 @@ tauri-plugin-fs = "~2.4"
 tauri-plugin-shell = "~2.3"
 tauri-plugin-store = "~2.4"
 ureq = "2"
+log = "0.4"
+env_logger = "0.11"
 
 [features]
 default = ["custom-protocol"]
