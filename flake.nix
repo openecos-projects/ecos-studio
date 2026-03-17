@@ -54,11 +54,15 @@
           devShells.default = pkgs.mkShell {
             inputsFrom = [
               pkgs.ecos-server
+              pkgs.ecos-studio
             ];
             buildInputs = [
               pkgs.nixfmt
               pkgs.git
               pkgs.uv
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.clippy
             ];
           };
           treefmt = {
