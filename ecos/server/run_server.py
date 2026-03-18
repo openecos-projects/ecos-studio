@@ -69,6 +69,13 @@ def main():
                         help="Number of backup files to keep")
     parser.add_argument("--disable-stdio-redirect", action="store_true",
                         help="Keep stdout/stderr on console")
+    parser.add_argument("--log-level", default=os.environ.get("ECOS_API_LOG_LEVEL", "warning"),
+                        help="Uvicorn log level (default: warning)")
+    parser.add_argument("--access-log", dest="access_log", action="store_true",
+                        help="Enable Uvicorn access logs")
+    parser.add_argument("--no-access-log", dest="access_log", action="store_false",
+                        help="Disable Uvicorn access logs (default)")
+    parser.set_defaults(access_log=False)
     parser.add_argument("--timestamp-log-file", dest="timestamp_log_file",
                         action="store_true", default=True,
                         help="Timestamped log filename per startup (default)")
@@ -96,7 +103,8 @@ def main():
         port=args.port,
         reload=args.reload,
         reload_dirs=reload_dirs or None,
-        log_level="info"
+        log_level=args.log_level,
+        access_log=args.access_log,
     )
 
 
