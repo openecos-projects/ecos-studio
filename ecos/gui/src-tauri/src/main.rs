@@ -10,76 +10,22 @@ use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 use log::{info, warn, error, debug};
 
-/// Fixed log file path for the API server (matches Python's --log-file default).
-/// In terminal mode Rust tees here; in desktop mode Python writes here directly.
-const API_SERVER_LOG_FILE: &str = "/tmp/ecos-studio-api-server.log";
-
 /// Returns true when the process was launched from an interactive terminal
 /// (i.e. stderr is a TTY). False when launched from a desktop file / launcher.
 fn is_launched_from_terminal() -> bool {
     std::io::stderr().is_terminal()
 }
 
-/// Open a file with the system's default application (text editor / file manager).
-fn open_log_file(path: &str) {
-    #[cfg(target_os = "linux")]
-    let _ = Command::new("xdg-open").arg(path).spawn();
-    #[cfg(target_os = "macos")]
-    let _ = Command::new("open").arg(path).spawn();
-    #[cfg(target_os = "windows")]
-    let _ = Command::new("cmd").args(["/C", "start", "", path]).spawn();
-}
-
-/// Drain a child's stdout or stderr pipe in a background thread.
-///
-/// * `to_terminal` – if true, also echo each line to Rust's own stdout/stderr
-///   AND write it to `log_path` (used in terminal-launch mode where Python has
-///   `--disable-stdio-redirect` so all output stays on the pipe).
-/// * `to_terminal = false` – desktop-launch mode: Python writes to log itself;
-///   we only drain the pipe to prevent the child from blocking on a full buffer.
+/// Drain a child's stdout or stderr pipe in a background thread to prevent
+/// the child from blocking when the OS pipe buffer fills up.
 #[cfg(not(debug_assertions))]
-fn tee_output(
-    reader: impl std::io::Read + Send + 'static,
-    log_path: String,
-    to_terminal: bool,
-    is_stderr: bool,
-) {
-    use std::fs::OpenOptions;
-    use std::io::{BufRead, BufReader, Write};
-
+fn drain_pipe(reader: impl std::io::Read + Send + 'static) {
+    use std::io::{BufRead, BufReader};
     thread::spawn(move || {
-        // Only open the log file when WE are responsible for writing to it
-        // (terminal mode). In desktop mode Python already writes there.
-        let mut log_writer = if to_terminal {
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .map_err(|e| {
-                    eprintln!("⚠️ Cannot open log file {}: {}", log_path, e);
-                    e
-                })
-                .ok()
-        } else {
-            None
-        };
-
         let reader = BufReader::new(reader);
         for line in reader.lines() {
-            match line {
-                Ok(l) => {
-                    if let Some(ref mut f) = log_writer {
-                        let _ = writeln!(f, "{}", l);
-                    }
-                    if to_terminal {
-                        if is_stderr {
-                            eprintln!("{}", l);
-                        } else {
-                            println!("{}", l);
-                        }
-                    }
-                }
-                Err(_) => break,
+            if line.is_err() {
+                break;
             }
         }
     });
@@ -482,29 +428,24 @@ fn start_api_server(
             warn!("Synthesis may fail if yosys is unavailable in PATH.");
         }
 
-        // Always pass a fixed log-file path so we know where to look on errors.
         cmd.arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
             .arg(port.to_string())
-            .arg("--log-file")
-            .arg(API_SERVER_LOG_FILE)
-            .arg("--no-timestamp-log-file");
+            .arg("--disable-stdio-redirect");
 
         if launched_from_terminal {
-            // Terminal launch: keep output on child's stdio so we can tee it.
-            // Python will NOT redirect to file; Rust handles writing to both
-            // the terminal and the log file via the tee threads below.
-            cmd.arg("--disable-stdio-redirect");
-            info!("Server logs -> terminal + {}", API_SERVER_LOG_FILE);
+            info!("Server output -> terminal (stdio)");
         } else {
-            // Desktop launch: Python redirects its own stdio to the log file.
-            // Rust only needs to drain the pipes to prevent buffer blocking.
-            info!("Server logs -> {}", API_SERVER_LOG_FILE);
+            info!("Server output -> discarded (desktop mode, no terminal)");
         }
         info!("Workspace logs will be saved to <workspace>/log/ when a project is opened");
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        if launched_from_terminal {
+            cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        } else {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        }
 
         match cmd.spawn() {
             Ok(mut child) => {
@@ -513,47 +454,16 @@ fn start_api_server(
                     child.id(),
                     port
                 );
-
-                // Drain (and optionally tee) the child's stdout/stderr pipes.
-                // This is required in both modes to prevent the child from
-                // blocking when the OS pipe buffer fills up.
-                if let Some(stdout) = child.stdout.take() {
-                    tee_output(
-                        stdout,
-                        API_SERVER_LOG_FILE.to_string(),
-                        launched_from_terminal,
-                        false,
-                    );
+                if !launched_from_terminal {
+                    if let Some(stdout) = child.stdout.take() { drain_pipe(stdout); }
+                    if let Some(stderr) = child.stderr.take() { drain_pipe(stderr); }
                 }
-                if let Some(stderr) = child.stderr.take() {
-                    tee_output(
-                        stderr,
-                        API_SERVER_LOG_FILE.to_string(),
-                        launched_from_terminal,
-                        true,
-                    );
-                }
-
                 ApiStartResult::Started(child, port)
             }
             Err(e) => {
                 error!("Failed to start FastAPI server: {}", e);
                 error!("   Binary path: {:?}", server_binary);
                 error!("   Error details: {:?}", e.kind());
-                // Write the error into the log file so desktop users can see it
-                // when the file is opened automatically.
-                if !launched_from_terminal {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(API_SERVER_LOG_FILE)
-                    {
-                        let _ = writeln!(f, "Failed to start FastAPI server: {}", e);
-                        let _ = writeln!(f, "   Binary path: {:?}", server_binary);
-                        let _ = writeln!(f, "   Error details: {:?}", e.kind());
-                    }
-                }
                 ApiStartResult::Failed
             }
         }
@@ -899,9 +809,9 @@ async fn request_project_permission(app: tauri::AppHandle, path: String) -> Resu
 fn main() {
     use std::path::PathBuf;
 
-    // Initialize logger with default filter level "info"
+    // Default to warnings in production while still honoring RUST_LOG overrides.
     env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info")
+        env_logger::Env::default().default_filter_or("warn")
     ).init();
 
     // Shared state for the API server process and discovered port
@@ -957,13 +867,6 @@ fn main() {
                     }
                     if !wait_for_server_ready(actual_port, 15) {
                         warn!("FastAPI server may not be fully ready after 15s");
-                        // In release desktop mode, open the log file so the user
-                        // can see what went wrong without needing a terminal.
-                        #[cfg(not(debug_assertions))]
-                        if !is_launched_from_terminal() {
-                            warn!("Opening server log: {}", API_SERVER_LOG_FILE);
-                            open_log_file(API_SERVER_LOG_FILE);
-                        }
                     }
                 });
 
