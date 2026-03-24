@@ -9,6 +9,11 @@ This script is intended to be spawned by Tauri at application startup.
 import sys
 import os
 
+# In PyInstaller onefile mode, native C++ code (e.g. FLUTE) opens files via
+# relative paths anchored at _MEIPASS. Switch CWD so those paths resolve.
+if hasattr(sys, "_MEIPASS"):
+    os.chdir(sys._MEIPASS)
+
 # Add project root to path for imports
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, "../.."))
