@@ -16,6 +16,7 @@ Usage:
 
 import os
 import sys
+import warnings
 from importlib import metadata
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
@@ -36,22 +37,78 @@ ecc_datas, ecc_binaries, ecc_hiddenimports = collect_all("chipcompiler")
 # --- Collect klayout package resources ---
 klayout_datas, klayout_binaries, klayout_hiddenimports = collect_all("klayout")
 
+# --- Collect DreamPlace (ecc-dreamplace) package ---
+try:
+    dp_datas, dp_binaries, dp_hiddenimports = collect_all("dreamplace")
+except Exception as exc:
+    warnings.warn(
+        f"Failed to collect dreamplace package: {exc}. "
+        "DreamPlace placement will not work in the packaged binary.",
+        stacklevel=1,
+    )
+    dp_datas, dp_binaries, dp_hiddenimports = [], [], []
+
 # --- Data files ---
 datas = []
 datas.extend(ecc_datas)
 datas.extend(klayout_datas)
+datas.extend(dp_datas)
+
+# DreamPlace FLUTE LUT files: native C++ opens via fixed relative path
+#   thirdparty/flute/lut.ICCAD2015/{POWV9.dat,POST9.dat}
+# collect_all() puts them under a package-prefixed path (e.g.
+#   chipcompiler/thirdparty/ecc-dreamplace/thirdparty/flute/...).
+# We duplicate them at the top-level path the C++ code expects.
+# (run_server.py sets CWD to _MEIPASS so the relative open() resolves.)
+_flute_targets = {"POWV9.dat", "POST9.dat"}
+_flute_found = set()
+for src_path, dest_dir in list(ecc_datas) + list(dp_datas):
+    basename = os.path.basename(src_path)
+    if (
+        basename in _flute_targets
+        and "flute/lut.ICCAD2015" in src_path
+        and basename not in _flute_found
+    ):
+        datas.append((src_path, "thirdparty/flute/lut.ICCAD2015"))
+        _flute_found.add(basename)
+if _flute_found != _flute_targets:
+    warnings.warn(
+        "DreamPlace FLUTE LUT files not found in collected datas; "
+        "placement may fail at runtime when opening POWV9.dat/POST9.dat.",
+        stacklevel=1,
+    )
 
 # --- Binaries ---
 binaries = []
 binaries.extend(ecc_binaries)
 binaries.extend(klayout_binaries)
+binaries.extend(dp_binaries)
 
 # Add system libraries if needed (Linux)
 if sys.platform.startswith("linux"):
-    binaries.extend([
-        ("/lib/x86_64-linux-gnu/libgomp.so.1", "lib"),
-        ("/lib/x86_64-linux-gnu/libtbb.so.12", "lib"),
-    ])
+    # In onefile mode, PyInstaller exposes bundled shared libraries from _MEIPASS.
+    # Put required .so files at extraction root (".") so the dynamic loader can
+    # resolve dreamplace C++ op dependencies (e.g. draw_place_cpp -> libxcb.so.1).
+    linux_runtime_libs = [
+        "/lib/x86_64-linux-gnu/libgomp.so.1",
+        "/lib/x86_64-linux-gnu/libtbb.so.12",
+        # draw_place_cpp.so dependencies (Cairo/X11 rendering)
+        "/lib/x86_64-linux-gnu/libcairo.so.2",
+        "/lib/x86_64-linux-gnu/libX11.so.6",
+        "/lib/x86_64-linux-gnu/libxcb.so.1",
+        "/lib/x86_64-linux-gnu/libxcb-render.so.0",
+        "/lib/x86_64-linux-gnu/libxcb-shm.so.0",
+        "/lib/x86_64-linux-gnu/libpng16.so.16",
+        "/lib/x86_64-linux-gnu/libfreetype.so.6",
+    ]
+    for so_path in linux_runtime_libs:
+        if Path(so_path).exists():
+            binaries.append((so_path, "."))
+        else:
+            warnings.warn(
+                f"Optional runtime library not found and will not be bundled: {so_path}",
+                stacklevel=1,
+            )
 
 # --- Hidden imports ---
 hiddenimports = [
@@ -116,11 +173,19 @@ hiddenimports = [
     "scipy.linalg",
     "scipy.sparse",
     "matplotlib.backends.backend_agg",
+    # NumPy runtime modules commonly imported from pybind11/C-extensions
+    # (DreamPlace ops may import legacy path `numpy.core.multiarray`)
+    "numpy.core",
+    "numpy.core.multiarray",
+    "numpy.core._multiarray_umath",
+    "numpy.core.umath",
     "numpy._core._methods",
+    "numpy._core.multiarray",
     "numpy.lib.format",
 ]
 hiddenimports.extend(ecc_hiddenimports)
 hiddenimports.extend(klayout_hiddenimports)
+hiddenimports.extend(dp_hiddenimports)
 hiddenimports.extend([
     "ecos_server",
     "ecos_server.main",
@@ -152,9 +217,8 @@ a = Analysis(
     excludes=[
         "tkinter",
         "test",
-        "chipcompiler.thirdparty",
+        "chipcompiler.thirdparty.ecc_tools",
         "setuptools",
-        "distutils",
         "_distutils_hack",
         "mypy",
         "pip",
@@ -163,12 +227,12 @@ a = Analysis(
     noarchive=False,
 )
 
-# Remove thirdparty files that collect_all("chipcompiler") pulled in.
+# Remove ecc-tools files that collect_all("chipcompiler") pulled in.
 # The needed ECC binaries (ecc_py*.so, lib/*.so) are already collected via
-# collect_all into ecc_binaries, but the full thirdparty source tree
-# (ecc-tools: ~1.1 GB of build scripts/src/docs) is not needed at runtime.
-a.datas = [d for d in a.datas if not d[0].startswith("chipcompiler/thirdparty")]
-a.binaries = [b for b in a.binaries if not b[0].startswith("chipcompiler/thirdparty")]
+# collect_all into ecc_binaries, but the full ecc-tools source tree
+# (~1.1 GB of build scripts/src/docs) is not needed at runtime.
+a.datas = [d for d in a.datas if not d[0].startswith("chipcompiler/thirdparty/ecc-tools")]
+a.binaries = [b for b in a.binaries if not b[0].startswith("chipcompiler/thirdparty/ecc-tools")]
 
 pyz = PYZ(a.pure, a.zipped_data)
 
