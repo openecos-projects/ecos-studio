@@ -5,7 +5,7 @@ requires = ["hatchling"]
 [project]
 name = "ecos-server"
 version = "0.1.0"
-requires-python = "==3.11.14"
+requires-python = ">=3.11, <=3.12"
 dependencies = [
   "ecc==0.1.0",
   "fastapi>=0.109",
@@ -28,8 +28,14 @@ dev = [
   "ty>=0.0.9"
 ]
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.sources]
 ecc = { path = "../../ecc", editable = true }
+torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 100
