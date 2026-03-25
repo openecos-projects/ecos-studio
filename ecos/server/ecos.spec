@@ -37,6 +37,17 @@ ecc_datas, ecc_binaries, ecc_hiddenimports = collect_all("chipcompiler")
 # --- Collect klayout package resources ---
 klayout_datas, klayout_binaries, klayout_hiddenimports = collect_all("klayout")
 
+# --- Collect PyTorch (DreamPlace dependency) ---
+try:
+    torch_datas, torch_binaries, torch_hiddenimports = collect_all("torch")
+except Exception as exc:
+    warnings.warn(
+        f"Failed to collect torch package: {exc}. "
+        "DreamPlace placement will not work in the packaged binary.",
+        stacklevel=1,
+    )
+    torch_datas, torch_binaries, torch_hiddenimports = [], [], []
+
 # --- Collect DreamPlace (ecc-dreamplace) package ---
 try:
     dp_datas, dp_binaries, dp_hiddenimports = collect_all("dreamplace")
@@ -52,6 +63,7 @@ except Exception as exc:
 datas = []
 datas.extend(ecc_datas)
 datas.extend(klayout_datas)
+datas.extend(torch_datas)
 datas.extend(dp_datas)
 
 # DreamPlace FLUTE LUT files: native C++ opens via fixed relative path
@@ -82,6 +94,7 @@ if _flute_found != _flute_targets:
 binaries = []
 binaries.extend(ecc_binaries)
 binaries.extend(klayout_binaries)
+binaries.extend(torch_binaries)
 binaries.extend(dp_binaries)
 
 # Add system libraries if needed (Linux)
@@ -117,6 +130,7 @@ hiddenimports = [
     "pandas",
     "matplotlib",
     "scipy",
+    "torch",
     "pyjson5",
     "yaml",
     "tqdm",
@@ -185,6 +199,7 @@ hiddenimports = [
 ]
 hiddenimports.extend(ecc_hiddenimports)
 hiddenimports.extend(klayout_hiddenimports)
+hiddenimports.extend(torch_hiddenimports)
 hiddenimports.extend(dp_hiddenimports)
 hiddenimports.extend([
     "ecos_server",
