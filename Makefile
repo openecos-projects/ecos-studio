@@ -1,4 +1,4 @@
-.PHONY: help setup check-setup build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all
+.PHONY: help setup check-setup build dev gui clean-gui dreamplace-wheel demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all
 
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
 BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
@@ -20,6 +20,7 @@ help:
 	@echo "  make demo-gcd   - Run GCD demo"
 	@echo "  make demo-soc   - Run SoC demo"
 	@echo "  make demo-retrosoc - Run retroSoC demo"
+	@echo "  make dreamplace-wheel - Build ecc-dreamplace wheel (auditwheel repair + smoke test)"
 	@echo "  make docker-build  - Build Docker verification image"
 	@echo "  make docker-verify-all - Run all demos in Docker"
 
@@ -41,7 +42,12 @@ dev: check-setup
 	bazel run //ecos:dev_symlinks
 
 $(BUNDLE_TAR): check-setup
-	@cd ecos/server && uv sync --frozen --all-groups --python 3.11
+	cd ecc && bazel run //:build_dreamplace_wheel
+	cd ecc && bazel run //:build_wheel
+	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
+	@cd ecos/server && uv pip install --reinstall --no-deps \
+		$(CURDIR)/ecc/dist/wheel/repaired/ecc_dreamplace-*.whl \
+		$(CURDIR)/ecc/dist/wheel/repaired/ecc_tools-*.whl
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
@@ -62,6 +68,9 @@ clean:
 	rm -rf bazel-*
 	bazel clean --expunge
 	@rm -f .setup-done
+
+dreamplace-wheel: check-setup
+	cd ecc && bazel run //:build_dreamplace_wheel
 
 demo-gcd: check-setup
 	nix run $(ECC_CLI) -- --workspace $(GCD_WS) \
@@ -85,4 +94,3 @@ demo-retrosoc: check-setup
 		--rtl $(RETROSOC_WS)/retrosoc.f \
 		--design retrosoc_asic --top retrosoc_asic --clock extclk_i_pad \
 		--pdk-root $(PDK_ROOT)
-
