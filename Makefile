@@ -1,5 +1,6 @@
 .PHONY: help setup check-setup build dev gui clean-gui dreamplace-wheel demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all
 
+WHEEL_DIR := $(CURDIR)/ecc/dist/wheel/repaired
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
 BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
 APPIMAGE_MARKER := $(BUNDLE_EXTRACT_DIR)/.extracted
@@ -45,9 +46,11 @@ $(BUNDLE_TAR): check-setup
 	cd ecc && bazel run //:build_dreamplace_wheel
 	cd ecc && bazel run //:build_wheel
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	@cd ecos/server && uv pip install --reinstall --no-deps \
-		$(CURDIR)/ecc/dist/wheel/repaired/ecc_dreamplace-*.whl \
-		$(CURDIR)/ecc/dist/wheel/repaired/ecc_tools-*.whl
+	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-0.1.0-*.whl' | head -1) && \
+		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' | head -1) && \
+		[ -n "$$ECC_WHL" ] || { echo "Error: ecc wheel not found in $(WHEEL_DIR)"; exit 1; } && \
+		[ -n "$$DP_WHL" ] || { echo "Error: ecc_dreamplace wheel not found in $(WHEEL_DIR)"; exit 1; } && \
+		cd ecos/server && uv pip install --reinstall --no-deps "$$ECC_WHL" "$$DP_WHL"
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
@@ -65,8 +68,7 @@ clean-gui:
 	rm -rf $(BUNDLE_EXTRACT_DIR)
 
 clean:
-	rm -rf bazel-*
-	bazel clean --expunge
+	bazel clean && cd ecc && bazel clean
 	@rm -f .setup-done
 
 dreamplace-wheel: check-setup
