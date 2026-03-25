@@ -68,24 +68,23 @@ datas.extend(dp_datas)
 
 # DreamPlace FLUTE LUT files: native C++ opens via fixed relative path
 #   thirdparty/flute/lut.ICCAD2015/{POWV9.dat,POST9.dat}
-# collect_all() puts them under a package-prefixed path (e.g.
-#   chipcompiler/thirdparty/ecc-dreamplace/thirdparty/flute/...).
-# We duplicate them at the top-level path the C++ code expects.
+# These files are NOT included in the dreamplace wheel, so collect_all()
+# cannot find them. We locate them directly from the source tree.
 # (run_server.py sets CWD to _MEIPASS so the relative open() resolves.)
 _flute_targets = {"POWV9.dat", "POST9.dat"}
+_flute_lut_dir = (
+    Path(SPECPATH).parent.parent / "ecc" / "chipcompiler" / "thirdparty"
+    / "ecc-dreamplace" / "thirdparty" / "flute" / "lut.ICCAD2015"
+)
 _flute_found = set()
-for src_path, dest_dir in list(ecc_datas) + list(dp_datas):
-    basename = os.path.basename(src_path)
-    if (
-        basename in _flute_targets
-        and "flute/lut.ICCAD2015" in src_path
-        and basename not in _flute_found
-    ):
-        datas.append((src_path, "thirdparty/flute/lut.ICCAD2015"))
-        _flute_found.add(basename)
+for fname in _flute_targets:
+    src = _flute_lut_dir / fname
+    if src.exists():
+        datas.append((str(src), "thirdparty/flute/lut.ICCAD2015"))
+        _flute_found.add(fname)
 if _flute_found != _flute_targets:
     warnings.warn(
-        "DreamPlace FLUTE LUT files not found in collected datas; "
+        f"DreamPlace FLUTE LUT files not found in {_flute_lut_dir}; "
         "placement may fail at runtime when opening POWV9.dat/POST9.dat.",
         stacklevel=1,
     )
