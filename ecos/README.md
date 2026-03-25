@@ -15,23 +15,58 @@ ECOS Studio is a desktop application that provides an integrated development env
 ### Development
 
 ```bash
-cd ecos/server && uv sync
-cd ecos/gui && pnpm install && pnpm tauri dev
+# From repo root — one-time setup (submodules, PDK, DreamPlace .so, ECC-Tools)
+make setup
+
+# Install dev dependencies and create symlinks
+make dev
+
+# Run GUI in dev mode
+cd ecos/gui && pnpm tauri dev
+```
+
+### DreamPlace Development
+
+DreamPlace C++ operators are compiled by Bazel and installed as `.so` files into the source tree for venv-based development:
+
+```bash
+cd ecc
+bazel run //bazel/scripts:install_dreamplace    # Build + install .so files
+bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (manifest-based)
+```
+
+### Building Wheels
+
+Both wheels are output to `ecc/dist/wheel/repaired/` after auditwheel repair and smoke test:
+
+```bash
+# DreamPlace wheel (CMake compile .so → raw wheel → auditwheel repair → smoke test)
+cd ecc && bazel run //:build_dreamplace_wheel   # → ecc_dreamplace-*-linux_x86_64.whl
+
+# ECC wheel (ECC-Tools runtime → raw wheel → auditwheel repair → smoke test)
+cd ecc && bazel run //bazel/scripts:build_wheel # → ecc_tools-*-linux_x86_64.whl
+
+# Or use the convenience target for DreamPlace
+make dreamplace-wheel
 ```
 
 ### Release Build
 
-```bash
-# Build the ECC wheel first (in ecc/)
-cd ecc && bazel run //:build_wheel
+`make build` runs the full pipeline:
 
-# Install ecos-server using pre-built wheel
-cd ecos/server && uv sync --find-links ../../ecc/dist/wheel/repaired/
-source .venv/bin/activate
-
-# Build the full bundle
-bazel build //:ecos_studio_bundle
 ```
+build wheels → uv sync (runtime deps) → install wheels into venv → PyInstaller bundle → AppImage
+```
+
+```bash
+# Full release build (from repo root)
+make build
+
+# Launch the built AppImage
+make gui
+```
+
+The wheels are installed as **non-editable** packages so that PyInstaller's `collect_all("dreamplace")` and `collect_all("chipcompiler")` can discover all package files during bundling.
 
 ## Documentation
 
