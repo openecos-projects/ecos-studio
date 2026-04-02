@@ -3,7 +3,6 @@
 import logging
 import os
 import time
-from functools import wraps
 from logging.handlers import RotatingFileHandler
 
 from ..schemas import (
@@ -35,17 +34,38 @@ def _summarize_request(data: dict) -> dict:
     return summary
 
 
-def _log_api_command(func):
-    """Decorator to log API command execution with timing."""
-    @wraps(func)
-    def wrapper(self, request: ECCRequest, *args, **kwargs):
-        cmd = getattr(request, "cmd", "?")
-        data = getattr(request, "data", {})
-        logger.info("[CMD:start] cmd=%s %s", cmd, _summarize_request(data))
+class ECCService:
+    # Logger subtree that receives workspace-level file logging
+    _WS_LOGGER_NAME = "ecos_server.ecc"
+
+    _COMMANDS = frozenset({
+        "create_workspace", "set_pdk_root", "load_workspace",
+        "delete_workspace", "rtl2gds", "run_step",
+        "get_info", "home_page",
+    })
+
+    def __init__(self):
+        self.workspace = None
+        self.engine_flow = None
+        self._workspace_log_handler = None
+
+    def dispatch(self, request: ECCRequest) -> ECCResponse:
+        """Route request to the matching handler method and log execution."""
+        cmd = request.cmd
+        if cmd not in self._COMMANDS:
+            return ECCResponse(
+                cmd=cmd,
+                response=ResponseEnum.error.value,
+                data={},
+                message=[f"unknown command: {cmd}"],
+            )
+
+        handler = getattr(self, cmd)
+        logger.info("[CMD:start] cmd=%s %s", cmd, _summarize_request(request.data))
 
         start = time.time()
         try:
-            response = func(self, request, *args, **kwargs)
+            response = handler(request)
         except Exception:
             elapsed_ms = (time.time() - start) * 1000
             logger.exception("[CMD:error] cmd=%s elapsed=%.0fms", cmd, elapsed_ms)
@@ -55,17 +75,6 @@ def _log_api_command(func):
         result = getattr(response, "response", type(response).__name__)
         logger.info("[CMD:done] cmd=%s result=%s elapsed=%.0fms", cmd, result, elapsed_ms)
         return response
-    return wrapper
-
-
-class ECCService:
-    # Logger subtree that receives workspace-level file logging
-    _WS_LOGGER_NAME = "ecos_server.ecc"
-
-    def __init__(self):
-        self.workspace = None
-        self.engine_flow = None
-        self._workspace_log_handler = None
 
     def _attach_workspace_log(self, workspace_dir: str):
         """Attach a rotating file handler that mirrors API logs into {workspace}/log/server.log."""
@@ -121,20 +130,6 @@ class ECCService:
                     f.write(f"{path}\n")
         return filelist_path
 
-    def check_cmd(self, request: ECCRequest, cmd : CMDEnum):
-        # check cmd
-        if request.cmd != cmd.value:
-            response = ECCResponse(
-                cmd=request.cmd,
-                response=ResponseEnum.failed.value,
-                data={},
-                message=[f"request cmd not match: expected={cmd.value}, got={request.cmd}"]
-            )
-
-            return False, response
-
-        return True, None
-
     def __build_flow(self):
         from chipcompiler.engine import EngineFlow
         from chipcompiler.rtl2gds import build_rtl2gds_flow
@@ -153,7 +148,6 @@ class ECCService:
             return
         engine_flow.create_step_workspaces()
 
-    @_log_api_command
     def create_workspace(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -171,11 +165,6 @@ class ECCService:
         }
         """
         from chipcompiler.data import create_workspace as _create_workspace
-
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.create_workspace)
-        if not state:
-            return response
 
         # get data
         data = request.data
@@ -247,7 +236,6 @@ class ECCService:
                 message = [f"create workspace success : {data.get('directory', '')}"]
             )
 
-    @_log_api_command
     def set_pdk_root(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -261,10 +249,6 @@ class ECCService:
         }
         """
         from chipcompiler.data import get_pdk
-
-        state, response = self.check_cmd(request, CMDEnum.set_pdk_root)
-        if not state:
-            return response
 
         data = request.data
         pdk_name = str(data.get("pdk", "")).strip().lower()
@@ -322,7 +306,6 @@ class ECCService:
             message=[f"set pdk root success: {pdk_name} -> {response_data['pdk_root']}"],
         )
 
-    @_log_api_command
     def load_workspace(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -333,11 +316,6 @@ class ECCService:
         }
         """
         from chipcompiler.data import load_workspace as _load_workspace
-
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.load_workspace)
-        if not state:
-            return response
 
         # get data
         data = request.data
@@ -384,7 +362,6 @@ class ECCService:
                 message = [f"load workspace success : {data.get('directory', '')}"]
             )
 
-    @_log_api_command
     def delete_workspace(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -394,11 +371,6 @@ class ECCService:
             "directory" : ""
         }
         """
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.delete_workspace)
-        if not state:
-            return response
-
         # get data
         data = request.data
         directory = data.get('directory', '')
@@ -438,7 +410,6 @@ class ECCService:
             message = [f"delete workspace success : {directory}"]
         )
 
-    @_log_api_command
     def rtl2gds(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -448,11 +419,6 @@ class ECCService:
             "rerun" : False
         }
         """
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.rtl2gds)
-        if not state:
-            return response
-
         # get data
         data = request.data
 
@@ -529,7 +495,6 @@ class ECCService:
                 message = [f"run rtl2gds failed in step : {failed_step}"]
             )
 
-    @_log_api_command
     def run_step(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {
@@ -542,11 +507,6 @@ class ECCService:
         }
         """
         from chipcompiler.data import StateEnum
-
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.run_step)
-        if not state:
-            return response
 
         # get data
         data = request.data
@@ -593,7 +553,6 @@ class ECCService:
                 message = [f"run step {step} failed with state {state.value} : {self.workspace.directory}"]
             )
 
-    @_log_api_command
     def get_info(self, request: ECCRequest) -> ECCResponse:
         """
         get information by step (defined by StepEnum) and id (defined by InfoEnum)
@@ -607,11 +566,6 @@ class ECCService:
             "info" : {}
         }
         """
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.get_info)
-        if not state:
-            return response
-
         # get data
         data = request.data
         step = data.get("step", "")
@@ -667,19 +621,13 @@ class ECCService:
                 message = [f"get information success : {step} - {id}"]
             )
 
-    @_log_api_command
-    def get_home_page(self, request: ECCRequest) -> ECCResponse:
+    def home_page(self, request: ECCRequest) -> ECCResponse:
         """
         "request" : {},
         "response" : {
             "path" : ""
         }
         """
-        # check cmd
-        state, response = self.check_cmd(request, CMDEnum.home_page)
-        if not state:
-            return response
-
         # get data
         data = request.data
 
