@@ -45,14 +45,15 @@ def _setup_logging(args) -> str:
         logging.getLogger("ecos_server").setLevel(logging.INFO)
         return log_file
 
-    print(f"[API_LOG] log -> {log_file} (tail -f {log_file})",
-          file=sys.stderr, flush=True)
-
     log_file = init_api_runtime_log(
         log_file=log_file,
         max_bytes=args.log_max_bytes,
         backup_count=args.log_backup_count,
     )
+
+    print(f"[API_LOG] log -> {log_file} (tail -f {log_file})",
+          file=sys.stderr, flush=True)
+
     return log_file
 
 

@@ -9,8 +9,8 @@ from ..schemas import (
     CMDEnum,
     ECCRequest,
     ECCResponse,
-    ResponseEnum
-    )
+    ResponseEnum,
+)
 
 from ..sse import server_notify
 gui_notify = server_notify()
@@ -27,7 +27,7 @@ def _summarize_request(data: dict) -> dict:
         if key in data:
             summary[key] = data[key]
     if "parameters" in data:
-        summary["parameters_keys"] = len(data.get("parameters", {}))
+        summary["parameters_keys"] = len(data["parameters"])
     if "rtl_list" in data:
         rtl = data["rtl_list"]
         summary["rtl_count"] = len(rtl.splitlines() if isinstance(rtl, str) else rtl)
@@ -38,11 +38,8 @@ class ECCService:
     # Logger subtree that receives workspace-level file logging
     _WS_LOGGER_NAME = "ecos_server.ecc"
 
-    _COMMANDS = frozenset({
-        "create_workspace", "set_pdk_root", "load_workspace",
-        "delete_workspace", "rtl2gds", "run_step",
-        "get_info", "home_page",
-    })
+    # All CMDEnum values except "notify" (which is SSE-only, not dispatched).
+    _COMMANDS = frozenset(e.value for e in CMDEnum if e is not CMDEnum.notify)
 
     def __init__(self):
         self.workspace = None
@@ -628,12 +625,6 @@ class ECCService:
             "path" : ""
         }
         """
-        # get data
-        data = request.data
-
-        # check data
-
-        # process cmd
         if os.path.exists(self.workspace.home.path):
             response_data = {
                 "path" : self.workspace.home.path

@@ -55,8 +55,7 @@ class TestDispatch:
 
     @pytest.fixture
     def service(self):
-        svc = ECCService()
-        return svc
+        return ECCService()
 
     def test_unknown_command_returns_error(self, service):
         request = ECCRequest(cmd="nonexistent_cmd", data={})
