@@ -65,6 +65,9 @@ export interface ParametersData {
   'Target density': number
   'Target overflow': number
   'Global right padding': number
+  'Cell padding x': number
+  'Boundary padding x': number
+  'Boundary padding y': number
   Clock: string
   'Frequency max [MHz]': number
   'Bottom layer': string
@@ -119,6 +122,9 @@ export interface ConfigData {
   targetDensity: number
   targetOverflow: number
   globalRightPadding: number
+  cellPaddingX: number
+  bndryPaddingX: number
+  bndryPaddingY: number
   clock: string
   frequencyMax: number
   bottomLayer: string
@@ -157,6 +163,9 @@ function getDefaultConfig(): ConfigData {
     targetDensity: 0.3,
     targetOverflow: 0.1,
     globalRightPadding: 0,
+    cellPaddingX: 600,
+    bndryPaddingX: 0,
+    bndryPaddingY: 0,
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET1',
@@ -199,6 +208,9 @@ function transformParametersToConfig(data: ParametersData): ConfigData {
     targetDensity: data['Target density'] || 0.3,
     targetOverflow: data['Target overflow'] || 0.1,
     globalRightPadding: data['Global right padding'] || 0,
+    cellPaddingX: data['Cell padding x'] ?? 600,
+    bndryPaddingX: data['Boundary padding x'] ?? 0,
+    bndryPaddingY: data['Boundary padding y'] ?? 0,
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] || 100,
     bottomLayer: data['Bottom layer'] || 'MET1',
@@ -272,6 +284,9 @@ function transformConfigToParameters(config: ConfigData): ParametersData {
     'Target density': config.targetDensity,
     'Target overflow': config.targetOverflow,
     'Global right padding': config.globalRightPadding,
+    'Cell padding x': config.cellPaddingX,
+    'Boundary padding x': config.bndryPaddingX,
+    'Boundary padding y': config.bndryPaddingY,
     Clock: config.clock,
     'Frequency max [MHz]': config.frequencyMax,
     'Bottom layer': config.bottomLayer,
