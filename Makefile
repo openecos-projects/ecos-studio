@@ -77,14 +77,14 @@ setup:
 	else \
 	    $(MAKE) install-deps; \
 	    DEPS_SKIPPED=false; \
-	fi && \
-	echo "timestamp=$$(date --iso-8601=seconds)" > .setup-done && \
-	echo "deps_skipped=$$DEPS_SKIPPED" >> .setup-done && \
+	fi
+	git submodule update --init --recursive
+	cd ecc && bazel run //:prepare_dev
+	@echo "timestamp=$$(date --iso-8601=seconds)" > .setup-done && \
+	echo "deps_skipped=$(or $(DEPS_SKIPPED),unknown)" >> .setup-done && \
 	echo "bazel=$$(command -v bazel) ($$(bazel --version 2>/dev/null | head -1))" >> .setup-done && \
 	echo "uv=$$(command -v uv) ($$(uv --version 2>/dev/null))" >> .setup-done && \
 	echo "pnpm=$$(command -v pnpm) ($$(pnpm --version 2>/dev/null))" >> .setup-done
-	git submodule update --init --recursive
-	cd ecc && bazel run //:prepare_dev
 
 check-setup:
 	@if [ ! -f .setup-done ]; then \
