@@ -162,7 +162,7 @@ function getDefaultConfig(): ConfigData {
     targetOverflow: 0.1,
     globalRightPadding: 0,
     cellPaddingX: 600,
-    routabilityOptFlag: false,
+    routabilityOptFlag: true,
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET1',
