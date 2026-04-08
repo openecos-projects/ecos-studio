@@ -66,8 +66,7 @@ export interface ParametersData {
   'Target overflow': number
   'Global right padding': number
   'Cell padding x': number
-  'Boundary padding x': number
-  'Boundary padding y': number
+  'Routability opt flag': number
   Clock: string
   'Frequency max [MHz]': number
   'Bottom layer': string
@@ -123,8 +122,7 @@ export interface ConfigData {
   targetOverflow: number
   globalRightPadding: number
   cellPaddingX: number
-  bndryPaddingX: number
-  bndryPaddingY: number
+  routabilityOptFlag: boolean
   clock: string
   frequencyMax: number
   bottomLayer: string
@@ -164,8 +162,7 @@ function getDefaultConfig(): ConfigData {
     targetOverflow: 0.1,
     globalRightPadding: 0,
     cellPaddingX: 600,
-    bndryPaddingX: 0,
-    bndryPaddingY: 0,
+    routabilityOptFlag: false,
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET1',
@@ -209,8 +206,7 @@ function transformParametersToConfig(data: ParametersData): ConfigData {
     targetOverflow: data['Target overflow'] || 0.1,
     globalRightPadding: data['Global right padding'] || 0,
     cellPaddingX: data['Cell padding x'] ?? 600,
-    bndryPaddingX: data['Boundary padding x'] ?? 0,
-    bndryPaddingY: data['Boundary padding y'] ?? 0,
+    routabilityOptFlag: !!data['Routability opt flag'],
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] || 100,
     bottomLayer: data['Bottom layer'] || 'MET1',
@@ -285,8 +281,7 @@ function transformConfigToParameters(config: ConfigData): ParametersData {
     'Target overflow': config.targetOverflow,
     'Global right padding': config.globalRightPadding,
     'Cell padding x': config.cellPaddingX,
-    'Boundary padding x': config.bndryPaddingX,
-    'Boundary padding y': config.bndryPaddingY,
+    'Routability opt flag': config.routabilityOptFlag ? 1 : 0,
     Clock: config.clock,
     'Frequency max [MHz]': config.frequencyMax,
     'Bottom layer': config.bottomLayer,
