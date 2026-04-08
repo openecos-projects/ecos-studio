@@ -66,49 +66,39 @@ datas.extend(klayout_datas)
 datas.extend(torch_datas)
 datas.extend(dp_datas)
 
-# DreamPlace FLUTE LUT files: native C++ opens via fixed relative path
-#   thirdparty/flute/lut.ICCAD2015/{POWV9.dat,POST9.dat}
-# These files are NOT included in the dreamplace wheel, so collect_all()
-# cannot find them. We locate them directly from the source tree.
+# DreamPlace ships thirdparty data files that native C++ code opens via fixed
+# relative paths (e.g. thirdparty/flute/lut.ICCAD2015/POWV9.dat).  These are
+# NOT included in the dreamplace wheel, so collect_all() cannot find them.
+# We locate them from the source tree and bundle them at the expected paths.
 # (run_server.py sets CWD to _MEIPASS so the relative open() resolves.)
-_flute_targets = {"POWV9.dat", "POST9.dat"}
-_flute_lut_dir = (
+_dreamplace_thirdparty = (
     Path(SPECPATH).parent.parent / "ecc" / "chipcompiler" / "thirdparty"
-    / "ecc-dreamplace" / "thirdparty" / "flute" / "lut.ICCAD2015"
+    / "ecc-dreamplace" / "thirdparty"
 )
-_flute_found = set()
-for fname in _flute_targets:
-    src = _flute_lut_dir / fname
-    if src.exists():
-        datas.append((str(src), "thirdparty/flute/lut.ICCAD2015"))
-        _flute_found.add(fname)
-if _flute_found != _flute_targets:
-    warnings.warn(
-        f"DreamPlace FLUTE LUT files not found in {_flute_lut_dir}; "
-        "placement may fail at runtime when opening POWV9.dat/POST9.dat.",
-        stacklevel=1,
-    )
 
-# DreamPlace NCTUgr: routability optimization depends on external binary + config
-#   thirdparty/NCTUgr.ICCAD2012/{NCTUgr,*.dat,*.set}
-# Same situation as FLUTE: not included in the dreamplace wheel.
-_nctugr_targets = {"NCTUgr", "PORT9.dat", "POST9.dat", "POWV9.dat", "DAC12.set", "ICCAD12.set"}
-_nctugr_dir = (
-    Path(SPECPATH).parent.parent / "ecc" / "chipcompiler" / "thirdparty"
-    / "ecc-dreamplace" / "thirdparty" / "NCTUgr.ICCAD2012"
+def _collect_thirdparty_files(subdir, targets, warning_msg):
+    """Collect files from a DreamPlace thirdparty subdirectory into datas."""
+    src_dir = _dreamplace_thirdparty / subdir
+    bundle_dest = f"thirdparty/{subdir}"
+    found = set()
+    for fname in targets:
+        src = src_dir / fname
+        if src.exists():
+            datas.append((str(src), bundle_dest))
+            found.add(fname)
+    if found != targets:
+        warnings.warn(f"{warning_msg} (missing from {src_dir})", stacklevel=2)
+
+_collect_thirdparty_files(
+    "flute/lut.ICCAD2015",
+    {"POWV9.dat", "POST9.dat"},
+    "DreamPlace FLUTE LUT files not found; placement may fail at runtime.",
 )
-_nctugr_found = set()
-for fname in _nctugr_targets:
-    src = _nctugr_dir / fname
-    if src.exists():
-        datas.append((str(src), "thirdparty/NCTUgr.ICCAD2012"))
-        _nctugr_found.add(fname)
-if _nctugr_found != _nctugr_targets:
-    warnings.warn(
-        f"DreamPlace NCTUgr files not found in {_nctugr_dir}; "
-        "routability optimization (routability_opt_flag=1) will fail at runtime.",
-        stacklevel=1,
-    )
+_collect_thirdparty_files(
+    "NCTUgr.ICCAD2012",
+    {"NCTUgr", "PORT9.dat", "POST9.dat", "POWV9.dat", "DAC12.set", "ICCAD12.set"},
+    "DreamPlace NCTUgr files not found; routability optimization will fail at runtime.",
+)
 
 # --- Binaries ---
 binaries = []
