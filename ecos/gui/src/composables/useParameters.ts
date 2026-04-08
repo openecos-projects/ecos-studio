@@ -313,7 +313,7 @@ function transformConfigToParameters(config: ConfigData): ParametersData {
         'instance pin name': gc.instancePinName,
         'is power': gc.isPower
       })),
-      grid: {
+      Grid: {
         layer: config.pdn.grid.layer,
         'power net': config.pdn.grid.powerNet,
         'ground net': config.pdn.grid.groundNet,
