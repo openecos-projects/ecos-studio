@@ -89,6 +89,27 @@ if _flute_found != _flute_targets:
         stacklevel=1,
     )
 
+# DreamPlace NCTUgr: routability optimization depends on external binary + config
+#   thirdparty/NCTUgr.ICCAD2012/{NCTUgr,*.dat,*.set}
+# Same situation as FLUTE: not included in the dreamplace wheel.
+_nctugr_targets = {"NCTUgr", "PORT9.dat", "POST9.dat", "POWV9.dat", "DAC12.set", "ICCAD12.set"}
+_nctugr_dir = (
+    Path(SPECPATH).parent.parent / "ecc" / "chipcompiler" / "thirdparty"
+    / "ecc-dreamplace" / "thirdparty" / "NCTUgr.ICCAD2012"
+)
+_nctugr_found = set()
+for fname in _nctugr_targets:
+    src = _nctugr_dir / fname
+    if src.exists():
+        datas.append((str(src), "thirdparty/NCTUgr.ICCAD2012"))
+        _nctugr_found.add(fname)
+if _nctugr_found != _nctugr_targets:
+    warnings.warn(
+        f"DreamPlace NCTUgr files not found in {_nctugr_dir}; "
+        "routability optimization (routability_opt_flag=1) will fail at runtime.",
+        stacklevel=1,
+    )
+
 # --- Binaries ---
 binaries = []
 binaries.extend(ecc_binaries)
