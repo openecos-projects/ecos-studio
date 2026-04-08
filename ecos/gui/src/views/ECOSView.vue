@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex flex-col h-full w-full min-h-0 text-(--text-primary) relative overflow-y-auto overflow-x-hidden"
+    class="ecos-home-surface flex flex-col h-full w-full min-h-0 text-(--text-primary) relative overflow-y-auto overflow-x-hidden"
   >
     <div
       class="relative z-10 flex flex-col min-h-full w-full justify-center px-6 py-10 pb-12"
@@ -193,7 +193,7 @@
               </div>
             </div>
 
-            <!-- EDA Tools → dedicated route -->
+            <!-- Resource Manager → dedicated route -->
             <button
               type="button"
               class="group w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-(--border-color) bg-(--bg-secondary) text-left transition-all duration-200 cursor-pointer hover:border-(--accent-color) hover:shadow-md hover:shadow-(--accent-color)/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
@@ -205,9 +205,9 @@
                 <i class="ri-tools-line text-xl text-(--accent-color)" aria-hidden="true" />
               </div>
               <div class="flex-1 min-w-0">
-                <span class="text-sm font-semibold text-(--text-primary) block">EDA Tools</span>
+                <span class="text-sm font-semibold text-(--text-primary) block">Resource Manager</span>
                 <span class="text-xs text-(--text-secondary) line-clamp-2">
-                  Install and manage toolchains on a dedicated page
+                  Discover, install, and manage EDA tools and PDKs
                 </span>
               </div>
               <i
@@ -253,7 +253,7 @@
             type="button"
             class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border border-(--border-color) bg-(--bg-secondary) transition-all duration-200 text-left cursor-pointer group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
             :class="
-              lastProject.pathExists === false
+              lastProject.workspaceRecognized === false
                 ? 'opacity-50 pointer-events-none'
                 : 'hover:border-(--accent-color) hover:shadow-lg hover:shadow-(--accent-color)/6'
             "
@@ -286,7 +286,7 @@
                   {{ lastProject.completedSteps }}/{{ lastProject.totalSteps }} steps
                 </span>
                 <span>{{ formatDate(lastProject.lastOpened) }}</span>
-                <span v-if="lastProject.pathExists === false" class="text-red-400">Path not reachable</span>
+                <span v-if="lastProject.workspaceRecognized === false" class="text-red-400">Workspace not recognized</span>
               </div>
             </div>
             <div
@@ -374,3 +374,34 @@ function formatDate(date: Date): string {
   return new Date(date).toLocaleDateString('en-US')
 }
 </script>
+
+<style scoped>
+.ecos-home-surface {
+  background:
+    radial-gradient(circle at 46% 16%, color-mix(in srgb, var(--accent-color) 10%, transparent) 0, transparent 32%),
+    linear-gradient(color-mix(in srgb, var(--border-color) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 45%, transparent) 1px, transparent 1px),
+    var(--bg-primary);
+  background-size: auto, 50px 50px, 50px 50px, auto;
+  background-position: center top, -2px -2px, -2px -2px, center;
+}
+
+.ecos-home-surface::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 18%, transparent), transparent 28%),
+    radial-gradient(circle at 50% 50%, transparent 0, color-mix(in srgb, var(--bg-primary) 72%, transparent) 72%);
+}
+
+:global(.dark) .ecos-home-surface {
+  background:
+    radial-gradient(circle at 46% 16%, color-mix(in srgb, var(--accent-color) 13%, transparent) 0, transparent 34%),
+    linear-gradient(color-mix(in srgb, var(--border-color) 52%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 52%, transparent) 1px, transparent 1px),
+    var(--bg-primary);
+  background-size: auto, 50px 50px, 50px 50px, auto;
+}
+</style>
