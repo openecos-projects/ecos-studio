@@ -98,7 +98,7 @@ check-setup:
 	fi
 
 dev: check-setup
-	@cd ecos/server && uv sync --all-groups --all-extras --python 3.11
+	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@cd ecos/gui && pnpm install
 	bazel run //ecos:dev_symlinks
 
