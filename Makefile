@@ -75,7 +75,7 @@ setup:
 	    echo "Note: if build fails, run 'make install-apt-deps' for system libraries"; \
 	    DEPS_SKIPPED=true; \
 	else \
-	    $(MAKE) install-deps; \
+	    $(MAKE) install-deps && \
 	    DEPS_SKIPPED=false; \
 	fi && \
 	git submodule update --init --recursive && \
