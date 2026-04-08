@@ -1,4 +1,4 @@
-.PHONY: help setup check-setup build dev gui clean-gui dreamplace-wheel demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps
+.PHONY: help setup check-setup build dev gui clean-gui dreamplace-wheel demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
 WHEEL_DIR := $(CURDIR)/ecc/dist/wheel/repaired
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
@@ -14,6 +14,8 @@ RETROSOC_WS ?= ./ws/retrosoc
 help:
 	@echo "Targets:"
 	@echo "  make install-deps - Install system dependencies and tools (Node.js, pnpm, Rust, Bazel, uv)"
+	@echo "  make install-apt-deps - Install system build libraries only (apt packages, requires Ubuntu)"
+	@echo "  make install-tools    - Install CLI tools only (Node.js, pnpm, Rust, Bazel, uv)"
 	@echo "  make setup      - Init submodules and setup PDK"
 	@echo "  make build      - Build ECOS Studio bundle (Bazel)"
 	@echo "  make dev        - Setup development environment"
@@ -26,7 +28,7 @@ help:
 	@echo "  make docker-build  - Build Docker verification image"
 	@echo "  make docker-verify-all - Run all demos in Docker"
 
-install-deps:
+install-apt-deps:
 	@. /etc/os-release && \
 	if [ "$$ID" != "ubuntu" ]; then \
 	    echo "Error: install-deps requires Ubuntu (detected: $$ID)"; \
@@ -44,6 +46,8 @@ install-deps:
 	    flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
 	    libhwloc-dev libcurl4-openssl-dev libtbb-dev \
 	    patchelf jq wget
+
+install-tools:
 	@echo "==> Installing Node.js (LTS)..."
 	curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
 	sudo apt-get install -y nodejs && sudo rm -rf /var/lib/apt/lists/*
@@ -61,10 +65,26 @@ install-deps:
 	@echo "Done. Ensure the following are in your PATH (add to ~/.bashrc or ~/.zshrc):"
 	@echo '  export PATH="$$HOME/.local/bin:$$HOME/.cargo/bin:$$PATH"'
 
-setup: install-deps
+install-deps: install-apt-deps install-tools
+
+setup:
+	@if command -v bazel >/dev/null 2>&1 && \
+	    command -v uv >/dev/null 2>&1 && \
+	    command -v pnpm >/dev/null 2>&1; then \
+	    echo "bazel, uv, pnpm found on PATH -- skipping install-deps"; \
+	    echo "Note: if build fails, run 'make install-apt-deps' for system libraries"; \
+	    DEPS_SKIPPED=true; \
+	else \
+	    $(MAKE) install-deps; \
+	    DEPS_SKIPPED=false; \
+	fi && \
+	echo "timestamp=$$(date --iso-8601=seconds)" > .setup-done && \
+	echo "deps_skipped=$$DEPS_SKIPPED" >> .setup-done && \
+	echo "bazel=$$(command -v bazel) ($$(bazel --version 2>/dev/null | head -1))" >> .setup-done && \
+	echo "uv=$$(command -v uv) ($$(uv --version 2>/dev/null))" >> .setup-done && \
+	echo "pnpm=$$(command -v pnpm) ($$(pnpm --version 2>/dev/null))" >> .setup-done
 	git submodule update --init --recursive
 	cd ecc && bazel run //:prepare_dev
-	@touch .setup-done
 
 check-setup:
 	@if [ ! -f .setup-done ]; then \
