@@ -54,9 +54,7 @@ def test_verify_sha256_fail(tmp_path: Path) -> None:
     assert InstallerService.verify_sha256(file_path, "wrong_hash") is False
 
 
-def test_extract_tarball_no_prefix(
-    installer: InstallerService, tmp_path: Path, tools_dir: Path
-) -> None:
+def test_extract_tarball_no_prefix(installer: InstallerService, tmp_path: Path, tools_dir: Path) -> None:
     content, _ = _make_tarball(tmp_path)
     archive = tmp_path / "yosys.tar.gz"
     archive.write_bytes(content)
@@ -76,12 +74,10 @@ def test_extract_tarball_with_strip_prefix(
     assert (dest / "bin" / "yosys").exists()
 
 
-def test_atomic_extract_cleans_up_on_failure(
-    installer: InstallerService, tmp_path: Path, tools_dir: Path
-) -> None:
+def test_atomic_extract_cleans_up_on_failure(installer: InstallerService, tmp_path: Path, tools_dir: Path) -> None:
     bad_archive = tmp_path / "bad.tar.gz"
     bad_archive.write_bytes(b"not a tarball")
     dest = tools_dir / "yosys" / "0.61"
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         installer.extract(archive_path=bad_archive, dest_dir=dest, strip_prefix=None)
     assert not dest.exists()

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- encoding: utf-8 -*-
 
 import hashlib
 import logging
@@ -101,17 +102,15 @@ class InstallerService:
     ) -> None:
         """Stream-download a file with optional progress callback (0..1)."""
         dest.parent.mkdir(parents=True, exist_ok=True)
-        async with (
-            httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client,
-            client.stream("GET", url) as resp,
-        ):
-            resp.raise_for_status()
-            cl = resp.headers.get("content-length")
-            total = expected_size or (int(cl) if cl else 0)
-            downloaded = 0
-            with open(dest, "wb") as f:
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if on_progress and total > 0:
-                        on_progress(downloaded / total)
+        async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                cl = resp.headers.get("content-length")
+                total = expected_size or (int(cl) if cl else 0)
+                downloaded = 0
+                with open(dest, "wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if on_progress and total > 0:
+                            on_progress(downloaded / total)
