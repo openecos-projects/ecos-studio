@@ -10,6 +10,19 @@ export {
   type WaitForApiReadyOptions,
   API_BASE_URL
 } from './client'
+
+export {
+  listToolsApi,
+  getToolStatusApi,
+  installToolApi,
+  uninstallToolApi,
+  refreshRegistryApi,
+  subscribePluginProgress,
+  type ToolInfo,
+  type ToolStatus,
+  type InstallProgress,
+  type InstallPhase,
+} from './plugin'
 export {
   loadWorkspaceApi,
   createWorkspaceApi,

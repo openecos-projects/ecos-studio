@@ -11,12 +11,14 @@ dependencies = [
   "ecc-dreamplace==0.1.0a2",
   "ecc-tools==0.1.0a1",
   "fastapi>=0.109",
+  "httpx>=0.27",
   "torch>=1.6.0",
   "uvicorn>=0.27",
 ]
 
 [dependency-groups]
 dev = [
+  "pytest-asyncio>=0.23",
   "auditwheel>=6",
   "black>=23",
   "mypy>=1",
@@ -52,6 +54,9 @@ ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/re
 ecc-tools = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" }
 torch = { index = "pytorch-cpu" }
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.ruff]
 line-length = 100
 extend-include = ["*.spec"]
@@ -78,6 +83,7 @@ packages = ["ecos_server"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "run_server.py" = "ecos_server/run_server.py"
+"ecos_server/plugin/data/tool-registry.json" = "ecos_server/plugin/data/tool-registry.json"
 
 [tool.ty]
 environment.python-version = "3.11"

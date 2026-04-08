@@ -9,7 +9,8 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', name: 'ECOS', component: () => import('../views/ECOSView.vue') },
       { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
-      { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') }
+      { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') },
+      { path: 'tools', name: 'PluginTools', component: () => import('../views/PluginToolsView.vue') }
     ],
     meta: {
       title: 'ECOS-Studio'

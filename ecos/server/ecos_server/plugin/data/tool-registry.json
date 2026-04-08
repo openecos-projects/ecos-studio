@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "tools": [
+    {
+      "name": "yosys",
+      "display_name": "Yosys (with Slang)",
+      "description": "RTL synthesis framework with SystemVerilog support",
+      "category": "synthesis",
+      "homepage": "https://github.com/YosysHQ/yosys",
+      "versions": [
+        {
+          "version": "0.61",
+          "platforms": {
+            "linux-x86_64": {
+              "url": "https://github.com/octocat/Hello-World/archive/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d.tar.gz",
+              "sha256": "39a4b97b9d108782fa7466b07160a2c9227a7da07725ad4110c41be6014e4160",
+              "size": 261,
+              "strip_prefix": "Hello-World-7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            },
+            "linux-aarch64": {
+              "url": "https://github.com/octocat/Hello-World/archive/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d.tar.gz",
+              "sha256": "39a4b97b9d108782fa7466b07160a2c9227a7da07725ad4110c41be6014e4160",
+              "size": 261,
+              "strip_prefix": "Hello-World-7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            },
+            "darwin-arm64": {
+              "url": "https://github.com/octocat/Hello-World/archive/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d.tar.gz",
+              "sha256": "39a4b97b9d108782fa7466b07160a2c9227a7da07725ad4110c41be6014e4160",
+              "size": 261,
+              "strip_prefix": "Hello-World-7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            },
+            "darwin-x86_64": {
+              "url": "https://github.com/octocat/Hello-World/archive/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d.tar.gz",
+              "sha256": "39a4b97b9d108782fa7466b07160a2c9227a7da07725ad4110c41be6014e4160",
+              "size": 261,
+              "strip_prefix": "Hello-World-7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            }
+          },
+          "requires": []
+        }
+      ]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ._log import ensure_api_logger
 from .ecc import sse_router, workspace_router
+from .plugin import plugin_router
 
 
 def _read_distribution_version(dist_name: str) -> str:
@@ -51,7 +52,6 @@ async def lifespan(_app: FastAPI):
     )
     yield
 
-
 app = FastAPI(
     title="ECOS Studio API",
     description="Backend API for ECOS Studio",
@@ -79,6 +79,7 @@ app.add_middleware(
 # Register routers
 app.include_router(workspace_router)
 app.include_router(sse_router)
+app.include_router(plugin_router)
 
 
 @app.get("/")
@@ -88,7 +89,7 @@ async def root():
         "name": "ECOS Studio API",
         "version": _runtime_versions()["server"],
         "status": "running",
-        "tools": ["ecc"],
+        "tools": ["ecc", "plugin"],
     }
 
 
