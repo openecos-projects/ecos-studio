@@ -24,7 +24,8 @@ ecc_ver=$(python3 -c "import tomllib; print(tomllib.load(open('$REPO_ROOT/ecc/py
 ecc_hash=$(git_hash_for ecc/ ':!ecc/chipcompiler/thirdparty/ecc-dreamplace/')
 
 dreamplace_ver=$(python3 -c "import tomllib; print(tomllib.load(open('$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-dreamplace/pyproject.toml','rb'))['project']['version'])")
-dreamplace_hash=$(git_hash_for ecc/chipcompiler/thirdparty/ecc-dreamplace/)
+# DreamPlace is a submodule -- get its HEAD from inside the submodule itself.
+dreamplace_hash=$(git -C "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-dreamplace" rev-parse --short HEAD 2>/dev/null || true)
 
 # Compose version strings: <base>-<hash> or just <base> if git unavailable
 fmt() { local v="$1" h="$2"; echo "${v}${h:+-$h}"; }
