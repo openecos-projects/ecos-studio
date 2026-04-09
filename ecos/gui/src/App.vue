@@ -18,6 +18,7 @@
       <div class="app-content">
         <router-view />
       </div>
+      <StatusBar />
     </div>
 
     <!-- 全局 Toast 通知 -->
@@ -55,8 +56,11 @@ import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { useThemeStore } from '@/stores/themeStore'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
+import { useVersion } from '@/composables/useVersion'
 
 import TopBar from '@/components/TopBar.vue'
+import StatusBar from '@/components/StatusBar.vue'
+import AboutDialog from '@/components/AboutDialog.vue'
 import Toast from 'primevue/toast'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import type { WorkspaceConfig } from '@/types'
@@ -69,9 +73,11 @@ const isWelcome = computed(() => route.path === '/')
 const { loadRecentProjects, currentProject, openProject, newProject, apiBackendConnecting } =
   useWorkspace()
 const { loadPdks } = usePdkManager()
+const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const showAboutDialog = ref(false)
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
   showNewProjectWizard.value = false
@@ -104,7 +110,7 @@ const handleMenuAction = async (action: string) => {
       }
       break
     case 'about':
-      // TODO: 打开关于对话框
+      showAboutDialog.value = true
       break
   }
 }
@@ -204,6 +210,7 @@ onMounted(async () => {
   themeStore.initTheme()
   // 在应用启动时加载最近项目和已导入的 PDK
   await Promise.all([loadRecentProjects(), loadPdks()])
+  loadVersions()
 
   document.addEventListener('selectstart', handleSelectStart)
 

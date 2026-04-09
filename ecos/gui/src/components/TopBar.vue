@@ -129,6 +129,8 @@ const menus: Menu[] = [
     action: 'help',
     children: [
       { label: 'Documentation', icon: 'ri-book-open-line', event: 'documentation' },
+      { separator: true },
+      { label: 'About', icon: 'ri-information-line', event: 'about' },
     ]
   }
 ]
