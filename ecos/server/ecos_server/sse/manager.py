@@ -1,17 +1,16 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 """
 SSE 事件管理器 - 支持事件缓冲和跨线程发布
 """
 
 import asyncio
+import contextlib
 import threading
 import time
 from collections import defaultdict
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 from pydantic import BaseModel
-
 
 # 事件缓冲配置
 EVENT_BUFFER_MAX_SIZE = 100      # 每个 workspace 最多缓存的事件数
@@ -33,7 +32,7 @@ class EventManager:
         # 每个 workspace_id 的订阅者队列列表
         self._subscribers: dict[str, list[asyncio.Queue]] = defaultdict(list)
         # 事件循环引用（在 subscribe 时捕获）
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         # 保护 _subscribers 和 _event_buffer 的锁（用于跨线程访问）
         self._lock = threading.Lock()
         # 事件缓冲区：workspace_id -> [(timestamp, response), ...]
@@ -43,11 +42,8 @@ class EventManager:
         """
         安全地将通知放入队列（在事件循环线程中执行）
         """
-        try:
+        with contextlib.suppress(asyncio.QueueFull):
             queue.put_nowait(response)
-        except asyncio.QueueFull:
-            # 队列已满，跳过（避免阻塞）
-            pass
 
     def _buffer_event(self, workspace_id: str, response: BaseModel) -> None:
         """
@@ -106,13 +102,10 @@ class EventManager:
                 self._put_to_queue(queue, response)
             else:
                 # 在其他线程中，使用 call_soon_threadsafe 调度到事件循环
-                try:
+                with contextlib.suppress(RuntimeError):
                     self._loop.call_soon_threadsafe(
                         self._put_to_queue, queue, response
                     )
-                except RuntimeError:
-                    # 事件循环已关闭
-                    pass
 
     def notify(self, workspace_id: str, response: BaseModel) -> None:
         """
@@ -166,10 +159,8 @@ class EventManager:
             # 清理订阅
             with self._lock:
                 if workspace_id in self._subscribers:
-                    try:
+                    with contextlib.suppress(ValueError):
                         self._subscribers[workspace_id].remove(queue)
-                    except ValueError:
-                        pass
                     # 如果没有订阅者了，清理空列表
                     if not self._subscribers[workspace_id]:
                         del self._subscribers[workspace_id]

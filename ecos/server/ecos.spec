@@ -1,4 +1,3 @@
-# -*- mode: python ; coding: utf-8 -*-
 
 """
 PyInstaller spec file for ECOS Studio API Server.
@@ -17,9 +16,9 @@ Usage:
 import os
 import sys
 import warnings
-from importlib import metadata
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+from PyInstaller.utils.hooks import collect_all
 
 # Server directory (ecos/server/)
 SERVER_DIR = Path(SPECPATH)

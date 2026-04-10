@@ -39,6 +39,7 @@ torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 100
+extend-include = ["*.spec"]
 lint.select = [
   "B",   # flake8-bugbear
   "E",   # pycodestyle
@@ -47,7 +48,12 @@ lint.select = [
   "SIM", # flake8-simplify
   "UP",  # pyupgrade
 ]
-extend-include = ["*.spec"]
+
+[tool.ruff.lint.per-file-ignores]
+# PyInstaller injects SPECPATH, Analysis, PYZ, EXE as builtins at runtime.
+"*.spec" = ["F821"]
+# sys.path manipulation must precede imports in this entry-point script.
+"run_server.py" = ["E402"]
 
 [project.scripts]
 ecos-server = "ecos_server.run_server:main"

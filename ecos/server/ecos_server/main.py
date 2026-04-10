@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .ecc import workspace_router, sse_router
+from .ecc import sse_router, workspace_router
 
 # Create FastAPI application
 app = FastAPI(

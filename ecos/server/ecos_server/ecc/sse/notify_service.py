@@ -1,15 +1,14 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 """
 NotifyService - 全局通知服务单例
 
 提供全局的 SSE 通知能力，基于 workspace 进行通知分发。
 """
 
-from typing import Optional
+
+from ecos_server.sse import event_manager
 
 from ..schemas import ECCResponse
-from ecos_server.sse import event_manager
 
 
 class NotifyService:
@@ -30,10 +29,10 @@ class NotifyService:
     """
 
     def __init__(self):
-        self._workspace_id: Optional[str] = None
+        self._workspace_id: str | None = None
 
     @property
-    def workspace_id(self) -> Optional[str]:
+    def workspace_id(self) -> str | None:
         """获取当前 workspace_id"""
         return self._workspace_id
 
@@ -50,7 +49,7 @@ class NotifyService:
         """清除当前 workspace ID"""
         self._workspace_id = None
 
-    def get_workspace_id(self) -> Optional[str]:
+    def get_workspace_id(self) -> str | None:
         """
         获取当前 workspace ID
 
@@ -68,7 +67,7 @@ class NotifyService:
         """
         return self._workspace_id is not None
 
-    def notify(self, response: ECCResponse, workspace_id: Optional[str] = None) -> bool:
+    def notify(self, response: ECCResponse, workspace_id: str | None = None) -> bool:
         """
         发送通知
 

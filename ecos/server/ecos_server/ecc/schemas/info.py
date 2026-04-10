@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 from enum import Enum
+
 
 class InfoEnum(Enum):
     home = "home" # home information

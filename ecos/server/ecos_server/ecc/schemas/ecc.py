@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 from enum import Enum
+
 from pydantic import BaseModel
+
 
 class CMDEnum(Enum):
     home_page = "home_page"

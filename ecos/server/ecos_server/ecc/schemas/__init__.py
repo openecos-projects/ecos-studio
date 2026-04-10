@@ -1,13 +1,5 @@
-from .ecc import (
-    CMDEnum,
-    ResponseEnum,
-    ECCRequest,
-    ECCResponse
-)
-
-from .info import (
-    InfoEnum
-)
+from .ecc import CMDEnum, ECCRequest, ECCResponse, ResponseEnum
+from .info import InfoEnum
 
 __all__ = [
     'CMDEnum',

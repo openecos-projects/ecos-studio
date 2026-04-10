@@ -1,12 +1,8 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 from fastapi import APIRouter
 
-from ..schemas import (
-    ECCRequest,
-    ECCResponse
-)
+from ..schemas import ECCRequest, ECCResponse
 from ..services import ecc_service
 
 ecc_serv = ecc_service()

@@ -1,16 +1,18 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 """
 SSE 路由端点
 """
 
 import asyncio
+import contextlib
+
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from ecos_server.sse import event_manager
+
+from ..schemas import CMDEnum, ECCResponse, ResponseEnum
 from ..sse import to_sse_format
-from ..schemas import ECCResponse, CMDEnum, ResponseEnum
 
 router = APIRouter(prefix="/sse", tags=["sse"])
 
@@ -45,10 +47,8 @@ async def event_stream(workspace_id: str, request: Request):
 
         finally:
             heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat_task
-            except asyncio.CancelledError:
-                pass
 
     return StreamingResponse(
         generate(),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
+
+from ecos_server.sse import event_manager
 
 from .models import to_sse_format
-from ecos_server.sse import event_manager
 from .notify_service import NotifyService
 
 global _notify_service

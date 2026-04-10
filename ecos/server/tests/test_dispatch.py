@@ -1,10 +1,11 @@
+import contextlib
 import logging
 from unittest.mock import MagicMock
 
 import pytest
 
-from ecos_server.ecc.schemas import ECCRequest, ECCResponse, ResponseEnum
-from ecos_server.ecc.services.ecc import _summarize_request, ECCService
+from ecos_server.ecc.schemas import ECCRequest, ResponseEnum
+from ecos_server.ecc.services.ecc import ECCService, _summarize_request
 
 
 class TestSummarizeRequest:
@@ -66,29 +67,33 @@ class TestDispatch:
 
     def test_dispatch_routes_to_correct_method(self, service, caplog):
         request = ECCRequest(cmd="set_pdk_root", data={"pdk": "ics55", "pdk_root": "/tmp"})
-        with caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"):
-            try:
-                response = service.dispatch(request)
-            except Exception:
-                pass  # chipcompiler not installed in test env — that's fine
+        # chipcompiler not installed in test env — suppress import errors
+        with (
+            caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"),
+            contextlib.suppress(Exception),
+        ):
+            service.dispatch(request)
         assert "[CMD:start] cmd=set_pdk_root" in caplog.text
         assert ("[CMD:done]" in caplog.text or "[CMD:error]" in caplog.text)
 
     def test_dispatch_logs_timing(self, service, caplog):
         request = ECCRequest(cmd="set_pdk_root", data={"pdk": "ics55", "pdk_root": "/tmp"})
-        with caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"):
-            try:
-                service.dispatch(request)
-            except Exception:
-                pass  # chipcompiler not installed in test env — that's fine
+        # chipcompiler not installed in test env — suppress import errors
+        with (
+            caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"),
+            contextlib.suppress(Exception),
+        ):
+            service.dispatch(request)
         assert "elapsed=" in caplog.text
 
     def test_dispatch_exception_logs_error_and_reraises(self, service, caplog):
         service.create_workspace = MagicMock(side_effect=RuntimeError("test boom"))
         request = ECCRequest(cmd="create_workspace", data={})
-        with caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"):
-            with pytest.raises(RuntimeError, match="test boom"):
-                service.dispatch(request)
+        with (
+            caplog.at_level(logging.INFO, logger="ecos_server.ecc.services.ecc"),
+            pytest.raises(RuntimeError, match="test boom"),
+        ):
+            service.dispatch(request)
         assert "[CMD:error] cmd=create_workspace" in caplog.text
         assert "[CMD:done]" not in caplog.text
 

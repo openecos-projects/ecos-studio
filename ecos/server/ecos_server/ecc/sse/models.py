@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 """
 SSE 通知模型定义
 """
 
-from ..schemas import ECCResponse, CMDEnum
+from ..schemas import CMDEnum, ECCResponse
 
 
 def to_sse_format(response: ECCResponse) -> str:

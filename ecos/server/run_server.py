@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 """
 Standalone script to run the FastAPI server.
 This script is intended to be spawned by Tauri at application startup.
 """
 
-import sys
 import os
+import sys
 
 # In PyInstaller onefile mode, native C++ code (e.g. FLUTE) opens files via
 # relative paths anchored at _MEIPASS. Switch CWD so those paths resolve.
@@ -22,8 +21,8 @@ if project_root not in sys.path:
 
 import argparse
 import logging
-import uvicorn
 
+import uvicorn
 from chipcompiler.utility.log import (
     build_timestamped_log_file,
     init_api_runtime_log,
