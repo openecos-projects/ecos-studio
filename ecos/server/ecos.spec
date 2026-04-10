@@ -165,12 +165,7 @@ hiddenimports = [
     "anyio._backends._asyncio",
     # ChipCompiler modules
     "chipcompiler",
-    "chipcompiler.server",
-    "chipcompiler.server.main",
     "chipcompiler.utility.log",
-    "chipcompiler.server.routers",
-    "chipcompiler.server.schemas",
-    "chipcompiler.server.services",
     "chipcompiler.data",
     "chipcompiler.engine",
     "chipcompiler.tools",
