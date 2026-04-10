@@ -29,16 +29,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ecos/gui/src-tauri
-      # api-server is built by Bazel/PyInstaller and does not exist in CI.
-      # oss-cad-suite is not committed to git (only .gitkeep).
-      # tauri-build validates externalBin and resource paths in build.rs,
-      # so we stub them to satisfy the checks without the real artifacts.
+      # Stub artifacts absent in CI:
+      # - api-server: Bazel/PyInstaller sidecar, checked by tauri-build build.rs
+      # - oss-cad-suite: not committed to git, checked by tauri-build build.rs
+      # - ../dist: Vite output, checked by tauri::generate_context!() proc macro
       - run: |
           mkdir -p binaries
           touch binaries/api-server-x86_64-unknown-linux-gnu
           chmod +x binaries/api-server-x86_64-unknown-linux-gnu
           mkdir -p resources/oss-cad-suite
           touch resources/oss-cad-suite/README
+          mkdir -p ../dist
       - run: cargo clippy -- -D warnings
 
   vue-tsc:
