@@ -478,8 +478,8 @@ View design metrics and analysis charts generated during the flow:
 
 **Getting Help:**
 - Click **Help → Documentation** for detailed guides
-- Report bugs or request features: [GitHub Issues](https://github.com/openecos-projects/ecc/issues)
-- Ask questions and get support: [GitHub Discussions](https://github.com/openecos-projects/ecc/discussions)
+- Report bugs or request features: [GitHub Issues](https://github.com/openecos-projects/ecos-studio/issues)
+- Ask questions and get support: [GitHub Discussions](https://github.com/openecos-projects/ecos-studio/discussions)
 
 ---
 
