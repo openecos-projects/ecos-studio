@@ -74,7 +74,7 @@ class TestDispatch:
         ):
             service.dispatch(request)
         assert "[CMD:start] cmd=set_pdk_root" in caplog.text
-        assert ("[CMD:done]" in caplog.text or "[CMD:error]" in caplog.text)
+        assert "[CMD:done]" in caplog.text or "[CMD:error]" in caplog.text
 
     def test_dispatch_logs_timing(self, service, caplog):
         request = ECCRequest(cmd="set_pdk_root", data={"pdk": "ics55", "pdk_root": "/tmp"})
@@ -96,4 +96,3 @@ class TestDispatch:
             service.dispatch(request)
         assert "[CMD:error] cmd=create_workspace" in caplog.text
         assert "[CMD:done]" not in caplog.text
-

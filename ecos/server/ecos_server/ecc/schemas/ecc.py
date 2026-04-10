@@ -16,22 +16,25 @@ class CMDEnum(Enum):
     get_info = "get_info"
     notify = "notify"
 
+
 class ResponseEnum(Enum):
     success = "success"
     failed = "failed"
     error = "error"
     warning = "warning"
 
+
 class ECCRequest(BaseModel):
-    """
-    """
-    cmd : str
-    data : dict
+    """ """
+
+    cmd: str
+    data: dict
+
 
 class ECCResponse(BaseModel):
-    """
-    """
-    cmd : str
-    response : str
-    data : dict
-    message : list
+    """ """
+
+    cmd: str
+    response: str
+    data: dict
+    message: list

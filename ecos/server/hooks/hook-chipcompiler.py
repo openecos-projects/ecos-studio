@@ -2,6 +2,7 @@
 PyInstaller hook for chipcompiler package.
 Ensures ecc_py*.so extension module is included.
 """
+
 from pathlib import Path
 
 from PyInstaller.utils.hooks import get_module_file_attribute

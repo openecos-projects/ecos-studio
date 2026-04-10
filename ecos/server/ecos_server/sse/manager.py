@@ -13,8 +13,8 @@ from collections.abc import AsyncGenerator
 from pydantic import BaseModel
 
 # 事件缓冲配置
-EVENT_BUFFER_MAX_SIZE = 100      # 每个 workspace 最多缓存的事件数
-EVENT_BUFFER_TTL_SECONDS = 60    # 缓存事件的最大存活时间（秒）
+EVENT_BUFFER_MAX_SIZE = 100  # 每个 workspace 最多缓存的事件数
+EVENT_BUFFER_TTL_SECONDS = 60  # 缓存事件的最大存活时间（秒）
 
 
 class EventManager:
@@ -56,8 +56,7 @@ class EventManager:
         # 清理过期事件
         current_time = time.time()
         buffer[:] = [
-            (ts, evt) for ts, evt in buffer
-            if current_time - ts < EVENT_BUFFER_TTL_SECONDS
+            (ts, evt) for ts, evt in buffer if current_time - ts < EVENT_BUFFER_TTL_SECONDS
         ]
 
         # 添加新事件
@@ -91,7 +90,7 @@ class EventManager:
         # 检查是否在事件循环线程中
         try:
             running_loop = asyncio.get_running_loop()
-            in_loop_thread = (running_loop == self._loop)
+            in_loop_thread = running_loop == self._loop
         except RuntimeError:
             # 不在任何事件循环中
             in_loop_thread = False
@@ -103,9 +102,7 @@ class EventManager:
             else:
                 # 在其他线程中，使用 call_soon_threadsafe 调度到事件循环
                 with contextlib.suppress(RuntimeError):
-                    self._loop.call_soon_threadsafe(
-                        self._put_to_queue, queue, response
-                    )
+                    self._loop.call_soon_threadsafe(self._put_to_queue, queue, response)
 
     def notify(self, workspace_id: str, response: BaseModel) -> None:
         """
@@ -139,7 +136,8 @@ class EventManager:
             if workspace_id in self._event_buffer:
                 current_time = time.time()
                 buffered_events = [
-                    evt for ts, evt in self._event_buffer[workspace_id]
+                    evt
+                    for ts, evt in self._event_buffer[workspace_id]
                     if current_time - ts < EVENT_BUFFER_TTL_SECONDS
                 ]
                 del self._event_buffer[workspace_id]

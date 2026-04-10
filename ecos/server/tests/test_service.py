@@ -22,6 +22,7 @@ def test_ics55_gcd():
     input_filelist = str(FIXTURES_DIR / "gcd" / "filelist.f")
 
     from chipcompiler.data import get_design_parameters
+
     parameters = get_design_parameters("ics55", "gcd")
 
     ecc_serv = ecc_service()

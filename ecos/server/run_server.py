@@ -39,8 +39,9 @@ def _setup_logging(args) -> str:
         log_file = build_timestamped_log_file(log_file=log_file, pid=os.getpid())
 
     if args.disable_stdio_redirect:
-        print("[API_LOG] stdio redirect disabled; logs stay on console.",
-              file=sys.stderr, flush=True)
+        print(
+            "[API_LOG] stdio redirect disabled; logs stay on console.", file=sys.stderr, flush=True
+        )
         logging.getLogger("ecos_server").setLevel(logging.INFO)
         return log_file
 
@@ -50,8 +51,7 @@ def _setup_logging(args) -> str:
         backup_count=args.log_backup_count,
     )
 
-    print(f"[API_LOG] log -> {log_file} (tail -f {log_file})",
-          file=sys.stderr, flush=True)
+    print(f"[API_LOG] log -> {log_file} (tail -f {log_file})", file=sys.stderr, flush=True)
 
     return log_file
 
@@ -68,26 +68,49 @@ def main():
         default=[],
         help="Directory to watch for reload (can be specified multiple times)",
     )
-    parser.add_argument("--log-file", default="/tmp/ecos-studio-api-server.log",
-                        help="Runtime log file path")
-    parser.add_argument("--log-max-bytes", type=int, default=20 * 1024 * 1024,
-                        help="Rotate on startup if log exceeds this size")
-    parser.add_argument("--log-backup-count", type=int, default=5,
-                        help="Number of backup files to keep")
-    parser.add_argument("--disable-stdio-redirect", action="store_true",
-                        help="Keep stdout/stderr on console")
-    parser.add_argument("--log-level", default=os.environ.get("ECOS_API_LOG_LEVEL", "warning"),
-                        help="Uvicorn log level (default: warning)")
-    parser.add_argument("--access-log", dest="access_log", action="store_true",
-                        help="Enable Uvicorn access logs")
-    parser.add_argument("--no-access-log", dest="access_log", action="store_false",
-                        help="Disable Uvicorn access logs (default)")
+    parser.add_argument(
+        "--log-file", default="/tmp/ecos-studio-api-server.log", help="Runtime log file path"
+    )
+    parser.add_argument(
+        "--log-max-bytes",
+        type=int,
+        default=20 * 1024 * 1024,
+        help="Rotate on startup if log exceeds this size",
+    )
+    parser.add_argument(
+        "--log-backup-count", type=int, default=5, help="Number of backup files to keep"
+    )
+    parser.add_argument(
+        "--disable-stdio-redirect", action="store_true", help="Keep stdout/stderr on console"
+    )
+    parser.add_argument(
+        "--log-level",
+        default=os.environ.get("ECOS_API_LOG_LEVEL", "warning"),
+        help="Uvicorn log level (default: warning)",
+    )
+    parser.add_argument(
+        "--access-log", dest="access_log", action="store_true", help="Enable Uvicorn access logs"
+    )
+    parser.add_argument(
+        "--no-access-log",
+        dest="access_log",
+        action="store_false",
+        help="Disable Uvicorn access logs (default)",
+    )
     parser.set_defaults(access_log=False)
-    parser.add_argument("--timestamp-log-file", dest="timestamp_log_file",
-                        action="store_true", default=True,
-                        help="Timestamped log filename per startup (default)")
-    parser.add_argument("--no-timestamp-log-file", dest="timestamp_log_file",
-                        action="store_false", help="Use exact --log-file path")
+    parser.add_argument(
+        "--timestamp-log-file",
+        dest="timestamp_log_file",
+        action="store_true",
+        default=True,
+        help="Timestamped log filename per startup (default)",
+    )
+    parser.add_argument(
+        "--no-timestamp-log-file",
+        dest="timestamp_log_file",
+        action="store_false",
+        help="Use exact --log-file path",
+    )
 
     args = parser.parse_args()
     log_file = _setup_logging(args)

@@ -9,10 +9,12 @@ ecc_serv = ecc_service()
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "ok"}
+
 
 @router.post("/create_workspace", response_model=ECCResponse)
 async def create_workspace(request: ECCRequest):

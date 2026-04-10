@@ -56,7 +56,7 @@ def test_create_workspace_from_rtl_list_string(tmp_path):
     assert content == [
         str(file_a),
         str(file_b),
-        f"\"{file_c}\"",
+        f'"{file_c}"',
     ]
 
     assert (workspace_dir / "origin" / "a.v").exists()

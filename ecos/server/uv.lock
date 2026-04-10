@@ -497,6 +497,7 @@ dev = [
     { name = "ruff", specifier = ">=0.14.10" },
     { name = "ty", specifier = ">=0.0.9" },
     { name = "uv-build", specifier = ">=0.10.9,<0.11.0" },
+    { name = "z3-solver", specifier = ">=4.12" },
 ]
 
 [[package]]
