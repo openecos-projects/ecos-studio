@@ -71,7 +71,7 @@ const handleMenuAction = async (action: string) => {
     }
     case 'documentation':
       try {
-        await shellOpen('https://github.com/openecos-projects/ecc/blob/main/docs/user-guide.md')
+        await shellOpen('https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md')
       } catch (error) {
         console.error('Failed to open documentation:', error)
         showToast({
