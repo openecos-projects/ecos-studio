@@ -29,6 +29,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ecos/gui/src-tauri
+      # api-server is built by Bazel/PyInstaller and does not exist in CI.
+      # tauri-build's build.rs validates externalBin entries before compilation,
+      # so we stub the file to satisfy the check without the real binary.
+      - run: |
+          mkdir -p binaries
+          touch binaries/api-server-x86_64-unknown-linux-gnu
+          chmod +x binaries/api-server-x86_64-unknown-linux-gnu
       - run: cargo clippy -- -D warnings
 
   vue-tsc:
