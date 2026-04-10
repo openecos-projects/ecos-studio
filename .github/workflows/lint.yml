@@ -8,8 +8,11 @@ on:
 jobs:
   ruff:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ecos/server
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uvx ruff format --check ecos/server
-      - run: uvx ruff check ecos/server
+      - run: uvx ruff format --check
+      - run: uvx ruff check
