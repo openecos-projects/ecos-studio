@@ -489,7 +489,3 @@ View design metrics and analysis charts generated during the flow:
 - **Read API Guide** - Learn backend integration with REST API
 - **Join Community** - Participate in discussions and contribute
 
-For more information, see:
-- [Architecture Documentation](architecture.md)
-- [Development Guide](development.md)
-- [API Guide](api-guide.md)
