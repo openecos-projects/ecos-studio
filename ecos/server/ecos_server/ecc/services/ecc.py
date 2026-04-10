@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 import logging
 import os
 import time
@@ -11,14 +10,14 @@ from ..schemas import (
     ECCResponse,
     ResponseEnum,
 )
-
 from ..sse import server_notify
+
 gui_notify = server_notify()
 
 logger = logging.getLogger(__name__)
 
 
-def _summarize_request(data: dict) -> dict:
+def _summarize_request(data: object) -> dict:
     """Extract key fields from request data for logging."""
     if not isinstance(data, dict):
         return {}
@@ -202,7 +201,10 @@ class ECCService:
                         cmd=request.cmd,
                         response=ResponseEnum.error.value,
                         data={},
-                        message=[f"create workspace failed : {data.get('directory', '')}, error info is {e}"]
+                        message=[
+                            f"create workspace failed : {data.get('directory', '')}, "
+                            f"error info is {e}"
+                        ]
                     )
 
         if workspace is None:
@@ -328,7 +330,10 @@ class ECCService:
                 cmd=request.cmd,
                 response=ResponseEnum.failed.value,
                 data={},
-                message = [f"load workspace failed : {data.get('directory', '')}, error info is {e}"]
+                message=[
+                    f"load workspace failed : {data.get('directory', '')}, "
+                    f"error info is {e}"
+                ]
             )
 
         if workspace is None:
@@ -463,10 +468,12 @@ class ECCService:
                     break
                 else:
                     log_file = workspace_step.log.get("file", "")
-                    gui_notify.notify_step(step=workspace_step.name,
-                                               step_path=self.workspace.flow.path,
-                                               home_page=self.workspace.home.path,
-                                               log_file=os.path.abspath(log_file) if log_file else "")
+                    gui_notify.notify_step(
+                        step=workspace_step.name,
+                        step_path=self.workspace.flow.path,
+                        home_page=self.workspace.home.path,
+                        log_file=os.path.abspath(log_file) if log_file else "",
+                    )
             # self.engine_flow.run_steps()
         except Exception as e:
             logger.exception("rtl2gds: execution failed")
@@ -547,7 +554,10 @@ class ECCService:
                 cmd=request.cmd,
                 response=ResponseEnum.failed.value,
                 data=response_data,
-                message = [f"run step {step} failed with state {state.value} : {self.workspace.directory}"]
+                message=[
+                    f"run step {step} failed with state {state.value} : "
+                    f"{self.workspace.directory}"
+                ]
             )
 
     def get_info(self, request: ECCRequest) -> ECCResponse:
