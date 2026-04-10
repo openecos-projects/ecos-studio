@@ -75,6 +75,6 @@ The wheels are installed as **non-editable** packages so that PyInstaller's `col
 ## Documentation
 
 - [User Guide](docs/user-guide.md) - Complete guide to using ECOS Studio
-- [ECC Documentation](../ecc/README.md) - ECC toolchain documentation
+- [ECC Documentation](https://github.com/openecos-projects/ecc/blob/main/README.md) - ECC toolchain documentation
 
 
