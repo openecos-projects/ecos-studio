@@ -2,6 +2,7 @@
 
 mod gen_layout_tiles;
 
+#[cfg(not(debug_assertions))]
 use std::io::IsTerminal;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
@@ -16,6 +17,7 @@ use sha2::{Digest, Sha256};
 
 /// Returns true when the process was launched from an interactive terminal
 /// (i.e. stderr is a TTY). False when launched from a desktop file / launcher.
+#[cfg(not(debug_assertions))]
 fn is_launched_from_terminal() -> bool {
     std::io::stderr().is_terminal()
 }
@@ -232,7 +234,7 @@ fn wait_for_server_ready(port: u16, timeout_secs: u64) -> bool {
             return true;
         }
 
-        if start.elapsed().as_secs() >= 4 && attempt % 3 == 0 {
+        if start.elapsed().as_secs() >= 4 && attempt.is_multiple_of(3) {
             debug!(
                 "Still waiting for server on port {}... ({:.1}s elapsed)",
                 port,
@@ -368,11 +370,11 @@ fn start_api_server(
                     child.id(),
                     port
                 );
-                return ApiStartResult::Started(child, port);
+                ApiStartResult::Started(child, port)
             }
             Err(e) => {
                 error!("Failed to start FastAPI server: {}", e);
-                return ApiStartResult::Failed;
+                ApiStartResult::Failed
             }
         }
     }
@@ -1026,7 +1028,7 @@ fn main() {
                 // Start the FastAPI server (or detect an externally started one)
                 let (using_external_server, actual_port) = {
                     let mut server = api_server.lock().unwrap();
-                    match start_api_server(&app.handle()) {
+                    match start_api_server(app.handle()) {
                         ApiStartResult::Started(child, port) => {
                             *server = Some(child);
                             *api_port.lock().unwrap() = port;

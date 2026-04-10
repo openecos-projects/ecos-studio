@@ -619,7 +619,6 @@ fn parse_dbu_per_micron(units: Option<&Value>) -> i64 {
         return 1000;
     };
     let first = u
-        .trim()
         .split_whitespace()
         .next()
         .and_then(|s| s.parse::<f64>().ok())
