@@ -30,12 +30,15 @@ jobs:
         with:
           workspaces: ecos/gui/src-tauri
       # api-server is built by Bazel/PyInstaller and does not exist in CI.
-      # tauri-build's build.rs validates externalBin entries before compilation,
-      # so we stub the file to satisfy the check without the real binary.
+      # oss-cad-suite is not committed to git (only .gitkeep).
+      # tauri-build validates externalBin and resource paths in build.rs,
+      # so we stub them to satisfy the checks without the real artifacts.
       - run: |
           mkdir -p binaries
           touch binaries/api-server-x86_64-unknown-linux-gnu
           chmod +x binaries/api-server-x86_64-unknown-linux-gnu
+          mkdir -p resources/oss-cad-suite
+          touch resources/oss-cad-suite/README
       - run: cargo clippy -- -D warnings
 
   vue-tsc:
