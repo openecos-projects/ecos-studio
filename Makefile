@@ -1,4 +1,4 @@
-.PHONY: help setup check-setup build dev gui clean-gui dreamplace-wheel demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
+.PHONY: help setup check-setup build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
 WHEEL_DIR := $(CURDIR)/ecc/dist/wheel/repaired
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
@@ -24,7 +24,6 @@ help:
 	@echo "  make demo-gcd   - Run GCD demo"
 	@echo "  make demo-soc   - Run SoC demo"
 	@echo "  make demo-retrosoc - Run retroSoC demo"
-	@echo "  make dreamplace-wheel - Build ecc-dreamplace wheel (auditwheel repair + smoke test)"
 	@echo "  make docker-build  - Build Docker verification image"
 	@echo "  make docker-verify-all - Run all demos in Docker"
 
@@ -103,8 +102,6 @@ dev: check-setup
 	bazel run //ecos:dev_symlinks
 
 $(BUNDLE_TAR): check-setup
-	cd ecc && bazel run //:build_dreamplace_wheel
-	cd ecc && bazel run //:build_wheel
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-0.1.0-*.whl' | head -1) && \
 		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' | head -1) && \
@@ -130,9 +127,6 @@ clean-gui:
 clean:
 	bazel clean && cd ecc && bazel clean
 	@rm -f .setup-done
-
-dreamplace-wheel: check-setup
-	cd ecc && bazel run //:build_dreamplace_wheel
 
 demo-gcd: check-setup
 	nix run $(ECC_CLI) -- --workspace $(GCD_WS) \
