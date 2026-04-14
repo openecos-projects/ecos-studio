@@ -101,7 +101,7 @@ dev: check-setup
 	@cd ecos/gui && pnpm install
 	bazel run //ecos:dev_symlinks
 
-$(BUNDLE_TAR): check-setup
+$(BUNDLE_TAR): check-setup | _download_dreamplace_wheel
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-0.1.0-*.whl' | head -1) && \
 		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' | head -1) && \
@@ -109,6 +109,18 @@ $(BUNDLE_TAR): check-setup
 		[ -n "$$DP_WHL" ] || { echo "Error: ecc_dreamplace wheel not found in $(WHEEL_DIR)"; exit 1; } && \
 		cd ecos/server && uv pip install --reinstall --no-deps "$$ECC_WHL" "$$DP_WHL"
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
+
+.PHONY: _download_dreamplace_wheel
+_download_dreamplace_wheel:
+	@find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' -print -quit | grep -q . || { \
+		echo "==> Downloading ecc-dreamplace wheel from GitHub Releases..."; \
+		mkdir -p $(WHEEL_DIR); \
+		asset_url=$$(curl -s "https://api.github.com/repos/openecos-projects/ecc-dreamplace/releases/latest" | jq -r '.assets[0].browser_download_url'); \
+		[ "$$asset_url" != "null" ] || { echo "Error: no release asset found from GitHub Releases"; exit 1; }; \
+		whl_name=$$(basename $$asset_url); \
+		curl -L -o "$(WHEEL_DIR)/$$whl_name" "$$asset_url"; \
+		echo "==> Downloaded: $$asset_url"; \
+	}
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
 	@mkdir -p $(BUNDLE_EXTRACT_DIR)
