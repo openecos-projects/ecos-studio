@@ -102,6 +102,7 @@ dev: check-setup
 	bazel run //ecos:dev_symlinks
 
 $(BUNDLE_TAR): check-setup | _download_dreamplace_wheel
+	cd ecc && bazel run //:build_wheel
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-0.1.0-*.whl' | head -1) && \
 		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' | head -1) && \
