@@ -13,3 +13,5 @@ result
 # Claude Code
 .claude/
 .humanize*
+pdk/IHP-Open-PDK/
+pdk/sky130-pdk/

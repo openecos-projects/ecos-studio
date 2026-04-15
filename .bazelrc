@@ -1,21 +1,5 @@
-build --disk_cache=~/.cache/bazel-disk
-build --spawn_strategy=sandboxed,local
-build --verbose_failures
-build --show_timestamps
-build --python_version=PY3
-# Inherit caller PATH so sandboxed actions can resolve project toolchains
-# (for example: .venv Python 3.11 or nix develop shells).
-build --action_env=PATH
-build --action_env=PYINSTALLER_ONEFILE=1
-
-
-# Optional GitHub mirror config for external repository downloads.
-# Usage: bazel --config=ghproxy build //...
-# Set up git config to use ghfast mirror for github.com can also help with bazel's git_repository() rules:
-# git config --global url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"
-common:ghproxy --experimental_downloader_config=.bazel_downloader_config
-# Use ghfast-hosted Bazel Central Registry to avoid direct githubusercontent DNS issues.
-common:ghproxy --registry=https://ghfast.top/https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/main
-common:ghproxy --experimental_repository_downloader_retries=5
-common:ghproxy --http_connector_attempts=16
-common:ghproxy --http_connector_retry_max_timeout=30s
+build --spawn_strategy=local
+build --strategy=CcCmakeMakeRule=local
+build --jobs=2
+build --local_resources=memory=16384
+build --action_env=PATH=/home/you/.cargo/bin:/home/you/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin

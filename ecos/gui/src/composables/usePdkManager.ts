@@ -104,6 +104,24 @@ export function usePdkManager() {
         return info
       }
 
+      // 3. IHP SG13G2 (ADD THIS)
+      if (topDirs.some(d => d.toLowerCase().startsWith('sg13g2'))) {
+        info.name = 'IHP SG13G2 PDK'
+        info.description = 'IHP 130nm open-source BiCMOS PDK (auto-detected)'
+        info.techNode = '130nm'
+        info.pdkId = 'ihp130'
+        return info
+      }
+
+      // 4. GlobalFoundries (ADD THIS)
+      if (topDirs.some(d => d.startsWith('gf180mcu'))) {
+        info.name = 'GlobalFoundries GF180MCU PDK'
+        info.description = 'GlobalFoundries 180nm open-source PDK (auto-detected)'
+        info.techNode = '180nm'
+        info.pdkId = 'gf180mcu'
+        return info
+      }
+
       // 通用检测：检查是否包含常见 PDK 文件
       const hasLef = topFiles.some(f => f.endsWith('.lef'))
       const hasLib = topFiles.some(f => f.endsWith('.lib'))
