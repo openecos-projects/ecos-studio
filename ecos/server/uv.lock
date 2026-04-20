@@ -467,7 +467,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "ecc-dreamplace", url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" },
-    { name = "ecc-tools", editable = "../../ecc/chipcompiler/thirdparty/ecc-tools" },
+    { name = "ecc-tools", url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl" },
     { name = "fastapi", specifier = ">=0.109" },
     { name = "klayout", specifier = ">=0.30.2" },
     { name = "matplotlib", specifier = ">=3.4" },
@@ -552,12 +552,10 @@ requires-dist = [
 [[package]]
 name = "ecc-tools"
 version = "0.1.0a0"
-source = { editable = "../../ecc/chipcompiler/thirdparty/ecc-tools" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [{ name = "auditwheel" }]
+source = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl" }
+wheels = [
+    { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:ac1370f9ee412332cf9161db74eae959f4e40e1b296f24e428dabe7e1abbadbb" },
+]
 
 [[package]]
 name = "ecos-server"
