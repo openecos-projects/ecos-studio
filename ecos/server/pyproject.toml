@@ -11,8 +11,6 @@ dependencies = [
   "fastapi>=0.109",
   "uvicorn>=0.27",
 ]
-[project.optional-dependencies]
-dreamplace = ["ecc[dreamplace]==0.1.0"]
 
 [dependency-groups]
 dev = [

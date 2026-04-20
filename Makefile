@@ -101,23 +101,37 @@ dev: check-setup
 	@cd ecos/gui && pnpm install
 	bazel run //ecos:dev_symlinks
 
-$(BUNDLE_TAR): check-setup | _download_dreamplace_wheel
-	cd ecc && bazel run //:build_wheel
+$(BUNDLE_TAR): check-setup | _download_dreamplace_wheel _download_ecc_tools_wheel
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-0.1.0-*.whl' | head -1) && \
-		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' | head -1) && \
+	@ECC_WHL=$$(find $(WHEEL_DIR) -name 'ecc-*.whl' ! -name 'ecc_dreamplace-*' ! -name 'ecc_tools-*' | head -1) && \
+		DP_WHL=$$(find $(WHEEL_DIR) -name 'ecc_dreamplace-*.whl' | head -1) && \
+		ET_WHL=$$(find $(WHEEL_DIR) -name 'ecc_tools-*.whl' | head -1) && \
 		[ -n "$$ECC_WHL" ] || { echo "Error: ecc wheel not found in $(WHEEL_DIR)"; exit 1; } && \
 		[ -n "$$DP_WHL" ] || { echo "Error: ecc_dreamplace wheel not found in $(WHEEL_DIR)"; exit 1; } && \
-		cd ecos/server && uv pip install --reinstall --no-deps "$$ECC_WHL" "$$DP_WHL"
+		[ -n "$$ET_WHL" ] || { echo "Error: ecc_tools wheel not found in $(WHEEL_DIR)"; exit 1; } && \
+		cd ecos/server && uv pip install --reinstall --no-deps "$$ECC_WHL" "$$DP_WHL" "$$ET_WHL"
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
 
 .PHONY: _download_dreamplace_wheel
 _download_dreamplace_wheel:
-	@find $(WHEEL_DIR) -name 'ecc_dreamplace-0.1.0-*.whl' -print -quit | grep -q . || { \
+	@find $(WHEEL_DIR) -name 'ecc_dreamplace-*.whl' -print -quit | grep -q . || { \
 		echo "==> Downloading ecc-dreamplace wheel from GitHub Releases..."; \
 		mkdir -p $(WHEEL_DIR); \
 		asset_url=$$(curl -s "https://api.github.com/repos/openecos-projects/ecc-dreamplace/releases/latest" | jq -r '.assets[0].browser_download_url'); \
 		[ "$$asset_url" != "null" ] || { echo "Error: no release asset found from GitHub Releases"; exit 1; }; \
+		whl_name=$$(basename $$asset_url); \
+		curl -L -o "$(WHEEL_DIR)/$$whl_name" "$$asset_url"; \
+		echo "==> Downloaded: $$asset_url"; \
+	}
+
+.PHONY: _download_ecc_tools_wheel
+_download_ecc_tools_wheel:
+	@find $(WHEEL_DIR) -name 'ecc_tools-*.whl' -print -quit | grep -q . || { \
+		echo "==> Downloading ecc-tools wheel from GitHub Releases..."; \
+		mkdir -p $(WHEEL_DIR); \
+		asset_url=$$(curl -s "https://api.github.com/repos/openecos-projects/ecc-tools/releases/latest" \
+			| jq -r '.assets[] | select(.name | endswith(".whl")) | .browser_download_url'); \
+		[ "$$asset_url" != "null" ] || { echo "Error: no ecc-tools release asset found from GitHub Releases"; exit 1; }; \
 		whl_name=$$(basename $$asset_url); \
 		curl -L -o "$(WHEEL_DIR)/$$whl_name" "$$asset_url"; \
 		echo "==> Downloaded: $$asset_url"; \
