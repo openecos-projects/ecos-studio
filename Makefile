@@ -84,8 +84,6 @@ setup:
 	    DEPS_SKIPPED=false; \
 	fi && \
 	git submodule update --init --recursive && \
-	cd ecc && bazel run //:prepare_dev && \
-	cd .. && \
 	echo "timestamp=$$(date +%Y-%m-%dT%H:%M:%S%z)" > .setup-done && \
 	echo "deps_skipped=$$DEPS_SKIPPED" >> .setup-done && \
 	echo "bazel=$$(command -v bazel) ($$(bazel --version 2>/dev/null | head -1))" >> .setup-done && \
@@ -95,10 +93,6 @@ setup:
 check-setup:
 	@if [ ! -f .setup-done ]; then \
 		echo "Error: Please run 'make setup' before this target."; \
-		exit 1; \
-	fi
-	@if [ ! -d ecc/.venv ]; then \
-		echo "Error: ecc/.venv not found. Please run 'make setup' to create it."; \
 		exit 1; \
 	fi
 
