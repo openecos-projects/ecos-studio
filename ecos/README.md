@@ -39,19 +39,13 @@ bazel run //bazel/scripts:install_dreamplace    # Build + install .so files
 bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (manifest-based)
 ```
 
-### Building Wheels
+### Release Wheels
 
-Both wheels are output to `ecc/dist/wheel/repaired/` after auditwheel repair and smoke test:
+Release builds download pinned GitHub Release wheels into `ecc/dist/wheel/repaired/`:
 
 ```bash
-# DreamPlace wheel (CMake compile .so → raw wheel → auditwheel repair → smoke test)
-cd ecc && bazel run //:build_dreamplace_wheel   # → ecc_dreamplace-*-linux_x86_64.whl
-
-# ECC wheel (ECC-Tools runtime → raw wheel → auditwheel repair → smoke test)
-cd ecc && bazel run //bazel/scripts:build_wheel # → ecc_tools-*-linux_x86_64.whl
-
-# Or use the convenience target for DreamPlace
-make dreamplace-wheel
+# Download pinned ecc, ecc-dreamplace, and ecc-tools release wheels
+make _download_ecc_wheel _download_dreamplace_wheel _download_ecc_tools_wheel
 ```
 
 ### Release Build
@@ -59,7 +53,7 @@ make dreamplace-wheel
 `make build` runs the full pipeline:
 
 ```
-build wheels → uv sync (runtime deps) → install wheels into venv → PyInstaller bundle → AppImage
+download pinned release wheels → uv sync (runtime deps) → install wheels into venv → PyInstaller bundle → AppImage
 ```
 
 ```bash
@@ -70,11 +64,10 @@ make build
 make gui
 ```
 
-The wheels are installed as **non-editable** packages so that PyInstaller's `collect_all("dreamplace")` and `collect_all("chipcompiler")` can discover all package files during bundling.
+The release wheels are installed as **non-editable** packages so that PyInstaller's `collect_all("dreamplace")` and `collect_all("chipcompiler")` can discover all package files during bundling.
 
 ## Documentation
 
 - [User Guide](docs/user-guide.md) - Complete guide to using ECOS Studio
 - [ECC Documentation](https://github.com/openecos-projects/ecc/blob/main/README.md) - ECC toolchain documentation
-
 

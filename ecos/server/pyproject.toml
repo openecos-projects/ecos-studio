@@ -7,7 +7,7 @@ name = "ecos-server"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-  "ecc==0.1.0",
+  "ecc==0.1.0a0",
   "fastapi>=0.109",
   "uvicorn>=0.27",
 ]

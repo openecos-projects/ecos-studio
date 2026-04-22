@@ -49,7 +49,7 @@ make setup
 # Development
 make dev
 
-# Release build (wheels + bundle + AppImage)
+# Release build (download pinned wheels + bundle + AppImage)
 make build
 
 # Launch GUI
@@ -63,7 +63,7 @@ make demo-gcd           # GCD example
 make demo-retrosoc      # retroSoC example
 ```
 
-For development setup, ecc-tools builds, ecc-dreamPlace builds, wheel builds, and release build details, see [ecos/README.md](ecos/README.md).
+For development setup, release wheel usage, and release build details, see [ecos/README.md](ecos/README.md).
 
 ## Documentation
 
