@@ -41,11 +41,14 @@ bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (ma
 
 ### Release Wheels
 
-Release builds download pinned GitHub Release wheels into `ecc/dist/wheel/repaired/`:
+Release builds use pinned GitHub Release wheels through `ecos/server/pyproject.toml` and `ecos/server/uv.lock`.
 
 ```bash
-# Download pinned ecc, ecc-dreamplace, and ecc-tools release wheels
-make _download_ecc_wheel _download_dreamplace_wheel _download_ecc_tools_wheel
+# Re-sync the server environment from the locked release wheels
+cd ecos/server && uv sync --frozen --all-groups --python 3.11
+
+# Optional: switch the server venv to the local ECC checkout for development
+make use-local-ecc
 ```
 
 ### Release Build
@@ -53,7 +56,7 @@ make _download_ecc_wheel _download_dreamplace_wheel _download_ecc_tools_wheel
 `make build` runs the full pipeline:
 
 ```
-download pinned release wheels → uv sync (runtime deps) → install wheels into venv → PyInstaller bundle → AppImage
+uv sync locked release wheels → PyInstaller bundle → AppImage
 ```
 
 ```bash
@@ -70,4 +73,3 @@ The release wheels are installed as **non-editable** packages so that PyInstalle
 
 - [User Guide](docs/user-guide.md) - Complete guide to using ECOS Studio
 - [ECC Documentation](https://github.com/openecos-projects/ecc/blob/main/README.md) - ECC toolchain documentation
-

@@ -1,12 +1,5 @@
-.PHONY: help setup check-setup build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
+.PHONY: help setup check-setup build dev use-local-ecc gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
-WHEEL_DIR := $(CURDIR)/ecc/dist/wheel/repaired
-ECC_WHEEL_URL := https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha/ecc-0.1.0a0-py3-none-any.whl
-DREAMPLACE_WHEEL_URL := https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl
-ECC_TOOLS_WHEEL_URL := https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl
-ECC_WHEEL := $(WHEEL_DIR)/$(notdir $(ECC_WHEEL_URL))
-DREAMPLACE_WHEEL := $(WHEEL_DIR)/$(notdir $(DREAMPLACE_WHEEL_URL))
-ECC_TOOLS_WHEEL := $(WHEEL_DIR)/$(notdir $(ECC_TOOLS_WHEEL_URL))
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
 BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
 APPIMAGE_MARKER := $(BUNDLE_EXTRACT_DIR)/.extracted
@@ -101,45 +94,13 @@ dev: check-setup
 	@cd ecos/gui && pnpm install
 	bazel run //ecos:dev_symlinks
 
-$(BUNDLE_TAR): check-setup | _download_ecc_wheel _download_dreamplace_wheel _download_ecc_tools_wheel
+use-local-ecc: check-setup
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	@[ -f "$(ECC_WHEEL)" ] || { echo "Error: ecc wheel not found: $(ECC_WHEEL)"; exit 1; }; \
-		[ -f "$(DREAMPLACE_WHEEL)" ] || { echo "Error: ecc-dreamplace wheel not found: $(DREAMPLACE_WHEEL)"; exit 1; }; \
-		[ -f "$(ECC_TOOLS_WHEEL)" ] || { echo "Error: ecc-tools wheel not found: $(ECC_TOOLS_WHEEL)"; exit 1; }; \
-		cd ecos/server && uv pip install --reinstall --no-deps "$(ECC_WHEEL)" "$(DREAMPLACE_WHEEL)" "$(ECC_TOOLS_WHEEL)"
+	@cd ecos/server && uv pip install --reinstall --no-deps -e ../../ecc
+
+$(BUNDLE_TAR): check-setup
+	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
-
-.PHONY: _download_ecc_wheel _download_dreamplace_wheel _download_ecc_tools_wheel
-
-_download_ecc_wheel:
-	@[ -f "$(ECC_WHEEL)" ] || { \
-		echo "==> Downloading ecc wheel from GitHub Releases..."; \
-		mkdir -p "$(WHEEL_DIR)"; \
-		tmp="$(ECC_WHEEL).tmp"; \
-		curl -fL -o "$$tmp" "$(ECC_WHEEL_URL)"; \
-		mv "$$tmp" "$(ECC_WHEEL)"; \
-		echo "==> Downloaded: $(ECC_WHEEL_URL)"; \
-	}
-
-_download_dreamplace_wheel:
-	@[ -f "$(DREAMPLACE_WHEEL)" ] || { \
-		echo "==> Downloading ecc-dreamplace wheel from GitHub Releases..."; \
-		mkdir -p "$(WHEEL_DIR)"; \
-		tmp="$(DREAMPLACE_WHEEL).tmp"; \
-		curl -fL -o "$$tmp" "$(DREAMPLACE_WHEEL_URL)"; \
-		mv "$$tmp" "$(DREAMPLACE_WHEEL)"; \
-		echo "==> Downloaded: $(DREAMPLACE_WHEEL_URL)"; \
-	}
-
-_download_ecc_tools_wheel:
-	@[ -f "$(ECC_TOOLS_WHEEL)" ] || { \
-		echo "==> Downloading ecc-tools wheel from GitHub Releases..."; \
-		mkdir -p "$(WHEEL_DIR)"; \
-		tmp="$(ECC_TOOLS_WHEEL).tmp"; \
-		curl -fL -o "$$tmp" "$(ECC_TOOLS_WHEEL_URL)"; \
-		mv "$$tmp" "$(ECC_TOOLS_WHEEL)"; \
-		echo "==> Downloaded: $(ECC_TOOLS_WHEEL_URL)"; \
-	}
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
 	@mkdir -p $(BUNDLE_EXTRACT_DIR)

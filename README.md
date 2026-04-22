@@ -49,7 +49,7 @@ make setup
 # Development
 make dev
 
-# Release build (download pinned wheels + bundle + AppImage)
+# Release build (locked release wheels + bundle + AppImage)
 make build
 
 # Launch GUI
