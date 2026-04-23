@@ -180,7 +180,7 @@ jobs:
       - name: Upload CI AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ecos-studio-appimage-${{ github.sha }}
+          name: ecos-studio-appimage-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 14
           path: |
