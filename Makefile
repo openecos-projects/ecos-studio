@@ -18,6 +18,7 @@ help:
 	@echo "  make setup      - Init submodules and setup PDK"
 	@echo "  make build      - Build ECOS Studio bundle (Bazel)"
 	@echo "  make dev        - Setup development environment"
+	@echo "  make use-local-ecc - Use local ECC checkout in server venv"
 	@echo "  make gui        - Launch GUI (release version)"
 	@echo "  make clean-gui  - Clean extracted GUI bundle"
 	@echo "  make demo-gcd   - Run GCD demo"
