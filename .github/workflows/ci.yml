@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Check Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check version
+        uses: ./.github/actions/check-version
+
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ecos/server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Check formatting
+        run: uvx ruff format --check
+
+      - name: Lint Python
+        run: uvx ruff check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ecos/gui/src-tauri
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --fix-missing \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ecos/gui/src-tauri
+
+      - name: Stub generated artifacts
+        run: |
+          mkdir -p binaries
+          touch binaries/api-server-x86_64-unknown-linux-gnu
+          chmod +x binaries/api-server-x86_64-unknown-linux-gnu
+          mkdir -p resources/oss-cad-suite
+          touch resources/oss-cad-suite/README
+          mkdir -p ../dist
+
+      - name: Lint Rust
+        run: cargo clippy -- -D warnings
+
+  vue-tsc:
+    name: Vue Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ecos/gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ecos/gui/.nvmrc
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck Vue
+        run: pnpm exec vue-tsc --noEmit
+
+  build-appimage:
+    name: Build AppImage
+    needs: [check-version, ruff, clippy, vue-tsc]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing \
+            git curl ca-certificates build-essential pkg-config \
+            python3 python3-venv python3-pip python3-dev \
+            libgtk-3-dev libgtk-3-bin libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev \
+            libglib2.0-dev libglib2.0-bin librsvg2-dev \
+            cmake ninja-build tcl-dev \
+            libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev \
+            flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
+            libhwloc-dev libcurl4-openssl-dev libtbb-dev \
+            patchelf jq wget
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ecos/gui/.nvmrc
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ecos/gui/src-tauri
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+          enable-cache: true
+
+      - name: Setup Bazel
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/bazelbuild/bazel/releases/download/8.5.0/bazel-8.5.0-linux-x86_64 \
+            -o "$HOME/.local/bin/bazel"
+          chmod +x "$HOME/.local/bin/bazel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync server environment
+        working-directory: ecos/server
+        run: uv sync --frozen --all-groups --all-extras --python 3.11
+
+      - name: Build release bundle
+        run: |
+          PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
+
+      - name: Verify AppImage artifact
+        run: |
+          BUNDLE_TAR="bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar"
+          tar -tf "$BUNDLE_TAR" | grep -E '(^|/)[^/]+\.AppImage$' > /tmp/ecos-appimage-files.txt || true
+
+          if [ ! -s /tmp/ecos-appimage-files.txt ]; then
+            echo "ERROR: AppImage artifact not found in $BUNDLE_TAR" >&2
+            echo "Bundle contents:" >&2
+            tar -tf "$BUNDLE_TAR" | sed -n '1,200p' >&2
+            exit 1
+          fi
+
+          echo "Found AppImage artifact:"
+          cat /tmp/ecos-appimage-files.txt
