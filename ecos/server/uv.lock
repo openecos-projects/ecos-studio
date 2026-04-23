@@ -220,8 +220,8 @@ wheels = [
 
 [[package]]
 name = "ecc"
-version = "0.1.0a0"
-source = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha/ecc-0.1.0a0-py3-none-any.whl" }
+version = "0.1.0a1"
+source = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.1/ecc-0.1.0a1-py3-none-any.whl" }
 dependencies = [
     { name = "ecc-dreamplace", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "ecc-tools", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -240,13 +240,13 @@ dependencies = [
     { name = "uvicorn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha/ecc-0.1.0a0-py3-none-any.whl", hash = "sha256:f7248520818fe6577a1d3701e109582e01398cde5cbde2d13b1c7f032dcf3a3e" },
+    { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.1/ecc-0.1.0a1-py3-none-any.whl", hash = "sha256:ffc645e89b511fa4d374f0c6ad85d09634612b25786e883bb421588e9129c5d9" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "ecc-dreamplace", specifier = "==0.1.0a1" },
-    { name = "ecc-tools", specifier = "==0.1.0a0" },
+    { name = "ecc-tools", specifier = "==0.1.0a1" },
     { name = "fastapi", specifier = ">=0.109" },
     { name = "klayout", specifier = ">=0.30.2" },
     { name = "matplotlib", specifier = ">=3.4" },
@@ -312,10 +312,10 @@ requires-dist = [
 
 [[package]]
 name = "ecc-tools"
-version = "0.1.0a0"
-source = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl" }
+version = "0.1.0a1"
+source = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" }
 wheels = [
-    { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:ac1370f9ee412332cf9161db74eae959f4e40e1b296f24e428dabe7e1abbadbb" },
+    { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:762cef33f7d2bffb9e90e51c7c1c62f9a6bee3cb9ac97c888951351487663288" },
 ]
 
 [[package]]
@@ -347,9 +347,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ecc", url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha/ecc-0.1.0a0-py3-none-any.whl" },
+    { name = "ecc", url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.1/ecc-0.1.0a1-py3-none-any.whl" },
     { name = "ecc-dreamplace", url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" },
-    { name = "ecc-tools", url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha/ecc_tools-0.1.0a0-py3-none-manylinux_2_34_x86_64.whl" },
+    { name = "ecc-tools", url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" },
     { name = "fastapi", specifier = ">=0.109" },
     { name = "torch", specifier = ">=1.6.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "uvicorn", specifier = ">=0.27" },
