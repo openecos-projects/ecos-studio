@@ -179,6 +179,10 @@ jobs:
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           {
+            echo "> [!WARNING]"
+            echo "> **ECOS Studio** is still under rapid development. You can download the latest version from the [release page](https://github.com/openecos-projects/ecos-studio/releases) to try it out (The current release builds are produced on **Ubuntu 22.04**, so using an older Linux system may lead to compatibility issues. Additionally, ECOS Studio currently only supports the **x86_64** Linux platform.)."
+            echo ">"
+            echo ""
             if [[ -n "$PREV_TAG" ]]; then
               echo "## Changes"
               echo ""
