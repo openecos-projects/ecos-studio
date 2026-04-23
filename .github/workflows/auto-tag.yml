@@ -14,7 +14,6 @@ on:
       - "ecos/gui/src-tauri/Cargo.toml"
       - "ecos/gui/src-tauri/Cargo.lock"
       - "ecos/gui/src-tauri/tauri.conf.json"
-      - "ecos/gui/src-tauri/ecos-version.json"
 
 permissions:
   contents: write
