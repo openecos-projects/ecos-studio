@@ -1,6 +1,7 @@
 # ECOS Studio: An RTL-to-Chip Silicon Design Solution
 
-[![CI](https://github.com/0xharry/ecos-studio/actions/workflows/lint.yml/badge.svg)](https://github.com/0xharry/ecos-studio/actions/workflows/lint.yml)
+[![CI](https://github.com/openecos-projects/ecos-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/openecos-projects/ecos-studio/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/openecos-projects/ecos-studio)](https://github.com/openecos-projects/ecos-studio/releases/latest)
 
 ECOS Studio is an integrated, one-stop silicon design solution that democratizes access to custom silicon. It vertically integrates open-source IP libraries, a robust EDA toolchain, and accessible PDKs into a unified framework, providing an "FPGA-like" experience for ASIC design.
 
