@@ -35,6 +35,9 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv]
+# Release wheels for ecc-dreamplace and ecc-tools are currently published only as
+# manylinux x86_64 artifacts, so locking and syncing this server environment is
+# intentionally limited to Linux x86_64.
 environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]

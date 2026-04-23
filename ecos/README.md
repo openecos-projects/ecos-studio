@@ -16,6 +16,14 @@ ECOS Studio is a desktop application that provides an integrated development env
 
 ## Quick Start (For Developers)
 
+### Platform Support
+
+Server development and release builds currently require Linux x86_64. The server
+uv environment is locked to pinned GitHub Release wheels for `ecc-dreamplace`
+and `ecc-tools`, and those native wheels are published as manylinux x86_64
+artifacts. macOS, Windows, and non-x86_64 Linux hosts are not supported by
+`make dev`, `make use-local-ecc`, or `make build` yet.
+
 ### Development
 
 ```bash

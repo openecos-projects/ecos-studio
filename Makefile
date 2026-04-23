@@ -1,4 +1,4 @@
-.PHONY: help setup check-setup build dev use-local-ecc gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
+.PHONY: help setup check-setup check-platform build dev use-local-ecc gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
 BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
@@ -89,16 +89,23 @@ check-setup:
 		exit 1; \
 	fi
 
-dev: check-setup
+check-platform:
+	@if [ "$$(uname -s)" != "Linux" ] || [ "$$(uname -m)" != "x86_64" ]; then \
+		echo "Error: ECOS Studio server development currently requires Linux x86_64."; \
+		echo "The locked uv environment uses pinned manylinux x86_64 wheels for ecc-dreamplace and ecc-tools."; \
+		exit 1; \
+	fi
+
+dev: check-setup check-platform
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@cd ecos/gui && pnpm install
 	bazel run //ecos:dev_symlinks
 
-use-local-ecc: check-setup
+use-local-ecc: check-setup check-platform
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	@cd ecos/server && uv pip install --reinstall --no-deps -e ../../ecc
 
-$(BUNDLE_TAR): check-setup
+$(BUNDLE_TAR): check-setup check-platform
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
 	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
 
