@@ -1,6 +1,6 @@
 [package]
 name = "ecos-studio"
-version = "0.1.0"
+version = "0.1.0-alpha.3"
 description = "ECOS-Studio"
 authors = ["Ekko"]
 license = ""
@@ -50,4 +50,3 @@ overflow-checks = false
 opt-level = 3
 [profile.release.package.wry]
 opt-level = 3
-

@@ -8,7 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .ecc import sse_router, workspace_router
 
 # Create FastAPI application
-app = FastAPI(title="ECOS Studio API", description="Backend API for ECOS Studio", version="0.1.0")
+app = FastAPI(
+    title="ECOS Studio API", description="Backend API for ECOS Studio", version="0.1.0-alpha.3"
+)
 
 # Configure CORS for frontend access
 app.add_middleware(
@@ -35,7 +37,12 @@ app.include_router(sse_router)
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"name": "ECOS Studio API", "version": "0.1.0", "status": "running", "tools": ["ecc"]}
+    return {
+        "name": "ECOS Studio API",
+        "version": "0.1.0-alpha.3",
+        "status": "running",
+        "tools": ["ecc"],
+    }
 
 
 @app.get("/health")

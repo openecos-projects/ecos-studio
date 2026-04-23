@@ -18,7 +18,7 @@
 
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "ecos-studio";
-  version = "0.1.0-alpha";
+  version = "0.1.0-alpha.3";
 
   src =
     with lib.fileset;
