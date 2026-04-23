@@ -136,7 +136,7 @@ clean-gui:
 	rm -rf $(BUNDLE_EXTRACT_DIR)
 
 clean:
-	bazel clean && cd ecc && bazel clean
+	bazel clean
 	@rm -f .setup-done
 
 demo-gcd: check-setup
