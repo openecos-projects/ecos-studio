@@ -10,6 +10,12 @@ from pathlib import Path
 expected_tag = os.environ.get("EXPECTED_TAG", "").strip()
 
 
+def normalize_version(v: str) -> str:
+    """Normalize semver prerelease tags (e.g. 0.1.0-alpha.3) to PEP 440 (e.g. 0.1.0a3)
+    so they can be compared with uv.lock / packaging canonical forms."""
+    return re.sub(r"-(alpha|beta|rc)\.?(\d+)", lambda m: m.group(1)[0] + m.group(2), v)
+
+
 def read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
@@ -100,7 +106,12 @@ print("Detected versions:")
 for name, value in versions:
     print(f"  {name}: {value}")
 
-mismatches = [(name, value) for name, value in versions if value != module_version]
+normalized_module = normalize_version(module_version)
+mismatches = [
+    (name, value)
+    for name, value in versions
+    if normalize_version(value) != normalized_module
+]
 if mismatches:
     print("")
     print(
