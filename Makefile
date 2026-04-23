@@ -92,8 +92,19 @@ check-setup:
 
 check-platform:
 	@if [ "$$(uname -s)" != "Linux" ] || [ "$$(uname -m)" != "x86_64" ]; then \
-		echo "Error: ECOS Studio server development currently requires Linux x86_64."; \
-		echo "The locked uv environment uses pinned manylinux x86_64 wheels for ecc-dreamplace and ecc-tools."; \
+		echo "Error: ECOS Studio server development currently requires Linux x86_64 with glibc >= 2.34."; \
+		echo "The locked uv environment uses pinned manylinux_2_34_x86_64 wheels for ecc-dreamplace and ecc-tools."; \
+		exit 1; \
+	fi; \
+	GLIBC_VERSION=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $$2 }'); \
+	GLIBC_MAJOR=$${GLIBC_VERSION%%.*}; \
+	GLIBC_MINOR=$${GLIBC_VERSION#*.}; \
+	GLIBC_MINOR=$${GLIBC_MINOR%%[^0-9]*}; \
+	GLIBC_MAJOR=$${GLIBC_MAJOR:-0}; \
+	GLIBC_MINOR=$${GLIBC_MINOR:-0}; \
+	if [ "$$GLIBC_MAJOR" -lt 2 ] || { [ "$$GLIBC_MAJOR" -eq 2 ] && [ "$$GLIBC_MINOR" -lt 34 ]; }; then \
+		echo "Error: ECOS Studio server development requires glibc >= 2.34 (detected: $${GLIBC_VERSION:-unknown})."; \
+		echo "The pinned ecc-dreamplace and ecc-tools wheels are tagged manylinux_2_34_x86_64."; \
 		exit 1; \
 	fi
 

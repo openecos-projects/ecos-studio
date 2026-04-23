@@ -42,9 +42,9 @@ Enabling mainstream manufacturing processes.
 
 ## Quick Start (For Developers)
 
-Server development and release builds currently require Linux x86_64 because the
-server uv environment uses pinned manylinux x86_64 wheels for `ecc-dreamplace`
-and `ecc-tools`.
+Server development and release builds currently require Linux x86_64 with glibc
+2.34 or newer because the server uv environment uses pinned
+manylinux_2_34_x86_64 wheels for `ecc-dreamplace` and `ecc-tools`.
 
 ```bash
 # Setup (init submodules, PDK, and ECC environment)

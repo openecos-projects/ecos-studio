@@ -36,8 +36,8 @@ explicit = true
 
 [tool.uv]
 # Release wheels for ecc-dreamplace and ecc-tools are currently published only as
-# manylinux x86_64 artifacts, so locking and syncing this server environment is
-# intentionally limited to Linux x86_64.
+# manylinux_2_34_x86_64 artifacts, so locking and syncing this server environment
+# is intentionally limited to Linux x86_64 with glibc 2.34 or newer.
 environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
