@@ -1,0 +1,25 @@
+name: Setup Node.js And pnpm
+description: Setup the Node.js and pnpm versions used by the GUI.
+
+inputs:
+  node-version-file:
+    description: Path to the Node.js version file.
+    required: false
+    default: ecos/gui/.nvmrc
+  pnpm-version:
+    description: pnpm version to install.
+    required: false
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: ${{ inputs.node-version-file }}
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: ${{ inputs.pnpm-version }}

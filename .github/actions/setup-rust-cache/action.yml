@@ -1,0 +1,19 @@
+name: Setup Rust Cache
+description: Setup stable Rust and cache Cargo artifacts.
+
+inputs:
+  workspaces:
+    description: Rust workspace paths for Swatinem/rust-cache.
+    required: false
+    default: ecos/gui/src-tauri
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Rust build artifacts
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ inputs.workspaces }}

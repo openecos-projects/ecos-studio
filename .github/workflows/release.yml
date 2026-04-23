@@ -102,6 +102,9 @@ jobs:
         run: uv sync --frozen --all-groups --all-extras --python 3.11
 
       - name: Build release bundle
+        env:
+          ENABLE_OSS_CAD_SUITE: "true"
+          TAURI_BUNDLES: appimage
         run: |
           PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
 
