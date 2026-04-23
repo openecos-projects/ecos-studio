@@ -6,6 +6,10 @@ inputs:
     description: Rust workspace paths for Swatinem/rust-cache.
     required: false
     default: ecos/gui/src-tauri
+  cache-targets:
+    description: Whether to cache target directories.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -17,3 +21,4 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ inputs.workspaces }}
+        cache-targets: ${{ inputs.cache-targets }}
