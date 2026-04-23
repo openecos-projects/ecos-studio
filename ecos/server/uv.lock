@@ -9,6 +9,9 @@ supported-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
+[manifest]
+overrides = [{ name = "ecc-dreamplace", url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }]
+
 [[package]]
 name = "altgraph"
 version = "0.17.5"
@@ -264,8 +267,8 @@ requires-dist = [
 
 [[package]]
 name = "ecc-dreamplace"
-version = "0.1.0a1"
-source = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" }
+version = "0.1.0a2"
+source = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
 dependencies = [
     { name = "cairocffi", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "configspace", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -286,7 +289,7 @@ dependencies = [
     { name = "xgboost", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:212139c43f825498968eda10309959b99cd93aec0744d182a17bb5d34b53145e" },
+    { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl", hash = "sha256:fad0e489bfba62f79c193e2e0ec5051a492768e2a3d6099aa5e604c08abb191f" },
 ]
 
 [package.metadata]
@@ -320,7 +323,7 @@ wheels = [
 
 [[package]]
 name = "ecos-server"
-version = "0.1.0-alpha.3"
+version = "0.1.0a3"
 source = { editable = "." }
 dependencies = [
     { name = "ecc", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -348,7 +351,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "ecc", url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.1/ecc-0.1.0a1-py3-none-any.whl" },
-    { name = "ecc-dreamplace", url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.1/ecc_dreamplace-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" },
+    { name = "ecc-dreamplace", url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" },
     { name = "ecc-tools", url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" },
     { name = "fastapi", specifier = ">=0.109" },
     { name = "torch", specifier = ">=1.6.0", index = "https://download.pytorch.org/whl/cpu" },
