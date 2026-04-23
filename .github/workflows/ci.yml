@@ -12,7 +12,7 @@ permissions:
 jobs:
   check-version:
     name: Check Version Consistency
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +22,7 @@ jobs:
 
   ruff:
     name: Ruff
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: ecos/server
@@ -41,7 +41,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: ecos/gui/src-tauri
@@ -62,7 +62,7 @@ jobs:
 
   vue-tsc:
     name: Vue Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: ecos/gui
@@ -82,7 +82,7 @@ jobs:
   build-appimage:
     name: Build AppImage
     needs: [check-version, ruff, clippy, vue-tsc]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
