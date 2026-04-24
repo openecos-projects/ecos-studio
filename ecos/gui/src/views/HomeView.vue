@@ -8,16 +8,12 @@
       class="dashboard-splitter"
       layout="vertical"
       :gutterSize="6"
-      stateKey="home-dashboard-outer"
-      stateStorage="local"
     >
       <!-- ================= Row 1: Chip Info | Runtime Monitoring ================= -->
       <SplitterPanel :size="26" :minSize="10" class="dashboard-row">
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
-          stateKey="home-dashboard-row1"
-          stateStorage="local"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <section class="section-card chip-info-area">
@@ -100,8 +96,6 @@
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
-          stateKey="home-dashboard-row2"
-          stateStorage="local"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
@@ -177,8 +171,6 @@
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
-          stateKey="home-dashboard-row3"
-          stateStorage="local"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <!-- ========== Row 3 Left: Flow step log ========== -->
@@ -1016,6 +1008,10 @@ function stateClass(state: string): string {
   z-index: 1;
   height: 100%;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   padding: 8px;
   background: transparent;
   border: none;
@@ -1037,9 +1033,14 @@ function stateClass(state: string): string {
 }
 
 .dashboard-row-splitter {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   flex: 1;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   background: transparent;
   border: none;
   border-radius: 0;
