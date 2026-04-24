@@ -27,7 +27,7 @@ const PORT_SEARCH_RANGE: u16 = 100;
 /// `/health == ok`. Overridable at runtime via `ECOS_API_READY_TIMEOUT_SECS`
 /// — useful when shipping a diagnostic build to a user whose cold start is
 /// dominated by PyInstaller onefile extraction / heavy imports.
-const API_READY_TIMEOUT_SECS_DEFAULT: u64 = 60;
+const API_READY_TIMEOUT_SECS_DEFAULT: u64 = 180;
 
 fn api_ready_timeout_secs() -> u64 {
     match std::env::var("ECOS_API_READY_TIMEOUT_SECS") {

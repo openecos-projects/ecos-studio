@@ -101,7 +101,7 @@ export function useWorkspace() {
   const ensureApiReady = async (): Promise<boolean> => {
     apiBackendConnecting.value = true
     try {
-      await waitForApiReady({ timeoutMs: 90_000 })
+      await waitForApiReady({ timeoutMs: 180_000 })
       return true
     } catch {
       showToast({

@@ -123,7 +123,7 @@ export interface WaitForApiReadyOptions {
  * Use before workspace/critical API calls so the GUI does not race the FastAPI child process.
  */
 export async function waitForApiReady(options?: WaitForApiReadyOptions): Promise<void> {
-  const timeoutMs = options?.timeoutMs ?? 90_000
+  const timeoutMs = options?.timeoutMs ?? 180_000
   const intervalMs = options?.intervalMs ?? 250
   const healthTimeoutMs = options?.healthTimeoutMs ?? 1500
   const deadline = Date.now() + timeoutMs
