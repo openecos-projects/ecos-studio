@@ -12,7 +12,15 @@ ECOS Studio is a desktop application that provides an integrated development env
 
 ## Download
 
-- [ECOS-Studio v0.1.0-alpha.2 AppImage (amd64)](https://github.com/openecos-projects/ecos-studio/releases/download/v0.1.0-alpha.2/ECOS-Studio_0.1.0_amd64.AppImage)
+- [ECOS-Studio AppImage (amd64)](https://github.com/openecos-projects/ecos-studio/releases/latest/)
+
+For Linux Desktop x86_64 users, you can download the latest ECOS Studio AppImage from the releases page. After downloading, make the file executable and run it to launch ECOS Studio.
+```shell
+# Download and run ECOS Studio on Linux x86_64
+wget https://github.com/openecos-projects/ecos-studio/releases/latest/download/<latest-release-file>.AppImage
+chmod +x <latest-release-file>.AppImage
+./<latest-release-file>.AppImage
+```
 
 ## Quick Start (For Developers)
 
