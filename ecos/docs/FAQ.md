@@ -6,6 +6,9 @@
 
 ECOS Studio is an integrated RTL-to-GDS chip design solution that bundles open-source EDA tools (Yosys, ECC-Tools, ECC-Dreamplace, KLayout), IP libraries, and PDKs into a unified desktop application.
 
+> [!NOTE]
+> IP integration and additional tool support are still in progress. Stay tuned for updates.
+
 **Q: Which platforms are supported?**
 
 Currently only Linux x86_64 with glibc >= 2.34. **Ubuntu 22.04 or later is recommended.** Other Linux distributions are not officially maintained — if you encounter issues, you may need to resolve them on your own.
