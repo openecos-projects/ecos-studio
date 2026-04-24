@@ -14,9 +14,74 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-22.04
+    permissions:
+      pull-requests: read
+    outputs:
+      version: ${{ steps.filter.outputs.version }}
+      server: ${{ steps.filter.outputs.server }}
+      gui: ${{ steps.filter.outputs.gui }}
+      rust: ${{ steps.filter.outputs.rust }}
+      build: ${{ steps.filter.outputs.build }}
+      ci: ${{ steps.filter.outputs.ci }}
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Classify changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            version:
+              - 'MODULE.bazel'
+              - 'ecos/server/pyproject.toml'
+              - 'ecos/server/default.nix'
+              - 'ecos/server/ecos_server/main.py'
+              - 'ecos/server/uv.lock'
+              - 'ecos/gui/default.nix'
+              - 'ecos/gui/package.json'
+              - 'ecos/gui/src-tauri/Cargo.toml'
+              - 'ecos/gui/src-tauri/Cargo.lock'
+              - 'ecos/gui/src-tauri/tauri.conf.json'
+            server:
+              - 'ecos/server/**'
+            gui:
+              - 'ecos/gui/src/**'
+              - 'ecos/gui/public/**'
+              - 'ecos/gui/index.html'
+              - 'ecos/gui/package.json'
+              - 'ecos/gui/pnpm-lock.yaml'
+              - 'ecos/gui/tsconfig*.json'
+              - 'ecos/gui/vite.config.ts'
+              - 'ecos/gui/tailwind.config.ts'
+            rust:
+              - 'ecos/gui/src-tauri/**'
+            build:
+              - '.bazelrc'
+              - 'BUILD.bazel'
+              - 'MODULE.bazel'
+              - 'MODULE.bazel.lock'
+              - 'Makefile'
+              - 'ecos/BUILD.bazel'
+              - 'ecos/scripts/**'
+              - 'ecos/server/ecos.spec'
+            ci:
+              - '.github/**'
+            docs_only:
+              - 'README.md'
+              - 'docs/**'
+              - 'ecos/README.md'
+              - 'ecos/docs/**'
+
   check-version:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.gui == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +92,8 @@ jobs:
   ruff:
     name: Ruff
     runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/server
@@ -46,6 +113,8 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/gui/src-tauri
@@ -69,6 +138,8 @@ jobs:
   vue-tsc:
     name: Vue Typecheck
     runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
         working-directory: ecos/gui
@@ -87,7 +158,21 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [check-version, ruff, clippy, vue-tsc]
+    needs: [changes, check-version, ruff, clippy, vue-tsc]
+    if: >-
+      ${{
+        always() &&
+        (needs.changes.outputs.server == 'true' ||
+         needs.changes.outputs.gui == 'true' ||
+         needs.changes.outputs.rust == 'true' ||
+         needs.changes.outputs.version == 'true' ||
+         needs.changes.outputs.build == 'true' ||
+         needs.changes.outputs.ci == 'true') &&
+        needs.check-version.result != 'failure' &&
+        needs.ruff.result != 'failure' &&
+        needs.clippy.result != 'failure' &&
+        needs.vue-tsc.result != 'failure'
+      }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
