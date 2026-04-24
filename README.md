@@ -81,6 +81,7 @@ For development setup, release wheel usage, and release build details, see [ecos
 ## Documentation
 
 - [ECOS Studio User Guide](ecos/docs/user-guide.md)
+- [FAQ](ecos/docs/FAQ.md)
 - [ECOS GUI Development](ecos/README.md)
 - [ECC CLI Flow Runner](https://github.com/openecos-projects/ecc/blob/main/README.md#cli-flow-runner)
 - [ECC Documentation Index](https://github.com/openecos-projects/ecc/blob/main/docs/index.md)

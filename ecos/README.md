@@ -89,4 +89,5 @@ The release wheels are installed as **non-editable** packages so that PyInstalle
 ## Documentation
 
 - [User Guide](docs/user-guide.md) - Complete guide to using ECOS Studio
+- [FAQ](docs/FAQ.md) - Frequently asked questions and troubleshooting
 - [ECC Documentation](https://github.com/openecos-projects/ecc/blob/main/README.md) - ECC toolchain documentation
