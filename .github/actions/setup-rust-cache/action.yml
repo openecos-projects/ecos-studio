@@ -1,5 +1,5 @@
 name: Setup Rust Cache
-description: Setup stable Rust, cache Cargo artifacts, and enable sccache for Rust compilations.
+description: Setup stable Rust and cache Cargo artifacts.
 
 inputs:
   workspaces:
@@ -10,27 +10,12 @@ inputs:
     description: Whether to cache target directories.
     required: false
     default: "true"
-  enable-sccache:
-    description: Whether to enable sccache backed by the GitHub Actions cache.
-    required: false
-    default: "true"
 
 runs:
   using: composite
   steps:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
-
-    - name: Setup sccache
-      if: ${{ inputs.enable-sccache == 'true' }}
-      uses: mozilla-actions/sccache-action@v0.0.9
-
-    - name: Enable sccache for Rust
-      if: ${{ inputs.enable-sccache == 'true' }}
-      shell: bash
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
 
     - name: Cache Rust build artifacts
       uses: Swatinem/rust-cache@v2

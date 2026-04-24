@@ -7,15 +7,6 @@ build --python_version=PY3
 # (for example: .venv Python 3.11 or nix develop shells).
 build --action_env=PATH
 build --action_env=PYINSTALLER_ONEFILE=1
-# Allow CI to opt into sccache for Rust/Tauri builds executed inside Bazel
-# actions. These vars are only forwarded when present in the caller env.
-build --action_env=RUSTC_WRAPPER
-build --action_env=SCCACHE_GHA_ENABLED
-build --action_env=ACTIONS_CACHE_URL
-build --action_env=ACTIONS_RESULTS_URL
-build --action_env=ACTIONS_RUNTIME_TOKEN
-build --action_env=ACTIONS_RUNTIME_URL
-build --action_env=ACTIONS_CACHE_SERVICE_V2
 
 
 # Optional GitHub mirror config for external repository downloads.
