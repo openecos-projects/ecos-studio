@@ -71,12 +71,7 @@ jobs:
           version: latest
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ecos/gui/src-tauri
+        uses: ./.github/actions/setup-rust-cache
 
       - name: Setup Python
         uses: actions/setup-python@v5
