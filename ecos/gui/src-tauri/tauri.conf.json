@@ -1,6 +1,6 @@
 {
   "productName": "ECOS-Studio",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "identifier": "com.ecos.studio",
   "build": {
     "beforeDevCommand": "pnpm run dev",

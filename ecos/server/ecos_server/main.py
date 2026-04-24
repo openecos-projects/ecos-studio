@@ -9,7 +9,7 @@ from .ecc import sse_router, workspace_router
 
 # Create FastAPI application
 app = FastAPI(
-    title="ECOS Studio API", description="Backend API for ECOS Studio", version="0.1.0-alpha.3"
+    title="ECOS Studio API", description="Backend API for ECOS Studio", version="0.1.0-alpha.4"
 )
 
 # Configure CORS for frontend access
@@ -39,7 +39,7 @@ async def root():
     """Root endpoint"""
     return {
         "name": "ECOS Studio API",
-        "version": "0.1.0-alpha.3",
+        "version": "0.1.0-alpha.4",
         "status": "running",
         "tools": ["ecc"],
     }
