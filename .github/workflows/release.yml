@@ -120,17 +120,8 @@ jobs:
 
           tar -xf "$BUNDLE_TAR" -C dist/release -T /tmp/ecos-release-files.txt
 
-          (
-            cd dist/release
-            find . -type f -name '*.AppImage' -print0 \
-              | sort -z \
-              | xargs -0 sha256sum > SHA256SUMS
-          )
-
           echo "Built AppImage artifact:"
-          find dist/release -type f \( -name '*.AppImage' -o -name 'SHA256SUMS' \) | sort
-          echo ""
-          cat dist/release/SHA256SUMS
+          find dist/release -type f -name '*.AppImage' | sort
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
@@ -139,7 +130,6 @@ jobs:
           if-no-files-found: error
           path: |
             dist/release/**/*.AppImage
-            dist/release/SHA256SUMS
 
   release:
     name: Create Release
@@ -186,12 +176,6 @@ jobs:
             echo ">"
             echo ""
             cat release-changelog.md
-            echo ""
-            echo "## Checksums"
-            echo ""
-            echo '```'
-            cat dist/release/SHA256SUMS
-            echo '```'
           } > release-notes.md
           cat release-notes.md
 
@@ -199,7 +183,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t ASSETS < <(find dist/release -type f \( -name '*.AppImage' -o -name 'SHA256SUMS' \) | sort)
+          mapfile -t ASSETS < <(find dist/release -type f -name '*.AppImage' | sort)
           gh release create "${{ steps.version.outputs.full_tag }}" \
             --title "ECOS Studio ${{ steps.version.outputs.full_tag }}" \
             --notes-file release-notes.md \

@@ -250,17 +250,9 @@ jobs:
           cat /tmp/ecos-appimage-files.txt
 
           tar -xf "$BUNDLE_TAR" -C dist/ci-appimage -T /tmp/ecos-appimage-files.txt
-          (
-            cd dist/ci-appimage
-            find . -type f -name '*.AppImage' -print0 \
-              | sort -z \
-              | xargs -0 sha256sum > SHA256SUMS
-          )
 
           echo "Prepared CI AppImage artifact:"
-          find dist/ci-appimage -type f \( -name '*.AppImage' -o -name 'SHA256SUMS' \) | sort
-          echo ""
-          cat dist/ci-appimage/SHA256SUMS
+          find dist/ci-appimage -type f -name '*.AppImage' | sort
 
       - name: Upload CI AppImage artifact
         uses: actions/upload-artifact@v4
@@ -270,4 +262,3 @@ jobs:
           retention-days: 14
           path: |
             dist/ci-appimage/**/*.AppImage
-            dist/ci-appimage/SHA256SUMS
