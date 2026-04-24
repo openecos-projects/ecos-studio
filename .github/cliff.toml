@@ -1,0 +1,53 @@
+[changelog]
+header = ""
+body = """
+## Changes
+{% if commits | length == 0 %}
+- No changes recorded.
+{% else %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}{% if commit.author and commit.author.name %} by {{ commit.author.name }}{% endif %}{% if commit.remote and commit.remote.username %} (@{{ commit.remote.username }}){% endif %}{% if commit.remote and commit.remote.pr_number %} in [#{{ commit.remote.pr_number }}](https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/pull/{{ commit.remote.pr_number }}){% else %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/commit/{{ commit.id }})){% endif %}
+{% endfor %}
+{% endfor %}
+{% endif %}
+"""
+footer = ""
+trim = true
+
+[remote.github]
+owner = "openecos-projects"
+repo = "ecos-studio"
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+sort_commits = "oldest"
+commit_preprocessors = [
+  { pattern = " \\(#\\d+\\)$", replace = "" },
+  { pattern = "^fixup! ", replace = "" },
+  { pattern = "\"+$", replace = "" },
+]
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "(?i)^(add|implement|enhance)\\b", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "(?i)^(correct|regenerate|do not)\\b", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^docs", group = "<!-- 2 -->Documentation" },
+  { message = "(?i)^(update .*\\b(readme|guide|docs?|documentation)\\b|docs, devcontainer:)", group = "<!-- 2 -->Documentation" },
+  { message = "^refactor", group = "<!-- 3 -->Refactors" },
+  { message = "(?i)^(rename|move)\\b", group = "<!-- 3 -->Refactors" },
+  { message = "^perf", group = "<!-- 4 -->Performance" },
+  { message = "^test", group = "<!-- 5 -->Tests" },
+  { message = "^build", group = "<!-- 6 -->Build" },
+  { message = "(?i)^nix:", group = "<!-- 6 -->Build" },
+  { message = "^ci", group = "<!-- 7 -->CI" },
+  { message = "^style", group = "<!-- 8 -->Style" },
+  { message = "^chore", group = "<!-- 9 -->Chores" },
+  { message = "(?i)^(update (ecc|ignore|submodules?)\\b|redirect .*submodule\\b|cleanup\\b|gui: merge$)", group = "<!-- 9 -->Chores" },
+  { message = "^revert", group = "<!-- 10 -->Reverts" },
+  { message = ".*", group = "<!-- 11 -->Other" },
+]
