@@ -23,7 +23,34 @@ pub const DEFAULT_API_PORT: u16 = 8765;
 /// How many ports to scan beyond the default before giving up
 const PORT_SEARCH_RANGE: u16 = 100;
 
-const API_READY_TIMEOUT_SECS: u64 = 15;
+/// Default deadline (in seconds) for the spawned FastAPI server to reach
+/// `/health == ok`. Overridable at runtime via `ECOS_API_READY_TIMEOUT_SECS`
+/// — useful when shipping a diagnostic build to a user whose cold start is
+/// dominated by PyInstaller onefile extraction / heavy imports.
+const API_READY_TIMEOUT_SECS_DEFAULT: u64 = 60;
+
+fn api_ready_timeout_secs() -> u64 {
+    match std::env::var("ECOS_API_READY_TIMEOUT_SECS") {
+        Ok(raw) => match raw.trim().parse::<u64>() {
+            Ok(value) if value > 0 => value,
+            Ok(_) => {
+                warn!(
+                    "ECOS_API_READY_TIMEOUT_SECS=0 is not allowed; falling back to default {}s",
+                    API_READY_TIMEOUT_SECS_DEFAULT
+                );
+                API_READY_TIMEOUT_SECS_DEFAULT
+            }
+            Err(e) => {
+                warn!(
+                    "ECOS_API_READY_TIMEOUT_SECS={:?} is not a valid u64 ({}); falling back to default {}s",
+                    raw, e, API_READY_TIMEOUT_SECS_DEFAULT
+                );
+                API_READY_TIMEOUT_SECS_DEFAULT
+            }
+        },
+        Err(_) => API_READY_TIMEOUT_SECS_DEFAULT,
+    }
+}
 
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -151,8 +178,9 @@ fn wait_for_server_ready(
     use std::time::Instant;
 
     info!(
-        "Waiting for FastAPI server to be ready on port {} (token check: {})...",
+        "Waiting for FastAPI server to be ready on port {} (timeout: {}s, token check: {})...",
         port,
+        timeout_secs,
         expected_token.is_some()
     );
     let start = Instant::now();
@@ -197,10 +225,11 @@ fn wait_for_server_ready(
         }
 
         if start.elapsed().as_secs() >= 4 && attempt.is_multiple_of(3) {
-            debug!(
-                "Still waiting for server on port {}... ({:.1}s elapsed)",
+            info!(
+                "Still waiting for server on port {}... ({:.1}s elapsed, attempt {})",
                 port,
-                start.elapsed().as_secs_f32()
+                start.elapsed().as_secs_f32(),
+                attempt
             );
         }
 
@@ -332,7 +361,7 @@ pub fn start_api_server(
                 }
             };
 
-            match wait_for_server_ready(&mut child, port, API_READY_TIMEOUT_SECS, Some(&token)) {
+            match wait_for_server_ready(&mut child, port, api_ready_timeout_secs(), Some(&token)) {
                 ServerReadyState::Ready => {
                     info!(
                         "FastAPI server started with PID: {} on port {}",
@@ -474,7 +503,7 @@ pub fn start_api_server(
                 }
             }
 
-            match wait_for_server_ready(&mut child, port, API_READY_TIMEOUT_SECS, Some(&token)) {
+            match wait_for_server_ready(&mut child, port, api_ready_timeout_secs(), Some(&token)) {
                 ServerReadyState::Ready => {
                     info!(
                         "FastAPI server started with PID: {} on port {}",

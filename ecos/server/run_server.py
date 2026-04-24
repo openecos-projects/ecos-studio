@@ -7,11 +7,28 @@ This script is intended to be spawned by Tauri at application startup.
 
 import os
 import sys
+import time
+
+# Track startup phases so a packaged binary can be diagnosed purely from stdout.
+# These prints are unconditional (independent of log level) and cheap.
+_STARTUP_T0 = time.monotonic()
+
+
+def _phase(label: str) -> None:
+    print(
+        f"[API_PHASE] t={time.monotonic() - _STARTUP_T0:.2f}s {label}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+_phase("process_started")
 
 # In PyInstaller onefile mode, native C++ code (e.g. FLUTE) opens files via
 # relative paths anchored at _MEIPASS. Switch CWD so those paths resolve.
 if hasattr(sys, "_MEIPASS"):
     os.chdir(sys._MEIPASS)
+    _phase("meipass_extracted_and_cwd_set")
 
 # Add project root to path for imports
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -22,11 +39,18 @@ if project_root not in sys.path:
 import argparse
 import logging
 
+_phase("import_uvicorn_start")
 import uvicorn
+
+_phase("import_uvicorn_done")
+
+_phase("import_chipcompiler_log_start")
 from chipcompiler.utility.log import (
     build_timestamped_log_file,
     init_api_runtime_log,
 )
+
+_phase("import_chipcompiler_log_done")
 
 
 def _setup_logging(args) -> str:
@@ -128,6 +152,11 @@ def main():
         flush=True,
     )
 
+    # Expose the anchor timestamp so ecos_server.main can emit [API_READY] with
+    # a consistent "seconds since process start" measurement.
+    os.environ["ECOS_SERVER_STARTUP_T0"] = str(_STARTUP_T0)
+
+    _phase("uvicorn_run_called")
     uvicorn.run(
         "ecos_server.main:app",
         host=args.host,

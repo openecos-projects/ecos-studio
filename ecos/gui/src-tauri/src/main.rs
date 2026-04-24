@@ -26,8 +26,13 @@ use tile_cache::{
 use window_commands::{clamp_window_to_monitor, window_close, window_maximize, window_minimize};
 
 fn main() {
-    // Default to warnings in production while still honoring RUST_LOG overrides.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // Default: third-party crates stay at `warn`, but our own crate emits `info`
+    // so key lifecycle logs (API server spawn / readiness / timing) are visible
+    // in the terminal when running the packaged AppImage. `RUST_LOG` still wins.
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,ecos_studio=info"),
+    )
+    .init();
 
     // Shared state for the API server process and discovered port
     let api_server: ApiServerProcess = Arc::new(Mutex::new(None));
