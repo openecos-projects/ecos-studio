@@ -140,10 +140,18 @@ onUnmounted(() => {
 }
 
 :deep(.p-splitter) {
+  display: flex;
+  flex-wrap: nowrap;
+  min-width: 0;
+  min-height: 0;
   background: transparent;
   border: none;
   /* layout only; avoid paint containment on panels (conflicts with wide tables + scrollbars in WebKitGTK) */
   contain: layout;
+}
+
+:deep(.p-splitter.p-splitter-vertical) {
+  flex-direction: column;
 }
 
 /*
@@ -152,9 +160,29 @@ onUnmounted(() => {
  * 在此用更高优先级只保留 style containment，避免横向把整行撑出视口。
  */
 :deep(.p-splitterpanel) {
+  display: flex;
+  flex-grow: 1;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   contain: style;
+}
+
+:deep(.p-splitterpanel-nested) {
+  display: flex;
+}
+
+:deep(.p-splitterpanel > *) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+:deep(.p-splitterpanel .p-splitter) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border: 0 none;
 }
 
 :deep(.p-splitter-gutter) {
