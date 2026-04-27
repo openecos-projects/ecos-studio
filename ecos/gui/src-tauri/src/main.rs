@@ -7,7 +7,7 @@ mod tile_cache;
 mod window_commands;
 
 use api_server::{
-    get_api_port, start_api_server, stop_api_server, ActualApiPort, ApiServerProcess,
+    get_api_port, get_versions, start_api_server, stop_api_server, ActualApiPort, ApiServerProcess,
     ApiStartResult, DEFAULT_API_PORT,
 };
 use std::path::PathBuf;
@@ -147,7 +147,8 @@ fn main() {
             window_minimize,
             window_maximize,
             window_close,
-            get_api_port
+            get_api_port,
+            get_versions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

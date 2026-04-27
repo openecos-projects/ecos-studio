@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
@@ -69,6 +70,32 @@ enum ServerReadyState {
     Ready,
     PortConflict,
     Failed(String),
+}
+
+#[derive(Debug, Deserialize)]
+struct BackendVersionInfo {
+    server: String,
+    ecc: String,
+    dreamplace: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VersionInfo {
+    gui: String,
+    server: String,
+    ecc: String,
+    dreamplace: String,
+}
+
+impl VersionInfo {
+    fn with_gui_only() -> Self {
+        Self {
+            gui: env!("CARGO_PKG_VERSION").to_string(),
+            server: "unknown".to_string(),
+            ecc: "unknown".to_string(),
+            dreamplace: "unknown".to_string(),
+        }
+    }
 }
 
 /// Returns true when the process was launched from an interactive terminal
@@ -152,6 +179,24 @@ fn is_api_server_healthy(port: u16, expected_token: Option<&str>) -> bool {
             }
         })
         .unwrap_or(false)
+}
+
+fn fetch_backend_versions(port: u16) -> Result<BackendVersionInfo, String> {
+    let url = format!("http://127.0.0.1:{}/api/about", port);
+    let response = ureq::get(&url)
+        .timeout(Duration::from_secs(2))
+        .call()
+        .map_err(|err| format!("request failed: {}", err))?;
+
+    if response.status() != 200u16 {
+        return Err(format!("unexpected status {}", response.status()));
+    }
+
+    let body = response
+        .into_string()
+        .map_err(|err| format!("failed to read response body: {}", err))?;
+    serde_json::from_str::<BackendVersionInfo>(&body)
+        .map_err(|err| format!("failed to parse response body: {}", err))
 }
 
 fn configure_managed_process(cmd: &mut Command) {
@@ -620,6 +665,32 @@ pub fn get_api_port(port_state: tauri::State<'_, ActualApiPort>) -> u16 {
     let port = *port_state.lock().unwrap();
     debug!("cmd=get_api_port port={}", port);
     port
+}
+
+#[tauri::command]
+pub fn get_versions(port_state: tauri::State<'_, ActualApiPort>) -> VersionInfo {
+    let port = *port_state.lock().unwrap();
+    let mut versions = VersionInfo::with_gui_only();
+
+    match fetch_backend_versions(port) {
+        Ok(backend) => {
+            versions.server = backend.server;
+            versions.ecc = backend.ecc;
+            versions.dreamplace = backend.dreamplace;
+        }
+        Err(err) => {
+            warn!(
+                "cmd=get_versions failed to fetch backend versions from port {}: {}",
+                port, err
+            );
+        }
+    }
+
+    debug!(
+        "cmd=get_versions gui={} server={} ecc={} dreamplace={}",
+        versions.gui, versions.server, versions.ecc, versions.dreamplace
+    );
+    versions
 }
 
 /// Get possible paths where the api-server binary might be located.
