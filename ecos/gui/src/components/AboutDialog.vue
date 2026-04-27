@@ -91,16 +91,16 @@ async function copyVersions(): Promise<void> {
 
 .about-dialog .about-dialog-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: -8px;
+  right: -8px;
 }
 
 .about-dialog .p-dialog-close-button {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  width: 28px;
-  height: 28px;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
   color: var(--text-secondary);
 }
 
