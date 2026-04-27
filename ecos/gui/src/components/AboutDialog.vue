@@ -9,7 +9,11 @@
     :closable="true"
     :draggable="false"
     class="about-dialog"
-    :pt="{ mask: { class: 'about-dialog-mask' } }"
+    :pt="{
+      mask: { class: 'about-dialog-mask' },
+      header: { class: 'about-dialog-header' },
+      headerActions: { class: 'about-dialog-close' },
+    }"
   >
     <div class="about-content">
       <p class="about-description">
@@ -78,10 +82,31 @@ async function copyVersions(): Promise<void> {
 
 .about-dialog .p-dialog-header {
   color: var(--text-primary);
+  padding: 20px 24px 8px !important;
 }
 
 .about-dialog .p-dialog-content {
   background: transparent;
+}
+
+.about-dialog .about-dialog-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.about-dialog .p-dialog-close-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  color: var(--text-secondary);
+}
+
+.about-dialog .p-dialog-close-button:hover {
+  color: var(--text-primary);
+  background: var(--border-color);
 }
 
 .about-dialog-mask.p-dialog-mask,
