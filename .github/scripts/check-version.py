@@ -53,21 +53,6 @@ server_default_nix = parse_regex(
 )
 versions.append(("ecos/server/default.nix", server_default_nix))
 
-server_main_fastapi = parse_regex(
-    "ecos/server/ecos_server/main.py",
-    r'FastAPI\(.*?version\s*=\s*"([^"]+)"',
-    flags=re.S,
-    label="ecos/server/ecos_server/main.py FastAPI version",
-)
-versions.append(("ecos/server/ecos_server/main.py (FastAPI)", server_main_fastapi))
-
-server_main_root = parse_regex(
-    "ecos/server/ecos_server/main.py",
-    r'"version"\s*:\s*"([^"]+)"',
-    label="ecos/server/ecos_server/main.py root endpoint version",
-)
-versions.append(("ecos/server/ecos_server/main.py (root endpoint)", server_main_root))
-
 server_uv_lock = parse_regex(
     "ecos/server/uv.lock",
     r'\[\[package\]\]\s+name\s*=\s*"ecos-server"\s+version\s*=\s*"([^"]+)"',
