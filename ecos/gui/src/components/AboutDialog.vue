@@ -68,8 +68,11 @@ async function copyVersions(): Promise<void> {
 .about-dialog.p-dialog {
   background: var(--bg-primary) !important;
   color: var(--text-primary) !important;
-  border-color: var(--border-color) !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 12px !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 16px 48px rgba(0, 0, 0, 0.5) !important;
 }
 
 .about-dialog .p-dialog-header {
@@ -82,7 +85,7 @@ async function copyVersions(): Promise<void> {
 
 .about-dialog-mask.p-dialog-mask,
 .about-dialog-mask.p-overlay-mask {
-  background: rgba(0, 0, 0, 0.4) !important;
+  background: rgba(0, 0, 0, 0.45) !important;
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
 }
