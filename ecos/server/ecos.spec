@@ -17,7 +17,7 @@ import sys
 import warnings
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 # Server directory (ecos/server/)
 SERVER_DIR = Path(SPECPATH)
@@ -27,6 +27,13 @@ HOOKS_DIR = SERVER_DIR / "hooks"
 
 # macOS code signing identity (optional)
 CODESIGN_IDENTITY = os.environ.get("APPLE_SIGNING_IDENTITY")
+
+REQUIRED_DISTRIBUTION_METADATA = (
+    "ecos-server",
+    "ecc",
+    "ecc-dreamplace",
+    "ecc-tools",
+)
 
 # --- Collect ecc (chipcompiler) package from wheel ---
 # The ecc wheel should be installed before running PyInstaller
@@ -63,6 +70,17 @@ datas.extend(ecc_datas)
 datas.extend(klayout_datas)
 datas.extend(torch_datas)
 datas.extend(dp_datas)
+
+# Bundle required distribution metadata so the packaged runtime can resolve
+# installed versions via importlib.metadata; this is not for module imports.
+for dist_name in REQUIRED_DISTRIBUTION_METADATA:
+    try:
+        datas.extend(copy_metadata(dist_name))
+    except Exception as exc:
+        raise SystemExit(
+            f"Missing required distribution metadata for '{dist_name}'. "
+            "Ensure the build environment has the locked dependencies installed."
+        ) from exc
 
 # DreamPlace ships thirdparty data files that native C++ code opens via fixed
 # relative paths (e.g. thirdparty/flute/lut.ICCAD2015/POWV9.dat).  These are
