@@ -27,6 +27,7 @@ split_commits = false
 sort_commits = "oldest"
 commit_preprocessors = [
   { pattern = " \\(#\\d+\\)$", replace = "" },
+  { pattern = '(?i)^revert "(.*)"$', replace = "revert $1" },
   { pattern = "^fixup! ", replace = "" },
   { pattern = "\"+$", replace = "" },
 ]
@@ -48,6 +49,6 @@ commit_parsers = [
   { message = "^style", group = "<!-- 8 -->Style" },
   { message = "^chore", group = "<!-- 9 -->Chores" },
   { message = "(?i)^(update (ecc|ignore|submodules?)\\b|redirect .*submodule\\b|cleanup\\b|gui: merge$)", group = "<!-- 9 -->Chores" },
-  { message = "^revert", group = "<!-- 10 -->Reverts" },
+  { message = "(?i)^revert\\b", group = "<!-- 10 -->Reverts" },
   { message = ".*", group = "<!-- 11 -->Other" },
 ]
