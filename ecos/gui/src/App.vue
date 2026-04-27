@@ -27,6 +27,8 @@
     <!-- 全局新建工程向导 -->
     <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
 
+    <AboutDialog v-model="showAboutDialog" />
+
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
       <Transition name="api-backend-overlay">

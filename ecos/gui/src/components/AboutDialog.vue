@@ -7,6 +7,8 @@
     :style="{ width: '420px' }"
     :closable="true"
     :draggable="false"
+    class="about-dialog"
+    :pt="{ mask: { class: 'about-dialog-mask' } }"
   >
     <div class="about-content">
       <p class="about-description">
@@ -60,6 +62,31 @@ async function copyVersions(): Promise<void> {
   setTimeout(() => { copied.value = false }, 2000)
 }
 </script>
+
+<style>
+/* PrimeVue Dialog teleports to <body>, so scoped styles can't reach it */
+.about-dialog.p-dialog {
+  background: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}
+
+.about-dialog .p-dialog-header {
+  color: var(--text-primary);
+}
+
+.about-dialog .p-dialog-content {
+  background: transparent;
+}
+
+.about-dialog-mask.p-dialog-mask,
+.about-dialog-mask.p-overlay-mask {
+  background: rgba(0, 0, 0, 0.4) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+</style>
 
 <style scoped>
 .about-content {
