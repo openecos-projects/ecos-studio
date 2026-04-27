@@ -144,17 +144,6 @@ chmod +x "$GUI_DIR/src-tauri/binaries/api-server-$TARGET_TRIPLE"
 export TAURI_API_SERVER_BIN="$API_SERVER_BIN"
 export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
 
-# Generate ecos-version.json from existing config files.
-# The script reads pyproject.toml / tauri.conf.json and appends the git hash.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-"$REPO_ROOT/scripts/gen-version-json.sh" "$REPO_ROOT"
-
-# Copy the generated version JSON into the build tree (build-gui.sh copies
-# the GUI source into a temp directory, so the file generated at the repo
-# location needs to land in the copied tree too).
-cp -f "$REPO_ROOT/ecos/gui/src-tauri/ecos-version.json" "$GUI_DIR/src-tauri/ecos-version.json"
-
 TAURI_BUNDLES="${TAURI_BUNDLES:-deb,appimage}"
 TAURI_BUNDLES="$(echo "$TAURI_BUNDLES" | tr -d '[:space:]' | tr -s ',' | sed 's/^,//; s/,$//')"
 echo "[bundle] tauri bundles: $TAURI_BUNDLES"
