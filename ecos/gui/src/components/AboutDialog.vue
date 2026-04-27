@@ -5,6 +5,7 @@
     modal
     header="About ECOS Studio"
     :style="{ width: '420px' }"
+    :contentStyle="{ padding: '24px' }"
     :closable="true"
     :draggable="false"
     class="about-dialog"
