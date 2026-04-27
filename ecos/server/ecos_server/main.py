@@ -5,7 +5,8 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version as distribution_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
