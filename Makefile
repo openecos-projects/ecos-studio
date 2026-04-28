@@ -99,7 +99,7 @@ check-platform:
 	GLIBC_VERSION=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $$2 }'); \
 	GLIBC_MAJOR=$${GLIBC_VERSION%%.*}; \
 	GLIBC_MINOR=$${GLIBC_VERSION#*.}; \
-	GLIBC_MINOR=$${GLIBC_MINOR%%[^0-9]*}; \
+	GLIBC_MINOR=$${GLIBC_MINOR%%[!0-9]*}; \
 	GLIBC_MAJOR=$${GLIBC_MAJOR:-0}; \
 	GLIBC_MINOR=$${GLIBC_MINOR:-0}; \
 	if [ "$$GLIBC_MAJOR" -lt 2 ] || { [ "$$GLIBC_MAJOR" -eq 2 ] && [ "$$GLIBC_MINOR" -lt 34 ]; }; then \
