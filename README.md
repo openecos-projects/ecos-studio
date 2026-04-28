@@ -41,7 +41,7 @@ Enabling mainstream manufacturing processes.
 
 - [ECOS-Studio AppImage (amd64)](https://github.com/openecos-projects/ecos-studio/releases/latest/)
 
-[AppImage](https://en.wikipedia.org/wiki/AppImage) is a portable Linux application format — download a single file, make it executable, and run it without installation. For Linux Desktop x86_64 users, you can download the latest ECOS Studio AppImage from the releases page.
+[AppImage](https://en.wikipedia.org/wiki/AppImage) is a portable Linux application format — download a single file, make it executable, and run it without installation. ECOS Studio is a GUI application and requires a desktop environment (X11 or Wayland) to run — it cannot be launched from a headless environment. For Linux Desktop x86_64 users, you can download the latest ECOS Studio AppImage from the releases page.
 ```shell
 # Download and run ECOS Studio on Linux x86_64
 wget https://github.com/openecos-projects/ecos-studio/releases/latest/download/<latest-release-file>.AppImage
