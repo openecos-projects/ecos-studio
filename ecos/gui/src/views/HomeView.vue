@@ -326,13 +326,13 @@ import { CanvasRenderer } from 'echarts/renderers'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import { useParameters } from '@/composables/useParameters'
-import { useHomeData, type AnalysisChartItem, type FlowLogSegment } from '@/composables/useHomeData'
+import { useHomeData, sharedHomeData, type AnalysisChartItem, type FlowLogSegment } from '@/composables/useHomeData'
 import { isWindowResizing } from '@/composables/useWindowResizeState'
 
 // 注册 ECharts 组件（按需引入）
 echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
-const { config } = useParameters()
+const { config, refreshParameters } = useParameters()
 const {
   monitorData,
   checklistItems,
@@ -344,6 +344,10 @@ const {
   flowLogLoading,
   expandFlowLogSegment,
 } = useHomeData()
+
+watch(sharedHomeData, () => {
+  refreshParameters()
+})
 
 /** 正在展开完整日志的 step key 集合，避免同一步连点多次以及按钮 loading 状态 */
 const expandingFlowLogKeys = reactive<Record<string, boolean>>({})
