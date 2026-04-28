@@ -33,6 +33,8 @@ Yes, ECOS Studio is open-source software. See the [LICENSE](../../LICENSE) file 
 
 Download the AppImage from the [Releases](https://github.com/openecos-projects/ecos-studio/releases/latest) page, then run:
 
+> [AppImage](https://en.wikipedia.org/wiki/AppImage) is a portable Linux application format — download a single file, make it executable, and run it without installation. ECOS Studio is a GUI application and requires a desktop environment (X11 or Wayland) to run — it cannot be launched from a headless environment.
+
 ```bash
 chmod +x ECOS-Studio_*.AppImage
 ./ECOS-Studio_*.AppImage
