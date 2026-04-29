@@ -46,6 +46,19 @@ See the [User Guide](user-guide.md) for detailed instructions on creating worksp
 
 ## Troubleshooting
 
+**Q: How do I enable GUI Rust diagnostic logs?**
+
+By default, the GUI prints Rust warnings and errors only. Launch the AppImage
+from a terminal with `RUST_LOG` to enable more detailed Rust-side diagnostics:
+
+```bash
+# GUI lifecycle diagnostics
+RUST_LOG=ecos_studio=info ./ECOS-Studio_*.AppImage
+
+# More detailed API server startup diagnostics
+RUST_LOG=ecos_studio::api_server=debug ./ECOS-Studio_*.AppImage
+```
+
 **Q: AppImage fails to launch on a virtual machine (GL / GVFS / ATK errors)**
 
 Errors such as `undefined symbol: g_task_set_static_name` or `Failed to load module: /usr/lib/x86_64-linux-gnu/gio/modules/libgvfsdbus.so`.

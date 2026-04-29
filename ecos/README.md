@@ -46,6 +46,17 @@ make dev
 cd ecos/gui && pnpm tauri dev
 ```
 
+Rust-side GUI logs default to warnings and errors. Use `RUST_LOG` when you need
+more detail while debugging the Tauri shell:
+
+```bash
+# GUI lifecycle diagnostics
+cd ecos/gui && RUST_LOG=ecos_studio=info pnpm tauri dev
+
+# More detailed API server startup diagnostics
+cd ecos/gui && RUST_LOG=ecos_studio::api_server=debug pnpm tauri dev
+```
+
 ### DreamPlace Development
 
 DreamPlace C++ operators are compiled by Bazel and installed as `.so` files into the source tree for venv-based development:
