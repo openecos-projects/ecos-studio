@@ -57,6 +57,18 @@ cd ecos/gui && RUST_LOG=ecos_studio=info pnpm tauri dev
 cd ecos/gui && RUST_LOG=ecos_studio::api_server=debug pnpm tauri dev
 ```
 
+Python API server startup markers (`[API_PHASE]`, `[API_START]`, `[API_READY]`,
+`[API_LOG]`) are suppressed by default. Set `ECOS_API_LOG_LEVEL=info` to show
+them, or pass `--log-level info` to `run_server.py`:
+
+```bash
+# Show API server startup phases
+ECOS_API_LOG_LEVEL=info cd ecos/server && python run_server.py
+
+# Equivalent via CLI flag
+cd ecos/server && python run_server.py --log-level info
+```
+
 ### DreamPlace Development
 
 DreamPlace C++ operators are compiled by Bazel and installed as `.so` files into the source tree for venv-based development:

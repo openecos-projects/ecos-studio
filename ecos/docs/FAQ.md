@@ -46,19 +46,6 @@ See the [User Guide](user-guide.md) for detailed instructions on creating worksp
 
 ## Troubleshooting
 
-**Q: How do I enable GUI Rust diagnostic logs?**
-
-By default, the GUI prints Rust warnings and errors only. Launch the AppImage
-from a terminal with `RUST_LOG` to enable more detailed Rust-side diagnostics:
-
-```bash
-# GUI lifecycle diagnostics
-RUST_LOG=ecos_studio=info ./ECOS-Studio_*.AppImage
-
-# More detailed API server startup diagnostics
-RUST_LOG=ecos_studio::api_server=debug ./ECOS-Studio_*.AppImage
-```
-
 **Q: AppImage fails to launch on a virtual machine (GL / GVFS / ATK errors)**
 
 Errors such as `undefined symbol: g_task_set_static_name` or `Failed to load module: /usr/lib/x86_64-linux-gnu/gio/modules/libgvfsdbus.so`.
@@ -86,3 +73,35 @@ Large or complex designs may exceed the 10-minute synthesis timeout. Use a small
 **Q: DreamPlace placement fails with "overflow is significant" or HPWL is infinity/nan**
 
 The core utilization or target density is too high for the placer to converge. Try reducing Core Utilization and Target Density, increasing Cell Padding, or enabling the Routability Opt Flag in the Configuration page. See [#50](https://github.com/openecos-projects/ecos-studio/issues/50) for details.
+
+**Q: How do I enable GUI Rust diagnostic logs?**
+
+By default, the GUI prints Rust warnings and errors only. Launch the AppImage
+from a terminal with `RUST_LOG` to enable more detailed Rust-side diagnostics:
+
+```bash
+# GUI lifecycle diagnostics
+RUST_LOG=ecos_studio=info ./ECOS-Studio_*.AppImage
+
+# More detailed API server startup diagnostics
+RUST_LOG=ecos_studio::api_server=debug ./ECOS-Studio_*.AppImage
+```
+
+**Q: How do I enable Python API server startup logs?**
+
+The Python API server emits startup phase markers (`[API_PHASE]`, `[API_START]`,
+`[API_READY]`, `[API_LOG]`) that are hidden by default (log level `warning`).
+Set `ECOS_API_LOG_LEVEL=info` to show them:
+
+```bash
+# AppImage: show API server startup phases
+ECOS_API_LOG_LEVEL=info ./ECOS-Studio_*.AppImage
+
+# Development: show API server startup phases
+ECOS_API_LOG_LEVEL=info python ecos/server/run_server.py
+
+# Or pass the CLI flag directly
+python ecos/server/run_server.py --log-level info
+```
+
+Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
