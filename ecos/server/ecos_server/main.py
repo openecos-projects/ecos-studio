@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import os
-import sys
 import time
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -11,6 +10,7 @@ from importlib.metadata import version as distribution_version
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from ._log import ensure_api_logger
 from .ecc import sse_router, workspace_router
 
 
@@ -41,16 +41,13 @@ def _elapsed_since_process_start() -> float:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Emit a single-line readiness marker so the Tauri host can see when
-    the FastAPI app is actually serving requests (not just when uvicorn.run
-    was invoked). Written unconditionally to stderr so it survives any uvicorn
-    log-level configuration."""
+    log = ensure_api_logger()
     elapsed = _elapsed_since_process_start()
-    print(
-        f"[API_READY] pid={os.getpid()} elapsed={elapsed:.2f}s "
-        f"token={os.environ.get('ECOS_SERVER_INSTANCE_TOKEN', '')[:8]}",
-        file=sys.stderr,
-        flush=True,
+    log.info(
+        "[API_READY] pid=%d elapsed=%.2fs token=%s",
+        os.getpid(),
+        elapsed,
+        os.environ.get("ECOS_SERVER_INSTANCE_TOKEN", "")[:8],
     )
     yield
 

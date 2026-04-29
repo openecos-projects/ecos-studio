@@ -5,39 +5,39 @@ Standalone script to run the FastAPI server.
 This script is intended to be spawned by Tauri at application startup.
 """
 
+import logging
 import os
 import sys
 import time
 
-# Track startup phases so a packaged binary can be diagnosed purely from stdout.
-# These prints are unconditional (independent of log level) and cheap.
 _STARTUP_T0 = time.monotonic()
 
-
-def _phase(label: str) -> None:
-    print(
-        f"[API_PHASE] t={time.monotonic() - _STARTUP_T0:.2f}s {label}",
-        file=sys.stderr,
-        flush=True,
-    )
-
-
-_phase("process_started")
-
-# In PyInstaller onefile mode, native C++ code (e.g. FLUTE) opens files via
-# relative paths anchored at _MEIPASS. Switch CWD so those paths resolve.
+# MEIPASS CWD fix must happen before any native code opens files by relative path.
 if hasattr(sys, "_MEIPASS"):
     os.chdir(sys._MEIPASS)
-    _phase("meipass_extracted_and_cwd_set")
 
-# Add project root to path for imports
+# Make ecos_server importable so we can import the shared logger helper
+# without triggering heavy imports (ecos_server.__init__ is lazy).
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from ecos_server._log import ensure_api_logger
+
+_log = ensure_api_logger()
+
+
+def _phase(label: str) -> None:
+    _log.info("[API_PHASE] t=%.2fs %s", time.monotonic() - _STARTUP_T0, label)
+
+
+_phase("process_started")
+
+if hasattr(sys, "_MEIPASS"):
+    _phase("meipass_extracted_and_cwd_set")
+
 import argparse
-import logging
 
 _phase("import_uvicorn_start")
 import uvicorn
@@ -63,9 +63,7 @@ def _setup_logging(args) -> str:
         log_file = build_timestamped_log_file(log_file=log_file, pid=os.getpid())
 
     if args.disable_stdio_redirect:
-        print(
-            "[API_LOG] stdio redirect disabled; logs stay on console.", file=sys.stderr, flush=True
-        )
+        _log.info("[API_LOG] stdio redirect disabled; logs stay on console.")
         logging.getLogger("ecos_server").setLevel(logging.INFO)
         return log_file
 
@@ -75,7 +73,7 @@ def _setup_logging(args) -> str:
         backup_count=args.log_backup_count,
     )
 
-    print(f"[API_LOG] log -> {log_file} (tail -f {log_file})", file=sys.stderr, flush=True)
+    _log.info("[API_LOG] log -> %s (tail -f %s)", log_file, log_file)
 
     return log_file
 
@@ -137,6 +135,14 @@ def main():
     )
 
     args = parser.parse_args()
+    raw_level = args.log_level.upper()
+    try:
+        _log.setLevel(raw_level)
+    except ValueError:
+        _log.setLevel(logging.DEBUG if raw_level == "TRACE" else logging.WARNING)
+    # Mirror the resolved level into env so the Uvicorn reload child
+    # picks up the same effective level (it does not re-execute run_server.py).
+    os.environ["ECOS_API_LOG_LEVEL"] = logging.getLevelName(_log.level)
     log_file = _setup_logging(args)
 
     reload_dirs = [
@@ -145,11 +151,14 @@ def main():
         if path and path.strip()
     ]
 
-    print(
-        f"[API_START] pid={os.getpid()} {args.host}:{args.port} "
-        f"reload={args.reload} reload_dirs={reload_dirs or 'default'} "
-        f"log={'console' if args.disable_stdio_redirect else log_file}",
-        flush=True,
+    _log.info(
+        "[API_START] pid=%d %s:%d reload=%s reload_dirs=%s log=%s",
+        os.getpid(),
+        args.host,
+        args.port,
+        args.reload,
+        reload_dirs or "default",
+        "console" if args.disable_stdio_redirect else log_file,
     )
 
     # Expose the anchor timestamp so ecos_server.main can emit [API_READY] with
