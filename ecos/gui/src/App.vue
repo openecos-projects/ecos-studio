@@ -368,12 +368,14 @@ onUnmounted(() => {
 .app-wrapper {
   width: 100%;
   height: 100%;
+  min-height: 0;
   position: relative;
 }
 
 .app-container {
   width: 100%;
   height: 100%;
+  min-height: 0;
   max-width: 100vw;
   display: flex;
   flex-direction: column;
