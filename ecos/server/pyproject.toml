@@ -7,9 +7,9 @@ name = "ecos-server"
 version = "0.1.0-alpha.4"
 requires-python = ">=3.11"
 dependencies = [
-  "ecc==0.1.0a1",
+  "ecc==0.1.0a2",
   "ecc-dreamplace==0.1.0a2",
-  "ecc-tools==0.1.0a1",
+  "ecc-tools==0.1.0a2",
   "fastapi>=0.109",
   "torch>=1.6.0",
   "uvicorn>=0.27",
@@ -47,9 +47,9 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-ecc = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.1/ecc-0.1.0a1-py3-none-any.whl" }
+ecc = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.2/ecc-0.1.0a2-py3-none-any.whl" }
 ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
-ecc-tools = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.1/ecc_tools-0.1.0a1-py3-none-manylinux_2_34_x86_64.whl" }
+ecc-tools = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.2/ecc_tools-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
 torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
