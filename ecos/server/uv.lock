@@ -323,7 +323,7 @@ wheels = [
 
 [[package]]
 name = "ecos-server"
-version = "0.1.0a4"
+version = "0.1.0a5"
 source = { editable = "." }
 dependencies = [
     { name = "ecc", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },

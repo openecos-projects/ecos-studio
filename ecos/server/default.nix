@@ -6,7 +6,7 @@
 
 python3Packages.buildPythonPackage {
   pname = "ecos-server";
-  version = "0.1.0-alpha.4";
+  version = "0.1.0-alpha.5";
   pyproject = true;
 
   src =
