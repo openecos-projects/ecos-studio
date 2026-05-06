@@ -8,12 +8,14 @@
       class="dashboard-splitter"
       layout="vertical"
       :gutterSize="6"
+      @resizeend="onDashboardSplitterResizeEnd"
     >
       <!-- ================= Row 1: Chip Info | Runtime Monitoring ================= -->
       <SplitterPanel :size="26" :minSize="10" class="dashboard-row">
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
+          @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <section class="section-card chip-info-area">
@@ -96,6 +98,7 @@
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
+          @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
@@ -171,6 +174,7 @@
         <Splitter
           class="dashboard-row-splitter"
           :gutterSize="6"
+          @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <!-- ========== Row 3 Left: Flow step log ========== -->
@@ -544,6 +548,8 @@ const chartInitialized = new WeakSet<echarts.ECharts>()
 let resizeObserver: ResizeObserver | null = null
 /** ResizeObserver 合并多个 entry 到单次 rAF，避免同一帧里反复 init + resize */
 let pendingResizeRaf: number | null = null
+/** Splitter 释放鼠标后等 flex 尺寸落定，再统一修正依赖容器尺寸的图表 */
+let pendingDashboardSettleRaf: number | null = null
 
 /** 预置配色盘 —— 按 key 出现顺序循环取色 */
 const COLOR_PALETTE = [
@@ -840,6 +846,20 @@ function resizeAllCharts() {
   }
 }
 
+function onDashboardSplitterResizeEnd() {
+  if (pendingDashboardSettleRaf !== null) {
+    cancelAnimationFrame(pendingDashboardSettleRaf)
+  }
+
+  pendingDashboardSettleRaf = requestAnimationFrame(() => {
+    pendingDashboardSettleRaf = requestAnimationFrame(() => {
+      pendingDashboardSettleRaf = null
+      if (monitorData.value) initOrUpdateCharts()
+      resizeAllCharts()
+    })
+  })
+}
+
 /**
  * 监听图表容器尺寸变化，处理首次初始化和 resize。
  *
@@ -914,6 +934,10 @@ onUnmounted(() => {
   if (pendingResizeRaf !== null) {
     cancelAnimationFrame(pendingResizeRaf)
     pendingResizeRaf = null
+  }
+  if (pendingDashboardSettleRaf !== null) {
+    cancelAnimationFrame(pendingDashboardSettleRaf)
+    pendingDashboardSettleRaf = null
   }
   if (pendingFlowLogScroll !== null) {
     cancelAnimationFrame(pendingFlowLogScroll)
@@ -1027,9 +1051,29 @@ function stateClass(state: string): string {
 .dashboard-splitter :deep(.p-splitterpanel.dashboard-row),
 .dashboard-splitter :deep(.p-splitterpanel.dashboard-cell) {
   display: flex;
+  flex-grow: 1;
+  flex-shrink: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  contain: style;
+}
+
+.dashboard-splitter :deep(.p-splitterpanel-nested) {
+  display: flex;
+}
+
+.dashboard-splitter :deep(.p-splitterpanel > *) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dashboard-splitter :deep(.p-splitterpanel .p-splitter) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  border: 0 none;
 }
 
 .dashboard-row-splitter {
