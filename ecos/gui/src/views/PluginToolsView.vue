@@ -65,7 +65,7 @@
           <div class="manager-toolbar">
             <label class="resource-search">
               <i class="ri-search-line" aria-hidden="true"></i>
-              <input v-model="searchQuery" type="text" placeholder="Search resources..." />
+              <input v-model="searchQuery" type="text" placeholder="Search" />
             </label>
 
             <div class="resource-tabs" role="tablist" aria-label="Resource status filters">
@@ -76,6 +76,7 @@
                 :class="{ active: statusFilter === tab.id }"
                 @click="statusFilter = tab.id"
               >
+                <i :class="tab.icon" aria-hidden="true"></i>
                 {{ tab.label }}
                 <span v-if="tab.badge">{{ tab.badge }}</span>
               </button>
@@ -108,7 +109,6 @@
                 <span>Name</span>
                 <span>Version</span>
                 <span>Size</span>
-                <span>Platform</span>
                 <span>Status</span>
                 <span></span>
               </div>
@@ -142,33 +142,77 @@
 
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
-                  <span><b class="platform-pill">{{ row.platform }}</b></span>
                   <span>
                     <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
                     <span v-if="row.progressPercent !== null" class="mini-progress">
                       <span :style="{ width: `${row.progressPercent}%` }"></span>
                     </span>
+                    <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
                   </span>
-                  <span class="row-menu">
-                    <i class="ri-more-2-fill" aria-hidden="true"></i>
+
+                  <span class="row-actions">
+                    <template v-if="row.type === 'tool'">
+                      <button
+                        v-if="row.statusKind === 'available'"
+                        type="button"
+                        class="row-action-btn primary"
+                        @click.stop="handleRowInstall(row)"
+                      >
+                        <i class="ri-download-line" aria-hidden="true"></i>
+                        Install
+                      </button>
+                      <button
+                        v-else-if="row.statusKind === 'installed'"
+                        type="button"
+                        class="row-action-btn danger-outlined"
+                        @click.stop="handleRowUninstall(row)"
+                      >
+                        <i class="ri-delete-bin-line" aria-hidden="true"></i>
+                        Uninstall
+                      </button>
+                      <button
+                        v-else-if="row.statusKind === 'update'"
+                        type="button"
+                        class="row-action-btn info"
+                        @click.stop="handleRowInstall(row)"
+                      >
+                        <i class="ri-refresh-line" aria-hidden="true"></i>
+                        Update
+                      </button>
+                      <button
+                        v-else-if="row.statusKind === 'installing'"
+                        type="button"
+                        class="row-action-btn warn"
+                        disabled
+                      >
+                        <i class="ri-loader-4-line spin" aria-hidden="true"></i>
+                        {{ row.progressPercent !== null ? `${row.progressPercent}%` : 'Installing' }}
+                      </button>
+                      <button
+                        v-else-if="row.statusKind === 'error'"
+                        type="button"
+                        class="row-action-btn danger"
+                        @click.stop="handleRowInstall(row)"
+                      >
+                        <i class="ri-restart-line" aria-hidden="true"></i>
+                        Retry
+                      </button>
+                    </template>
                   </span>
                 </button>
               </template>
 
               <div v-if="!pluginStore.loading && filteredRows.length === 0" class="resource-empty">
-                No resources match the current filters.
+                <i class="ri-search-2-line" aria-hidden="true"></i>
+                <strong>No resources found</strong>
+                <p>Try adjusting your search or filters.</p>
+                <button type="button" class="clear-filters-btn" @click="clearFilters">
+                  <i class="ri-close-circle-line" aria-hidden="true"></i>
+                  Clear all filters
+                </button>
               </div>
             </div>
           </div>
-
-          <footer class="table-footer">
-            <span>Showing {{ filteredRows.length === 0 ? 0 : 1 }} to {{ filteredRows.length }} of {{ resourceRows.length }} resources</span>
-            <div class="pager">
-              <button type="button" disabled><i class="ri-arrow-left-s-line" aria-hidden="true"></i></button>
-              <button type="button" class="active">1</button>
-              <button type="button" disabled><i class="ri-arrow-right-s-line" aria-hidden="true"></i></button>
-            </div>
-          </footer>
         </main>
 
         <aside class="selected-panel" aria-label="Selected resources">
@@ -176,7 +220,9 @@
 
           <div class="selected-list">
             <div v-if="selectedResources.length === 0" class="selected-empty">
-              Select resources from the table.
+              <i class="ri-checkbox-multiple-line" aria-hidden="true"></i>
+              <span>No resources selected</span>
+              <small>Click rows in the table to select resources for batch operations.</small>
             </div>
 
             <div
@@ -211,7 +257,6 @@
             <div>
               <i class="ri-folder-line" aria-hidden="true"></i>
               <code>~/.ecos/tools</code>
-              <button type="button">Change</button>
             </div>
           </div>
 
@@ -229,7 +274,7 @@
             >
               <i class="ri-download-line" aria-hidden="true"></i>
               <span>
-                Download Selected ({{ selectedResources.length }})
+                Download
                 <small>{{ totalSizeText }}</small>
               </span>
             </button>
@@ -298,26 +343,6 @@ const toolMeta: Record<string, ResourceMeta> = {
 }
 
 const pdkCatalog = [
-  {
-    key: 'sky130',
-    name: 'Sky130',
-    description: 'SkyWater 130nm PDK',
-    version: 'v0.9.1',
-    sizeMb: 1147,
-    sizeLabel: '1.12 GB',
-    icon: 'S',
-    accent: '#6b7078',
-  },
-  {
-    key: 'gf180',
-    name: 'GF180',
-    description: 'GlobalFoundries 180nm PDK',
-    version: 'v1.8.0',
-    sizeMb: 2406,
-    sizeLabel: '2.35 GB',
-    icon: 'G',
-    accent: '#6b7078',
-  },
   {
     key: 'ics55',
     name: 'ics55',
@@ -446,32 +471,33 @@ const sidebarItems = computed(() => [
   {
     id: 'tools' as const,
     label: 'EDA Tools',
-    icon: 'ri-record-circle-line',
+    icon: 'ri-tools-line',
     count: resourceRows.value.filter((row) => row.type === 'tool').length,
   },
   {
     id: 'pdks' as const,
     label: 'PDKs',
-    icon: 'ri-record-circle-line',
+    icon: 'ri-cpu-line',
     count: resourceRows.value.filter((row) => row.type === 'pdk').length,
   },
   {
     id: 'installed' as const,
     label: 'Installed',
-    icon: 'ri-checkbox-line',
+    icon: 'ri-checkbox-circle-line',
     count: installedCount.value,
   },
 ])
 
 const tabItems = computed(() => [
-  { id: 'all' as const, label: 'All', badge: 0 },
+  { id: 'all' as const, label: 'All', icon: 'ri-apps-line', badge: 0 },
   {
     id: 'available' as const,
     label: 'Available',
+    icon: 'ri-download-line',
     badge: resourceRows.value.filter((row) => row.statusKind === 'available').length,
   },
-  { id: 'installed' as const, label: 'Installed', badge: installedCount.value },
-  { id: 'updates' as const, label: 'Updates', badge: updatesCount.value },
+  { id: 'installed' as const, label: 'Installed', icon: 'ri-check-line', badge: installedCount.value },
+  { id: 'updates' as const, label: 'Updates', icon: 'ri-arrow-up-circle-line', badge: updatesCount.value },
 ])
 
 watch(
@@ -556,6 +582,33 @@ function removeSelected(id: string): void {
   selectedResourceIds.value = next
 }
 
+function clearFilters(): void {
+  searchQuery.value = ''
+  categoryFilter.value = 'all'
+  statusFilter.value = 'all'
+}
+
+function rowError(row: ResourceRow): string | undefined {
+  if (row.type === 'tool' && row.tool) {
+    return pluginStore.toolErrors[row.tool.name]
+  }
+  return undefined
+}
+
+async function handleRowInstall(row: ResourceRow): Promise<void> {
+  if (row.type === 'tool' && row.tool) {
+    await pluginStore.install(row.tool.name)
+  } else if (row.type === 'pdk' && row.statusKind === 'available') {
+    await importPdk()
+  }
+}
+
+async function handleRowUninstall(row: ResourceRow): Promise<void> {
+  if (row.type === 'tool' && row.tool) {
+    await pluginStore.uninstall(row.tool.name)
+  }
+}
+
 async function downloadSelected(): Promise<void> {
   const rows = selectedResources.value
   const toolRows = rows.filter((row) => row.type === 'tool' && row.tool)
@@ -593,15 +646,17 @@ async function openDocs(): Promise<void> {
 </script>
 
 <style scoped>
+/* ---- Layout ---- */
 .resource-manager-view {
   position: relative;
   min-height: 100%;
   overflow: auto;
   isolation: isolate;
   color: var(--text-primary);
-  background: #eef2f1;
+  background: var(--bg-secondary);
 }
 
+/* ---- Blurred background ---- */
 .blurred-home {
   position: absolute;
   inset: 0;
@@ -610,10 +665,10 @@ async function openDocs(): Promise<void> {
   transform: scale(1.015);
   transform-origin: center;
   background:
-    radial-gradient(circle at 50% 16%, rgba(0, 191, 165, 0.12), transparent 28%),
-    linear-gradient(rgba(207, 216, 220, 0.5) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(207, 216, 220, 0.5) 1px, transparent 1px),
-    #f7faf9;
+    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%),
+    linear-gradient(color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+    var(--bg-secondary);
   background-size: auto, 52px 52px, 52px 52px, auto;
 }
 
@@ -625,7 +680,7 @@ async function openDocs(): Promise<void> {
   align-items: center;
   gap: 26px;
   transform: translateX(-50%);
-  color: #111827;
+  color: var(--text-primary);
   font-size: 42px;
   font-weight: 800;
   letter-spacing: 0;
@@ -634,7 +689,7 @@ async function openDocs(): Promise<void> {
 .blurred-brand i {
   color: var(--accent-color);
   font-size: 64px;
-  text-shadow: 0 18px 50px rgba(0, 191, 165, 0.22);
+  text-shadow: 0 18px 50px color-mix(in srgb, var(--accent-color) 22%, transparent);
 }
 
 .blurred-cards {
@@ -649,8 +704,8 @@ async function openDocs(): Promise<void> {
 
 .blurred-card,
 .blurred-lines div {
-  border: 1px solid rgba(203, 213, 225, 0.78);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
   box-shadow: 0 24px 90px rgba(15, 23, 42, 0.06);
 }
 
@@ -660,7 +715,7 @@ async function openDocs(): Promise<void> {
 }
 
 .blurred-card.is-active {
-  border-color: rgba(0, 191, 165, 0.28);
+  border-color: color-mix(in srgb, var(--accent-color) 28%, transparent);
 }
 
 .blurred-lines {
@@ -678,6 +733,7 @@ async function openDocs(): Promise<void> {
   border-radius: 12px;
 }
 
+/* ---- Scrim ---- */
 .manager-scrim {
   position: absolute;
   inset: 0;
@@ -686,6 +742,7 @@ async function openDocs(): Promise<void> {
   backdrop-filter: blur(5px);
 }
 
+/* ---- Dialog ---- */
 .manager-dialog {
   position: relative;
   z-index: 2;
@@ -697,9 +754,9 @@ async function openDocs(): Promise<void> {
   margin: 116px auto 48px;
   padding: 36px 38px 38px;
   overflow: hidden;
-  border: 1px solid rgba(229, 231, 235, 0.92);
+  border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.94);
+  background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
   box-shadow: 0 34px 90px rgba(15, 23, 42, 0.24);
 }
 
@@ -713,17 +770,18 @@ async function openDocs(): Promise<void> {
   place-items: center;
   border: 0;
   border-radius: 8px;
-  color: #475569;
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.16s ease, background 0.16s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .manager-close:hover {
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.06);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
+/* ---- Header ---- */
 .manager-header {
   flex: 0 0 auto;
   padding-right: 42px;
@@ -732,21 +790,22 @@ async function openDocs(): Promise<void> {
 
 .manager-header h1 {
   margin: 0;
-  color: #111827;
-  font-size: 23px;
+  color: var(--text-primary);
+  font-size: 22px;
   font-weight: 750;
   letter-spacing: 0;
 }
 
 .manager-header p {
   margin: 4px 0 0;
-  color: #536176;
-  font-size: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
+/* ---- Grid ---- */
 .manager-grid {
   display: grid;
-  grid-template-columns: 225px minmax(0, 1fr) 260px;
+  grid-template-columns: 200px minmax(0, 1fr) 240px;
   gap: 12px;
   min-height: 0;
   flex: 1 1 auto;
@@ -756,12 +815,13 @@ async function openDocs(): Promise<void> {
 .manager-table-panel,
 .selected-panel {
   min-height: 0;
-  border: 1px solid #e4e9ef;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 78%, transparent);
 }
 
+/* ---- Sidebar ---- */
 .manager-sidebar {
   display: flex;
   flex-direction: column;
@@ -783,12 +843,12 @@ async function openDocs(): Promise<void> {
   padding: 0 10px;
   border: 0;
   border-radius: 8px;
-  color: #5b6679;
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
   font-size: 13px;
   text-align: left;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .resource-nav-item i {
@@ -801,20 +861,20 @@ async function openDocs(): Promise<void> {
   height: 22px;
   place-items: center;
   border-radius: 999px;
-  color: #64748b;
-  background: #f0f3f7;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
   font-size: 11px;
   font-weight: 700;
 }
 
 .resource-nav-item.active {
-  color: #009d8b;
-  background: rgba(0, 191, 165, 0.12);
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
 }
 
 .resource-nav-item.active b {
-  color: #009d8b;
-  background: rgba(255, 255, 255, 0.82);
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
 }
 
 .manager-help {
@@ -822,9 +882,9 @@ async function openDocs(): Promise<void> {
   grid-template-columns: 24px 1fr;
   gap: 10px;
   padding: 16px;
-  border: 1px solid #e3e9ef;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
 }
 
 .help-icon {
@@ -833,20 +893,20 @@ async function openDocs(): Promise<void> {
   height: 24px;
   place-items: center;
   border-radius: 8px;
-  color: #00a997;
-  background: rgba(0, 191, 165, 0.12);
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
 }
 
 .manager-help strong {
   display: block;
-  color: #111827;
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 750;
 }
 
 .manager-help p {
   margin: 3px 0 12px;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.45;
 }
@@ -858,13 +918,14 @@ async function openDocs(): Promise<void> {
   align-items: center;
   gap: 6px;
   border: 0;
-  color: #00a997;
+  color: var(--accent-color);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
 }
 
+/* ---- Table panel ---- */
 .manager-table-panel {
   display: flex;
   flex-direction: column;
@@ -874,22 +935,22 @@ async function openDocs(): Promise<void> {
 
 .manager-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 264px) auto;
+  grid-template-columns: minmax(120px, 160px) auto;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 26px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 .resource-search {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 36px;
+  gap: 8px;
+  height: 28px;
   padding: 0 14px;
-  border: 1px solid #dfe5eb;
-  border-radius: 8px;
-  color: #64748b;
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
 }
 
 .resource-search input {
@@ -897,13 +958,18 @@ async function openDocs(): Promise<void> {
   min-width: 0;
   border: 0;
   outline: 0;
-  color: #111827;
+  color: var(--text-primary);
   background: transparent;
   font-size: 13px;
 }
 
 .resource-search input::placeholder {
-  color: #94a3b8;
+  color: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+}
+
+.resource-search:focus-within {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 16%, transparent);
 }
 
 .resource-tabs {
@@ -912,21 +978,21 @@ async function openDocs(): Promise<void> {
   align-items: center;
   min-height: 36px;
   padding: 3px;
-  border: 1px solid #dfe5eb;
+  border: 1px solid var(--border-color);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
 }
 
 .resource-tabs button {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   height: 28px;
-  padding: 0 14px;
+  padding: 0 10px;
   border: 0;
   border-radius: 999px;
-  color: #64748b;
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
@@ -939,13 +1005,13 @@ async function openDocs(): Promise<void> {
   left: -1px;
   width: 1px;
   height: 14px;
-  background: #e6ebf0;
+  background: var(--border-color);
 }
 
 .resource-tabs button.active {
-  color: #00a997;
-  background: rgba(0, 191, 165, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(0, 191, 165, 0.46);
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 46%, transparent);
 }
 
 .resource-tabs button.active::before,
@@ -959,8 +1025,8 @@ async function openDocs(): Promise<void> {
   height: 20px;
   place-items: center;
   border-radius: 999px;
-  color: #009d8b;
-  background: rgba(0, 191, 165, 0.16);
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
   font-size: 11px;
 }
 
@@ -972,7 +1038,7 @@ async function openDocs(): Promise<void> {
 }
 
 .manager-table-meta strong {
-  color: #111827;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 750;
 }
@@ -982,7 +1048,7 @@ async function openDocs(): Promise<void> {
   align-items: center;
   gap: 6px;
   border: 0;
-  color: #00a997;
+  color: var(--accent-color);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
@@ -998,74 +1064,80 @@ async function openDocs(): Promise<void> {
   margin-bottom: 8px;
   padding: 8px 10px;
   border-radius: 8px;
-  color: #b42318;
-  background: #fff1f1;
+  color: var(--danger-color);
+  background: var(--danger-bg);
   font-size: 12px;
 }
 
+/* ---- Table ---- */
 .resource-table-scroll {
   min-height: 0;
   overflow: auto;
+  flex: 1;
 }
 
 .resource-table {
-  min-width: 650px;
+  min-width: 680px;
 }
 
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(210px, 1.55fr) 80px 78px 78px 144px 28px;
+  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 120px 100px;
   align-items: center;
   gap: 0;
 }
 
 .resource-table-head {
-  height: 34px;
-  padding: 0 8px;
-  border-bottom: 1px solid #dfe5eb;
-  color: #64748b;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .resource-row {
   width: 100%;
-  min-height: 62px;
-  padding: 0 8px;
+  min-height: 56px;
+  padding: 8px 12px;
   border: 0;
-  border-bottom: 1px solid #e7edf2;
-  color: #1f2937;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
   background: transparent;
   cursor: pointer;
   text-align: left;
-  transition: background 0.16s ease;
+  transition: background 0.15s ease;
 }
 
-.resource-row:hover,
+.resource-row:hover {
+  background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+}
+
 .resource-row.selected {
-  background: rgba(0, 191, 165, 0.045);
+  background: color-mix(in srgb, var(--accent-color) 7%, transparent);
 }
 
 .resource-check {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   place-items: center;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  color: white;
-  background: white;
-  font-size: 13px;
+  color: var(--accent-text);
+  background: var(--bg-primary);
+  font-size: 12px;
 }
 
 .resource-check.checked {
-  border-color: #00a997;
-  background: #00bfa5;
+  border-color: var(--accent-color);
+  background: var(--accent-color);
 }
 
-.resource-name-cell,
-.selected-item {
+.resource-name-cell {
   display: flex;
   align-items: center;
   min-width: 0;
@@ -1097,44 +1169,33 @@ async function openDocs(): Promise<void> {
   margin-left: 12px;
 }
 
-.resource-copy strong,
-.selected-item strong {
+.resource-copy strong {
   display: block;
   overflow: hidden;
-  color: #1f2937;
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.resource-copy small,
-.selected-item small {
+.resource-copy small {
   display: block;
   overflow: hidden;
   max-width: 260px;
   margin-top: 2px;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.selected-item small b {
-  padding: 2px 5px;
-  border-radius: 5px;
-  color: #2376d9;
-  background: #dbeafe;
-  font-size: 10px;
-  font-style: normal;
-}
-
 .resource-muted {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
-.platform-pill,
+/* ---- Pills ---- */
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1145,35 +1206,30 @@ async function openDocs(): Promise<void> {
   font-weight: 700;
 }
 
-.platform-pill {
-  color: #64748b;
-  background: #f1f5f9;
-}
-
 .status-pill.installed {
-  color: #00a083;
-  background: rgba(0, 191, 165, 0.14);
+  color: var(--success-color);
+  background: var(--success-bg);
 }
 
 .status-pill.available {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 
 .status-pill.update {
-  color: #2376d9;
-  background: #dbeafe;
+  color: var(--info-color);
+  background: var(--info-bg);
 }
 
 .status-pill.installing {
-  color: #475569;
+  color: var(--text-secondary);
   background: transparent;
   padding: 0;
 }
 
 .status-pill.error {
-  color: #b42318;
-  background: #ffe4e6;
+  color: var(--danger-color);
+  background: var(--danger-bg);
 }
 
 .mini-progress {
@@ -1183,101 +1239,215 @@ async function openDocs(): Promise<void> {
   margin-top: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: #dbeafe;
+  background: var(--bg-secondary);
 }
 
 .mini-progress span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #2f8cf0;
+  background: var(--info-color);
 }
 
-.row-menu {
-  color: #334155;
-  text-align: center;
+.row-error-msg {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger-color);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
-.resource-loading,
-.resource-empty {
+/* ---- Row actions ---- */
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.row-action-btn.primary {
+  color: var(--accent-text);
+  background: var(--accent-color);
+}
+
+.row-action-btn.primary:hover {
+  opacity: 0.9;
+}
+
+.row-action-btn.danger-outlined {
+  color: var(--danger-color);
+  background: transparent;
+  border: 1px solid var(--danger-color);
+}
+
+.row-action-btn.danger-outlined:hover {
+  background: var(--danger-bg);
+}
+
+.row-action-btn.info {
+  color: var(--info-color);
+  background: var(--info-bg);
+}
+
+.row-action-btn.info:hover {
+  opacity: 0.85;
+}
+
+.row-action-btn.warn {
+  color: var(--warn-color);
+  background: var(--warn-bg);
+}
+
+.row-action-btn.warn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.row-action-btn.danger {
+  color: var(--danger-color);
+  background: var(--danger-bg);
+}
+
+/* ---- Loading / Empty ---- */
+.resource-loading {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 260px;
   gap: 10px;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
-.table-footer {
+.resource-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  flex: 0 0 auto;
-  padding-top: 14px;
-  color: #64748b;
+  justify-content: center;
+  min-height: 260px;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+}
+
+.resource-empty i {
+  font-size: 28px;
+  opacity: 0.35;
+  margin-bottom: 4px;
+}
+
+.resource-empty strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.resource-empty p {
+  margin: 0;
   font-size: 12px;
 }
 
-.pager {
-  display: flex;
+.clear-filters-btn {
+  margin-top: 8px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-
-.pager button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid #dfe5eb;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: #64748b;
-  background: white;
+  color: var(--accent-color);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+  transition: background 0.15s ease;
 }
 
-.pager button.active {
-  color: #00a997;
-  border-color: rgba(0, 191, 165, 0.52);
-  background: rgba(0, 191, 165, 0.08);
+.clear-filters-btn i {
+  font-size: 15px;
+  line-height: 1;
+  position: relative;
+  top: 1px;
 }
 
+.clear-filters-btn:hover {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+/* ---- Selected panel ---- */
 .selected-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 20px 16px 14px;
+  padding: 16px 16px 12px;
 }
 
 .selected-panel h2 {
-  margin: 0 0 20px;
-  color: #111827;
+  margin: 0 0 16px;
+  color: var(--text-primary);
   font-size: 15px;
   font-weight: 750;
 }
 
 .selected-panel h2 span {
-  color: #64748b;
+  color: var(--text-secondary);
   font-weight: 650;
 }
 
 .selected-list {
   display: grid;
   gap: 14px;
-  min-height: 116px;
+  flex: 1;
+  overflow: auto;
+  align-content: start;
 }
 
 .selected-empty {
-  display: grid;
-  min-height: 74px;
-  place-items: center;
-  border: 1px dashed #d7dee7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: auto;
+  gap: 6px;
+  border: 1px dashed var(--border-color);
   border-radius: 8px;
-  color: #94a3b8;
+  color: var(--text-secondary);
   font-size: 12px;
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.selected-empty i {
+  font-size: 28px;
+  opacity: 0.35;
+}
+
+.selected-empty small {
+  font-size: 11px;
+  opacity: 0.7;
+  max-width: 180px;
 }
 
 .selected-item {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
@@ -1286,8 +1456,38 @@ async function openDocs(): Promise<void> {
   flex: 1;
 }
 
+.selected-item strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-item small {
+  display: block;
+  overflow: hidden;
+  max-width: 260px;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-item small b {
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: var(--info-color);
+  background: var(--info-bg);
+  font-size: 10px;
+  font-style: normal;
+}
+
 .selected-item em {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 11px;
   font-style: normal;
   white-space: nowrap;
@@ -1300,31 +1500,32 @@ async function openDocs(): Promise<void> {
   place-items: center;
   border: 0;
   border-radius: 7px;
-  color: #64748b;
+  color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
 }
 
 .selected-item button:hover {
-  color: #0f172a;
-  background: rgba(15, 23, 42, 0.06);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
+/* ---- Total size & install location ---- */
 .total-size {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 20px -16px 0;
+  margin: 16px -16px 0;
   padding: 16px;
-  border-top: 1px solid #e7edf2;
-  border-bottom: 1px solid #e7edf2;
-  color: #1f2937;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
   font-size: 13px;
 }
 
 .total-size span,
 .install-location > span {
-  color: #475569;
+  color: var(--text-secondary);
   font-weight: 650;
 }
 
@@ -1334,50 +1535,42 @@ async function openDocs(): Promise<void> {
 }
 
 .install-location {
-  padding: 16px 0 18px;
-  color: #475569;
+  padding: 16px 0;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 .install-location div {
   display: grid;
-  grid-template-columns: 18px 1fr auto;
+  grid-template-columns: 18px 1fr;
   align-items: center;
   gap: 7px;
   margin-top: 12px;
 }
 
 .install-location code {
-  color: #475569;
+  color: var(--text-secondary);
   font-family: inherit;
   font-size: 12px;
 }
 
-.install-location button {
-  border: 0;
-  color: #00a997;
-  background: transparent;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
+/* ---- Note & actions ---- */
 .manager-note {
   display: grid;
   grid-template-columns: 20px 1fr;
   align-items: start;
   gap: 10px;
-  margin: 0;
-  padding: 13px 14px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
   border-radius: 8px;
-  color: #48616b;
-  background: rgba(0, 191, 165, 0.16);
+  color: color-mix(in srgb, var(--text-primary) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .manager-note i {
-  color: #00a997;
+  color: var(--accent-color);
   font-size: 16px;
 }
 
@@ -1397,19 +1590,24 @@ async function openDocs(): Promise<void> {
 }
 
 .download-button {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 11px;
   border: 0;
-  color: white;
-  background: linear-gradient(180deg, #12c9b2 0%, #00ad98 100%);
-  box-shadow: 0 12px 28px rgba(0, 191, 165, 0.26);
+  color: var(--accent-text);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 85%, white), var(--accent-color));
 }
 
 .download-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.download-button i {
+  position: absolute;
+  left: 14px;
+  font-size: 16px;
 }
 
 .download-button span {
@@ -1425,11 +1623,18 @@ async function openDocs(): Promise<void> {
 }
 
 .cancel-button {
-  border: 1px solid #dfe5eb;
-  color: #475569;
-  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  font-size: 13px;
+  transition: background 0.15s ease;
 }
 
+.cancel-button:hover {
+  background: var(--bg-secondary);
+}
+
+/* ---- Animation ---- */
 .spin {
   animation: spin 0.8s linear infinite;
 }
@@ -1440,38 +1645,43 @@ async function openDocs(): Promise<void> {
   }
 }
 
-:global(.dark) .resource-manager-view {
-  background: #1f2328;
-}
-
+/* ---- Dark mode overrides ---- */
 :global(.dark) .manager-scrim {
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(0, 0, 0, 0.4);
 }
 
-:global(.dark) .manager-dialog,
-:global(.dark) .manager-sidebar,
-:global(.dark) .manager-table-panel,
-:global(.dark) .selected-panel {
-  border-color: rgba(255, 255, 255, 0.09);
-  background: rgba(30, 33, 38, 0.94);
+:global(.dark) .manager-dialog {
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.4);
 }
 
-:global(.dark) .manager-header h1,
-:global(.dark) .manager-table-meta strong,
-:global(.dark) .resource-copy strong,
-:global(.dark) .selected-item strong,
-:global(.dark) .selected-panel h2 {
-  color: #f8fafc;
+:global(.dark) .blurred-card,
+:global(.dark) .blurred-lines div {
+  border-color: color-mix(in srgb, var(--border-color) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
 }
 
-:global(.dark) .manager-header p,
-:global(.dark) .resource-muted,
-:global(.dark) .resource-copy small,
-:global(.dark) .selected-item small,
-:global(.dark) .table-footer {
-  color: #a7b0c0;
+:global(.dark) .blurred-card.is-active {
+  border-color: color-mix(in srgb, var(--accent-color) 35%, transparent);
 }
 
+:global(.dark) .blurred-home {
+  background:
+    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 28%),
+    linear-gradient(color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
+    var(--bg-primary);
+  background-size: auto, 52px 52px, 52px 52px, auto;
+}
+
+:global(.dark) .blurred-brand {
+  color: var(--text-primary);
+}
+
+:global(.dark) .selected-empty {
+  border-color: color-mix(in srgb, var(--border-color) 60%, transparent);
+}
+
+/* ---- Responsive ---- */
 @media (max-width: 1120px) {
   .manager-dialog {
     width: min(980px, calc(100% - 40px));
@@ -1483,6 +1693,7 @@ async function openDocs(): Promise<void> {
 
   .manager-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
   }
 
   .manager-sidebar {
@@ -1492,22 +1703,33 @@ async function openDocs(): Promise<void> {
 
   .resource-nav {
     flex: 1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .manager-help {
-    width: 240px;
+    width: 220px;
+    flex-shrink: 0;
+  }
+
+  .selected-panel {
+    display: none;
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .manager-dialog {
     width: calc(100% - 24px);
     padding: 24px 18px;
+    margin: 24px auto;
+    min-height: calc(100vh - 48px);
   }
 
   .manager-sidebar {
     flex-direction: column;
+  }
+
+  .resource-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .manager-help {
@@ -1521,6 +1743,11 @@ async function openDocs(): Promise<void> {
   .resource-tabs {
     justify-self: stretch;
     overflow-x: auto;
+  }
+
+  .manager-close {
+    top: 24px;
+    right: 18px;
   }
 }
 </style>
