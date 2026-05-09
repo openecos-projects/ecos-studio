@@ -103,6 +103,8 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.12
 
       - name: Check formatting
         run: uvx ruff format --check
@@ -209,7 +211,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: latest
+          version: 0.11.12
           enable-cache: true
 
       - name: Setup Bazel

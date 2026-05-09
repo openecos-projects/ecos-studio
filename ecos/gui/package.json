@@ -3,6 +3,7 @@
   "version": "0.1.0-alpha.5",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.0.9",
   "pnpm": {
     "overrides": {
       "pixi.js": "$pixi.js"
