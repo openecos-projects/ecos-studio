@@ -9,7 +9,7 @@ inputs:
   pnpm-version:
     description: pnpm version to install.
     required: false
-    default: latest
+    default: 11.0.9
 
 runs:
   using: composite

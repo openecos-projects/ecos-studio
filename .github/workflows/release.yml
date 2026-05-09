@@ -68,10 +68,10 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 11.0.9
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -86,7 +86,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
-          version: latest
+          version: 0.11.12
           enable-cache: true
 
       - name: Setup Bazel
