@@ -82,6 +82,6 @@ def test_atomic_extract_cleans_up_on_failure(
     bad_archive = tmp_path / "bad.tar.gz"
     bad_archive.write_bytes(b"not a tarball")
     dest = tools_dir / "yosys" / "0.61"
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         installer.extract(archive_path=bad_archive, dest_dir=dest, strip_prefix=None)
     assert not dest.exists()
