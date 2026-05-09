@@ -52,6 +52,7 @@ async def lifespan(_app: FastAPI):
     )
     yield
 
+
 app = FastAPI(
     title="ECOS Studio API",
     description="Backend API for ECOS Studio",

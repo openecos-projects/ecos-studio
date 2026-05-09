@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
 import json
 import logging
@@ -65,7 +64,10 @@ class ManagerService:
             manifest.setdefault("installed", {})[name] = {
                 "version": version,
                 "path": path,
-                "installed_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "installed_at": datetime.now(UTC)
+                .replace(microsecond=0)
+                .isoformat()
+                .replace("+00:00", "Z"),
                 "sha256": sha256,
             }
             self._write_manifest(manifest)
