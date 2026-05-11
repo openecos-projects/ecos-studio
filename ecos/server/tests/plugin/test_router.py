@@ -50,13 +50,16 @@ def test_list_tools_empty_registry(client: TestClient) -> None:
 
 def test_list_tools_with_registry(client: TestClient) -> None:
     registry = ToolRegistry(**SAMPLE_REGISTRY)
-    with patch(
-        "ecos_server.plugin.router._registry.fetch",
-        new_callable=AsyncMock,
-        return_value=registry,
-    ), patch(
-        "ecos_server.plugin.router._manager.get_installed",
-        return_value={},
+    with (
+        patch(
+            "ecos_server.plugin.router._registry.fetch",
+            new_callable=AsyncMock,
+            return_value=registry,
+        ),
+        patch(
+            "ecos_server.plugin.router._manager.get_installed",
+            return_value={},
+        ),
     ):
         resp = client.get("/plugin/tools")
         assert resp.status_code == 200
@@ -68,13 +71,16 @@ def test_list_tools_with_registry(client: TestClient) -> None:
 
 def test_get_tool_status_not_found(client: TestClient) -> None:
     registry = ToolRegistry(schema_version=1, tools=[])
-    with patch(
-        "ecos_server.plugin.router._registry.fetch",
-        new_callable=AsyncMock,
-        return_value=registry,
-    ), patch(
-        "ecos_server.plugin.router._manager.get_installed",
-        return_value={},
+    with (
+        patch(
+            "ecos_server.plugin.router._registry.fetch",
+            new_callable=AsyncMock,
+            return_value=registry,
+        ),
+        patch(
+            "ecos_server.plugin.router._manager.get_installed",
+            return_value={},
+        ),
     ):
         resp = client.get("/plugin/tools/nonexistent/status")
         assert resp.status_code == 404

@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-# -*- encoding: utf-8 -*-
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class ToolStatus(str, Enum):
+class ToolStatus(StrEnum):
     available = "available"
     installing = "installing"
     installed = "installed"
