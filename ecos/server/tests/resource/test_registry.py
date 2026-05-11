@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ecos_server.plugin.schemas import RegistryTool, ToolRegistry
+from ecos_server.resource.schemas import RegistryTool, ToolRegistry
 from ecos_server.resource.registry import RegistryService, RegistryState
 
 
 def _make_registry_fixture() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "tools": [
             {
                 "name": "yosys",
@@ -220,7 +220,7 @@ class TestRegistryConstruction:
 
 class TestRegistryState:
     def test_clean_state(self) -> None:
-        state = RegistryState(registry=ToolRegistry(schema_version=1, tools=[]), diagnostics=[])
+        state = RegistryState(registry=ToolRegistry(schema_version=2, tools=[]), diagnostics=[])
         assert not state.is_degraded
         assert state.is_empty
 
@@ -238,7 +238,7 @@ class TestRegistryState:
             versions=[],
         )
         state = RegistryState(
-            registry=ToolRegistry(schema_version=1, tools=[tool]),
+            registry=ToolRegistry(schema_version=2, tools=[tool]),
             diagnostics=[],
         )
         assert not state.is_empty

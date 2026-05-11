@@ -2,8 +2,10 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+
+# ── Enums ──────────────────────────────────────────────────────────────
 
 class ResourceType(StrEnum):
     tool = "tool"
@@ -29,6 +31,8 @@ class ResourceAction(StrEnum):
     activate = "activate"
     remove_reference = "remove_reference"
 
+
+# ── Resource API models ────────────────────────────────────────────────
 
 class ResourceJob(BaseModel):
     resource_id: str
@@ -61,18 +65,40 @@ class ResourceList(BaseModel):
     diagnostics: list[str] = Field(default_factory=list)
 
 
-# ── Registry schemas ─────────────────────────────────────────────────
+# ── Registry schemas ───────────────────────────────────────────────────
 
-from pydantic import field_validator
+class PlatformAsset(BaseModel):
+    url: str
+    sha256: str
+    size: int
+    strip_prefix: str | None = None
 
-from ecos_server.plugin.schemas import RegistryTool
+
+class RegistryToolVersion(BaseModel):
+    version: str
+    platforms: dict[str, PlatformAsset]
+    requires: list[str] = Field(default_factory=list)
+
+
+class RegistryTool(BaseModel):
+    name: str
+    display_name: str
+    description: str
+    category: str
+    homepage: str
+    versions: list[RegistryToolVersion]
+
+
+class ToolRegistry(BaseModel):
+    """Flat tools list — used for backward compat serialization."""
+    schema_version: int
+    tools: list[RegistryTool]
 
 
 class ResourceRegistryV1(BaseModel):
-    """Resource Manager registry schema V1.
+    """Resource Manager registry schema.
 
-    Validates schema_version and reserves the pdks field for V2.
-    Rejects unknown schema versions.
+    Supported schema versions: 2 (current). Reserves pdks field.
     """
 
     schema_version: int
@@ -82,6 +108,6 @@ class ResourceRegistryV1(BaseModel):
     @field_validator("schema_version")
     @classmethod
     def check_supported_version(cls, v: int) -> int:
-        if v != 1:
-            raise ValueError(f"Unsupported registry schema version: {v}. Expected: 1")
+        if v != 2:
+            raise ValueError(f"Unsupported registry schema version: {v}. Expected: 2")
         return v

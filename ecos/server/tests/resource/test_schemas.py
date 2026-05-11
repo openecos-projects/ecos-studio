@@ -354,8 +354,8 @@ class TestResourceRegistryV1:
     def test_valid_v1_registry(self) -> None:
         from ecos_server.resource.schemas import ResourceRegistryV1
 
-        reg = ResourceRegistryV1(schema_version=1, tools=[], pdks=[])
-        assert reg.schema_version == 1
+        reg = ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
+        assert reg.schema_version == 2
         assert reg.tools == []
         assert reg.pdks == []
 
@@ -363,7 +363,7 @@ class TestResourceRegistryV1:
         from ecos_server.resource.schemas import ResourceRegistryV1
 
         with pytest.raises(ValidationError, match="Unsupported registry schema version"):
-            ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
+            ResourceRegistryV1(schema_version=1, tools=[], pdks=[])
 
     def test_rejects_version_zero(self) -> None:
         from ecos_server.resource.schemas import ResourceRegistryV1
@@ -380,18 +380,18 @@ class TestResourceRegistryV1:
     def test_pdks_field_reserved(self) -> None:
         from ecos_server.resource.schemas import ResourceRegistryV1
 
-        reg = ResourceRegistryV1(schema_version=1, tools=[], pdks=[])
+        reg = ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
         assert reg.pdks == []
 
     def test_defaults(self) -> None:
         from ecos_server.resource.schemas import ResourceRegistryV1
 
-        reg = ResourceRegistryV1(schema_version=1)
+        reg = ResourceRegistryV1(schema_version=2)
         assert reg.tools == []
         assert reg.pdks == []
 
     def test_with_tools(self) -> None:
-        from ecos_server.plugin.schemas import RegistryTool
+        from ecos_server.resource.schemas import RegistryTool
         from ecos_server.resource.schemas import ResourceRegistryV1
 
         tool = RegistryTool(
@@ -402,6 +402,6 @@ class TestResourceRegistryV1:
             homepage="",
             versions=[],
         )
-        reg = ResourceRegistryV1(schema_version=1, tools=[tool], pdks=[])
+        reg = ResourceRegistryV1(schema_version=2, tools=[tool], pdks=[])
         assert len(reg.tools) == 1
         assert reg.tools[0].name == "yosys"

@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import shutil
+import stat
 import sys
 import tarfile
 import zipfile
@@ -11,16 +12,11 @@ from pathlib import Path
 
 import httpx
 
-from .manager import ManagerService
-
 logger = logging.getLogger(__name__)
 
 
 class InstallerService:
-    """Download, verify, and extract tool archives."""
-
-    def __init__(self, manager: ManagerService) -> None:
-        self._manager = manager
+    """Download, verify, and extract tool archives (standalone, no plugin dependency)."""
 
     @staticmethod
     def verify_sha256(file_path: Path, expected: str) -> bool:
@@ -36,7 +32,7 @@ class InstallerService:
         dest_dir: Path,
         strip_prefix: str | None,
     ) -> None:
-        """Extract archive to dest_dir atomically. On failure, dest_dir is not left half-done."""
+        """Extract archive to dest_dir atomically."""
         tmp_dir = dest_dir.parent / f".tmp_{dest_dir.name}"
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir)
@@ -48,8 +44,7 @@ class InstallerService:
             elif zipfile.is_zipfile(archive_path):
                 self._extract_zip(archive_path, tmp_dir, strip_prefix)
             else:
-                msg = f"Unsupported archive format: {archive_path}"
-                raise ValueError(msg)
+                raise ValueError(f"Unsupported archive format: {archive_path}")
 
             if dest_dir.exists():
                 shutil.rmtree(dest_dir)
@@ -61,17 +56,11 @@ class InstallerService:
 
     @staticmethod
     def _validate_entry_path(dest: Path, member_name: str) -> Path:
-        """Validate that an archive member resolves inside dest.
-
-        Rejects absolute paths, parent directory traversal, and empty names.
-        Returns the resolved target path if valid.
-        """
+        """Reject traversal and unsafe archive entries."""
         if not member_name or member_name == ".":
             raise ValueError(f"Rejected empty archive entry name")
         if member_name.startswith("/"):
             raise ValueError(f"Rejected absolute archive entry: {member_name}")
-        if member_name != member_name.lstrip("/"):
-            raise ValueError(f"Rejected archive entry with leading slashes: {member_name}")
 
         parts = member_name.replace("\\", "/").split("/")
         for part in parts:
@@ -88,6 +77,23 @@ class InstallerService:
         return resolved
 
     @staticmethod
+    def _is_safe_tar_member(member: tarfile.TarInfo) -> bool:
+        """Reject symlinks, hardlinks, device nodes, fifos, and other special files."""
+        if member.issym():
+            raise ValueError(f"Rejected symlink in archive: {member.name}")
+        if member.islnk():
+            raise ValueError(f"Rejected hardlink in archive: {member.name}")
+        if member.isdev():
+            raise ValueError(f"Rejected device node in archive: {member.name}")
+        if member.isfifo():
+            raise ValueError(f"Rejected fifo in archive: {member.name}")
+        if member.ischr():
+            raise ValueError(f"Rejected character device in archive: {member.name}")
+        if member.isblk():
+            raise ValueError(f"Rejected block device in archive: {member.name}")
+        return True
+
+    @staticmethod
     def _extract_tar(archive: Path, dest: Path, strip_prefix: str | None) -> None:
         dest = dest.resolve()
         with tarfile.open(archive, "r:*") as tar:
@@ -101,6 +107,7 @@ class InstallerService:
                 if not name or name == ".":
                     continue
                 InstallerService._validate_entry_path(dest, name)
+                InstallerService._is_safe_tar_member(member)
                 member.name = name
                 if sys.version_info >= (3, 12):
                     tar.extract(member, dest, filter="data")

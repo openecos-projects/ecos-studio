@@ -12,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ._log import ensure_api_logger
 from .ecc import sse_router, workspace_router
-from .plugin import plugin_router
 from .resource.router import router as resource_router, init_registry as init_resource_registry
 
 # Initialize resource registry from environment or default URL
@@ -85,7 +84,6 @@ app.add_middleware(
 # Register routers
 app.include_router(workspace_router)
 app.include_router(sse_router)
-app.include_router(plugin_router)
 app.include_router(resource_router)
 
 
@@ -96,7 +94,7 @@ async def root():
         "name": "ECOS Studio API",
         "version": _runtime_versions()["server"],
         "status": "running",
-        "tools": ["ecc", "plugin"],
+        "tools": ["ecc", "resource"],
     }
 
 

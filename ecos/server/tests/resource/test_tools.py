@@ -5,10 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ecos_server.plugin.schemas import PlatformAsset
-from ecos_server.plugin.services.installer import InstallerService
+from ecos_server.resource.installer import InstallerService
 from ecos_server.resource.inventory import InventoryService
-from ecos_server.resource.schemas import ResourceAction, ResourceJob
+from ecos_server.resource.schemas import PlatformAsset, ResourceAction, ResourceJob
 from ecos_server.resource.tools import ToolResourceService
 
 

@@ -17,7 +17,7 @@ from ecos_server.resource.router import (
     init_registry,
 )
 from ecos_server.resource.tools import ToolResourceService
-from ecos_server.plugin.schemas import (
+from ecos_server.resource.schemas import (
     PlatformAsset,
     RegistryTool,
     RegistryToolVersion,
@@ -48,7 +48,7 @@ def client(tmp_path: Path) -> TestClient:
 
 def _mock_registry_data() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "tools": [
             {
                 "name": "yosys",
@@ -100,7 +100,7 @@ def _patch_registry(client: TestClient, data: dict) -> None:
 
 class TestListResources:
     def test_list_empty_registry(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.get("/api/resources")
         assert resp.status_code == 200
         data = resp.json()
@@ -118,7 +118,7 @@ class TestListResources:
         assert "install" in tools[0]["actions"]
 
     def test_list_with_imported_pdks(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.get("/api/resources")
         assert resp.status_code == 200
@@ -155,7 +155,7 @@ class TestGetResource:
         assert data["type"] == "tool"
 
     def test_get_pdk(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.get("/api/resources/pdk:ics55")
         assert resp.status_code == 200
@@ -164,12 +164,12 @@ class TestGetResource:
         assert data["type"] == "pdk"
 
     def test_get_unknown_resource_404(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.get("/api/resources/tool:nonexistent")
         assert resp.status_code == 404
 
     def test_get_resource_invalid_prefix_404(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.get("/api/resources/invalid:thing")
         assert resp.status_code == 404
 
@@ -207,12 +207,12 @@ class TestInstall:
         router_mod._job_tracker.finish("tool:yosys")
 
     def test_install_unknown_tool_404(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.post("/api/resources/tool:nonexistent/install")
         assert resp.status_code == 404
 
     def test_install_pdk_rejected_400(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.post("/api/resources/pdk:ics55/install")
         assert resp.status_code == 400
@@ -225,7 +225,7 @@ class TestUninstall:
         assert resp.status_code == 404
 
     def test_uninstall_pdk_rejected_400(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.post("/api/resources/pdk:ics55/uninstall")
         assert resp.status_code == 400
@@ -293,30 +293,30 @@ class TestRegistryRefresh:
 
 class TestBatch:
     def test_batch_empty(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.post("/api/resources/batch", json={"operations": []})
         assert resp.status_code == 200
         assert resp.json()["results"] == []
 
     def test_batch_invalid_operation(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.post("/api/resources/batch", json={"operations": [{}]})
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert result["status"] == 400
 
     def test_batch_unsupported_action(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.post(
             "/api/resources/batch",
-            json={"operations": [{"resource_id": "tool:yosys", "action": "uninstall"}]},
+            json={"operations": [{"resource_id": "pdk:ics55", "action": "unknown_op"}]},
         )
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert result["status"] == 400
 
     def test_batch_remove_pdk_reference(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.post(
             "/api/resources/batch",
@@ -357,7 +357,7 @@ class TestDoctor:
 
 class TestPdkDelete:
     def test_delete_pdk_by_id(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.delete("/api/resources/pdks/ics55")
         assert resp.status_code == 200
@@ -366,12 +366,17 @@ class TestPdkDelete:
         assert data["resource_id"] == "pdk:ics55"
 
     def test_delete_pdk_by_id_preserves_source(self, client: TestClient) -> None:
-        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _patch_registry(client, {"schema_version": 2, "tools": []})
         pdk_dir = _make_pdk_dir()
         _pdk_service.import_pdk(str(pdk_dir))
         resp = client.delete("/api/resources/pdks/ics55")
         assert resp.status_code == 200
         assert pdk_dir.exists()
+
+    def test_delete_nonexistent_pdk_404(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        resp = client.delete("/api/resources/pdks/nonexistent")
+        assert resp.status_code == 404
 
 
 def _make_pdk_dir() -> Path:

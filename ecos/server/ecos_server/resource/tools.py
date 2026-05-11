@@ -7,12 +7,9 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
-from ecos_server.plugin.schemas import PlatformAsset
-from ecos_server.plugin.services.installer import InstallerService
-from ecos_server.sse import event_manager
-
 from .inventory import InventoryService
-from .schemas import ResourceAction, ResourceJob
+from .installer import InstallerService
+from .schemas import PlatformAsset, ResourceAction, ResourceJob
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +17,11 @@ _DEFAULT_TOOLS_DIR = Path.home() / ".ecos" / "tools"
 
 
 class ToolResourceService:
-    """Orchestrates tool installation and removal through the existing installer.
+    """Orchestrates tool installation and removal.
 
-    Wraps InstallerService for download/verify/extract and InventoryService
-    for resource manifest management, while preserving legacy tools manifest
-    compatibility via the inventory service.
+    Uses InstallerService for download/verify/extract and InventoryService
+    for resource manifest management. Progress events are emitted via
+    callback only; the router's JobTracker owns SSE publication.
     """
 
     def __init__(
@@ -32,10 +29,7 @@ class ToolResourceService:
         installer: InstallerService | None = None,
         inventory: InventoryService | None = None,
     ) -> None:
-        # Defer ManagerService import to avoid circular dependency at module level
-        from ecos_server.plugin.services.manager import ManagerService
-
-        self._installer = installer or InstallerService(manager=ManagerService())
+        self._installer = installer or InstallerService()
         self._inventory = inventory or InventoryService()
 
     @property
@@ -65,8 +59,8 @@ class ToolResourceService:
     ) -> None:
         """Download, verify, extract, and register a tool.
 
-        Publishes ResourceJob progress events via callback and SSE event manager.
-        Raises on failure; caller should handle and publish error state.
+        Progress events are emitted via the on_progress callback only;
+        the caller (router) owns SSE publication through JobTracker.
         """
         tools_dir = _DEFAULT_TOOLS_DIR
         dest_dir = tools_dir / name / version
@@ -74,7 +68,6 @@ class ToolResourceService:
         def _publish(job: ResourceJob) -> None:
             if on_progress:
                 on_progress(job)
-            event_manager.publish(f"resource:{job.resource_id}", job)
 
         import tempfile
 
@@ -121,14 +114,15 @@ class ToolResourceService:
 
             ok = await asyncio.to_thread(InstallerService.verify_sha256, archive_path, asset.sha256)
             if not ok:
-                error_job = ResourceJob(
-                    resource_id=f"tool:{name}",
-                    action=ResourceAction.install,
-                    phase="error",
-                    progress=0.0,
-                    message="SHA256 verification failed",
+                _publish(
+                    ResourceJob(
+                        resource_id=f"tool:{name}",
+                        action=ResourceAction.install,
+                        phase="error",
+                        progress=0.0,
+                        message="SHA256 verification failed",
+                    )
                 )
-                _publish(error_job)
                 raise ValueError(f"SHA256 verification failed for {name}")
 
             _publish(

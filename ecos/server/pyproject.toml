@@ -83,7 +83,6 @@ packages = ["ecos_server"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "run_server.py" = "ecos_server/run_server.py"
-"ecos_server/plugin/data/tool-registry.json" = "ecos_server/plugin/data/tool-registry.json"
 
 [tool.ty]
 environment.python-version = "3.11"

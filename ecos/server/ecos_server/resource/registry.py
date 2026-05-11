@@ -8,9 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from ecos_server.plugin.schemas import ToolRegistry
-
-from .schemas import ResourceRegistryV1
+from .schemas import ResourceRegistryV1, ToolRegistry
 
 logger = logging.getLogger(__name__)
 

@@ -179,7 +179,11 @@ async def import_pdk(body: dict):
 
 @router.delete("/pdks/{pdk_id}")
 async def remove_pdk_reference(pdk_id: str):
-    """Remove a PDK inventory reference (AC-6: never deletes source directory)."""
+    """Remove a PDK inventory reference (AC-6: never deletes source directory).
+
+    Returns 404 if the PDK is not in inventory."""
+    if _pdk_service.get_pdk(pdk_id) is None:
+        raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
     _pdk_service.remove_reference(pdk_id)
     return {"status": "removed", "resource_id": f"pdk:{pdk_id}"}
 
@@ -229,6 +233,24 @@ async def batch_operations(body: dict):
                 _job_tracker.start(rid, action=ResourceAction.install)
                 asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
                 results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "installing", "version": version_entry.version}})
+            elif action == "uninstall" and rid.startswith("tool:"):
+                try:
+                    await _tool_service.uninstall(rid[5:])
+                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "uninstalled"}})
+                except KeyError:
+                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"Tool '{rid[5:]}' not installed"})
+            elif action == "activate" and rid.startswith("pdk:"):
+                try:
+                    _pdk_service.activate(rid[4:])
+                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "activated"}})
+                except KeyError:
+                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
+            elif action == "validate" and rid.startswith("pdk:"):
+                try:
+                    health = _pdk_service.validate(rid[4:])
+                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"health": health}})
+                except KeyError:
+                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
             elif action == "remove_reference" and rid.startswith("pdk:"):
                 _pdk_service.remove_reference(rid[4:])
                 results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "removed"}})
