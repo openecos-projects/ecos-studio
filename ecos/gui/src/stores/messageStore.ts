@@ -123,7 +123,17 @@ export const useMessageStore = defineStore('messages', () => {
    * 清空所有消息
    */
   const clearMessages = () => {
-    messages.value = []
+    messages.value.splice(0, messages.value.length)
+  }
+
+  /**
+   * 删除单条消息
+   */
+  const removeMessage = (id: string): void => {
+    const index = messages.value.findIndex(message => message.id === id)
+    if (index !== -1) {
+      messages.value.splice(index, 1)
+    }
   }
 
   return {
@@ -135,6 +145,7 @@ export const useMessageStore = defineStore('messages', () => {
     addImageMessage,
     addInfoMessage,
     addMapMessage,
+    removeMessage,
     clearMessages
   }
 })

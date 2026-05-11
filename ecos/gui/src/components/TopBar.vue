@@ -276,7 +276,6 @@ const handleMouseDown = async (event: MouseEvent) => {
   user-select: none;
   -webkit-user-select: none;
   background: var(--topbar-bg);
-  border-radius: 9px 9px 0 0;
   border-bottom: 1px solid var(--border-color);
   position: relative;
   cursor: default;
@@ -505,7 +504,7 @@ const handleMouseDown = async (event: MouseEvent) => {
 }
 
 .window-btn-close {
-  border-radius: 0 10px 0 0;
+  border-radius: 0;
 }
 
 .window-btn-close:hover {
@@ -513,14 +512,6 @@ const handleMouseDown = async (event: MouseEvent) => {
   color: white;
 }
 
-/*
- * 最大化时贴边：
- * 窗口最大化后 `.app-container` 已经去掉圆角（见 App.vue 里的
- * `body.window-maximized .app-container`），但顶栏自身和关闭按钮的圆角
- * 仍然存在，导致右上角被"削"掉一块 —— 用户按费茨定律把鼠标甩到屏幕
- * 最右上角时，那块视觉透明区域让按钮看起来点不到。最大化时一并去掉
- * 这两处圆角，让关闭按钮正好贴到屏幕右上角像素。
- */
 body.window-maximized .topbar {
   border-radius: 0;
 }

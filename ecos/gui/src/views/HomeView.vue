@@ -1,5 +1,5 @@
 <template>
-  <div class="home-view">
+  <div :class="['home-view', { 'layout-fullscreen-active': isLayoutFullscreen }]">
     <!-- 背景装饰 -->
     <div class="bg-grid"></div>
 
@@ -102,34 +102,36 @@
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
       <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
-      <section ref="layoutSectionRef" :class="['section-card layout-area', { 'is-fullscreen': isLayoutFullscreen }]">
-        <div class="section-header">
-          <div class="header-icon layout"><i class="ri-layout-masonry-line"></i></div>
-          <h2>Layout</h2>
-          <span class="header-hint">Displays the final step of the layout after the run is completed.</span>
-          <div class="header-actions">
-            <button class="action-btn" @click="toggleLayoutFullscreen"
-              :title="isLayoutFullscreen ? 'Exit full screen' : 'full screen'">
-              <i :class="isLayoutFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
-            </button>
+      <Teleport to="body" :disabled="!isLayoutFullscreen">
+        <section ref="layoutSectionRef" :class="['section-card layout-area', { 'is-fullscreen': isLayoutFullscreen }]">
+          <div class="section-header">
+            <div class="header-icon layout"><i class="ri-layout-masonry-line"></i></div>
+            <h2>Layout</h2>
+            <span class="header-hint">Displays the final step of the layout after the run is completed.</span>
+            <div class="header-actions">
+              <button class="action-btn" @click="toggleLayoutFullscreen"
+                :title="isLayoutFullscreen ? 'Exit full screen' : 'full screen'">
+                <i :class="isLayoutFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
+              </button>
+            </div>
           </div>
-        </div>
-        <div ref="layoutContentRef" class="layout-content" @wheel.prevent="onLayoutWheel" @mousedown="onLayoutMouseDown"
-          @mousemove="onLayoutMouseMove" @mouseup="onLayoutMouseUp" @mouseleave="onLayoutMouseUp">
-          <img v-if="layoutBlobUrl" :src="layoutBlobUrl" alt="Layout Preview" class="layout-image"
-            :style="layoutImageTransform" draggable="false" />
-          <!-- 科技感扫描线 -->
-          <!-- <div v-if="layoutBlobUrl && !isLayoutFullscreen" class="scanner-line"></div> -->
-          <div v-else-if="!layoutBlobUrl" class="layout-placeholder">
-            <i class="ri-image-2-line"></i>
-            <p>Layout Preview</p>
-            <span>Waiting for layout data...</span>
+          <div ref="layoutContentRef" class="layout-content" @wheel.prevent="onLayoutWheel" @mousedown="onLayoutMouseDown"
+            @mousemove="onLayoutMouseMove" @mouseup="onLayoutMouseUp" @mouseleave="onLayoutMouseUp">
+            <img v-if="layoutBlobUrl" :src="layoutBlobUrl" alt="Layout Preview" class="layout-image"
+              :style="layoutImageTransform" draggable="false" />
+            <!-- 科技感扫描线 -->
+            <!-- <div v-if="layoutBlobUrl && !isLayoutFullscreen" class="scanner-line"></div> -->
+            <div v-else-if="!layoutBlobUrl" class="layout-placeholder">
+              <i class="ri-image-2-line"></i>
+              <p>Layout Preview</p>
+              <span>Waiting for layout data...</span>
+            </div>
+            <div v-if="isLayoutFullscreen && layoutBlobUrl" class="zoom-indicator">
+              {{ Math.round(layoutScale * 100) }}%
+            </div>
           </div>
-          <div v-if="isLayoutFullscreen && layoutBlobUrl" class="zoom-indicator">
-            {{ Math.round(layoutScale * 100) }}%
-          </div>
-        </div>
-      </section>
+        </section>
+      </Teleport>
 
           </SplitterPanel>
 
@@ -1016,6 +1018,10 @@ function stateClass(state: string): string {
   background: var(--bg-primary);
 }
 
+.home-view.layout-fullscreen-active {
+  z-index: 10050;
+}
+
 .bg-grid {
   position: absolute;
   inset: 0;
@@ -1153,13 +1159,13 @@ function stateClass(state: string): string {
 
 .layout-area.is-fullscreen {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 9999;
+  inset: 0;
+  width: auto;
+  height: auto;
+  z-index: 20020;
   border-radius: 0;
   background: var(--bg-primary);
+  box-sizing: border-box;
 }
 
 .layout-area.is-fullscreen .layout-content {

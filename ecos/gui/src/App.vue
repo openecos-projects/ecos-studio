@@ -22,7 +22,7 @@
     </div>
 
     <!-- 全局 Toast 通知 -->
-    <Toast position="top-right" />
+    <Toast position="top-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
     <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
@@ -136,14 +136,14 @@ let unlistenWindowResized: (() => void) | undefined
  * `.window-maximized` 的权威来源是 `isMaximized()`，但它是一次 IPC 往返、
  * 往往要几 ~ 几十 ms 才 resolve。而最大化在屏幕上是瞬时发生的，这段 IPC
  * 窗口期里 WebKitGTK 的 transparent 已失效（最大化关闭透明），app-container
- * 的圆角 + 边框又还没被 `.window-maximized` 消掉 —— 圆角/边框位置就露出
- * 了 webview 的白画布，即用户看到的"最大化白闪"。
+ * 的边框又还没被 `.window-maximized` 消掉，边缘位置就可能露出 webview
+ * 的白画布，即用户看到的"最大化白闪"。
  *
  * 对策：在 onResized 事件回调里同步读 `window.innerWidth/innerHeight` 与
  * `screen.availWidth/availHeight` 比较，视口接近铺满屏幕就直接乐观地挂上
  * `.window-maximized`；随后 `isMaximized()` 的权威结果再由 `syncMaximizedClass`
- * 做修正。边缘拖拽缩放时启发式判为 false，`.window-maximized` 不挂，透明圆角
- * 浮岛视觉完整保留。
+ * 做修正。边缘拖拽缩放时启发式判为 false，`.window-maximized` 不挂，窗口
+ * 常态视觉完整保留。
  *
  * `- 2` 的余量是为了兼容某些 WM（KDE / Hyprland 等）把窗口最大化到不含面板
  * 的工作区时，视口比 availWidth 少 1 ~ 2 px 的 off-by-one。
@@ -161,7 +161,7 @@ const markResizing = () => {
   // 广播全局状态，组件（如 HomeView 的 ECharts）可据此跳过昂贵重绘
   setWindowResizing(true)
   // 同步快路径：视口已经铺满屏幕就立刻挂 `.window-maximized`，
-  // 不等 `isMaximized()` IPC 回来，消除最大化瞬间的圆角/边框白闪。
+  // 不等 `isMaximized()` IPC 回来，消除最大化瞬间的边框白闪。
   if (detectLikelyMaximized()) {
     document.body.classList.add('window-maximized')
   }
@@ -188,7 +188,7 @@ const startResize = async (direction: ResizeDirection) => {
  * 同步窗口最大化状态到 body.window-maximized。
  *
  * 目的：Linux (WebKitGTK) 下「透明 + 无装饰 + 最大化」组合会让 webview
- * 露出白色画布，因此最大化时需要把根层背景改成主题色、去掉圆角边框，
+ * 露出白色画布，因此最大化时需要把根层背景改成主题色、去掉边框，
  * 见 styles/index.css 与本文件 scoped 样式中的 `.window-maximized` 规则。
  */
 async function syncMaximizedClass() {
@@ -362,6 +362,49 @@ onUnmounted(() => {
 .window-resizing {
   cursor: default;
 }
+
+/*
+ * PrimeVue Toast is rendered by this root component and its internal markup is
+ * not scoped. Keep long backend errors, paths, and command output inside the
+ * notification bubble instead of letting them spill past the rounded panel.
+ */
+.app-toast.p-toast {
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.app-toast .p-toast-message {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.app-toast .p-toast-message-content {
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.app-toast .p-toast-message-icon,
+.app-toast .p-toast-close-button {
+  flex: 0 0 auto;
+}
+
+.app-toast .p-toast-message-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-toast .p-toast-summary,
+.app-toast .p-toast-detail {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.app-toast .p-toast-detail {
+  line-height: 1.45;
+}
 </style>
 
 <style scoped>
@@ -378,17 +421,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* 圆角窗口效果 */
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-primary);
   /* 边框 - 微弱的亮色边框 */
   border: 1px solid rgba(128, 128, 128, 0.3);
 }
 
 /*
- * 最大化时取消圆角 + 边框：
- * 最大化后窗口占满屏幕，圆角外露出的就是 webview 白画布（也就是截图里
- * 那片白屏）。把圆角去掉后 .app-container 能贴住窗口四边，彻底没处可露。
+ * 最大化时取消边框：
+ * 最大化后窗口占满屏幕，边框外露出的可能是 webview 白画布（也就是截图里
+ * 那片白屏）。去掉边框后 .app-container 能贴住窗口四边，彻底没处可露。
  * body 不会被 scoped 加 data-v 属性（它是 ancestor），`.app-container`
  * 是本组件自身元素，scoped 转换后选择器仍能正确命中。
  */

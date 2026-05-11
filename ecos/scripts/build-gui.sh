@@ -134,8 +134,30 @@ mkdir -p "$GUI_DIR"
 
 # Bazel sandbox exposes source files as symlinks. Vite/Rollup may resolve
 # realpaths outside the workspace root and reject emitted asset names.
-# Copy with dereference to build from a physical tree.
-cp -RL "$GUI_SRC_DIR/." "$GUI_DIR/"
+# Copy with dereference to build from a physical tree, while leaving local
+# dependency trees and generated bundles behind. Those directories may contain
+# stale pnpm symlinks after switching branches.
+(
+    cd "$GUI_SRC_DIR"
+    tar \
+        --create \
+        --dereference \
+        --exclude='./node_modules' \
+        --exclude='*/node_modules' \
+        --exclude='./dist' \
+        --exclude='*/dist' \
+        --exclude='./dist-ssr' \
+        --exclude='*/dist-ssr' \
+        --exclude='./release' \
+        --exclude='*/release' \
+        --exclude='./src-tauri/target' \
+        --exclude='./src-tauri/resources/oss-cad-suite' \
+        -f - \
+        .
+) | (
+    cd "$GUI_DIR"
+    tar -xf -
+)
 
 mkdir -p "$GUI_DIR/src-tauri/binaries"
 cp -f "$API_SERVER_BIN" "$GUI_DIR/src-tauri/binaries/api-server-$TARGET_TRIPLE"

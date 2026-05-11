@@ -24,6 +24,10 @@
           aria-label="查阅" @click.stop="openImageLightbox(message.mapData.title, message.mapData.imageUrl)">
           <i class="ri-fullscreen-fill"></i>
         </button>
+        <button type="button" class="info-report-header-close-btn info-report-header-close-btn--sm shrink-0"
+          title="关闭" aria-label="关闭" @click.stop="emit('close')">
+          <i class="ri-close-line"></i>
+        </button>
       </div>
 
       <!-- 统计信息 -->
@@ -99,6 +103,10 @@
           aria-label="查阅" @click.stop="openHeaderReportLightbox">
           <i class="ri-fullscreen-fill"></i>
         </button>
+        <button type="button" class="info-report-header-close-btn" title="关闭" aria-label="关闭"
+          @click.stop="emit('close')">
+          <i class="ri-close-line"></i>
+        </button>
       </div>
 
       <!-- 数据内容 - 直接显示表格 -->
@@ -119,11 +127,13 @@
         <!-- JSON 格式 - 复杂对象 -->
         <div v-else-if="item.format === 'json'" class="p-3 overflow-hidden">
           <pre
-            class="text-[11px] bg-(--bg-primary) p-3 rounded whitespace-pre overflow-auto max-h-[400px] font-mono text-content-pre"><code>{{ JSON.stringify(item.content, null, 2) }}</code></pre>
+            class="nested-report-scroll text-[11px] bg-(--bg-primary) p-3 rounded whitespace-pre overflow-auto max-h-[400px] font-mono text-content-pre"
+            @wheel="onNestedReportWheel"><code>{{ JSON.stringify(item.content, null, 2) }}</code></pre>
         </div>
 
         <!-- CSV 格式 - 表格显示 -->
-        <div v-else-if="item.format === 'csv'" class="overflow-auto max-h-[400px]">
+        <div v-else-if="item.format === 'csv'" class="nested-report-scroll overflow-auto max-h-[400px]"
+          @wheel="onNestedReportWheel">
           <table class="w-full text-xs border-collapse">
             <thead v-if="csvHeaders(item.content).length > 0" class="sticky top-0">
               <tr class="bg-(--bg-primary)">
@@ -147,7 +157,8 @@
         <!-- HTML 报告：嵌入区缩小字号；全屏查阅见标题栏按钮 -->
         <div v-else-if="item.format === 'html'" class="p-3 overflow-hidden">
           <div class="rounded-lg overflow-hidden bg-(--bg-primary) border border-(--border-color)/30 max-h-[350px]">
-            <div class="info-html-embed markdown-body info-html-embed--compact overflow-auto max-h-[350px] p-3"
+            <div class="nested-report-scroll info-html-embed markdown-body info-html-embed--compact overflow-auto max-h-[350px] p-3"
+              @wheel="onNestedReportWheel"
               v-html="coerceHtmlString(item.content)"></div>
           </div>
         </div>
@@ -156,7 +167,8 @@
         <div v-else class="p-3 overflow-hidden">
           <div class="rounded-lg overflow-hidden bg-(--bg-primary) border border-(--border-color)/30 max-h-[350px]">
             <pre
-              class="info-text-embed-compact bg-(--bg-primary) p-3 rounded-none whitespace-pre overflow-auto max-h-[350px] font-mono text-content-pre"><code>{{ item.content }}</code></pre>
+              class="nested-report-scroll info-text-embed-compact bg-(--bg-primary) p-3 rounded-none whitespace-pre overflow-auto max-h-[350px] font-mono text-content-pre"
+              @wheel="onNestedReportWheel"><code>{{ item.content }}</code></pre>
           </div>
         </div>
       </div>
@@ -164,11 +176,16 @@
 
     <!-- 其他消息类型 -->
     <div v-else :class="[
-      'max-w-[85%] rounded-lg text-sm',
+      'message-bubble group relative max-w-[85%] rounded-lg text-sm',
       message.role === 'user'
         ? 'bg-(--accent-color) text-(--accent-text)'
         : 'bg-(--bg-secondary) text-(--text-primary) border border-(--border-color)'
     ]">
+      <button type="button" class="message-close-btn" title="删除" aria-label="删除"
+        @click.stop="emit('close')">
+        <i class="ri-close-line"></i>
+      </button>
+
       <!-- 图片消息 -->
       <div v-if="message.type === 'image' && message.image" class="p-2">
         <p class="text-xs opacity-90">{{ message.image.label }}:</p>
@@ -182,11 +199,15 @@
             @click.stop="openImageLightbox(message.image.label || 'Image', message.image.url)">
             <i class="ri-fullscreen-fill"></i>
           </button>
+          <button type="button" class="image-close-overlay-btn" title="关闭" aria-label="关闭"
+            @click.stop="emit('close')">
+            <i class="ri-close-line"></i>
+          </button>
         </div>
       </div>
 
       <!-- 文本消息 -->
-      <div v-else class="px-4 py-2">
+      <div v-else class="px-4 py-2 pr-8">
         <!-- 加载状态 -->
         <div v-if="message.status === 'loading' && !message.content" class="flex items-center gap-2">
           <div class="loading-dots flex gap-1">
@@ -241,7 +262,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { Message } from '../types'
 import { sanitizeHtml } from '@/utils/sanitizeHtml'
@@ -252,6 +273,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'img-load'): void
+  (e: 'close'): void
 }>()
 
 const md = new MarkdownIt({
@@ -319,6 +341,37 @@ function openReportLightbox(title: string, content: unknown, mode: 'html' | 'tex
 
 function closeReportLightbox() {
   reportLightbox.value.visible = false
+}
+
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && reportLightbox.value.visible) {
+    closeReportLightbox()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onDocumentKeydown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onDocumentKeydown)
+})
+
+function onNestedReportWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement | null
+  if (!el) return
+  const canScroll = el.scrollHeight > el.clientHeight
+  if (!canScroll) return
+
+  const atTop = el.scrollTop <= 0
+  const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight
+  const scrollingUp = e.deltaY < 0
+  const scrollingDown = e.deltaY > 0
+
+  if ((scrollingUp && atTop) || (scrollingDown && atBottom)) {
+    e.preventDefault()
+    el.closest('.custom-scrollbar')?.scrollBy({ top: e.deltaY })
+  }
 }
 
 function openImageLightbox(title: string, url: string) {
@@ -576,6 +629,38 @@ function csvRows(content: string): string[][] {
   display: block;
 }
 
+.message-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.18);
+  color: currentColor;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+}
+
+.message-bubble:hover .message-close-btn,
+.message-close-btn:focus-visible {
+  opacity: 0.72;
+  transform: translateY(0);
+}
+
+.message-close-btn:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.18);
+}
+
 /* 加载动画 */
 .loading-dots span {
   animation: bounce 1s infinite;
@@ -650,8 +735,9 @@ function csvRows(content: string): string[][] {
   font-weight: 600;
 }
 
-/* Info 卡片标题栏：全屏查阅（与内嵌报告区分离，避免挡内容） */
-.info-report-header-fs-btn {
+/* Info 卡片标题栏：查阅 / 关闭（与内嵌报告区分离，避免挡内容） */
+.info-report-header-fs-btn,
+.info-report-header-close-btn {
   flex-shrink: 0;
   width: 32px;
   height: 32px;
@@ -666,21 +752,31 @@ function csvRows(content: string): string[][] {
   font-size: 16px;
 }
 
-.info-report-header-fs-btn:hover {
+.info-report-header-fs-btn:hover,
+.info-report-header-close-btn:hover {
   background: var(--bg-secondary);
+}
+
+.info-report-header-fs-btn:hover {
   color: var(--accent-color);
 }
 
+.info-report-header-close-btn:hover {
+  color: #ef4444;
+}
+
 /* Map 标题栏更紧凑的尺寸 */
-.info-report-header-fs-btn--sm {
+.info-report-header-fs-btn--sm,
+.info-report-header-close-btn--sm {
   width: 24px;
   height: 24px;
   font-size: 13px;
   border-radius: 5px;
 }
 
-/* 图片消息：右上角浮动全屏按钮 */
-.image-fs-overlay-btn {
+/* 图片消息：右上角浮动操作按钮 */
+.image-fs-overlay-btn,
+.image-close-overlay-btn {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -701,14 +797,25 @@ function csvRows(content: string): string[][] {
   backdrop-filter: blur(4px);
 }
 
+.image-close-overlay-btn {
+  right: 40px;
+}
+
 .group:hover .image-fs-overlay-btn,
-.image-fs-overlay-btn:focus-visible {
+.group:hover .image-close-overlay-btn,
+.image-fs-overlay-btn:focus-visible,
+.image-close-overlay-btn:focus-visible {
   opacity: 1;
   transform: translateY(0);
 }
 
-.image-fs-overlay-btn:hover {
+.image-fs-overlay-btn:hover,
+.image-close-overlay-btn:hover {
   background: rgba(0, 0, 0, 0.75);
+}
+
+.image-close-overlay-btn:hover {
+  color: #fecaca;
 }
 
 /* HTML 报告查阅 Lightbox（与 HomeView 图表预览一致） */

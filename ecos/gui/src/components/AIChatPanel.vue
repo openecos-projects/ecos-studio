@@ -13,7 +13,7 @@
       </div>
       <div v-else class="messages-container py-4 space-y-4 min-w-0 w-full max-w-full overflow-hidden">
         <MessageItem v-for="msg in messages" :key="msg.id" :message="msg" @img-load="onImageLoad"
-          class="message-item w-full min-w-0 max-w-full" />
+          @close="messageStore.removeMessage(msg.id)" class="message-item w-full min-w-0 max-w-full" />
       </div>
     </div>
 
@@ -67,11 +67,12 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
+import { storeToRefs } from 'pinia'
 import MessageItem from './MessageItem.vue'
 import { useMessageStore } from '../stores/messageStore'
 
 const messageStore = useMessageStore()
-const { messages } = messageStore
+const { messages } = storeToRefs(messageStore)
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
@@ -182,9 +183,11 @@ const onImageLoad = () => {
 }
 
 // 监听消息变化，自动滚动到底部
-watch(() => messages.length, () => {
-  // 新消息到来时强制滚动到底部
-  scrollToBottomIfNeeded(true)
+watch(() => messages.value.length, (newLength, oldLength) => {
+  // 新消息到来时强制滚动到底部；删除消息时保持用户当前浏览位置
+  if (newLength > oldLength) {
+    scrollToBottomIfNeeded(true)
+  }
 })
 
 const handleSubmit = () => {
