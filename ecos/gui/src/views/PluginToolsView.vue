@@ -649,8 +649,11 @@ async function openDocs(): Promise<void> {
 /* ---- Layout ---- */
 .resource-manager-view {
   position: relative;
-  min-height: 100%;
-  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  overflow: hidden;
   isolation: isolate;
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -749,11 +752,11 @@ async function openDocs(): Promise<void> {
   display: flex;
   flex-direction: column;
   width: min(1280px, calc(100% - 96px));
-  height: min(760px, calc(100vh - 126px));
+  max-height: calc(100% - 64px);
   min-height: 620px;
-  margin: 116px auto 48px;
+  margin: 0 auto;
   padding: 36px 38px 38px;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
   border-radius: 16px;
   background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
