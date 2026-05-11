@@ -98,6 +98,15 @@ def _patch_registry(client: TestClient, data: dict) -> None:
     router_mod._registry_service = mock_rs
 
 
+def _patch_installer() -> MagicMock:
+    """Patch _tool_service.install to prevent real network I/O in tests."""
+    import ecos_server.resource.router as router_mod
+
+    mock = AsyncMock()
+    router_mod._tool_service.install = mock  # type: ignore[method-assign]
+    return mock
+
+
 class TestListResources:
     def test_list_empty_registry(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
@@ -177,6 +186,7 @@ class TestGetResource:
 class TestInstall:
     def test_install_returns_accepted(self, client: TestClient) -> None:
         _patch_registry(client, _mock_registry_data())
+        _patch_installer()
         resp = client.post("/api/resources/tool:yosys/install")
         assert resp.status_code == 200
         data = resp.json()
@@ -188,6 +198,7 @@ class TestInstall:
         from ecos_server.resource.schemas import ResourceAction
 
         _patch_registry(client, _mock_registry_data())
+        _patch_installer()
         # First request starts the install
         resp1 = client.post("/api/resources/tool:yosys/install")
         assert resp1.status_code == 200
@@ -270,14 +281,14 @@ class TestPdkRoutes:
 
     def test_delete_pdk_reference(self, client: TestClient) -> None:
         _pdk_service.import_pdk(str(_make_pdk_dir()))
-        resp = client.delete("/api/resources/pdk:ics55")
+        resp = client.delete("/api/resources/pdks/ics55")
         assert resp.status_code == 200
         assert _pdk_service.get_pdk("ics55") is None
 
     def test_delete_pdk_preserves_source(self, client: TestClient) -> None:
         pdk_dir = _make_pdk_dir()
         _pdk_service.import_pdk(str(pdk_dir))
-        client.delete("/api/resources/pdk:ics55")
+        client.delete("/api/resources/pdks/ics55")
         assert pdk_dir.exists()
 
 
@@ -326,6 +337,16 @@ class TestBatch:
         result = resp.json()["results"][0]
         assert result["status"] == 200
         assert _pdk_service.get_pdk("ics55") is None
+
+    def test_batch_remove_reference_missing_404(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:nonexistent", "action": "remove_reference"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 404
 
 
 class TestDoctor:
@@ -377,6 +398,56 @@ class TestPdkDelete:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.delete("/api/resources/pdks/nonexistent")
         assert resp.status_code == 404
+
+
+class TestSSESubscription:
+    """Prove that JobTracker.publish delivers exactly one event per publish."""
+
+    @pytest.mark.asyncio
+    async def test_subscriber_receives_published_event(self) -> None:
+        import asyncio as aio
+        from ecos_server.resource.jobs import JobTracker
+        from ecos_server.resource.schemas import ResourceAction, ResourceJob
+        from ecos_server.sse import event_manager
+
+        tracker = JobTracker()
+        channel = "resource:tool:test"
+        received: list[ResourceJob] = []
+
+        async def _collect():
+            async for event in event_manager.subscribe(channel):
+                if isinstance(event, ResourceJob):
+                    received.append(event)
+                if len(received) >= 2:
+                    break
+
+        task = aio.create_task(_collect())
+        await aio.sleep(0.01)
+
+        job1 = ResourceJob(
+            resource_id="tool:test",
+            action=ResourceAction.install,
+            phase="downloading",
+            progress=0.5,
+            message="Test progress 1",
+        )
+        tracker.publish(job1)
+
+        job2 = ResourceJob(
+            resource_id="tool:test",
+            action=ResourceAction.install,
+            phase="done",
+            progress=1.0,
+            message="Test progress 2",
+        )
+        tracker.publish(job2)
+
+        await aio.wait_for(task, timeout=2.0)
+        assert len(received) == 2
+        assert received[0].phase == "downloading"
+        assert received[0].progress == 0.5
+        assert received[1].phase == "done"
+        assert received[1].progress == 1.0
 
 
 def _make_pdk_dir() -> Path:

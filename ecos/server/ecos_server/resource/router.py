@@ -252,8 +252,11 @@ async def batch_operations(body: dict):
                 except KeyError:
                     results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
             elif action == "remove_reference" and rid.startswith("pdk:"):
-                _pdk_service.remove_reference(rid[4:])
-                results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "removed"}})
+                if _pdk_service.get_pdk(rid[4:]) is None:
+                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
+                else:
+                    _pdk_service.remove_reference(rid[4:])
+                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "removed"}})
             else:
                 results.append({"resource_id": rid, "action": action, "status": 400, "error": f"Unsupported action '{action}' for '{rid}'"})
         except Exception as e:
@@ -459,16 +462,6 @@ async def validate_resource(resource_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
     return {"resource_id": resource_id, "health": health}
-
-
-@router.delete("/{resource_id}")
-async def remove_resource_reference(resource_id: str):
-    """Remove a PDK reference (inventory only, not source directory)."""
-    if not resource_id.startswith("pdk:"):
-        raise HTTPException(status_code=400, detail="Only PDK references can be removed")
-    pdk_id = resource_id[4:]
-    _pdk_service.remove_reference(pdk_id)
-    return {"status": "removed", "resource_id": resource_id}
 
 
 def _resource_progress_sse_format(job: ResourceJob) -> str:
