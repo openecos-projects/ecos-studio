@@ -59,3 +59,29 @@ class ResourceInfo(BaseModel):
 class ResourceList(BaseModel):
     resources: list[ResourceInfo]
     diagnostics: list[str] = Field(default_factory=list)
+
+
+# ── Registry schemas ─────────────────────────────────────────────────
+
+from pydantic import field_validator
+
+from ecos_server.plugin.schemas import RegistryTool
+
+
+class ResourceRegistryV1(BaseModel):
+    """Resource Manager registry schema V1.
+
+    Validates schema_version and reserves the pdks field for V2.
+    Rejects unknown schema versions.
+    """
+
+    schema_version: int
+    tools: list[RegistryTool] = Field(default_factory=list)
+    pdks: list = Field(default_factory=list)
+
+    @field_validator("schema_version")
+    @classmethod
+    def check_supported_version(cls, v: int) -> int:
+        if v != 1:
+            raise ValueError(f"Unsupported registry schema version: {v}. Expected: 1")
+        return v

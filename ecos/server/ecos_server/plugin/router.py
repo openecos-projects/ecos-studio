@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import platform
 import shutil
 from pathlib import Path
@@ -19,7 +20,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plugin", tags=["plugin"])
 
 _manager = ManagerService()
-_registry = RegistryService()
+_registry = RegistryService(
+    registry_url=os.environ.get(
+        "ECOS_REGISTRY_URL",
+        "https://github.com/openecos-projects/ecos-registry/releases/latest/download/tool-registry.json",
+    )
+)
 _installer = InstallerService(manager=_manager)
 
 _installing: set[str] = set()

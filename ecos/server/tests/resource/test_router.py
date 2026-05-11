@@ -185,16 +185,26 @@ class TestInstall:
 
     def test_install_duplicate_409(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
+        from ecos_server.resource.schemas import ResourceAction
 
         _patch_registry(client, _mock_registry_data())
         # First request starts the install
         resp1 = client.post("/api/resources/tool:yosys/install")
         assert resp1.status_code == 200
         # Manually mark job as still active (simulating in-progress install)
-        router_mod._job_tracker._active.add("tool:yosys")
+        router_mod._job_tracker._active["tool:yosys"] = type(
+            router_mod._job_tracker._active.get("tool:yosys", None)
+        )
+        # Use start() instead for proper metadata
+        router_mod._job_tracker.finish("tool:yosys")
+        router_mod._job_tracker.start("tool:yosys", action=ResourceAction.install)
         resp2 = client.post("/api/resources/tool:yosys/install")
         assert resp2.status_code == 409
-        router_mod._job_tracker._active.discard("tool:yosys")
+        detail = resp2.json()["detail"]
+        assert detail["resource_id"] == "tool:yosys"
+        assert detail["status"] == "conflict"
+        assert detail["existing_job_id"] is not None
+        router_mod._job_tracker.finish("tool:yosys")
 
     def test_install_unknown_tool_404(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 1, "tools": []})
@@ -279,6 +289,89 @@ class TestRegistryRefresh:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["tools_count"] == 1
+
+
+class TestBatch:
+    def test_batch_empty(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        resp = client.post("/api/resources/batch", json={"operations": []})
+        assert resp.status_code == 200
+        assert resp.json()["results"] == []
+
+    def test_batch_invalid_operation(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        resp = client.post("/api/resources/batch", json={"operations": [{}]})
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 400
+
+    def test_batch_unsupported_action(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "tool:yosys", "action": "uninstall"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 400
+
+    def test_batch_remove_pdk_reference(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _pdk_service.import_pdk(str(_make_pdk_dir()))
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:ics55", "action": "remove_reference"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 200
+        assert _pdk_service.get_pdk("ics55") is None
+
+
+class TestDoctor:
+    def test_doctor_ok(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data())
+        resp = client.get("/api/resources/doctor")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "diagnostics" in data
+        assert data["stats"]["registry_tools"] == 1
+
+    def test_doctor_degraded(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS, RegistryState
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        mock_rs.cache_file = Path("/tmp/cache/resource-registry.json")
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources/doctor")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "degraded"
+
+
+class TestPdkDelete:
+    def test_delete_pdk_by_id(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        _pdk_service.import_pdk(str(_make_pdk_dir()))
+        resp = client.delete("/api/resources/pdks/ics55")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "removed"
+        assert data["resource_id"] == "pdk:ics55"
+
+    def test_delete_pdk_by_id_preserves_source(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 1, "tools": []})
+        pdk_dir = _make_pdk_dir()
+        _pdk_service.import_pdk(str(pdk_dir))
+        resp = client.delete("/api/resources/pdks/ics55")
+        assert resp.status_code == 200
+        assert pdk_dir.exists()
 
 
 def _make_pdk_dir() -> Path:

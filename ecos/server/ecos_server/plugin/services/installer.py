@@ -60,16 +60,48 @@ class InstallerService:
             raise
 
     @staticmethod
+    def _validate_entry_path(dest: Path, member_name: str) -> Path:
+        """Validate that an archive member resolves inside dest.
+
+        Rejects absolute paths, parent directory traversal, and empty names.
+        Returns the resolved target path if valid.
+        """
+        if not member_name or member_name == ".":
+            raise ValueError(f"Rejected empty archive entry name")
+        if member_name.startswith("/"):
+            raise ValueError(f"Rejected absolute archive entry: {member_name}")
+        if member_name != member_name.lstrip("/"):
+            raise ValueError(f"Rejected archive entry with leading slashes: {member_name}")
+
+        parts = member_name.replace("\\", "/").split("/")
+        for part in parts:
+            if part == "..":
+                raise ValueError(f"Rejected parent directory traversal in archive: {member_name}")
+
+        resolved = (dest / member_name).resolve()
+        dest_resolved = dest.resolve()
+        try:
+            resolved.relative_to(dest_resolved)
+        except ValueError:
+            raise ValueError(f"Rejected archive entry outside extraction root: {member_name}")
+
+        return resolved
+
+    @staticmethod
     def _extract_tar(archive: Path, dest: Path, strip_prefix: str | None) -> None:
+        dest = dest.resolve()
         with tarfile.open(archive, "r:*") as tar:
             for member in tar.getmembers():
                 orig = member.name
-                if strip_prefix and orig.startswith(strip_prefix + "/"):
-                    member.name = orig[len(strip_prefix) + 1 :]
-                elif strip_prefix and orig == strip_prefix:
+                name = orig
+                if strip_prefix and name.startswith(strip_prefix + "/"):
+                    name = name[len(strip_prefix) + 1 :]
+                elif strip_prefix and name == strip_prefix:
                     continue
-                if not member.name or member.name == ".":
+                if not name or name == ".":
                     continue
+                InstallerService._validate_entry_path(dest, name)
+                member.name = name
                 if sys.version_info >= (3, 12):
                     tar.extract(member, dest, filter="data")
                 else:
@@ -77,6 +109,7 @@ class InstallerService:
 
     @staticmethod
     def _extract_zip(archive: Path, dest: Path, strip_prefix: str | None) -> None:
+        dest = dest.resolve()
         with zipfile.ZipFile(archive) as zf:
             for info in zf.infolist():
                 name = info.filename
@@ -84,7 +117,7 @@ class InstallerService:
                     name = name[len(strip_prefix) + 1 :]
                 if not name:
                     continue
-                target = dest / name
+                target = InstallerService._validate_entry_path(dest, name)
                 if info.is_dir():
                     target.mkdir(parents=True, exist_ok=True)
                 else:

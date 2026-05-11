@@ -74,7 +74,7 @@ class ToolResourceService:
         def _publish(job: ResourceJob) -> None:
             if on_progress:
                 on_progress(job)
-            event_manager.publish(f"resource:{name}", job)
+            event_manager.publish(f"resource:{job.resource_id}", job)
 
         import tempfile
 

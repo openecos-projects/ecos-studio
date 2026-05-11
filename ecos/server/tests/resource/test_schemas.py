@@ -348,3 +348,60 @@ class TestResourceList:
         assert len(rl.resources) == 2
         assert rl.resources[0].type == ResourceType.tool
         assert rl.resources[1].type == ResourceType.pdk
+
+
+class TestResourceRegistryV1:
+    def test_valid_v1_registry(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        reg = ResourceRegistryV1(schema_version=1, tools=[], pdks=[])
+        assert reg.schema_version == 1
+        assert reg.tools == []
+        assert reg.pdks == []
+
+    def test_rejects_unsupported_version(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        with pytest.raises(ValidationError, match="Unsupported registry schema version"):
+            ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
+
+    def test_rejects_version_zero(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        with pytest.raises(ValidationError, match="Unsupported registry schema version"):
+            ResourceRegistryV1(schema_version=0, tools=[], pdks=[])
+
+    def test_rejects_non_int_version(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        with pytest.raises(ValidationError):
+            ResourceRegistryV1(schema_version="not_an_int", tools=[], pdks=[])
+
+    def test_pdks_field_reserved(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        reg = ResourceRegistryV1(schema_version=1, tools=[], pdks=[])
+        assert reg.pdks == []
+
+    def test_defaults(self) -> None:
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        reg = ResourceRegistryV1(schema_version=1)
+        assert reg.tools == []
+        assert reg.pdks == []
+
+    def test_with_tools(self) -> None:
+        from ecos_server.plugin.schemas import RegistryTool
+        from ecos_server.resource.schemas import ResourceRegistryV1
+
+        tool = RegistryTool(
+            name="yosys",
+            display_name="Yosys",
+            description="",
+            category="",
+            homepage="",
+            versions=[],
+        )
+        reg = ResourceRegistryV1(schema_version=1, tools=[tool], pdks=[])
+        assert len(reg.tools) == 1
+        assert reg.tools[0].name == "yosys"

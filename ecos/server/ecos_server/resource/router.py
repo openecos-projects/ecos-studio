@@ -4,9 +4,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from fastapi import Request
 
 from ecos_server.sse import event_manager
 
@@ -29,13 +28,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 
 # ── Service singletons ────────────────────────────────────────────────
-# These are module-level for now; can be injected via FastAPI dependencies later.
 _inventory = InventoryService()
 _job_tracker = JobTracker()
 _pdk_service = PdkResourceService(inventory=_inventory)
 _tool_service = ToolResourceService(inventory=_inventory)
 
-# Registry service requires a URL; defer to module-level setter
 _registry_service: RegistryService | None = None
 
 
@@ -125,7 +122,7 @@ def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
     )
 
 
-# ── Routes ─────────────────────────────────────────────────────────────
+# ── Static routes (must precede dynamic /{resource_id} routes) ─────────
 
 @router.get("", response_model=ResourceList)
 async def list_resources():
@@ -146,110 +143,6 @@ async def list_resources():
 
     return ResourceList(resources=resources, diagnostics=state.diagnostics)
 
-
-@router.get("/{resource_id}", response_model=ResourceInfo)
-async def get_resource(resource_id: str):
-    """Get a single resource by id (e.g. tool:yosys or pdk:ics55)."""
-    if resource_id.startswith("tool:"):
-        name = resource_id[5:]
-        registry_svc = _require_registry()
-        state = await registry_svc.fetch()
-        if state.registry is None:
-            raise HTTPException(status_code=503, detail="Registry unavailable")
-        reg_tool = next((t for t in state.registry.tools if t.name == name), None)
-        if reg_tool is None:
-            raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
-        installed = _tool_service.get_installed()
-        return _tool_to_resource(reg_tool, installed, _job_tracker._active)
-
-    if resource_id.startswith("pdk:"):
-        pdk_id = resource_id[4:]
-        entry = _pdk_service.get_pdk(pdk_id)
-        if entry is None:
-            raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
-        return _pdk_to_resource(entry)
-
-    raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
-
-
-# ── Tool install / uninstall ───────────────────────────────────────────
-
-@router.post("/{resource_id}/install")
-async def install_resource(resource_id: str):
-    """Start tool installation. Returns 409 if already installing."""
-    if not resource_id.startswith("tool:"):
-        raise HTTPException(status_code=400, detail="Only tools can be installed")
-
-    name = resource_id[5:]
-
-    if _job_tracker.is_active(resource_id):
-        raise HTTPException(status_code=409, detail=f"Tool '{name}' is already installing")
-
-    registry_svc = _require_registry()
-    state = await registry_svc.fetch()
-    if state.registry is None:
-        raise HTTPException(status_code=503, detail="Registry unavailable")
-
-    reg_tool = next((t for t in state.registry.tools if t.name == name), None)
-    if reg_tool is None:
-        raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
-
-    if not reg_tool.versions:
-        raise HTTPException(status_code=404, detail=f"No versions available for '{name}'")
-
-    version_entry = reg_tool.versions[0]
-    plat = ToolResourceService.current_platform()
-    asset = version_entry.platforms.get(plat)
-    if asset is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Tool '{name}' v{version_entry.version} not available for {plat}",
-        )
-
-    version = version_entry.version
-    _job_tracker.start(resource_id)
-
-    def _on_progress(job: ResourceJob) -> None:
-        _job_tracker.publish(job)
-
-    async def _run() -> None:
-        try:
-            await _tool_service.install(name, version, asset, on_progress=_on_progress)
-        except Exception:
-            logger.exception("Install failed for %s", name)
-            _job_tracker.publish(
-                ResourceJob(
-                    resource_id=resource_id,
-                    action=ResourceAction.install,
-                    phase="error",
-                    progress=0.0,
-                    message=f"Installation failed for {name}",
-                )
-            )
-        finally:
-            _job_tracker.finish(resource_id)
-
-    asyncio.create_task(_run())
-
-    return {"status": "installing", "resource_id": resource_id, "version": version}
-
-
-@router.post("/{resource_id}/uninstall")
-async def uninstall_resource(resource_id: str):
-    """Uninstall a tool. Only available for managed (tool) resources."""
-    if not resource_id.startswith("tool:"):
-        raise HTTPException(status_code=400, detail="Only tools can be uninstalled")
-
-    name = resource_id[5:]
-    try:
-        await _tool_service.uninstall(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Tool '{name}' is not installed")
-
-    return {"status": "uninstalled", "resource_id": resource_id}
-
-
-# ── PDK operations ─────────────────────────────────────────────────────
 
 @router.post("/pdks/scan")
 async def scan_pdk(body: dict):
@@ -282,6 +175,242 @@ async def import_pdk(body: dict):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _pdk_to_resource(entry)
+
+
+@router.delete("/pdks/{pdk_id}")
+async def remove_pdk_reference(pdk_id: str):
+    """Remove a PDK inventory reference (AC-6: never deletes source directory)."""
+    _pdk_service.remove_reference(pdk_id)
+    return {"status": "removed", "resource_id": f"pdk:{pdk_id}"}
+
+
+@router.post("/registry/refresh")
+async def refresh_registry():
+    """Force refresh the tool registry from remote."""
+    registry_svc = _require_registry()
+    state = await registry_svc.refresh()
+    count = len(state.registry.tools) if state.registry else 0
+    return {"status": "ok", "tools_count": count, "diagnostics": state.diagnostics}
+
+
+@router.post("/batch")
+async def batch_operations(body: dict):
+    """Execute batch resource operations."""
+    operations = body.get("operations", [])
+    results: list[dict] = []
+    for op in operations:
+        rid = op.get("resource_id", "")
+        action = op.get("action", "")
+        if not rid or not action:
+            results.append({"resource_id": rid, "action": action, "status": 400, "error": "Missing resource_id or action"})
+            continue
+        try:
+            if action == "install" and rid.startswith("tool:"):
+                if _job_tracker.is_active(rid):
+                    existing = _job_tracker.get_active(rid)
+                    results.append({"resource_id": rid, "action": action, "status": 409, "detail": {"existing_job_id": existing.job_id if existing else None}})
+                    continue
+                name = rid[5:]
+                registry_svc = _require_registry()
+                state = await registry_svc.fetch()
+                if state.registry is None:
+                    results.append({"resource_id": rid, "action": action, "status": 503, "error": "Registry unavailable"})
+                    continue
+                reg_tool = next((t for t in state.registry.tools if t.name == name), None)
+                if reg_tool is None or not reg_tool.versions:
+                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"Tool '{name}' not found"})
+                    continue
+                version_entry = reg_tool.versions[0]
+                plat = ToolResourceService.current_platform()
+                asset = version_entry.platforms.get(plat)
+                if asset is None:
+                    results.append({"resource_id": rid, "action": action, "status": 400, "error": f"Not available for {plat}"})
+                    continue
+                _job_tracker.start(rid, action=ResourceAction.install)
+                asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
+                results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "installing", "version": version_entry.version}})
+            elif action == "remove_reference" and rid.startswith("pdk:"):
+                _pdk_service.remove_reference(rid[4:])
+                results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "removed"}})
+            else:
+                results.append({"resource_id": rid, "action": action, "status": 400, "error": f"Unsupported action '{action}' for '{rid}'"})
+        except Exception as e:
+            results.append({"resource_id": rid, "action": action, "status": 500, "error": str(e)})
+    return {"results": results}
+
+
+@router.get("/doctor")
+async def resource_doctor():
+    """Diagnostics for the Resource Manager subsystem."""
+    diagnostics: list[str] = []
+    registry_svc = _require_registry()
+    state = await registry_svc.fetch()
+
+    installed_tools = _tool_service.get_installed()
+    imported_pdks = _pdk_service.list_pdks()
+
+    if state.is_degraded:
+        diagnostics.extend(state.diagnostics)
+    if state.registry is None:
+        diagnostics.append("No registry loaded")
+    else:
+        diagnostics.append(f"Registry: {len(state.registry.tools)} tools")
+
+    diagnostics.append(f"Installed tools: {len(installed_tools)}")
+    diagnostics.append(f"Imported PDKs: {len(imported_pdks)}")
+
+    active_jobs = len(_job_tracker._active)
+    if active_jobs > 0:
+        diagnostics.append(f"Active jobs: {active_jobs}")
+
+    return {
+        "status": "degraded" if state.is_degraded else "ok",
+        "diagnostics": diagnostics,
+        "stats": {
+            "registry_tools": len(state.registry.tools) if state.registry else 0,
+            "installed_tools": len(installed_tools),
+            "imported_pdks": len(imported_pdks),
+            "active_jobs": active_jobs,
+        },
+    }
+
+
+@router.get("/sse/{resource_id}")
+async def resource_event_stream(resource_id: str, request: Request) -> StreamingResponse:
+    """SSE stream for resource operation progress events."""
+    channel = f"resource:{resource_id}"
+
+    async def generate():
+        async for response in event_manager.subscribe(channel):
+            if await request.is_disconnected():
+                break
+            if isinstance(response, ResourceJob):
+                yield _resource_progress_sse_format(response)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Dynamic resource-id routes ─────────────────────────────────────────
+
+@router.get("/{resource_id}", response_model=ResourceInfo)
+async def get_resource(resource_id: str):
+    """Get a single resource by id (e.g. tool:yosys or pdk:ics55)."""
+    if resource_id.startswith("tool:"):
+        name = resource_id[5:]
+        registry_svc = _require_registry()
+        state = await registry_svc.fetch()
+        if state.registry is None:
+            raise HTTPException(status_code=503, detail="Registry unavailable")
+        reg_tool = next((t for t in state.registry.tools if t.name == name), None)
+        if reg_tool is None:
+            raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
+        installed = _tool_service.get_installed()
+        return _tool_to_resource(reg_tool, installed, _job_tracker._active)
+
+    if resource_id.startswith("pdk:"):
+        pdk_id = resource_id[4:]
+        entry = _pdk_service.get_pdk(pdk_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
+        return _pdk_to_resource(entry)
+
+    raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
+
+
+@router.post("/{resource_id}/install")
+async def install_resource(resource_id: str):
+    """Start tool installation. Returns 409 with structured conflict detail."""
+    if not resource_id.startswith("tool:"):
+        raise HTTPException(status_code=400, detail="Only tools can be installed")
+
+    name = resource_id[5:]
+
+    if _job_tracker.is_active(resource_id):
+        existing = _job_tracker.get_active(resource_id)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "resource_id": resource_id,
+                "action": existing.action.value if existing else "install",
+                "status": "conflict",
+                "existing_job_id": existing.job_id if existing else None,
+                "event_url": existing.event_url if existing else None,
+            },
+        )
+
+    registry_svc = _require_registry()
+    state = await registry_svc.fetch()
+    if state.registry is None:
+        raise HTTPException(status_code=503, detail="Registry unavailable")
+
+    reg_tool = next((t for t in state.registry.tools if t.name == name), None)
+    if reg_tool is None:
+        raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+
+    if not reg_tool.versions:
+        raise HTTPException(status_code=404, detail=f"No versions available for '{name}'")
+
+    version_entry = reg_tool.versions[0]
+    plat = ToolResourceService.current_platform()
+    asset = version_entry.platforms.get(plat)
+    if asset is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tool '{name}' v{version_entry.version} not available for {plat}",
+        )
+
+    version = version_entry.version
+    _job_tracker.start(resource_id, action=ResourceAction.install)
+
+    asyncio.create_task(_run_install(resource_id, name, version_entry.version, asset))
+
+    return {"status": "installing", "resource_id": resource_id, "version": version}
+
+
+async def _run_install(resource_id: str, name: str, version: str, asset) -> None:
+    """Shared install runner used by both single and batch install routes."""
+
+    def _on_progress(job: ResourceJob) -> None:
+        _job_tracker.publish(job)
+
+    try:
+        await _tool_service.install(name, version, asset, on_progress=_on_progress)
+    except Exception:
+        logger.exception("Install failed for %s", name)
+        _job_tracker.publish(
+            ResourceJob(
+                resource_id=resource_id,
+                action=ResourceAction.install,
+                phase="error",
+                progress=0.0,
+                message=f"Installation failed for {name}",
+            )
+        )
+    finally:
+        _job_tracker.finish(resource_id)
+
+
+@router.post("/{resource_id}/uninstall")
+async def uninstall_resource(resource_id: str):
+    """Uninstall a tool."""
+    if not resource_id.startswith("tool:"):
+        raise HTTPException(status_code=400, detail="Only tools can be uninstalled")
+
+    name = resource_id[5:]
+    try:
+        await _tool_service.uninstall(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Tool '{name}' is not installed")
+
+    return {"status": "uninstalled", "resource_id": resource_id}
 
 
 @router.post("/{resource_id}/activate")
@@ -320,19 +449,6 @@ async def remove_resource_reference(resource_id: str):
     return {"status": "removed", "resource_id": resource_id}
 
 
-# ── Registry ───────────────────────────────────────────────────────────
-
-@router.post("/registry/refresh")
-async def refresh_registry():
-    """Force refresh the tool registry from remote."""
-    registry_svc = _require_registry()
-    state = await registry_svc.refresh()
-    count = len(state.registry.tools) if state.registry else 0
-    return {"status": "ok", "tools_count": count, "diagnostics": state.diagnostics}
-
-
-# ── SSE ────────────────────────────────────────────────────────────────
-
 def _resource_progress_sse_format(job: ResourceJob) -> str:
     lines = [
         "event: progress",
@@ -340,26 +456,3 @@ def _resource_progress_sse_format(job: ResourceJob) -> str:
         "",
     ]
     return "\n".join(lines) + "\n"
-
-
-@router.get("/sse/{resource_id}")
-async def resource_event_stream(resource_id: str, request: Request) -> StreamingResponse:
-    """SSE stream for resource operation progress events."""
-    channel = f"resource:{resource_id}"
-
-    async def generate():
-        async for response in event_manager.subscribe(channel):
-            if await request.is_disconnected():
-                break
-            if isinstance(response, ResourceJob):
-                yield _resource_progress_sse_format(response)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )

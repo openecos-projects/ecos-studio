@@ -10,6 +10,8 @@ import httpx
 
 from ecos_server.plugin.schemas import ToolRegistry
 
+from .schemas import ResourceRegistryV1
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CACHE_DIR = Path.home() / ".ecos" / "cache"
@@ -61,15 +63,19 @@ class RegistryService:
             return None
         try:
             data = json.loads(self._cache_file.read_text(encoding="utf-8"))
-            return ToolRegistry(**data)
+            validated = ResourceRegistryV1(**data)
+            return ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
         except Exception:
             logger.warning("Failed to parse cached registry", exc_info=True)
             return None
 
     def _save_cache(self, registry: ToolRegistry) -> None:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        # Write as ResourceRegistryV1 shape (includes pdks field)
+        data = registry.model_dump()
+        data.setdefault("pdks", [])
         self._cache_file.write_text(
-            registry.model_dump_json(indent=2),
+            json.dumps(data, indent=2),
             encoding="utf-8",
         )
 
@@ -96,7 +102,9 @@ class RegistryService:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(self._registry_url)
                 resp.raise_for_status()
-                registry = ToolRegistry(**resp.json())
+                raw = resp.json()
+                validated = ResourceRegistryV1(**raw)
+                registry = ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
                 self._save_cache(registry)
                 self._in_memory = registry
                 return RegistryState(registry=registry, diagnostics=[])

@@ -1,38 +1,63 @@
 #!/usr/bin/env python
 
-"""Thin job tracking for resource operations.
+"""Job tracking for resource operations.
 
 Tracks active resource jobs to power duplicate-detection (409 Conflict)
-and SSE progress subscriptions.
+and SSE progress subscriptions. Each active job stores metadata so
+clients receive a structured conflict response with the existing job id.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Callable
 
 from ecos_server.sse import event_manager as _default_event_manager
 
-from .schemas import ResourceJob
+from .schemas import ResourceAction, ResourceJob
 
 logger = logging.getLogger(__name__)
 
 
-class JobTracker:
-    """In-memory set of active resource operation keys.
+@dataclass
+class ActiveJob:
+    resource_id: str
+    action: ResourceAction
+    job_id: str
 
-    Used by routers to reject duplicate install/update requests with 409.
+    @property
+    def event_url(self) -> str:
+        return f"/api/resources/sse/{self.resource_id}"
+
+
+class JobTracker:
+    """In-memory tracker of active resource operations with metadata.
+
+    Used by routers to reject duplicate install/update requests with 409
+    and expose existing job info so clients can subscribe to progress.
     """
 
     def __init__(self) -> None:
-        self._active: set[str] = set()
+        self._active: dict[str, ActiveJob] = {}
+        self._counter = 0
 
     def is_active(self, resource_id: str) -> bool:
         return resource_id in self._active
 
-    def start(self, resource_id: str) -> None:
-        self._active.add(resource_id)
+    def get_active(self, resource_id: str) -> ActiveJob | None:
+        return self._active.get(resource_id)
+
+    def start(self, resource_id: str, action: ResourceAction = ResourceAction.install) -> ActiveJob:
+        self._counter += 1
+        job = ActiveJob(
+            resource_id=resource_id,
+            action=action,
+            job_id=f"job-{self._counter}",
+        )
+        self._active[resource_id] = job
+        return job
 
     def finish(self, resource_id: str) -> None:
-        self._active.discard(resource_id)
+        self._active.pop(resource_id, None)
 
     def publish(
         self,
