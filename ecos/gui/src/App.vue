@@ -22,7 +22,7 @@
     </div>
 
     <!-- 全局 Toast 通知 -->
-    <Toast position="top-right" />
+    <Toast position="top-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
     <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
@@ -361,6 +361,49 @@ onUnmounted(() => {
 
 .window-resizing {
   cursor: default;
+}
+
+/*
+ * PrimeVue Toast is rendered by this root component and its internal markup is
+ * not scoped. Keep long backend errors, paths, and command output inside the
+ * notification bubble instead of letting them spill past the rounded panel.
+ */
+.app-toast.p-toast {
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+}
+
+.app-toast .p-toast-message {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.app-toast .p-toast-message-content {
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.app-toast .p-toast-message-icon,
+.app-toast .p-toast-close-button {
+  flex: 0 0 auto;
+}
+
+.app-toast .p-toast-message-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-toast .p-toast-summary,
+.app-toast .p-toast-detail {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.app-toast .p-toast-detail {
+  line-height: 1.45;
 }
 </style>
 
