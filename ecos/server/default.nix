@@ -29,6 +29,7 @@ python3Packages.buildPythonPackage {
   ]
   ++ (with python3Packages; [
     fastapi
+    httpx
     uvicorn
   ]);
 
