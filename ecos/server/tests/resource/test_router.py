@@ -326,6 +326,53 @@ class TestBatch:
         result = resp.json()["results"][0]
         assert result["status"] == 400
 
+    def test_batch_install(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data())
+        _patch_installer()
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "tool:yosys", "action": "install"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 200
+        assert result["detail"]["status"] == "installing"
+
+    def test_batch_install_unknown_tool(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        _patch_installer()
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "tool:nonexistent", "action": "install"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 404
+
+    def test_batch_activate_pdk(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        _pdk_service.import_pdk(str(_make_pdk_dir()))
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:ics55", "action": "activate"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 200
+        assert _pdk_service.get_pdk("ics55").active is True
+
+    def test_batch_validate_pdk(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        _pdk_service.import_pdk(str(_make_pdk_dir()))
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:ics55", "action": "validate"}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 200
+        assert result["detail"]["health"] == "ok"
+
     def test_batch_remove_pdk_reference(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))

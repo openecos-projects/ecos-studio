@@ -21,3 +21,6 @@ ecos/server/ecos_server/resource/data/
 *.json.bak
 resource-registry.json
 resource-manifest.json
+resources/manifest.json
+tools/manifest.json
+manifest.json
