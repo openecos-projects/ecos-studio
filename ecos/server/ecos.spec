@@ -43,8 +43,19 @@ ecc_datas, ecc_binaries, ecc_hiddenimports = collect_all("chipcompiler")
 klayout_datas, klayout_binaries, klayout_hiddenimports = collect_all("klayout")
 
 # --- Collect PyTorch (DreamPlace dependency) ---
+def _include_torch_submodule(name):
+    """Keep the torch bundle focused on tensor/runtime modules used by DreamPlace."""
+    excluded_prefixes = (
+        "torch.distributed",
+    )
+    return not any(name == prefix or name.startswith(f"{prefix}.") for prefix in excluded_prefixes)
+
+
 try:
-    torch_datas, torch_binaries, torch_hiddenimports = collect_all("torch")
+    torch_datas, torch_binaries, torch_hiddenimports = collect_all(
+        "torch",
+        filter_submodules=_include_torch_submodule,
+    )
 except Exception as exc:
     warnings.warn(
         f"Failed to collect torch package: {exc}. "
