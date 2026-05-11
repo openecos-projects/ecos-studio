@@ -1,23 +1,32 @@
 <template>
-  <div class="flex flex-col h-full w-full min-h-0 text-(--text-primary) relative overflow-hidden">
-    <div class="relative z-10 flex flex-col h-full min-h-0 w-full max-w-4xl mx-auto px-6 pt-8 pb-6">
-      <header class="shrink-0 mb-6">
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 text-sm text-(--text-secondary) hover:text-(--accent-color) transition-colors duration-200 cursor-pointer mb-4"
-          @click="goHome"
-        >
-          <i class="ri-arrow-left-line text-lg" aria-hidden="true" />
-          <span>Back to home</span>
-        </button>
-        <div class="flex items-end gap-4 flex-wrap">
-          <div>
-            <h1 class="text-2xl font-semibold text-(--text-primary) tracking-tight">EDA Tools</h1>
-            <p class="text-sm text-(--text-secondary) mt-1 max-w-xl">
-              Install and manage EDA toolchains for your flows. Search, filter by category, and track install status.
-            </p>
-          </div>
-        </div>
+  <div class="resource-manager-view">
+    <div class="blurred-home" aria-hidden="true">
+      <div class="blurred-brand">
+        <i class="ri-cpu-line"></i>
+        <span>ECOS Studio</span>
+      </div>
+      <div class="blurred-cards">
+        <div class="blurred-card"></div>
+        <div class="blurred-card"></div>
+        <div class="blurred-card is-active"></div>
+      </div>
+      <div class="blurred-lines">
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+    </div>
+
+    <div class="manager-scrim" aria-hidden="true"></div>
+
+    <section class="manager-dialog" aria-labelledby="resource-manager-title">
+      <button type="button" class="manager-close" aria-label="Close resource manager" @click="goHome">
+        <i class="ri-close-line" aria-hidden="true"></i>
+      </button>
+
+      <header class="manager-header">
+        <h1 id="resource-manager-title">Resource Manager</h1>
+        <p>Discover, install, and manage EDA tools and PDKs</p>
       </header>
 
       <div class="manager-grid">
@@ -273,13 +282,46 @@
           </div>
         </aside>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import PluginToolsPanel from '../components/PluginToolsPanel.vue'
+import { open as shellOpen } from '@tauri-apps/plugin-shell'
+import { usePluginStore } from '@/stores/pluginStore'
+import { usePdkManager } from '@/composables/usePdkManager'
+import type { ToolInfo, ToolStatus } from '@/api/plugin'
+
+type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
+type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
+type ResourceType = 'tool' | 'pdk'
+type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
+
+interface ResourceRow {
+  id: string
+  type: ResourceType
+  name: string
+  description: string
+  version: string
+  sizeLabel: string
+  sizeMb: number
+  platform: string
+  statusText: string
+  statusKind: StatusKind
+  icon: string
+  accent: string
+  progressPercent: number | null
+  tool?: ToolInfo
+}
+
+interface ResourceMeta {
+  icon: string
+  accent: string
+  sizeMb: number
+  sizeLabel: string
+}
 
 const router = useRouter()
 const pluginStore = usePluginStore()
@@ -592,6 +634,14 @@ function formatSize(sizeMb: number): string {
 
 function goHome(): void {
   router.push('/')
+}
+
+async function openDocs(): Promise<void> {
+  try {
+    await shellOpen('https://github.com/openecos-projects/ecc/blob/main/docs/user-guide.md')
+  } catch (error) {
+    console.error('Failed to open documentation:', error)
+  }
 }
 </script>
 

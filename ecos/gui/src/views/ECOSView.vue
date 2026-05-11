@@ -1,13 +1,13 @@
 <template>
   <div
-    class="flex flex-col h-full w-full min-h-0 text-(--text-primary) relative overflow-y-auto overflow-x-hidden"
+    class="ecos-home-surface flex flex-col h-full w-full min-h-0 text-(--text-primary) relative overflow-y-auto overflow-x-hidden"
   >
     <div
-      class="relative z-10 flex flex-col min-h-full w-full justify-center px-6 py-10 pb-12"
+      class="relative z-10 flex flex-col w-full min-h-fit px-6 pt-7 pb-10 sm:pt-8"
     >
       <div class="w-full max-w-6xl mx-auto flex flex-col">
       <!-- Hero -->
-      <header class="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+      <header class="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
         <div class="flex flex-col sm:flex-row sm:items-center gap-5 text-center sm:text-left">
           <div class="relative shrink-0 mx-auto sm:mx-0">
             <div
@@ -44,7 +44,7 @@
       </header>
 
       <!-- Bento: design tools -->
-      <section class="mb-10" aria-labelledby="design-tools-heading">
+      <section class="mb-8" aria-labelledby="design-tools-heading">
         <h2
           id="design-tools-heading"
           class="text-[11px] font-semibold text-(--text-secondary) uppercase tracking-wider mb-4"
@@ -53,7 +53,7 @@
         </h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <article
-            class="relative flex flex-col overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary) min-h-[140px]"
+            class="relative flex flex-col overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary) min-h-[130px]"
           >
             <div class="relative z-0 flex flex-col p-6 opacity-[0.38]">
               <div
@@ -77,7 +77,7 @@
           </article>
 
           <article
-            class="relative flex flex-col overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary) min-h-[140px]"
+            class="relative flex flex-col overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary) min-h-[130px]"
           >
             <div class="relative z-0 flex flex-col p-6 opacity-[0.38]">
               <div
@@ -102,7 +102,7 @@
 
           <button
             type="button"
-            class="group flex flex-col rounded-2xl border border-(--border-color) bg-(--bg-secondary) p-6 min-h-[140px] text-left transition-all duration-200 cursor-pointer hover:border-(--accent-color) hover:shadow-lg hover:shadow-(--accent-color)/8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
+            class="group flex flex-col rounded-2xl border border-(--border-color) bg-(--bg-secondary) p-6 min-h-[130px] text-left transition-all duration-200 cursor-pointer hover:border-(--accent-color) hover:shadow-lg hover:shadow-(--accent-color)/8 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
             @click="navigateToECC"
           >
             <div
@@ -123,7 +123,7 @@
       </section>
 
       <!-- Resources + Explore -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         <section aria-labelledby="resources-heading">
           <h2
             id="resources-heading"
@@ -193,7 +193,7 @@
               </div>
             </div>
 
-            <!-- EDA Tools → dedicated route -->
+            <!-- Resource Manager → dedicated route -->
             <button
               type="button"
               class="group w-full flex items-center gap-4 px-4 py-4 rounded-2xl border border-(--border-color) bg-(--bg-secondary) text-left transition-all duration-200 cursor-pointer hover:border-(--accent-color) hover:shadow-md hover:shadow-(--accent-color)/6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
@@ -205,9 +205,9 @@
                 <i class="ri-tools-line text-xl text-(--accent-color)" aria-hidden="true" />
               </div>
               <div class="flex-1 min-w-0">
-                <span class="text-sm font-semibold text-(--text-primary) block">EDA Tools</span>
+                <span class="text-sm font-semibold text-(--text-primary) block">Resource Manager</span>
                 <span class="text-xs text-(--text-secondary) line-clamp-2">
-                  Install and manage toolchains on a dedicated page
+                  Discover, install, and manage EDA tools and PDKs
                 </span>
               </div>
               <i
@@ -253,7 +253,7 @@
             type="button"
             class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl border border-(--border-color) bg-(--bg-secondary) transition-all duration-200 text-left cursor-pointer group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--accent-color)"
             :class="
-              lastProject.pathExists === false
+              lastProject.workspaceRecognized === false
                 ? 'opacity-50 pointer-events-none'
                 : 'hover:border-(--accent-color) hover:shadow-lg hover:shadow-(--accent-color)/6'
             "
@@ -286,7 +286,7 @@
                   {{ lastProject.completedSteps }}/{{ lastProject.totalSteps }} steps
                 </span>
                 <span>{{ formatDate(lastProject.lastOpened) }}</span>
-                <span v-if="lastProject.pathExists === false" class="text-red-400">Path not reachable</span>
+                <span v-if="lastProject.workspaceRecognized === false" class="text-red-400">Workspace not recognized</span>
               </div>
             </div>
             <div
