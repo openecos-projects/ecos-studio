@@ -332,6 +332,7 @@ import SplitterPanel from 'primevue/splitterpanel'
 import { useParameters } from '@/composables/useParameters'
 import { useHomeData, type AnalysisChartItem, type FlowLogSegment } from '@/composables/useHomeData'
 import { isWindowResizing } from '@/composables/useWindowResizeState'
+import { ensureMonitorChartInstance } from './homeMonitorCharts'
 
 // 注册 ECharts 组件（按需引入）
 echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
@@ -804,13 +805,14 @@ function initOrUpdateCharts() {
     // 跳过尺寸为 0 的元素，等待 ResizeObserver 回调再初始化
     if (!el.clientWidth || !el.clientHeight) continue
 
-    let instance = chartInstances.get(cfg.key)
-    if (!instance) {
-      instance = echarts.init(el, undefined, { renderer: 'canvas' })
-      chartInstances.set(cfg.key, instance)
-      bindChartLinkEvents(instance)
-      newInstanceCreated = true
-    }
+    const { instance, created } = ensureMonitorChartInstance(
+      cfg.key,
+      el,
+      chartInstances,
+      (dom) => echarts.init(dom, undefined, { renderer: 'canvas' }),
+      bindChartLinkEvents,
+    )
+    if (created) newInstanceCreated = true
 
     if (!chartInitialized.has(instance)) {
       // 首次：全量 option + 触发入场动画
