@@ -56,13 +56,18 @@ class RegistryService:
     def cache_file(self) -> Path:
         return self._cache_file
 
+    @staticmethod
+    def _to_tool_registry(validated: ResourceRegistryV1) -> ToolRegistry:
+        """Convert a validated ResourceRegistryV1 to a ToolRegistry for internal use."""
+        return ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
+
     def _load_cached(self) -> ToolRegistry | None:
         if not self._cache_file.exists():
             return None
         try:
             data = json.loads(self._cache_file.read_text(encoding="utf-8"))
             validated = ResourceRegistryV1(**data)
-            return ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
+            return self._to_tool_registry(validated)
         except Exception:
             logger.warning("Failed to parse cached registry", exc_info=True)
             return None
@@ -102,7 +107,7 @@ class RegistryService:
                 resp.raise_for_status()
                 raw = resp.json()
                 validated = ResourceRegistryV1(**raw)
-                registry = ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
+                registry = self._to_tool_registry(validated)
                 self._save_cache(registry)
                 self._in_memory = registry
                 return RegistryState(registry=registry, diagnostics=[])

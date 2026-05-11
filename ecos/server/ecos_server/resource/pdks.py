@@ -135,15 +135,14 @@ class PdkResourceService:
 
         path = Path(entry.canonical_path)
         if not path.exists():
-            self._inventory.set_pdk_health(pdk_id, "missing")
-            return "missing"
+            health = "missing"
+        elif not path.is_dir():
+            health = "invalid"
+        else:
+            health = "ok"
 
-        if not path.is_dir():
-            self._inventory.set_pdk_health(pdk_id, "invalid")
-            return "invalid"
-
-        self._inventory.set_pdk_health(pdk_id, "ok")
-        return "ok"
+        self._inventory.set_pdk_health(pdk_id, health)
+        return health
 
     # ── Remove Reference ───────────────────────────────────────────────
 

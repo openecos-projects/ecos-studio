@@ -3,7 +3,6 @@
 import hashlib
 import logging
 import shutil
-import stat
 import sys
 import tarfile
 import zipfile

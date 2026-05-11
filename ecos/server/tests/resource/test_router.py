@@ -1,4 +1,5 @@
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -499,7 +500,6 @@ class TestSSESubscription:
 
 def _make_pdk_dir() -> Path:
     """Create a real temp PDK directory for router integration tests."""
-    import tempfile
     pdk_dir = Path(tempfile.mkdtemp(prefix="ecos_test_pdk_"))
     (pdk_dir / "prtech").mkdir()
     (pdk_dir / "IP").mkdir()

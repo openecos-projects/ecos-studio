@@ -4,6 +4,7 @@ import asyncio
 import logging
 import platform
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -68,8 +69,6 @@ class ToolResourceService:
         def _publish(job: ResourceJob) -> None:
             if on_progress:
                 on_progress(job)
-
-        import tempfile
 
         _publish(
             ResourceJob(

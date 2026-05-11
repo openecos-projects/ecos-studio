@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -35,6 +37,9 @@ _tool_service = ToolResourceService(inventory=_inventory)
 
 _registry_service: RegistryService | None = None
 
+_TOOL_PREFIX = "tool:"
+_PDK_PREFIX = "pdk:"
+
 
 def init_registry(registry_url: str) -> None:
     global _registry_service
@@ -55,7 +60,7 @@ def _tool_to_resource(
     name = reg_tool.name
     versions = [v.version for v in reg_tool.versions]
     inst = installed.get(name)
-    resource_id = f"tool:{name}"
+    resource_id = f"{_TOOL_PREFIX}{name}"
 
     if name in installing:
         status = ResourceStatus.installing
@@ -101,7 +106,7 @@ def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
     actions.append(ResourceAction.remove_reference)
 
     return ResourceInfo(
-        id=f"pdk:{entry.id}",
+        id=f"{_PDK_PREFIX}{entry.id}",
         type=ResourceType.pdk,
         display_name=entry.name or entry.id,
         description="",
@@ -185,7 +190,7 @@ async def remove_pdk_reference(pdk_id: str):
     if _pdk_service.get_pdk(pdk_id) is None:
         raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
     _pdk_service.remove_reference(pdk_id)
-    return {"status": "removed", "resource_id": f"pdk:{pdk_id}"}
+    return {"status": "removed", "resource_id": f"{_PDK_PREFIX}{pdk_id}"}
 
 
 @router.post("/registry/refresh")
@@ -197,70 +202,145 @@ async def refresh_registry():
     return {"status": "ok", "tools_count": count, "diagnostics": state.diagnostics}
 
 
+# ── Batch operation helpers ────────────────────────────────────────────
+
+async def _batch_install(rid: str) -> dict:
+    """Look up tool in registry, check platform, and start install job."""
+    if _job_tracker.is_active(rid):
+        existing = _job_tracker.get_active(rid)
+        return {
+            "resource_id": rid, "action": "install", "status": 409,
+            "detail": {"existing_job_id": existing.job_id if existing else None},
+        }
+
+    name = rid[5:]
+    registry_svc = _require_registry()
+    state = await registry_svc.fetch()
+
+    if state.registry is None:
+        return {"resource_id": rid, "action": "install", "status": 503, "error": "Registry unavailable"}
+
+    reg_tool = next((t for t in state.registry.tools if t.name == name), None)
+    if reg_tool is None or not reg_tool.versions:
+        return {"resource_id": rid, "action": "install", "status": 404, "error": f"Tool '{name}' not found"}
+
+    version_entry = reg_tool.versions[0]
+    plat = ToolResourceService.current_platform()
+    asset = version_entry.platforms.get(plat)
+    if asset is None:
+        return {"resource_id": rid, "action": "install", "status": 400, "error": f"Not available for {plat}"}
+
+    _job_tracker.start(rid, action=ResourceAction.install)
+    asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
+    return {
+        "resource_id": rid, "action": "install", "status": 200,
+        "detail": {"status": "installing", "version": version_entry.version},
+    }
+
+
+async def _batch_uninstall(rid: str) -> dict:
+    """Uninstall a tool by name."""
+    try:
+        await _tool_service.uninstall(rid[5:])
+        return {"resource_id": rid, "action": "uninstall", "status": 200, "detail": {"status": "uninstalled"}}
+    except KeyError:
+        return {"resource_id": rid, "action": "uninstall", "status": 404, "error": f"Tool '{rid[5:]}' not installed"}
+
+
+def _batch_activate_pdk(rid: str) -> dict:
+    """Activate a PDK by id."""
+    try:
+        _pdk_service.activate(rid[4:])
+        return {"resource_id": rid, "action": "activate", "status": 200, "detail": {"status": "activated"}}
+    except KeyError:
+        return {"resource_id": rid, "action": "activate", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+
+
+def _batch_validate_pdk(rid: str) -> dict:
+    """Validate PDK health."""
+    try:
+        health = _pdk_service.validate(rid[4:])
+        return {"resource_id": rid, "action": "validate", "status": 200, "detail": {"health": health}}
+    except KeyError:
+        return {"resource_id": rid, "action": "validate", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+
+
+def _batch_remove_pdk_reference(rid: str) -> dict:
+    """Remove a PDK inventory reference."""
+    if _pdk_service.get_pdk(rid[4:]) is None:
+        return {"resource_id": rid, "action": "remove_reference", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+    _pdk_service.remove_reference(rid[4:])
+    return {"resource_id": rid, "action": "remove_reference", "status": 200, "detail": {"status": "removed"}}
+
+
+# ── Batch dispatch table ──────────────────────────────────────────────
+
+_BATCH_DISPATCH: dict[str, dict[str, Callable[..., Any]]] = {
+    _TOOL_PREFIX: {
+        "install": _batch_install,
+        "uninstall": _batch_uninstall,
+    },
+    _PDK_PREFIX: {
+        "activate": _batch_activate_pdk,
+        "validate": _batch_validate_pdk,
+        "remove_reference": _batch_remove_pdk_reference,
+    },
+}
+
+
+def _dispatch_batch_operation(rid: str, action: str) -> tuple[Callable[..., Any] | None, str]:
+    """Resolve the batch handler for a given resource_id prefix and action.
+
+    Returns (handler, error_message). If handler is None, error_message
+    contains the reason.
+    """
+    for prefix, actions in _BATCH_DISPATCH.items():
+        if rid.startswith(prefix):
+            handler = actions.get(action)
+            if handler is None:
+                return None, f"Unsupported action '{action}' for '{rid}'"
+            return handler, ""
+    # No prefix matched
+    return None, f"Unsupported action '{action}' for '{rid}'"
+
+
 @router.post("/batch")
 async def batch_operations(body: dict):
     """Execute batch resource operations."""
     operations = body.get("operations", [])
     results: list[dict] = []
+
     for op in operations:
         rid = op.get("resource_id", "")
         action = op.get("action", "")
+
         if not rid or not action:
-            results.append({"resource_id": rid, "action": action, "status": 400, "error": "Missing resource_id or action"})
+            results.append({
+                "resource_id": rid, "action": action,
+                "status": 400, "error": "Missing resource_id or action",
+            })
             continue
+
+        handler, dispatch_error = _dispatch_batch_operation(rid, action)
+
+        if handler is None:
+            results.append({
+                "resource_id": rid, "action": action,
+                "status": 400, "error": dispatch_error,
+            })
+            continue
+
         try:
-            if action == "install" and rid.startswith("tool:"):
-                if _job_tracker.is_active(rid):
-                    existing = _job_tracker.get_active(rid)
-                    results.append({"resource_id": rid, "action": action, "status": 409, "detail": {"existing_job_id": existing.job_id if existing else None}})
-                    continue
-                name = rid[5:]
-                registry_svc = _require_registry()
-                state = await registry_svc.fetch()
-                if state.registry is None:
-                    results.append({"resource_id": rid, "action": action, "status": 503, "error": "Registry unavailable"})
-                    continue
-                reg_tool = next((t for t in state.registry.tools if t.name == name), None)
-                if reg_tool is None or not reg_tool.versions:
-                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"Tool '{name}' not found"})
-                    continue
-                version_entry = reg_tool.versions[0]
-                plat = ToolResourceService.current_platform()
-                asset = version_entry.platforms.get(plat)
-                if asset is None:
-                    results.append({"resource_id": rid, "action": action, "status": 400, "error": f"Not available for {plat}"})
-                    continue
-                _job_tracker.start(rid, action=ResourceAction.install)
-                asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
-                results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "installing", "version": version_entry.version}})
-            elif action == "uninstall" and rid.startswith("tool:"):
-                try:
-                    await _tool_service.uninstall(rid[5:])
-                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "uninstalled"}})
-                except KeyError:
-                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"Tool '{rid[5:]}' not installed"})
-            elif action == "activate" and rid.startswith("pdk:"):
-                try:
-                    _pdk_service.activate(rid[4:])
-                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "activated"}})
-                except KeyError:
-                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
-            elif action == "validate" and rid.startswith("pdk:"):
-                try:
-                    health = _pdk_service.validate(rid[4:])
-                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"health": health}})
-                except KeyError:
-                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
-            elif action == "remove_reference" and rid.startswith("pdk:"):
-                if _pdk_service.get_pdk(rid[4:]) is None:
-                    results.append({"resource_id": rid, "action": action, "status": 404, "error": f"PDK '{rid[4:]}' not found"})
-                else:
-                    _pdk_service.remove_reference(rid[4:])
-                    results.append({"resource_id": rid, "action": action, "status": 200, "detail": {"status": "removed"}})
+            if asyncio.iscoroutinefunction(handler):
+                results.append(await handler(rid))
             else:
-                results.append({"resource_id": rid, "action": action, "status": 400, "error": f"Unsupported action '{action}' for '{rid}'"})
+                results.append(handler(rid))
         except Exception as e:
-            results.append({"resource_id": rid, "action": action, "status": 500, "error": str(e)})
+            results.append({
+                "resource_id": rid, "action": action,
+                "status": 500, "error": str(e),
+            })
+
     return {"results": results}
 
 
@@ -328,7 +408,7 @@ async def resource_event_stream(resource_id: str, request: Request) -> Streaming
 @router.get("/{resource_id}", response_model=ResourceInfo)
 async def get_resource(resource_id: str):
     """Get a single resource by id (e.g. tool:yosys or pdk:ics55)."""
-    if resource_id.startswith("tool:"):
+    if resource_id.startswith(_TOOL_PREFIX):
         name = resource_id[5:]
         registry_svc = _require_registry()
         state = await registry_svc.fetch()
@@ -340,7 +420,7 @@ async def get_resource(resource_id: str):
         installed = _tool_service.get_installed()
         return _tool_to_resource(reg_tool, installed, _job_tracker._active)
 
-    if resource_id.startswith("pdk:"):
+    if resource_id.startswith(_PDK_PREFIX):
         pdk_id = resource_id[4:]
         entry = _pdk_service.get_pdk(pdk_id)
         if entry is None:
@@ -353,7 +433,7 @@ async def get_resource(resource_id: str):
 @router.post("/{resource_id}/install")
 async def install_resource(resource_id: str):
     """Start tool installation. Returns 409 with structured conflict detail."""
-    if not resource_id.startswith("tool:"):
+    if not resource_id.startswith(_TOOL_PREFIX):
         raise HTTPException(status_code=400, detail="Only tools can be installed")
 
     name = resource_id[5:]
@@ -426,7 +506,7 @@ async def _run_install(resource_id: str, name: str, version: str, asset) -> None
 @router.post("/{resource_id}/uninstall")
 async def uninstall_resource(resource_id: str):
     """Uninstall a tool."""
-    if not resource_id.startswith("tool:"):
+    if not resource_id.startswith(_TOOL_PREFIX):
         raise HTTPException(status_code=400, detail="Only tools can be uninstalled")
 
     name = resource_id[5:]
@@ -441,7 +521,7 @@ async def uninstall_resource(resource_id: str):
 @router.post("/{resource_id}/activate")
 async def activate_resource(resource_id: str):
     """Activate a PDK."""
-    if not resource_id.startswith("pdk:"):
+    if not resource_id.startswith(_PDK_PREFIX):
         raise HTTPException(status_code=400, detail="Only PDKs can be activated")
     pdk_id = resource_id[4:]
     try:
@@ -454,7 +534,7 @@ async def activate_resource(resource_id: str):
 @router.post("/{resource_id}/validate")
 async def validate_resource(resource_id: str):
     """Validate PDK health."""
-    if not resource_id.startswith("pdk:"):
+    if not resource_id.startswith(_PDK_PREFIX):
         raise HTTPException(status_code=400, detail="Only PDKs can be validated")
     pdk_id = resource_id[4:]
     try:

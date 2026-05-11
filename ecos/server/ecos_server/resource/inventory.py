@@ -48,6 +48,10 @@ class InventoryService:
     Tests inject temporary directories for deterministic behavior.
     """
 
+    @staticmethod
+    def _utc_now_iso() -> str:
+        return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
     def __init__(
         self,
         resource_manifest_path: Path | None = None,
@@ -126,7 +130,7 @@ class InventoryService:
             name=name,
             version=version,
             path=path,
-            installed_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            installed_at=self._utc_now_iso(),
             sha256=sha256,
         )
         self._write_manifest(manifest)
@@ -155,14 +159,13 @@ class InventoryService:
         detected_files: list[str] | None = None,
     ) -> PdkInventoryEntry:
         manifest = self._read_manifest()
-        now = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         existing = manifest.pdks.get(pdk_id)
         entry = PdkInventoryEntry(
             id=pdk_id,
             name=name or (existing.name if existing else ""),
             canonical_path=canonical_path,
             detected_files=detected_files or [],
-            imported_at=now,
+            imported_at=self._utc_now_iso(),
             active=existing.active if existing else False,
             managed=existing.managed if existing else False,
             health="ok",
