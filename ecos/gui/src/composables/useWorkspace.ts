@@ -301,10 +301,6 @@ export function useWorkspace() {
   }
   const openProject = async (project?: Project) => {
     try {
-      if (currentProject.value) {
-        await closeProject()
-      }
-
       let selectedPath: string | null = null
 
       if (project) {
@@ -316,7 +312,7 @@ export function useWorkspace() {
           multiple: false,
           title: 'Select ECOS Studio Project Directory'
         })
-        if (!result) return
+        if (!result) return false
         selectedPath = result as string
       }
 
@@ -334,6 +330,7 @@ export function useWorkspace() {
           })
           return false
         }
+
         const existingProject = recentProjects.value.find(
           p => normalizePath(p.path) === resolvedPath
         )
@@ -345,6 +342,14 @@ export function useWorkspace() {
           name: resolvedName,
           path: resolvedPath,
           lastOpened: new Date()
+        }
+
+        if (currentProject.value) {
+          try {
+            await snapshotCurrentProject()
+          } catch (err) {
+            console.error('Failed to snapshot project data before switching:', err)
+          }
         }
 
         currentProject.value = loadedProject
