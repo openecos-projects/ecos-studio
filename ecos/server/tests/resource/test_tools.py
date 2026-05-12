@@ -45,9 +45,9 @@ def temp_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @pytest.fixture
-def inventory(temp_dirs: tuple[Path, Path]) -> InventoryService:
+def inventory(temp_dirs: tuple[Path, Path], isolated_tools_dir: Path) -> InventoryService:
     rm, _tm = temp_dirs
-    return InventoryService(resource_manifest_path=rm)
+    return InventoryService(resource_manifest_path=rm, tools_dir=isolated_tools_dir)
 
 
 @pytest.fixture
@@ -102,6 +102,32 @@ class TestToolInstall:
         assert entry.detected_executables == ["bin/yosys"]
         assert entry.executable == "bin/yosys"
         assert entry.path == str(isolated_tools_dir / "yosys" / "0.61")
+
+    @pytest.mark.asyncio
+    async def test_install_uses_inventory_tools_dir(
+        self,
+        installer: MagicMock,
+        asset: PlatformAsset,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        wrong_default_dir = tmp_path / "wrong-default" / "tools"
+        custom_tools_dir = tmp_path / "custom" / "tools"
+        monkeypatch.setattr(tools_module, "_DEFAULT_TOOLS_DIR", wrong_default_dir)
+        inventory = InventoryService(
+            resource_manifest_path=tmp_path / "resources" / "manifest.json",
+            tools_dir=custom_tools_dir,
+        )
+        service = ToolResourceService(installer=installer, inventory=inventory)
+
+        with patch("ecos_server.resource.tools.InstallerService.verify_sha256", return_value=True):
+            await service.install("yosys", "0.61", asset)
+
+        entry = inventory.get_tool("yosys")
+        assert entry is not None
+        assert entry.path == str(custom_tools_dir / "yosys" / "0.61")
+        assert (custom_tools_dir / "yosys" / "0.61" / "bin" / "yosys").exists()
+        assert not wrong_default_dir.exists()
 
     @pytest.mark.asyncio
     async def test_install_calls_download(
@@ -171,6 +197,25 @@ class TestToolInstall:
         assert events[0].action == ResourceAction.install
         assert events[-1].phase == "done"
         assert events[-1].progress == 1.0
+
+    @pytest.mark.asyncio
+    async def test_update_action_emits_update_progress_events(
+        self, service: ToolResourceService, installer: MagicMock, asset: PlatformAsset
+    ) -> None:
+        events: list[ResourceJob] = []
+
+        with patch("ecos_server.resource.tools.InstallerService.verify_sha256", return_value=True):
+            await service.install(
+                "yosys",
+                "0.61",
+                asset,
+                action=ResourceAction.update,
+                on_progress=events.append,
+            )
+
+        assert len(events) > 0
+        assert {event.action for event in events} == {ResourceAction.update}
+        assert events[-1].phase == "done"
 
     @pytest.mark.asyncio
     async def test_install_does_not_generate_legacy_manifest(

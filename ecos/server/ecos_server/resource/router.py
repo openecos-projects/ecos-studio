@@ -266,13 +266,15 @@ async def refresh_registry():
 # ── Batch operation helpers ────────────────────────────────────────────
 
 
-async def _batch_install(rid: str) -> dict:
-    """Look up tool in registry, check platform, and start install job."""
+async def _batch_install(rid: str, action: ResourceAction = ResourceAction.install) -> dict:
+    """Look up tool in registry, check platform, and start install/update job."""
+    action_value = action.value
+    running_status = "updating" if action == ResourceAction.update else "installing"
     if _job_tracker.is_active(rid):
         existing = _job_tracker.get_active(rid)
         return {
             "resource_id": rid,
-            "action": "install",
+            "action": action_value,
             "status": 409,
             "detail": {"existing_job_id": existing.job_id if existing else None},
         }
@@ -284,7 +286,7 @@ async def _batch_install(rid: str) -> dict:
     if state.registry is None:
         return {
             "resource_id": rid,
-            "action": "install",
+            "action": action_value,
             "status": 503,
             "error": "Registry unavailable",
         }
@@ -293,7 +295,7 @@ async def _batch_install(rid: str) -> dict:
     if reg_tool is None or not reg_tool.versions:
         return {
             "resource_id": rid,
-            "action": "install",
+            "action": action_value,
             "status": 404,
             "error": f"Tool '{name}' not found",
         }
@@ -304,19 +306,24 @@ async def _batch_install(rid: str) -> dict:
     if asset is None:
         return {
             "resource_id": rid,
-            "action": "install",
+            "action": action_value,
             "status": 400,
             "error": f"Not available for {plat}",
         }
 
-    _job_tracker.start(rid, action=ResourceAction.install)
-    asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
+    _job_tracker.start(rid, action=action)
+    asyncio.create_task(_run_install(rid, name, version_entry.version, asset, action))
     return {
         "resource_id": rid,
-        "action": "install",
+        "action": action_value,
         "status": 200,
-        "detail": {"status": "installing", "version": version_entry.version},
+        "detail": {"status": running_status, "version": version_entry.version},
     }
+
+
+async def _batch_update(rid: str) -> dict:
+    """Start a tool update job using the latest registry version."""
+    return await _batch_install(rid, ResourceAction.update)
 
 
 async def _batch_uninstall(rid: str) -> dict:
@@ -406,6 +413,7 @@ def _batch_remove_pdk_reference(rid: str) -> dict:
 _BATCH_DISPATCH: dict[str, dict[str, Callable[..., Any]]] = {
     _TOOL_PREFIX: {
         "install": _batch_install,
+        "update": _batch_update,
         "uninstall": _batch_uninstall,
     },
     _PDK_PREFIX: {
@@ -625,10 +633,23 @@ async def get_resource(resource_id: str):
 @router.post("/{resource_id}/install")
 async def install_resource(resource_id: str):
     """Start tool installation. Returns 409 with structured conflict detail."""
+    return await _start_tool_install_or_update(resource_id, ResourceAction.install)
+
+
+@router.post("/{resource_id}/update")
+async def update_resource(resource_id: str):
+    """Start tool update to the latest registry version."""
+    return await _start_tool_install_or_update(resource_id, ResourceAction.update)
+
+
+async def _start_tool_install_or_update(resource_id: str, action: ResourceAction):
+    """Start a tool install/update job. Returns 409 with structured conflict detail."""
     if not resource_id.startswith(_TOOL_PREFIX):
-        raise HTTPException(status_code=400, detail="Only tools can be installed")
+        verb = "updated" if action == ResourceAction.update else "installed"
+        raise HTTPException(status_code=400, detail=f"Only tools can be {verb}")
 
     name = resource_id[5:]
+    running_status = "updating" if action == ResourceAction.update else "installing"
 
     if _job_tracker.is_active(resource_id):
         existing = _job_tracker.get_active(resource_id)
@@ -665,27 +686,29 @@ async def install_resource(resource_id: str):
         )
 
     version = version_entry.version
-    _job_tracker.start(resource_id, action=ResourceAction.install)
+    _job_tracker.start(resource_id, action=action)
 
-    asyncio.create_task(_run_install(resource_id, name, version_entry.version, asset))
+    asyncio.create_task(_run_install(resource_id, name, version_entry.version, asset, action))
 
-    return {"status": "installing", "resource_id": resource_id, "version": version}
+    return {"status": running_status, "resource_id": resource_id, "version": version}
 
 
-async def _run_install(resource_id: str, name: str, version: str, asset) -> None:
-    """Shared install runner used by both single and batch install routes."""
+async def _run_install(
+    resource_id: str, name: str, version: str, asset, action: ResourceAction
+) -> None:
+    """Shared install runner used by single and batch install/update routes."""
 
     def _on_progress(job: ResourceJob) -> None:
         _job_tracker.publish(job)
 
     try:
-        await _tool_service.install(name, version, asset, on_progress=_on_progress)
+        await _tool_service.install(name, version, asset, action=action, on_progress=_on_progress)
     except Exception:
         logger.exception("Install failed for %s", name)
         _job_tracker.publish(
             ResourceJob(
                 resource_id=resource_id,
-                action=ResourceAction.install,
+                action=action,
                 phase="error",
                 progress=0.0,
                 message=f"Installation failed for {name}",

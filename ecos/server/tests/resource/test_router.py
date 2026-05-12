@@ -469,6 +469,30 @@ class TestInstall:
         assert resp.status_code == 400
 
 
+class TestUpdate:
+    def test_update_returns_accepted_for_tool(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data())
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:yosys/update")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "updating"
+        assert data["resource_id"] == "tool:yosys"
+        assert data["version"] == "0.61"
+        installer.assert_called_once()
+        assert installer.call_args.kwargs["action"] == "update"
+
+    def test_update_pdk_rejected_400(self, client: TestClient) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        _pdk_service.import_pdk(str(_make_pdk_dir()))
+
+        resp = client.post("/api/resources/pdk:ics55/update")
+
+        assert resp.status_code == 400
+
+
 class TestUninstall:
     def test_uninstall_not_installed_404(self, client: TestClient) -> None:
         _patch_registry(client, _mock_registry_data())
@@ -617,6 +641,23 @@ class TestBatch:
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert result["status"] == 404
+
+    def test_batch_update(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data())
+        installer = _patch_installer()
+
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "tool:yosys", "action": "update"}]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["action"] == "update"
+        assert result["status"] == 200
+        assert result["detail"]["status"] == "updating"
+        installer.assert_called_once()
+        assert installer.call_args.kwargs["action"] == "update"
 
     def test_batch_uninstall_unmanaged_tool_rejected_and_preserves_path(
         self, client: TestClient, tmp_path: Path

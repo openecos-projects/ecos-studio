@@ -79,6 +79,7 @@ class ToolResourceService:
         version: str,
         asset: PlatformAsset,
         *,
+        action: ResourceAction = ResourceAction.install,
         on_progress: Callable[[ResourceJob], None] | None = None,
     ) -> None:
         """Download, verify, extract, and register a tool.
@@ -86,7 +87,7 @@ class ToolResourceService:
         Progress events are emitted via the on_progress callback only;
         the caller (router) owns SSE publication through JobTracker.
         """
-        tools_dir = _default_tools_dir()
+        tools_dir = self._inventory.tools_dir
         dest_dir = tools_dir / name / version
         extract_dir = dest_dir.parent / f".extract-{version}-{uuid.uuid4().hex}"
 
@@ -97,7 +98,7 @@ class ToolResourceService:
         _publish(
             ResourceJob(
                 resource_id=f"tool:{name}",
-                action=ResourceAction.install,
+                action=action,
                 phase="downloading",
                 progress=0.0,
                 message=f"Downloading {name} v{version}...",
@@ -111,7 +112,7 @@ class ToolResourceService:
                 _publish(
                     ResourceJob(
                         resource_id=f"tool:{name}",
-                        action=ResourceAction.install,
+                        action=action,
                         phase="downloading",
                         progress=pct,
                         message=f"Downloading... {pct:.0%}",
@@ -128,7 +129,7 @@ class ToolResourceService:
             _publish(
                 ResourceJob(
                     resource_id=f"tool:{name}",
-                    action=ResourceAction.install,
+                    action=action,
                     phase="verifying",
                     progress=0.0,
                     message="Verifying SHA256...",
@@ -140,7 +141,7 @@ class ToolResourceService:
                 _publish(
                     ResourceJob(
                         resource_id=f"tool:{name}",
-                        action=ResourceAction.install,
+                        action=action,
                         phase="error",
                         progress=0.0,
                         message="SHA256 verification failed",
@@ -152,7 +153,7 @@ class ToolResourceService:
             _publish(
                 ResourceJob(
                     resource_id=f"tool:{name}",
-                    action=ResourceAction.install,
+                    action=action,
                     phase="extracting",
                     progress=0.0,
                     message=f"Extracting to {dest_dir}...",
@@ -184,7 +185,7 @@ class ToolResourceService:
         _publish(
             ResourceJob(
                 resource_id=f"tool:{name}",
-                action=ResourceAction.install,
+                action=action,
                 phase="done",
                 progress=1.0,
                 message=f"{name} v{version} installed successfully",
