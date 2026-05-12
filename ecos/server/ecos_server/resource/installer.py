@@ -57,7 +57,7 @@ class InstallerService:
     def _validate_entry_path(dest: Path, member_name: str) -> Path:
         """Reject traversal and unsafe archive entries."""
         if not member_name or member_name == ".":
-            raise ValueError(f"Rejected empty archive entry name")
+            raise ValueError("Rejected empty archive entry name")
         if member_name.startswith("/"):
             raise ValueError(f"Rejected absolute archive entry: {member_name}")
 
@@ -70,8 +70,10 @@ class InstallerService:
         dest_resolved = dest.resolve()
         try:
             resolved.relative_to(dest_resolved)
-        except ValueError:
-            raise ValueError(f"Rejected archive entry outside extraction root: {member_name}")
+        except ValueError as exc:
+            raise ValueError(
+                f"Rejected archive entry outside extraction root: {member_name}"
+            ) from exc
 
         return resolved
 

@@ -12,10 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ._log import ensure_api_logger
 from .ecc import sse_router, workspace_router
-from .resource.router import router as resource_router, init_registry as init_resource_registry
+from .resource.router import init_registry as init_resource_registry
+from .resource.router import router as resource_router
 
 # Initialize resource registry from environment or default URL
-_DEFAULT_REGISTRY_URL = "https://github.com/openecos-projects/ecos-registry/releases/latest/download/tool-registry.json"
+_DEFAULT_REGISTRY_URL = (
+    "https://github.com/openecos-projects/ecos-registry/releases/latest/download/tool-registry.json"
+)
 init_resource_registry(os.environ.get("ECOS_REGISTRY_URL", _DEFAULT_REGISTRY_URL))
 
 

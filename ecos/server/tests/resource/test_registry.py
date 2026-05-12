@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ecos_server.resource.schemas import RegistryTool, ToolRegistry
+import ecos_server.resource.registry as registry_module
 from ecos_server.resource.registry import RegistryService, RegistryState
+from ecos_server.resource.schemas import RegistryTool, ToolRegistry
 
 
 def _make_registry_fixture() -> dict:
@@ -136,7 +137,7 @@ class TestRegistryFetch:
         mock_client = _mock_async_client(_make_mock_response(registry_fixture))
 
         with patch("httpx.AsyncClient", return_value=mock_client):
-            result1 = await service.fetch()
+            await service.fetch()
 
         # Second call should use in-memory cache; patch would catch unexpected network calls
         result2 = await service.fetch()
@@ -186,9 +187,7 @@ class TestRegistryValidation:
         assert result.is_degraded
 
     @pytest.mark.asyncio
-    async def test_rejects_invalid_platform_asset(
-        self, registry_url: str, tmp_path: Path
-    ) -> None:
+    async def test_rejects_invalid_platform_asset(self, registry_url: str, tmp_path: Path) -> None:
         service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
         bad_fixture = _make_registry_fixture()
         bad_fixture["tools"][0]["versions"][0]["platforms"]["linux-x86_64"] = {
@@ -210,7 +209,25 @@ class TestRegistryConstruction:
     def test_cache_dir_defaults(self, registry_url: str) -> None:
         service = RegistryService(registry_url=registry_url)
         assert service.cache_file.name == "resource-registry.json"
-        assert str(Path.home()) in str(service.cache_file)
+        assert ".cache" in service.cache_file.parts
+        assert ".ecos" not in str(service.cache_file)
+
+    def test_cache_dir_uses_xdg_cache_home(
+        self, registry_url: str, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-home"))
+        service = RegistryService(registry_url=registry_url)
+        assert (
+            service.cache_file == tmp_path / "cache-home" / "ecos-studio" / "resource-registry.json"
+        )
+
+    def test_cache_dir_uses_xdg_default_when_env_empty(
+        self, registry_url: str, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(registry_module.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("XDG_CACHE_HOME", "")
+        service = RegistryService(registry_url=registry_url)
+        assert service.cache_file == tmp_path / ".cache" / "ecos-studio" / "resource-registry.json"
 
     def test_custom_cache_dir(self, registry_url: str, tmp_path: Path) -> None:
         cache_dir = tmp_path / "custom_cache"

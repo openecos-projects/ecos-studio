@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import ecos_server.resource.inventory as inventory_module
 from ecos_server.resource.inventory import (
     InventoryService,
     PdkInventoryEntry,
@@ -11,9 +12,26 @@ from ecos_server.resource.inventory import (
 )
 
 
+def test_default_manifest_path_uses_xdg_state_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    svc = InventoryService()
+    assert svc.manifest_path == tmp_path / "state" / "ecos-studio" / "resources" / "manifest.json"
+    assert ".ecos" not in str(svc.manifest_path)
+
+
+def test_default_manifest_path_uses_xdg_default_when_env_empty(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(inventory_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", "")
+    svc = InventoryService()
+    assert (
+        svc.manifest_path
+        == tmp_path / ".local" / "state" / "ecos-studio" / "resources" / "manifest.json"
+    )
+
+
 @pytest.fixture
 def temp_dirs(tmp_path: Path) -> tuple[Path, Path]:
-    """Create temp resource and tools manifest paths."""
+    """Create temp resource manifest and legacy sentinel paths."""
     resource_manifest = tmp_path / "resources" / "manifest.json"
     tools_manifest = tmp_path / "tools" / "manifest.json"
     return resource_manifest, tools_manifest
@@ -21,11 +39,8 @@ def temp_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 @pytest.fixture
 def inventory(temp_dirs: tuple[Path, Path]) -> InventoryService:
-    resource_manifest, tools_manifest = temp_dirs
-    return InventoryService(
-        resource_manifest_path=resource_manifest,
-        tools_manifest_path=tools_manifest,
-    )
+    resource_manifest, _tools_manifest = temp_dirs
+    return InventoryService(resource_manifest_path=resource_manifest)
 
 
 class TestManifestPersistence:
@@ -43,13 +58,45 @@ class TestManifestPersistence:
             version="0.61",
             path="/tmp/tools/yosys/0.61",
             sha256="abc123",
+            detected_executables=["bin/yosys"],
         )
         tools = inventory.get_installed_tools()
         assert "yosys" in tools
+        assert "tool:yosys" in inventory._read_manifest().installed
         assert tools["yosys"].version == "0.61"
         assert tools["yosys"].path == "/tmp/tools/yosys/0.61"
         assert tools["yosys"].sha256 == "abc123"
+        assert tools["yosys"].detected_executables == ["bin/yosys"]
+        assert tools["yosys"].executable == "bin/yosys"
+        assert tools["yosys"].active is True
+        assert tools["yosys"].managed is True
         assert tools["yosys"].installed_at.endswith("Z")
+
+    def test_manifest_file_uses_unified_installed_shape(self, inventory: InventoryService) -> None:
+        inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+        )
+        inventory.add_or_update_pdk(
+            "ics55",
+            name="ics55",
+            canonical_path="/tmp/pdks/ics55",
+            detected_files=["prtech", "IP", "libs.ref"],
+        )
+
+        data = json.loads(inventory.manifest_path.read_text(encoding="utf-8"))
+        assert data["schema_version"] == 1
+        assert data["resources_dir"] == str(inventory.manifest_path.parent)
+        assert "tools" not in data
+        assert "pdks" not in data
+        assert set(data["installed"]) == {"tool:yosys", "pdk:ics55"}
+        assert data["installed"]["tool:yosys"]["type"] == "tool"
+        assert data["installed"]["tool:yosys"]["executable"] == "bin/yosys"
+        assert data["installed"]["pdk:ics55"]["type"] == "pdk"
+        assert data["installed"]["pdk:ics55"]["pdk_id"] == "ics55"
 
     def test_add_and_read_tool(self, inventory: InventoryService) -> None:
         inventory.add_tool(name="openroad", version="2.0", path="/tmp/or", sha256="def456")
@@ -68,47 +115,35 @@ class TestManifestPersistence:
 
     def test_manifest_survives_reload(self, temp_dirs: tuple[Path, Path]) -> None:
         """Data persists across service instances using the same file."""
-        resource_manifest, tools_manifest = temp_dirs
-        svc1 = InventoryService(resource_manifest_path=resource_manifest, tools_manifest_path=tools_manifest)
+        resource_manifest, _tools_manifest = temp_dirs
+        svc1 = InventoryService(resource_manifest_path=resource_manifest)
         svc1.add_tool(name="yosys", version="0.61", path="/tmp/y", sha256="abc")
 
-        svc2 = InventoryService(resource_manifest_path=resource_manifest, tools_manifest_path=tools_manifest)
+        svc2 = InventoryService(resource_manifest_path=resource_manifest)
         assert svc2.get_tool("yosys") is not None
         assert svc2.get_tool("yosys").version == "0.61"
 
 
-class TestLegacyToolManifest:
-    """Positive: tool entries generate compatibility tools/manifest.json."""
+class TestNoLegacyToolManifest:
+    """Resource Manager inventory does not write legacy tools/manifest.json."""
 
-    def test_generates_legacy_manifest(self, inventory: InventoryService, temp_dirs: tuple[Path, Path]) -> None:
+    def test_add_tool_does_not_generate_legacy_manifest(
+        self, inventory: InventoryService, temp_dirs: tuple[Path, Path]
+    ) -> None:
         _resource_manifest, tools_manifest = temp_dirs
         inventory.add_tool(name="yosys", version="0.61", path="/tmp/y", sha256="abc")
         inventory.add_tool(name="openroad", version="2.0", path="/tmp/or", sha256="def")
 
-        assert tools_manifest.exists()
-        legacy = json.loads(tools_manifest.read_text())
-        assert legacy["schema_version"] == 1
-        assert "yosys" in legacy["installed"]
-        assert "openroad" in legacy["installed"]
-        assert legacy["installed"]["yosys"]["version"] == "0.61"
+        assert not tools_manifest.exists()
 
-    def test_legacy_manifest_updated_on_remove(self, inventory: InventoryService, temp_dirs: tuple[Path, Path]) -> None:
+    def test_remove_tool_does_not_generate_legacy_manifest(
+        self, inventory: InventoryService, temp_dirs: tuple[Path, Path]
+    ) -> None:
         _resource_manifest, tools_manifest = temp_dirs
         inventory.add_tool(name="yosys", version="0.61", path="/tmp/y", sha256="abc")
         inventory.remove_tool("yosys")
 
-        legacy = json.loads(tools_manifest.read_text())
-        assert "yosys" not in legacy["installed"]
-
-    def test_legacy_manifest_created_with_parent_dirs(
-        self, tmp_path: Path
-    ) -> None:
-        """Tools manifest dirs are created if they don't exist."""
-        rm = tmp_path / "res" / "manifest.json"
-        tm = tmp_path / "deep" / "nested" / "tools" / "manifest.json"
-        svc = InventoryService(resource_manifest_path=rm, tools_manifest_path=tm)
-        svc.add_tool(name="test", version="1.0", path="/tmp/t", sha256="abc")
-        assert tm.exists()
+        assert not tools_manifest.exists()
 
 
 class TestPdkInventory:
@@ -125,6 +160,7 @@ class TestPdkInventory:
         assert entry.name == "IC-S55"
         assert entry.canonical_path == "/home/user/pdks/ics55"
         assert entry.detected_files == ["libs.ref", "tech.lef"]
+        assert entry.detected_file_groups["files"] == ["libs.ref", "tech.lef"]
         assert entry.imported_at.endswith("Z")
         assert entry.active is False
         assert entry.managed is False
@@ -239,7 +275,9 @@ class TestInventoryNegative:
         corrupt = backup.read_text(encoding="utf-8")
         assert "this is not valid json" in corrupt
 
-    def test_remove_pdk_does_not_delete_source(self, inventory: InventoryService, tmp_path: Path) -> None:
+    def test_remove_pdk_does_not_delete_source(
+        self, inventory: InventoryService, tmp_path: Path
+    ) -> None:
         """Removing PDK inventory reference does not delete the source directory."""
         source_dir = tmp_path / "user_pdks" / "ics55"
         source_dir.mkdir(parents=True)
@@ -258,12 +296,13 @@ class TestInventoryNegative:
     def test_no_production_files_required(self, tmp_path: Path) -> None:
         """Tests do not depend on production registry/manifest files."""
         rm = tmp_path / "manifest.json"
-        tm = tmp_path / "tools.json"
-        svc = InventoryService(resource_manifest_path=rm, tools_manifest_path=tm)
+        tm = tmp_path / "tools" / "manifest.json"
+        svc = InventoryService(resource_manifest_path=rm)
 
         # Service works without any pre-existing files
         svc.add_tool(name="test", version="1.0", path="/tmp/t", sha256="abc")
         assert svc.get_tool("test") is not None
+        assert not tm.exists()
 
         # No files in the repo are touched
         assert not Path("tool-registry.json").exists()
@@ -280,36 +319,54 @@ class TestInventoryNegative:
 
 class TestResourceManifestModel:
     def test_default_manifest(self) -> None:
-        m = ResourceManifest()
+        m = ResourceManifest(resources_dir="/tmp/resources", tools_dir="/tmp/tools")
         assert m.schema_version == 1
-        assert m.tools == {}
-        assert m.pdks == {}
+        assert m.resources_dir == "/tmp/resources"
+        assert m.tools_dir == "/tmp/tools"
+        assert m.installed == {}
 
     def test_manifest_with_tools(self) -> None:
         m = ResourceManifest(
-            tools={
-                "yosys": ToolInventoryEntry(
+            resources_dir="/tmp/resources",
+            tools_dir="/tmp/tools",
+            installed={
+                "tool:yosys": ToolInventoryEntry(
+                    type="tool",
                     name="yosys",
                     version="0.61",
                     path="/tmp/y",
                     installed_at="2026-05-11T00:00:00Z",
                     sha256="abc",
+                    detected_executables=["bin/yosys"],
+                    executable="bin/yosys",
+                    active=True,
+                    managed=True,
                 )
-            }
+            },
         )
-        assert "yosys" in m.tools
+        assert "tool:yosys" in m.installed
+        tool = m.installed["tool:yosys"]
+        assert isinstance(tool, ToolInventoryEntry)
+        assert tool.detected_executables == ["bin/yosys"]
+        assert tool.active is True
+        assert tool.managed is True
 
     def test_manifest_with_pdks(self) -> None:
         m = ResourceManifest(
-            pdks={
-                "ics55": PdkInventoryEntry(
+            resources_dir="/tmp/resources",
+            tools_dir="/tmp/tools",
+            installed={
+                "pdk:ics55": PdkInventoryEntry(
+                    type="pdk",
                     id="ics55",
                     name="IC-S55",
                     canonical_path="/tmp/ics55",
                     imported_at="2026-05-11T00:00:00Z",
                     active=True,
                 )
-            }
+            },
         )
-        assert m.pdks["ics55"].active is True
-        assert m.pdks["ics55"].managed is False
+        pdk = m.installed["pdk:ics55"]
+        assert isinstance(pdk, PdkInventoryEntry)
+        assert pdk.active is True
+        assert pdk.managed is False

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from ecos_server.resource.inventory import InventoryService, PdkInventoryEntry
-from ecos_server.resource.pdks import PdkResourceService, ScannedPdk
+from ecos_server.resource.inventory import InventoryService
+from ecos_server.resource.pdks import PdkResourceService
 
 
 @pytest.fixture
@@ -15,8 +15,8 @@ def temp_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 @pytest.fixture
 def inventory(temp_dirs: tuple[Path, Path]) -> InventoryService:
-    rm, tm = temp_dirs
-    return InventoryService(resource_manifest_path=rm, tools_manifest_path=tm)
+    rm, _tm = temp_dirs
+    return InventoryService(resource_manifest_path=rm)
 
 
 @pytest.fixture
@@ -67,6 +67,10 @@ class TestPdkScan:
         assert "ICSPROUT" in result.description
         assert "prtech" in result.detected_files
         assert "IP" in result.detected_files
+        assert result.detected_file_groups == {
+            "directories": ["IP", "prtech"],
+            "files": ["libs.ref", "tech.lef"],
+        }
 
     def test_scan_sky130_detects_directory_prefix(
         self, service: PdkResourceService, sky130_dir: Path
@@ -83,9 +87,7 @@ class TestPdkScan:
         assert "Process library" in result.description
         assert "cells.lef" in result.detected_files
 
-    def test_scan_unknown_directory(
-        self, service: PdkResourceService, tmp_path: Path
-    ) -> None:
+    def test_scan_unknown_directory(self, service: PdkResourceService, tmp_path: Path) -> None:
         empty_dir = tmp_path / "empty_pdk"
         empty_dir.mkdir()
         result = service.scan(str(empty_dir))
@@ -102,6 +104,7 @@ class TestPdkScan:
         self, service: PdkResourceService, ics55_dir: Path, tmp_path: Path
     ) -> None:
         import os
+
         cwd = os.getcwd()
         try:
             os.chdir(tmp_path)
@@ -115,14 +118,13 @@ class TestPdkScan:
 class TestPdkImport:
     """Import creates or updates inventory entries."""
 
-    def test_import_creates_entry(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_import_creates_entry(self, service: PdkResourceService, ics55_dir: Path) -> None:
         entry = service.import_pdk(str(ics55_dir))
         assert entry.id == "ics55"
         assert entry.name == "ics55"
         assert entry.canonical_path == str(ics55_dir.resolve())
         assert "prtech" in entry.detected_files
+        assert entry.detected_file_groups["directories"] == ["IP", "prtech"]
         assert entry.active is False
         assert entry.managed is False
         assert entry.health == "ok"
@@ -130,7 +132,7 @@ class TestPdkImport:
     def test_import_updates_existing_entry(
         self, service: PdkResourceService, ics55_dir: Path
     ) -> None:
-        first = service.import_pdk(str(ics55_dir))
+        service.import_pdk(str(ics55_dir))
         service.activate("ics55")
         second = service.import_pdk(str(ics55_dir))
         # Active state preserved on re-import
@@ -151,9 +153,7 @@ class TestPdkImport:
 class TestPdkActivate:
     """Activate/deactivate PDK entries."""
 
-    def test_activate_marks_active(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_activate_marks_active(self, service: PdkResourceService, ics55_dir: Path) -> None:
         service.import_pdk(str(ics55_dir))
         service.activate("ics55")
         assert service.get_pdk("ics55").active is True
@@ -168,17 +168,13 @@ class TestPdkActivate:
         assert service.get_pdk("ics55").active is False
         assert service.get_pdk("sky130").active is True
 
-    def test_deactivate(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_deactivate(self, service: PdkResourceService, ics55_dir: Path) -> None:
         service.import_pdk(str(ics55_dir))
         service.activate("ics55")
         service.deactivate("ics55")
         assert service.get_pdk("ics55").active is False
 
-    def test_get_active_pdk(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_get_active_pdk(self, service: PdkResourceService, ics55_dir: Path) -> None:
         service.import_pdk(str(ics55_dir))
         service.activate("ics55")
         active = service.get_active_pdk()
@@ -189,17 +185,13 @@ class TestPdkActivate:
 class TestPdkValidate:
     """Validate updates PDK health."""
 
-    def test_validate_existing_pdk_ok(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_validate_existing_pdk_ok(self, service: PdkResourceService, ics55_dir: Path) -> None:
         service.import_pdk(str(ics55_dir))
         health = service.validate("ics55")
         assert health == "ok"
         assert service.get_pdk("ics55").health == "ok"
 
-    def test_validate_missing_pdk(
-        self, service: PdkResourceService, tmp_path: Path
-    ) -> None:
+    def test_validate_missing_pdk(self, service: PdkResourceService, tmp_path: Path) -> None:
         # Import a PDK, then delete its source directory
         pdk_dir = tmp_path / "pdks" / "temp_pdk"
         pdk_dir.mkdir(parents=True)
@@ -210,6 +202,7 @@ class TestPdkValidate:
 
         # Remove the directory
         import shutil
+
         shutil.rmtree(pdk_dir)
 
         health = service.validate("ics55")
@@ -218,9 +211,7 @@ class TestPdkValidate:
         # The PDK entry is NOT automatically removed
         assert service.get_pdk("ics55") is not None
 
-    def test_validate_invalid_pdk_path(
-        self, service: PdkResourceService, tmp_path: Path
-    ) -> None:
+    def test_validate_invalid_pdk_path(self, service: PdkResourceService, tmp_path: Path) -> None:
         # Create a file (not a directory) and manually inject it into inventory
         fake_path = tmp_path / "not_a_dir"
         fake_path.write_text("data")
@@ -229,9 +220,7 @@ class TestPdkValidate:
         health = service.validate("test")
         assert health == "invalid"
 
-    def test_validate_nonexistent_pdk_raises(
-        self, service: PdkResourceService
-    ) -> None:
+    def test_validate_nonexistent_pdk_raises(self, service: PdkResourceService) -> None:
         with pytest.raises(KeyError, match="not found"):
             service.validate("nonexistent")
 
@@ -239,9 +228,7 @@ class TestPdkValidate:
 class TestPdkRemoveReference:
     """Remove-reference deletes only inventory entry, never source."""
 
-    def test_remove_reference(
-        self, service: PdkResourceService, ics55_dir: Path
-    ) -> None:
+    def test_remove_reference(self, service: PdkResourceService, ics55_dir: Path) -> None:
         service.import_pdk(str(ics55_dir))
         service.remove_reference("ics55")
         assert service.get_pdk("ics55") is None
@@ -270,22 +257,16 @@ class TestPdkList:
 class TestPdkNegative:
     """Negative tests per AC-6."""
 
-    def test_scan_rejects_invalid_characters(
-        self, service: PdkResourceService
-    ) -> None:
+    def test_scan_rejects_invalid_characters(self, service: PdkResourceService) -> None:
         with pytest.raises(ValueError, match="invalid characters"):
             service.scan("/path/with spaces/pdk")
 
-    def test_scan_rejects_non_directory(
-        self, service: PdkResourceService, tmp_path: Path
-    ) -> None:
+    def test_scan_rejects_non_directory(self, service: PdkResourceService, tmp_path: Path) -> None:
         f = tmp_path / "not_a_dir"
         f.write_text("content")
         with pytest.raises(ValueError, match="Not a directory"):
             service.scan(str(f))
 
-    def test_import_rejects_invalid_path(
-        self, service: PdkResourceService
-    ) -> None:
+    def test_import_rejects_invalid_path(self, service: PdkResourceService) -> None:
         with pytest.raises(ValueError, match="invalid characters"):
             service.import_pdk("/path/with 中文/pdk")

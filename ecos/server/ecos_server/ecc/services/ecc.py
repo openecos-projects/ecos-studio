@@ -4,6 +4,8 @@ import os
 import time
 from logging.handlers import RotatingFileHandler
 
+from ecos_server.resource.resolver import resolve_active_pdk
+
 from ..schemas import (
     CMDEnum,
     ECCRequest,
@@ -15,6 +17,40 @@ from ..sse import server_notify
 gui_notify = server_notify()
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_resource_manager_pdk_root(pdk_name: str) -> str:
+    from chipcompiler.data import get_pdk
+
+    if not pdk_name:
+        return ""
+    active_root = resolve_active_pdk(pdk_name)
+    if active_root is None:
+        return ""
+    try:
+        pdk = get_pdk(pdk_name=pdk_name, pdk_root=str(active_root))
+    except Exception:
+        logger.exception(
+            "Active Resource Manager PDK failed validation: %s",
+            active_root,
+        )
+        return ""
+    return str(os.path.abspath(pdk.root or active_root))
+
+
+def _resolve_environment_pdk_root(pdk_name: str) -> str:
+    if not pdk_name:
+        return ""
+    env_root = os.environ.get(f"CHIPCOMPILER_{pdk_name.upper()}_PDK_ROOT", "").strip()
+    if not env_root or not os.path.isdir(env_root):
+        return ""
+    return str(os.path.abspath(env_root))
+
+
+def _resolve_workspace_pdk_root(pdk_name: str, explicit_pdk_root: str) -> str:
+    if explicit_pdk_root:
+        return explicit_pdk_root
+    return _resolve_resource_manager_pdk_root(pdk_name) or _resolve_environment_pdk_root(pdk_name)
 
 
 def _summarize_request(data: object) -> dict:
@@ -187,14 +223,17 @@ class ECCService:
                     )
 
         try:
+            pdk_name = str(data.get("pdk", "")).strip().lower()
+            explicit_pdk_root = str(data.get("pdk_root", "")).strip()
+            pdk_root = _resolve_workspace_pdk_root(pdk_name, explicit_pdk_root)
             workspace = _create_workspace(
                 directory=data.get("directory", ""),
-                pdk=data.get("pdk", ""),
+                pdk=pdk_name,
                 parameters=data.get("parameters", {}),
                 origin_def=data.get("origin_def", ""),
                 origin_verilog=data.get("origin_verilog", ""),
                 input_filelist=input_filelist,
-                pdk_root=data.get("pdk_root", ""),
+                pdk_root=pdk_root,
             )
         except Exception as e:
             logger.exception("create_workspace: create_workspace() raised exception")
@@ -281,22 +320,22 @@ class ECCService:
 
         try:
             pdk = get_pdk(pdk_name=pdk_name, pdk_root=pdk_root)
-            resolved_root = pdk.root or pdk_root
-            os.environ[env_key] = resolved_root
-
-            response_data["pdk_root"] = resolved_root
-
-            if self.workspace is not None and self.workspace.pdk.name.lower() == pdk_name:
-                self.workspace.pdk = pdk
-                self.workspace.parameters.data["PDK Root"] = resolved_root
         except Exception as e:
-            logger.exception("set_pdk_root: get_pdk() or env update failed")
+            logger.exception("set_pdk_root: PDK validation failed")
             return ECCResponse(
                 cmd=request.cmd,
                 response=ResponseEnum.error.value,
                 data=response_data,
                 message=[f"set pdk root error: {e}"],
             )
+
+        resolved_root = str(os.path.abspath(pdk.root or pdk_root))
+        os.environ[env_key] = resolved_root
+        response_data["pdk_root"] = resolved_root
+        response_data["resolved_pdk_root"] = resolved_root
+        if self.workspace is not None and self.workspace.pdk.name.lower() == pdk_name:
+            self.workspace.pdk = pdk
+            self.workspace.parameters.data["PDK Root"] = resolved_root
 
         return ECCResponse(
             cmd=request.cmd,

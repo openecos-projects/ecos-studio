@@ -1,27 +1,18 @@
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from ecos_server.main import app
-from ecos_server.resource.inventory import InventoryService, PdkInventoryEntry
-from ecos_server.resource.registry import RegistryService, RegistryState
+from ecos_server.resource.inventory import InventoryService
+from ecos_server.resource.registry import RegistryState
 from ecos_server.resource.router import (
-    _inventory,
-    _job_tracker,
     _pdk_service,
-    _registry_service,
-    _tool_service,
     init_registry,
 )
-from ecos_server.resource.tools import ToolResourceService
 from ecos_server.resource.schemas import (
-    PlatformAsset,
-    RegistryTool,
-    RegistryToolVersion,
     ToolRegistry,
 )
 
@@ -30,12 +21,11 @@ from ecos_server.resource.schemas import (
 def client(tmp_path: Path) -> TestClient:
     """Create a test client with temp-path services."""
     rm = tmp_path / "resources" / "manifest.json"
-    tm = tmp_path / "tools" / "manifest.json"
 
     # Replace module-level services with temp-path versions
     import ecos_server.resource.router as router_mod
 
-    inventory = InventoryService(resource_manifest_path=rm, tools_manifest_path=tm)
+    inventory = InventoryService(resource_manifest_path=rm)
     router_mod._inventory = inventory
     router_mod._pdk_service._inventory = inventory
     router_mod._tool_service._inventory = inventory
@@ -154,6 +144,180 @@ class TestListResources:
         data = resp.json()
         assert len(data["diagnostics"]) >= 1
 
+    def test_list_includes_installed_tool_when_registry_unavailable(
+        self, client: TestClient
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/ecos/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+        )
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        mock_rs.cache_file = Path("/tmp/cache/resource-registry.json")
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources")
+        assert resp.status_code == 200
+        resources = resp.json()["resources"]
+        assert resources == [
+            {
+                "id": "tool:yosys",
+                "type": "tool",
+                "name": "yosys",
+                "display_name": "yosys",
+                "description": "",
+                "category": "",
+                "status": "installed",
+                "installed_version": "0.61",
+                "available_versions": [],
+                "active_version": "0.61",
+                "active": True,
+                "path": "/tmp/ecos/tools/yosys/0.61",
+                "platform": None,
+                "size": None,
+                "source": "local",
+                "homepage": "",
+                "actions": ["uninstall"],
+                "health": {
+                    "detected_executables": ["bin/yosys"],
+                    "installed_at": router_mod._inventory.get_tool("yosys").installed_at,
+                    "managed": True,
+                    "sha256": "abc123",
+                    "executable": "bin/yosys",
+                },
+                "error": None,
+            }
+        ]
+
+    def test_list_marks_local_tool_installing_when_job_active(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+        from ecos_server.resource.schemas import ResourceAction
+
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/ecos/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+        )
+        router_mod._job_tracker.start("tool:yosys", action=ResourceAction.install)
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        mock_rs.cache_file = Path("/tmp/cache/resource-registry.json")
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        tool = resp.json()["resources"][0]
+        assert tool["id"] == "tool:yosys"
+        assert tool["status"] == "installing"
+        assert tool["actions"] == []
+
+    def test_list_hides_uninstall_for_unmanaged_local_tool(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/external/yosys",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            managed=False,
+        )
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        mock_rs.cache_file = Path("/tmp/cache/resource-registry.json")
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        tool = resp.json()["resources"][0]
+        assert tool["id"] == "tool:yosys"
+        assert tool["health"]["managed"] is False
+        assert "uninstall" not in tool["actions"]
+
+    def test_list_hides_uninstall_for_unmanaged_registry_tool(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/external/yosys",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            managed=False,
+        )
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
+        assert tool["status"] == "installed"
+        assert "uninstall" not in tool["actions"]
+        assert tool["health"]["managed"] is False
+
+    def test_list_includes_inventory_metadata_for_registry_tool(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/ecos/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
+        assert tool["active"] is True
+        assert tool["path"] == "/tmp/ecos/tools/yosys/0.61"
+        assert tool["health"] == {
+            "detected_executables": ["bin/yosys"],
+            "installed_at": router_mod._inventory.get_tool("yosys").installed_at,
+            "managed": True,
+            "sha256": "abc123",
+            "executable": "bin/yosys",
+        }
+
+    def test_list_marks_registry_tool_installing_when_job_active(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.schemas import ResourceAction
+
+        _patch_registry(client, _mock_registry_data())
+        router_mod._job_tracker.start("tool:yosys", action=ResourceAction.install)
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
+        assert tool["status"] == "installing"
+        assert tool["actions"] == []
+
 
 class TestGetResource:
     def test_get_tool(self, client: TestClient) -> None:
@@ -177,6 +341,81 @@ class TestGetResource:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.get("/api/resources/tool:nonexistent")
         assert resp.status_code == 404
+
+    def test_get_installed_tool_when_registry_unavailable(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/ecos/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+        )
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources/tool:yosys")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == "tool:yosys"
+        assert data["status"] == "installed"
+        assert data["installed_version"] == "0.61"
+        assert data["health"]["detected_executables"] == ["bin/yosys"]
+
+    def test_get_registry_tool_hides_uninstall_when_unmanaged(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/external/yosys",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            managed=False,
+        )
+
+        resp = client.get("/api/resources/tool:yosys")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "installed"
+        assert "uninstall" not in data["actions"]
+        assert data["health"]["managed"] is False
+
+    def test_get_registry_tool_includes_inventory_metadata(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path="/tmp/ecos/tools/yosys/0.61",
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        resp = client.get("/api/resources/tool:yosys")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["active"] is True
+        assert data["path"] == "/tmp/ecos/tools/yosys/0.61"
+        assert data["health"] == {
+            "detected_executables": ["bin/yosys"],
+            "installed_at": router_mod._inventory.get_tool("yosys").installed_at,
+            "managed": True,
+            "sha256": "abc123",
+            "executable": "bin/yosys",
+        }
 
     def test_get_resource_invalid_prefix_404(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
@@ -242,6 +481,31 @@ class TestUninstall:
         resp = client.post("/api/resources/pdk:ics55/uninstall")
         assert resp.status_code == 400
 
+    def test_uninstall_unmanaged_tool_rejected_and_preserves_path(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        tool_dir = tmp_path / "external" / "yosys"
+        tool_dir.mkdir(parents=True)
+        marker = tool_dir / "owned-by-user"
+        marker.write_text("do not delete", encoding="utf-8")
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path=str(tool_dir),
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            managed=False,
+        )
+
+        resp = client.post("/api/resources/tool:yosys/uninstall")
+
+        assert resp.status_code == 400
+        assert "unmanaged" in resp.json()["detail"]
+        assert marker.exists()
+        assert router_mod._inventory.get_tool("yosys") is not None
+
 
 class TestPdkRoutes:
     def test_scan_pdk(self, client: TestClient) -> None:
@@ -250,7 +514,8 @@ class TestPdkRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "ics55"
-        assert "prtech" in data["detected_files"]
+        assert data["detected_files"]["directories"] == ["IP", "prtech"]
+        assert "prtech" in data["detected_file_list"]
 
     def test_scan_empty_path_400(self, client: TestClient) -> None:
         resp = client.post("/api/resources/pdks/scan", json={"path": ""})
@@ -262,6 +527,9 @@ class TestPdkRoutes:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == "pdk:ics55"
+        assert data["name"] == "ics55"
+        assert Path(data["path"]).name.startswith("ecos_test_pdk_")
+        assert data["health"]["detected_files"]["directories"] == ["IP", "prtech"]
 
     def test_activate_pdk(self, client: TestClient) -> None:
         _pdk_service.import_pdk(str(_make_pdk_dir()))
@@ -278,7 +546,7 @@ class TestPdkRoutes:
         resp = client.post("/api/resources/pdk:ics55/validate")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["health"] == "ok"
+        assert data["health"]["status"] == "ok"
 
     def test_delete_pdk_reference(self, client: TestClient) -> None:
         _pdk_service.import_pdk(str(_make_pdk_dir()))
@@ -350,6 +618,37 @@ class TestBatch:
         result = resp.json()["results"][0]
         assert result["status"] == 404
 
+    def test_batch_uninstall_unmanaged_tool_rejected_and_preserves_path(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, {"schema_version": 2, "tools": []})
+        tool_dir = tmp_path / "external" / "yosys"
+        tool_dir.mkdir(parents=True)
+        marker = tool_dir / "owned-by-user"
+        marker.write_text("do not delete", encoding="utf-8")
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="0.61",
+            path=str(tool_dir),
+            sha256="abc123",
+            detected_executables=["bin/yosys"],
+            managed=False,
+        )
+
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "tool:yosys", "action": "uninstall"}]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 400
+        assert "unmanaged" in result["error"]
+        assert marker.exists()
+        assert router_mod._inventory.get_tool("yosys") is not None
+
     def test_batch_activate_pdk(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         _pdk_service.import_pdk(str(_make_pdk_dir()))
@@ -372,7 +671,7 @@ class TestBatch:
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert result["status"] == 200
-        assert result["detail"]["health"] == "ok"
+        assert result["detail"]["health"]["status"] == "ok"
 
     def test_batch_remove_pdk_reference(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
@@ -409,7 +708,8 @@ class TestDoctor:
 
     def test_doctor_degraded(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
-        from ecos_server.resource.registry import RegistryService as RS, RegistryState
+        from ecos_server.resource.registry import RegistryService as RS
+        from ecos_server.resource.registry import RegistryState
 
         mock_rs = MagicMock(spec=RS)
         mock_rs.fetch = AsyncMock(
@@ -454,6 +754,7 @@ class TestSSESubscription:
     @pytest.mark.asyncio
     async def test_subscriber_receives_published_event(self) -> None:
         import asyncio as aio
+
         from ecos_server.resource.jobs import JobTracker
         from ecos_server.resource.schemas import ResourceAction, ResourceJob
         from ecos_server.sse import event_manager
@@ -473,6 +774,7 @@ class TestSSESubscription:
         await aio.sleep(0.01)
 
         job1 = ResourceJob(
+            id="job-1",
             resource_id="tool:test",
             action=ResourceAction.install,
             phase="downloading",
@@ -482,6 +784,7 @@ class TestSSESubscription:
         tracker.publish(job1)
 
         job2 = ResourceJob(
+            id="job-2",
             resource_id="tool:test",
             action=ResourceAction.install,
             phase="done",

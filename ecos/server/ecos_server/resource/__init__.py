@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-from .inventory import InventoryService
 from .installer import InstallerService
+from .inventory import InventoryService
 from .jobs import JobTracker
 from .pdks import PdkResourceService
 from .registry import RegistryService

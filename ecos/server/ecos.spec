@@ -42,12 +42,11 @@ ecc_datas, ecc_binaries, ecc_hiddenimports = collect_all("chipcompiler")
 # --- Collect klayout package resources ---
 klayout_datas, klayout_binaries, klayout_hiddenimports = collect_all("klayout")
 
+
 # --- Collect PyTorch (DreamPlace dependency) ---
 def _include_torch_submodule(name):
     """Keep the torch bundle focused on tensor/runtime modules used by DreamPlace."""
-    excluded_prefixes = (
-        "torch.distributed",
-    )
+    excluded_prefixes = ("torch.distributed",)
     return not any(name == prefix or name.startswith(f"{prefix}.") for prefix in excluded_prefixes)
 
 

@@ -4,8 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ── Enums ──────────────────────────────────────────────────────────────
+
 
 class ResourceType(StrEnum):
     tool = "tool"
@@ -26,6 +26,7 @@ class ResourceStatus(StrEnum):
 
 class ResourceAction(StrEnum):
     install = "install"
+    update = "update"
     uninstall = "uninstall"
     validate = "validate"
     activate = "activate"
@@ -34,30 +35,37 @@ class ResourceAction(StrEnum):
 
 # ── Resource API models ────────────────────────────────────────────────
 
+
 class ResourceJob(BaseModel):
+    id: str = ""
     resource_id: str
     action: ResourceAction
     phase: str
     progress: float = 0.0
     message: str = ""
+    error: str | None = None
 
 
 class ResourceInfo(BaseModel):
     id: str
     type: ResourceType
+    name: str
     display_name: str
     description: str = ""
     category: str = ""
     status: ResourceStatus = ResourceStatus.available
-    active: bool = False
     installed_version: str | None = None
     available_versions: list[str] = Field(default_factory=list)
-    install_path: str | None = None
-    health: str | None = None
-    canonical_path: str | None = None
+    active_version: str | None = None
+    active: bool = False
+    path: str | None = None
+    platform: str | None = None
+    size: int | None = None
+    source: str = "local"
     homepage: str = ""
     actions: list[ResourceAction] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+    health: dict[str, object] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class ResourceList(BaseModel):
@@ -66,6 +74,7 @@ class ResourceList(BaseModel):
 
 
 # ── Registry schemas ───────────────────────────────────────────────────
+
 
 class PlatformAsset(BaseModel):
     url: str
@@ -90,7 +99,8 @@ class RegistryTool(BaseModel):
 
 
 class ToolRegistry(BaseModel):
-    """Flat tools list — used for backward compat serialization."""
+    """Flat tools list used by Resource Manager services."""
+
     schema_version: int
     tools: list[RegistryTool]
 

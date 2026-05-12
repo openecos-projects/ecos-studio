@@ -20,6 +20,7 @@ class ScannedPdk:
     tech_node: str
     pdk_id: str
     detected_files: list[str]
+    detected_file_groups: dict[str, list[str]]
 
 
 class PdkResourceService:
@@ -62,9 +63,8 @@ class PdkResourceService:
                 if entry.is_dir():
                     if len(dirs) < 20:
                         dirs.append(entry.name)
-                elif entry.is_file():
-                    if len(files) < 20:
-                        files.append(entry.name)
+                elif entry.is_file() and len(files) < 20:
+                    files.append(entry.name)
         except OSError as e:
             raise ValueError(f"Cannot read directory {path}: {e}") from e
 
@@ -96,6 +96,7 @@ class PdkResourceService:
             tech_node=tech_node,
             pdk_id=pdk_id,
             detected_files=detected,
+            detected_file_groups={"directories": dirs, "files": files},
         )
 
     # ── Import ─────────────────────────────────────────────────────────
@@ -108,6 +109,7 @@ class PdkResourceService:
             name=scanned.name,
             canonical_path=scanned.canonical_path,
             detected_files=scanned.detected_files,
+            detected_file_groups=scanned.detected_file_groups,
         )
 
     # ── Activate / Deactivate ──────────────────────────────────────────

@@ -5,67 +5,98 @@ import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from .paths import default_resources_dir, default_tools_dir
 
-# Default resource manifest path
-_DEFAULT_RESOURCES_DIR = Path.home() / ".ecos" / "resources"
-_DEFAULT_TOOLS_DIR = Path.home() / ".ecos" / "tools"
+logger = logging.getLogger(__name__)
 
 
 class ToolInventoryEntry(BaseModel):
+    type: Literal["tool"] = "tool"
     name: str
     version: str
     path: str
     installed_at: str
     sha256: str
+    detected_executables: list[str] = Field(default_factory=list)
+    executable: str = ""
+    active: bool = True
+    managed: bool = True
 
 
 class PdkInventoryEntry(BaseModel):
+    type: Literal["pdk"] = "pdk"
     id: str
     name: str = ""
+    pdk_id: str = ""
     canonical_path: str
+    path: str = ""
     detected_files: list[str] = Field(default_factory=list)
+    detected_file_groups: dict[str, list[str]] = Field(
+        default_factory=lambda: {"directories": [], "files": []}
+    )
     imported_at: str = ""
     active: bool = False
     managed: bool = False
     health: str = "ok"
 
 
+ResourceInventoryEntry = Annotated[
+    ToolInventoryEntry | PdkInventoryEntry,
+    Field(discriminator="type"),
+]
+
+
 class ResourceManifest(BaseModel):
     schema_version: int = 1
-    tools: dict[str, ToolInventoryEntry] = Field(default_factory=dict)
-    pdks: dict[str, PdkInventoryEntry] = Field(default_factory=dict)
+    resources_dir: str
+    tools_dir: str
+    installed: dict[str, ResourceInventoryEntry] = Field(default_factory=dict)
 
 
 class InventoryService:
-    """Read/write resource inventory manifest at a configurable path.
-
-    The manifest stores installed tools and imported PDKs as runtime state.
-    Tests inject temporary directories for deterministic behavior.
-    """
+    """Read/write the Resource Manager manifest under XDG state paths."""
 
     @staticmethod
     def _utc_now_iso() -> str:
         return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
+    @staticmethod
+    def _default_executable(name: str, detected_executables: list[str]) -> str:
+        if detected_executables:
+            return detected_executables[0]
+        return f"bin/{name}"
+
     def __init__(
         self,
         resource_manifest_path: Path | None = None,
-        tools_manifest_path: Path | None = None,
+        tools_dir: Path | None = None,
     ) -> None:
-        self._manifest_path = resource_manifest_path or (_DEFAULT_RESOURCES_DIR / "manifest.json")
-        self._tools_manifest_path = tools_manifest_path or (_DEFAULT_TOOLS_DIR / "manifest.json")
+        resources_dir = default_resources_dir()
+        self._manifest_path = resource_manifest_path or (resources_dir / "manifest.json")
+        self._tools_dir = tools_dir or default_tools_dir()
 
     @property
     def manifest_path(self) -> Path:
         return self._manifest_path
 
+    @property
+    def resources_dir(self) -> Path:
+        return self._manifest_path.parent
+
+    @property
+    def tools_dir(self) -> Path:
+        return self._tools_dir
+
     def _empty_manifest(self) -> ResourceManifest:
-        return ResourceManifest()
+        return ResourceManifest(
+            resources_dir=str(self.resources_dir),
+            tools_dir=str(self._tools_dir),
+            installed={},
+        )
 
     def _read_manifest(self) -> ResourceManifest:
         if not self._manifest_path.exists():
@@ -79,6 +110,8 @@ class InventoryService:
             return self._empty_manifest()
 
     def _write_manifest(self, manifest: ResourceManifest) -> None:
+        manifest.resources_dir = str(self.resources_dir)
+        manifest.tools_dir = str(self._tools_dir)
         self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._manifest_path.with_suffix(".tmp")
         tmp.write_text(
@@ -88,67 +121,67 @@ class InventoryService:
         tmp.replace(self._manifest_path)
 
     def _backup_manifest(self) -> None:
-        """Preserve corrupt manifest before overwriting."""
         if not self._manifest_path.exists():
             return
         backup = self._manifest_path.with_suffix(".json.bak")
         shutil.copy2(self._manifest_path, backup)
         logger.info("Backed up corrupt manifest to %s", backup)
 
-    def _generate_legacy_tools_manifest(self, manifest: ResourceManifest) -> None:
-        """Write compatibility tools/manifest.json from resource inventory tool entries."""
-        tools_dir = self._tools_manifest_path.parent
-        tools_dir.mkdir(parents=True, exist_ok=True)
-        installed: dict[str, Any] = {}
-        for name, entry in manifest.tools.items():
-            installed[name] = {
-                "version": entry.version,
-                "path": entry.path,
-                "installed_at": entry.installed_at,
-                "sha256": entry.sha256,
-            }
-        legacy = {
-            "schema_version": 1,
-            "tools_dir": str(tools_dir),
-            "installed": installed,
-        }
-        tmp = self._tools_manifest_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(legacy, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self._tools_manifest_path)
-
-    # ── Tool operations ──────────────────────────────────────────────
-
     def get_installed_tools(self) -> dict[str, ToolInventoryEntry]:
-        return self._read_manifest().tools
+        manifest = self._read_manifest()
+        result: dict[str, ToolInventoryEntry] = {}
+        for resource_id, entry in manifest.installed.items():
+            if isinstance(entry, ToolInventoryEntry):
+                result[resource_id.removeprefix("tool:")] = entry
+        return result
 
     def get_tool(self, name: str) -> ToolInventoryEntry | None:
-        return self._read_manifest().tools.get(name)
+        entry = self._read_manifest().installed.get(f"tool:{name}")
+        return entry if isinstance(entry, ToolInventoryEntry) else None
 
-    def add_tool(self, *, name: str, version: str, path: str, sha256: str) -> None:
+    def add_tool(
+        self,
+        *,
+        name: str,
+        version: str,
+        path: str,
+        sha256: str,
+        detected_executables: list[str] | None = None,
+        executable: str | None = None,
+        active: bool = True,
+        managed: bool = True,
+    ) -> None:
+        detected = detected_executables or []
         manifest = self._read_manifest()
-        manifest.tools[name] = ToolInventoryEntry(
+        manifest.installed[f"tool:{name}"] = ToolInventoryEntry(
             name=name,
             version=version,
             path=path,
             installed_at=self._utc_now_iso(),
             sha256=sha256,
+            detected_executables=detected,
+            executable=executable or self._default_executable(name, detected),
+            active=active,
+            managed=managed,
         )
         self._write_manifest(manifest)
-        self._generate_legacy_tools_manifest(manifest)
 
     def remove_tool(self, name: str) -> None:
         manifest = self._read_manifest()
-        manifest.tools.pop(name, None)
+        manifest.installed.pop(f"tool:{name}", None)
         self._write_manifest(manifest)
-        self._generate_legacy_tools_manifest(manifest)
-
-    # ── PDK operations ───────────────────────────────────────────────
 
     def get_imported_pdks(self) -> dict[str, PdkInventoryEntry]:
-        return self._read_manifest().pdks
+        manifest = self._read_manifest()
+        result: dict[str, PdkInventoryEntry] = {}
+        for resource_id, entry in manifest.installed.items():
+            if isinstance(entry, PdkInventoryEntry):
+                result[resource_id.removeprefix("pdk:")] = entry
+        return result
 
     def get_pdk(self, pdk_id: str) -> PdkInventoryEntry | None:
-        return self._read_manifest().pdks.get(pdk_id)
+        entry = self._read_manifest().installed.get(f"pdk:{pdk_id}")
+        return entry if isinstance(entry, PdkInventoryEntry) else None
 
     def add_or_update_pdk(
         self,
@@ -157,53 +190,62 @@ class InventoryService:
         name: str = "",
         canonical_path: str,
         detected_files: list[str] | None = None,
+        detected_file_groups: dict[str, list[str]] | None = None,
     ) -> PdkInventoryEntry:
         manifest = self._read_manifest()
-        existing = manifest.pdks.get(pdk_id)
+        resource_id = f"pdk:{pdk_id}"
+        existing = manifest.installed.get(resource_id)
+        existing_pdk = existing if isinstance(existing, PdkInventoryEntry) else None
+        groups = detected_file_groups or {
+            "directories": [],
+            "files": detected_files or [],
+        }
         entry = PdkInventoryEntry(
             id=pdk_id,
-            name=name or (existing.name if existing else ""),
+            name=name or (existing_pdk.name if existing_pdk else ""),
+            pdk_id=pdk_id,
             canonical_path=canonical_path,
+            path=canonical_path,
             detected_files=detected_files or [],
+            detected_file_groups=groups,
             imported_at=self._utc_now_iso(),
-            active=existing.active if existing else False,
-            managed=existing.managed if existing else False,
+            active=existing_pdk.active if existing_pdk else False,
+            managed=existing_pdk.managed if existing_pdk else False,
             health="ok",
         )
-        manifest.pdks[pdk_id] = entry
+        manifest.installed[resource_id] = entry
         self._write_manifest(manifest)
         return entry
 
     def remove_pdk(self, pdk_id: str) -> None:
-        """Remove PDK inventory reference only; never delete source directory."""
         manifest = self._read_manifest()
-        manifest.pdks.pop(pdk_id, None)
+        manifest.installed.pop(f"pdk:{pdk_id}", None)
         self._write_manifest(manifest)
 
     def set_pdk_active(self, pdk_id: str, active: bool) -> None:
         manifest = self._read_manifest()
-        entry = manifest.pdks.get(pdk_id)
-        if entry is None:
+        resource_id = f"pdk:{pdk_id}"
+        entry = manifest.installed.get(resource_id)
+        if not isinstance(entry, PdkInventoryEntry):
             raise KeyError(f"PDK '{pdk_id}' not found in inventory")
-        # Only one PDK active at a time
         if active:
-            for pid, pent in manifest.pdks.items():
-                pent.active = pid == pdk_id
+            for rid, pent in manifest.installed.items():
+                if isinstance(pent, PdkInventoryEntry):
+                    pent.active = rid == resource_id
         else:
             entry.active = False
         self._write_manifest(manifest)
 
     def set_pdk_health(self, pdk_id: str, health: str) -> None:
         manifest = self._read_manifest()
-        entry = manifest.pdks.get(pdk_id)
-        if entry is None:
+        entry = manifest.installed.get(f"pdk:{pdk_id}")
+        if not isinstance(entry, PdkInventoryEntry):
             raise KeyError(f"PDK '{pdk_id}' not found in inventory")
         entry.health = health
         self._write_manifest(manifest)
 
     def get_active_pdk(self) -> PdkInventoryEntry | None:
-        manifest = self._read_manifest()
-        for entry in manifest.pdks.values():
-            if entry.active:
+        for entry in self._read_manifest().installed.values():
+            if isinstance(entry, PdkInventoryEntry) and entry.active:
                 return entry
         return None

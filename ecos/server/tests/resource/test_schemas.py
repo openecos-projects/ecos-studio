@@ -42,6 +42,7 @@ class TestResourceStatus:
 class TestResourceAction:
     def test_valid_actions(self) -> None:
         assert ResourceAction.install == "install"
+        assert ResourceAction.update == "update"
         assert ResourceAction.uninstall == "uninstall"
         assert ResourceAction.validate == "validate"
         assert ResourceAction.activate == "activate"
@@ -51,12 +52,14 @@ class TestResourceAction:
 class TestResourceJob:
     def test_install_job(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="tool:yosys",
             action=ResourceAction.install,
             phase="downloading",
             progress=0.5,
             message="Downloading yosys...",
         )
+        assert job.id == "job-1"
         assert job.resource_id == "tool:yosys"
         assert job.action == ResourceAction.install
         assert job.phase == "downloading"
@@ -65,6 +68,7 @@ class TestResourceJob:
 
     def test_validate_job(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="pdk:ics55",
             action=ResourceAction.validate,
             phase="scanning",
@@ -76,6 +80,7 @@ class TestResourceJob:
 
     def test_activate_job(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="pdk:ics55",
             action=ResourceAction.activate,
             phase="activating",
@@ -86,6 +91,7 @@ class TestResourceJob:
 
     def test_remove_reference_job(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="pdk:ics55",
             action=ResourceAction.remove_reference,
             phase="removing",
@@ -96,6 +102,7 @@ class TestResourceJob:
 
     def test_defaults(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="tool:test",
             action=ResourceAction.install,
             phase="init",
@@ -105,20 +112,34 @@ class TestResourceJob:
 
     def test_rejects_unknown_action(self) -> None:
         with pytest.raises(ValidationError):
-            ResourceJob(resource_id="t:1", action="unknown_action", phase="init")
+            ResourceJob(id="job-1", resource_id="t:1", action="unknown_action", phase="init")
 
     def test_serializes_to_json(self) -> None:
         job = ResourceJob(
+            id="job-1",
             resource_id="pdk:ics55",
             action=ResourceAction.validate,
             phase="done",
             progress=1.0,
         )
         data = job.model_dump()
+        assert data["id"] == "job-1"
         assert data["resource_id"] == "pdk:ics55"
         assert data["action"] == "validate"
         assert data["phase"] == "done"
         assert data["progress"] == 1.0
+
+    def test_error_field(self) -> None:
+        job = ResourceJob(
+            id="job-1",
+            resource_id="tool:yosys",
+            action=ResourceAction.install,
+            phase="error",
+            progress=0.0,
+            message="failed",
+            error="SHA256 mismatch",
+        )
+        assert job.error == "SHA256 mismatch"
 
 
 class TestResourceInfoTool:
@@ -128,14 +149,17 @@ class TestResourceInfoTool:
         info = ResourceInfo(
             id="tool:yosys",
             type=ResourceType.tool,
+            name="yosys",
             display_name="Yosys",
             description="RTL synthesis",
             category="synthesis",
             status=ResourceStatus.available,
             available_versions=["0.61", "0.60"],
+            source="registry",
             actions=[ResourceAction.install],
         )
         assert info.id == "tool:yosys"
+        assert info.name == "yosys"
         assert info.type == ResourceType.tool
         assert info.status == ResourceStatus.available
         assert info.active is False
@@ -147,40 +171,51 @@ class TestResourceInfoTool:
         info = ResourceInfo(
             id="tool:yosys",
             type=ResourceType.tool,
+            name="yosys",
             display_name="Yosys",
             description="RTL synthesis",
             category="synthesis",
             status=ResourceStatus.installed,
             installed_version="0.61",
             available_versions=["0.61", "0.60"],
-            install_path="/home/user/.ecos/tools/yosys/0.61",
+            active_version="0.61",
+            path="/home/user/.local/share/ecos-studio/tools/yosys/0.61",
+            platform="linux-x86_64",
+            size=123,
+            source="registry",
             actions=[ResourceAction.uninstall],
         )
         assert info.status == ResourceStatus.installed
         assert info.installed_version == "0.61"
-        assert info.install_path == "/home/user/.ecos/tools/yosys/0.61"
+        assert info.active_version == "0.61"
+        assert info.path == "/home/user/.local/share/ecos-studio/tools/yosys/0.61"
+        assert info.platform == "linux-x86_64"
+        assert info.size == 123
         assert ResourceAction.uninstall in info.actions
 
     def test_tool_with_update(self) -> None:
         info = ResourceInfo(
             id="tool:yosys",
             type=ResourceType.tool,
+            name="yosys",
             display_name="Yosys",
             description="RTL synthesis",
             category="synthesis",
             status=ResourceStatus.update_available,
             installed_version="0.60",
             available_versions=["0.61", "0.60"],
-            install_path="/home/user/.ecos/tools/yosys/0.60",
-            actions=[ResourceAction.install, ResourceAction.uninstall],
+            path="/home/user/.local/share/ecos-studio/tools/yosys/0.60",
+            actions=[ResourceAction.update, ResourceAction.uninstall],
         )
         assert info.status == ResourceStatus.update_available
         assert info.installed_version == "0.60"
+        assert ResourceAction.update in info.actions
 
     def test_installing_tool(self) -> None:
         info = ResourceInfo(
             id="tool:yosys",
             type=ResourceType.tool,
+            name="yosys",
             display_name="Yosys",
             description="",
             category="",
@@ -197,21 +232,23 @@ class TestResourceInfoPdk:
         info = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             description="IC-S55 PDK",
             category="pdk",
             status=ResourceStatus.installed,
             active=True,
-            health="ok",
-            canonical_path="/home/user/pdks/ics55",
+            path="/home/user/pdks/ics55",
+            health={"status": "ok", "detected_files": ["prtech", "IP"]},
             actions=[ResourceAction.validate, ResourceAction.remove_reference],
         )
         assert info.id == "pdk:ics55"
+        assert info.name == "ics55"
         assert info.type == ResourceType.pdk
         assert info.status == ResourceStatus.installed
         assert info.active is True
-        assert info.health == "ok"
-        assert info.canonical_path == "/home/user/pdks/ics55"
+        assert info.health["status"] == "ok"
+        assert info.path == "/home/user/pdks/ics55"
         assert ResourceAction.validate in info.actions
         assert ResourceAction.remove_reference in info.actions
 
@@ -219,10 +256,11 @@ class TestResourceInfoPdk:
         info = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             status=ResourceStatus.missing,
-            health="missing",
-            canonical_path="/home/user/pdks/ics55",
+            health={"status": "missing"},
+            path="/home/user/pdks/ics55",
             actions=[ResourceAction.remove_reference],
         )
         assert info.status == ResourceStatus.missing
@@ -232,10 +270,11 @@ class TestResourceInfoPdk:
         info = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             status=ResourceStatus.invalid,
-            health="invalid",
-            canonical_path="/home/user/pdks/ics55",
+            health={"status": "invalid"},
+            path="/home/user/pdks/ics55",
             actions=[ResourceAction.validate, ResourceAction.remove_reference],
         )
         assert info.status == ResourceStatus.invalid
@@ -245,10 +284,11 @@ class TestResourceInfoPdk:
         info = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             status=ResourceStatus.installed,
             active=True,
-            canonical_path="/home/user/pdks/ics55",
+            path="/home/user/pdks/ics55",
             actions=[ResourceAction.validate, ResourceAction.remove_reference],
         )
         assert ResourceAction.uninstall not in info.actions
@@ -257,11 +297,16 @@ class TestResourceInfoPdk:
         info = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             status=ResourceStatus.installed,
-            metadata={"detected_files": ["libs.ref", "tech.lef"], "imported_at": "2026-05-11T10:00:00Z"},
+            health={
+                "status": "ok",
+                "detected_files": {"directories": ["prtech"], "files": ["libs.ref"]},
+                "imported_at": "2026-05-11T10:00:00Z",
+            },
         )
-        assert info.metadata["detected_files"] == ["libs.ref", "tech.lef"]
+        assert info.health["detected_files"]["directories"] == ["prtech"]
 
 
 class TestResourceInfoValidation:
@@ -272,6 +317,7 @@ class TestResourceInfoValidation:
             ResourceInfo(
                 id="res:1",
                 type="unknown_type",  # not tool or pdk
+                name="test",
                 display_name="Test",
             )
 
@@ -280,6 +326,7 @@ class TestResourceInfoValidation:
             ResourceInfo(
                 id="tool:test",
                 type=ResourceType.tool,
+                name="test",
                 display_name="Test",
                 status="unknown_status",  # not a valid ResourceStatus
             )
@@ -289,6 +336,7 @@ class TestResourceInfoValidation:
             ResourceInfo(
                 id="pdk:test",
                 type=ResourceType.pdk,
+                name="test",
                 display_name="Test",
                 status="active",  # active is a bool, not a status
             )
@@ -298,6 +346,7 @@ class TestResourceInfoValidation:
         info = ResourceInfo(
             id="pdk:test",
             type=ResourceType.pdk,
+            name="test",
             display_name="Test",
             status=ResourceStatus.installed,
             active=True,
@@ -312,6 +361,7 @@ class TestResourceInfoValidation:
             ResourceInfo(
                 id="tool:test",
                 type=ResourceType.tool,
+                name="test",
                 display_name="Test",
                 actions=["invalid_action"],
             )
@@ -334,6 +384,7 @@ class TestResourceList:
         tool = ResourceInfo(
             id="tool:yosys",
             type=ResourceType.tool,
+            name="yosys",
             display_name="Yosys",
             status=ResourceStatus.available,
             available_versions=["0.61"],
@@ -341,10 +392,11 @@ class TestResourceList:
         pdk = ResourceInfo(
             id="pdk:ics55",
             type=ResourceType.pdk,
+            name="ics55",
             display_name="IC-S55",
             status=ResourceStatus.installed,
             active=True,
-            canonical_path="/home/user/pdks/ics55",
+            path="/home/user/pdks/ics55",
         )
         rl = ResourceList(resources=[tool, pdk])
         assert len(rl.resources) == 2

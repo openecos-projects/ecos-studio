@@ -2,19 +2,26 @@
 
 import asyncio
 import logging
+import os
 import platform
 import shutil
 import tempfile
+import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-from .inventory import InventoryService
 from .installer import InstallerService
+from .inventory import InventoryService
+from .paths import default_tools_dir
 from .schemas import PlatformAsset, ResourceAction, ResourceJob
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TOOLS_DIR = Path.home() / ".ecos" / "tools"
+_DEFAULT_TOOLS_DIR = None
+
+
+def _default_tools_dir() -> Path:
+    return _DEFAULT_TOOLS_DIR or default_tools_dir()
 
 
 class ToolResourceService:
@@ -50,6 +57,22 @@ class ToolResourceService:
     def get_installed(self) -> dict:
         return self._inventory.get_installed_tools()
 
+    @staticmethod
+    def _detect_executables(install_dir: Path) -> list[str]:
+        if not install_dir.exists():
+            return []
+
+        executables: list[str] = []
+        for candidate in sorted(install_dir.rglob("*")):
+            if not candidate.is_file():
+                continue
+            try:
+                if os.access(candidate, os.X_OK):
+                    executables.append(candidate.relative_to(install_dir).as_posix())
+            except OSError:
+                continue
+        return executables
+
     async def install(
         self,
         name: str,
@@ -63,8 +86,9 @@ class ToolResourceService:
         Progress events are emitted via the on_progress callback only;
         the caller (router) owns SSE publication through JobTracker.
         """
-        tools_dir = _DEFAULT_TOOLS_DIR
+        tools_dir = _default_tools_dir()
         dest_dir = tools_dir / name / version
+        extract_dir = dest_dir.parent / f".extract-{version}-{uuid.uuid4().hex}"
 
         def _publish(job: ResourceJob) -> None:
             if on_progress:
@@ -120,6 +144,7 @@ class ToolResourceService:
                         phase="error",
                         progress=0.0,
                         message="SHA256 verification failed",
+                        error="SHA256 verification failed",
                     )
                 )
                 raise ValueError(f"SHA256 verification failed for {name}")
@@ -137,15 +162,23 @@ class ToolResourceService:
             await asyncio.to_thread(
                 self._installer.extract,
                 archive_path,
-                dest_dir,
+                extract_dir,
                 asset.strip_prefix,
             )
 
+        if dest_dir.exists():
+            await asyncio.to_thread(shutil.rmtree, dest_dir)
+        dest_dir.parent.mkdir(parents=True, exist_ok=True)
+        extract_dir.replace(dest_dir)
+
+        detected = self._detect_executables(dest_dir)
         self._inventory.add_tool(
             name=name,
             version=version,
             path=str(dest_dir),
             sha256=asset.sha256,
+            detected_executables=detected,
+            executable=InventoryService._default_executable(name, detected),
         )
 
         _publish(
@@ -163,6 +196,8 @@ class ToolResourceService:
         entry = self._inventory.get_tool(name)
         if entry is None:
             raise KeyError(f"Tool '{name}' is not installed")
+        if not entry.managed:
+            raise PermissionError(f"Tool '{name}' is unmanaged and cannot be uninstalled")
 
         tool_path = Path(entry.path)
         if tool_path.exists():

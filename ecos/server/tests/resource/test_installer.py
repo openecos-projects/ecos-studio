@@ -69,7 +69,9 @@ class TestExtract:
 
 
 class TestArchiveTraversal:
-    def test_tar_parent_traversal_rejected(self, installer: InstallerService, tmp_path: Path) -> None:
+    def test_tar_parent_traversal_rejected(
+        self, installer: InstallerService, tmp_path: Path
+    ) -> None:
         buf = io_mod.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             info = tarfile.TarInfo(name="../evil")
@@ -91,7 +93,9 @@ class TestArchiveTraversal:
         with pytest.raises(ValueError, match="absolute"):
             installer.extract(archive_path=archive, dest_dir=tmp_path / "safe", strip_prefix=None)
 
-    def test_tar_nested_traversal_rejected(self, installer: InstallerService, tmp_path: Path) -> None:
+    def test_tar_nested_traversal_rejected(
+        self, installer: InstallerService, tmp_path: Path
+    ) -> None:
         buf = io_mod.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             info = tarfile.TarInfo(name="foo/../../evil")
@@ -102,7 +106,9 @@ class TestArchiveTraversal:
         with pytest.raises(ValueError, match="parent directory traversal"):
             installer.extract(archive_path=archive, dest_dir=tmp_path / "safe", strip_prefix=None)
 
-    def test_zip_parent_traversal_rejected(self, installer: InstallerService, tmp_path: Path) -> None:
+    def test_zip_parent_traversal_rejected(
+        self, installer: InstallerService, tmp_path: Path
+    ) -> None:
         archive = tmp_path / "traversal.zip"
         with zf.ZipFile(archive, "w") as z:
             z.writestr("../evil", "evil")

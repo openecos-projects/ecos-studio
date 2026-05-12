@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -41,6 +40,16 @@ _TOOL_PREFIX = "tool:"
 _PDK_PREFIX = "pdk:"
 
 
+def _tool_health(entry: ToolInventoryEntry) -> dict[str, object]:
+    return {
+        "detected_executables": entry.detected_executables,
+        "installed_at": entry.installed_at,
+        "managed": entry.managed,
+        "sha256": entry.sha256,
+        "executable": entry.executable,
+    }
+
+
 def init_registry(registry_url: str) -> None:
     global _registry_service
     _registry_service = RegistryService(registry_url=registry_url)
@@ -54,15 +63,19 @@ def _require_registry() -> RegistryService:
 
 # ── Resource row builders ──────────────────────────────────────────────
 
+
 def _tool_to_resource(
     reg_tool, installed: dict[str, ToolInventoryEntry], installing: set[str]
 ) -> ResourceInfo:
     name = reg_tool.name
     versions = [v.version for v in reg_tool.versions]
+    platform_id = ToolResourceService.current_platform()
+    latest = reg_tool.versions[0] if reg_tool.versions else None
+    platform_asset = latest.platforms.get(platform_id) if latest else None
     inst = installed.get(name)
     resource_id = f"{_TOOL_PREFIX}{name}"
 
-    if name in installing:
+    if resource_id in installing:
         status = ResourceStatus.installing
         actions = []
     elif inst:
@@ -70,9 +83,11 @@ def _tool_to_resource(
             status = ResourceStatus.update_available
         else:
             status = ResourceStatus.installed
-        actions = [ResourceAction.uninstall]
+        actions = []
         if status == ResourceStatus.update_available:
-            actions.insert(0, ResourceAction.install)
+            actions.append(ResourceAction.update)
+        if inst.managed:
+            actions.append(ResourceAction.uninstall)
     else:
         status = ResourceStatus.available
         actions = [ResourceAction.install]
@@ -80,15 +95,50 @@ def _tool_to_resource(
     return ResourceInfo(
         id=resource_id,
         type=ResourceType.tool,
+        name=name,
         display_name=reg_tool.display_name,
         description=reg_tool.description,
         category=reg_tool.category,
         status=status,
         installed_version=inst.version if inst else None,
         available_versions=versions,
-        install_path=inst.path if inst else None,
+        active_version=inst.version if inst and inst.active else None,
+        active=inst.active if inst else False,
+        path=inst.path if inst else None,
+        platform=platform_id,
+        size=platform_asset.size if platform_asset else None,
+        source="registry",
         homepage=reg_tool.homepage,
         actions=actions,
+        health=_tool_health(inst) if inst else {},
+    )
+
+
+def _installed_tool_to_resource(
+    name: str, entry: ToolInventoryEntry, installing: set[str]
+) -> ResourceInfo:
+    resource_id = f"{_TOOL_PREFIX}{name}"
+    status = ResourceStatus.installing if resource_id in installing else ResourceStatus.installed
+    actions = []
+    if status != ResourceStatus.installing and entry.managed:
+        actions = [ResourceAction.uninstall]
+    return ResourceInfo(
+        id=resource_id,
+        type=ResourceType.tool,
+        name=name,
+        display_name=name,
+        description="",
+        category="",
+        status=status,
+        installed_version=entry.version,
+        available_versions=[],
+        active_version=entry.version if entry.active else None,
+        active=entry.active,
+        path=entry.path,
+        source="local",
+        homepage="",
+        actions=actions,
+        health=_tool_health(entry),
     )
 
 
@@ -108,19 +158,22 @@ def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
     return ResourceInfo(
         id=f"{_PDK_PREFIX}{entry.id}",
         type=ResourceType.pdk,
+        name=entry.id,
         display_name=entry.name or entry.id,
         description="",
         category="pdk",
         status=status,
         active=entry.active,
-        health=entry.health,
-        canonical_path=entry.canonical_path,
         installed_version=None,
         available_versions=[],
-        install_path=None,
+        path=entry.canonical_path,
+        source="local",
         actions=actions,
-        metadata={
-            "detected_files": entry.detected_files,
+        health={
+            "status": entry.health,
+            "detected_files": entry.detected_file_groups,
+            "detected_file_list": entry.detected_files,
+            "detected_file_groups": entry.detected_file_groups,
             "imported_at": entry.imported_at,
             "managed": entry.managed,
         },
@@ -128,6 +181,7 @@ def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
 
 
 # ── Static routes (must precede dynamic /{resource_id} routes) ─────────
+
 
 @router.get("", response_model=ResourceList)
 async def list_resources():
@@ -138,10 +192,16 @@ async def list_resources():
     imported_pdks = _pdk_service.list_pdks()
 
     resources: list[ResourceInfo] = []
+    seen_tool_names: set[str] = set()
 
     if state.registry is not None:
         for reg_tool in state.registry.tools:
             resources.append(_tool_to_resource(reg_tool, installed_tools, _job_tracker._active))
+            seen_tool_names.add(reg_tool.name)
+
+    for name, entry in installed_tools.items():
+        if name not in seen_tool_names:
+            resources.append(_installed_tool_to_resource(name, entry, _job_tracker._active))
 
     for entry in imported_pdks.values():
         resources.append(_pdk_to_resource(entry))
@@ -158,14 +218,15 @@ async def scan_pdk(body: dict):
     try:
         scanned = _pdk_service.scan(path)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {
         "canonical_path": scanned.canonical_path,
         "name": scanned.name,
         "description": scanned.description,
         "tech_node": scanned.tech_node,
         "pdk_id": scanned.pdk_id,
-        "detected_files": scanned.detected_files,
+        "detected_files": scanned.detected_file_groups,
+        "detected_file_list": scanned.detected_files,
     }
 
 
@@ -178,7 +239,7 @@ async def import_pdk(body: dict):
     try:
         entry = _pdk_service.import_pdk(path)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return _pdk_to_resource(entry)
 
 
@@ -204,12 +265,15 @@ async def refresh_registry():
 
 # ── Batch operation helpers ────────────────────────────────────────────
 
+
 async def _batch_install(rid: str) -> dict:
     """Look up tool in registry, check platform, and start install job."""
     if _job_tracker.is_active(rid):
         existing = _job_tracker.get_active(rid)
         return {
-            "resource_id": rid, "action": "install", "status": 409,
+            "resource_id": rid,
+            "action": "install",
+            "status": 409,
             "detail": {"existing_job_id": existing.job_id if existing else None},
         }
 
@@ -218,22 +282,39 @@ async def _batch_install(rid: str) -> dict:
     state = await registry_svc.fetch()
 
     if state.registry is None:
-        return {"resource_id": rid, "action": "install", "status": 503, "error": "Registry unavailable"}
+        return {
+            "resource_id": rid,
+            "action": "install",
+            "status": 503,
+            "error": "Registry unavailable",
+        }
 
     reg_tool = next((t for t in state.registry.tools if t.name == name), None)
     if reg_tool is None or not reg_tool.versions:
-        return {"resource_id": rid, "action": "install", "status": 404, "error": f"Tool '{name}' not found"}
+        return {
+            "resource_id": rid,
+            "action": "install",
+            "status": 404,
+            "error": f"Tool '{name}' not found",
+        }
 
     version_entry = reg_tool.versions[0]
     plat = ToolResourceService.current_platform()
     asset = version_entry.platforms.get(plat)
     if asset is None:
-        return {"resource_id": rid, "action": "install", "status": 400, "error": f"Not available for {plat}"}
+        return {
+            "resource_id": rid,
+            "action": "install",
+            "status": 400,
+            "error": f"Not available for {plat}",
+        }
 
     _job_tracker.start(rid, action=ResourceAction.install)
     asyncio.create_task(_run_install(rid, name, version_entry.version, asset))
     return {
-        "resource_id": rid, "action": "install", "status": 200,
+        "resource_id": rid,
+        "action": "install",
+        "status": 200,
         "detail": {"status": "installing", "version": version_entry.version},
     }
 
@@ -242,35 +323,82 @@ async def _batch_uninstall(rid: str) -> dict:
     """Uninstall a tool by name."""
     try:
         await _tool_service.uninstall(rid[5:])
-        return {"resource_id": rid, "action": "uninstall", "status": 200, "detail": {"status": "uninstalled"}}
+        return {
+            "resource_id": rid,
+            "action": "uninstall",
+            "status": 200,
+            "detail": {"status": "uninstalled"},
+        }
+    except PermissionError as e:
+        return {
+            "resource_id": rid,
+            "action": "uninstall",
+            "status": 400,
+            "error": str(e),
+        }
     except KeyError:
-        return {"resource_id": rid, "action": "uninstall", "status": 404, "error": f"Tool '{rid[5:]}' not installed"}
+        return {
+            "resource_id": rid,
+            "action": "uninstall",
+            "status": 404,
+            "error": f"Tool '{rid[5:]}' not installed",
+        }
 
 
 def _batch_activate_pdk(rid: str) -> dict:
     """Activate a PDK by id."""
     try:
         _pdk_service.activate(rid[4:])
-        return {"resource_id": rid, "action": "activate", "status": 200, "detail": {"status": "activated"}}
+        return {
+            "resource_id": rid,
+            "action": "activate",
+            "status": 200,
+            "detail": {"status": "activated"},
+        }
     except KeyError:
-        return {"resource_id": rid, "action": "activate", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+        return {
+            "resource_id": rid,
+            "action": "activate",
+            "status": 404,
+            "error": f"PDK '{rid[4:]}' not found",
+        }
 
 
 def _batch_validate_pdk(rid: str) -> dict:
     """Validate PDK health."""
     try:
         health = _pdk_service.validate(rid[4:])
-        return {"resource_id": rid, "action": "validate", "status": 200, "detail": {"health": health}}
+        return {
+            "resource_id": rid,
+            "action": "validate",
+            "status": 200,
+            "detail": {"health": {"status": health}},
+        }
     except KeyError:
-        return {"resource_id": rid, "action": "validate", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+        return {
+            "resource_id": rid,
+            "action": "validate",
+            "status": 404,
+            "error": f"PDK '{rid[4:]}' not found",
+        }
 
 
 def _batch_remove_pdk_reference(rid: str) -> dict:
     """Remove a PDK inventory reference."""
     if _pdk_service.get_pdk(rid[4:]) is None:
-        return {"resource_id": rid, "action": "remove_reference", "status": 404, "error": f"PDK '{rid[4:]}' not found"}
+        return {
+            "resource_id": rid,
+            "action": "remove_reference",
+            "status": 404,
+            "error": f"PDK '{rid[4:]}' not found",
+        }
     _pdk_service.remove_reference(rid[4:])
-    return {"resource_id": rid, "action": "remove_reference", "status": 200, "detail": {"status": "removed"}}
+    return {
+        "resource_id": rid,
+        "action": "remove_reference",
+        "status": 200,
+        "detail": {"status": "removed"},
+    }
 
 
 # ── Batch dispatch table ──────────────────────────────────────────────
@@ -315,19 +443,27 @@ async def batch_operations(body: dict):
         action = op.get("action", "")
 
         if not rid or not action:
-            results.append({
-                "resource_id": rid, "action": action,
-                "status": 400, "error": "Missing resource_id or action",
-            })
+            results.append(
+                {
+                    "resource_id": rid,
+                    "action": action,
+                    "status": 400,
+                    "error": "Missing resource_id or action",
+                }
+            )
             continue
 
         handler, dispatch_error = _dispatch_batch_operation(rid, action)
 
         if handler is None:
-            results.append({
-                "resource_id": rid, "action": action,
-                "status": 400, "error": dispatch_error,
-            })
+            results.append(
+                {
+                    "resource_id": rid,
+                    "action": action,
+                    "status": 400,
+                    "error": dispatch_error,
+                }
+            )
             continue
 
         try:
@@ -336,10 +472,14 @@ async def batch_operations(body: dict):
             else:
                 results.append(handler(rid))
         except Exception as e:
-            results.append({
-                "resource_id": rid, "action": action,
-                "status": 500, "error": str(e),
-            })
+            results.append(
+                {
+                    "resource_id": rid,
+                    "action": action,
+                    "status": 500,
+                    "error": str(e),
+                }
+            )
 
     return {"results": results}
 
@@ -380,9 +520,55 @@ async def resource_doctor():
     }
 
 
+@router.get("/events/{job_id}")
+async def resource_job_event_stream(job_id: str, request: Request) -> StreamingResponse:
+    """SSE stream for one resource job."""
+    channel = f"resource-job:{job_id}"
+
+    async def generate():
+        async for response in event_manager.subscribe(channel):
+            if await request.is_disconnected():
+                break
+            if isinstance(response, ResourceJob):
+                yield _resource_progress_sse_format(response)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/events")
+async def resource_all_event_stream(request: Request) -> StreamingResponse:
+    """SSE stream for all resource manager events."""
+    channel = "resource:*"
+
+    async def generate():
+        async for response in event_manager.subscribe(channel):
+            if await request.is_disconnected():
+                break
+            if isinstance(response, ResourceJob):
+                yield _resource_progress_sse_format(response)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/sse/{resource_id}")
 async def resource_event_stream(resource_id: str, request: Request) -> StreamingResponse:
-    """SSE stream for resource operation progress events."""
+    """Legacy development SSE stream for resource operation progress events."""
     channel = f"resource:{resource_id}"
 
     async def generate():
@@ -405,6 +591,7 @@ async def resource_event_stream(resource_id: str, request: Request) -> Streaming
 
 # ── Dynamic resource-id routes ─────────────────────────────────────────
 
+
 @router.get("/{resource_id}", response_model=ResourceInfo)
 async def get_resource(resource_id: str):
     """Get a single resource by id (e.g. tool:yosys or pdk:ics55)."""
@@ -412,12 +599,17 @@ async def get_resource(resource_id: str):
         name = resource_id[5:]
         registry_svc = _require_registry()
         state = await registry_svc.fetch()
+        installed = _tool_service.get_installed()
+        local_entry = installed.get(name)
         if state.registry is None:
+            if local_entry is not None:
+                return _installed_tool_to_resource(name, local_entry, _job_tracker._active)
             raise HTTPException(status_code=503, detail="Registry unavailable")
         reg_tool = next((t for t in state.registry.tools if t.name == name), None)
+        if reg_tool is None and local_entry is not None:
+            return _installed_tool_to_resource(name, local_entry, _job_tracker._active)
         if reg_tool is None:
             raise HTTPException(status_code=404, detail=f"Resource '{resource_id}' not found")
-        installed = _tool_service.get_installed()
         return _tool_to_resource(reg_tool, installed, _job_tracker._active)
 
     if resource_id.startswith(_PDK_PREFIX):
@@ -497,6 +689,7 @@ async def _run_install(resource_id: str, name: str, version: str, asset) -> None
                 phase="error",
                 progress=0.0,
                 message=f"Installation failed for {name}",
+                error=f"Installation failed for {name}",
             )
         )
     finally:
@@ -512,8 +705,10 @@ async def uninstall_resource(resource_id: str):
     name = resource_id[5:]
     try:
         await _tool_service.uninstall(name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Tool '{name}' is not installed")
+    except PermissionError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Tool '{name}' is not installed") from e
 
     return {"status": "uninstalled", "resource_id": resource_id}
 
@@ -526,8 +721,8 @@ async def activate_resource(resource_id: str):
     pdk_id = resource_id[4:]
     try:
         _pdk_service.activate(pdk_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found") from e
     return {"status": "activated", "resource_id": resource_id}
 
 
@@ -539,9 +734,9 @@ async def validate_resource(resource_id: str):
     pdk_id = resource_id[4:]
     try:
         health = _pdk_service.validate(pdk_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
-    return {"resource_id": resource_id, "health": health}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found") from e
+    return {"resource_id": resource_id, "health": {"status": health}}
 
 
 def _resource_progress_sse_format(job: ResourceJob) -> str:

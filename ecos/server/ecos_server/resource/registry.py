@@ -8,11 +8,12 @@ from pathlib import Path
 
 import httpx
 
+from .paths import default_registry_cache_dir
 from .schemas import ResourceRegistryV1, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CACHE_DIR = Path.home() / ".ecos" / "cache"
+_DEFAULT_CACHE_DIR = None
 _DEFAULT_TTL = 3600
 
 
@@ -47,7 +48,7 @@ class RegistryService:
         if not registry_url:
             raise ValueError("registry_url is required for remote-first operation")
         self._registry_url = registry_url
-        self._cache_dir = cache_dir or _DEFAULT_CACHE_DIR
+        self._cache_dir = cache_dir or default_registry_cache_dir()
         self._cache_file = self._cache_dir / "resource-registry.json"
         self._ttl_seconds = ttl_seconds
         self._in_memory: ToolRegistry | None = None

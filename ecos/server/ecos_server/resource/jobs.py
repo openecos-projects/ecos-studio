@@ -8,8 +8,8 @@ clients receive a structured conflict response with the existing job id.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from ecos_server.sse import event_manager as _default_event_manager
 
@@ -26,7 +26,7 @@ class ActiveJob:
 
     @property
     def event_url(self) -> str:
-        return f"/api/resources/sse/{self.resource_id}"
+        return f"/api/resources/events/{self.job_id}"
 
 
 class JobTracker:
@@ -65,9 +65,15 @@ class JobTracker:
         on_progress: Callable[[ResourceJob], None] | None = None,
     ) -> None:
         """Publish a job progress update to SSE and optional callback."""
+        if not job.id:
+            active = self.get_active(job.resource_id)
+            job.id = active.job_id if active else ""
         if on_progress:
             on_progress(job)
         _default_event_manager.publish(f"resource:{job.resource_id}", job)
+        _default_event_manager.publish("resource:*", job)
+        if job.id:
+            _default_event_manager.publish(f"resource-job:{job.id}", job)
 
     def subscribe(self, resource_id: str):
         """Subscribe to SSE events for a resource operation."""
