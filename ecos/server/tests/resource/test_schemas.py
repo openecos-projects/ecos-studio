@@ -463,6 +463,40 @@ class TestResourceRegistryV1:
             == "https://example.com/ics55-1.01.tar.gz"
         )
 
+    def test_parses_sparse_registry_pdk_with_defaults(self) -> None:
+        reg = ResourceRegistryV1(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                }
+            ],
+        )
+
+        pdk = reg.pdks[0]
+        assert pdk.id == "ics55"
+        assert pdk.display_name == "IC-S55"
+        assert pdk.description == ""
+        assert pdk.category == "pdk"
+        assert pdk.homepage == ""
+        assert pdk.versions == []
+
+    def test_exports_registry_pdk_models(self) -> None:
+        from ecos_server.resource import RegistryPdk, RegistryPdkVersion
+
+        assert RegistryPdk(id="ics55", display_name="IC-S55").id == "ics55"
+        assert RegistryPdkVersion(
+            version="1.01",
+            platforms={
+                "all-platform": {
+                    "url": "https://example.com/ics55-1.01.tar.gz",
+                    "sha256": "abc123",
+                    "size": 1024,
+                }
+            },
+        ).version == "1.01"
+
     def test_tool_registry_keeps_pdks(self) -> None:
         reg = ToolRegistry(
             schema_version=2,

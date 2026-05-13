@@ -110,10 +110,10 @@ class RegistryPdkVersion(BaseModel):
 class RegistryPdk(BaseModel):
     id: str
     display_name: str
-    description: str
-    category: str
-    homepage: str
-    versions: list[RegistryPdkVersion]
+    description: str = ""
+    category: str = "pdk"
+    homepage: str = ""
+    versions: list[RegistryPdkVersion] = Field(default_factory=list)
 
 
 class ToolRegistry(BaseModel):
