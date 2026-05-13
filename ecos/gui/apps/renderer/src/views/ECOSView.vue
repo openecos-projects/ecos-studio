@@ -68,6 +68,16 @@
                 <span class="text-sm text-(--text-primary)">IP Catalog</span>
               </button>
 
+              <button @click="navigateToTools"
+                class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left">
+                <i class="ri-tools-line text-lg text-(--accent-color)"></i>
+                <span class="flex-1 min-w-0">
+                  <span class="block text-sm font-medium text-(--text-primary)">Resource Manager</span>
+                  <span class="block text-xs text-(--text-secondary) truncate">EDA tools and PDKs</span>
+                </span>
+                <i class="ri-arrow-right-s-line text-lg text-(--text-secondary) group-hover:text-(--accent-color) transition-colors"></i>
+              </button>
+
               <!-- PDK Manager card -->
               <div class="bg-(--bg-secondary) rounded-xl border border-(--border-color) overflow-hidden">
                 <div class="flex items-center justify-between px-4 py-3">
@@ -193,6 +203,7 @@ const lastProject = computed(() => {
 
 const navigateToECC = () => router.push('/ecc')
 const navigateToProjects = () => router.push('/projects')
+const navigateToTools = () => router.push('/tools')
 const handleNotReady = () => { /* placeholder */ }
 
 const handleImportPdk = async () => {
