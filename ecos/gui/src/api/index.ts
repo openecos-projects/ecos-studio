@@ -13,13 +13,20 @@ export {
 
 export {
   listToolsApi,
+  listResourcesApi,
   getToolStatusApi,
   installToolApi,
   uninstallToolApi,
+  activatePdkApi,
+  validatePdkApi,
+  removePdkReferenceApi,
   refreshRegistryApi,
   subscribePluginProgress,
   type ToolInfo,
   type ToolStatus,
+  type ResourceInfo,
+  type ResourceType,
+  type ResourceAction,
   type InstallProgress,
   type InstallPhase,
 } from './plugin'

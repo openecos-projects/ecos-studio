@@ -23,8 +23,8 @@ export interface ToolInfo {
   install_path: string | null
 }
 
-type ResourceType = 'tool' | 'pdk'
-type ResourceAction =
+export type ResourceType = 'tool' | 'pdk'
+export type ResourceAction =
   | 'install'
   | 'update'
   | 'uninstall'
@@ -32,7 +32,7 @@ type ResourceAction =
   | 'activate'
   | 'remove_reference'
 
-interface ResourceInfo {
+export interface ResourceInfo {
   id: string
   type: ResourceType
   name: string
@@ -110,6 +110,10 @@ export function resourceListToTools(payload: ResourceList): ToolInfo[] {
     .map(resourceToToolInfo)
 }
 
+export function resourceListToResources(payload: ResourceList): ResourceInfo[] {
+  return payload.resources
+}
+
 export function resourceJobToInstallProgress(job: ResourceJob): InstallProgress {
   return {
     tool: job.resource_id.replace(/^tool:/, ''),
@@ -124,12 +128,37 @@ export async function listToolsApi(): Promise<ToolInfo[]> {
   return resourceListToTools(payload)
 }
 
+export async function listResourcesApi(): Promise<ResourceInfo[]> {
+  const payload = await alovaInstance.Get<ResourceList>('/api/resources', NO_CACHE)
+  return resourceListToResources(payload)
+}
+
 export async function getToolStatusApi(name: string): Promise<ToolInfo> {
   const resource = await alovaInstance.Get<ResourceInfo>(
     `/api/resources/${encodeURIComponent(resourceIdForTool(name))}`,
     NO_CACHE,
   )
   return resourceToToolInfo(resource)
+}
+
+export function activatePdkApi(resourceId: string) {
+  return alovaInstance.Post<{ status: string; resource_id: string }>(
+    `/api/resources/${encodeURIComponent(resourceId)}/activate`,
+    {},
+  )
+}
+
+export function validatePdkApi(resourceId: string) {
+  return alovaInstance.Post<{ resource_id: string; health: { status: string } }>(
+    `/api/resources/${encodeURIComponent(resourceId)}/validate`,
+    {},
+  )
+}
+
+export function removePdkReferenceApi(resourceId: string) {
+  return alovaInstance.Delete<{ status: string; resource_id: string }>(
+    `/api/resources/pdks/${encodeURIComponent(resourceId.replace(/^pdk:/, ''))}`,
+  )
 }
 
 export function installToolApi(name: string, version?: string) {

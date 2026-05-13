@@ -1,15 +1,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
+  activatePdkApi,
   installToolApi,
-  listToolsApi,
+  listResourcesApi,
+  removePdkReferenceApi,
   refreshRegistryApi,
   subscribePluginProgress,
   uninstallToolApi,
+  validatePdkApi,
 } from '@/api/plugin'
-import type { InstallProgress, ToolInfo } from '@/api/plugin'
+import type { InstallProgress, ResourceInfo, ToolInfo } from '@/api/plugin'
 
 export const usePluginStore = defineStore('plugin', () => {
+  const resources = ref<ResourceInfo[]>([])
   const tools = ref<ToolInfo[]>([])
   const loading = ref(false)
   const refreshing = ref(false)
@@ -32,7 +36,20 @@ export const usePluginStore = defineStore('plugin', () => {
     }
     error.value = null
     try {
-      tools.value = await listToolsApi()
+      const nextResources = await listResourcesApi()
+      resources.value = nextResources
+      tools.value = nextResources
+        .filter((resource) => resource.type === 'tool')
+        .map((resource) => ({
+          name: resource.name,
+          display_name: resource.display_name,
+          description: resource.description,
+          category: resource.category,
+          status: resource.status as ToolInfo['status'],
+          installed_version: resource.installed_version,
+          available_versions: resource.available_versions,
+          install_path: resource.path,
+        }))
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
     } finally {
@@ -102,6 +119,21 @@ export const usePluginStore = defineStore('plugin', () => {
     }
   }
 
+  async function activatePdk(resourceId: string): Promise<void> {
+    await activatePdkApi(resourceId)
+    await fetchTools({ silent: true })
+  }
+
+  async function validatePdk(resourceId: string): Promise<void> {
+    await validatePdkApi(resourceId)
+    await fetchTools({ silent: true })
+  }
+
+  async function removePdkReference(resourceId: string): Promise<void> {
+    await removePdkReferenceApi(resourceId)
+    await fetchTools({ silent: true })
+  }
+
   async function refresh(): Promise<void> {
     refreshing.value = true
     error.value = null
@@ -123,6 +155,7 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   return {
+    resources,
     tools,
     loading,
     refreshing,
@@ -133,6 +166,9 @@ export const usePluginStore = defineStore('plugin', () => {
     fetchTools,
     install,
     uninstall,
+    activatePdk,
+    validatePdk,
+    removePdkReference,
     refresh,
     cleanup,
   }

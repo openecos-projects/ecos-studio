@@ -198,6 +198,35 @@
                         Retry
                       </button>
                     </template>
+                    <template v-else-if="row.resource">
+                      <button
+                        v-if="row.actions.includes('activate')"
+                        type="button"
+                        class="row-action-btn primary"
+                        @click.stop="handlePdkActivate(row)"
+                      >
+                        <i class="ri-check-line" aria-hidden="true"></i>
+                        Activate
+                      </button>
+                      <button
+                        v-else-if="row.actions.includes('validate')"
+                        type="button"
+                        class="row-action-btn info"
+                        @click.stop="handlePdkValidate(row)"
+                      >
+                        <i class="ri-shield-check-line" aria-hidden="true"></i>
+                        Validate
+                      </button>
+                      <button
+                        v-if="row.actions.includes('remove_reference')"
+                        type="button"
+                        class="row-action-btn danger-outlined"
+                        @click.stop="handleRowUninstall(row)"
+                      >
+                        <i class="ri-link-unlink" aria-hidden="true"></i>
+                        Remove
+                      </button>
+                    </template>
                   </span>
                 </button>
               </template>
@@ -292,7 +321,7 @@ import { useRouter } from 'vue-router'
 import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import type { ToolInfo, ToolStatus } from '@/api/plugin'
+import type { ResourceAction, ResourceInfo, ToolInfo, ToolStatus } from '@/api/plugin'
 
 type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
 type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
@@ -313,7 +342,9 @@ interface ResourceRow {
   icon: string
   accent: string
   progressPercent: number | null
+  actions: ResourceAction[]
   tool?: ToolInfo
+  resource?: ResourceInfo
 }
 
 interface ResourceMeta {
@@ -378,17 +409,50 @@ const resourceRows = computed<ResourceRow[]>(() => {
       icon: meta.icon,
       accent: meta.accent,
       progressPercent,
+      actions: [],
       tool,
     }
   })
 
-  const knownPdkRows = pdkCatalog.map((pdk) => {
+  const serverPdkRows = pluginStore.resources
+    .filter((resource) => resource.type === 'pdk')
+    .map((resource) => {
+      const meta = metadataForPdkResource(resource)
+      const mappedStatus = mapPdkStatus(resource)
+      return {
+        id: resource.id,
+        type: 'pdk' as const,
+        name: resource.display_name || resource.name,
+        description: resource.description || pdkPathLabel(resource),
+        version: pdkVersionLabel(resource),
+        sizeLabel: meta.sizeLabel,
+        sizeMb: meta.sizeMb,
+        platform: resource.platform || 'Local',
+        statusText: mappedStatus.text,
+        statusKind: mappedStatus.kind,
+        icon: meta.icon,
+        accent: meta.accent,
+        progressPercent: null,
+        actions: resource.actions,
+        resource,
+      }
+    })
+
+  const serverPdkKeys = new Set(
+    serverPdkRows.map((row) => `${row.id} ${row.name}`.toLowerCase()),
+  )
+
+  const knownPdkRows = pdkCatalog.flatMap((pdk) => {
+    if (Array.from(serverPdkKeys).some((key) => key.includes(pdk.key))) {
+      return []
+    }
+
     const installed = importedPdks.value.some((item) => {
       const key = `${item.pdkId || ''} ${item.name || ''}`.toLowerCase()
       return key.includes(pdk.key)
     })
 
-    return {
+    return [{
       id: `pdk:${pdk.key}`,
       type: 'pdk' as const,
       name: pdk.name,
@@ -402,7 +466,8 @@ const resourceRows = computed<ResourceRow[]>(() => {
       icon: pdk.icon,
       accent: pdk.accent,
       progressPercent: null,
-    }
+      actions: [] as ResourceAction[],
+    }]
   })
 
   const catalogKeys = new Set(pdkCatalog.map((pdk) => pdk.key))
@@ -425,9 +490,10 @@ const resourceRows = computed<ResourceRow[]>(() => {
       icon: pdk.name.slice(0, 5),
       accent: '#6b7078',
       progressPercent: null,
+      actions: [] as ResourceAction[],
     }))
 
-  return [...toolRows, ...knownPdkRows, ...customPdkRows]
+  return [...toolRows, ...serverPdkRows, ...knownPdkRows, ...customPdkRows]
 })
 
 const filteredRows = computed(() => {
@@ -541,6 +607,40 @@ function versionLabel(tool: ToolInfo): string {
   return `v${String(version).replace(/^v/i, '')}`
 }
 
+function metadataForPdkResource(resource: ResourceInfo): ResourceMeta {
+  const catalog = pdkCatalog.find((pdk) => {
+    const haystack = `${resource.id} ${resource.name} ${resource.display_name}`.toLowerCase()
+    return haystack.includes(pdk.key)
+  })
+  if (catalog) {
+    return {
+      icon: catalog.icon,
+      accent: catalog.accent,
+      sizeMb: resource.size ? resource.size / (1024 * 1024) : catalog.sizeMb,
+      sizeLabel: resource.size ? formatSize(resource.size / (1024 * 1024)) : catalog.sizeLabel,
+    }
+  }
+
+  const label = (resource.display_name || resource.name || '?').slice(0, 5)
+  return {
+    icon: label,
+    accent: resource.active ? '#4f7f75' : '#6b7078',
+    sizeMb: resource.size ? resource.size / (1024 * 1024) : 0,
+    sizeLabel: resource.size ? formatSize(resource.size / (1024 * 1024)) : 'Local',
+  }
+}
+
+function pdkVersionLabel(resource: ResourceInfo): string {
+  if (resource.active) return 'Active'
+  const importedAt = resource.health.imported_at
+  if (typeof importedAt === 'string') return 'Local'
+  return resource.installed_version || 'Local'
+}
+
+function pdkPathLabel(resource: ResourceInfo): string {
+  return resource.path || 'Imported process design kit'
+}
+
 function mapToolStatus(status: ToolStatus, progressPercent: number | null): { kind: StatusKind; text: string } {
   switch (status) {
     case 'installed':
@@ -559,6 +659,19 @@ function mapToolStatus(status: ToolStatus, progressPercent: number | null): { ki
     default:
       return { kind: 'available', text: 'Available' }
   }
+}
+
+function mapPdkStatus(resource: ResourceInfo): { kind: StatusKind; text: string } {
+  if (resource.status === 'missing' || resource.status === 'invalid' || resource.status === 'error') {
+    return { kind: 'error', text: String(resource.status).replace(/_/g, ' ') }
+  }
+  if (resource.active) {
+    return { kind: 'installed', text: 'Active' }
+  }
+  if (resource.status === 'installed') {
+    return { kind: 'installed', text: 'Installed' }
+  }
+  return { kind: 'available', text: 'Available' }
 }
 
 function isInstalledLike(row: ResourceRow): boolean {
@@ -598,14 +711,30 @@ function rowError(row: ResourceRow): string | undefined {
 async function handleRowInstall(row: ResourceRow): Promise<void> {
   if (row.type === 'tool' && row.tool) {
     await pluginStore.install(row.tool.name)
+  } else if (row.type === 'pdk' && row.resource?.actions.includes('activate')) {
+    await pluginStore.activatePdk(row.resource.id)
   } else if (row.type === 'pdk' && row.statusKind === 'available') {
     await importPdk()
+  }
+}
+
+async function handlePdkActivate(row: ResourceRow): Promise<void> {
+  if (row.resource) {
+    await pluginStore.activatePdk(row.resource.id)
+  }
+}
+
+async function handlePdkValidate(row: ResourceRow): Promise<void> {
+  if (row.resource) {
+    await pluginStore.validatePdk(row.resource.id)
   }
 }
 
 async function handleRowUninstall(row: ResourceRow): Promise<void> {
   if (row.type === 'tool' && row.tool) {
     await pluginStore.uninstall(row.tool.name)
+  } else if (row.type === 'pdk' && row.resource?.actions.includes('remove_reference')) {
+    await pluginStore.removePdkReference(row.resource.id)
   }
 }
 
@@ -1086,7 +1215,7 @@ async function openDocs(): Promise<void> {
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 120px 100px;
+  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 112px 132px;
   align-items: center;
   gap: 0;
 }
@@ -1265,6 +1394,8 @@ async function openDocs(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
 }
 
 .row-action-btn {
@@ -1272,7 +1403,7 @@ async function openDocs(): Promise<void> {
   align-items: center;
   gap: 5px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 0;
   border-radius: 6px;
   font-size: 11px;
