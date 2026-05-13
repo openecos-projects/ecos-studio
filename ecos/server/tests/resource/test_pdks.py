@@ -1,9 +1,30 @@
+import hashlib
+import io
+import tarfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from ecos_server.resource.inventory import InventoryService
 from ecos_server.resource.pdks import PdkResourceService
+from ecos_server.resource.schemas import PlatformAsset, ResourceAction
+
+
+def _make_pdk_tarball(tmp_path: Path, prefix: str = "ics55-pdk") -> tuple[Path, str, int]:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, content in {
+            f"{prefix}/prtech/tech.lef": b"LAYER M1",
+            f"{prefix}/IP/README": b"IP cells",
+        }.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(content)
+            tar.addfile(info, io.BytesIO(content))
+    data = buf.getvalue()
+    archive = tmp_path / "ics55.tar.gz"
+    archive.write_bytes(data)
+    return archive, hashlib.sha256(data).hexdigest(), len(data)
 
 
 @pytest.fixture
@@ -322,3 +343,137 @@ class TestPdkNegative:
     def test_import_rejects_invalid_path(self, service: PdkResourceService) -> None:
         with pytest.raises(ValueError, match="invalid characters"):
             service.import_pdk("/path/with 中文/pdk")
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_downloads_scans_and_activates_first(
+    inventory: InventoryService, tmp_path: Path
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+    events = []
+
+    with patch.object(service._installer, "download") as download:
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+            if on_progress:
+                on_progress(1.0)
+
+        download.side_effect = fake_download
+        await service.install_managed_pdk(
+            pdk_id="ics55",
+            display_name="ICSPROUT 55nm PDK",
+            version="1.01",
+            asset=PlatformAsset(
+                url="https://example.com/ics55.tar.gz",
+                sha256=sha,
+                size=size,
+                strip_prefix="ics55-pdk",
+            ),
+            action=ResourceAction.install,
+            on_progress=events.append,
+        )
+
+    entry = inventory.get_pdk("ics55")
+    assert entry is not None
+    assert entry.version == "1.01"
+    assert entry.sha256 == sha
+    assert entry.source == "registry"
+    assert entry.source_url == "https://example.com/ics55.tar.gz"
+    assert entry.managed is True
+    assert entry.active is True
+    assert Path(entry.canonical_path) == pdks_dir / "ics55" / "1.01"
+    assert (Path(entry.canonical_path) / "prtech").is_dir()
+    assert (Path(entry.canonical_path) / "IP").is_dir()
+    assert [event.phase for event in events] == [
+        "downloading",
+        "downloading",
+        "verifying",
+        "extracting",
+        "done",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_does_not_replace_existing_active_pdk(tmp_path: Path) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=tmp_path / "managed-pdks",
+    )
+    active_root = tmp_path / "local" / "active"
+    active_root.mkdir(parents=True)
+    inventory.add_or_update_pdk(
+        "local",
+        name="Local PDK",
+        canonical_path=str(active_root),
+        active=True,
+    )
+    service = PdkResourceService(inventory=inventory)
+
+    with patch.object(service._installer, "download") as download:
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        download.side_effect = fake_download
+        await service.install_managed_pdk(
+            pdk_id="ics55",
+            display_name="ICSPROUT 55nm PDK",
+            version="1.01",
+            asset=PlatformAsset(
+                url="https://example.com/ics55.tar.gz",
+                sha256=sha,
+                size=size,
+                strip_prefix="ics55-pdk",
+            ),
+        )
+
+    assert inventory.get_pdk("local").active is True
+    assert inventory.get_pdk("ics55").active is False
+    assert inventory.get_pdk("ics55").canonical_path == str(
+        tmp_path / "managed-pdks" / "ics55" / "1.01"
+    )
+
+
+@pytest.mark.asyncio
+async def test_uninstall_managed_pdk_deletes_files_and_manifest(tmp_path: Path) -> None:
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=tmp_path / "managed-pdks",
+    )
+    root = tmp_path / "managed-pdks" / "ics55" / "1.01"
+    root.mkdir(parents=True)
+    (root / "prtech").mkdir()
+    inventory.add_or_update_pdk(
+        "ics55",
+        name="ICSPROUT 55nm PDK",
+        canonical_path=str(root),
+        version="1.01",
+        managed=True,
+    )
+    service = PdkResourceService(inventory=inventory)
+
+    await service.uninstall_managed_pdk("ics55")
+
+    assert inventory.get_pdk("ics55") is None
+    assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_unmanaged_pdk_rejects_and_preserves_source(
+    service: PdkResourceService, ics55_dir: Path
+) -> None:
+    service.import_pdk(str(ics55_dir))
+
+    with pytest.raises(PermissionError, match="unmanaged"):
+        await service.uninstall_managed_pdk("ics55")
+
+    assert ics55_dir.exists()
+    assert service.get_pdk("ics55") is not None

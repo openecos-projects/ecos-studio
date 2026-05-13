@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 
+import asyncio
 import logging
 import re
+import shutil
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .installer import InstallerService
 from .inventory import InventoryService, PdkInventoryEntry
+from .schemas import PlatformAsset, ResourceAction, ResourceJob
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +36,13 @@ class PdkResourceService:
     through the InventoryService.
     """
 
-    def __init__(self, inventory: InventoryService | None = None) -> None:
+    def __init__(
+        self,
+        inventory: InventoryService | None = None,
+        installer: InstallerService | None = None,
+    ) -> None:
         self._inventory = inventory or InventoryService()
+        self._installer = installer or InstallerService()
 
     @property
     def inventory(self) -> InventoryService:
@@ -117,6 +128,121 @@ class PdkResourceService:
             managed=False,
         )
 
+    async def install_managed_pdk(
+        self,
+        *,
+        pdk_id: str,
+        display_name: str,
+        version: str,
+        asset: PlatformAsset,
+        action: ResourceAction = ResourceAction.install,
+        on_progress: Callable[[ResourceJob], None] | None = None,
+    ) -> PdkInventoryEntry:
+        """Download, verify, extract, scan, and register a managed PDK."""
+        dest_dir = self._inventory.pdks_dir / pdk_id / version
+
+        def _publish(job: ResourceJob) -> None:
+            if on_progress:
+                on_progress(job)
+
+        _publish(
+            ResourceJob(
+                resource_id=f"pdk:{pdk_id}",
+                action=action,
+                phase="downloading",
+                progress=0.0,
+                message=f"Downloading {display_name or pdk_id} v{version}...",
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            archive_path = Path(tmp) / f"{pdk_id}.archive"
+
+            def _download_progress(pct: float) -> None:
+                _publish(
+                    ResourceJob(
+                        resource_id=f"pdk:{pdk_id}",
+                        action=action,
+                        phase="downloading",
+                        progress=pct,
+                        message=f"Downloading... {pct:.0%}",
+                    )
+                )
+
+            await self._installer.download(
+                url=asset.url,
+                dest=archive_path,
+                expected_size=asset.size,
+                on_progress=_download_progress,
+            )
+
+            _publish(
+                ResourceJob(
+                    resource_id=f"pdk:{pdk_id}",
+                    action=action,
+                    phase="verifying",
+                    progress=0.0,
+                    message="Verifying SHA256...",
+                )
+            )
+            ok = await asyncio.to_thread(InstallerService.verify_sha256, archive_path, asset.sha256)
+            if not ok:
+                _publish(
+                    ResourceJob(
+                        resource_id=f"pdk:{pdk_id}",
+                        action=action,
+                        phase="error",
+                        progress=0.0,
+                        message="SHA256 verification failed",
+                        error="SHA256 verification failed",
+                    )
+                )
+                raise ValueError(f"SHA256 verification failed for PDK {pdk_id}")
+
+            _publish(
+                ResourceJob(
+                    resource_id=f"pdk:{pdk_id}",
+                    action=action,
+                    phase="extracting",
+                    progress=0.0,
+                    message=f"Extracting to {dest_dir}...",
+                )
+            )
+            await asyncio.to_thread(
+                self._installer.extract,
+                archive_path,
+                dest_dir,
+                asset.strip_prefix,
+            )
+
+        scanned = self.scan(str(dest_dir))
+        active_pdk = self._inventory.get_active_pdk()
+        should_activate = active_pdk is None or active_pdk.id == pdk_id
+        entry = self._inventory.add_or_update_pdk(
+            pdk_id,
+            name=display_name or scanned.name,
+            canonical_path=scanned.canonical_path,
+            detected_files=scanned.detected_files,
+            detected_file_groups=scanned.detected_file_groups,
+            version=version,
+            sha256=asset.sha256,
+            source="registry",
+            source_url=asset.url,
+            managed=True,
+            active=should_activate,
+        )
+
+        _publish(
+            ResourceJob(
+                resource_id=f"pdk:{pdk_id}",
+                action=action,
+                phase="done",
+                progress=1.0,
+                message=f"{display_name or pdk_id} v{version} installed successfully",
+            )
+        )
+        return entry
+
     # ── Activate / Deactivate ──────────────────────────────────────────
 
     def activate(self, pdk_id: str) -> None:
@@ -150,6 +276,20 @@ class PdkResourceService:
 
         self._inventory.set_pdk_health(pdk_id, health)
         return health
+
+    async def uninstall_managed_pdk(self, pdk_id: str) -> None:
+        """Delete managed PDK files and remove inventory entry."""
+        entry = self._inventory.get_pdk(pdk_id)
+        if entry is None:
+            raise KeyError(f"PDK '{pdk_id}' is not installed")
+        if not entry.managed:
+            raise PermissionError(f"PDK '{pdk_id}' is unmanaged and cannot be uninstalled")
+
+        pdk_path = Path(entry.canonical_path)
+        if pdk_path.exists():
+            await asyncio.to_thread(shutil.rmtree, pdk_path)
+
+        self._inventory.remove_pdk(pdk_id)
 
     # ── Remove Reference ───────────────────────────────────────────────
 
