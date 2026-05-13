@@ -232,10 +232,10 @@ class InventoryService:
         canonical_path: str,
         detected_files: list[str] | None = None,
         detected_file_groups: dict[str, list[str]] | None = None,
-        version: str = "",
-        sha256: str = "",
-        source: str = "",
-        source_url: str = "",
+        version: str | None = None,
+        sha256: str | None = None,
+        source: str | None = None,
+        source_url: str | None = None,
         managed: bool | None = None,
         active: bool | None = None,
     ) -> PdkInventoryEntry:
@@ -258,10 +258,18 @@ class InventoryService:
                 id=pdk_id,
                 name=name or (existing_pdk.name if existing_pdk else ""),
                 pdk_id=pdk_id,
-                version=version or (existing_pdk.version if existing_pdk else ""),
-                sha256=sha256 or (existing_pdk.sha256 if existing_pdk else ""),
-                source=source or (existing_pdk.source if existing_pdk else ""),
-                source_url=source_url or (existing_pdk.source_url if existing_pdk else ""),
+                version=version if version is not None else (
+                    existing_pdk.version if existing_pdk else ""
+                ),
+                sha256=sha256 if sha256 is not None else (
+                    existing_pdk.sha256 if existing_pdk else ""
+                ),
+                source=source if source is not None else (
+                    existing_pdk.source if existing_pdk else ""
+                ),
+                source_url=source_url if source_url is not None else (
+                    existing_pdk.source_url if existing_pdk else ""
+                ),
                 canonical_path=canonical_path,
                 path=canonical_path,
                 detected_files=detected_files or [],
@@ -271,6 +279,10 @@ class InventoryService:
                 managed=next_managed,
                 health="ok",
             )
+            if next_active:
+                for rid, pent in manifest.installed.items():
+                    if isinstance(pent, PdkInventoryEntry):
+                        pent.active = rid == resource_id
             manifest.installed[resource_id] = entry
             self._write_manifest(manifest)
             return entry

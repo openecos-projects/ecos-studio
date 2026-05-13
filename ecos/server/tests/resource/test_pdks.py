@@ -149,6 +149,58 @@ class TestPdkImport:
         assert pdk is not None
         assert pdk.canonical_path == str(ics55_dir.resolve())
 
+    def test_import_replaces_managed_entry_with_unmanaged_local_reference(
+        self, service: PdkResourceService, inventory: InventoryService, ics55_dir: Path
+    ) -> None:
+        inventory.add_or_update_pdk(
+            "sky130",
+            canonical_path="/tmp/sky130",
+            active=True,
+        )
+        inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/managed",
+            version="1.01",
+            sha256="3" * 64,
+            source="registry",
+            source_url="https://example.com/ics55.tar.gz",
+            managed=True,
+        )
+
+        entry = service.import_pdk(str(ics55_dir))
+
+        assert entry.canonical_path == str(ics55_dir.resolve())
+        assert entry.managed is False
+        assert entry.version == ""
+        assert entry.sha256 == ""
+        assert entry.source == ""
+        assert entry.source_url == ""
+        assert entry.active is False
+        assert inventory.get_pdk("sky130").active is True
+
+    def test_import_preserves_active_when_replacing_active_managed_entry(
+        self, service: PdkResourceService, inventory: InventoryService, ics55_dir: Path
+    ) -> None:
+        inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/managed",
+            version="1.01",
+            sha256="3" * 64,
+            source="registry",
+            source_url="https://example.com/ics55.tar.gz",
+            managed=True,
+            active=True,
+        )
+
+        entry = service.import_pdk(str(ics55_dir))
+
+        assert entry.active is True
+        assert entry.managed is False
+        assert entry.version == ""
+        assert entry.sha256 == ""
+        assert entry.source == ""
+        assert entry.source_url == ""
+
 
 class TestPdkActivate:
     """Activate/deactivate PDK entries."""

@@ -110,6 +110,11 @@ class PdkResourceService:
             canonical_path=scanned.canonical_path,
             detected_files=scanned.detected_files,
             detected_file_groups=scanned.detected_file_groups,
+            version="",
+            sha256="",
+            source="",
+            source_url="",
+            managed=False,
         )
 
     # ── Activate / Deactivate ──────────────────────────────────────────

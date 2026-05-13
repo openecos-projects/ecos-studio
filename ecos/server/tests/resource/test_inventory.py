@@ -301,6 +301,43 @@ class TestPdkInventory:
         assert entry.canonical_path == "/tmp/newpath"
         assert entry.detected_files == ["a", "b"]
 
+    def test_add_or_update_pdk_active_true_is_exclusive(
+        self, inventory: InventoryService
+    ) -> None:
+        inventory.add_or_update_pdk("a", canonical_path="/tmp/a", active=True)
+        inventory.add_or_update_pdk("b", canonical_path="/tmp/b", active=True)
+
+        assert inventory.get_pdk("a").active is False
+        assert inventory.get_pdk("b").active is True
+        assert inventory.get_active_pdk().id == "b"
+
+    def test_add_or_update_pdk_can_clear_metadata(self, inventory: InventoryService) -> None:
+        inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/managed",
+            version="1.01",
+            sha256="3" * 64,
+            source="registry",
+            source_url="https://example.com/ics55.tar.gz",
+            managed=True,
+        )
+
+        entry = inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/local",
+            version="",
+            sha256="",
+            source="",
+            source_url="",
+            managed=False,
+        )
+
+        assert entry.version == ""
+        assert entry.sha256 == ""
+        assert entry.source == ""
+        assert entry.source_url == ""
+        assert entry.managed is False
+
     def test_remove_pdk(self, inventory: InventoryService) -> None:
         inventory.add_or_update_pdk("ics55", canonical_path="/tmp/ics55")
         inventory.remove_pdk("ics55")
