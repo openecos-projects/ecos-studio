@@ -10,6 +10,7 @@ from ecos_server.resource.schemas import (
     ResourceRegistryV1,
     ResourceStatus,
     ResourceType,
+    ToolRegistry,
 )
 
 
@@ -426,6 +427,70 @@ class TestResourceRegistryV1:
     def test_pdks_field_reserved(self) -> None:
         reg = ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
         assert reg.pdks == []
+
+    def test_parses_registry_pdks(self) -> None:
+        reg = ResourceRegistryV1(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                    "description": "IC-S55 PDK",
+                    "category": "pdk",
+                    "homepage": "https://example.com/ics55",
+                    "versions": [
+                        {
+                            "version": "1.01",
+                            "platforms": {
+                                "all-platform": {
+                                    "url": "https://example.com/ics55-1.01.tar.gz",
+                                    "sha256": "abc123",
+                                    "size": 1024,
+                                    "strip_prefix": "ics55",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+        assert reg.pdks[0].id == "ics55"
+        assert reg.pdks[0].display_name == "IC-S55"
+        assert reg.pdks[0].versions[0].version == "1.01"
+        assert (
+            reg.pdks[0].versions[0].platforms["all-platform"].url
+            == "https://example.com/ics55-1.01.tar.gz"
+        )
+
+    def test_tool_registry_keeps_pdks(self) -> None:
+        reg = ToolRegistry(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                    "description": "IC-S55 PDK",
+                    "category": "pdk",
+                    "homepage": "https://example.com/ics55",
+                    "versions": [
+                        {
+                            "version": "1.01",
+                            "platforms": {
+                                "all-platform": {
+                                    "url": "https://example.com/ics55-1.01.tar.gz",
+                                    "sha256": "abc123",
+                                    "size": 1024,
+                                    "strip_prefix": "ics55",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+        assert reg.pdks[0].id == "ics55"
 
     def test_defaults(self) -> None:
         reg = ResourceRegistryV1(schema_version=2)
