@@ -73,6 +73,10 @@ class ResourceList(BaseModel):
     diagnostics: list[str] = Field(default_factory=list)
 
 
+class ToolInstallRequest(BaseModel):
+    version: str | None = None
+
+
 # ── Registry schemas ───────────────────────────────────────────────────
 
 

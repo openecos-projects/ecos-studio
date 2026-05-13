@@ -103,7 +103,7 @@ class RegistryService:
 
         # Try remote fetch first
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 resp = await client.get(self._registry_url)
                 resp.raise_for_status()
                 raw = resp.json()

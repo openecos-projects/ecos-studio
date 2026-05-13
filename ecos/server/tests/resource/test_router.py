@@ -66,6 +66,24 @@ def _mock_registry_data() -> dict:
     }
 
 
+def _mock_registry_data_with_versions() -> dict:
+    data = _mock_registry_data()
+    data["tools"][0]["versions"].append(
+        {
+            "version": "0.60",
+            "platforms": {
+                "linux-x86_64": {
+                    "url": "https://example.com/yosys-0.60.tar.gz",
+                    "sha256": "def456",
+                    "size": 41943040,
+                }
+            },
+            "requires": [],
+        }
+    )
+    return data
+
+
 def _mock_async_client(response_data: dict) -> MagicMock:
     resp = MagicMock()
     resp.json.return_value = response_data
@@ -433,6 +451,29 @@ class TestInstall:
         data = resp.json()
         assert data["status"] == "installing"
         assert data["resource_id"] == "tool:yosys"
+
+    def test_install_uses_requested_version(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data_with_versions())
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:yosys/install", json={"version": "0.60"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["version"] == "0.60"
+        installer.assert_called_once()
+        assert installer.call_args.args[1] == "0.60"
+        assert installer.call_args.args[2].url == "https://example.com/yosys-0.60.tar.gz"
+
+    def test_install_unknown_requested_version_404(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data_with_versions())
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:yosys/install", json={"version": "0.59"})
+
+        assert resp.status_code == 404
+        assert "v0.59" in resp.json()["detail"]
+        installer.assert_not_called()
 
     def test_install_duplicate_409(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod

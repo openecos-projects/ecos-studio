@@ -21,6 +21,7 @@ from .schemas import (
     ResourceList,
     ResourceStatus,
     ResourceType,
+    ToolInstallRequest,
 )
 from .tools import ToolResourceService
 
@@ -644,9 +645,12 @@ async def get_resource(resource_id: str):
 
 
 @router.post("/{resource_id}/install")
-async def install_resource(resource_id: str):
+async def install_resource(resource_id: str, request: ToolInstallRequest | None = None):
     """Start tool installation. Returns 409 with structured conflict detail."""
-    return await _start_tool_install_or_update(resource_id, ResourceAction.install)
+    requested_version = request.version if request else None
+    return await _start_tool_install_or_update(
+        resource_id, ResourceAction.install, requested_version=requested_version
+    )
 
 
 @router.post("/{resource_id}/update")
@@ -655,7 +659,11 @@ async def update_resource(resource_id: str):
     return await _start_tool_install_or_update(resource_id, ResourceAction.update)
 
 
-async def _start_tool_install_or_update(resource_id: str, action: ResourceAction):
+async def _start_tool_install_or_update(
+    resource_id: str,
+    action: ResourceAction,
+    requested_version: str | None = None,
+):
     """Start a tool install/update job. Returns 409 with structured conflict detail."""
     if not resource_id.startswith(_TOOL_PREFIX):
         verb = "updated" if action == ResourceAction.update else "installed"
@@ -695,6 +703,15 @@ async def _start_tool_install_or_update(resource_id: str, action: ResourceAction
         raise HTTPException(status_code=404, detail=f"No versions available for '{name}'")
 
     version_entry = reg_tool.versions[0]
+    if requested_version is not None:
+        version_entry = next((v for v in reg_tool.versions if v.version == requested_version), None)
+        if version_entry is None:
+            _job_tracker.finish(resource_id)
+            raise HTTPException(
+                status_code=404,
+                detail=f"Tool '{name}' v{requested_version} not found",
+            )
+
     plat = ToolResourceService.current_platform()
     asset = version_entry.platforms.get(plat)
     if asset is None:

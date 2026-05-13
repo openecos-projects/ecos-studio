@@ -95,6 +95,18 @@ class TestRegistryFetch:
         assert cached["tools"][0]["name"] == "yosys"
 
     @pytest.mark.asyncio
+    async def test_fetch_follows_registry_redirects(
+        self, registry_url: str, registry_fixture: dict, tmp_path: Path
+    ) -> None:
+        service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
+        mock_client = _mock_async_client(_make_mock_response(registry_fixture))
+
+        with patch("httpx.AsyncClient", return_value=mock_client) as async_client:
+            await service.fetch()
+
+        async_client.assert_called_once_with(timeout=30.0, follow_redirects=True)
+
+    @pytest.mark.asyncio
     async def test_cache_fallback_when_url_unavailable(
         self, registry_url: str, registry_fixture: dict, tmp_path: Path
     ) -> None:
