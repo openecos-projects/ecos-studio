@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from .paths import default_resources_dir, default_tools_dir
+from .paths import default_pdks_dir, default_resources_dir, default_tools_dir
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ class PdkInventoryEntry(BaseModel):
     id: str
     name: str = ""
     pdk_id: str = ""
+    version: str = ""
+    sha256: str = ""
+    source: str = ""
+    source_url: str = ""
     canonical_path: str
     path: str = ""
     detected_files: list[str] = Field(default_factory=list)
@@ -65,6 +69,7 @@ class ResourceManifest(BaseModel):
     schema_version: int = 1
     resources_dir: str
     tools_dir: str
+    pdks_dir: str = ""
     installed: dict[str, ResourceInventoryEntry] = Field(default_factory=dict)
 
 
@@ -85,10 +90,12 @@ class InventoryService:
         self,
         resource_manifest_path: Path | None = None,
         tools_dir: Path | None = None,
+        pdks_dir: Path | None = None,
     ) -> None:
         resources_dir = default_resources_dir()
         self._manifest_path = resource_manifest_path or (resources_dir / "manifest.json")
         self._tools_dir = tools_dir or default_tools_dir()
+        self._pdks_dir = pdks_dir or default_pdks_dir()
 
     @property
     def manifest_path(self) -> Path:
@@ -102,10 +109,15 @@ class InventoryService:
     def tools_dir(self) -> Path:
         return self._tools_dir
 
+    @property
+    def pdks_dir(self) -> Path:
+        return self._pdks_dir
+
     def _empty_manifest(self) -> ResourceManifest:
         return ResourceManifest(
             resources_dir=str(self.resources_dir),
             tools_dir=str(self._tools_dir),
+            pdks_dir=str(self._pdks_dir),
             installed={},
         )
 
@@ -136,6 +148,7 @@ class InventoryService:
     def _write_manifest(self, manifest: ResourceManifest) -> None:
         manifest.resources_dir = str(self.resources_dir)
         manifest.tools_dir = str(self._tools_dir)
+        manifest.pdks_dir = str(self._pdks_dir)
         self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._manifest_path.with_name(
             f"{self._manifest_path.name}.{threading.get_ident()}.tmp"
@@ -219,6 +232,12 @@ class InventoryService:
         canonical_path: str,
         detected_files: list[str] | None = None,
         detected_file_groups: dict[str, list[str]] | None = None,
+        version: str = "",
+        sha256: str = "",
+        source: str = "",
+        source_url: str = "",
+        managed: bool | None = None,
+        active: bool | None = None,
     ) -> PdkInventoryEntry:
         with self._mutation_lock():
             manifest = self._read_manifest()
@@ -229,17 +248,27 @@ class InventoryService:
                 "directories": [],
                 "files": detected_files or [],
             }
+            next_managed = managed if managed is not None else (
+                existing_pdk.managed if existing_pdk else False
+            )
+            next_active = active if active is not None else (
+                existing_pdk.active if existing_pdk else False
+            )
             entry = PdkInventoryEntry(
                 id=pdk_id,
                 name=name or (existing_pdk.name if existing_pdk else ""),
                 pdk_id=pdk_id,
+                version=version or (existing_pdk.version if existing_pdk else ""),
+                sha256=sha256 or (existing_pdk.sha256 if existing_pdk else ""),
+                source=source or (existing_pdk.source if existing_pdk else ""),
+                source_url=source_url or (existing_pdk.source_url if existing_pdk else ""),
                 canonical_path=canonical_path,
                 path=canonical_path,
                 detected_files=detected_files or [],
                 detected_file_groups=groups,
                 imported_at=self._utc_now_iso(),
-                active=existing_pdk.active if existing_pdk else False,
-                managed=existing_pdk.managed if existing_pdk else False,
+                active=next_active,
+                managed=next_managed,
                 health="ok",
             )
             manifest.installed[resource_id] = entry

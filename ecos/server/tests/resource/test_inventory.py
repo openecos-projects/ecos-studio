@@ -30,6 +30,58 @@ def test_default_manifest_path_uses_xdg_default_when_env_empty(tmp_path: Path, m
     )
 
 
+def test_default_pdks_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    inventory = InventoryService(resource_manifest_path=tmp_path / "state" / "manifest.json")
+
+    assert inventory.pdks_dir == tmp_path / "data" / "ecos-studio" / "pdks"
+
+
+def test_add_managed_pdk_metadata(tmp_path: Path) -> None:
+    inventory = InventoryService(resource_manifest_path=tmp_path / "resources" / "manifest.json")
+    pdk_root = tmp_path / "pdks" / "ics55" / "1.01"
+    pdk_root.mkdir(parents=True)
+
+    entry = inventory.add_or_update_pdk(
+        "ics55",
+        name="ICSPROUT 55nm PDK",
+        canonical_path=str(pdk_root),
+        detected_files=["prtech", "IP"],
+        detected_file_groups={"directories": ["IP", "prtech"], "files": []},
+        version="1.01",
+        sha256="3" * 64,
+        source="registry",
+        source_url="https://example.com/ics55.tar.gz",
+        managed=True,
+        active=True,
+    )
+
+    assert entry.id == "ics55"
+    assert entry.version == "1.01"
+    assert entry.sha256 == "3" * 64
+    assert entry.source == "registry"
+    assert entry.source_url == "https://example.com/ics55.tar.gz"
+    assert entry.managed is True
+    assert entry.active is True
+
+    loaded = InventoryService(resource_manifest_path=inventory.manifest_path).get_pdk("ics55")
+    assert loaded is not None
+    assert loaded.version == "1.01"
+    assert loaded.managed is True
+
+    refreshed = inventory.add_or_update_pdk(
+        "ics55",
+        canonical_path=str(pdk_root),
+        managed=False,
+    )
+    assert refreshed.version == "1.01"
+    assert refreshed.sha256 == "3" * 64
+    assert refreshed.source == "registry"
+    assert refreshed.source_url == "https://example.com/ics55.tar.gz"
+    assert refreshed.managed is False
+    assert refreshed.active is True
+
+
 @pytest.fixture
 def temp_dirs(tmp_path: Path) -> tuple[Path, Path]:
     """Create temp resource manifest and legacy sentinel paths."""
@@ -91,8 +143,11 @@ class TestManifestPersistence:
         data = json.loads(inventory.manifest_path.read_text(encoding="utf-8"))
         assert data["schema_version"] == 1
         assert data["resources_dir"] == str(inventory.manifest_path.parent)
+        assert data["tools_dir"] == str(inventory.tools_dir)
+        assert data["pdks_dir"] == str(inventory.pdks_dir)
         assert "tools" not in data
         assert "pdks" not in data
+        assert "pdks" not in data["installed"]
         assert set(data["installed"]) == {"tool:yosys", "pdk:ics55"}
         assert data["installed"]["tool:yosys"]["type"] == "tool"
         assert data["installed"]["tool:yosys"]["executable"] == "bin/yosys"
@@ -368,6 +423,7 @@ class TestResourceManifestModel:
         assert m.schema_version == 1
         assert m.resources_dir == "/tmp/resources"
         assert m.tools_dir == "/tmp/tools"
+        assert m.pdks_dir == ""
         assert m.installed == {}
 
     def test_manifest_with_tools(self) -> None:
