@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,50 @@ class TestManifestPersistence:
         svc2 = InventoryService(resource_manifest_path=resource_manifest)
         assert svc2.get_tool("yosys") is not None
         assert svc2.get_tool("yosys").version == "0.61"
+
+    def test_concurrent_add_tool_preserves_all_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        manifest_path = tmp_path / "resources" / "manifest.json"
+        services = [
+            InventoryService(resource_manifest_path=manifest_path),
+            InventoryService(resource_manifest_path=manifest_path),
+        ]
+        original_read = InventoryService._read_manifest
+        read_count = 0
+        read_lock = threading.Lock()
+        second_read = threading.Event()
+
+        def delayed_read(self):
+            nonlocal read_count
+            manifest = original_read(self)
+            with read_lock:
+                read_count += 1
+                if read_count == 2:
+                    second_read.set()
+            second_read.wait(timeout=0.2)
+            return manifest
+
+        monkeypatch.setattr(InventoryService, "_read_manifest", delayed_read)
+
+        threads = [
+            threading.Thread(
+                target=services[0].add_tool,
+                kwargs={"name": "yosys", "version": "0.61", "path": "/tmp/y", "sha256": "abc"},
+            ),
+            threading.Thread(
+                target=services[1].add_tool,
+                kwargs={"name": "openroad", "version": "2.0", "path": "/tmp/or", "sha256": "def"},
+            ),
+        ]
+
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=1)
+
+        installed = InventoryService(resource_manifest_path=manifest_path).get_installed_tools()
+        assert set(installed) == {"yosys", "openroad"}
 
 
 class TestNoLegacyToolManifest:

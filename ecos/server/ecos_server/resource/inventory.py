@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 
+import fcntl
 import json
 import logging
 import shutil
+import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -12,6 +15,14 @@ from pydantic import BaseModel, Field
 from .paths import default_resources_dir, default_tools_dir
 
 logger = logging.getLogger(__name__)
+
+_LOCKS_GUARD = threading.Lock()
+_PROCESS_LOCKS: dict[Path, threading.RLock] = {}
+
+
+def _process_lock_for(path: Path) -> threading.RLock:
+    with _LOCKS_GUARD:
+        return _PROCESS_LOCKS.setdefault(path.resolve(), threading.RLock())
 
 
 class ToolInventoryEntry(BaseModel):
@@ -109,11 +120,26 @@ class InventoryService:
             self._backup_manifest()
             return self._empty_manifest()
 
+    @contextmanager
+    def _mutation_lock(self):
+        self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = _process_lock_for(self._manifest_path)
+        with lock:
+            lock_path = self._manifest_path.with_suffix(".lock")
+            with lock_path.open("a+", encoding="utf-8") as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def _write_manifest(self, manifest: ResourceManifest) -> None:
         manifest.resources_dir = str(self.resources_dir)
         manifest.tools_dir = str(self._tools_dir)
         self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._manifest_path.with_suffix(".tmp")
+        tmp = self._manifest_path.with_name(
+            f"{self._manifest_path.name}.{threading.get_ident()}.tmp"
+        )
         tmp.write_text(
             manifest.model_dump_json(indent=2),
             encoding="utf-8",
@@ -152,24 +178,26 @@ class InventoryService:
         managed: bool = True,
     ) -> None:
         detected = detected_executables or []
-        manifest = self._read_manifest()
-        manifest.installed[f"tool:{name}"] = ToolInventoryEntry(
-            name=name,
-            version=version,
-            path=path,
-            installed_at=self._utc_now_iso(),
-            sha256=sha256,
-            detected_executables=detected,
-            executable=executable or self._default_executable(name, detected),
-            active=active,
-            managed=managed,
-        )
-        self._write_manifest(manifest)
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            manifest.installed[f"tool:{name}"] = ToolInventoryEntry(
+                name=name,
+                version=version,
+                path=path,
+                installed_at=self._utc_now_iso(),
+                sha256=sha256,
+                detected_executables=detected,
+                executable=executable or self._default_executable(name, detected),
+                active=active,
+                managed=managed,
+            )
+            self._write_manifest(manifest)
 
     def remove_tool(self, name: str) -> None:
-        manifest = self._read_manifest()
-        manifest.installed.pop(f"tool:{name}", None)
-        self._write_manifest(manifest)
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            manifest.installed.pop(f"tool:{name}", None)
+            self._write_manifest(manifest)
 
     def get_imported_pdks(self) -> dict[str, PdkInventoryEntry]:
         manifest = self._read_manifest()
@@ -192,57 +220,61 @@ class InventoryService:
         detected_files: list[str] | None = None,
         detected_file_groups: dict[str, list[str]] | None = None,
     ) -> PdkInventoryEntry:
-        manifest = self._read_manifest()
-        resource_id = f"pdk:{pdk_id}"
-        existing = manifest.installed.get(resource_id)
-        existing_pdk = existing if isinstance(existing, PdkInventoryEntry) else None
-        groups = detected_file_groups or {
-            "directories": [],
-            "files": detected_files or [],
-        }
-        entry = PdkInventoryEntry(
-            id=pdk_id,
-            name=name or (existing_pdk.name if existing_pdk else ""),
-            pdk_id=pdk_id,
-            canonical_path=canonical_path,
-            path=canonical_path,
-            detected_files=detected_files or [],
-            detected_file_groups=groups,
-            imported_at=self._utc_now_iso(),
-            active=existing_pdk.active if existing_pdk else False,
-            managed=existing_pdk.managed if existing_pdk else False,
-            health="ok",
-        )
-        manifest.installed[resource_id] = entry
-        self._write_manifest(manifest)
-        return entry
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            resource_id = f"pdk:{pdk_id}"
+            existing = manifest.installed.get(resource_id)
+            existing_pdk = existing if isinstance(existing, PdkInventoryEntry) else None
+            groups = detected_file_groups or {
+                "directories": [],
+                "files": detected_files or [],
+            }
+            entry = PdkInventoryEntry(
+                id=pdk_id,
+                name=name or (existing_pdk.name if existing_pdk else ""),
+                pdk_id=pdk_id,
+                canonical_path=canonical_path,
+                path=canonical_path,
+                detected_files=detected_files or [],
+                detected_file_groups=groups,
+                imported_at=self._utc_now_iso(),
+                active=existing_pdk.active if existing_pdk else False,
+                managed=existing_pdk.managed if existing_pdk else False,
+                health="ok",
+            )
+            manifest.installed[resource_id] = entry
+            self._write_manifest(manifest)
+            return entry
 
     def remove_pdk(self, pdk_id: str) -> None:
-        manifest = self._read_manifest()
-        manifest.installed.pop(f"pdk:{pdk_id}", None)
-        self._write_manifest(manifest)
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            manifest.installed.pop(f"pdk:{pdk_id}", None)
+            self._write_manifest(manifest)
 
     def set_pdk_active(self, pdk_id: str, active: bool) -> None:
-        manifest = self._read_manifest()
-        resource_id = f"pdk:{pdk_id}"
-        entry = manifest.installed.get(resource_id)
-        if not isinstance(entry, PdkInventoryEntry):
-            raise KeyError(f"PDK '{pdk_id}' not found in inventory")
-        if active:
-            for rid, pent in manifest.installed.items():
-                if isinstance(pent, PdkInventoryEntry):
-                    pent.active = rid == resource_id
-        else:
-            entry.active = False
-        self._write_manifest(manifest)
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            resource_id = f"pdk:{pdk_id}"
+            entry = manifest.installed.get(resource_id)
+            if not isinstance(entry, PdkInventoryEntry):
+                raise KeyError(f"PDK '{pdk_id}' not found in inventory")
+            if active:
+                for rid, pent in manifest.installed.items():
+                    if isinstance(pent, PdkInventoryEntry):
+                        pent.active = rid == resource_id
+            else:
+                entry.active = False
+            self._write_manifest(manifest)
 
     def set_pdk_health(self, pdk_id: str, health: str) -> None:
-        manifest = self._read_manifest()
-        entry = manifest.installed.get(f"pdk:{pdk_id}")
-        if not isinstance(entry, PdkInventoryEntry):
-            raise KeyError(f"PDK '{pdk_id}' not found in inventory")
-        entry.health = health
-        self._write_manifest(manifest)
+        with self._mutation_lock():
+            manifest = self._read_manifest()
+            entry = manifest.installed.get(f"pdk:{pdk_id}")
+            if not isinstance(entry, PdkInventoryEntry):
+                raise KeyError(f"PDK '{pdk_id}' not found in inventory")
+            entry.health = health
+            self._write_manifest(manifest)
 
     def get_active_pdk(self) -> PdkInventoryEntry | None:
         for entry in self._read_manifest().installed.values():

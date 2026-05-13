@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -467,6 +468,40 @@ class TestInstall:
         _pdk_service.import_pdk(str(_make_pdk_dir()))
         resp = client.post("/api/resources/pdk:ics55/install")
         assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_install_reserves_job_before_registry_fetch(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        fetches_started = 0
+        release_fetch = asyncio.Event()
+        registry = ToolRegistry(**_mock_registry_data())
+
+        async def delayed_fetch():
+            nonlocal fetches_started
+            fetches_started += 1
+            await release_fetch.wait()
+            return RegistryState(registry=registry, diagnostics=[])
+
+        mock_rs = MagicMock()
+        mock_rs.fetch = delayed_fetch
+        router_mod._registry_service = mock_rs
+
+        async def start_install():
+            return await router_mod._start_tool_install_or_update(
+                "tool:yosys",
+                router_mod.ResourceAction.install,
+            )
+
+        first = asyncio.create_task(start_install())
+        second = asyncio.create_task(start_install())
+        await asyncio.sleep(0)
+        assert fetches_started == 1
+        release_fetch.set()
+        response = await asyncio.wait_for(first, timeout=1)
+        await asyncio.gather(second, return_exceptions=True)
+
+        assert response["status"] == "installing"
 
 
 class TestUpdate:

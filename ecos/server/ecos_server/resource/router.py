@@ -270,7 +270,20 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
     """Look up tool in registry, check platform, and start install/update job."""
     action_value = action.value
     running_status = "updating" if action == ResourceAction.update else "installing"
-    if _job_tracker.is_active(rid):
+    name = rid[5:]
+    try:
+        registry_svc = _require_registry()
+    except HTTPException as e:
+        return {
+            "resource_id": rid,
+            "action": action_value,
+            "status": e.status_code,
+            "error": str(e.detail),
+        }
+
+    try:
+        _job_tracker.start(rid, action=action)
+    except KeyError:
         existing = _job_tracker.get_active(rid)
         return {
             "resource_id": rid,
@@ -279,11 +292,10 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
             "detail": {"existing_job_id": existing.job_id if existing else None},
         }
 
-    name = rid[5:]
-    registry_svc = _require_registry()
     state = await registry_svc.fetch()
 
     if state.registry is None:
+        _job_tracker.finish(rid)
         return {
             "resource_id": rid,
             "action": action_value,
@@ -293,6 +305,7 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
 
     reg_tool = next((t for t in state.registry.tools if t.name == name), None)
     if reg_tool is None or not reg_tool.versions:
+        _job_tracker.finish(rid)
         return {
             "resource_id": rid,
             "action": action_value,
@@ -304,6 +317,7 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
     plat = ToolResourceService.current_platform()
     asset = version_entry.platforms.get(plat)
     if asset is None:
+        _job_tracker.finish(rid)
         return {
             "resource_id": rid,
             "action": action_value,
@@ -311,7 +325,6 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
             "error": f"Not available for {plat}",
         }
 
-    _job_tracker.start(rid, action=action)
     asyncio.create_task(_run_install(rid, name, version_entry.version, asset, action))
     return {
         "resource_id": rid,
@@ -650,8 +663,11 @@ async def _start_tool_install_or_update(resource_id: str, action: ResourceAction
 
     name = resource_id[5:]
     running_status = "updating" if action == ResourceAction.update else "installing"
+    registry_svc = _require_registry()
 
-    if _job_tracker.is_active(resource_id):
+    try:
+        _job_tracker.start(resource_id, action=action)
+    except KeyError as e:
         existing = _job_tracker.get_active(resource_id)
         raise HTTPException(
             status_code=409,
@@ -662,31 +678,33 @@ async def _start_tool_install_or_update(resource_id: str, action: ResourceAction
                 "existing_job_id": existing.job_id if existing else None,
                 "event_url": existing.event_url if existing else None,
             },
-        )
+        ) from e
 
-    registry_svc = _require_registry()
     state = await registry_svc.fetch()
     if state.registry is None:
+        _job_tracker.finish(resource_id)
         raise HTTPException(status_code=503, detail="Registry unavailable")
 
     reg_tool = next((t for t in state.registry.tools if t.name == name), None)
     if reg_tool is None:
+        _job_tracker.finish(resource_id)
         raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
 
     if not reg_tool.versions:
+        _job_tracker.finish(resource_id)
         raise HTTPException(status_code=404, detail=f"No versions available for '{name}'")
 
     version_entry = reg_tool.versions[0]
     plat = ToolResourceService.current_platform()
     asset = version_entry.platforms.get(plat)
     if asset is None:
+        _job_tracker.finish(resource_id)
         raise HTTPException(
             status_code=400,
             detail=f"Tool '{name}' v{version_entry.version} not available for {plat}",
         )
 
     version = version_entry.version
-    _job_tracker.start(resource_id, action=action)
 
     asyncio.create_task(_run_install(resource_id, name, version_entry.version, asset, action))
 
