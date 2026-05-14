@@ -59,6 +59,7 @@ class ResourceInfo(BaseModel):
     active_version: str | None = None
     active: bool = False
     path: str | None = None
+    managed_root: str | None = None
     platform: str | None = None
     size: int | None = None
     source: str = "local"

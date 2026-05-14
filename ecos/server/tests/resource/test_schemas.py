@@ -181,6 +181,7 @@ class TestResourceInfoTool:
             available_versions=["0.61", "0.60"],
             active_version="0.61",
             path="/home/user/.local/share/ecos-studio/tools/yosys/0.61",
+            managed_root="/home/user/.local/share/ecos-studio/tools",
             platform="linux-x86_64",
             size=123,
             source="registry",
@@ -190,6 +191,7 @@ class TestResourceInfoTool:
         assert info.installed_version == "0.61"
         assert info.active_version == "0.61"
         assert info.path == "/home/user/.local/share/ecos-studio/tools/yosys/0.61"
+        assert info.managed_root == "/home/user/.local/share/ecos-studio/tools"
         assert info.platform == "linux-x86_64"
         assert info.size == 123
         assert ResourceAction.uninstall in info.actions
@@ -240,6 +242,7 @@ class TestResourceInfoPdk:
             status=ResourceStatus.installed,
             active=True,
             path="/home/user/pdks/ics55",
+            managed_root="/home/user/.local/share/ecos-studio/pdks",
             health={"status": "ok", "detected_files": ["prtech", "IP"]},
             actions=[ResourceAction.validate, ResourceAction.remove_reference],
         )
@@ -250,6 +253,7 @@ class TestResourceInfoPdk:
         assert info.active is True
         assert info.health["status"] == "ok"
         assert info.path == "/home/user/pdks/ics55"
+        assert info.managed_root == "/home/user/.local/share/ecos-studio/pdks"
         assert ResourceAction.validate in info.actions
         assert ResourceAction.remove_reference in info.actions
 
@@ -398,6 +402,7 @@ class TestResourceList:
             status=ResourceStatus.installed,
             active=True,
             path="/home/user/pdks/ics55",
+            managed_root="/home/user/.local/share/ecos-studio/pdks",
         )
         rl = ResourceList(resources=[tool, pdk])
         assert len(rl.resources) == 2

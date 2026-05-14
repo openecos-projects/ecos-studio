@@ -24,6 +24,7 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
     active_version: null,
     active: false,
     path: null,
+    managed_root: '/home/user/.local/share/ecos-studio/pdks',
     platform: 'all-platform',
     size: 432000000,
     source: 'registry',
@@ -142,6 +143,7 @@ describe('pluginToolsRows', () => {
           available_versions: ['0.61'],
           platform: 'linux-x86_64',
           size: 123,
+          managed_root: '/home/user/.local/share/ecos-studio/tools',
           source: 'registry',
           actions: ['update', 'uninstall'],
         }),
@@ -183,16 +185,22 @@ describe('pluginToolsRows', () => {
         display_name: 'Yosys',
         category: 'synthesis',
         status: 'available',
+        available_versions: ['0.61'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
         actions: ['install'],
       }),
       undefined,
     )
 
-    expect(managedInstallLocation([installablePdk])).toBe('XDG data dir / ecos-studio/pdks')
-    expect(managedInstallLocation([installableTool])).toBe('XDG data dir / ecos-studio/tools')
-    expect(managedInstallLocation([installableTool, installablePdk])).toBe(
-      'XDG data dir / ecos-studio/{tools,pdks}',
+    expect(managedInstallLocation([installablePdk])).toBe(
+      '/home/user/.local/share/ecos-studio/pdks/ics55/1.01',
     )
-    expect(managedInstallLocation([])).toBe('XDG data dir / ecos-studio/{tools,pdks}')
+    expect(managedInstallLocation([installableTool])).toBe(
+      '/home/user/.local/share/ecos-studio/tools/yosys/0.61',
+    )
+    expect(managedInstallLocation([installableTool, installablePdk])).toBe(
+      '/home/user/.local/share/ecos-studio/tools/yosys/0.61, /home/user/.local/share/ecos-studio/pdks/ics55/1.01',
+    )
+    expect(managedInstallLocation([])).toBe('')
   })
 })

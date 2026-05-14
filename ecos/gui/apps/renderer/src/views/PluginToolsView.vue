@@ -393,7 +393,10 @@ const totalSizeMb = computed(() => {
 })
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
-const installLocationText = computed(() => managedInstallLocation(downloadableSelectedResources.value))
+const installLocationText = computed(() => {
+  const location = managedInstallLocation(downloadableSelectedResources.value)
+  return location || '-'
+})
 
 const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)

@@ -180,6 +180,7 @@ class TestListResources:
         assert tools[0]["id"] == "tool:yosys"
         assert tools[0]["status"] == "available"
         assert "install" in tools[0]["actions"]
+        assert tools[0]["managed_root"].endswith("/ecos-studio/tools")
 
     def test_list_with_imported_pdks(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
@@ -191,6 +192,7 @@ class TestListResources:
         assert len(pdks) == 1
         assert pdks[0]["id"] == "pdk:ics55"
         assert pdks[0]["source"] == "local"
+        assert pdks[0]["managed_root"] is None
         assert "validate" in pdks[0]["actions"]
         assert "remove_reference" in pdks[0]["actions"]
         assert "uninstall" not in pdks[0]["actions"]
@@ -212,6 +214,7 @@ class TestListResources:
         assert pdk["platform"] == "all-platform"
         assert pdk["size"] == 432000000
         assert pdk["source"] == "registry"
+        assert pdk["managed_root"].endswith("/ecos-studio/pdks")
         assert pdk["health"] == {}
         assert pdk["actions"] == ["install"]
 
@@ -398,6 +401,7 @@ class TestListResources:
                 "active_version": "0.61",
                 "active": True,
                 "path": "/tmp/ecos/tools/yosys/0.61",
+                "managed_root": str(router_mod._inventory.tools_dir),
                 "platform": None,
                 "size": None,
                 "source": "local",

@@ -47,6 +47,7 @@ export interface ResourceInfo {
   active_version: string | null
   active: boolean
   path: string | null
+  managed_root: string | null
   platform: string | null
   size: number | null
   source: string

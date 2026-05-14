@@ -14,6 +14,7 @@ export interface ResourceRow {
   id: string
   type: ResourceType
   name: string
+  resourceName: string
   description: string
   version: string
   sizeLabel: string
@@ -27,8 +28,6 @@ export interface ResourceRow {
   actions: ResourceAction[]
   resource: ResourceItem
 }
-
-const MANAGED_RESOURCE_ROOT = 'XDG data dir / ecos-studio'
 
 const toolMeta: Record<string, { icon: string; accent: string }> = {
   openroad: { icon: 'O', accent: '#79c142' },
@@ -214,17 +213,42 @@ export async function runBatchDownload(
   await Promise.all(tasks)
 }
 
-export function managedInstallLocation(rows: ResourceRow[]): string {
-  const resourceTypes = new Set(rows.map((row) => row.type))
-  if (resourceTypes.size === 1) {
-    if (resourceTypes.has('tool')) {
-      return `${MANAGED_RESOURCE_ROOT}/tools`
-    }
-    if (resourceTypes.has('pdk')) {
-      return `${MANAGED_RESOURCE_ROOT}/pdks`
-    }
+function targetVersionForRow(row: ResourceRow): string | null {
+  const resource = row.resource
+  if (resource.status === 'update_available' || resource.status === 'available') {
+    return resource.available_versions[0] ?? null
   }
-  return `${MANAGED_RESOURCE_ROOT}/{tools,pdks}`
+  return resource.installed_version ?? resource.active_version ?? resource.available_versions[0] ?? null
+}
+
+function joinInstallPath(root: string, segments: string[]): string {
+  return [root.replace(/\/+$/, ''), ...segments.map((segment) => segment.replace(/^\/+|\/+$/g, ''))].join('/')
+}
+
+export function managedInstallLocation(rows: ResourceRow[]): string {
+  const installableRows = rows.filter((row) => primaryActionForRow(row) !== null)
+  if (installableRows.length === 0) {
+    return ''
+  }
+
+  const resolvedPaths = installableRows.map((row) => {
+    const managedRoot = row.resource.managed_root
+    const version = targetVersionForRow(row)
+    if (!managedRoot || !version) {
+      return row.resource.path ?? ''
+    }
+    return joinInstallPath(managedRoot, [row.resourceName, version])
+  }).filter((path) => path.length > 0)
+
+  if (resolvedPaths.length === 0) {
+    return ''
+  }
+
+  if (resolvedPaths.length === 1) {
+    return resolvedPaths[0]
+  }
+
+  return resolvedPaths.join(', ')
 }
 
 export function resourceToRow(
@@ -239,6 +263,7 @@ export function resourceToRow(
     id: resource.id,
     type: resource.type,
     name: resource.display_name || resource.name,
+    resourceName: resource.name,
     description: resource.description || resource.path || resource.error || '',
     version: versionLabel(resource),
     sizeLabel: size.sizeLabel,
