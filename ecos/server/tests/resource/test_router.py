@@ -414,6 +414,33 @@ class TestListResources:
             }
         ]
 
+    def test_list_includes_imported_pdk_when_registry_unavailable(
+        self, client: TestClient
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        pdk_dir = _make_pdk_dir()
+        router_mod._pdk_service.import_pdk(str(pdk_dir))
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        mock_rs.cache_file = Path("/tmp/cache/resource-registry.json")
+        router_mod._registry_service = mock_rs
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        resources = resp.json()["resources"]
+        assert len(resources) == 1
+        assert resources[0]["id"] == "pdk:ics55"
+        assert resources[0]["source"] == "local"
+        assert "validate" in resources[0]["actions"]
+        assert "remove_reference" in resources[0]["actions"]
+        assert "uninstall" not in resources[0]["actions"]
+
     def test_list_marks_local_tool_installing_when_job_active(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
         from ecos_server.resource.registry import RegistryService as RS
@@ -1483,6 +1510,36 @@ class TestPdkDelete:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.delete("/api/resources/pdks/nonexistent")
         assert resp.status_code == 404
+
+
+class TestPdkInstallRunner:
+    @pytest.mark.asyncio
+    async def test_run_pdk_install_publishes_underlying_error_message(self) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.schemas import ResourceAction
+
+        published = []
+
+        async def fail_install(**kwargs):
+            raise RuntimeError("SHA256 verification failed for PDK ics55")
+
+        with (
+            patch.object(router_mod._pdk_service, "install_managed_pdk", side_effect=fail_install),
+            patch.object(router_mod._job_tracker, "publish", side_effect=published.append),
+        ):
+            await router_mod._run_pdk_install(
+                resource_id="pdk:ics55",
+                pdk_id="ics55",
+                display_name="ICSPROUT 55nm PDK",
+                version="1.01",
+                asset=object(),
+                action=ResourceAction.install,
+            )
+
+        assert published
+        assert published[-1].phase == "error"
+        assert published[-1].message == "SHA256 verification failed for PDK ics55"
+        assert published[-1].error == "SHA256 verification failed for PDK ics55"
 
 
 class TestSSESubscription:

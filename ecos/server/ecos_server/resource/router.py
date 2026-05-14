@@ -971,16 +971,17 @@ async def _run_pdk_install(
             action=action,
             on_progress=_on_progress,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("PDK install failed for %s", pdk_id)
+        detail = str(exc).strip() or f"Installation failed for PDK {pdk_id}"
         _job_tracker.publish(
             ResourceJob(
                 resource_id=resource_id,
                 action=action,
                 phase="error",
                 progress=0.0,
-                message=f"Installation failed for PDK {pdk_id}",
-                error=f"Installation failed for PDK {pdk_id}",
+                message=detail,
+                error=detail,
             )
         )
     finally:

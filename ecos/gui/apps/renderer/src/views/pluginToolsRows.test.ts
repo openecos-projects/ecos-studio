@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ResourceItem } from '@/api/plugin'
-import { formatResourceSize, resourceToRow, rowActionForStatus } from './pluginToolsRows'
+import {
+  formatResourceSize,
+  managedInstallLocation,
+  primaryActionForRow,
+  resourceToRow,
+  rowActionForStatus,
+  runBatchDownload,
+} from './pluginToolsRows'
 
 function resource(overrides: Partial<ResourceItem>): ResourceItem {
   return {
@@ -89,5 +96,103 @@ describe('pluginToolsRows', () => {
     expect(rowActionForStatus(resource({ status: 'update_available', actions: ['update'] }))).toBe('update')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] }))).toBe('uninstall')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['remove_reference'] }))).toBe('remove_reference')
+  })
+
+  it('identifies rows with primary download actions', () => {
+    expect(
+      primaryActionForRow(
+        resourceToRow(resource({ status: 'available', actions: ['install'] }), undefined),
+      ),
+    ).toBe('install')
+    expect(
+      primaryActionForRow(
+        resourceToRow(resource({ status: 'update_available', actions: ['update'] }), undefined),
+      ),
+    ).toBe('update')
+    expect(
+      primaryActionForRow(
+        resourceToRow(
+          resource({
+            status: 'installed',
+            source: 'local',
+            actions: ['validate', 'remove_reference'],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBeNull()
+  })
+
+  it('runs batch download for selected available PDKs and updateable tools', async () => {
+    const installResource = vi.fn(async () => undefined)
+    const updateResource = vi.fn(async () => undefined)
+
+    const rows = [
+      resourceToRow(resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }), undefined),
+      resourceToRow(
+        resource({
+          id: 'tool:yosys',
+          type: 'tool',
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          status: 'update_available',
+          installed_version: '0.60',
+          available_versions: ['0.61'],
+          platform: 'linux-x86_64',
+          size: 123,
+          source: 'registry',
+          actions: ['update', 'uninstall'],
+        }),
+        undefined,
+      ),
+      resourceToRow(
+        resource({
+          id: 'pdk:local55',
+          status: 'installed',
+          source: 'local',
+          path: '/tmp/pdks/local55',
+          actions: ['validate', 'remove_reference'],
+        }),
+        undefined,
+      ),
+    ]
+
+    await runBatchDownload(rows, {
+      installResource,
+      updateResource,
+    })
+
+    expect(installResource).toHaveBeenCalledTimes(1)
+    expect(installResource).toHaveBeenCalledWith('pdk:ics55')
+    expect(updateResource).toHaveBeenCalledTimes(1)
+    expect(updateResource).toHaveBeenCalledWith('tool:yosys')
+  })
+
+  it('derives managed install location from downloadable resource types', () => {
+    const installablePdk = resourceToRow(
+      resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }),
+      undefined,
+    )
+    const installableTool = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        category: 'synthesis',
+        status: 'available',
+        actions: ['install'],
+      }),
+      undefined,
+    )
+
+    expect(managedInstallLocation([installablePdk])).toBe('XDG data dir / ecos-studio/pdks')
+    expect(managedInstallLocation([installableTool])).toBe('XDG data dir / ecos-studio/tools')
+    expect(managedInstallLocation([installableTool, installablePdk])).toBe(
+      'XDG data dir / ecos-studio/{tools,pdks}',
+    )
+    expect(managedInstallLocation([])).toBe('XDG data dir / ecos-studio/{tools,pdks}')
   })
 })

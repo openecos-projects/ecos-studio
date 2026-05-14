@@ -401,6 +401,133 @@ async def test_install_managed_pdk_downloads_scans_and_activates_first(
 
 
 @pytest.mark.asyncio
+async def test_install_managed_pdk_extracts_via_staging_dir_then_moves_into_place(
+    tmp_path: Path,
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+    extract_calls: list[Path] = []
+    staging_dir = pdks_dir / "ics55" / ".staging-1.01"
+    final_dir = pdks_dir / "ics55" / "1.01"
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract") as extract,
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        def fake_extract(archive_path, dest_dir, strip_prefix):
+            extract_calls.append(dest_dir)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "prtech").mkdir()
+            (dest_dir / "IP").mkdir()
+
+        download.side_effect = fake_download
+        extract.side_effect = fake_extract
+
+        await service.install_managed_pdk(
+            pdk_id="ics55",
+            display_name="ICSPROUT 55nm PDK",
+            version="1.01",
+            asset=PlatformAsset(
+                url="https://example.com/ics55.tar.gz",
+                sha256=sha,
+                size=size,
+                strip_prefix="ics55-pdk",
+            ),
+        )
+
+    assert extract_calls == [staging_dir]
+    assert final_dir.exists()
+    assert not staging_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_sha256_mismatch_publishes_error_and_does_not_register(
+    tmp_path: Path,
+) -> None:
+    archive, _sha, size = _make_pdk_tarball(tmp_path)
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=tmp_path / "managed-pdks",
+    )
+    service = PdkResourceService(inventory=inventory)
+    events = []
+
+    with patch.object(service._installer, "download") as download:
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        download.side_effect = fake_download
+        with pytest.raises(ValueError, match="SHA256 verification failed"):
+            await service.install_managed_pdk(
+                pdk_id="ics55",
+                display_name="ICSPROUT 55nm PDK",
+                version="1.01",
+                asset=PlatformAsset(
+                    url="https://example.com/ics55.tar.gz",
+                    sha256="0" * 64,
+                    size=size,
+                    strip_prefix="ics55-pdk",
+                ),
+                on_progress=events.append,
+            )
+
+    assert inventory.get_pdk("ics55") is None
+    assert [event.phase for event in events][-2:] == ["verifying", "error"]
+    assert events[-1].error == "SHA256 verification failed"
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_extract_failure_cleans_up_staging_and_destination(
+    tmp_path: Path,
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+    dest_dir = pdks_dir / "ics55" / "1.01"
+    staging_dir = pdks_dir / "ics55" / ".staging-1.01"
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract", side_effect=RuntimeError("extract failed")),
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        download.side_effect = fake_download
+        with pytest.raises(RuntimeError, match="extract failed"):
+            await service.install_managed_pdk(
+                pdk_id="ics55",
+                display_name="ICSPROUT 55nm PDK",
+                version="1.01",
+                asset=PlatformAsset(
+                    url="https://example.com/ics55.tar.gz",
+                    sha256=sha,
+                    size=size,
+                    strip_prefix="ics55-pdk",
+                ),
+            )
+
+    assert inventory.get_pdk("ics55") is None
+    assert not dest_dir.exists()
+    assert not staging_dir.exists()
+
+
+@pytest.mark.asyncio
 async def test_install_managed_pdk_does_not_replace_existing_active_pdk(tmp_path: Path) -> None:
     archive, sha, size = _make_pdk_tarball(tmp_path)
     inventory = InventoryService(

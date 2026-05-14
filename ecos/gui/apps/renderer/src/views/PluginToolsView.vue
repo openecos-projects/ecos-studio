@@ -85,17 +85,30 @@
 
           <div class="manager-table-meta">
             <strong>{{ filteredRows.length }} Resources</strong>
-            <button
-              type="button"
-              :disabled="pluginStore.refreshing"
-              @click="pluginStore.refresh()"
-            >
-              <i
-                :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
-                aria-hidden="true"
-              ></i>
-              Refresh
-            </button>
+            <div class="manager-table-actions">
+              <button
+                type="button"
+                :disabled="pluginStore.loading || importingPdk"
+                @click="handleImportPdk"
+              >
+                <i
+                  :class="importingPdk ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
+                  aria-hidden="true"
+                ></i>
+                Import PDK
+              </button>
+              <button
+                type="button"
+                :disabled="pluginStore.refreshing"
+                @click="pluginStore.refresh()"
+              >
+                <i
+                  :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
+                  aria-hidden="true"
+                ></i>
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div v-if="pluginStore.error" class="resource-error">
@@ -284,7 +297,7 @@
             <span>Install Location</span>
             <div>
               <i class="ri-folder-line" aria-hidden="true"></i>
-              <code>~/.ecos/tools</code>
+              <code>{{ installLocationText }}</code>
             </div>
           </div>
 
@@ -297,7 +310,7 @@
             <button
               type="button"
               class="download-button"
-              :disabled="selectedResources.length === 0"
+              :disabled="downloadableSelectedResources.length === 0"
               @click="downloadSelected"
             >
               <i class="ri-download-line" aria-hidden="true"></i>
@@ -318,8 +331,16 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePluginStore } from '@/stores/pluginStore'
+import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
-import { resourceToRow, rowActionForStatus } from './pluginToolsRows'
+import {
+  managedInstallLocation,
+  primaryActionForRow,
+  resourceToRow,
+  rowActionForStatus,
+  runBatchDownload,
+  runPrimaryAction,
+} from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
 
 type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
@@ -327,11 +348,13 @@ type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
+const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
+const importingPdk = ref(false)
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -361,11 +384,16 @@ const selectedResources = computed(() => {
   return resourceRows.value.filter((row) => selected.has(row.id))
 })
 
+const downloadableSelectedResources = computed(() => {
+  return selectedResources.value.filter((row) => primaryActionForRow(row) !== null)
+})
+
 const totalSizeMb = computed(() => {
-  return selectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
+  return downloadableSelectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
 })
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
+const installLocationText = computed(() => managedInstallLocation(downloadableSelectedResources.value))
 
 const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
@@ -467,12 +495,23 @@ function rowError(row: ResourceRow): string | undefined {
 }
 
 async function handleRowInstall(row: ResourceRow): Promise<void> {
-  const action = rowActionForStatus(row.resource)
-  if (action === 'update') {
-    await pluginStore.updateResource(row.id)
+  await runPrimaryAction(row, pluginStore)
+}
+
+async function handleImportPdk(): Promise<void> {
+  if (importingPdk.value) {
     return
   }
-  await pluginStore.installResource(row.id)
+
+  importingPdk.value = true
+  try {
+    const imported = await importPdk()
+    if (imported) {
+      await pluginStore.fetchTools({ silent: true })
+    }
+  } finally {
+    importingPdk.value = false
+  }
 }
 
 async function handlePdkActivate(row: ResourceRow): Promise<void> {
@@ -497,19 +536,7 @@ async function handleRowUninstall(row: ResourceRow): Promise<void> {
 }
 
 async function downloadSelected(): Promise<void> {
-  const installable = selectedResources.value.filter((row) => {
-    const action = rowActionForStatus(row.resource)
-    return action === 'install' || action === 'update'
-  })
-
-  await Promise.all(
-    installable.map((row) => {
-      const action = rowActionForStatus(row.resource)
-      return action === 'update'
-        ? pluginStore.updateResource(row.id)
-        : pluginStore.installResource(row.id)
-    }),
-  )
+  await runBatchDownload(downloadableSelectedResources.value, pluginStore)
 }
 
 function formatSize(sizeMb: number): string {
@@ -930,6 +957,12 @@ async function openDocs(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.manager-table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .manager-table-meta strong {

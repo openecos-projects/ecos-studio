@@ -144,6 +144,7 @@ class PdkResourceService:
     ) -> PdkInventoryEntry:
         """Download, verify, extract, scan, and register a managed PDK."""
         dest_dir = self._inventory.pdks_dir / pdk_id / version
+        staging_dir = dest_dir.parent / f".staging-{dest_dir.name}"
         existing_entry = self._inventory.get_pdk(pdk_id)
         superseded_managed_dir: Path | None = None
         if existing_entry is not None and existing_entry.managed:
@@ -230,14 +231,20 @@ class PdkResourceService:
                     message=f"Extracting to {dest_dir}...",
                 )
             )
+            if staging_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, staging_dir)
             await asyncio.to_thread(
                 self._installer.extract,
                 archive_path,
-                dest_dir,
+                staging_dir,
                 asset.strip_prefix,
             )
 
         try:
+            if dest_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, dest_dir)
+            staging_dir.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(staging_dir.replace, dest_dir)
             scanned = self._scan_directory(str(dest_dir), validate_path_chars=False)
             active_pdk = self._inventory.get_active_pdk()
             should_activate = active_pdk is None or active_pdk.id == pdk_id
@@ -257,6 +264,8 @@ class PdkResourceService:
         except Exception:
             if dest_dir.exists():
                 await asyncio.to_thread(shutil.rmtree, dest_dir)
+            if staging_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, staging_dir)
             raise
 
         if superseded_managed_dir is not None and superseded_managed_dir.exists():

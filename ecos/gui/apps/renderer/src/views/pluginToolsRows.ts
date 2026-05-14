@@ -3,6 +3,12 @@ import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin
 export type ResourceType = 'tool' | 'pdk'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
 export type RowAction = 'install' | 'update' | 'uninstall' | 'remove_reference' | 'none'
+export type PrimaryRowAction = 'install' | 'update'
+
+export interface ResourceActionExecutor {
+  installResource(resourceId: string): Promise<void>
+  updateResource(resourceId: string): Promise<void>
+}
 
 export interface ResourceRow {
   id: string
@@ -21,6 +27,8 @@ export interface ResourceRow {
   actions: ResourceAction[]
   resource: ResourceItem
 }
+
+const MANAGED_RESOURCE_ROOT = 'XDG data dir / ecos-studio'
 
 const toolMeta: Record<string, { icon: string; accent: string }> = {
   openroad: { icon: 'O', accent: '#79c142' },
@@ -160,6 +168,63 @@ export function rowActionForStatus(resource: ResourceItem): RowAction {
   }
 
   return 'none'
+}
+
+export function primaryActionForRow(row: ResourceRow): PrimaryRowAction | null {
+  const action = rowActionForStatus(row.resource)
+  if (action === 'install' || action === 'update') {
+    return action
+  }
+  return null
+}
+
+export function createPrimaryActionTask(
+  row: ResourceRow,
+  executor: ResourceActionExecutor,
+): Promise<void> | null {
+  const action = primaryActionForRow(row)
+  if (action === 'update') {
+    return executor.updateResource(row.id)
+  }
+  if (action === 'install') {
+    return executor.installResource(row.id)
+  }
+  return null
+}
+
+export async function runPrimaryAction(
+  row: ResourceRow,
+  executor: ResourceActionExecutor,
+): Promise<void> {
+  const task = createPrimaryActionTask(row, executor)
+  if (!task) {
+    return
+  }
+  await task
+}
+
+export async function runBatchDownload(
+  rows: ResourceRow[],
+  executor: ResourceActionExecutor,
+): Promise<void> {
+  const tasks = rows
+    .map((row) => createPrimaryActionTask(row, executor))
+    .filter((task): task is Promise<void> => task !== null)
+
+  await Promise.all(tasks)
+}
+
+export function managedInstallLocation(rows: ResourceRow[]): string {
+  const resourceTypes = new Set(rows.map((row) => row.type))
+  if (resourceTypes.size === 1) {
+    if (resourceTypes.has('tool')) {
+      return `${MANAGED_RESOURCE_ROOT}/tools`
+    }
+    if (resourceTypes.has('pdk')) {
+      return `${MANAGED_RESOURCE_ROOT}/pdks`
+    }
+  }
+  return `${MANAGED_RESOURCE_ROOT}/{tools,pdks}`
 }
 
 export function resourceToRow(
