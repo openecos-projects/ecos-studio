@@ -86,6 +86,20 @@ describe('pluginToolsRows', () => {
     expect(row.progressPercent).toBe(50)
   })
 
+  it('maps post-install progress to initializing state', () => {
+    const row = resourceToRow(resource({ status: 'installing' }), {
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'post_install',
+      progress: 0,
+      message: 'Running PDK post-install steps...',
+    })
+
+    expect(row.statusKind).toBe('installing')
+    expect(row.statusText).toBe('Running PDK post-install steps...')
+  })
+
   it('formats resource sizes from bytes', () => {
     expect(formatResourceSize(null)).toEqual({ sizeLabel: '0 MB', sizeMb: 0 })
     expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '412 MB', sizeMb: 412 })

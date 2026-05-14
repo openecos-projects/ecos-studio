@@ -81,11 +81,17 @@ class ToolInstallRequest(BaseModel):
 # ── Registry schemas ───────────────────────────────────────────────────
 
 
+class PostInstallStep(BaseModel):
+    command: list[str]
+    cwd: str = "."
+
+
 class PlatformAsset(BaseModel):
     url: str
     sha256: str
     size: int
     strip_prefix: str | None = None
+    post_install: list[PostInstallStep] = Field(default_factory=list)
 
 
 class RegistryToolVersion(BaseModel):

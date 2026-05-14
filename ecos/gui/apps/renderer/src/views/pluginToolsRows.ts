@@ -112,6 +112,9 @@ function progressStatusText(progress: InstallProgress | undefined, percent: numb
   if (percent !== null && progress?.phase === 'extracting') {
     return `Extracting ${percent}%`
   }
+  if (progress?.phase === 'post_install') {
+    return progress.message || 'Initializing'
+  }
   if (progress?.message) {
     return progress.message
   }

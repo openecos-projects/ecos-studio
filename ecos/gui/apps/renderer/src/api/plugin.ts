@@ -78,6 +78,7 @@ export type InstallPhase =
   | 'downloading'
   | 'verifying'
   | 'extracting'
+  | 'post_install'
   | 'done'
   | 'error'
   | 'uninstalling'

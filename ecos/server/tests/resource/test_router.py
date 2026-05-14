@@ -102,6 +102,12 @@ def _mock_registry_data_with_pdk() -> dict:
                             "sha256": "4" * 64,
                             "size": 432000000,
                             "strip_prefix": "ics55-pdk",
+                            "post_install": [
+                                {
+                                    "command": ["make", "unzip"],
+                                    "cwd": ".",
+                                }
+                            ],
                         }
                     },
                 }
@@ -797,6 +803,7 @@ class TestInstall:
             mock.assert_called_once()
             assert mock.call_args.kwargs["pdk_id"] == "ics55"
             assert mock.call_args.kwargs["asset"].url == "https://example.com/ics55.tar.gz"
+            assert mock.call_args.kwargs["asset"].post_install[0].command == ["make", "unzip"]
             router_mod._job_tracker.finish("pdk:ics55")
 
     def test_install_pdk_prefers_current_platform_asset(self, client: TestClient) -> None:

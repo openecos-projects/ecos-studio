@@ -8,7 +8,7 @@ import pytest
 
 from ecos_server.resource.inventory import InventoryService
 from ecos_server.resource.pdks import PdkResourceService
-from ecos_server.resource.schemas import PlatformAsset, ResourceAction
+from ecos_server.resource.schemas import PlatformAsset, PostInstallStep, ResourceAction
 
 
 def _make_pdk_tarball(tmp_path: Path, prefix: str = "ics55-pdk") -> tuple[Path, str, int]:
@@ -447,6 +447,119 @@ async def test_install_managed_pdk_extracts_via_staging_dir_then_moves_into_plac
     assert extract_calls == [staging_dir]
     assert final_dir.exists()
     assert not staging_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_runs_post_install_before_scan(tmp_path: Path) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+    events = []
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract") as extract,
+        patch("ecos_server.resource.pdks.subprocess.run") as run,
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        def fake_extract(archive_path, dest_dir, strip_prefix):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "Makefile").write_text("unzip:\n\t@true\n")
+            (dest_dir / "prtech").mkdir()
+            (dest_dir / "IP").mkdir()
+
+        download.side_effect = fake_download
+        extract.side_effect = fake_extract
+
+        await service.install_managed_pdk(
+            pdk_id="ics55",
+            display_name="ICSPROUT 55nm PDK",
+            version="1.10.100",
+            asset=PlatformAsset(
+                url="https://example.com/ics55.tar.gz",
+                sha256=sha,
+                size=size,
+                strip_prefix="ics55-pdk",
+                post_install=[PostInstallStep(command=["make", "unzip"])],
+            ),
+            on_progress=events.append,
+        )
+
+    staging_dir = pdks_dir / "ics55" / ".staging-1.10.100"
+    run.assert_called_once_with(
+        ["make", "unzip"],
+        cwd=staging_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert inventory.get_pdk("ics55") is not None
+    assert [event.phase for event in events] == [
+        "downloading",
+        "verifying",
+        "extracting",
+        "post_install",
+        "done",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_post_install_failure_cleans_up_and_does_not_register(
+    tmp_path: Path,
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+    staging_dir = pdks_dir / "ics55" / ".staging-1.10.100"
+    dest_dir = pdks_dir / "ics55" / "1.10.100"
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract") as extract,
+        patch("ecos_server.resource.pdks.subprocess.run") as run,
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(archive.read_bytes())
+
+        def fake_extract(archive_path, dest_dir, strip_prefix):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "Makefile").write_text("unzip:\n\t@false\n")
+            (dest_dir / "prtech").mkdir()
+            (dest_dir / "IP").mkdir()
+
+        download.side_effect = fake_download
+        extract.side_effect = fake_extract
+        run.side_effect = RuntimeError("make unzip failed")
+
+        with pytest.raises(RuntimeError, match="make unzip failed"):
+            await service.install_managed_pdk(
+                pdk_id="ics55",
+                display_name="ICSPROUT 55nm PDK",
+                version="1.10.100",
+                asset=PlatformAsset(
+                    url="https://example.com/ics55.tar.gz",
+                    sha256=sha,
+                    size=size,
+                    strip_prefix="ics55-pdk",
+                    post_install=[PostInstallStep(command=["make", "unzip"])],
+                ),
+            )
+
+    assert inventory.get_pdk("ics55") is None
+    assert not staging_dir.exists()
+    assert not dest_dir.exists()
 
 
 @pytest.mark.asyncio

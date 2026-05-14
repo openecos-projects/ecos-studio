@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -113,6 +114,39 @@ class PdkResourceService:
         Raises ValueError for non-directory paths or paths with invalid characters.
         """
         return PdkResourceService._scan_directory(path, validate_path_chars=True)
+
+    @staticmethod
+    def _resolve_post_install_cwd(root: Path, cwd: str) -> Path:
+        candidate = (root / cwd).resolve(strict=False)
+        root_resolved = root.resolve(strict=False)
+        try:
+            candidate.relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError(f"Post-install cwd escapes PDK root: {cwd}") from exc
+        return candidate
+
+    @classmethod
+    def _run_post_install(cls, root: Path, asset: PlatformAsset) -> None:
+        for step in asset.post_install:
+            if not step.command:
+                raise ValueError("Post-install command cannot be empty")
+            cwd = cls._resolve_post_install_cwd(root, step.cwd)
+            try:
+                subprocess.run(
+                    step.command,
+                    cwd=cwd,
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                output = "\n".join(
+                    part for part in (exc.stdout.strip(), exc.stderr.strip()) if part
+                )
+                detail = f"Post-install command failed: {' '.join(step.command)}"
+                if output:
+                    detail = f"{detail}\n{output}"
+                raise RuntimeError(detail) from exc
 
     # ── Import ─────────────────────────────────────────────────────────
 
@@ -241,6 +275,17 @@ class PdkResourceService:
             )
 
         try:
+            if asset.post_install:
+                _publish(
+                    ResourceJob(
+                        resource_id=f"pdk:{pdk_id}",
+                        action=action,
+                        phase="post_install",
+                        progress=0.0,
+                        message="Running PDK post-install steps...",
+                    )
+                )
+                await asyncio.to_thread(self._run_post_install, staging_dir, asset)
             if dest_dir.exists():
                 await asyncio.to_thread(shutil.rmtree, dest_dir)
             staging_dir.parent.mkdir(parents=True, exist_ok=True)
