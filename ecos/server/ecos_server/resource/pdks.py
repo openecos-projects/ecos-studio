@@ -51,12 +51,8 @@ class PdkResourceService:
     # ── Scan ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def scan(path: str) -> ScannedPdk:
-        """Scan a directory and return PDK metadata without mutating inventory.
-
-        Raises ValueError for non-directory paths or paths with invalid characters.
-        """
-        if _INVALID_PATH_RE.search(path):
+    def _scan_directory(path: str, *, validate_path_chars: bool) -> ScannedPdk:
+        if validate_path_chars and _INVALID_PATH_RE.search(path):
             raise ValueError(f"PDK path contains invalid characters: {path}")
 
         raw = Path(path)
@@ -110,6 +106,14 @@ class PdkResourceService:
             detected_file_groups={"directories": dirs, "files": files},
         )
 
+    @staticmethod
+    def scan(path: str) -> ScannedPdk:
+        """Scan a directory and return PDK metadata without mutating inventory.
+
+        Raises ValueError for non-directory paths or paths with invalid characters.
+        """
+        return PdkResourceService._scan_directory(path, validate_path_chars=True)
+
     # ── Import ─────────────────────────────────────────────────────────
 
     def import_pdk(self, path: str) -> PdkInventoryEntry:
@@ -140,6 +144,24 @@ class PdkResourceService:
     ) -> PdkInventoryEntry:
         """Download, verify, extract, scan, and register a managed PDK."""
         dest_dir = self._inventory.pdks_dir / pdk_id / version
+        existing_entry = self._inventory.get_pdk(pdk_id)
+        superseded_managed_dir: Path | None = None
+        if existing_entry is not None and existing_entry.managed:
+            existing_dir = Path(existing_entry.canonical_path)
+            existing_resolved = existing_dir.resolve(strict=False)
+            dest_resolved = dest_dir.resolve(strict=False)
+            if existing_resolved != dest_resolved:
+                try:
+                    dest_resolved.relative_to(existing_resolved)
+                except ValueError:
+                    superseded_managed_dir = existing_dir
+                else:
+                    logger.warning(
+                        "Skipping cleanup of managed PDK path %s because it contains "
+                        "new install %s",
+                        existing_dir,
+                        dest_dir,
+                    )
 
         def _publish(job: ResourceJob) -> None:
             if on_progress:
@@ -215,22 +237,30 @@ class PdkResourceService:
                 asset.strip_prefix,
             )
 
-        scanned = self.scan(str(dest_dir))
-        active_pdk = self._inventory.get_active_pdk()
-        should_activate = active_pdk is None or active_pdk.id == pdk_id
-        entry = self._inventory.add_or_update_pdk(
-            pdk_id,
-            name=display_name or scanned.name,
-            canonical_path=scanned.canonical_path,
-            detected_files=scanned.detected_files,
-            detected_file_groups=scanned.detected_file_groups,
-            version=version,
-            sha256=asset.sha256,
-            source="registry",
-            source_url=asset.url,
-            managed=True,
-            active=should_activate,
-        )
+        try:
+            scanned = self._scan_directory(str(dest_dir), validate_path_chars=False)
+            active_pdk = self._inventory.get_active_pdk()
+            should_activate = active_pdk is None or active_pdk.id == pdk_id
+            entry = self._inventory.add_or_update_pdk(
+                pdk_id,
+                name=display_name or scanned.name,
+                canonical_path=scanned.canonical_path,
+                detected_files=scanned.detected_files,
+                detected_file_groups=scanned.detected_file_groups,
+                version=version,
+                sha256=asset.sha256,
+                source="registry",
+                source_url=asset.url,
+                managed=True,
+                active=should_activate,
+            )
+        except Exception:
+            if dest_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, dest_dir)
+            raise
+
+        if superseded_managed_dir is not None and superseded_managed_dir.exists():
+            await asyncio.to_thread(shutil.rmtree, superseded_managed_dir)
 
         _publish(
             ResourceJob(
