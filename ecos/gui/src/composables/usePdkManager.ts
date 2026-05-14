@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { LazyStore } from '@tauri-apps/plugin-store'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { importPdkPathApi } from '@/api/plugin'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
 
@@ -99,6 +100,7 @@ export function usePdkManager() {
       }
 
       const detected = await scanPdkDirectory(path)
+      await importPdkPathApi(path)
       const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
       const existing = importedPdks.value.find(
         p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath
@@ -146,6 +148,7 @@ export function usePdkManager() {
       }
 
       const detected = await scanPdkDirectory(path)
+      await importPdkPathApi(path)
       const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
       const existing = importedPdks.value.find(
         p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath

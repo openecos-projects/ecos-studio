@@ -180,6 +180,10 @@ export function removePdkReferenceApi(resourceId: string) {
   )
 }
 
+export function importPdkPathApi(path: string) {
+  return alovaInstance.Post<ResourceItem>('/api/resources/pdks/import', { path })
+}
+
 export function installResourceApi(resourceId: string, version?: string) {
   return alovaInstance.Post<{ status: string; resource_id: string; version: string }>(
     `/api/resources/${encodeURIComponent(resourceId)}/install`,
