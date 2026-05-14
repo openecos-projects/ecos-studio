@@ -1,16 +1,21 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
-  installToolApi,
-  listToolsApi,
+  activatePdkApi,
+  installResourceApi,
+  listResourcesApi,
+  removePdkReferenceApi,
   refreshRegistryApi,
-  subscribePluginProgress,
-  uninstallToolApi,
-  updateToolApi,
+  resourceListToTools,
+  subscribeResourceProgress,
+  uninstallResourceApi,
+  updateResourceApi,
+  validatePdkApi,
 } from '@/api/plugin'
-import type { InstallProgress, ToolInfo } from '@/api/plugin'
+import type { InstallProgress, ResourceItem, ToolInfo } from '@/api/plugin'
 
 export const usePluginStore = defineStore('plugin', () => {
+  const resources = ref<ResourceItem[]>([])
   const tools = ref<ToolInfo[]>([])
   const loading = ref(false)
   const refreshing = ref(false)
@@ -18,6 +23,8 @@ export const usePluginStore = defineStore('plugin', () => {
   /** Per-tool install/uninstall errors so one failure does not block the rest of the list */
   const toolErrors = ref<Record<string, string>>({})
   const installProgress = ref<Record<string, InstallProgress>>({})
+  const resourceErrors = ref<Record<string, string>>({})
+  const resourceProgress = ref<Record<string, InstallProgress>>({})
 
   const _sseConnections = new Map<string, { close: () => void }>()
 
@@ -26,6 +33,82 @@ export const usePluginStore = defineStore('plugin', () => {
     return Array.from(cats).sort()
   })
 
+  function _toolResourceId(toolName: string): string {
+    return `tool:${toolName}`
+  }
+
+  function _resourceName(resourceId: string): string {
+    const resource = resources.value.find((item) => item.id === resourceId)
+    if (resource) {
+      return resource.name
+    }
+    return resourceId.replace(/^(tool|pdk):/, '')
+  }
+
+  function _toolNameForResourceId(resourceId: string): string | null {
+    const resource = resources.value.find((item) => item.id === resourceId)
+    if (resource?.type === 'tool') {
+      return resource.name
+    }
+    if (resourceId.startsWith('tool:')) {
+      return resourceId.slice('tool:'.length)
+    }
+    return null
+  }
+
+  function _syncLegacyTools(): void {
+    tools.value = resourceListToTools({ resources: resources.value, diagnostics: [] })
+  }
+
+  function _syncLegacyToolError(resourceId: string, message?: string): void {
+    const toolName = _toolNameForResourceId(resourceId)
+    if (!toolName) {
+      return
+    }
+    if (message) {
+      toolErrors.value[toolName] = message
+      return
+    }
+    delete toolErrors.value[toolName]
+  }
+
+  function _syncLegacyToolProgress(resourceId: string, progress?: InstallProgress): void {
+    const toolName = _toolNameForResourceId(resourceId)
+    if (!toolName) {
+      return
+    }
+    if (progress) {
+      installProgress.value[toolName] = progress
+      return
+    }
+    delete installProgress.value[toolName]
+  }
+
+  function _setResourceStatus(resourceId: string, status: ResourceItem['status']): void {
+    const resource = resources.value.find((item) => item.id === resourceId)
+    if (!resource) {
+      return
+    }
+    resource.status = status
+    if (status !== 'error') {
+      resource.error = null
+    }
+    _syncLegacyTools()
+  }
+
+  function _setResourceError(resourceId: string, message: string): void {
+    resourceErrors.value[resourceId] = message
+    _syncLegacyToolError(resourceId, message)
+
+    const resource = resources.value.find((item) => item.id === resourceId)
+    if (!resource) {
+      return
+    }
+    resource.status = 'error'
+    resource.error = message
+    _syncLegacyTools()
+  }
+
   async function fetchTools(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent === true
     if (!silent) {
@@ -33,8 +116,9 @@ export const usePluginStore = defineStore('plugin', () => {
     }
     error.value = null
     try {
-      const response = await listToolsApi()
-      tools.value = response.resources
+      const nextResources = await listResourcesApi()
+      resources.value = nextResources
+      _syncLegacyTools()
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
     } finally {
@@ -44,68 +128,131 @@ export const usePluginStore = defineStore('plugin', () => {
     }
   }
 
-  function _subscribeProgress(toolName: string): void {
-    _sseConnections.get(toolName)?.close()
+  function _subscribeResourceProgress(resourceId: string): void {
+    _sseConnections.get(resourceId)?.close()
 
-    const conn = subscribePluginProgress(
-      toolName,
+    const conn = subscribeResourceProgress(
+      resourceId,
       (progress) => {
-        installProgress.value[toolName] = progress
+        resourceProgress.value[progress.resourceId] = progress
+        _syncLegacyToolProgress(progress.resourceId, progress)
 
         if (progress.phase === 'done' || progress.phase === 'error') {
           conn.close()
-          _sseConnections.delete(toolName)
-          delete installProgress.value[toolName]
+          _sseConnections.delete(resourceId)
+          delete resourceProgress.value[progress.resourceId]
+          _syncLegacyToolProgress(progress.resourceId)
           if (progress.phase === 'done') {
-            delete toolErrors.value[toolName]
+            delete resourceErrors.value[progress.resourceId]
+            _syncLegacyToolError(progress.resourceId)
           } else {
-            toolErrors.value[toolName] = progress.message || 'Installation failed'
+            _setResourceError(progress.resourceId, progress.message || 'Installation failed')
           }
           void fetchTools({ silent: true })
         }
       },
       () => {
-        _sseConnections.delete(toolName)
+        _sseConnections.delete(resourceId)
       },
     )
-    _sseConnections.set(toolName, conn)
+    _sseConnections.set(resourceId, conn)
+  }
+
+  function _subscribeProgress(toolName: string): void {
+    _subscribeResourceProgress(_toolResourceId(toolName))
+  }
+
+  async function installResource(resourceId: string, version?: string): Promise<void> {
+    delete resourceErrors.value[resourceId]
+    _syncLegacyToolError(resourceId)
+    try {
+      await installResourceApi(resourceId, version)
+      _setResourceStatus(resourceId, 'installing')
+
+      const toolName = _toolNameForResourceId(resourceId)
+      if (toolName) {
+        _subscribeProgress(toolName)
+      } else {
+        _subscribeResourceProgress(resourceId)
+      }
+    } catch (e) {
+      _setResourceError(
+        resourceId,
+        e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
+      )
+    }
+  }
+
+  async function updateResource(resourceId: string): Promise<void> {
+    delete resourceErrors.value[resourceId]
+    _syncLegacyToolError(resourceId)
+    try {
+      await updateResourceApi(resourceId)
+      _setResourceStatus(resourceId, 'installing')
+
+      const toolName = _toolNameForResourceId(resourceId)
+      if (toolName) {
+        _subscribeProgress(toolName)
+      } else {
+        _subscribeResourceProgress(resourceId)
+      }
+    } catch (e) {
+      _setResourceError(
+        resourceId,
+        e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
+      )
+    }
+  }
+
+  async function uninstallResource(resourceId: string): Promise<void> {
+    delete resourceErrors.value[resourceId]
+    _syncLegacyToolError(resourceId)
+    const resource = resources.value.find((item) => item.id === resourceId)
+    const prevStatus = resource?.status
+    const prevError = resource?.error ?? null
+    try {
+      await uninstallResourceApi(resourceId)
+      if (resource) {
+        resource.status = resource.type === 'tool' ? 'uninstalling' : 'removing'
+        resource.error = null
+        _syncLegacyTools()
+      }
+      await fetchTools({ silent: true })
+    } catch (e) {
+      _setResourceError(
+        resourceId,
+        e instanceof Error ? e.message : `Failed to uninstall ${_resourceName(resourceId)}`,
+      )
+      if (resource && prevStatus) {
+        resource.status = prevStatus
+        resource.error = prevError
+        _syncLegacyTools()
+      }
+      await fetchTools({ silent: true })
+    }
   }
 
   async function install(name: string, version?: string): Promise<void> {
-    delete toolErrors.value[name]
-    try {
-      const tool = tools.value.find((t) => t.name === name)
-      if (tool?.status === 'update_available') {
-        await updateToolApi(name)
-      } else {
-        await installToolApi(name, version)
-      }
-      if (tool) {
-        tool.status = 'installing'
-      }
-      _subscribeProgress(name)
-    } catch (e) {
-      toolErrors.value[name] = e instanceof Error ? e.message : `Failed to install ${name}`
-    }
+    await installResource(_toolResourceId(name), version)
   }
 
   async function uninstall(name: string): Promise<void> {
-    delete toolErrors.value[name]
-    const tool = tools.value.find((t) => t.name === name)
-    const prevStatus = tool?.status
-    if (tool) {
-      tool.status = 'uninstalling'
-    }
-    try {
-      await uninstallToolApi(name)
-      await fetchTools({ silent: true })
-    } catch (e) {
-      toolErrors.value[name] = e instanceof Error ? e.message : `Failed to uninstall ${name}`
-      if (tool && prevStatus) {
-        tool.status = prevStatus
-      }
-      await fetchTools({ silent: true })
-    }
+    await uninstallResource(_toolResourceId(name))
+  }
+
+  async function activatePdk(resourceId: string): Promise<void> {
+    await activatePdkApi(resourceId)
+    await fetchTools({ silent: true })
+  }
+
+  async function validatePdk(resourceId: string): Promise<void> {
+    await validatePdkApi(resourceId)
+    await fetchTools({ silent: true })
+  }
+
+  async function removePdkReference(resourceId: string): Promise<void> {
+    await removePdkReferenceApi(resourceId)
+    await fetchTools({ silent: true })
   }
 
   async function refresh(): Promise<void> {
@@ -129,16 +276,25 @@ export const usePluginStore = defineStore('plugin', () => {
   }
 
   return {
+    resources,
     tools,
     loading,
     refreshing,
     error,
     toolErrors,
     installProgress,
+    resourceErrors,
+    resourceProgress,
     categories,
     fetchTools,
+    installResource,
+    updateResource,
+    uninstallResource,
     install,
     uninstall,
+    activatePdk,
+    validatePdk,
+    removePdkReference,
     refresh,
     cleanup,
   }

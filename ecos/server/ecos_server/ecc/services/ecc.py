@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 import logging
 import os
+import threading
 import time
+from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 
-from ecos_server.resource.resolver import resolve_active_pdk
+from ecos_server.resource.resolver import resolve_active_pdk, resolve_tool_environment
 
 from ..schemas import (
     CMDEnum,
@@ -17,6 +19,7 @@ from ..sse import server_notify
 gui_notify = server_notify()
 
 logger = logging.getLogger(__name__)
+_ENV_LOCK = threading.Lock()
 
 
 def _resolve_resource_manager_pdk_root(pdk_name: str) -> str:
@@ -67,6 +70,26 @@ def _summarize_request(data: object) -> dict:
         rtl = data["rtl_list"]
         summary["rtl_count"] = len(rtl.splitlines() if isinstance(rtl, str) else rtl)
     return summary
+
+
+@contextmanager
+def _resource_manager_tool_env():
+    """Temporarily expose Resource Manager tools to ECC runtime lookup."""
+    with _ENV_LOCK:
+        previous = {key: os.environ.get(key) for key in ("PATH", "CHIPCOMPILER_OSS_CAD_DIR")}
+        base_env = {key: value for key, value in previous.items() if value is not None}
+        try:
+            resolved = resolve_tool_environment(["yosys"], base_env=base_env)
+            for key in ("PATH", "CHIPCOMPILER_OSS_CAD_DIR"):
+                if key in resolved:
+                    os.environ[key] = resolved[key]
+            yield
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 class ECCService:
@@ -562,7 +585,8 @@ class ECCService:
         # process cmd
         state = StateEnum.Unstart
         try:
-            state = self.engine_flow.run_step(step, rerun)
+            with _resource_manager_tool_env():
+                state = self.engine_flow.run_step(step, rerun)
         except Exception:
             state = StateEnum.Imcomplete
             logger.exception("run_step: engine_flow.run_step() raised exception")

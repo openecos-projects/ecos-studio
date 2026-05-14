@@ -47,6 +47,8 @@ class JobTracker:
         return self._active.get(resource_id)
 
     def start(self, resource_id: str, action: ResourceAction = ResourceAction.install) -> ActiveJob:
+        if resource_id in self._active:
+            raise KeyError(f"Job already active for {resource_id}")
         self._counter += 1
         job = ActiveJob(
             resource_id=resource_id,

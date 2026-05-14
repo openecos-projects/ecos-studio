@@ -37,6 +37,29 @@ def _make_registry_fixture() -> dict:
     }
 
 
+def _make_pdk_fixture() -> dict:
+    return {
+        "id": "ics55",
+        "display_name": "IC-S55",
+        "description": "IC-S55 PDK",
+        "category": "pdk",
+        "homepage": "https://example.com/ics55",
+        "versions": [
+            {
+                "version": "1.01",
+                "platforms": {
+                    "all-platform": {
+                        "url": "https://example.com/ics55-1.01.tar.gz",
+                        "sha256": "abc123",
+                        "size": 1024,
+                        "strip_prefix": "ics55",
+                    }
+                },
+            }
+        ],
+    }
+
+
 @pytest.fixture
 def registry_fixture() -> dict:
     return _make_registry_fixture()
@@ -93,6 +116,18 @@ class TestRegistryFetch:
         assert service.cache_file.exists()
         cached = json.loads(service.cache_file.read_text())
         assert cached["tools"][0]["name"] == "yosys"
+
+    @pytest.mark.asyncio
+    async def test_fetch_follows_registry_redirects(
+        self, registry_url: str, registry_fixture: dict, tmp_path: Path
+    ) -> None:
+        service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
+        mock_client = _mock_async_client(_make_mock_response(registry_fixture))
+
+        with patch("httpx.AsyncClient", return_value=mock_client) as async_client:
+            await service.fetch()
+
+        async_client.assert_called_once_with(timeout=30.0, follow_redirects=True)
 
     @pytest.mark.asyncio
     async def test_cache_fallback_when_url_unavailable(
@@ -166,6 +201,21 @@ class TestRegistryFetch:
 
         assert result.registry is not None
         assert result.registry.tools[0].display_name == "Updated Yosys"
+
+
+@pytest.mark.asyncio
+async def test_fetch_preserves_pdks(registry_url: str, tmp_path: Path) -> None:
+    payload = {"schema_version": 2, "tools": [], "pdks": [_make_pdk_fixture()]}
+    service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
+    mock_client = _mock_async_client(_make_mock_response(payload))
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        state = await service.fetch()
+
+    assert state.registry is not None
+    assert state.registry.pdks[0].id == "ics55"
+    cached = json.loads(service.cache_file.read_text())
+    assert cached["pdks"][0]["id"] == "ics55"
 
 
 class TestRegistryValidation:

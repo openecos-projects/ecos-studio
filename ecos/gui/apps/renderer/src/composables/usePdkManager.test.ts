@@ -100,16 +100,29 @@ vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: async () => desktopBridge,
 }))
 
+vi.mock('@/api/plugin', () => ({
+  importPdkPathApi: vi.fn(),
+  removePdkReferenceApi: vi.fn(),
+}))
+
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     showToast,
   }),
 }))
 
-import { usePdkManager } from './usePdkManager'
+async function loadTestSubjects() {
+  const api = await import('@/api/plugin')
+  const composable = await import('./usePdkManager')
+  return {
+    importPdkPathApi: api.importPdkPathApi as any,
+    removePdkReferenceApi: api.removePdkReferenceApi as any,
+    usePdkManager: composable.usePdkManager,
+  }
+}
 
 describe('usePdkManager', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     showToast.mockReset()
     settingsGet.mockReset()
     settingsSet.mockReset()
@@ -135,6 +148,12 @@ describe('usePdkManager', () => {
     pickDirectory.mockResolvedValue('/tmp/pdk')
     scanPdkDirectory.mockResolvedValue(scannedPdk)
 
+    vi.resetModules()
+    const { importPdkPathApi, removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
+    vi.mocked(importPdkPathApi).mockReset()
+    vi.mocked(removePdkReferenceApi).mockReset()
+    vi.mocked(importPdkPathApi).mockResolvedValue({} as any)
+    vi.mocked(removePdkReferenceApi).mockResolvedValue({ status: 'removed', resource_id: 'pdk:ics55' })
     const { importedPdks } = usePdkManager()
     importedPdks.value = []
   })
@@ -149,6 +168,8 @@ describe('usePdkManager', () => {
   })
 
   it('serializes imported PDKs into plain values before persisting settings', async () => {
+    const { importPdkPathApi, usePdkManager } = await loadTestSubjects()
+    vi.mocked(importPdkPathApi).mockResolvedValue({} as any)
     const { importPdk, importedPdks } = usePdkManager()
 
     const imported = await importPdk()
@@ -157,6 +178,7 @@ describe('usePdkManager', () => {
       path: '/tmp/pdk',
       pdkId: 'ics55',
     })
+    expect(importPdkPathApi).toHaveBeenCalledWith('/tmp/pdk')
     expect(importedPdks.value).toHaveLength(1)
     expect(settingsSet).toHaveBeenCalledTimes(1)
     expect(settingsSet).toHaveBeenCalledWith('imported_pdks', expect.any(Array))
@@ -169,6 +191,8 @@ describe('usePdkManager', () => {
   it('falls back to localStorage when desktop settings persistence fails', async () => {
     settingsSet.mockRejectedValueOnce(new Error('ECOS desktop bridge is not available.'))
 
+    const { importPdkPathApi, usePdkManager } = await loadTestSubjects()
+    vi.mocked(importPdkPathApi).mockResolvedValue({} as any)
     const { importPdk, importedPdks } = usePdkManager()
     const imported = await importPdk()
 
@@ -183,5 +207,73 @@ describe('usePdkManager', () => {
       expect.stringContaining('"pdkId":"ics55"'),
     )
     expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it('removes backend resource references when deleting an imported PDK', async () => {
+    const { removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
+    settingsGet.mockResolvedValueOnce([
+      {
+        id: 'local-ics55',
+        name: 'ICSPROUT 55nm PDK',
+        path: '/tmp/pdks/ics55',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+      },
+    ] as any)
+    vi.mocked(removePdkReferenceApi).mockResolvedValue({ status: 'removed', resource_id: 'pdk:ics55' })
+
+    const { loadPdks, removePdk, importedPdks } = usePdkManager()
+    await loadPdks()
+    await removePdk('local-ics55')
+
+    expect(removePdkReferenceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(importedPdks.value).toEqual([])
+  })
+
+  it('still removes the local entry when the backend reference is already gone', async () => {
+    const { removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
+    settingsGet.mockResolvedValueOnce([
+      {
+        id: 'local-ics55',
+        name: 'ICSPROUT 55nm PDK',
+        path: '/tmp/pdks/ics55',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+      },
+    ] as any)
+    vi.mocked(removePdkReferenceApi).mockRejectedValueOnce(new Error('404 Not Found'))
+
+    const { loadPdks, removePdk, importedPdks } = usePdkManager()
+    await loadPdks()
+    await removePdk('local-ics55')
+
+    expect(removePdkReferenceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(importedPdks.value).toEqual([])
+  })
+
+  it('surfaces non-404 backend removal failures', async () => {
+    const { removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
+    settingsGet.mockResolvedValueOnce([
+      {
+        id: 'local-ics55',
+        name: 'ICSPROUT 55nm PDK',
+        path: '/tmp/pdks/ics55',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+      },
+    ] as any)
+    vi.mocked(removePdkReferenceApi).mockRejectedValueOnce(new Error('500 Internal Server Error'))
+
+    const { loadPdks, removePdk, importedPdks } = usePdkManager()
+    await loadPdks()
+
+    await expect(removePdk('local-ics55')).rejects.toThrow('500 Internal Server Error')
+    expect(importedPdks.value).toHaveLength(1)
   })
 })

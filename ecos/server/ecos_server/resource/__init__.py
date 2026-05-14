@@ -7,6 +7,8 @@ from .pdks import PdkResourceService
 from .registry import RegistryService
 from .schemas import (
     PlatformAsset,
+    RegistryPdk,
+    RegistryPdkVersion,
     RegistryTool,
     RegistryToolVersion,
     ResourceAction,
@@ -27,6 +29,8 @@ __all__ = [
     "PdkResourceService",
     "PlatformAsset",
     "RegistryService",
+    "RegistryPdk",
+    "RegistryPdkVersion",
     "RegistryTool",
     "RegistryToolVersion",
     "ResourceAction",

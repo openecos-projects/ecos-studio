@@ -39,5 +39,9 @@ def default_tools_dir() -> Path:
     return ecos_data_dir() / "tools"
 
 
+def default_pdks_dir() -> Path:
+    return ecos_data_dir() / "pdks"
+
+
 def default_registry_cache_dir() -> Path:
     return ecos_cache_dir()
