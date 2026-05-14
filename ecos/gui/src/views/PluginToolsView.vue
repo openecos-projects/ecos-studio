@@ -151,9 +151,16 @@
                   </span>
 
                   <span class="row-actions">
-                    <template v-if="row.type === 'tool'">
+                    <template
+                      v-if="
+                        rowActionForStatus(row.resource) !== 'none' ||
+                        row.statusKind === 'installing' ||
+                        row.actions.includes('activate') ||
+                        row.actions.includes('validate')
+                      "
+                    >
                       <button
-                        v-if="row.statusKind === 'available'"
+                        v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
                         type="button"
                         class="row-action-btn primary"
                         @click.stop="handleRowInstall(row)"
@@ -162,16 +169,7 @@
                         Install
                       </button>
                       <button
-                        v-else-if="row.statusKind === 'installed'"
-                        type="button"
-                        class="row-action-btn danger-outlined"
-                        @click.stop="handleRowUninstall(row)"
-                      >
-                        <i class="ri-delete-bin-line" aria-hidden="true"></i>
-                        Uninstall
-                      </button>
-                      <button
-                        v-else-if="row.statusKind === 'update'"
+                        v-else-if="rowActionForStatus(row.resource) === 'update' && row.statusKind !== 'error'"
                         type="button"
                         class="row-action-btn info"
                         @click.stop="handleRowInstall(row)"
@@ -189,7 +187,7 @@
                         {{ row.progressPercent !== null ? `${row.progressPercent}%` : 'Installing' }}
                       </button>
                       <button
-                        v-else-if="row.statusKind === 'error'"
+                        v-else-if="row.statusKind === 'error' && ['install', 'update'].includes(rowActionForStatus(row.resource))"
                         type="button"
                         class="row-action-btn danger"
                         @click.stop="handleRowInstall(row)"
@@ -197,10 +195,8 @@
                         <i class="ri-restart-line" aria-hidden="true"></i>
                         Retry
                       </button>
-                    </template>
-                    <template v-else-if="row.resource">
                       <button
-                        v-if="row.actions.includes('activate')"
+                        v-else-if="row.actions.includes('activate')"
                         type="button"
                         class="row-action-btn primary"
                         @click.stop="handlePdkActivate(row)"
@@ -218,13 +214,16 @@
                         Validate
                       </button>
                       <button
-                        v-if="row.actions.includes('remove_reference')"
+                        v-if="['uninstall', 'remove_reference'].includes(rowActionForStatus(row.resource))"
                         type="button"
                         class="row-action-btn danger-outlined"
                         @click.stop="handleRowUninstall(row)"
                       >
-                        <i class="ri-link-unlink" aria-hidden="true"></i>
-                        Remove
+                        <i
+                          :class="rowActionForStatus(row.resource) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
+                          aria-hidden="true"
+                        ></i>
+                        {{ rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall' }}
                       </button>
                     </template>
                   </span>
@@ -320,180 +319,24 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { usePluginStore } from '@/stores/pluginStore'
-import { usePdkManager } from '@/composables/usePdkManager'
-import type { ResourceAction, ResourceInfo, ToolInfo, ToolStatus } from '@/api/plugin'
+import { resourceToRow, rowActionForStatus } from './pluginToolsRows'
+import type { ResourceRow } from './pluginToolsRows'
 
 type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
 type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
-type ResourceType = 'tool' | 'pdk'
-type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
-
-interface ResourceRow {
-  id: string
-  type: ResourceType
-  name: string
-  description: string
-  version: string
-  sizeLabel: string
-  sizeMb: number
-  platform: string
-  statusText: string
-  statusKind: StatusKind
-  icon: string
-  accent: string
-  progressPercent: number | null
-  actions: ResourceAction[]
-  tool?: ToolInfo
-  resource?: ResourceInfo
-}
-
-interface ResourceMeta {
-  icon: string
-  accent: string
-  sizeMb: number
-  sizeLabel: string
-}
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importedPdks, loadPdks, importPdk } = usePdkManager()
 
 const searchQuery = ref('')
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
 
-const toolMeta: Record<string, ResourceMeta> = {
-  openroad: { icon: 'O', accent: '#79c142', sizeMb: 245, sizeLabel: '245 MB' },
-  yosys: { icon: 'Y', accent: '#63666d', sizeMb: 68, sizeLabel: '68 MB' },
-  klayout: { icon: 'K', accent: '#d99427', sizeMb: 132, sizeLabel: '132 MB' },
-  magic: { icon: 'M', accent: '#6b7078', sizeMb: 54, sizeLabel: '54 MB' },
-  netgen: { icon: 'N', accent: '#607d8b', sizeMb: 42, sizeLabel: '42 MB' },
-  verilator: { icon: 'V', accent: '#4b87c5', sizeMb: 96, sizeLabel: '96 MB' },
-  iverilog: { icon: 'I', accent: '#4f7f75', sizeMb: 44, sizeLabel: '44 MB' },
-}
-
-const pdkCatalog = [
-  {
-    key: 'ics55',
-    name: 'ics55',
-    description: 'Integrated Circuit Systems 55nm PDK',
-    version: 'v1.01',
-    sizeMb: 412,
-    sizeLabel: '412 MB',
-    icon: 'ics55',
-    accent: '#6b7078',
-  },
-]
-
 const resourceRows = computed<ResourceRow[]>(() => {
-  const toolRows = pluginStore.tools.map((tool) => {
-    const meta = metadataForTool(tool)
-    const progress = pluginStore.installProgress[tool.name]
-    const progressPercent = progress
-      ? Math.max(0, Math.min(100, Math.round((progress.progress || 0) * 100)))
-      : null
-    const mappedStatus = mapToolStatus(tool.status, progressPercent)
-
-    return {
-      id: `tool:${tool.name}`,
-      type: 'tool' as const,
-      name: tool.display_name || tool.name,
-      description: tool.description,
-      version: versionLabel(tool),
-      sizeLabel: meta.sizeLabel,
-      sizeMb: meta.sizeMb,
-      platform: 'Linux',
-      statusText: mappedStatus.text,
-      statusKind: mappedStatus.kind,
-      icon: meta.icon,
-      accent: meta.accent,
-      progressPercent,
-      actions: [],
-      tool,
-    }
+  return pluginStore.resources.map((resource) => {
+    return resourceToRow(resource, pluginStore.resourceProgress[resource.id])
   })
-
-  const serverPdkRows = pluginStore.resources
-    .filter((resource) => resource.type === 'pdk')
-    .map((resource) => {
-      const meta = metadataForPdkResource(resource)
-      const mappedStatus = mapPdkStatus(resource)
-      return {
-        id: resource.id,
-        type: 'pdk' as const,
-        name: resource.display_name || resource.name,
-        description: resource.description || pdkPathLabel(resource),
-        version: pdkVersionLabel(resource),
-        sizeLabel: meta.sizeLabel,
-        sizeMb: meta.sizeMb,
-        platform: resource.platform || 'Local',
-        statusText: mappedStatus.text,
-        statusKind: mappedStatus.kind,
-        icon: meta.icon,
-        accent: meta.accent,
-        progressPercent: null,
-        actions: resource.actions,
-        resource,
-      }
-    })
-
-  const serverPdkKeys = new Set(
-    serverPdkRows.map((row) => `${row.id} ${row.name}`.toLowerCase()),
-  )
-
-  const knownPdkRows = pdkCatalog.flatMap((pdk) => {
-    if (Array.from(serverPdkKeys).some((key) => key.includes(pdk.key))) {
-      return []
-    }
-
-    const installed = importedPdks.value.some((item) => {
-      const key = `${item.pdkId || ''} ${item.name || ''}`.toLowerCase()
-      return key.includes(pdk.key)
-    })
-
-    return [{
-      id: `pdk:${pdk.key}`,
-      type: 'pdk' as const,
-      name: pdk.name,
-      description: pdk.description,
-      version: pdk.version,
-      sizeLabel: pdk.sizeLabel,
-      sizeMb: pdk.sizeMb,
-      platform: 'Linux',
-      statusText: installed ? 'Installed' : 'Available',
-      statusKind: installed ? 'installed' as const : 'available' as const,
-      icon: pdk.icon,
-      accent: pdk.accent,
-      progressPercent: null,
-      actions: [] as ResourceAction[],
-    }]
-  })
-
-  const catalogKeys = new Set(pdkCatalog.map((pdk) => pdk.key))
-  const customPdkRows = importedPdks.value
-    .filter((pdk) => {
-      const key = `${pdk.pdkId || ''} ${pdk.name || ''}`.toLowerCase()
-      return !Array.from(catalogKeys).some((catalogKey) => key.includes(catalogKey))
-    })
-    .map((pdk) => ({
-      id: `pdk:custom:${pdk.id}`,
-      type: 'pdk' as const,
-      name: pdk.name,
-      description: pdk.description || 'Imported process design kit',
-      version: pdk.techNode || 'Local',
-      sizeLabel: 'Local',
-      sizeMb: 0,
-      platform: 'Local',
-      statusText: 'Installed',
-      statusKind: 'installed' as const,
-      icon: pdk.name.slice(0, 5),
-      accent: '#6b7078',
-      progressPercent: null,
-      actions: [] as ResourceAction[],
-    }))
-
-  return [...toolRows, ...serverPdkRows, ...knownPdkRows, ...customPdkRows]
 })
 
 const filteredRows = computed(() => {
@@ -585,94 +428,12 @@ watch(
 )
 
 onMounted(() => {
-  void Promise.all([pluginStore.fetchTools(), loadPdks()])
+  void pluginStore.fetchTools()
 })
 
 onUnmounted(() => {
   pluginStore.cleanup()
 })
-
-function metadataForTool(tool: ToolInfo): ResourceMeta {
-  const haystack = `${tool.name} ${tool.display_name}`.toLowerCase()
-  const match = Object.keys(toolMeta).find((key) => haystack.includes(key))
-  if (match) return toolMeta[match]
-
-  const label = (tool.display_name || tool.name || '?').slice(0, 1).toUpperCase()
-  return { icon: label, accent: '#68707d', sizeMb: 128, sizeLabel: '128 MB' }
-}
-
-function versionLabel(tool: ToolInfo): string {
-  const version = tool.installed_version || tool.available_versions[0]
-  if (!version) return '-'
-  return `v${String(version).replace(/^v/i, '')}`
-}
-
-function metadataForPdkResource(resource: ResourceInfo): ResourceMeta {
-  const catalog = pdkCatalog.find((pdk) => {
-    const haystack = `${resource.id} ${resource.name} ${resource.display_name}`.toLowerCase()
-    return haystack.includes(pdk.key)
-  })
-  if (catalog) {
-    return {
-      icon: catalog.icon,
-      accent: catalog.accent,
-      sizeMb: resource.size ? resource.size / (1024 * 1024) : catalog.sizeMb,
-      sizeLabel: resource.size ? formatSize(resource.size / (1024 * 1024)) : catalog.sizeLabel,
-    }
-  }
-
-  const label = (resource.display_name || resource.name || '?').slice(0, 5)
-  return {
-    icon: label,
-    accent: resource.active ? '#4f7f75' : '#6b7078',
-    sizeMb: resource.size ? resource.size / (1024 * 1024) : 0,
-    sizeLabel: resource.size ? formatSize(resource.size / (1024 * 1024)) : 'Local',
-  }
-}
-
-function pdkVersionLabel(resource: ResourceInfo): string {
-  if (resource.active) return 'Active'
-  const importedAt = resource.health.imported_at
-  if (typeof importedAt === 'string') return 'Local'
-  return resource.installed_version || 'Local'
-}
-
-function pdkPathLabel(resource: ResourceInfo): string {
-  return resource.path || 'Imported process design kit'
-}
-
-function mapToolStatus(status: ToolStatus, progressPercent: number | null): { kind: StatusKind; text: string } {
-  switch (status) {
-    case 'installed':
-      return { kind: 'installed', text: 'Installed' }
-    case 'update_available':
-      return { kind: 'update', text: 'Update' }
-    case 'installing':
-      return {
-        kind: 'installing',
-        text: progressPercent !== null ? `Downloading ${progressPercent}%` : 'Installing',
-      }
-    case 'uninstalling':
-      return { kind: 'installing', text: 'Removing' }
-    case 'error':
-      return { kind: 'error', text: 'Error' }
-    default:
-      return { kind: 'available', text: 'Available' }
-  }
-}
-
-function mapPdkStatus(resource: ResourceInfo): { kind: StatusKind; text: string } {
-  if (resource.status === 'missing' || resource.status === 'invalid' || resource.status === 'error') {
-    return { kind: 'error', text: String(resource.status).replace(/_/g, ' ') }
-  }
-  if (resource.active) {
-    return { kind: 'installed', text: 'Active' }
-  }
-  if (resource.status === 'installed') {
-    return { kind: 'installed', text: 'Installed' }
-  }
-  return { kind: 'available', text: 'Available' }
-}
 
 function isInstalledLike(row: ResourceRow): boolean {
   return row.statusKind === 'installed' || row.statusKind === 'update'
@@ -702,20 +463,16 @@ function clearFilters(): void {
 }
 
 function rowError(row: ResourceRow): string | undefined {
-  if (row.type === 'tool' && row.tool) {
-    return pluginStore.toolErrors[row.tool.name]
-  }
-  return undefined
+  return pluginStore.resourceErrors[row.id] || row.resource.error || undefined
 }
 
 async function handleRowInstall(row: ResourceRow): Promise<void> {
-  if (row.type === 'tool' && row.tool) {
-    await pluginStore.install(row.tool.name)
-  } else if (row.type === 'pdk' && row.resource?.actions.includes('activate')) {
-    await pluginStore.activatePdk(row.resource.id)
-  } else if (row.type === 'pdk' && row.statusKind === 'available') {
-    await importPdk()
+  const action = rowActionForStatus(row.resource)
+  if (action === 'update') {
+    await pluginStore.updateResource(row.id)
+    return
   }
+  await pluginStore.installResource(row.id)
 }
 
 async function handlePdkActivate(row: ResourceRow): Promise<void> {
@@ -731,28 +488,28 @@ async function handlePdkValidate(row: ResourceRow): Promise<void> {
 }
 
 async function handleRowUninstall(row: ResourceRow): Promise<void> {
-  if (row.type === 'tool' && row.tool) {
-    await pluginStore.uninstall(row.tool.name)
-  } else if (row.type === 'pdk' && row.resource?.actions.includes('remove_reference')) {
-    await pluginStore.removePdkReference(row.resource.id)
+  const action = rowActionForStatus(row.resource)
+  if (action === 'remove_reference') {
+    await pluginStore.removePdkReference(row.id)
+    return
   }
+  await pluginStore.uninstallResource(row.id)
 }
 
 async function downloadSelected(): Promise<void> {
-  const rows = selectedResources.value
-  const toolRows = rows.filter((row) => row.type === 'tool' && row.tool)
-  const installable = toolRows.filter((row) => {
-    return row.statusKind === 'available' || row.statusKind === 'update' || row.statusKind === 'error'
+  const installable = selectedResources.value.filter((row) => {
+    const action = rowActionForStatus(row.resource)
+    return action === 'install' || action === 'update'
   })
 
-  if (installable.length > 0) {
-    await Promise.all(installable.map((row) => pluginStore.install(row.tool!.name)))
-    return
-  }
-
-  if (rows.some((row) => row.type === 'pdk' && row.statusKind === 'available')) {
-    await importPdk()
-  }
+  await Promise.all(
+    installable.map((row) => {
+      const action = rowActionForStatus(row.resource)
+      return action === 'update'
+        ? pluginStore.updateResource(row.id)
+        : pluginStore.installResource(row.id)
+    }),
+  )
 }
 
 function formatSize(sizeMb: number): string {
