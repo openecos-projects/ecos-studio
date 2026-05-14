@@ -74,6 +74,10 @@ function buildImportedPdk(detected: ScannedPdkDirectory): ImportedPdk {
   }
 }
 
+function normalizePdkPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/$/, '')
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message
@@ -208,6 +212,10 @@ export function usePdkManager() {
     return await desktopApi.workspace.scanPdkDirectory(path)
   }
 
+  const syncImportedPdkReference = async (path: string): Promise<void> => {
+    await importPdkPathApi(path)
+  }
+
   // ============ PDK 操作 ============
 
   /**
@@ -244,16 +252,17 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
+      const normalizedPath = normalizePdkPath(detected.canonicalPath)
       const existing = importedPdks.value.find(
-        p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath
+        p => normalizePdkPath(p.path) === normalizedPath
       )
       if (existing) {
+        await syncImportedPdkReference(detected.canonicalPath)
         console.warn('[usePdkManager] PDK already imported:', detected.canonicalPath)
         return existing
       }
 
-      await importPdkPathApi(path)
+      await syncImportedPdkReference(path)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)
@@ -297,13 +306,16 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
+      const normalizedPath = normalizePdkPath(detected.canonicalPath)
       const existing = importedPdks.value.find(
-        p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath
+        p => normalizePdkPath(p.path) === normalizedPath
       )
-      if (existing) return existing
+      if (existing) {
+        await syncImportedPdkReference(detected.canonicalPath)
+        return existing
+      }
 
-      await importPdkPathApi(path)
+      await syncImportedPdkReference(path)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)

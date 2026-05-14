@@ -209,6 +209,33 @@ describe('usePdkManager', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
+  it('syncs duplicate imported PDKs to the backend before returning the existing entry', async () => {
+    const { importPdkPathApi, usePdkManager } = await loadTestSubjects()
+    const { importPdk, importedPdks } = usePdkManager()
+
+    importedPdks.value = [
+      {
+        id: 'local-ics55',
+        name: 'ics55',
+        path: '/tmp/pdk',
+        description: 'ICSPROUT 55nm process library (auto-detected)',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+        detectedFiles: scannedPdk.detectedFiles,
+      },
+    ]
+
+    const imported = await importPdk()
+
+    expect(imported).toBe(importedPdks.value[0])
+    expect(importPdkPathApi).toHaveBeenCalledTimes(1)
+    expect(importPdkPathApi).toHaveBeenCalledWith('/tmp/pdk')
+    expect(importedPdks.value).toHaveLength(1)
+    expect(settingsSet).not.toHaveBeenCalled()
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
   it('removes backend resource references when deleting an imported PDK', async () => {
     const { removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
     settingsGet.mockResolvedValueOnce([
