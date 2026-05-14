@@ -1,7 +1,7 @@
 """
 PyInstaller spec file for ECOS Studio API Server.
 
-This packages ecos_server as a backend API server (onefile mode).
+This packages ecos_server as a backend API server.
 The main user interface is provided by the GUI (Tauri app).
 
 Prerequisites:
@@ -27,6 +27,7 @@ HOOKS_DIR = SERVER_DIR / "hooks"
 
 # macOS code signing identity (optional)
 CODESIGN_IDENTITY = os.environ.get("APPLE_SIGNING_IDENTITY")
+BUNDLE_MODE = os.environ.get("ECOS_PYINSTALLER_MODE", "onedir").strip().lower()
 
 REQUIRED_DISTRIBUTION_METADATA = (
     "ecos-server",
@@ -141,9 +142,9 @@ binaries.extend(dp_binaries)
 
 # Add system libraries if needed (Linux)
 if sys.platform.startswith("linux"):
-    # In onefile mode, PyInstaller exposes bundled shared libraries from _MEIPASS.
-    # Put required .so files at extraction root (".") so the dynamic loader can
-    # resolve dreamplace C++ op dependencies (e.g. draw_place_cpp -> libxcb.so.1).
+    # Keep required .so files next to the bundled executable/runtime so the
+    # dynamic loader can resolve dreamplace C++ op dependencies
+    # (e.g. draw_place_cpp -> libxcb.so.1).
     linux_runtime_libs = [
         "/lib/x86_64-linux-gnu/libgomp.so.1",
         "/lib/x86_64-linux-gnu/libtbb.so.12",
@@ -293,16 +294,39 @@ a.binaries = [b for b in a.binaries if not b[0].startswith("chipcompiler/thirdpa
 
 pyz = PYZ(a.pure, a.zipped_data)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name="ecos-server",
-    strip=False,
-    upx=True,
-    console=True,
-    codesign_identity=CODESIGN_IDENTITY,
-)
+if BUNDLE_MODE == "onedir":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="ecos-server",
+        strip=False,
+        upx=False,
+        console=True,
+        codesign_identity=CODESIGN_IDENTITY,
+    )
+
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="ecos-server",
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name="ecos-server",
+        strip=False,
+        upx=True,
+        console=True,
+        codesign_identity=CODESIGN_IDENTITY,
+    )

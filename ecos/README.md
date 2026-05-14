@@ -43,19 +43,21 @@ make setup
 make dev
 
 # Run GUI in dev mode
-cd ecos/gui && pnpm tauri dev
+cd ecos/gui && pnpm dev
 ```
 
-Rust-side GUI logs default to warnings and errors. Use `RUST_LOG` when you need
-more detail while debugging the Tauri shell:
+Electron host logs default to warnings and errors. Use `ECOS_ELECTRON_LOG_LEVEL`
+when you need more detail while debugging the desktop shell:
 
 ```bash
 # GUI lifecycle diagnostics
-cd ecos/gui && RUST_LOG=ecos_studio=info pnpm tauri dev
+cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=info pnpm dev
 
 # More detailed API server startup diagnostics
-cd ecos/gui && RUST_LOG=ecos_studio::api_server=debug pnpm tauri dev
+cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm dev
 ```
+
+Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
 Python API server startup markers (`[API_PHASE]`, `[API_START]`, `[API_READY]`,
 `[API_LOG]`) are suppressed by default. Set `ECOS_API_LOG_LEVEL=info` to show
@@ -63,7 +65,7 @@ them, or pass `--log-level info` to `run_server.py`:
 
 ```bash
 # Show API server startup phases
-ECOS_API_LOG_LEVEL=info cd ecos/server && python run_server.py
+cd ecos/server && ECOS_API_LOG_LEVEL=info python run_server.py
 
 # Equivalent via CLI flag
 cd ecos/server && python run_server.py --log-level info

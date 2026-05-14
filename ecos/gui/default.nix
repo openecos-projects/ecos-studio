@@ -1,22 +1,27 @@
 {
   lib,
   stdenv,
-  rustPlatform,
   fetchPnpmDeps,
-  cargo-tauri,
+  electron,
   ecos-server,
-  glib-networking,
+  makeWrapper,
   nodejs,
   pnpmConfigHook,
   pnpm,
-  openssl,
-  pkg-config,
-  webkitgtk_4_1,
-  wrapGAppsHook4,
+  python3,
   yosysWithSlang,
 }:
 
-rustPlatform.buildRustPackage (finalAttrs: {
+let
+  apiServerBinaryName =
+    if stdenv.hostPlatform.system == "x86_64-linux" then
+      "api-server-x86_64-unknown-linux-gnu"
+    else if stdenv.hostPlatform.system == "aarch64-linux" then
+      "api-server-aarch64-unknown-linux-gnu"
+    else
+      throw "Unsupported ECOS Studio GUI host platform: ${stdenv.hostPlatform.system}";
+in
+stdenv.mkDerivation (finalAttrs: {
   pname = "ecos-studio";
   version = "0.1.0-alpha.5";
 
@@ -24,24 +29,18 @@ rustPlatform.buildRustPackage (finalAttrs: {
     with lib.fileset;
     toSource {
       root = ./.;
-      fileset = unions [
+      fileset = intersection (gitTracked ./. ) (unions [
         ./README.md
-        ./index.html
         ./.gitignore
         ./.nvmrc
+        ./apps
+        ./packages
         ./package.json
         ./pnpm-lock.yaml
+        ./pnpm-workspace.yaml
         ./tailwind.config.ts
-        ./tsconfig.json
-        ./tsconfig.node.json
-        ./vite.config.ts
-        ./src
-        ./src-tauri
-        ./public
-      ];
+      ]);
     };
-
-  cargoHash = "sha256-P3EAtI+ZyKM+cZK/ybzPmRTiKAkZ8fhAvrmhzl6nlI8=";
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
@@ -51,43 +50,73 @@ rustPlatform.buildRustPackage (finalAttrs: {
   };
 
   nativeBuildInputs = [
-    cargo-tauri.hook
-
+    makeWrapper
     nodejs
     pnpm
     pnpmConfigHook
-
-    # Make sure we can find our libraries
-    pkg-config
-  ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux [ wrapGAppsHook4 ];
-
-  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
-    glib-networking # Most Tauri apps need networking
-    openssl
-    webkitgtk_4_1
   ];
 
-  preBuild = ''
-    mkdir -p src-tauri/binaries
-    cp ${ecos-server}/bin/ecos-server src-tauri/binaries/api-server-x86_64-unknown-linux-gnu
+  buildPhase = ''
+    runHook preBuild
 
-    # Keep Tauri resource globs valid even when OSS CAD suite payload is not vendored yet.
-    mkdir -p src-tauri/resources/oss-cad-suite
-    echo "placeholder for nix build" > src-tauri/resources/oss-cad-suite/README
-    echo "placeholder" > src-tauri/resources/oss-cad-suite/placeholder.txt
+    mkdir -p apps/desktop-electron/resources/binaries
+    cp ${ecos-server}/bin/ecos-server apps/desktop-electron/resources/binaries/${apiServerBinaryName}
+    chmod +x apps/desktop-electron/resources/binaries/${apiServerBinaryName}
+
+    mkdir -p apps/desktop-electron/resources/oss-cad-suite/bin
+    ln -s ${yosysWithSlang}/bin/yosys apps/desktop-electron/resources/oss-cad-suite/bin/yosys
+    echo "nix-provided OSS CAD bundle" > apps/desktop-electron/resources/oss-cad-suite/README
+
+    pnpm install --offline --frozen-lockfile
+    pnpm run build
+
+    runHook postBuild
   '';
 
-  postFixup = ''
-    mkdir -p $out/lib/ECOS-Studio/resources/oss-cad-suite/bin
-    ln -s ${yosysWithSlang}/bin/yosys $out/lib/ECOS-Studio/resources/oss-cad-suite/bin/yosys
+  installPhase = ''
+    runHook preInstall
 
-    wrapProgram $out/bin/ecos-studio \
-      --set CHIPCOMPILER_OSS_CAD_DIR "${yosysWithSlang}"
+    app_root="$out/share/ecos-studio"
+    mkdir -p "$app_root/apps/desktop-electron" "$app_root/server" "$out/bin"
+
+    cp -R apps/desktop-electron/dist "$app_root/apps/desktop-electron/"
+    cp apps/desktop-electron/package.json "$app_root/apps/desktop-electron/package.json"
+    cp -R apps/desktop-electron/resources "$app_root/apps/desktop-electron/"
+
+    cat > "$app_root/server/run_server.py" <<'PY'
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BINARY = ROOT / "apps" / "desktop-electron" / "resources" / "binaries" / "${apiServerBinaryName}"
+OSS_CAD_DIR = ROOT / "apps" / "desktop-electron" / "resources" / "oss-cad-suite"
+
+if not BINARY.exists():
+    raise SystemExit(f"Bundled API server binary not found: {BINARY}")
+
+os.environ.setdefault("CHIPCOMPILER_OSS_CAD_DIR", str(OSS_CAD_DIR))
+os.execv(str(BINARY), [str(BINARY), *sys.argv[1:]])
+PY
+    chmod +x "$app_root/server/run_server.py"
+
+    makeWrapper ${electron}/bin/electron "$out/bin/ecos-studio" \
+      --add-flags "$app_root/apps/desktop-electron" \
+      --prefix PATH : ${lib.makeBinPath [ python3 ]} \
+      --set-default ECOS_SERVER_DIRECTORY "$app_root/server" \
+      --set-default ECOS_ELECTRON_BINARIES_DIR "$app_root/apps/desktop-electron/resources/binaries" \
+      --set-default ECOS_ELECTRON_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite" \
+      --set-default CHIPCOMPILER_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite"
+
+    runHook postInstall
   '';
 
-  # Set our Tauri source directory
-  cargoRoot = "src-tauri";
-  buildAndTestSubdir = finalAttrs.cargoRoot;
   doCheck = false;
+
+  meta = {
+    mainProgram = "ecos-studio";
+  };
 })

@@ -23,14 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target
-
-
-src-tauri/binaries/*
-!src-tauri/binaries/.gitkeep
-src-tauri/resources/oss-cad-suite
-
 .cursor/
 .shared/
 openspec/
@@ -43,3 +35,8 @@ openspec/
 
 .agents/
 skills-lock.json
+
+# Electron packaging outputs and locally prepared bundle resources
+apps/desktop-electron/release/
+apps/desktop-electron/resources/binaries/
+apps/desktop-electron/resources/oss-cad-suite/

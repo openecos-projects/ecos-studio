@@ -1,0 +1,38 @@
+{
+  "name": "@ecos-studio/desktop-electron",
+  "version": "0.1.0-alpha.5",
+  "private": true,
+  "description": "ECOS Studio desktop shell built with Electron.",
+  "homepage": "https://github.com/openecos-projects/ecos-studio",
+  "author": {
+    "name": "OpenECOS Team",
+    "email": "openecos-projects@users.noreply.github.com"
+  },
+  "type": "module",
+  "main": "./dist/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package:prepare-resources": "./scripts/prepare-package-resources.sh",
+    "package": "rm -rf release && pnpm run package:prepare-resources && electron-builder --config electron-builder.yml",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@ecos-studio/shared": "workspace:*",
+    "@ecos-studio/tile-helper": "workspace:*",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^25.0.6",
+    "@vitejs/plugin-vue": "^6.0.3",
+    "electron": "41.3.0",
+    "electron-builder": "26.8.1",
+    "electron-vite": "5.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3"
+  }
+}

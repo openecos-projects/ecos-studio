@@ -44,39 +44,20 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing \
-            git curl ca-certificates build-essential pkg-config \
-            python3 python3-venv python3-pip python3-dev \
-            libgtk-3-dev libgtk-3-bin libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev \
-            libglib2.0-dev libglib2.0-bin librsvg2-dev \
-            cmake ninja-build tcl-dev \
-            libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev \
-            flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
-            libhwloc-dev libcurl4-openssl-dev libtbb-dev \
+      - name: Install Linux GUI dependencies
+        uses: ./.github/actions/install-gui-linux-deps
+        with:
+          extra-packages: >-
+            git curl ca-certificates build-essential pkg-config
+            python3 python3-venv python3-pip python3-dev
+            cmake ninja-build tcl-dev
+            libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev
+            flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison
+            libhwloc-dev libcurl4-openssl-dev libtbb-dev
             patchelf jq wget
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: ecos/gui/.nvmrc
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.0.9
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@1.95.0
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ecos/gui/src-tauri
+        uses: ./.github/actions/setup-node-pnpm
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -101,10 +82,10 @@ jobs:
         working-directory: ecos/server
         run: uv sync --frozen --all-groups --all-extras --python 3.11
 
-      - name: Build release bundle
+      - name: Build Electron release bundle
         env:
           ENABLE_OSS_CAD_SUITE: "true"
-          TAURI_BUNDLES: appimage
+          ECOS_ELECTRON_LINUX_TARGETS: AppImage
         run: |
           PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
 

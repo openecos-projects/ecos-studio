@@ -23,7 +23,6 @@ jobs:
       version: ${{ steps.filter.outputs.version }}
       server: ${{ steps.filter.outputs.server }}
       gui: ${{ steps.filter.outputs.gui }}
-      rust: ${{ steps.filter.outputs.rust }}
       build: ${{ steps.filter.outputs.build }}
       ci: ${{ steps.filter.outputs.ci }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
@@ -44,22 +43,17 @@ jobs:
               - 'ecos/server/uv.lock'
               - 'ecos/gui/default.nix'
               - 'ecos/gui/package.json'
-              - 'ecos/gui/src-tauri/Cargo.toml'
-              - 'ecos/gui/src-tauri/Cargo.lock'
-              - 'ecos/gui/src-tauri/tauri.conf.json'
+              - 'ecos/gui/apps/*/package.json'
+              - 'ecos/gui/packages/*/package.json'
             server:
               - 'ecos/server/**'
             gui:
-              - 'ecos/gui/src/**'
-              - 'ecos/gui/public/**'
-              - 'ecos/gui/index.html'
+              - 'ecos/gui/apps/**'
+              - 'ecos/gui/packages/**'
               - 'ecos/gui/package.json'
               - 'ecos/gui/pnpm-lock.yaml'
-              - 'ecos/gui/tsconfig*.json'
-              - 'ecos/gui/vite.config.ts'
+              - 'ecos/gui/pnpm-workspace.yaml'
               - 'ecos/gui/tailwind.config.ts'
-            rust:
-              - 'ecos/gui/src-tauri/**'
             build:
               - '.bazelrc'
               - 'BUILD.bazel'
@@ -81,7 +75,7 @@ jobs:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
     needs: changes
-    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.gui == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.gui == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,31 +106,6 @@ jobs:
       - name: Lint Python
         run: uvx ruff check
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-22.04
-    needs: changes
-    if: ${{ needs.changes.outputs.rust == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
-    defaults:
-      run:
-        working-directory: ecos/gui/src-tauri
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        uses: ./.github/actions/install-tauri-linux-deps
-
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust-cache
-        with:
-          cache-targets: "false"
-
-      - name: Lint Rust
-        env:
-          TAURI_CONFIG: '{"build":{"frontendDist":null},"bundle":{"resources":null,"externalBin":null}}'
-        run: cargo clippy -- -D warnings
-
   vue-tsc:
     name: Vue Typecheck
     runs-on: ubuntu-22.04
@@ -156,23 +125,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck Vue
-        run: pnpm exec vue-tsc --noEmit
+        run: pnpm run typecheck
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, ruff, clippy, vue-tsc]
+    needs: [changes, check-version, ruff, vue-tsc]
     if: >-
       ${{
         always() &&
         (needs.changes.outputs.server == 'true' ||
          needs.changes.outputs.gui == 'true' ||
-         needs.changes.outputs.rust == 'true' ||
          needs.changes.outputs.version == 'true' ||
          needs.changes.outputs.build == 'true' ||
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
         needs.ruff.result != 'failure' &&
-        needs.clippy.result != 'failure' &&
         needs.vue-tsc.result != 'failure'
       }}
     runs-on: ubuntu-22.04
@@ -183,14 +150,12 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install system dependencies
-        uses: ./.github/actions/install-tauri-linux-deps
+      - name: Install Linux GUI dependencies
+        uses: ./.github/actions/install-gui-linux-deps
         with:
           extra-packages: >-
             git curl ca-certificates build-essential pkg-config
             python3 python3-venv python3-pip python3-dev
-            libgtk-3-bin libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev
-            libglib2.0-dev libglib2.0-bin
             cmake ninja-build tcl-dev
             libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev
             flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison
@@ -199,9 +164,6 @@ jobs:
 
       - name: Setup Node.js
         uses: ./.github/actions/setup-node-pnpm
-
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust-cache
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -226,10 +188,10 @@ jobs:
         working-directory: ecos/server
         run: uv sync --frozen --all-groups --all-extras --python 3.11
 
-      - name: Build release bundle
+      - name: Build Electron release bundle
         env:
           ENABLE_OSS_CAD_SUITE: "true"
-          TAURI_BUNDLES: appimage
+          ECOS_ELECTRON_LINUX_TARGETS: AppImage
         run: |
           PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
 

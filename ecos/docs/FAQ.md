@@ -74,18 +74,21 @@ Large or complex designs may exceed the 10-minute synthesis timeout. Use a small
 
 The core utilization or target density is too high for the placer to converge. Try reducing Core Utilization and Target Density, increasing Cell Padding, or enabling the Routability Opt Flag in the Configuration page. See [#50](https://github.com/openecos-projects/ecos-studio/issues/50) for details.
 
-**Q: How do I enable GUI Rust diagnostic logs?**
+**Q: How do I enable Electron host diagnostic logs?**
 
-By default, the GUI prints Rust warnings and errors only. Launch the AppImage
-from a terminal with `RUST_LOG` to enable more detailed Rust-side diagnostics:
+By default, the GUI host prints warnings and errors only. Launch the AppImage
+from a terminal with `ECOS_ELECTRON_LOG_LEVEL` to enable more detailed
+Electron-side diagnostics:
 
 ```bash
 # GUI lifecycle diagnostics
-RUST_LOG=ecos_studio=info ./ECOS-Studio_*.AppImage
+ECOS_ELECTRON_LOG_LEVEL=info ./ECOS-Studio_*.AppImage
 
 # More detailed API server startup diagnostics
-RUST_LOG=ecos_studio::api_server=debug ./ECOS-Studio_*.AppImage
+ECOS_ELECTRON_LOG_LEVEL=debug ./ECOS-Studio_*.AppImage
 ```
+
+Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
 **Q: How do I enable Python API server startup logs?**
 

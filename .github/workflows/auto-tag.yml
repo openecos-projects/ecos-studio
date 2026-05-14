@@ -11,9 +11,8 @@ on:
       - "ecos/server/uv.lock"
       - "ecos/gui/default.nix"
       - "ecos/gui/package.json"
-      - "ecos/gui/src-tauri/Cargo.toml"
-      - "ecos/gui/src-tauri/Cargo.lock"
-      - "ecos/gui/src-tauri/tauri.conf.json"
+      - "ecos/gui/apps/*/package.json"
+      - "ecos/gui/packages/*/package.json"
 
 permissions:
   contents: write

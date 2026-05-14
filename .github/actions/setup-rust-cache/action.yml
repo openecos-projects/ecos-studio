@@ -1,11 +1,11 @@
 name: Setup Rust Cache
-description: Setup stable Rust and cache Cargo artifacts.
+description: Setup stable Rust and cache Cargo artifacts when a Rust workspace is part of the build.
 
 inputs:
   workspaces:
     description: Rust workspace paths for Swatinem/rust-cache.
     required: false
-    default: ecos/gui/src-tauri
+    default: ""
   cache-targets:
     description: Whether to cache target directories.
     required: false
@@ -18,7 +18,14 @@ runs:
       uses: dtolnay/rust-toolchain@1.95.0
 
     - name: Cache Rust build artifacts
+      if: ${{ inputs.workspaces != '' }}
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ inputs.workspaces }}
+        cache-targets: ${{ inputs.cache-targets }}
+
+    - name: Cache Rust build artifacts
+      if: ${{ inputs.workspaces == '' }}
+      uses: Swatinem/rust-cache@v2
+      with:
         cache-targets: ${{ inputs.cache-targets }}

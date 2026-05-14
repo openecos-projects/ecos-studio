@@ -1,0 +1,21 @@
+appId: org.openecos.ecos-studio
+productName: ECOS Studio
+afterPack: ./scripts/after-pack-linux-sandbox.mjs
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: resources/binaries
+    to: binaries
+  - from: resources/oss-cad-suite
+    to: resources/oss-cad-suite
+linux:
+  artifactName: ECOS-Studio_${version}_${arch}.${ext}
+  executableName: ecos-studio
+  category: Development
+  maintainer: OpenECOS Team <openecos-projects@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb

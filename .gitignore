@@ -15,8 +15,9 @@ result
 .humanize*
 .humanize/
 docs/superpowers/
+.superpowers/
 
-# Resource Manager — runtime cache and manifest (never committed)
+# Resource Manager runtime cache and manifests
 ecos/server/ecos_server/resource/data/
 *.json.bak
 resource-registry.json

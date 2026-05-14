@@ -1,12 +1,11 @@
 # ECOS Studio (GUI)
 
-Desktop chip-design frontend built with **Tauri + Vue 3 + TypeScript**, working with backends such as `ecos/server` as part of ECOS Studio.
+Desktop chip-design frontend built with **Electron + Vue 3 + TypeScript**, working with backends such as `ecos/server` as part of ECOS Studio.
 
 ## Prerequisites
 
 - **Node.js** (LTS recommended)
 - **pnpm** (this repo uses pnpm for dependencies)
-- **Rust toolchain** (only needed for local Tauri dev and packaging)
 
 For a fuller end-to-end setup (Python, `uv`, Bazel, etc.), see the [ECOS package README](../README.md) and the [repository root README](../../README.md).
 
@@ -21,20 +20,37 @@ pnpm install
 ### Development
 
 ```bash
-# Tauri shell + frontend
-pnpm run tauri:dev
+# Electron shell + renderer workspace
+pnpm run dev
+```
+
+```bash
+# Optional: reuse an already running API server on 127.0.0.1:8765
+pnpm run dev:reuse-api-server
+```
+
+```bash
+# Linux VM / sandbox-restricted environment
+pnpm run dev:vm
 ```
 
 ### Build and preview
 
 ```bash
-# Typecheck + production build (output to dist/, used by Tauri beforeBuildCommand)
+# Typecheck + production Electron/renderer build
 pnpm run build
+```
+
+```bash
+# Renderer-only smoke checks
+pnpm run typecheck
+pnpm --filter @ecos-studio/renderer exec vitest run src/utils/sanitizeHtml.test.ts
 ```
 
 ## Stack
 
-- **Tauri 2** — Rust desktop shell and system APIs
+- **Electron 41** — desktop shell and native integration
+- **electron-vite 5** — Electron build and dev pipeline
 - **Vue 3** — Composition API
 - **PixiJS 8** — WebGL/WebGPU canvas and editor rendering
 - **PrimeVue 4** — UI components (Aura theme)
@@ -45,13 +61,14 @@ pnpm run build
 
 | Path | Description |
 |------|-------------|
-| `src/applications/editor/` | Canvas editor core, layout rendering, plugins, tile logic |
-| `src/components/` | Reusable UI (toolbar, sidebars, panels, etc.) |
-| `src/views/` | Routed pages |
-| `src/composables/` | Composables (workspace, menus, Tauri wrappers, etc.) |
-| `src/stores/` | Pinia state |
-| `src/api/` | HTTP / SSE client wrappers |
-| `src-tauri/` | Tauri backend (Rust), packaging and window config |
+| `apps/desktop-electron/` | Electron main/preload process code, package config, and release metadata |
+| `apps/renderer/src/applications/editor/` | Canvas editor core, layout rendering, plugins, tile logic |
+| `apps/renderer/src/components/` | Reusable UI (toolbar, sidebars, panels, etc.) |
+| `apps/renderer/src/views/` | Routed pages |
+| `apps/renderer/src/composables/` | Composables (workspace state, menus, desktop integration wrappers, etc.) |
+| `apps/renderer/src/stores/` | Pinia state |
+| `apps/renderer/src/api/` | HTTP / SSE client wrappers |
+| `packages/` | Shared internal workspace packages (desktop bridge, tile helper, shared contracts) |
 
 ## Related docs
 

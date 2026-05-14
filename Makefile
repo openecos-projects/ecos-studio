@@ -97,9 +97,8 @@ check-platform:
 		exit 1; \
 	fi; \
 	GLIBC_VERSION=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $$2 }'); \
-	GLIBC_MAJOR=$${GLIBC_VERSION%%.*}; \
-	GLIBC_MINOR=$${GLIBC_VERSION#*.}; \
-	GLIBC_MINOR=$${GLIBC_MINOR%%[!0-9]*}; \
+	GLIBC_MAJOR=$$(printf '%s\n' "$$GLIBC_VERSION" | awk -F. '{ print $$1 }'); \
+	GLIBC_MINOR=$$(printf '%s\n' "$$GLIBC_VERSION" | awk -F. '{ print $$2 }' | sed 's/[^0-9].*//'); \
 	GLIBC_MAJOR=$${GLIBC_MAJOR:-0}; \
 	GLIBC_MINOR=$${GLIBC_MINOR:-0}; \
 	if [ "$$GLIBC_MAJOR" -lt 2 ] || { [ "$$GLIBC_MAJOR" -eq 2 ] && [ "$$GLIBC_MINOR" -lt 34 ]; }; then \
@@ -110,8 +109,7 @@ check-platform:
 
 dev: check-setup check-platform
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	@cd ecos/gui && pnpm install
-	bazel run //ecos:dev_symlinks
+	@cd ecos/gui && pnpm install --frozen-lockfile
 
 use-local-ecc: check-setup check-platform
 	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11

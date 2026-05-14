@@ -26,6 +26,7 @@ dev = [
   "pyinstaller>=6",
   "pyright>=1.1.407",
   "pytest>=7",
+  "pytest-asyncio>=0.23",
   "pytest-cov>=4",
   "ruff>=0.14.10",
   "ty>=0.0.9"
@@ -50,7 +51,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 ecc = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.2/ecc-0.1.0a2-py3-none-any.whl" }
-ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.2/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
+ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.4/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
 ecc-tools = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.2/ecc_tools-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
 torch = { index = "pytorch-cpu" }
 
