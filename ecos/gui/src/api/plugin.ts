@@ -32,6 +32,8 @@ export type ResourceAction =
   | 'activate'
   | 'remove_reference'
 
+export type ResourceStatus = ToolStatus | 'missing' | 'invalid' | 'removing'
+
 export interface ResourceInfo {
   id: string
   type: ResourceType
@@ -39,7 +41,7 @@ export interface ResourceInfo {
   display_name: string
   description: string
   category: string
-  status: ToolStatus | string
+  status: ResourceStatus
   installed_version: string | null
   available_versions: string[]
   active_version: string | null
@@ -54,12 +56,14 @@ export interface ResourceInfo {
   error: string | null
 }
 
-interface ResourceList {
+export interface ResourceItem extends ResourceInfo {}
+
+export interface ResourceList {
   resources: ResourceInfo[]
   diagnostics: string[]
 }
 
-interface ResourceJob {
+export interface ResourceJob {
   id: string
   resource_id: string
   action: ResourceAction
@@ -78,6 +82,9 @@ export type InstallPhase =
   | 'uninstalling'
 
 export interface InstallProgress {
+  resourceId: string
+  resourceName: string
+  /** Legacy field kept for existing tool UI code. */
   tool: string
   phase: InstallPhase | string
   progress: number
@@ -89,6 +96,10 @@ const NO_CACHE = { cacheFor: 0 as const }
 
 function resourceIdForTool(name: string): string {
   return `tool:${name}`
+}
+
+function resourceNameFromId(resourceId: string): string {
+  return resourceId.replace(/^(tool|pdk):/, '')
 }
 
 export function resourceToToolInfo(resource: ResourceInfo): ToolInfo {
@@ -104,19 +115,26 @@ export function resourceToToolInfo(resource: ResourceInfo): ToolInfo {
   }
 }
 
+export function resourceToResourceItem(resource: ResourceInfo): ResourceItem {
+  return { ...resource }
+}
+
 export function resourceListToTools(payload: ResourceList): ToolInfo[] {
   return payload.resources
     .filter((resource) => resource.type === 'tool')
     .map(resourceToToolInfo)
 }
 
-export function resourceListToResources(payload: ResourceList): ResourceInfo[] {
-  return payload.resources
+export function resourceListToResources(payload: ResourceList): ResourceItem[] {
+  return payload.resources.map(resourceToResourceItem)
 }
 
 export function resourceJobToInstallProgress(job: ResourceJob): InstallProgress {
+  const resourceName = resourceNameFromId(job.resource_id)
   return {
-    tool: job.resource_id.replace(/^tool:/, ''),
+    resourceId: job.resource_id,
+    resourceName,
+    tool: resourceName,
     phase: job.phase,
     progress: job.progress,
     message: job.message || job.error || '',
@@ -128,7 +146,7 @@ export async function listToolsApi(): Promise<ToolInfo[]> {
   return resourceListToTools(payload)
 }
 
-export async function listResourcesApi(): Promise<ResourceInfo[]> {
+export async function listResourcesApi(): Promise<ResourceItem[]> {
   const payload = await alovaInstance.Get<ResourceList>('/api/resources', NO_CACHE)
   return resourceListToResources(payload)
 }
@@ -156,35 +174,51 @@ export function validatePdkApi(resourceId: string) {
 }
 
 export function removePdkReferenceApi(resourceId: string) {
+  const pdkId = resourceNameFromId(resourceId)
   return alovaInstance.Delete<{ status: string; resource_id: string }>(
-    `/api/resources/pdks/${encodeURIComponent(resourceId.replace(/^pdk:/, ''))}`,
+    `/api/resources/pdks/${encodeURIComponent(pdkId)}`,
   )
 }
 
-export function installToolApi(name: string, version?: string) {
-  return alovaInstance.Post<{ status: string; tool: string; version: string }>(
-    `/api/resources/${encodeURIComponent(resourceIdForTool(name))}/install`,
+export function installResourceApi(resourceId: string, version?: string) {
+  return alovaInstance.Post<{ status: string; resource_id: string; version: string }>(
+    `/api/resources/${encodeURIComponent(resourceId)}/install`,
     version ? { version } : {},
   )
 }
 
-export function uninstallToolApi(name: string) {
-  return alovaInstance.Post<{ status: string; tool: string }>(
-    `/api/resources/${encodeURIComponent(resourceIdForTool(name))}/uninstall`,
+export function updateResourceApi(resourceId: string) {
+  return alovaInstance.Post<{ status: string; resource_id: string; version: string }>(
+    `/api/resources/${encodeURIComponent(resourceId)}/update`,
     {},
   )
+}
+
+export function uninstallResourceApi(resourceId: string) {
+  return alovaInstance.Post<{ status: string; resource_id: string }>(
+    `/api/resources/${encodeURIComponent(resourceId)}/uninstall`,
+    {},
+  )
+}
+
+export function installToolApi(name: string, version?: string) {
+  return installResourceApi(resourceIdForTool(name), version)
+}
+
+export function uninstallToolApi(name: string) {
+  return uninstallResourceApi(resourceIdForTool(name))
 }
 
 export function refreshRegistryApi() {
   return alovaInstance.Post<{ status: string; tools_count: number }>('/api/resources/registry/refresh')
 }
 
-export function subscribePluginProgress(
-  toolName: string,
+export function subscribeResourceProgress(
+  resourceId: string,
   onProgress: (progress: InstallProgress) => void,
   onError?: (ev: Event) => void,
 ): { close: () => void } {
-  const url = `${API_BASE_URL}/api/resources/sse/${encodeURIComponent(resourceIdForTool(toolName))}`
+  const url = `${API_BASE_URL}/api/resources/sse/${encodeURIComponent(resourceId)}`
   const es = new EventSource(url)
 
   es.addEventListener('progress', (e: MessageEvent) => {
@@ -192,7 +226,7 @@ export function subscribePluginProgress(
       const job: ResourceJob = JSON.parse(e.data as string)
       onProgress(resourceJobToInstallProgress(job))
     } catch (err) {
-      console.error('Plugin SSE parse error:', err)
+      console.error('Resource SSE parse error:', err)
     }
   })
 
@@ -203,4 +237,12 @@ export function subscribePluginProgress(
   return {
     close: () => es.close(),
   }
+}
+
+export function subscribePluginProgress(
+  toolName: string,
+  onProgress: (progress: InstallProgress) => void,
+  onError?: (ev: Event) => void,
+): { close: () => void } {
+  return subscribeResourceProgress(resourceIdForTool(toolName), onProgress, onError)
 }

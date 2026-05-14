@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { resourceJobToInstallProgress, resourceListToResources, resourceListToTools } from './plugin'
+import {
+  resourceJobToInstallProgress,
+  resourceListToResources,
+  resourceListToTools,
+  resourceToResourceItem,
+  type ResourceList,
+} from './plugin'
 
 describe('Resource Manager tool API adapter', () => {
-  const resourceListPayload = {
+  const resourceListPayload: ResourceList = {
     diagnostics: [],
     resources: [
       {
@@ -13,7 +19,7 @@ describe('Resource Manager tool API adapter', () => {
         display_name: 'Yosys',
         description: 'RTL synthesis',
         category: 'synthesis',
-        status: 'installed',
+        status: 'installed' as const,
         installed_version: '0.61',
         available_versions: ['0.61'],
         active_version: '0.61',
@@ -34,7 +40,7 @@ describe('Resource Manager tool API adapter', () => {
         display_name: 'ics55',
         description: '',
         category: 'pdk',
-        status: 'installed',
+        status: 'installed' as const,
         installed_version: null,
         available_versions: [],
         active_version: null,
@@ -80,6 +86,66 @@ describe('Resource Manager tool API adapter', () => {
     })
   })
 
+  it('preserves Resource Manager PDK resources for resource views', () => {
+    const resources = resourceListToResources({
+      diagnostics: [],
+      resources: [
+        {
+          id: 'pdk:ics55',
+          type: 'pdk' as const,
+          name: 'ics55',
+          display_name: 'ICSPROUT 55nm PDK',
+          description: 'Integrated Circuit Systems 55nm PDK',
+          category: 'pdk',
+          status: 'available' as const,
+          installed_version: null,
+          available_versions: ['1.01'],
+          active_version: null,
+          active: false,
+          path: null,
+          platform: 'all-platform',
+          size: 432000000,
+          source: 'registry',
+          homepage: 'https://example.com/ics55',
+          actions: ['install' as const],
+          health: {},
+          error: null,
+        },
+      ],
+    })
+
+    expect(resources).toEqual([
+      {
+        id: 'pdk:ics55',
+        type: 'pdk',
+        name: 'ics55',
+        display_name: 'ICSPROUT 55nm PDK',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        category: 'pdk',
+        status: 'available',
+        installed_version: null,
+        available_versions: ['1.01'],
+        active_version: null,
+        active: false,
+        path: null,
+        platform: 'all-platform',
+        size: 432000000,
+        source: 'registry',
+        homepage: 'https://example.com/ics55',
+        actions: ['install'],
+        health: {},
+        error: null,
+      },
+    ])
+  })
+
+  it('clones a resource row for resource views', () => {
+    const resource = resourceListPayload.resources[1]
+
+    expect(resourceToResourceItem(resource)).toEqual(resource)
+    expect(resourceToResourceItem(resource)).not.toBe(resource)
+  })
+
   it('maps Resource Manager jobs to install progress rows', () => {
     expect(
       resourceJobToInstallProgress({
@@ -92,9 +158,32 @@ describe('Resource Manager tool API adapter', () => {
         error: null,
       }),
     ).toEqual({
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
       tool: 'yosys',
       phase: 'downloading',
       progress: 0.5,
+      message: 'Downloading...',
+    })
+  })
+
+  it('maps PDK jobs to install progress rows with resource identity', () => {
+    expect(
+      resourceJobToInstallProgress({
+        id: 'job-2',
+        resource_id: 'pdk:ics55',
+        action: 'install',
+        phase: 'downloading',
+        progress: 0.25,
+        message: 'Downloading...',
+        error: null,
+      }),
+    ).toEqual({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'downloading',
+      progress: 0.25,
       message: 'Downloading...',
     })
   })
