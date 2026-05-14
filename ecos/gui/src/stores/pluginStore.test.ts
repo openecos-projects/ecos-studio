@@ -309,4 +309,30 @@ describe('pluginStore', () => {
       status: 'installed',
     })
   })
+
+  it('refreshes resources immediately after uninstall without waiting for SSE progress', async () => {
+    const installedPdk = makePdkResource({
+      status: 'installed',
+      installed_version: '1.01',
+      path: '/tmp/pdks/ics55',
+      actions: ['uninstall'],
+    })
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([installedPdk])
+      .mockResolvedValueOnce([])
+    vi.mocked(uninstallResourceApi).mockResolvedValue({
+      status: 'uninstalled',
+      resource_id: 'pdk:ics55',
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.uninstallResource('pdk:ics55')
+
+    expect(uninstallResourceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(subscribeResourceProgress).not.toHaveBeenCalled()
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    expect(store.resources).toEqual([])
+  })
 })

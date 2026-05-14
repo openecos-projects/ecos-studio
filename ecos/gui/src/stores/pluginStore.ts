@@ -217,13 +217,7 @@ export const usePluginStore = defineStore('plugin', () => {
         resource.error = null
         _syncLegacyTools()
       }
-
-      const toolName = _toolNameForResourceId(resourceId)
-      if (toolName) {
-        _subscribeProgress(toolName)
-      } else {
-        _subscribeResourceProgress(resourceId)
-      }
+      await fetchTools({ silent: true })
     } catch (e) {
       _setResourceError(
         resourceId,

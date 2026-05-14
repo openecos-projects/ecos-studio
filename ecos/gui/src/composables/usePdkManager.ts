@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { LazyStore } from '@tauri-apps/plugin-store'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
-import { importPdkPathApi } from '@/api/plugin'
+import { importPdkPathApi, removePdkReferenceApi } from '@/api/plugin'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
 
@@ -19,6 +19,27 @@ const store = new LazyStore('settings.json')
 // 全局共享状态
 const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
+
+function isMissingBackendReference(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const maybe = error as {
+    status?: number
+    statusCode?: number
+    response?: { status?: number }
+    message?: string
+  }
+
+  const status = maybe.status ?? maybe.statusCode ?? maybe.response?.status
+  if (status === 404) {
+    return true
+  }
+
+  const message = maybe.message?.toLowerCase() ?? ''
+  return message.includes('404') || message.includes('not found')
+}
 
 interface ScannedPdkDirectory {
   canonicalPath: string
@@ -183,6 +204,16 @@ export function usePdkManager() {
 
   /** 删除已导入的 PDK */
   const removePdk = async (id: string) => {
+    const target = importedPdks.value.find(p => p.id === id)
+    if (target) {
+      try {
+        await removePdkReferenceApi(`pdk:${target.pdkId}`)
+      } catch (error) {
+        if (!isMissingBackendReference(error)) {
+          throw error
+        }
+      }
+    }
     importedPdks.value = importedPdks.value.filter(p => p.id !== id)
     await savePdks()
   }
