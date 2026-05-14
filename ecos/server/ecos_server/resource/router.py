@@ -78,9 +78,7 @@ def _pdk_health(entry: PdkInventoryEntry) -> dict[str, object]:
     }
 
 
-def _pdk_status(
-    entry: PdkInventoryEntry, *, update_available: bool = False
-) -> ResourceStatus:
+def _pdk_status(entry: PdkInventoryEntry, *, update_available: bool = False) -> ResourceStatus:
     if entry.health == "missing":
         return ResourceStatus.missing
     if entry.health == "invalid":

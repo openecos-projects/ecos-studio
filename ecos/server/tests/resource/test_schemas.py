@@ -486,16 +486,19 @@ class TestResourceRegistryV1:
         from ecos_server.resource import RegistryPdk, RegistryPdkVersion
 
         assert RegistryPdk(id="ics55", display_name="IC-S55").id == "ics55"
-        assert RegistryPdkVersion(
-            version="1.01",
-            platforms={
-                "all-platform": {
-                    "url": "https://example.com/ics55-1.01.tar.gz",
-                    "sha256": "abc123",
-                    "size": 1024,
-                }
-            },
-        ).version == "1.01"
+        assert (
+            RegistryPdkVersion(
+                version="1.01",
+                platforms={
+                    "all-platform": {
+                        "url": "https://example.com/ics55-1.01.tar.gz",
+                        "sha256": "abc123",
+                        "size": 1024,
+                    }
+                },
+            ).version
+            == "1.01"
+        )
 
     def test_tool_registry_keeps_pdks(self) -> None:
         reg = ToolRegistry(

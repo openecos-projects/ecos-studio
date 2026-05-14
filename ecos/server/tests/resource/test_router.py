@@ -414,9 +414,7 @@ class TestListResources:
             }
         ]
 
-    def test_list_includes_imported_pdk_when_registry_unavailable(
-        self, client: TestClient
-    ) -> None:
+    def test_list_includes_imported_pdk_when_registry_unavailable(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
         from ecos_server.resource.registry import RegistryService as RS
 
@@ -935,9 +933,7 @@ class TestManagedPdkDirectRoutes:
         assert "not available for linux-x86_64 or all-platform" in resp.json()["detail"]
 
     @pytest.mark.parametrize("action", ["install", "update"])
-    def test_direct_pdk_conflict_409_when_job_active(
-        self, client: TestClient, action: str
-    ) -> None:
+    def test_direct_pdk_conflict_409_when_job_active(self, client: TestClient, action: str) -> None:
         import ecos_server.resource.router as router_mod
         from ecos_server.resource.schemas import ResourceAction
 
@@ -1269,9 +1265,7 @@ class TestBatch:
         assert "not available for linux-x86_64 or all-platform" in result["error"]
 
     @pytest.mark.parametrize("action", ["install", "update"])
-    def test_batch_pdk_conflict_409_when_job_active(
-        self, client: TestClient, action: str
-    ) -> None:
+    def test_batch_pdk_conflict_409_when_job_active(self, client: TestClient, action: str) -> None:
         import ecos_server.resource.router as router_mod
         from ecos_server.resource.schemas import ResourceAction
 

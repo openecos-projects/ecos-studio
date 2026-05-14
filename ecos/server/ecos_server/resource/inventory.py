@@ -248,28 +248,30 @@ class InventoryService:
                 "directories": [],
                 "files": detected_files or [],
             }
-            next_managed = managed if managed is not None else (
-                existing_pdk.managed if existing_pdk else False
+            next_managed = (
+                managed
+                if managed is not None
+                else (existing_pdk.managed if existing_pdk else False)
             )
-            next_active = active if active is not None else (
-                existing_pdk.active if existing_pdk else False
+            next_active = (
+                active if active is not None else (existing_pdk.active if existing_pdk else False)
             )
             entry = PdkInventoryEntry(
                 id=pdk_id,
                 name=name or (existing_pdk.name if existing_pdk else ""),
                 pdk_id=pdk_id,
-                version=version if version is not None else (
-                    existing_pdk.version if existing_pdk else ""
-                ),
-                sha256=sha256 if sha256 is not None else (
-                    existing_pdk.sha256 if existing_pdk else ""
-                ),
-                source=source if source is not None else (
-                    existing_pdk.source if existing_pdk else ""
-                ),
-                source_url=source_url if source_url is not None else (
-                    existing_pdk.source_url if existing_pdk else ""
-                ),
+                version=version
+                if version is not None
+                else (existing_pdk.version if existing_pdk else ""),
+                sha256=sha256
+                if sha256 is not None
+                else (existing_pdk.sha256 if existing_pdk else ""),
+                source=source
+                if source is not None
+                else (existing_pdk.source if existing_pdk else ""),
+                source_url=source_url
+                if source_url is not None
+                else (existing_pdk.source_url if existing_pdk else ""),
                 canonical_path=canonical_path,
                 path=canonical_path,
                 detected_files=detected_files or [],

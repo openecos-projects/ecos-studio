@@ -301,9 +301,7 @@ class TestPdkInventory:
         assert entry.canonical_path == "/tmp/newpath"
         assert entry.detected_files == ["a", "b"]
 
-    def test_add_or_update_pdk_active_true_is_exclusive(
-        self, inventory: InventoryService
-    ) -> None:
+    def test_add_or_update_pdk_active_true_is_exclusive(self, inventory: InventoryService) -> None:
         inventory.add_or_update_pdk("a", canonical_path="/tmp/a", active=True)
         inventory.add_or_update_pdk("b", canonical_path="/tmp/b", active=True)
 
