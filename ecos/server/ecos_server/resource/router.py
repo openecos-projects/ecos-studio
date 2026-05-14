@@ -78,6 +78,24 @@ def _pdk_health(entry: PdkInventoryEntry) -> dict[str, object]:
     }
 
 
+def _pdk_status(
+    entry: PdkInventoryEntry, *, update_available: bool = False
+) -> ResourceStatus:
+    if entry.health == "missing":
+        return ResourceStatus.missing
+    if entry.health == "invalid":
+        return ResourceStatus.invalid
+    if update_available:
+        return ResourceStatus.update_available
+    return ResourceStatus.installed
+
+
+def _managed_pdk_reference_error(entry: PdkInventoryEntry) -> str | None:
+    if entry.managed:
+        return f"PDK '{entry.id}' is managed and cannot remove reference; use uninstall"
+    return None
+
+
 def init_registry(registry_url: str) -> None:
     global _registry_service
     _registry_service = RegistryService(registry_url=registry_url)
@@ -171,13 +189,7 @@ def _installed_tool_to_resource(
 
 
 def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
-    if entry.health == "missing":
-        status = ResourceStatus.missing
-    elif entry.health == "invalid":
-        status = ResourceStatus.invalid
-    else:
-        status = ResourceStatus.installed
-
+    status = _pdk_status(entry)
     actions = [ResourceAction.validate]
     if not entry.active:
         actions.append(ResourceAction.activate)
@@ -224,10 +236,14 @@ def _registry_pdk_to_resource(
         actions: list[ResourceAction] = []
         error = None
     elif inst:
-        if inst.managed and versions and inst.version and versions[0] != inst.version:
-            status = ResourceStatus.update_available
-        else:
-            status = ResourceStatus.installed
+        actionable_update = (
+            inst.managed
+            and bool(inst.version)
+            and latest is not None
+            and latest.version != inst.version
+            and platform_asset is not None
+        )
+        status = _pdk_status(inst, update_available=actionable_update)
         actions = [ResourceAction.validate]
         if not inst.active:
             actions.append(ResourceAction.activate)
@@ -345,8 +361,12 @@ async def remove_pdk_reference(pdk_id: str):
     """Remove a PDK inventory reference (AC-6: never deletes source directory).
 
     Returns 404 if the PDK is not in inventory."""
-    if _pdk_service.get_pdk(pdk_id) is None:
+    entry = _pdk_service.get_pdk(pdk_id)
+    if entry is None:
         raise HTTPException(status_code=404, detail=f"PDK '{pdk_id}' not found")
+    managed_error = _managed_pdk_reference_error(entry)
+    if managed_error is not None:
+        raise HTTPException(status_code=400, detail=managed_error)
     _pdk_service.remove_reference(pdk_id)
     return {"status": "removed", "resource_id": f"{_PDK_PREFIX}{pdk_id}"}
 
@@ -559,12 +579,21 @@ def _batch_validate_pdk(rid: str) -> dict:
 
 def _batch_remove_pdk_reference(rid: str) -> dict:
     """Remove a PDK inventory reference."""
-    if _pdk_service.get_pdk(rid[4:]) is None:
+    entry = _pdk_service.get_pdk(rid[4:])
+    if entry is None:
         return {
             "resource_id": rid,
             "action": "remove_reference",
             "status": 404,
             "error": f"PDK '{rid[4:]}' not found",
+        }
+    managed_error = _managed_pdk_reference_error(entry)
+    if managed_error is not None:
+        return {
+            "resource_id": rid,
+            "action": "remove_reference",
+            "status": 400,
+            "error": managed_error,
         }
     _pdk_service.remove_reference(rid[4:])
     return {

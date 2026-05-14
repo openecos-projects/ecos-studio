@@ -111,6 +111,24 @@ def _mock_registry_data_with_pdk() -> dict:
     return data
 
 
+def _mock_registry_data_with_pdk_versions() -> dict:
+    data = _mock_registry_data_with_pdk()
+    data["pdks"][0]["versions"].append(
+        {
+            "version": "1.00",
+            "platforms": {
+                "all-platform": {
+                    "url": "https://example.com/ics55-1.00.tar.gz",
+                    "sha256": "6" * 64,
+                    "size": 321000000,
+                    "strip_prefix": "ics55-pdk",
+                }
+            },
+        }
+    )
+    return data
+
+
 def _mock_async_client(response_data: dict) -> MagicMock:
     resp = MagicMock()
     resp.json.return_value = response_data
@@ -229,6 +247,76 @@ class TestListResources:
         assert pdk["health"]["managed"] is True
         assert pdk["health"]["version"] == "1.00"
         assert pdk["health"]["source"] == "registry"
+
+    @pytest.mark.parametrize("health", ["missing", "invalid"])
+    def test_list_registry_pdk_preserves_validated_health(
+        self, client: TestClient, health: str
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data_with_pdk_versions())
+        pdk_dir = _make_pdk_dir()
+        router_mod._inventory.add_or_update_pdk(
+            "ics55",
+            name="ICSPROUT 55nm PDK",
+            canonical_path=str(pdk_dir),
+            version="1.00",
+            sha256="old",
+            source="registry",
+            source_url="https://example.com/ics55-1.00.tar.gz",
+            managed=True,
+            active=True,
+        )
+        router_mod._inventory.set_pdk_health("ics55", health)
+
+        resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        pdk = next(r for r in resp.json()["resources"] if r["type"] == "pdk")
+        assert pdk["status"] == health
+        assert pdk["health"]["status"] == health
+        assert pdk["installed_version"] == "1.00"
+
+    def test_list_registry_pdk_hides_impossible_update_when_latest_unavailable(
+        self, client: TestClient
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        data = _mock_registry_data_with_pdk_versions()
+        data["pdks"][0]["versions"][0]["platforms"] = {
+            "darwin-arm64": {
+                "url": "https://example.com/ics55-1.01-darwin.tar.gz",
+                "sha256": "7" * 64,
+                "size": 111,
+                "strip_prefix": "ics55-pdk",
+            }
+        }
+        _patch_registry(client, data)
+        router_mod._inventory.add_or_update_pdk(
+            "ics55",
+            name="ICSPROUT 55nm PDK",
+            canonical_path=str(_make_pdk_dir()),
+            version="1.00",
+            sha256="old",
+            source="registry",
+            source_url="https://example.com/ics55-1.00.tar.gz",
+            managed=True,
+            active=True,
+        )
+
+        with patch(
+            "ecos_server.resource.router.ToolResourceService.current_platform",
+            return_value="linux-x86_64",
+        ):
+            resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        pdk = next(r for r in resp.json()["resources"] if r["type"] == "pdk")
+        assert pdk["status"] == "installed"
+        assert "update" not in pdk["actions"]
+        assert pdk["error"] is None
+        assert pdk["platform"] == "linux-x86_64"
+        assert pdk["size"] is None
 
     def test_list_registry_pdk_without_supported_asset_is_error(self, client: TestClient) -> None:
         data = _mock_registry_data_with_pdk()
@@ -682,6 +770,42 @@ class TestInstall:
             assert mock.call_args.kwargs["asset"].url == "https://example.com/ics55.tar.gz"
             router_mod._job_tracker.finish("pdk:ics55")
 
+    def test_install_pdk_prefers_current_platform_asset(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        data = _mock_registry_data_with_pdk()
+        data["pdks"][0]["versions"][0]["platforms"]["linux-x86_64"] = {
+            "url": "https://example.com/ics55-linux.tar.gz",
+            "sha256": "8" * 64,
+            "size": 123456,
+            "strip_prefix": "ics55-linux",
+        }
+        _patch_registry(client, data)
+        mock = AsyncMock()
+        with (
+            patch.object(router_mod._pdk_service, "install_managed_pdk", mock),
+            patch(
+                "ecos_server.resource.router.ToolResourceService.current_platform",
+                return_value="linux-x86_64",
+            ),
+        ):
+            resp = client.post("/api/resources/pdk:ics55/install")
+
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["platform"] == "linux-x86_64"
+            mock.assert_called_once()
+            assert mock.call_args.kwargs["asset"].url == "https://example.com/ics55-linux.tar.gz"
+            router_mod._job_tracker.finish("pdk:ics55")
+
+    def test_install_unknown_requested_pdk_version_404(self, client: TestClient) -> None:
+        _patch_registry(client, _mock_registry_data_with_pdk_versions())
+
+        resp = client.post("/api/resources/pdk:ics55/install", json={"version": "9.99"})
+
+        assert resp.status_code == 404
+        assert "v9.99" in resp.json()["detail"]
+
     @pytest.mark.asyncio
     async def test_install_reserves_job_before_registry_fetch(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
@@ -749,6 +873,77 @@ class TestUpdate:
             mock.assert_called_once()
             assert mock.call_args.kwargs["action"] == "update"
             router_mod._job_tracker.finish("pdk:ics55")
+
+
+class TestManagedPdkDirectRoutes:
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_direct_pdk_unknown_id_404(self, client: TestClient, action: str) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": [], "pdks": []})
+
+        resp = client.post(f"/api/resources/pdk:nonexistent/{action}")
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "PDK 'nonexistent' not found"
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_direct_pdk_unsupported_platform_400(self, client: TestClient, action: str) -> None:
+        data = _mock_registry_data_with_pdk()
+        data["pdks"][0]["versions"][0]["platforms"] = {
+            "darwin-arm64": {
+                "url": "https://example.com/ics55-darwin.tar.gz",
+                "sha256": "5" * 64,
+                "size": 123,
+                "strip_prefix": "ics55-pdk",
+            }
+        }
+        _patch_registry(client, data)
+
+        with patch(
+            "ecos_server.resource.router.ToolResourceService.current_platform",
+            return_value="linux-x86_64",
+        ):
+            resp = client.post(f"/api/resources/pdk:ics55/{action}")
+
+        assert resp.status_code == 400
+        assert "not available for linux-x86_64 or all-platform" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_direct_pdk_conflict_409_when_job_active(
+        self, client: TestClient, action: str
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.schemas import ResourceAction
+
+        router_mod._job_tracker.start("pdk:ics55", action=ResourceAction.install)
+
+        try:
+            resp = client.post(f"/api/resources/pdk:ics55/{action}")
+        finally:
+            router_mod._job_tracker.finish("pdk:ics55")
+
+        assert resp.status_code == 409
+        detail = resp.json()["detail"]
+        assert detail["resource_id"] == "pdk:ics55"
+        assert detail["action"] == "install"
+        assert detail["status"] == "conflict"
+        assert detail["existing_job_id"] is not None
+        assert detail["event_url"] is not None
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_direct_pdk_registry_unavailable_503(self, client: TestClient, action: str) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        router_mod._registry_service = mock_rs
+
+        resp = client.post(f"/api/resources/pdk:ics55/{action}")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Registry unavailable"
 
 
 class TestUninstall:
@@ -860,6 +1055,34 @@ class TestPdkRoutes:
         _pdk_service.import_pdk(str(pdk_dir))
         client.delete("/api/resources/pdks/ics55")
         assert pdk_dir.exists()
+
+    def test_delete_managed_pdk_reference_rejected_and_preserves_files(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        managed_dir = tmp_path / "managed" / "ics55"
+        managed_dir.mkdir(parents=True)
+        marker = managed_dir / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        router_mod._inventory.add_or_update_pdk(
+            "ics55",
+            name="ICSPROUT 55nm PDK",
+            canonical_path=str(managed_dir),
+            version="1.00",
+            sha256="old",
+            source="registry",
+            source_url="https://example.com/ics55-1.00.tar.gz",
+            managed=True,
+            active=True,
+        )
+
+        resp = client.delete("/api/resources/pdks/ics55")
+
+        assert resp.status_code == 400
+        assert "managed" in resp.json()["detail"]
+        assert marker.exists()
+        assert router_mod._pdk_service.get_pdk("ics55") is not None
 
 
 class TestRegistryRefresh:
@@ -977,6 +1200,92 @@ class TestBatch:
             assert mock.call_args.kwargs["action"] == "update"
             router_mod._job_tracker.finish("pdk:ics55")
 
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_batch_pdk_unknown_id_404(self, client: TestClient, action: str) -> None:
+        _patch_registry(client, {"schema_version": 2, "tools": [], "pdks": []})
+
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:nonexistent", "action": action}]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 404
+        assert result["error"] == "PDK 'nonexistent' not found"
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_batch_pdk_unsupported_platform_400(self, client: TestClient, action: str) -> None:
+        data = _mock_registry_data_with_pdk()
+        data["pdks"][0]["versions"][0]["platforms"] = {
+            "darwin-arm64": {
+                "url": "https://example.com/ics55-darwin.tar.gz",
+                "sha256": "5" * 64,
+                "size": 123,
+                "strip_prefix": "ics55-pdk",
+            }
+        }
+        _patch_registry(client, data)
+
+        with patch(
+            "ecos_server.resource.router.ToolResourceService.current_platform",
+            return_value="linux-x86_64",
+        ):
+            resp = client.post(
+                "/api/resources/batch",
+                json={"operations": [{"resource_id": "pdk:ics55", "action": action}]},
+            )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 400
+        assert "not available for linux-x86_64 or all-platform" in result["error"]
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_batch_pdk_conflict_409_when_job_active(
+        self, client: TestClient, action: str
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.schemas import ResourceAction
+
+        router_mod._job_tracker.start("pdk:ics55", action=ResourceAction.install)
+
+        try:
+            resp = client.post(
+                "/api/resources/batch",
+                json={"operations": [{"resource_id": "pdk:ics55", "action": action}]},
+            )
+        finally:
+            router_mod._job_tracker.finish("pdk:ics55")
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 409
+        assert result["detail"]["resource_id"] == "pdk:ics55"
+        assert result["detail"]["status"] == "conflict"
+        assert result["detail"]["existing_job_id"] is not None
+
+    @pytest.mark.parametrize("action", ["install", "update"])
+    def test_batch_pdk_registry_unavailable_503(self, client: TestClient, action: str) -> None:
+        import ecos_server.resource.router as router_mod
+        from ecos_server.resource.registry import RegistryService as RS
+
+        mock_rs = MagicMock(spec=RS)
+        mock_rs.fetch = AsyncMock(
+            return_value=RegistryState(registry=None, diagnostics=["Registry unavailable"])
+        )
+        router_mod._registry_service = mock_rs
+
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:ics55", "action": action}]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 503
+        assert result["error"] == "Registry unavailable"
+
     def test_batch_uninstall_unmanaged_tool_rejected_and_preserves_path(
         self, client: TestClient, tmp_path: Path
     ) -> None:
@@ -1079,6 +1388,39 @@ class TestBatch:
         result = resp.json()["results"][0]
         assert result["status"] == 200
         assert _pdk_service.get_pdk("ics55") is None
+
+    def test_batch_remove_managed_pdk_reference_rejected_and_preserves_files(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        managed_dir = tmp_path / "managed" / "ics55"
+        managed_dir.mkdir(parents=True)
+        marker = managed_dir / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        router_mod._inventory.add_or_update_pdk(
+            "ics55",
+            name="ICSPROUT 55nm PDK",
+            canonical_path=str(managed_dir),
+            version="1.00",
+            sha256="old",
+            source="registry",
+            source_url="https://example.com/ics55-1.00.tar.gz",
+            managed=True,
+            active=True,
+        )
+
+        resp = client.post(
+            "/api/resources/batch",
+            json={"operations": [{"resource_id": "pdk:ics55", "action": "remove_reference"}]},
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert result["status"] == 400
+        assert "managed" in result["error"]
+        assert marker.exists()
+        assert router_mod._pdk_service.get_pdk("ics55") is not None
 
     def test_batch_remove_reference_missing_404(self, client: TestClient) -> None:
         _patch_registry(client, {"schema_version": 2, "tools": []})
