@@ -1,0 +1,312 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+
+vi.mock('@/api/plugin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/plugin')>()
+
+  return {
+    ...actual,
+    activatePdkApi: vi.fn(),
+    installResourceApi: vi.fn(),
+    installToolApi: vi.fn(),
+    listResourcesApi: vi.fn(),
+    refreshRegistryApi: vi.fn(),
+    removePdkReferenceApi: vi.fn(),
+    resourceListToTools: vi.fn(actual.resourceListToTools),
+    subscribePluginProgress: vi.fn(),
+    subscribeResourceProgress: vi.fn(),
+    uninstallResourceApi: vi.fn(),
+    uninstallToolApi: vi.fn(),
+    updateResourceApi: vi.fn(),
+    validatePdkApi: vi.fn(),
+  }
+})
+
+import {
+  installResourceApi,
+  listResourcesApi,
+  resourceListToTools,
+  subscribeResourceProgress,
+  uninstallResourceApi,
+  updateResourceApi,
+  type InstallProgress,
+  type ResourceItem,
+} from '@/api/plugin'
+import { usePluginStore } from './pluginStore'
+
+function makeToolResource(overrides: Partial<ResourceItem> = {}): ResourceItem {
+  return {
+    id: 'tool:yosys',
+    type: 'tool',
+    name: 'yosys',
+    display_name: 'Yosys',
+    description: 'RTL synthesis',
+    category: 'synthesis',
+    status: 'available',
+    installed_version: null,
+    available_versions: ['0.61'],
+    active_version: null,
+    active: false,
+    path: null,
+    platform: 'linux-x86_64',
+    size: 123,
+    source: 'registry',
+    homepage: 'https://example.com/yosys',
+    actions: ['install'],
+    health: {},
+    error: null,
+    ...overrides,
+  }
+}
+
+function makePdkResource(overrides: Partial<ResourceItem> = {}): ResourceItem {
+  return {
+    id: 'pdk:ics55',
+    type: 'pdk',
+    name: 'ics55',
+    display_name: 'ICSPROUT 55nm PDK',
+    description: 'Integrated Circuit Systems 55nm PDK',
+    category: 'pdk',
+    status: 'available',
+    installed_version: null,
+    available_versions: ['1.01'],
+    active_version: null,
+    active: false,
+    path: null,
+    platform: 'all-platform',
+    size: 432000000,
+    source: 'registry',
+    homepage: 'https://example.com/ics55',
+    actions: ['install'],
+    health: {},
+    error: null,
+    ...overrides,
+  }
+}
+
+async function flushPromises(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+describe('pluginStore', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('fetches unified resources while keeping tools as the legacy tool projection', async () => {
+    const unifiedResources = [
+      makeToolResource({
+        status: 'installed',
+        installed_version: '0.61',
+        available_versions: ['0.61'],
+        path: '/tmp/tools/yosys/0.61',
+        actions: ['uninstall'],
+      }),
+      makePdkResource({
+        status: 'installed',
+        actions: ['validate', 'activate'],
+        path: '/tmp/pdks/ics55',
+      }),
+    ]
+    vi.mocked(listResourcesApi).mockResolvedValue(unifiedResources)
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    expect(listResourcesApi).toHaveBeenCalledTimes(1)
+    expect(resourceListToTools).toHaveBeenCalledWith({
+      resources: unifiedResources,
+      diagnostics: [],
+    })
+    expect(store.resources.map((resource) => resource.id)).toEqual(['tool:yosys', 'pdk:ics55'])
+    expect(store.tools).toEqual([
+      {
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: '0.61',
+        available_versions: ['0.61'],
+        install_path: '/tmp/tools/yosys/0.61',
+      },
+    ])
+  })
+
+  it('installs a PDK resource and subscribes by resourceId', async () => {
+    const availablePdk = makePdkResource()
+    const installedPdk = makePdkResource({
+      status: 'installed',
+      installed_version: '1.01',
+      path: '/tmp/pdks/ics55',
+      actions: ['validate', 'activate'],
+    })
+    let onProgress: ((progress: InstallProgress) => void) | undefined
+    const close = vi.fn()
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availablePdk])
+      .mockResolvedValueOnce([installedPdk])
+    vi.mocked(installResourceApi).mockResolvedValue({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.01',
+    })
+    vi.mocked(subscribeResourceProgress).mockImplementation((resourceId, callback) => {
+      expect(resourceId).toBe('pdk:ics55')
+      onProgress = callback
+      return { close }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.installResource('pdk:ics55', '1.01')
+
+    expect(installResourceApi).toHaveBeenCalledWith('pdk:ics55', '1.01')
+    expect(subscribeResourceProgress).toHaveBeenCalledTimes(1)
+    expect(store.resources[0]?.status).toBe('installing')
+
+    onProgress?.({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'downloading',
+      progress: 0.25,
+      message: 'Downloading...',
+    })
+
+    expect(store.resourceProgress['pdk:ics55']).toMatchObject({
+      resourceId: 'pdk:ics55',
+      phase: 'downloading',
+      progress: 0.25,
+    })
+    expect(store.installProgress.ics55).toBeUndefined()
+
+    onProgress?.({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'done',
+      progress: 1,
+      message: 'Done',
+    })
+    await flushPromises()
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(store.resourceProgress['pdk:ics55']).toBeUndefined()
+    expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'pdk:ics55',
+      status: 'installed',
+      installed_version: '1.01',
+    })
+  })
+
+  it('updates a resource by resourceId and syncs legacy tool progress and errors', async () => {
+    const updateAvailableTool = makeToolResource({
+      status: 'update_available',
+      installed_version: '0.60',
+      available_versions: ['0.61'],
+      actions: ['update', 'uninstall'],
+      path: '/tmp/tools/yosys/0.60',
+    })
+    const erroredTool = makeToolResource({
+      status: 'error',
+      installed_version: '0.60',
+      available_versions: ['0.61'],
+      actions: ['update', 'uninstall'],
+      error: 'Checksum mismatch',
+      path: '/tmp/tools/yosys/0.60',
+    })
+    let onProgress: ((progress: InstallProgress) => void) | undefined
+    const close = vi.fn()
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([updateAvailableTool])
+      .mockResolvedValueOnce([erroredTool])
+    vi.mocked(updateResourceApi).mockResolvedValue({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '0.61',
+    })
+    vi.mocked(subscribeResourceProgress).mockImplementation((resourceId, callback) => {
+      expect(resourceId).toBe('tool:yosys')
+      onProgress = callback
+      return { close }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.updateResource('tool:yosys')
+
+    expect(updateResourceApi).toHaveBeenCalledWith('tool:yosys')
+    expect(store.resources[0]?.status).toBe('installing')
+    expect(store.tools[0]?.status).toBe('installing')
+
+    onProgress?.({
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'downloading',
+      progress: 0.5,
+      message: 'Downloading...',
+    })
+
+    expect(store.resourceProgress['tool:yosys']).toMatchObject({
+      resourceId: 'tool:yosys',
+      phase: 'downloading',
+      progress: 0.5,
+    })
+    expect(store.installProgress.yosys).toMatchObject({
+      resourceId: 'tool:yosys',
+      phase: 'downloading',
+      progress: 0.5,
+    })
+
+    onProgress?.({
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'error',
+      progress: 1,
+      message: 'Checksum mismatch',
+    })
+    await flushPromises()
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(store.resourceProgress['tool:yosys']).toBeUndefined()
+    expect(store.installProgress.yosys).toBeUndefined()
+    expect(store.resourceErrors['tool:yosys']).toBe('Checksum mismatch')
+    expect(store.toolErrors.yosys).toBe('Checksum mismatch')
+    expect(store.tools[0]).toMatchObject({
+      name: 'yosys',
+      status: 'error',
+    })
+  })
+
+  it('stores uninstall errors by resourceId and restores the previous resource state', async () => {
+    const installedPdk = makePdkResource({
+      status: 'installed',
+      installed_version: '1.01',
+      path: '/tmp/pdks/ics55',
+      actions: ['uninstall'],
+    })
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([installedPdk])
+      .mockResolvedValueOnce([installedPdk])
+    vi.mocked(uninstallResourceApi).mockRejectedValue(new Error('Resource is busy'))
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.uninstallResource('pdk:ics55')
+
+    expect(uninstallResourceApi).toHaveBeenCalledWith('pdk:ics55')
+    expect(store.resourceErrors['pdk:ics55']).toBe('Resource is busy')
+    expect(store.resources[0]).toMatchObject({
+      id: 'pdk:ics55',
+      status: 'installed',
+    })
+  })
+})
