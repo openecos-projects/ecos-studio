@@ -78,6 +78,14 @@ function normalizePdkPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/$/, '')
 }
 
+function dedupeImportedPdks(pdks: ImportedPdk[]): ImportedPdk[] {
+  const deduped = new Map<string, ImportedPdk>()
+  for (const pdk of pdks) {
+    deduped.set(normalizePdkPath(pdk.path), pdk)
+  }
+  return Array.from(deduped.values())
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message
@@ -154,10 +162,11 @@ export function usePdkManager() {
     if (isLoaded.value) return // 避免重复加载
     try {
       let saved: ImportedPdk[] | null = null
+      let desktopApi: DesktopApi | undefined
 
       if (hasDesktopApi()) {
         try {
-          const desktopApi = await waitForDesktopApi()
+          desktopApi = await waitForDesktopApi()
           saved = await getSetting<ImportedPdk[]>(desktopApi, 'imported_pdks')
         } catch (error) {
           console.warn('[usePdkManager] Desktop settings unavailable during load, falling back to localStorage:', error)
@@ -169,7 +178,22 @@ export function usePdkManager() {
       }
 
       if (saved && saved.length > 0) {
-        importedPdks.value = saved
+        const deduped = dedupeImportedPdks(saved)
+        importedPdks.value = deduped
+
+        await Promise.all(
+          deduped.map(async (pdk) => {
+            try {
+              await syncImportedPdkReference(pdk.path)
+            } catch (error) {
+              console.warn('[usePdkManager] Failed to sync imported PDK to backend manifest:', pdk.path, error)
+            }
+          }),
+        )
+
+        if (deduped.length !== saved.length && desktopApi) {
+          await savePdks(desktopApi)
+        }
       }
       isLoaded.value = true
     } catch (error) {

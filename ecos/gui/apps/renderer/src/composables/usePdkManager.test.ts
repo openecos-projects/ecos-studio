@@ -236,6 +236,57 @@ describe('usePdkManager', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
+  it('syncs persisted imported PDKs into the backend manifest during load', async () => {
+    const { importPdkPathApi, usePdkManager } = await loadTestSubjects()
+    settingsGet.mockResolvedValueOnce([
+      {
+        id: 'local-ics55',
+        name: 'ICSPROUT 55nm PDK',
+        path: '/tmp/pdks/ics55',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+      },
+    ] as any)
+
+    const { loadPdks, importedPdks } = usePdkManager()
+    await loadPdks()
+
+    expect(importedPdks.value).toHaveLength(1)
+    expect(importPdkPathApi).toHaveBeenCalledTimes(1)
+    expect(importPdkPathApi).toHaveBeenCalledWith('/tmp/pdks/ics55')
+  })
+
+  it('keeps persisted imported PDKs loaded even when backend sync fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { importPdkPathApi, usePdkManager } = await loadTestSubjects()
+    settingsGet.mockResolvedValueOnce([
+      {
+        id: 'local-ics55',
+        name: 'ICSPROUT 55nm PDK',
+        path: '/tmp/pdks/ics55',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        techNode: '55nm',
+        pdkId: 'ics55',
+        importedAt: '2026-05-14T00:00:00Z',
+      },
+    ] as any)
+    vi.mocked(importPdkPathApi).mockRejectedValueOnce(new Error('backend unavailable'))
+
+    const { loadPdks, importedPdks } = usePdkManager()
+    await loadPdks()
+
+    expect(importedPdks.value).toHaveLength(1)
+    expect(importPdkPathApi).toHaveBeenCalledWith('/tmp/pdks/ics55')
+    expect(warn).toHaveBeenCalledWith(
+      '[usePdkManager] Failed to sync imported PDK to backend manifest:',
+      '/tmp/pdks/ics55',
+      expect.any(Error),
+    )
+    warn.mockRestore()
+  })
+
   it('removes backend resource references when deleting an imported PDK', async () => {
     const { removePdkReferenceApi, usePdkManager } = await loadTestSubjects()
     settingsGet.mockResolvedValueOnce([
