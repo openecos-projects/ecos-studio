@@ -208,12 +208,15 @@ export async function runPrimaryAction(
 export async function runBatchDownload(
   rows: ResourceRow[],
   executor: ResourceActionExecutor,
+  concurrency: number = 2,
 ): Promise<void> {
   const tasks = rows
     .map((row) => createPrimaryActionTask(row, executor))
     .filter((task): task is Promise<void> => task !== null)
 
-  await Promise.all(tasks)
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    await Promise.all(tasks.slice(i, i + concurrency))
+  }
 }
 
 function targetVersionForRow(row: ResourceRow): string | null {

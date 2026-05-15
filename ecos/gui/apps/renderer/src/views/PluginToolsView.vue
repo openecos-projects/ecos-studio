@@ -65,7 +65,13 @@
           <div class="manager-toolbar">
             <label class="resource-search">
               <i class="ri-search-line" aria-hidden="true"></i>
-              <input v-model="searchQuery" type="text" placeholder="Search" />
+              <input
+                :value="searchInput"
+                type="text"
+                placeholder="Search"
+                aria-label="Search resources"
+                @input="searchInput = ($event.target as HTMLInputElement).value"
+              />
             </label>
 
             <div class="resource-tabs" role="tablist" aria-label="Resource status filters">
@@ -132,16 +138,22 @@
               </div>
 
               <template v-else>
-                <button
+                <div
                   v-for="row in filteredRows"
                   :key="row.id"
-                  type="button"
                   class="resource-row"
                   :class="{ selected: isSelected(row.id) }"
                   :style="{ '--row-accent': row.accent }"
-                  @click="toggleResource(row.id)"
+                  role="button"
+                  tabindex="0"
+                  @keydown.enter.prevent="toggleResource(row.id)"
+                  @keydown.space.prevent="toggleResource(row.id)"
                 >
-                  <span class="resource-check" :class="{ checked: isSelected(row.id) }">
+                  <span
+                    class="resource-check"
+                    :class="{ checked: isSelected(row.id) }"
+                    @click.stop="toggleResource(row.id)"
+                  >
                     <i v-if="isSelected(row.id)" class="ri-check-line" aria-hidden="true"></i>
                   </span>
 
@@ -157,7 +169,15 @@
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span>
                     <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
-                    <span v-if="row.progressPercent !== null" class="mini-progress">
+                    <span
+                      v-if="row.progressPercent !== null"
+                      class="mini-progress"
+                      role="progressbar"
+                      :aria-valuenow="row.progressPercent"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      :aria-label="`${row.name} installation progress`"
+                    >
                       <span :style="{ width: `${row.progressPercent}%` }"></span>
                     </span>
                     <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
@@ -240,7 +260,7 @@
                       </button>
                     </template>
                   </span>
-                </button>
+                </div>
               </template>
 
               <div v-if="!pluginStore.loading && filteredRows.length === 0" class="resource-empty">
@@ -351,6 +371,16 @@ const pluginStore = usePluginStore()
 const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
+const searchInput = ref('')
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(searchInput, (val) => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    searchQuery.value = val
+  }, 200)
+})
+
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
@@ -531,6 +561,12 @@ async function handlePdkValidate(row: ResourceRow): Promise<void> {
 
 async function handleRowUninstall(row: ResourceRow): Promise<void> {
   const action = rowActionForStatus(row.resource)
+  const isDestructive = action === 'uninstall'
+  const confirmMsg = isDestructive
+    ? `Are you sure you want to uninstall "${row.name}"? This action cannot be undone.`
+    : `Remove reference to "${row.name}"?`
+  if (!confirm(confirmMsg)) return
+
   if (action === 'remove_reference') {
     await pluginStore.removePdkReference(row.id)
     return
@@ -1045,6 +1081,11 @@ async function openDocs(): Promise<void> {
 
 .resource-row:hover {
   background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+}
+
+.resource-row:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
 }
 
 .resource-row.selected {
@@ -1643,7 +1684,11 @@ async function openDocs(): Promise<void> {
   }
 
   .selected-panel {
-    display: none;
+    max-height: 320px;
+  }
+
+  .selected-list {
+    max-height: 120px;
   }
 }
 
