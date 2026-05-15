@@ -124,7 +124,34 @@ class TestArchiveTraversal:
 
 
 class TestSymlinkHardlink:
-    def test_tar_symlink_rejected(self, installer: InstallerService, tmp_path: Path) -> None:
+    def test_tar_relative_symlink_inside_root_allowed(
+        self, installer: InstallerService, tmp_path: Path
+    ) -> None:
+        buf = io_mod.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            data = b"python3 man page"
+            target = tarfile.TarInfo(name="oss-cad-suite/share/man/man1/python3.11")
+            target.size = len(data)
+            tar.addfile(target, io_mod.BytesIO(data))
+
+            link = tarfile.TarInfo(name="oss-cad-suite/share/man/man1/python3.1")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "python3.11"
+            tar.addfile(link)
+
+        archive = tmp_path / "symlink.tar.gz"
+        archive.write_bytes(buf.getvalue())
+        dest = tmp_path / "safe"
+
+        installer.extract(archive_path=archive, dest_dir=dest, strip_prefix="oss-cad-suite")
+
+        link_path = dest / "share" / "man" / "man1" / "python3.1"
+        assert link_path.is_symlink()
+        assert link_path.readlink() == Path("python3.11")
+
+    def test_tar_absolute_symlink_rejected(
+        self, installer: InstallerService, tmp_path: Path
+    ) -> None:
         buf = io_mod.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             info = tarfile.TarInfo(name="bin/tool")
@@ -133,7 +160,19 @@ class TestSymlinkHardlink:
             tar.addfile(info)
         archive = tmp_path / "symlink.tar.gz"
         archive.write_bytes(buf.getvalue())
-        with pytest.raises(ValueError, match="symlink"):
+        with pytest.raises(ValueError, match="absolute symlink"):
+            installer.extract(archive_path=archive, dest_dir=tmp_path / "safe", strip_prefix=None)
+
+    def test_tar_symlink_escape_rejected(self, installer: InstallerService, tmp_path: Path) -> None:
+        buf = io_mod.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            info = tarfile.TarInfo(name="bin/tool")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "../../evil"
+            tar.addfile(info)
+        archive = tmp_path / "symlink-escape.tar.gz"
+        archive.write_bytes(buf.getvalue())
+        with pytest.raises(ValueError, match="escaping extraction root"):
             installer.extract(archive_path=archive, dest_dir=tmp_path / "safe", strip_prefix=None)
 
     def test_tar_hardlink_rejected(self, installer: InstallerService, tmp_path: Path) -> None:

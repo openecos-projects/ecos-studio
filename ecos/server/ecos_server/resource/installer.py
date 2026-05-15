@@ -78,10 +78,26 @@ class InstallerService:
         return resolved
 
     @staticmethod
-    def _is_safe_tar_member(member: tarfile.TarInfo) -> bool:
-        """Reject symlinks, hardlinks, device nodes, fifos, and other special files."""
+    def _validate_link_target(dest: Path, member_name: str, linkname: str) -> None:
+        if not linkname:
+            raise ValueError(f"Rejected empty symlink target in archive: {member_name}")
+        if linkname.startswith("/"):
+            raise ValueError(f"Rejected absolute symlink in archive: {member_name}")
+
+        link_parent = (dest / member_name).parent
+        resolved_target = (link_parent / linkname).resolve()
+        dest_resolved = dest.resolve()
+        try:
+            resolved_target.relative_to(dest_resolved)
+        except ValueError as exc:
+            raise ValueError(f"Rejected symlink escaping extraction root: {member_name}") from exc
+
+    @staticmethod
+    def _is_safe_tar_member(member: tarfile.TarInfo, dest: Path, member_name: str) -> bool:
+        """Reject unsafe links, device nodes, fifos, and other special files."""
         if member.issym():
-            raise ValueError(f"Rejected symlink in archive: {member.name}")
+            InstallerService._validate_link_target(dest, member_name, member.linkname)
+            return True
         if member.islnk():
             raise ValueError(f"Rejected hardlink in archive: {member.name}")
         if member.isdev():
@@ -108,7 +124,7 @@ class InstallerService:
                 if not name or name == ".":
                     continue
                 InstallerService._validate_entry_path(dest, name)
-                InstallerService._is_safe_tar_member(member)
+                InstallerService._is_safe_tar_member(member, dest, name)
                 member.name = name
                 if sys.version_info >= (3, 12):
                     tar.extract(member, dest, filter="data")
