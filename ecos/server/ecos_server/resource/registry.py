@@ -28,7 +28,7 @@ class RegistryState:
 
     @property
     def is_empty(self) -> bool:
-        return self.registry is None or not self.registry.tools
+        return self.registry is None or (not self.registry.tools and not self.registry.pdks)
 
 
 class RegistryService:
@@ -60,7 +60,11 @@ class RegistryService:
     @staticmethod
     def _to_tool_registry(validated: ResourceRegistryV1) -> ToolRegistry:
         """Convert a validated ResourceRegistryV1 to a ToolRegistry for internal use."""
-        return ToolRegistry(schema_version=validated.schema_version, tools=validated.tools)
+        return ToolRegistry(
+            schema_version=validated.schema_version,
+            tools=validated.tools,
+            pdks=validated.pdks,
+        )
 
     def _load_cached(self) -> ToolRegistry | None:
         if not self._cache_file.exists():
@@ -103,7 +107,7 @@ class RegistryService:
 
         # Try remote fetch first
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 resp = await client.get(self._registry_url)
                 resp.raise_for_status()
                 raw = resp.json()

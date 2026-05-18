@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,58 @@ def test_default_manifest_path_uses_xdg_default_when_env_empty(tmp_path: Path, m
         svc.manifest_path
         == tmp_path / ".local" / "state" / "ecos-studio" / "resources" / "manifest.json"
     )
+
+
+def test_default_pdks_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    inventory = InventoryService(resource_manifest_path=tmp_path / "state" / "manifest.json")
+
+    assert inventory.pdks_dir == tmp_path / "data" / "ecos-studio" / "pdks"
+
+
+def test_add_managed_pdk_metadata(tmp_path: Path) -> None:
+    inventory = InventoryService(resource_manifest_path=tmp_path / "resources" / "manifest.json")
+    pdk_root = tmp_path / "pdks" / "ics55" / "1.01"
+    pdk_root.mkdir(parents=True)
+
+    entry = inventory.add_or_update_pdk(
+        "ics55",
+        name="ICSPROUT 55nm PDK",
+        canonical_path=str(pdk_root),
+        detected_files=["prtech", "IP"],
+        detected_file_groups={"directories": ["IP", "prtech"], "files": []},
+        version="1.01",
+        sha256="3" * 64,
+        source="registry",
+        source_url="https://example.com/ics55.tar.gz",
+        managed=True,
+        active=True,
+    )
+
+    assert entry.id == "ics55"
+    assert entry.version == "1.01"
+    assert entry.sha256 == "3" * 64
+    assert entry.source == "registry"
+    assert entry.source_url == "https://example.com/ics55.tar.gz"
+    assert entry.managed is True
+    assert entry.active is True
+
+    loaded = InventoryService(resource_manifest_path=inventory.manifest_path).get_pdk("ics55")
+    assert loaded is not None
+    assert loaded.version == "1.01"
+    assert loaded.managed is True
+
+    refreshed = inventory.add_or_update_pdk(
+        "ics55",
+        canonical_path=str(pdk_root),
+        managed=False,
+    )
+    assert refreshed.version == "1.01"
+    assert refreshed.sha256 == "3" * 64
+    assert refreshed.source == "registry"
+    assert refreshed.source_url == "https://example.com/ics55.tar.gz"
+    assert refreshed.managed is False
+    assert refreshed.active is True
 
 
 @pytest.fixture
@@ -90,8 +143,11 @@ class TestManifestPersistence:
         data = json.loads(inventory.manifest_path.read_text(encoding="utf-8"))
         assert data["schema_version"] == 1
         assert data["resources_dir"] == str(inventory.manifest_path.parent)
+        assert data["tools_dir"] == str(inventory.tools_dir)
+        assert data["pdks_dir"] == str(inventory.pdks_dir)
         assert "tools" not in data
         assert "pdks" not in data
+        assert "pdks" not in data["installed"]
         assert set(data["installed"]) == {"tool:yosys", "pdk:ics55"}
         assert data["installed"]["tool:yosys"]["type"] == "tool"
         assert data["installed"]["tool:yosys"]["executable"] == "bin/yosys"
@@ -122,6 +178,50 @@ class TestManifestPersistence:
         svc2 = InventoryService(resource_manifest_path=resource_manifest)
         assert svc2.get_tool("yosys") is not None
         assert svc2.get_tool("yosys").version == "0.61"
+
+    def test_concurrent_add_tool_preserves_all_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        manifest_path = tmp_path / "resources" / "manifest.json"
+        services = [
+            InventoryService(resource_manifest_path=manifest_path),
+            InventoryService(resource_manifest_path=manifest_path),
+        ]
+        original_read = InventoryService._read_manifest
+        read_count = 0
+        read_lock = threading.Lock()
+        second_read = threading.Event()
+
+        def delayed_read(self):
+            nonlocal read_count
+            manifest = original_read(self)
+            with read_lock:
+                read_count += 1
+                if read_count == 2:
+                    second_read.set()
+            second_read.wait(timeout=0.2)
+            return manifest
+
+        monkeypatch.setattr(InventoryService, "_read_manifest", delayed_read)
+
+        threads = [
+            threading.Thread(
+                target=services[0].add_tool,
+                kwargs={"name": "yosys", "version": "0.61", "path": "/tmp/y", "sha256": "abc"},
+            ),
+            threading.Thread(
+                target=services[1].add_tool,
+                kwargs={"name": "openroad", "version": "2.0", "path": "/tmp/or", "sha256": "def"},
+            ),
+        ]
+
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=1)
+
+        installed = InventoryService(resource_manifest_path=manifest_path).get_installed_tools()
+        assert set(installed) == {"yosys", "openroad"}
 
 
 class TestNoLegacyToolManifest:
@@ -200,6 +300,41 @@ class TestPdkInventory:
         assert entry.active is True
         assert entry.canonical_path == "/tmp/newpath"
         assert entry.detected_files == ["a", "b"]
+
+    def test_add_or_update_pdk_active_true_is_exclusive(self, inventory: InventoryService) -> None:
+        inventory.add_or_update_pdk("a", canonical_path="/tmp/a", active=True)
+        inventory.add_or_update_pdk("b", canonical_path="/tmp/b", active=True)
+
+        assert inventory.get_pdk("a").active is False
+        assert inventory.get_pdk("b").active is True
+        assert inventory.get_active_pdk().id == "b"
+
+    def test_add_or_update_pdk_can_clear_metadata(self, inventory: InventoryService) -> None:
+        inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/managed",
+            version="1.01",
+            sha256="3" * 64,
+            source="registry",
+            source_url="https://example.com/ics55.tar.gz",
+            managed=True,
+        )
+
+        entry = inventory.add_or_update_pdk(
+            "ics55",
+            canonical_path="/tmp/local",
+            version="",
+            sha256="",
+            source="",
+            source_url="",
+            managed=False,
+        )
+
+        assert entry.version == ""
+        assert entry.sha256 == ""
+        assert entry.source == ""
+        assert entry.source_url == ""
+        assert entry.managed is False
 
     def test_remove_pdk(self, inventory: InventoryService) -> None:
         inventory.add_or_update_pdk("ics55", canonical_path="/tmp/ics55")
@@ -323,6 +458,7 @@ class TestResourceManifestModel:
         assert m.schema_version == 1
         assert m.resources_dir == "/tmp/resources"
         assert m.tools_dir == "/tmp/tools"
+        assert m.pdks_dir == ""
         assert m.installed == {}
 
     def test_manifest_with_tools(self) -> None:

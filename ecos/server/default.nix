@@ -31,6 +31,7 @@ python3Packages.buildPythonPackage {
     ecc-dreamplace-python
     ecc-tools-python
     fastapi
+    httpx
     torch
     uvicorn
   ];

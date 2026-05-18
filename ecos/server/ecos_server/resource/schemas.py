@@ -59,6 +59,7 @@ class ResourceInfo(BaseModel):
     active_version: str | None = None
     active: bool = False
     path: str | None = None
+    managed_root: str | None = None
     platform: str | None = None
     size: int | None = None
     source: str = "local"
@@ -73,7 +74,16 @@ class ResourceList(BaseModel):
     diagnostics: list[str] = Field(default_factory=list)
 
 
+class ToolInstallRequest(BaseModel):
+    version: str | None = None
+
+
 # ── Registry schemas ───────────────────────────────────────────────────
+
+
+class PostInstallStep(BaseModel):
+    command: list[str]
+    cwd: str = "."
 
 
 class PlatformAsset(BaseModel):
@@ -81,6 +91,7 @@ class PlatformAsset(BaseModel):
     sha256: str
     size: int
     strip_prefix: str | None = None
+    post_install: list[PostInstallStep] = Field(default_factory=list)
 
 
 class RegistryToolVersion(BaseModel):
@@ -98,11 +109,26 @@ class RegistryTool(BaseModel):
     versions: list[RegistryToolVersion]
 
 
+class RegistryPdkVersion(BaseModel):
+    version: str
+    platforms: dict[str, PlatformAsset]
+
+
+class RegistryPdk(BaseModel):
+    id: str
+    display_name: str
+    description: str = ""
+    category: str = "pdk"
+    homepage: str = ""
+    versions: list[RegistryPdkVersion] = Field(default_factory=list)
+
+
 class ToolRegistry(BaseModel):
     """Flat tools list used by Resource Manager services."""
 
     schema_version: int
-    tools: list[RegistryTool]
+    tools: list[RegistryTool] = Field(default_factory=list)
+    pdks: list[RegistryPdk] = Field(default_factory=list)
 
 
 class ResourceRegistryV1(BaseModel):
@@ -113,7 +139,7 @@ class ResourceRegistryV1(BaseModel):
 
     schema_version: int
     tools: list[RegistryTool] = Field(default_factory=list)
-    pdks: list = Field(default_factory=list)
+    pdks: list[RegistryPdk] = Field(default_factory=list)
 
     @field_validator("schema_version")
     @classmethod

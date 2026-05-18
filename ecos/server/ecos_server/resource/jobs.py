@@ -8,6 +8,7 @@ clients receive a structured conflict response with the existing job id.
 """
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -39,25 +40,32 @@ class JobTracker:
     def __init__(self) -> None:
         self._active: dict[str, ActiveJob] = {}
         self._counter = 0
+        self._lock = threading.Lock()
 
     def is_active(self, resource_id: str) -> bool:
-        return resource_id in self._active
+        with self._lock:
+            return resource_id in self._active
 
     def get_active(self, resource_id: str) -> ActiveJob | None:
-        return self._active.get(resource_id)
+        with self._lock:
+            return self._active.get(resource_id)
 
     def start(self, resource_id: str, action: ResourceAction = ResourceAction.install) -> ActiveJob:
-        self._counter += 1
-        job = ActiveJob(
-            resource_id=resource_id,
-            action=action,
-            job_id=f"job-{self._counter}",
-        )
-        self._active[resource_id] = job
-        return job
+        with self._lock:
+            if resource_id in self._active:
+                raise KeyError(f"Job already active for {resource_id}")
+            self._counter += 1
+            job = ActiveJob(
+                resource_id=resource_id,
+                action=action,
+                job_id=f"job-{self._counter}",
+            )
+            self._active[resource_id] = job
+            return job
 
     def finish(self, resource_id: str) -> None:
-        self._active.pop(resource_id, None)
+        with self._lock:
+            self._active.pop(resource_id, None)
 
     def publish(
         self,

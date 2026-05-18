@@ -10,6 +10,7 @@ from ecos_server.resource.schemas import (
     ResourceRegistryV1,
     ResourceStatus,
     ResourceType,
+    ToolRegistry,
 )
 
 
@@ -180,6 +181,7 @@ class TestResourceInfoTool:
             available_versions=["0.61", "0.60"],
             active_version="0.61",
             path="/home/user/.local/share/ecos-studio/tools/yosys/0.61",
+            managed_root="/home/user/.local/share/ecos-studio/tools",
             platform="linux-x86_64",
             size=123,
             source="registry",
@@ -189,6 +191,7 @@ class TestResourceInfoTool:
         assert info.installed_version == "0.61"
         assert info.active_version == "0.61"
         assert info.path == "/home/user/.local/share/ecos-studio/tools/yosys/0.61"
+        assert info.managed_root == "/home/user/.local/share/ecos-studio/tools"
         assert info.platform == "linux-x86_64"
         assert info.size == 123
         assert ResourceAction.uninstall in info.actions
@@ -239,6 +242,7 @@ class TestResourceInfoPdk:
             status=ResourceStatus.installed,
             active=True,
             path="/home/user/pdks/ics55",
+            managed_root="/home/user/.local/share/ecos-studio/pdks",
             health={"status": "ok", "detected_files": ["prtech", "IP"]},
             actions=[ResourceAction.validate, ResourceAction.remove_reference],
         )
@@ -249,6 +253,7 @@ class TestResourceInfoPdk:
         assert info.active is True
         assert info.health["status"] == "ok"
         assert info.path == "/home/user/pdks/ics55"
+        assert info.managed_root == "/home/user/.local/share/ecos-studio/pdks"
         assert ResourceAction.validate in info.actions
         assert ResourceAction.remove_reference in info.actions
 
@@ -397,6 +402,7 @@ class TestResourceList:
             status=ResourceStatus.installed,
             active=True,
             path="/home/user/pdks/ics55",
+            managed_root="/home/user/.local/share/ecos-studio/pdks",
         )
         rl = ResourceList(resources=[tool, pdk])
         assert len(rl.resources) == 2
@@ -426,6 +432,107 @@ class TestResourceRegistryV1:
     def test_pdks_field_reserved(self) -> None:
         reg = ResourceRegistryV1(schema_version=2, tools=[], pdks=[])
         assert reg.pdks == []
+
+    def test_parses_registry_pdks(self) -> None:
+        reg = ResourceRegistryV1(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                    "description": "IC-S55 PDK",
+                    "category": "pdk",
+                    "homepage": "https://example.com/ics55",
+                    "versions": [
+                        {
+                            "version": "1.01",
+                            "platforms": {
+                                "all-platform": {
+                                    "url": "https://example.com/ics55-1.01.tar.gz",
+                                    "sha256": "abc123",
+                                    "size": 1024,
+                                    "strip_prefix": "ics55",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+        assert reg.pdks[0].id == "ics55"
+        assert reg.pdks[0].display_name == "IC-S55"
+        assert reg.pdks[0].versions[0].version == "1.01"
+        assert (
+            reg.pdks[0].versions[0].platforms["all-platform"].url
+            == "https://example.com/ics55-1.01.tar.gz"
+        )
+
+    def test_parses_sparse_registry_pdk_with_defaults(self) -> None:
+        reg = ResourceRegistryV1(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                }
+            ],
+        )
+
+        pdk = reg.pdks[0]
+        assert pdk.id == "ics55"
+        assert pdk.display_name == "IC-S55"
+        assert pdk.description == ""
+        assert pdk.category == "pdk"
+        assert pdk.homepage == ""
+        assert pdk.versions == []
+
+    def test_exports_registry_pdk_models(self) -> None:
+        from ecos_server.resource import RegistryPdk, RegistryPdkVersion
+
+        assert RegistryPdk(id="ics55", display_name="IC-S55").id == "ics55"
+        assert (
+            RegistryPdkVersion(
+                version="1.01",
+                platforms={
+                    "all-platform": {
+                        "url": "https://example.com/ics55-1.01.tar.gz",
+                        "sha256": "abc123",
+                        "size": 1024,
+                    }
+                },
+            ).version
+            == "1.01"
+        )
+
+    def test_tool_registry_keeps_pdks(self) -> None:
+        reg = ToolRegistry(
+            schema_version=2,
+            pdks=[
+                {
+                    "id": "ics55",
+                    "display_name": "IC-S55",
+                    "description": "IC-S55 PDK",
+                    "category": "pdk",
+                    "homepage": "https://example.com/ics55",
+                    "versions": [
+                        {
+                            "version": "1.01",
+                            "platforms": {
+                                "all-platform": {
+                                    "url": "https://example.com/ics55-1.01.tar.gz",
+                                    "sha256": "abc123",
+                                    "size": 1024,
+                                    "strip_prefix": "ics55",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+        assert reg.pdks[0].id == "ics55"
 
     def test_defaults(self) -> None:
         reg = ResourceRegistryV1(schema_version=2)

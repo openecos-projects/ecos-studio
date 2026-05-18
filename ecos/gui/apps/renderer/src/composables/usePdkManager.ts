@@ -1,5 +1,6 @@
 import { ref, toRaw } from 'vue'
 import type { DesktopApi, DesktopSettingsValue, ScannedPdkDirectory } from '@ecos-studio/shared'
+import { importPdkPathApi, removePdkReferenceApi } from '@/api/plugin'
 import { hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
@@ -15,6 +16,27 @@ function pathHasInvalidChars(path: string): boolean {
 const importedPdks = ref<ImportedPdk[]>([])
 const isLoaded = ref(false)
 const IMPORTED_PDKS_STORAGE_KEY = 'ecos.imported_pdks'
+
+function isMissingBackendReference(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const maybe = error as {
+    status?: number
+    statusCode?: number
+    response?: { status?: number }
+    message?: string
+  }
+
+  const status = maybe.status ?? maybe.statusCode ?? maybe.response?.status
+  if (status === 404) {
+    return true
+  }
+
+  const message = maybe.message?.toLowerCase() ?? ''
+  return message.includes('404') || message.includes('not found')
+}
 
 function toSerializableImportedPdk(pdk: ImportedPdk): ImportedPdk {
   return {
@@ -50,6 +72,18 @@ function buildImportedPdk(detected: ScannedPdkDirectory): ImportedPdk {
     importedAt: new Date().toISOString(),
     detectedFiles: detected.detectedFiles,
   }
+}
+
+function normalizePdkPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/$/, '')
+}
+
+function dedupeImportedPdks(pdks: ImportedPdk[]): ImportedPdk[] {
+  const deduped = new Map<string, ImportedPdk>()
+  for (const pdk of pdks) {
+    deduped.set(normalizePdkPath(pdk.path), pdk)
+  }
+  return Array.from(deduped.values())
 }
 
 function getErrorMessage(error: unknown): string {
@@ -128,10 +162,11 @@ export function usePdkManager() {
     if (isLoaded.value) return // 避免重复加载
     try {
       let saved: ImportedPdk[] | null = null
+      let desktopApi: DesktopApi | undefined
 
       if (hasDesktopApi()) {
         try {
-          const desktopApi = await waitForDesktopApi()
+          desktopApi = await waitForDesktopApi()
           saved = await getSetting<ImportedPdk[]>(desktopApi, 'imported_pdks')
         } catch (error) {
           console.warn('[usePdkManager] Desktop settings unavailable during load, falling back to localStorage:', error)
@@ -143,7 +178,22 @@ export function usePdkManager() {
       }
 
       if (saved && saved.length > 0) {
-        importedPdks.value = saved
+        const deduped = dedupeImportedPdks(saved)
+        importedPdks.value = deduped
+
+        await Promise.all(
+          deduped.map(async (pdk) => {
+            try {
+              await syncImportedPdkReference(pdk.path)
+            } catch (error) {
+              console.warn('[usePdkManager] Failed to sync imported PDK to backend manifest:', pdk.path, error)
+            }
+          }),
+        )
+
+        if (deduped.length !== saved.length && desktopApi) {
+          await savePdks(desktopApi)
+        }
       }
       isLoaded.value = true
     } catch (error) {
@@ -186,6 +236,10 @@ export function usePdkManager() {
     return await desktopApi.workspace.scanPdkDirectory(path)
   }
 
+  const syncImportedPdkReference = async (path: string): Promise<void> => {
+    await importPdkPathApi(path)
+  }
+
   // ============ PDK 操作 ============
 
   /**
@@ -222,15 +276,17 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
+      const normalizedPath = normalizePdkPath(detected.canonicalPath)
       const existing = importedPdks.value.find(
-        p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath
+        p => normalizePdkPath(p.path) === normalizedPath
       )
       if (existing) {
+        await syncImportedPdkReference(detected.canonicalPath)
         console.warn('[usePdkManager] PDK already imported:', detected.canonicalPath)
         return existing
       }
 
+      await syncImportedPdkReference(path)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)
@@ -274,12 +330,16 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = detected.canonicalPath.replace(/\\/g, '/').replace(/\/$/, '')
+      const normalizedPath = normalizePdkPath(detected.canonicalPath)
       const existing = importedPdks.value.find(
-        p => p.path.replace(/\\/g, '/').replace(/\/$/, '') === normalizedPath
+        p => normalizePdkPath(p.path) === normalizedPath
       )
-      if (existing) return existing
+      if (existing) {
+        await syncImportedPdkReference(detected.canonicalPath)
+        return existing
+      }
 
+      await syncImportedPdkReference(path)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)
@@ -299,6 +359,16 @@ export function usePdkManager() {
 
   /** 删除已导入的 PDK */
   const removePdk = async (id: string) => {
+    const target = importedPdks.value.find(p => p.id === id)
+    if (target) {
+      try {
+        await removePdkReferenceApi(`pdk:${target.pdkId}`)
+      } catch (error) {
+        if (!isMissingBackendReference(error)) {
+          throw error
+        }
+      }
+    }
     const desktopApi = hasDesktopApi() ? await waitForDesktopApi() : undefined
     importedPdks.value = importedPdks.value.filter(p => p.id !== id)
     await savePdks(desktopApi)

@@ -18,6 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "pytest-asyncio>=0.23",
   "auditwheel>=6",
   "black>=23",
   "mypy>=1",

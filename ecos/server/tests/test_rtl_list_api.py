@@ -1,7 +1,37 @@
 #!/usr/bin/env python
 
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
 from ecos_server.ecc.schemas import ECCRequest
 from ecos_server.ecc.services import ECCService
+
+
+def _install_fake_create_workspace(monkeypatch):
+    def fake_create_workspace(**kwargs):
+        directory = Path(kwargs["directory"])
+        origin_dir = directory / "origin"
+        origin_dir.mkdir(parents=True, exist_ok=True)
+
+        input_filelist = Path(kwargs["input_filelist"])
+        filelist_lines = []
+        for raw_line in input_filelist.read_text().splitlines():
+            if not raw_line.strip():
+                continue
+            filelist_lines.append(raw_line)
+            source = raw_line.strip().strip('"')
+            shutil.copy2(source, origin_dir / Path(source).name)
+
+        (origin_dir / "filelist").write_text("\n".join(filelist_lines) + "\n")
+        return SimpleNamespace(
+            directory=str(directory),
+            pdk=SimpleNamespace(name=kwargs["pdk"]),
+            parameters=SimpleNamespace(data=kwargs["parameters"]),
+        )
+
+    monkeypatch.setattr("chipcompiler.data.create_workspace", fake_create_workspace)
+    monkeypatch.setattr(ECCService, "_ECCService__build_flow", lambda self: None)
 
 
 def _write_rtl(path, module_name):
@@ -19,7 +49,8 @@ def _default_parameters():
     }
 
 
-def test_create_workspace_from_rtl_list_string(tmp_path):
+def test_create_workspace_from_rtl_list_string(tmp_path, monkeypatch):
+    _install_fake_create_workspace(monkeypatch)
     workspace_dir = tmp_path / "workspace"
     rtl_dir = tmp_path / "rtl"
     rtl_dir.mkdir()
@@ -64,7 +95,8 @@ def test_create_workspace_from_rtl_list_string(tmp_path):
     assert (workspace_dir / "origin" / "c.v").exists()
 
 
-def test_create_workspace_from_rtl_list_array(tmp_path):
+def test_create_workspace_from_rtl_list_array(tmp_path, monkeypatch):
+    _install_fake_create_workspace(monkeypatch)
     workspace_dir = tmp_path / "workspace"
     rtl_dir = tmp_path / "rtl"
     rtl_dir.mkdir()

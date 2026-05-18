@@ -20,6 +20,16 @@
   --topbar-text: #374151;
   --status-bar-height: 24px;
 
+  /* Semantic status color tokens */
+  --info-color: #2376d9;
+  --info-bg: #dbeafe;
+  --danger-color: #b42318;
+  --danger-bg: #fff1f1;
+  --success-color: #00a083;
+  --success-bg: rgba(0, 191, 165, 0.14);
+  --warn-color: #d97706;
+  --warn-bg: rgba(217, 119, 6, 0.12);
+
   color-scheme: light dark;
   
   /* 禁用浏览器的自动缩放 */
@@ -59,6 +69,16 @@ code,
   --accent-text: #ffffff;
   --topbar-bg: #18181c;
   --topbar-text: #e3e3e8;
+
+  /* Semantic status color tokens - dark mode */
+  --info-color: #60a5fa;
+  --info-bg: rgba(96, 165, 250, 0.15);
+  --danger-color: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.12);
+  --success-color: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.15);
+  --warn-color: #fbbf24;
+  --warn-bg: rgba(251, 191, 36, 0.12);
 }
 
 html, body {

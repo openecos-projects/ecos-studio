@@ -65,7 +65,13 @@
           <div class="manager-toolbar">
             <label class="resource-search">
               <i class="ri-search-line" aria-hidden="true"></i>
-              <input v-model="searchQuery" type="text" placeholder="Search" />
+              <input
+                :value="searchInput"
+                type="text"
+                placeholder="Search"
+                aria-label="Search resources"
+                @input="searchInput = ($event.target as HTMLInputElement).value"
+              />
             </label>
 
             <div class="resource-tabs" role="tablist" aria-label="Resource status filters">
@@ -85,17 +91,30 @@
 
           <div class="manager-table-meta">
             <strong>{{ filteredRows.length }} Resources</strong>
-            <button
-              type="button"
-              :disabled="pluginStore.refreshing"
-              @click="pluginStore.refresh()"
-            >
-              <i
-                :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
-                aria-hidden="true"
-              ></i>
-              Refresh
-            </button>
+            <div class="manager-table-actions">
+              <button
+                type="button"
+                :disabled="pluginStore.loading || importingPdk"
+                @click="handleImportPdk"
+              >
+                <i
+                  :class="importingPdk ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
+                  aria-hidden="true"
+                ></i>
+                Import PDK
+              </button>
+              <button
+                type="button"
+                :disabled="pluginStore.refreshing"
+                @click="pluginStore.refresh()"
+              >
+                <i
+                  :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
+                  aria-hidden="true"
+                ></i>
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div v-if="pluginStore.error" class="resource-error">
@@ -119,16 +138,22 @@
               </div>
 
               <template v-else>
-                <button
+                <div
                   v-for="row in filteredRows"
                   :key="row.id"
-                  type="button"
                   class="resource-row"
                   :class="{ selected: isSelected(row.id) }"
                   :style="{ '--row-accent': row.accent }"
-                  @click="toggleResource(row.id)"
+                  role="button"
+                  tabindex="0"
+                  @keydown.enter.prevent="toggleResource(row.id)"
+                  @keydown.space.prevent="toggleResource(row.id)"
                 >
-                  <span class="resource-check" :class="{ checked: isSelected(row.id) }">
+                  <span
+                    class="resource-check"
+                    :class="{ checked: isSelected(row.id) }"
+                    @click.stop="toggleResource(row.id)"
+                  >
                     <i v-if="isSelected(row.id)" class="ri-check-line" aria-hidden="true"></i>
                   </span>
 
@@ -144,62 +169,98 @@
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span>
                     <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
-                    <span v-if="row.progressPercent !== null" class="mini-progress">
+                    <span
+                      v-if="row.progressPercent !== null"
+                      class="mini-progress"
+                      role="progressbar"
+                      :aria-valuenow="row.progressPercent"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      :aria-label="`${row.name} installation progress`"
+                    >
                       <span :style="{ width: `${row.progressPercent}%` }"></span>
                     </span>
                     <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
                   </span>
 
                   <span class="row-actions">
-                    <template v-if="row.type === 'tool'">
+                    <template
+                      v-if="
+                        rowActionForStatus(row.resource) !== 'none' ||
+                        row.statusKind === 'installing' ||
+                        row.actions.includes('activate') ||
+                        row.actions.includes('validate')
+                      "
+                    >
                       <button
-                        v-if="row.statusKind === 'available'"
+                        v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
                         type="button"
-                        class="row-action-btn primary"
+                        class="row-action-btn icon-only primary"
+                        data-title="Install"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-download-line" aria-hidden="true"></i>
-                        Install
                       </button>
                       <button
-                        v-else-if="row.statusKind === 'installed'"
+                        v-else-if="rowActionForStatus(row.resource) === 'update' && row.statusKind !== 'error'"
                         type="button"
-                        class="row-action-btn danger-outlined"
-                        @click.stop="handleRowUninstall(row)"
-                      >
-                        <i class="ri-delete-bin-line" aria-hidden="true"></i>
-                        Uninstall
-                      </button>
-                      <button
-                        v-else-if="row.statusKind === 'update'"
-                        type="button"
-                        class="row-action-btn info"
+                        class="row-action-btn icon-only info"
+                        data-title="Update"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-refresh-line" aria-hidden="true"></i>
-                        Update
                       </button>
                       <button
                         v-else-if="row.statusKind === 'installing'"
                         type="button"
-                        class="row-action-btn warn"
+                        class="row-action-btn icon-only warn"
+                        data-title="Installing"
                         disabled
                       >
                         <i class="ri-loader-4-line spin" aria-hidden="true"></i>
-                        {{ row.progressPercent !== null ? `${row.progressPercent}%` : 'Installing' }}
                       </button>
                       <button
                         v-else-if="row.statusKind === 'error'"
                         type="button"
-                        class="row-action-btn danger"
+                        class="row-action-btn icon-only danger"
+                        data-title="Retry"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-restart-line" aria-hidden="true"></i>
-                        Retry
+                      </button>
+                      <button
+                        v-else-if="row.actions.includes('activate')"
+                        type="button"
+                        class="row-action-btn icon-only primary"
+                        data-title="Activate"
+                        @click.stop="handlePdkActivate(row)"
+                      >
+                        <i class="ri-check-line" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        v-else-if="row.actions.includes('validate')"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Validate"
+                        @click.stop="handlePdkValidate(row)"
+                      >
+                        <i class="ri-shield-check-line" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        v-if="['uninstall', 'remove_reference'].includes(rowActionForStatus(row.resource))"
+                        type="button"
+                        class="row-action-btn icon-only danger-outlined"
+                        :data-title="rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall'"
+                        @click.stop="handleRowUninstall(row)"
+                      >
+                        <i
+                          :class="rowActionForStatus(row.resource) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
+                          aria-hidden="true"
+                        ></i>
                       </button>
                     </template>
                   </span>
-                </button>
+                </div>
               </template>
 
               <div v-if="!pluginStore.loading && filteredRows.length === 0" class="resource-empty">
@@ -232,9 +293,9 @@
               :style="{ '--row-accent': row.accent }"
             >
               <span class="resource-avatar compact">{{ row.icon }}</span>
-              <span>
+              <span class="selected-item-body">
                 <strong>{{ row.name }}</strong>
-                <small>
+                <small class="selected-item-meta" :title="resolveInstallPath(row)">
                   <b v-if="row.statusKind === 'update'">Update</b>
                   <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
                   <span v-else>{{ row.version }}</span>
@@ -252,14 +313,6 @@
             <strong>{{ totalSizeText }}</strong>
           </div>
 
-          <div class="install-location">
-            <span>Install Location</span>
-            <div>
-              <i class="ri-folder-line" aria-hidden="true"></i>
-              <code>~/.ecos/tools</code>
-            </div>
-          </div>
-
           <p class="manager-note">
             <i class="ri-information-line" aria-hidden="true"></i>
             Updates will replace the existing installed versions.
@@ -269,7 +322,7 @@
             <button
               type="button"
               class="download-button"
-              :disabled="selectedResources.length === 0"
+              :disabled="downloadableSelectedResources.length === 0"
               @click="downloadSelected"
             >
               <i class="ri-download-line" aria-hidden="true"></i>
@@ -292,142 +345,43 @@ import { useRouter } from 'vue-router'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
-import type { ToolInfo, ToolStatus } from '@/api/plugin'
+import {
+  primaryActionForRow,
+  resourceToRow,
+  resolveRowInstallPath,
+  rowActionForStatus,
+  runBatchDownload,
+  runPrimaryAction,
+} from './pluginToolsRows'
+import type { ResourceRow } from './pluginToolsRows'
 
 type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
 type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
-type ResourceType = 'tool' | 'pdk'
-type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
-
-interface ResourceRow {
-  id: string
-  type: ResourceType
-  name: string
-  description: string
-  version: string
-  sizeLabel: string
-  sizeMb: number
-  platform: string
-  statusText: string
-  statusKind: StatusKind
-  icon: string
-  accent: string
-  progressPercent: number | null
-  tool?: ToolInfo
-}
-
-interface ResourceMeta {
-  icon: string
-  accent: string
-  sizeMb: number
-  sizeLabel: string
-}
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importedPdks, loadPdks, importPdk } = usePdkManager()
+const { importPdk } = usePdkManager()
 
 const searchQuery = ref('')
+const searchInput = ref('')
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(searchInput, (val) => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    searchQuery.value = val
+  }, 200)
+})
+
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
-
-const toolMeta: Record<string, ResourceMeta> = {
-  openroad: { icon: 'O', accent: '#79c142', sizeMb: 245, sizeLabel: '245 MB' },
-  yosys: { icon: 'Y', accent: '#63666d', sizeMb: 68, sizeLabel: '68 MB' },
-  klayout: { icon: 'K', accent: '#d99427', sizeMb: 132, sizeLabel: '132 MB' },
-  magic: { icon: 'M', accent: '#6b7078', sizeMb: 54, sizeLabel: '54 MB' },
-  netgen: { icon: 'N', accent: '#607d8b', sizeMb: 42, sizeLabel: '42 MB' },
-  verilator: { icon: 'V', accent: '#4b87c5', sizeMb: 96, sizeLabel: '96 MB' },
-  iverilog: { icon: 'I', accent: '#4f7f75', sizeMb: 44, sizeLabel: '44 MB' },
-}
-
-const pdkCatalog = [
-  {
-    key: 'ics55',
-    name: 'ics55',
-    description: 'Integrated Circuit Systems 55nm PDK',
-    version: 'v1.01',
-    sizeMb: 412,
-    sizeLabel: '412 MB',
-    icon: 'ics55',
-    accent: '#6b7078',
-  },
-]
+const importingPdk = ref(false)
 
 const resourceRows = computed<ResourceRow[]>(() => {
-  const toolRows = pluginStore.tools.map((tool) => {
-    const meta = metadataForTool(tool)
-    const progress = pluginStore.installProgress[tool.name]
-    const progressPercent = progress
-      ? Math.max(0, Math.min(100, Math.round((progress.progress || 0) * 100)))
-      : null
-    const mappedStatus = mapToolStatus(tool.status, progressPercent)
-
-    return {
-      id: `tool:${tool.name}`,
-      type: 'tool' as const,
-      name: tool.display_name || tool.name,
-      description: tool.description,
-      version: versionLabel(tool),
-      sizeLabel: meta.sizeLabel,
-      sizeMb: meta.sizeMb,
-      platform: 'Linux',
-      statusText: mappedStatus.text,
-      statusKind: mappedStatus.kind,
-      icon: meta.icon,
-      accent: meta.accent,
-      progressPercent,
-      tool,
-    }
+  return pluginStore.resources.map((resource) => {
+    return resourceToRow(resource, pluginStore.resourceProgress[resource.id])
   })
-
-  const knownPdkRows = pdkCatalog.map((pdk) => {
-    const installed = importedPdks.value.some((item) => {
-      const key = `${item.pdkId || ''} ${item.name || ''}`.toLowerCase()
-      return key.includes(pdk.key)
-    })
-
-    return {
-      id: `pdk:${pdk.key}`,
-      type: 'pdk' as const,
-      name: pdk.name,
-      description: pdk.description,
-      version: pdk.version,
-      sizeLabel: pdk.sizeLabel,
-      sizeMb: pdk.sizeMb,
-      platform: 'Linux',
-      statusText: installed ? 'Installed' : 'Available',
-      statusKind: installed ? 'installed' as const : 'available' as const,
-      icon: pdk.icon,
-      accent: pdk.accent,
-      progressPercent: null,
-    }
-  })
-
-  const catalogKeys = new Set(pdkCatalog.map((pdk) => pdk.key))
-  const customPdkRows = importedPdks.value
-    .filter((pdk) => {
-      const key = `${pdk.pdkId || ''} ${pdk.name || ''}`.toLowerCase()
-      return !Array.from(catalogKeys).some((catalogKey) => key.includes(catalogKey))
-    })
-    .map((pdk) => ({
-      id: `pdk:custom:${pdk.id}`,
-      type: 'pdk' as const,
-      name: pdk.name,
-      description: pdk.description || 'Imported process design kit',
-      version: pdk.techNode || 'Local',
-      sizeLabel: 'Local',
-      sizeMb: 0,
-      platform: 'Local',
-      statusText: 'Installed',
-      statusKind: 'installed' as const,
-      icon: pdk.name.slice(0, 5),
-      accent: '#6b7078',
-      progressPercent: null,
-    }))
-
-  return [...toolRows, ...knownPdkRows, ...customPdkRows]
 })
 
 const filteredRows = computed(() => {
@@ -452,8 +406,12 @@ const selectedResources = computed(() => {
   return resourceRows.value.filter((row) => selected.has(row.id))
 })
 
+const downloadableSelectedResources = computed(() => {
+  return selectedResources.value.filter((row) => primaryActionForRow(row) !== null)
+})
+
 const totalSizeMb = computed(() => {
-  return selectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
+  return downloadableSelectedResources.value.reduce((sum, row) => sum + row.sizeMb, 0)
 })
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
@@ -519,47 +477,12 @@ watch(
 )
 
 onMounted(() => {
-  void Promise.all([pluginStore.fetchTools(), loadPdks()])
+  void pluginStore.fetchTools()
 })
 
 onUnmounted(() => {
   pluginStore.cleanup()
 })
-
-function metadataForTool(tool: ToolInfo): ResourceMeta {
-  const haystack = `${tool.name} ${tool.display_name}`.toLowerCase()
-  const match = Object.keys(toolMeta).find((key) => haystack.includes(key))
-  if (match) return toolMeta[match]
-
-  const label = (tool.display_name || tool.name || '?').slice(0, 1).toUpperCase()
-  return { icon: label, accent: '#68707d', sizeMb: 128, sizeLabel: '128 MB' }
-}
-
-function versionLabel(tool: ToolInfo): string {
-  const version = tool.installed_version || tool.available_versions[0]
-  if (!version) return '-'
-  return `v${String(version).replace(/^v/i, '')}`
-}
-
-function mapToolStatus(status: ToolStatus, progressPercent: number | null): { kind: StatusKind; text: string } {
-  switch (status) {
-    case 'installed':
-      return { kind: 'installed', text: 'Installed' }
-    case 'update_available':
-      return { kind: 'update', text: 'Update' }
-    case 'installing':
-      return {
-        kind: 'installing',
-        text: progressPercent !== null ? `Downloading ${progressPercent}%` : 'Installing',
-      }
-    case 'uninstalling':
-      return { kind: 'installing', text: 'Removing' }
-    case 'error':
-      return { kind: 'error', text: 'Error' }
-    default:
-      return { kind: 'available', text: 'Available' }
-  }
-}
 
 function isInstalledLike(row: ResourceRow): boolean {
   return row.statusKind === 'installed' || row.statusKind === 'update'
@@ -589,41 +512,62 @@ function clearFilters(): void {
 }
 
 function rowError(row: ResourceRow): string | undefined {
-  if (row.type === 'tool' && row.tool) {
-    return pluginStore.toolErrors[row.tool.name]
-  }
-  return undefined
+  return pluginStore.resourceErrors[row.id] || row.resource.error || undefined
 }
 
 async function handleRowInstall(row: ResourceRow): Promise<void> {
-  if (row.type === 'tool' && row.tool) {
-    await pluginStore.install(row.tool.name)
-  } else if (row.type === 'pdk' && row.statusKind === 'available') {
-    await importPdk()
+  await runPrimaryAction(row, pluginStore)
+}
+
+async function handleImportPdk(): Promise<void> {
+  if (importingPdk.value) {
+    return
+  }
+
+  importingPdk.value = true
+  try {
+    const imported = await importPdk()
+    if (imported) {
+      await pluginStore.fetchTools({ silent: true })
+    }
+  } finally {
+    importingPdk.value = false
+  }
+}
+
+async function handlePdkActivate(row: ResourceRow): Promise<void> {
+  if (row.resource) {
+    await pluginStore.activatePdk(row.resource.id)
+  }
+}
+
+async function handlePdkValidate(row: ResourceRow): Promise<void> {
+  if (row.resource) {
+    await pluginStore.validatePdk(row.resource.id)
   }
 }
 
 async function handleRowUninstall(row: ResourceRow): Promise<void> {
-  if (row.type === 'tool' && row.tool) {
-    await pluginStore.uninstall(row.tool.name)
+  const action = rowActionForStatus(row.resource)
+  const isDestructive = action === 'uninstall'
+  const confirmMsg = isDestructive
+    ? `Are you sure you want to uninstall "${row.name}"? This action cannot be undone.`
+    : `Remove reference to "${row.name}"?`
+  if (!confirm(confirmMsg)) return
+
+  if (action === 'remove_reference') {
+    await pluginStore.removePdkReference(row.id)
+    return
   }
+  await pluginStore.uninstallResource(row.id)
 }
 
 async function downloadSelected(): Promise<void> {
-  const rows = selectedResources.value
-  const toolRows = rows.filter((row) => row.type === 'tool' && row.tool)
-  const installable = toolRows.filter((row) => {
-    return row.statusKind === 'available' || row.statusKind === 'update' || row.statusKind === 'error'
-  })
+  await runBatchDownload(downloadableSelectedResources.value, pluginStore)
+}
 
-  if (installable.length > 0) {
-    await Promise.all(installable.map((row) => pluginStore.install(row.tool!.name)))
-    return
-  }
-
-  if (rows.some((row) => row.type === 'pdk' && row.statusKind === 'available')) {
-    await importPdk()
-  }
+function resolveInstallPath(row: ResourceRow): string {
+  return resolveRowInstallPath(row)
 }
 
 function formatSize(sizeMb: number): string {
@@ -637,7 +581,7 @@ function goHome(): void {
 }
 
 async function openDocs(): Promise<void> {
-  const docsUrl = 'https://github.com/openecos-projects/ecc/blob/main/docs/user-guide.md'
+  const docsUrl = 'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
   try {
     if (hasDesktopApi()) {
       const desktopApi = getOptionalDesktopApi() ?? await waitForDesktopApi()
@@ -1046,6 +990,12 @@ async function openDocs(): Promise<void> {
   margin-bottom: 8px;
 }
 
+.manager-table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .manager-table-meta strong {
   color: var(--text-primary);
   font-size: 13px;
@@ -1092,7 +1042,7 @@ async function openDocs(): Promise<void> {
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 120px 100px;
+  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 110px 90px;
   align-items: center;
   gap: 0;
 }
@@ -1123,6 +1073,11 @@ async function openDocs(): Promise<void> {
 
 .resource-row:hover {
   background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+}
+
+.resource-row:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
 }
 
 .resource-row.selected {
@@ -1271,14 +1226,17 @@ async function openDocs(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .row-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 10px;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
   border: 0;
   border-radius: 6px;
   font-size: 11px;
@@ -1286,6 +1244,61 @@ async function openDocs(): Promise<void> {
   cursor: pointer;
   white-space: nowrap;
   transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.row-action-btn.icon-only {
+  width: 26px;
+  padding: 0;
+  font-size: 13px;
+}
+
+/* ---- Custom tooltip ---- */
+.row-action-btn[data-title] {
+  position: relative;
+}
+
+.row-action-btn[data-title]::after {
+  content: attr(data-title);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.96);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.row-action-btn[data-title]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.96);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid var(--border-color);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 10;
+}
+
+.row-action-btn[data-title]:hover::after,
+.row-action-btn[data-title]:hover::before {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
 }
 
 .row-action-btn.primary {
@@ -1421,26 +1434,27 @@ async function openDocs(): Promise<void> {
 }
 
 .selected-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   flex: 1;
   overflow: auto;
-  align-content: start;
+  min-height: 160px;
 }
 
 .selected-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  min-height: auto;
+  justify-content: center;
+  min-height: 100px;
   gap: 6px;
   border: 1px dashed var(--border-color);
   border-radius: 8px;
   color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
-  padding: 24px 16px;
+  padding: 16px;
 }
 
 .selected-empty i {
@@ -1456,13 +1470,17 @@ async function openDocs(): Promise<void> {
 
 .selected-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+  padding: 4px 0;
 }
 
-.selected-item > span:nth-child(2) {
+.selected-item-body {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .selected-item strong {
@@ -1475,18 +1493,17 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
 }
 
-.selected-item small {
+.selected-item-meta {
   display: block;
   overflow: hidden;
   max-width: 260px;
-  margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.selected-item small b {
+.selected-item-meta b {
   padding: 2px 5px;
   border-radius: 5px;
   color: var(--info-color);
@@ -1500,6 +1517,7 @@ async function openDocs(): Promise<void> {
   font-size: 11px;
   font-style: normal;
   white-space: nowrap;
+  margin-top: 2px;
 }
 
 .selected-item button {
@@ -1519,7 +1537,7 @@ async function openDocs(): Promise<void> {
   background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
-/* ---- Total size & install location ---- */
+/* ---- Total size ---- */
 .total-size {
   display: flex;
   align-items: center;
@@ -1532,8 +1550,7 @@ async function openDocs(): Promise<void> {
   font-size: 13px;
 }
 
-.total-size span,
-.install-location > span {
+.total-size span {
   color: var(--text-secondary);
   font-weight: 650;
 }
@@ -1543,32 +1560,13 @@ async function openDocs(): Promise<void> {
   font-weight: 800;
 }
 
-.install-location {
-  padding: 16px 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.install-location div {
-  display: grid;
-  grid-template-columns: 18px 1fr;
-  align-items: center;
-  gap: 7px;
-  margin-top: 12px;
-}
-
-.install-location code {
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px;
-}
-
 /* ---- Note & actions ---- */
 .manager-note {
   display: grid;
   grid-template-columns: 20px 1fr;
   align-items: start;
   gap: 10px;
+  margin-top: 12px;
   margin-bottom: 12px;
   padding: 8px 10px;
   border-radius: 8px;
@@ -1721,7 +1719,11 @@ async function openDocs(): Promise<void> {
   }
 
   .selected-panel {
-    display: none;
+    max-height: 320px;
+  }
+
+  .selected-list {
+    max-height: 120px;
   }
 }
 
