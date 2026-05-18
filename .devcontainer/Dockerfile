@@ -20,6 +20,20 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     libglib2.0-dev \
     libglib2.0-bin \
     librsvg2-dev \
+    libnss3 \
+    libnspr4 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libxkbcommon0 \
+    libxss1 \
+    libxtst6 \
+    libasound2t64 \
     cmake \
     ninja-build \
     tcl-dev \

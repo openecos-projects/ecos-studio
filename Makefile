@@ -34,12 +34,21 @@ install-apt-deps:
 	    exit 1; \
 	fi
 	@echo "==> Installing apt dependencies..."
+	@. /etc/os-release && \
+	if dpkg --compare-versions "$$VERSION_ID" ge 24.04; then \
+	    ASOUND_PACKAGE=libasound2t64; \
+	else \
+	    ASOUND_PACKAGE=libasound2; \
+	fi; \
 	sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
 	    git curl ca-certificates build-essential pkg-config \
 	    python3 python3-venv python3-pip python3-dev \
 	    libgtk-3-dev libgtk-3-bin libwebkit2gtk-4.1-dev \
 	    libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev \
 	    libglib2.0-dev libglib2.0-bin librsvg2-dev \
+	    libnss3 libnspr4 libatk-bridge2.0-0 libcups2 libdrm2 \
+	    libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+	    libxkbcommon0 libxss1 libxtst6 $$ASOUND_PACKAGE \
 	    cmake ninja-build tcl-dev \
 	    libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev \
 	    flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
