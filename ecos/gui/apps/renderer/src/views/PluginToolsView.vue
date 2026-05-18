@@ -1579,6 +1579,7 @@ async function openDocs(): Promise<void> {
   grid-template-columns: 20px 1fr;
   align-items: start;
   gap: 10px;
+  margin-top: 12px;
   margin-bottom: 12px;
   padding: 8px 10px;
   border-radius: 8px;
