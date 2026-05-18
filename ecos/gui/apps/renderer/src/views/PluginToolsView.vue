@@ -581,7 +581,7 @@ function goHome(): void {
 }
 
 async function openDocs(): Promise<void> {
-  const docsUrl = 'https://github.com/openecos-projects/ecc/blob/main/docs/user-guide.md'
+  const docsUrl = 'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
   try {
     if (hasDesktopApi()) {
       const desktopApi = getOptionalDesktopApi() ?? await waitForDesktopApi()
