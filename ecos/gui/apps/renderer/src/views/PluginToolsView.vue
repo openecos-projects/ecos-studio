@@ -1442,26 +1442,27 @@ async function openDocs(): Promise<void> {
 }
 
 .selected-list {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   flex: 1;
   overflow: auto;
-  align-content: start;
+  min-height: 160px;
 }
 
 .selected-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  min-height: auto;
+  justify-content: center;
+  min-height: 100px;
   gap: 6px;
   border: 1px dashed var(--border-color);
   border-radius: 8px;
   color: var(--text-secondary);
   font-size: 12px;
   text-align: center;
-  padding: 24px 16px;
+  padding: 16px;
 }
 
 .selected-empty i {
