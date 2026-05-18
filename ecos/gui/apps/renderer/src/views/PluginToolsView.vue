@@ -299,10 +299,6 @@
                   <b v-if="row.statusKind === 'update'">Update</b>
                   <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
                   <span v-else>{{ row.version }}</span>
-                  <template v-if="resolveInstallPath(row)">
-                    <span class="meta-sep"> · </span>
-                    <span class="meta-path">{{ resolveInstallPath(row) }}</span>
-                  </template>
                 </small>
               </span>
               <em>{{ row.sizeLabel }}</em>
@@ -1498,17 +1494,13 @@ async function openDocs(): Promise<void> {
 }
 
 .selected-item-meta {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: block;
   overflow: hidden;
+  max-width: 260px;
   color: var(--text-secondary);
   font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.selected-item-meta > :first-child {
-  flex-shrink: 0;
 }
 
 .selected-item-meta b {
@@ -1518,21 +1510,6 @@ async function openDocs(): Promise<void> {
   background: var(--info-bg);
   font-size: 10px;
   font-style: normal;
-  flex-shrink: 0;
-}
-
-.meta-sep {
-  opacity: 0.4;
-  flex-shrink: 0;
-}
-
-.meta-path {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.6;
-  text-align: right;
 }
 
 .selected-item em {
