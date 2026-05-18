@@ -295,12 +295,15 @@
               <span class="resource-avatar compact">{{ row.icon }}</span>
               <span class="selected-item-body">
                 <strong>{{ row.name }}</strong>
-                <small>
+                <small class="selected-item-meta" :title="resolveInstallPath(row)">
                   <b v-if="row.statusKind === 'update'">Update</b>
                   <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
                   <span v-else>{{ row.version }}</span>
+                  <template v-if="resolveInstallPath(row)">
+                    <span class="meta-sep"> · </span>
+                    <span class="meta-path">{{ resolveInstallPath(row) }}</span>
+                  </template>
                 </small>
-                <small class="selected-item-path" :title="resolveInstallPath(row)">{{ resolveInstallPath(row) }}</small>
               </span>
               <em>{{ row.sizeLabel }}</em>
               <button type="button" aria-label="Remove selected resource" @click.stop="removeSelected(row.id)">
@@ -1494,7 +1497,7 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
 }
 
-.selected-item small {
+.selected-item-meta {
   display: block;
   overflow: hidden;
   max-width: 260px;
@@ -1504,7 +1507,7 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
 }
 
-.selected-item small b {
+.selected-item-meta b {
   padding: 2px 5px;
   border-radius: 5px;
   color: var(--info-color);
@@ -1513,16 +1516,12 @@ async function openDocs(): Promise<void> {
   font-style: normal;
 }
 
-.selected-item-path {
-  display: block;
-  overflow: hidden;
-  max-width: 260px;
-  color: var(--text-secondary);
-  font-family: 'Fira Code', monospace;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.7;
+.meta-sep {
+  opacity: 0.4;
+}
+
+.meta-path {
+  opacity: 0.6;
 }
 
 .selected-item em {
