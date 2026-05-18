@@ -195,68 +195,68 @@
                       <button
                         v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
                         type="button"
-                        class="row-action-btn primary"
+                        class="row-action-btn icon-only primary"
+                        data-title="Install"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-download-line" aria-hidden="true"></i>
-                        Install
                       </button>
                       <button
                         v-else-if="rowActionForStatus(row.resource) === 'update' && row.statusKind !== 'error'"
                         type="button"
-                        class="row-action-btn info"
+                        class="row-action-btn icon-only info"
+                        data-title="Update"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-refresh-line" aria-hidden="true"></i>
-                        Update
                       </button>
                       <button
                         v-else-if="row.statusKind === 'installing'"
                         type="button"
-                        class="row-action-btn warn"
+                        class="row-action-btn icon-only warn"
+                        data-title="Installing"
                         disabled
                       >
                         <i class="ri-loader-4-line spin" aria-hidden="true"></i>
-                        {{ row.progressPercent !== null ? `${row.progressPercent}%` : 'Installing' }}
                       </button>
                       <button
                         v-else-if="row.statusKind === 'error'"
                         type="button"
-                        class="row-action-btn danger"
+                        class="row-action-btn icon-only danger"
+                        data-title="Retry"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-restart-line" aria-hidden="true"></i>
-                        Retry
                       </button>
                       <button
                         v-else-if="row.actions.includes('activate')"
                         type="button"
-                        class="row-action-btn primary"
+                        class="row-action-btn icon-only primary"
+                        data-title="Activate"
                         @click.stop="handlePdkActivate(row)"
                       >
                         <i class="ri-check-line" aria-hidden="true"></i>
-                        Activate
                       </button>
                       <button
                         v-else-if="row.actions.includes('validate')"
                         type="button"
-                        class="row-action-btn info"
+                        class="row-action-btn icon-only info"
+                        data-title="Validate"
                         @click.stop="handlePdkValidate(row)"
                       >
                         <i class="ri-shield-check-line" aria-hidden="true"></i>
-                        Validate
                       </button>
                       <button
                         v-if="['uninstall', 'remove_reference'].includes(rowActionForStatus(row.resource))"
                         type="button"
-                        class="row-action-btn danger-outlined"
+                        class="row-action-btn icon-only danger-outlined"
+                        :data-title="rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall'"
                         @click.stop="handleRowUninstall(row)"
                       >
                         <i
                           :class="rowActionForStatus(row.resource) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
                           aria-hidden="true"
                         ></i>
-                        {{ rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall' }}
                       </button>
                     </template>
                   </span>
@@ -1050,7 +1050,7 @@ async function openDocs(): Promise<void> {
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 120px 100px;
+  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 110px 90px;
   align-items: center;
   gap: 0;
 }
@@ -1234,14 +1234,17 @@ async function openDocs(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .row-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
-  padding: 0 10px;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
   border: 0;
   border-radius: 6px;
   font-size: 11px;
@@ -1249,6 +1252,61 @@ async function openDocs(): Promise<void> {
   cursor: pointer;
   white-space: nowrap;
   transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.row-action-btn.icon-only {
+  width: 26px;
+  padding: 0;
+  font-size: 13px;
+}
+
+/* ---- Custom tooltip ---- */
+.row-action-btn[data-title] {
+  position: relative;
+}
+
+.row-action-btn[data-title]::after {
+  content: attr(data-title);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.96);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.row-action-btn[data-title]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%) scale(0.96);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid var(--border-color);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 10;
+}
+
+.row-action-btn[data-title]:hover::after,
+.row-action-btn[data-title]:hover::before {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
 }
 
 .row-action-btn.primary {
