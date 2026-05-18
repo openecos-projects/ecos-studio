@@ -231,7 +231,7 @@ function joinInstallPath(root: string, segments: string[]): string {
   return [root.replace(/\/+$/, ''), ...segments.map((segment) => segment.replace(/^\/+|\/+$/g, ''))].join('/')
 }
 
-function resolveRowInstallPath(row: ResourceRow): string {
+export function resolveRowInstallPath(row: ResourceRow): string {
   const managedRoot = row.resource.managed_root
   const version = targetVersionForRow(row)
   if (!managedRoot || !version) {

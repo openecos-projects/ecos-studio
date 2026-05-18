@@ -293,13 +293,14 @@
               :style="{ '--row-accent': row.accent }"
             >
               <span class="resource-avatar compact">{{ row.icon }}</span>
-              <span>
+              <span class="selected-item-body">
                 <strong>{{ row.name }}</strong>
                 <small>
                   <b v-if="row.statusKind === 'update'">Update</b>
                   <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
                   <span v-else>{{ row.version }}</span>
                 </small>
+                <small class="selected-item-path" :title="resolveInstallPath(row)">{{ resolveInstallPath(row) }}</small>
               </span>
               <em>{{ row.sizeLabel }}</em>
               <button type="button" aria-label="Remove selected resource" @click.stop="removeSelected(row.id)">
@@ -311,16 +312,6 @@
           <div class="total-size">
             <span>Estimated Total Size</span>
             <strong>{{ totalSizeText }}</strong>
-          </div>
-
-          <div class="install-location">
-            <span>Install Location</span>
-            <div>
-              <i class="ri-folder-line" aria-hidden="true"></i>
-              <code :title="installLocationText"
-                >{{ installLocationText }}</code
-              >
-            </div>
           </div>
 
           <p class="manager-note">
@@ -356,10 +347,9 @@ import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
-  currentInstallLocation,
-  managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
+  resolveRowInstallPath,
   rowActionForStatus,
   runBatchDownload,
   runPrimaryAction,
@@ -426,13 +416,6 @@ const totalSizeMb = computed(() => {
 })
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
-const installLocationText = computed(() => {
-  const downloadLocation = managedInstallLocation(downloadableSelectedResources.value)
-  if (downloadLocation) return downloadLocation
-
-  const currentLocation = currentInstallLocation(selectedResources.value)
-  return currentLocation || '-'
-})
 
 const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
@@ -582,6 +565,10 @@ async function handleRowUninstall(row: ResourceRow): Promise<void> {
 
 async function downloadSelected(): Promise<void> {
   await runBatchDownload(downloadableSelectedResources.value, pluginStore)
+}
+
+function resolveInstallPath(row: ResourceRow): string {
+  return resolveRowInstallPath(row)
 }
 
 function formatSize(sizeMb: number): string {
@@ -1484,13 +1471,17 @@ async function openDocs(): Promise<void> {
 
 .selected-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+  padding: 4px 0;
 }
 
-.selected-item > span:nth-child(2) {
+.selected-item-body {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .selected-item strong {
@@ -1507,7 +1498,6 @@ async function openDocs(): Promise<void> {
   display: block;
   overflow: hidden;
   max-width: 260px;
-  margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
   text-overflow: ellipsis;
@@ -1523,11 +1513,24 @@ async function openDocs(): Promise<void> {
   font-style: normal;
 }
 
+.selected-item-path {
+  display: block;
+  overflow: hidden;
+  max-width: 260px;
+  color: var(--text-secondary);
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
 .selected-item em {
   color: var(--text-secondary);
   font-size: 11px;
   font-style: normal;
   white-space: nowrap;
+  margin-top: 2px;
 }
 
 .selected-item button {
@@ -1547,7 +1550,7 @@ async function openDocs(): Promise<void> {
   background: color-mix(in srgb, var(--text-primary) 6%, transparent);
 }
 
-/* ---- Total size & install location ---- */
+/* ---- Total size ---- */
 .total-size {
   display: flex;
   align-items: center;
@@ -1560,8 +1563,7 @@ async function openDocs(): Promise<void> {
   font-size: 13px;
 }
 
-.total-size span,
-.install-location > span {
+.total-size span {
   color: var(--text-secondary);
   font-weight: 650;
 }
@@ -1569,32 +1571,6 @@ async function openDocs(): Promise<void> {
 .total-size strong {
   font-size: 14px;
   font-weight: 800;
-}
-
-.install-location {
-  padding: 12px 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  min-height: 56px;
-}
-
-.install-location div {
-  display: grid;
-  grid-template-columns: 18px 1fr;
-  align-items: center;
-  gap: 7px;
-  margin-top: 8px;
-}
-
-.install-location code {
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
-  cursor: default;
 }
 
 /* ---- Note & actions ---- */
