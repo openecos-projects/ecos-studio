@@ -231,20 +231,24 @@ function joinInstallPath(root: string, segments: string[]): string {
   return [root.replace(/\/+$/, ''), ...segments.map((segment) => segment.replace(/^\/+|\/+$/g, ''))].join('/')
 }
 
+function resolveRowInstallPath(row: ResourceRow): string {
+  const managedRoot = row.resource.managed_root
+  const version = targetVersionForRow(row)
+  if (!managedRoot || !version) {
+    return row.resource.path ?? ''
+  }
+  return joinInstallPath(managedRoot, [row.resourceName, version])
+}
+
 export function managedInstallLocation(rows: ResourceRow[]): string {
   const installableRows = rows.filter((row) => primaryActionForRow(row) !== null)
   if (installableRows.length === 0) {
     return ''
   }
 
-  const resolvedPaths = installableRows.map((row) => {
-    const managedRoot = row.resource.managed_root
-    const version = targetVersionForRow(row)
-    if (!managedRoot || !version) {
-      return row.resource.path ?? ''
-    }
-    return joinInstallPath(managedRoot, [row.resourceName, version])
-  }).filter((path) => path.length > 0)
+  const resolvedPaths = installableRows
+    .map(resolveRowInstallPath)
+    .filter((path) => path.length > 0)
 
   if (resolvedPaths.length === 0) {
     return ''
@@ -255,6 +259,20 @@ export function managedInstallLocation(rows: ResourceRow[]): string {
   }
 
   return resolvedPaths.join(', ')
+}
+
+export function currentInstallLocation(rows: ResourceRow[]): string {
+  const paths = rows.map(resolveRowInstallPath).filter((path) => path.length > 0)
+
+  if (paths.length === 0) {
+    return ''
+  }
+
+  if (paths.length === 1) {
+    return paths[0]
+  }
+
+  return paths.join(', ')
 }
 
 export function resourceToRow(

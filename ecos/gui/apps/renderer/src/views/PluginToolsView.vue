@@ -354,6 +354,7 @@ import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
+  currentInstallLocation,
   managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
@@ -424,8 +425,11 @@ const totalSizeMb = computed(() => {
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
 const installLocationText = computed(() => {
-  const location = managedInstallLocation(downloadableSelectedResources.value)
-  return location || '-'
+  const downloadLocation = managedInstallLocation(downloadableSelectedResources.value)
+  if (downloadLocation) return downloadLocation
+
+  const currentLocation = currentInstallLocation(selectedResources.value)
+  return currentLocation || '-'
 })
 
 const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
