@@ -317,7 +317,9 @@
             <span>Install Location</span>
             <div>
               <i class="ri-folder-line" aria-hidden="true"></i>
-              <code>{{ installLocationText }}</code>
+              <code :title="installLocationText"
+                >{{ installLocationText }}</code
+              >
             </div>
           </div>
 
@@ -1570,9 +1572,10 @@ async function openDocs(): Promise<void> {
 }
 
 .install-location {
-  padding: 16px 0;
+  padding: 12px 0;
   color: var(--text-secondary);
   font-size: 13px;
+  min-height: 56px;
 }
 
 .install-location div {
@@ -1580,13 +1583,18 @@ async function openDocs(): Promise<void> {
   grid-template-columns: 18px 1fr;
   align-items: center;
   gap: 7px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .install-location code {
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  cursor: default;
 }
 
 /* ---- Note & actions ---- */
