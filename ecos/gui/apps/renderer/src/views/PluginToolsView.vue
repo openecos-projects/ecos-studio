@@ -1031,12 +1031,13 @@ async function openDocs(): Promise<void> {
 /* ---- Table ---- */
 .resource-table-scroll {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   flex: 1;
 }
 
 .resource-table {
-  min-width: 680px;
+  width: 100%;
 }
 
 .resource-table-head,
