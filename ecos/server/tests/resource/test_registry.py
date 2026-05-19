@@ -182,9 +182,7 @@ class TestRegistryFetch:
         self, registry_url: str, registry_fixture: dict, tmp_path: Path
     ) -> None:
         service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
-        mock_client = _mock_async_client_transient_failure(
-            _make_mock_response(registry_fixture)
-        )
+        mock_client = _mock_async_client_transient_failure(_make_mock_response(registry_fixture))
 
         with patch("httpx.AsyncClient", return_value=mock_client):
             result = await service.fetch()

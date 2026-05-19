@@ -40,8 +40,7 @@ class _ApiLogFormatter(logging.Formatter):
 
         prefix = self._prefix(record)
         return "\n".join(
-            f"{prefix}{line}" if line else prefix.rstrip()
-            for line in message.splitlines()
+            f"{prefix}{line}" if line else prefix.rstrip() for line in message.splitlines()
         )
 
     def _prefix(self, record: logging.LogRecord) -> str:
@@ -74,10 +73,7 @@ def _remove_api_handlers(log: logging.Logger, *, close: bool = True) -> None:
         removed = True
         if close:
             handler.close()
-    if (
-        removed
-        and not any(getattr(handler, _API_HANDLER_ATTR, False) for handler in log.handlers)
-    ):
+    if removed and not any(getattr(handler, _API_HANDLER_ATTR, False) for handler in log.handlers):
         previous_propagate = getattr(log, _API_PREVIOUS_PROPAGATE_ATTR, True)
         log.propagate = previous_propagate
         if hasattr(log, _API_PREVIOUS_PROPAGATE_ATTR):
@@ -118,9 +114,7 @@ def ensure_api_logger(reset: bool = False) -> logging.Logger:
 
     if not log.handlers:
         handler = _mark_api_handler(logging.StreamHandler(sys.stderr))
-        handler.setFormatter(
-            _ApiLogFormatter(color=_should_use_color(sys.stderr), terminal=True)
-        )
+        handler.setFormatter(_ApiLogFormatter(color=_should_use_color(sys.stderr), terminal=True))
         log.addHandler(handler)
 
         log_file = os.environ.get("ECOS_API_LOG_FILE", "").strip()
