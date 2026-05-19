@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import asyncio
 import json
 import logging
 import time
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CACHE_DIR = None
 _DEFAULT_TTL = 3600
+_FETCH_ATTEMPTS = 2
+_FETCH_RETRY_DELAY_SECONDS = 0.25
 
 
 @dataclass
@@ -108,16 +111,38 @@ class RegistryService:
         # Try remote fetch first
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                resp = await client.get(self._registry_url)
-                resp.raise_for_status()
-                raw = resp.json()
-                validated = ResourceRegistryV1(**raw)
-                registry = self._to_tool_registry(validated)
-                self._save_cache(registry)
-                self._in_memory = registry
-                return RegistryState(registry=registry, diagnostics=[])
-        except Exception:
-            logger.warning("Failed to fetch registry from %s", self._registry_url, exc_info=True)
+                for attempt in range(1, _FETCH_ATTEMPTS + 1):
+                    try:
+                        resp = await client.get(self._registry_url)
+                        resp.raise_for_status()
+                        raw = resp.json()
+                        validated = ResourceRegistryV1(**raw)
+                        registry = self._to_tool_registry(validated)
+                        self._save_cache(registry)
+                        self._in_memory = registry
+                        return RegistryState(registry=registry, diagnostics=[])
+                    except Exception as exc:
+                        if attempt >= _FETCH_ATTEMPTS:
+                            raise
+                        logger.debug(
+                            "Registry fetch attempt %d/%d failed for %s: %s",
+                            attempt,
+                            _FETCH_ATTEMPTS,
+                            self._registry_url,
+                            _describe_error(exc),
+                        )
+                        await asyncio.sleep(_FETCH_RETRY_DELAY_SECONDS)
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch registry from %s: %s",
+                self._registry_url,
+                _describe_error(exc),
+            )
+            logger.debug(
+                "Registry fetch traceback for %s",
+                self._registry_url,
+                exc_info=True,
+            )
             diagnostics.append(f"Registry unavailable at {self._registry_url}")
 
         # Fall back to file cache (even if expired)
@@ -134,3 +159,11 @@ class RegistryService:
     async def refresh(self) -> RegistryState:
         """Force refresh from remote, bypassing cache."""
         return await self.fetch(force=True)
+
+
+def _describe_error(error: Exception) -> str:
+    detail = str(error).strip()
+    name = type(error).__name__
+    if detail:
+        return f"{name}: {detail}"
+    return name

@@ -96,6 +96,15 @@ def _mock_async_client_failing() -> MagicMock:
     return client
 
 
+def _mock_async_client_transient_failure(response: MagicMock) -> MagicMock:
+    """Create a mock AsyncClient whose get() succeeds after one transient failure."""
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=[Exception("TLS reset"), response])
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    return client
+
+
 class TestRegistryFetch:
     """Positive: remote-first fetch with cache and degraded states."""
 
@@ -148,6 +157,42 @@ class TestRegistryFetch:
         assert result.registry.tools[0].name == "yosys"
         assert len(result.diagnostics) >= 1
         assert any("unavailable" in d.lower() or "cached" in d.lower() for d in result.diagnostics)
+
+    @pytest.mark.asyncio
+    async def test_unavailable_registry_warning_is_concise(
+        self, registry_url: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
+        mock_client = _mock_async_client_failing()
+
+        with (
+            patch("httpx.AsyncClient", return_value=mock_client),
+            caplog.at_level("WARNING", logger="ecos_server.resource.registry"),
+        ):
+            await service.fetch()
+
+        assert (
+            "Failed to fetch registry from https://registry.example.com/tool-registry.json"
+            in caplog.text
+        )
+        assert "Traceback" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_transient_registry_failure_retries(
+        self, registry_url: str, registry_fixture: dict, tmp_path: Path
+    ) -> None:
+        service = RegistryService(registry_url=registry_url, cache_dir=tmp_path / "cache")
+        mock_client = _mock_async_client_transient_failure(
+            _make_mock_response(registry_fixture)
+        )
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await service.fetch()
+
+        assert result.registry is not None
+        assert result.registry.tools[0].name == "yosys"
+        assert result.diagnostics == []
+        assert mock_client.get.await_count == 2
 
     @pytest.mark.asyncio
     async def test_degraded_empty_when_both_unavailable(
