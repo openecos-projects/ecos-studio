@@ -8,7 +8,7 @@ version = "0.1.0-alpha.5"
 requires-python = ">=3.11"
 dependencies = [
   "ecc==0.1.0a2",
-  "ecc-dreamplace==0.1.0a2",
+  "ecc-dreamplace==0.1.0a3",
   "ecc-tools==0.1.0a2",
   "fastapi>=0.109",
   "torch>=1.6.0",
@@ -42,13 +42,13 @@ environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 override-dependencies = [
-# Remove this after ecc bump its ecc-dreamplace dependency to 0.1.0a2 or later, which is the version that this server depends on.
-  "ecc-dreamplace==0.1.0a2",
+# Remove this after ecc bump its ecc-dreamplace dependency to 0.1.0a3 or later, which is the version that this server depends on.
+  "ecc-dreamplace==0.1.0a3",
 ]
 
 [tool.uv.sources]
 ecc = { url = "https://github.com/openecos-projects/ecc/releases/download/v0.1.0-alpha.2/ecc-0.1.0a2-py3-none-any.whl" }
-ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.4/ecc_dreamplace-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
+ecc-dreamplace = { url = "https://github.com/openecos-projects/ecc-dreamplace/releases/download/v0.1.0-alpha.3/ecc_dreamplace-0.1.0a3-py3-none-manylinux_2_34_x86_64.whl" }
 ecc-tools = { url = "https://github.com/openecos-projects/ecc-tools/releases/download/v0.1.0-alpha.2/ecc_tools-0.1.0a2-py3-none-manylinux_2_34_x86_64.whl" }
 torch = { index = "pytorch-cpu" }
 
