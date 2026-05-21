@@ -47,12 +47,16 @@ const { versions } = useVersion()
 
 const componentLabels: Record<string, string> = {
   gui: 'GUI',
-  server: 'Server',
+  runtime: 'Runtime',
   ecc: 'ECC-Tools',
   dreamplace: 'ECC-DreamPlace',
 }
 
 function versionText(key: string): string {
+  if (key === 'runtime') {
+    return versions.value?.runtime ?? versions.value?.server ?? 'unknown'
+  }
+
   return versions.value?.[key as keyof typeof versions.value] ?? 'unknown'
 }
 

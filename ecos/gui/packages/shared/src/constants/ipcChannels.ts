@@ -11,7 +11,6 @@ export const desktopApiIpcChannels = {
   settingsDelete: 'settings:delete',
   dialogPickDirectory: 'dialog:pick-directory',
   dialogPickFiles: 'dialog:pick-files',
-  workspaceGetApiPort: 'workspace:get-api-port',
   workspaceIsProjectDirectory: 'workspace:is-project-directory',
   workspaceRegisterProjectRoot: 'workspace:register-project-root',
   workspaceClearProjectRoot: 'workspace:clear-project-root',

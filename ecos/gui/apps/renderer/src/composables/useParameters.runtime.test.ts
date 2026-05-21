@@ -4,7 +4,7 @@ const {
   currentProject,
   fetchSharedHomeData,
   readProjectTextFile,
-  sseMessages,
+  runtimeEvents,
   stepRefreshCounter,
   writeProjectTextFile,
   resolveProjectPathAccess,
@@ -14,7 +14,7 @@ const {
   },
   fetchSharedHomeData: vi.fn(),
   readProjectTextFile: vi.fn(),
-  sseMessages: { value: [] },
+  runtimeEvents: { value: [] },
   stepRefreshCounter: { __v_isRef: true, value: 0 },
   writeProjectTextFile: vi.fn(),
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
@@ -23,7 +23,7 @@ const {
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject,
-    sseMessages,
+    runtimeEvents,
     stepRefreshCounter,
   }),
 }))
@@ -53,7 +53,7 @@ import { useParameters } from './useParameters'
 describe('useParameters desktop bridge integration', () => {
   beforeEach(() => {
     currentProject.value = { path: '/workspace/demo' }
-    sseMessages.value = []
+    runtimeEvents.value = []
     stepRefreshCounter.value = 0
     fetchSharedHomeData.mockReset()
     readProjectTextFile.mockReset()

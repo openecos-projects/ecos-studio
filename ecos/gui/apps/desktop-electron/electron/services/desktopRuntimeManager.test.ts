@@ -143,6 +143,36 @@ describe('DesktopRuntimeManager', () => {
     await expect(first).resolves.toMatchObject({ ok: true })
   })
 
+  it('emits completed events for warning results returned by the adapter', async () => {
+    const listener = vi.fn()
+    const manager = new DesktopRuntimeManager({
+      adapter: {
+        execute: vi.fn(async () => result({
+          cmd: 'get_info',
+          message: ['no info available'],
+          ok: true,
+          response: 'warning',
+        })),
+      },
+    })
+
+    await expect(manager.execute({
+      cmd: 'get_info',
+      data: { id: 'layout', step: 'route' },
+      source: 'button',
+    }, listener)).resolves.toMatchObject({
+      cmd: 'get_info',
+      ok: true,
+      response: 'warning',
+    })
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      cmd: 'get_info',
+      result: expect.objectContaining({ response: 'warning' }),
+      stream: 'system',
+      type: 'completed',
+    }))
+  })
+
   it('clears the active long-running job after adapter errors', async () => {
     const manager = new DesktopRuntimeManager({
       adapter: {

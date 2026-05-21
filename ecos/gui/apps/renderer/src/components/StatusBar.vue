@@ -2,7 +2,7 @@
 <template>
   <div class="status-bar">
     <span class="status-text">
-      ECOS Studio{{ serverVersion ? ` v${serverVersion}` : '' }}
+      ECOS Studio{{ guiVersion ? ` v${guiVersion}` : '' }}
     </span>
     <button
       class="status-terminal-toggle"
@@ -29,13 +29,13 @@ defineEmits<{
 }>()
 
 const { versions } = useVersion()
-const serverVersion = computed(() => versions.value?.server ?? '')
+const guiVersion = computed(() => versions.value?.gui ?? '')
 </script>
 
 <style scoped>
 .status-bar {
-  height: 24px;
-  min-height: 24px;
+  height: var(--status-bar-height, 24px);
+  min-height: var(--status-bar-height, 24px);
   display: flex;
   align-items: center;
   gap: 10px;

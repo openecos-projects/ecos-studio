@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<EOF
-Usage: $0 --gui-src-dir <dir> --api-server-bin <path> --out-tar <path> [--oss-cad-bin <path>]
+Usage: $0 --gui-src-dir <dir> --out-tar <path> --ecc-cli-artifact <path> [--oss-cad-bin <path>]
 EOF
 }
 
@@ -39,35 +39,6 @@ pnpm_with_repo_node() {
 
 normalize_csv() {
     echo "$1" | tr -d '[:space:]' | tr -s ',' | sed 's/^,//; s/,$//'
-}
-
-detect_api_server_triple() {
-    local uname_s
-    local uname_m
-    uname_s="$(uname -s)"
-    uname_m="$(uname -m)"
-
-    case "$uname_s/$uname_m" in
-        Linux/x86_64)
-            echo "x86_64-unknown-linux-gnu"
-            ;;
-        Linux/aarch64|Linux/arm64)
-            echo "aarch64-unknown-linux-gnu"
-            ;;
-        Darwin/arm64)
-            echo "aarch64-apple-darwin"
-            ;;
-        Darwin/x86_64)
-            echo "x86_64-apple-darwin"
-            ;;
-        MINGW*/*|MSYS*/*|CYGWIN*/*)
-            echo "x86_64-pc-windows-msvc"
-            ;;
-        *)
-            echo "ERROR: unsupported host platform for API server bundle naming: $uname_s/$uname_m" >&2
-            exit 1
-            ;;
-    esac
 }
 
 map_linux_target() {
@@ -120,26 +91,36 @@ resolve_oss_cad_bin() {
     return 1
 }
 
-install_api_server_artifact() {
+install_ecc_cli_artifact() {
     local artifact_path="$1"
-    local target_path="$2"
+    local target_dir="$2"
 
-    rm -rf "$target_path"
-
-    if tar -tf "$artifact_path" >/dev/null 2>&1; then
-        mkdir -p "$target_path"
-        tar -xf "$artifact_path" -C "$target_path"
-        local executable_path="$target_path/ecos-server"
-        if [[ ! -x "$executable_path" ]]; then
-            echo "ERROR: API server bundle is missing executable: $executable_path" >&2
-            exit 1
-        fi
-        chmod +x "$executable_path"
-        return 0
+    if [[ ! -f "$artifact_path" ]]; then
+        echo "ERROR: ECC CLI artifact not found: $artifact_path" >&2
+        exit 1
     fi
 
-    cp -f "$artifact_path" "$target_path"
-    chmod +x "$target_path"
+    rm -rf "$target_dir"
+    mkdir -p "$target_dir/runtime"
+
+    if tar -tf "$artifact_path" >/dev/null 2>&1; then
+        tar -xf "$artifact_path" -C "$target_dir/runtime"
+    else
+        cp -f "$artifact_path" "$target_dir/runtime/ecc-cli"
+    fi
+
+    if [[ ! -x "$target_dir/runtime/ecc-cli" ]]; then
+        echo "ERROR: ECC CLI bundle is missing executable: $target_dir/runtime/ecc-cli" >&2
+        exit 1
+    fi
+
+    cat > "$target_dir/ecc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"
+EOF
+    chmod +x "$target_dir/ecc"
 }
 
 validate_packaged_oss_cad_suite() {
@@ -168,18 +149,14 @@ validate_packaged_oss_cad_suite() {
 
 main() {
     GUI_SRC_DIR=""
-    API_SERVER_BIN=""
     OUT_TAR=""
     OSS_CAD_BIN=""
+    ECC_CLI_ARTIFACT=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --gui-src-dir)
                 GUI_SRC_DIR="$2"
-                shift 2
-                ;;
-            --api-server-bin)
-                API_SERVER_BIN="$2"
                 shift 2
                 ;;
             --out-tar)
@@ -188,6 +165,10 @@ main() {
                 ;;
             --oss-cad-bin)
                 OSS_CAD_BIN="$2"
+                shift 2
+                ;;
+            --ecc-cli-artifact)
+                ECC_CLI_ARTIFACT="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -202,14 +183,18 @@ main() {
         esac
     done
 
-    if [[ -z "$GUI_SRC_DIR" || -z "$API_SERVER_BIN" || -z "$OUT_TAR" ]]; then
+    if [[ -z "$GUI_SRC_DIR" || -z "$OUT_TAR" || -z "$ECC_CLI_ARTIFACT" ]]; then
         echo "ERROR: missing required arguments" >&2
         usage >&2
         exit 1
     fi
 
-    API_SERVER_BIN="$(readlink -f "$API_SERVER_BIN")"
-    TARGET_TRIPLE="${ECOS_API_SERVER_TRIPLE:-$(detect_api_server_triple)}"
+    ECC_CLI_ARTIFACT="$(readlink -f "$ECC_CLI_ARTIFACT")"
+    if [[ ! -f "$ECC_CLI_ARTIFACT" ]]; then
+        echo "ERROR: ECC CLI artifact not found: $ECC_CLI_ARTIFACT" >&2
+        exit 1
+    fi
+
     WORK_ROOT="$(mktemp -d)"
     trap 'rm -rf "$WORK_ROOT"' EXIT
     GUI_DIR="$WORK_ROOT/gui"
@@ -218,15 +203,6 @@ main() {
     ELECTRON_BINARIES_DIR="$ELECTRON_RESOURCES_DIR/binaries"
     OSS_CAD_BUNDLE_DIR="$ELECTRON_RESOURCES_DIR/oss-cad-suite"
     RELEASE_DIR="$ELECTRON_APP_DIR/release"
-
-    if [[ ! -f "$API_SERVER_BIN" ]]; then
-        echo "ERROR: api server artifact not found: $API_SERVER_BIN" >&2
-        exit 1
-    fi
-    if [[ -z "$TARGET_TRIPLE" ]]; then
-        echo "ERROR: failed to resolve API server bundle target triple" >&2
-        exit 1
-    fi
 
     rm -rf "$WORK_ROOT"
     mkdir -p "$GUI_DIR"
@@ -257,8 +233,7 @@ main() {
         tar -xf -
     )
 
-    mkdir -p "$ELECTRON_BINARIES_DIR"
-    install_api_server_artifact "$API_SERVER_BIN" "$ELECTRON_BINARIES_DIR/api-server-$TARGET_TRIPLE"
+    install_ecc_cli_artifact "$ECC_CLI_ARTIFACT" "$ELECTRON_BINARIES_DIR"
 
     ECOS_ELECTRON_LINUX_TARGETS="${ECOS_ELECTRON_LINUX_TARGETS:-AppImage,deb}"
     ECOS_ELECTRON_LINUX_TARGETS="$(normalize_csv "$ECOS_ELECTRON_LINUX_TARGETS")"

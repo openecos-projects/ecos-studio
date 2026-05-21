@@ -1,11 +1,6 @@
-/**
- * Project API module for ChipCompiler
- */
-
-import { alovaInstance } from './client'
 import { toDesktopCliData } from './desktopPayload'
 import { CMDEnum } from './type'
-import { getOptionalDesktopApi } from '@/platform/desktop'
+import { getDesktopApi } from '@/platform/desktop'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -19,7 +14,7 @@ export interface WorkspaceResponse {
   response: string;
   data: {
     directory: string;
-    workspace_id?: string;  // 前端用于订阅 SSE
+    workspace_id?: string;  // 前端用于订阅 CLI runtime events
   };
   message: string[];
 }
@@ -69,21 +64,11 @@ export interface SetPdkRootRequest {
  * @param path - Full path to the project directory
  */
 export function loadWorkspaceApi(directory: string) {
-  const desktopApi = getOptionalDesktopApi()
-  if (desktopApi?.cli) {
-    return desktopApi.cli.execute({
-      cmd: 'load_workspace',
-      data: { directory },
-      source: 'button',
-    }) as unknown as Promise<WorkspaceResponse>
-  }
-
-  return alovaInstance.Post<WorkspaceResponse>('/api/workspace/load_workspace', {
-    cmd: CMDEnum.load_workspace,
-    data: {
-      directory: directory
-    }
-  } as LoadWorkspaceRequest)
+  return getDesktopApi().cli.execute({
+    cmd: 'load_workspace',
+    data: { directory },
+    source: 'button',
+  }) as unknown as Promise<WorkspaceResponse>
 }
 
 /**
@@ -114,19 +99,11 @@ export function createWorkspaceApi(
     pdk_root: options.pdk_root || '',
     filelist: options.filelist || ''
   })
-  const desktopApi = getOptionalDesktopApi()
-  if (desktopApi?.cli) {
-    return desktopApi.cli.execute({
-      cmd: 'create_workspace',
-      data,
-      source: 'button',
-    }) as unknown as Promise<WorkspaceResponse>
-  }
-
-  return alovaInstance.Post<WorkspaceResponse>('/api/workspace/create_workspace', {
-    cmd: CMDEnum.create_workspace,
-    data
-  } as CreateWorkspaceRequest)
+  return getDesktopApi().cli.execute({
+    cmd: 'create_workspace',
+    data,
+    source: 'button',
+  }) as unknown as Promise<WorkspaceResponse>
 }
 
 export function setPdkRootApi(options: {
@@ -137,24 +114,16 @@ export function setPdkRootApi(options: {
     pdk: options?.pdk || '',
     pdk_root: options?.pdk_root || '',
   })
-  const desktopApi = getOptionalDesktopApi()
-  if (desktopApi?.cli) {
-    return desktopApi.cli.execute({
-      cmd: 'set_pdk_root',
-      data,
-      source: 'button',
-    }) as unknown as Promise<SetPdkRootResponse>
-  }
-
-  return alovaInstance.Post<SetPdkRootResponse>('/api/workspace/set_pdk_root', {
-    cmd: CMDEnum.set_pdk_root,
+  return getDesktopApi().cli.execute({
+    cmd: 'set_pdk_root',
     data,
-  } as SetPdkRootRequest)
+    source: 'button',
+  }) as unknown as Promise<SetPdkRootResponse>
 }
 
 /**
  * Check project API health
  */
 export function checkProjectApiHealth() {
-  return alovaInstance.Get<{ status: string }>('/api/project/health')
+  return Promise.resolve({ status: 'desktop-runtime' })
 }

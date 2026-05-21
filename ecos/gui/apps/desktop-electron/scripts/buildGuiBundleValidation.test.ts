@@ -33,6 +33,28 @@ afterEach(async () => {
 })
 
 describe('build-gui bundle validation', () => {
+  it('installs the ECC CLI wrapper from a bundled CLI artifact', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'ecos-build-gui-runtime-'))
+    tempDirs.push(rootDir)
+    const bundleDir = join(rootDir, 'ecc-cli-bundle')
+    const artifactPath = join(rootDir, 'ecc-cli.tar')
+    const targetDir = join(rootDir, 'resources', 'binaries')
+    await mkdir(bundleDir, { recursive: true })
+    await writeFile(join(bundleDir, 'ecc-cli'), '#!/usr/bin/env bash\n')
+    await chmod(join(bundleDir, 'ecc-cli'), 0o755)
+    await execFile('tar', ['-cf', artifactPath, '-C', bundleDir, '.'])
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${scriptPath}"; install_ecc_cli_artifact "${artifactPath}" "${targetDir}"`,
+    ])).resolves.toMatchObject({
+      stderr: '',
+    })
+
+    const wrapper = await readFile(join(targetDir, 'ecc'), 'utf8')
+    expect(wrapper).toContain('exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"')
+  })
+
   it('runs pnpm from PATH with the repository Node version', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'ecos-build-gui-pnpm-'))
     tempDirs.push(rootDir)

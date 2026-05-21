@@ -30,12 +30,12 @@ function clearTransientInteractionLocks() {
  * 流程运行器 Hook
  * 负责处理流程的运行、停止、重置等操作
  * 
- * SSE 通知由 useWorkspace 管理（workspace 级别长连接），
- * 本 Hook 只负责调用 API 并等待结果。
+ * Runtime lifecycle events 由 useWorkspace 管理（workspace 级别订阅），
+ * 本 Hook 只负责调用 CLI-backed runtime command 并等待结果。
  */
 export function useFlowRunner() {
   const { ensureTauri } = useTauri()
-  const { ensureApiReady, showToast, triggerStepRefresh } = useWorkspace()
+  const { ensureApiReady, showToast } = useWorkspace()
   const route = useRoute()
 
   // 状态（与 flowExecutionActive 同一引用）
@@ -123,7 +123,6 @@ export function useFlowRunner() {
         })
       }
 
-      triggerStepRefresh()
       return result.data
     } catch (err) {
       console.error('Single-step run failed:', err)
@@ -143,9 +142,9 @@ export function useFlowRunner() {
   /**
    * 运行所有步骤
    * 
-   * 调用 rtl2gds API（同步等待后端执行完成）。
-   * 执行过程中，后端通过 notify_service 发送 step_complete 等通知，
-   * 前端通过 useWorkspace 中已建立的 SSE 连接实时接收。
+   * 调用 rtl2gds runtime command（同步等待 CLI 执行完成）。
+   * 执行过程中，Electron runtime 转发 CLI lifecycle events，
+   * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
   async function runAllFlow(): Promise<any | null> {
     // 检查是否在 Tauri 环境中
@@ -198,7 +197,6 @@ export function useFlowRunner() {
         })
       }
 
-      triggerStepRefresh()
       return result.data
     } catch (err) {
       console.error('Run-all flow failed:', err)

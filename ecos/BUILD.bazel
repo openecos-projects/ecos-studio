@@ -60,6 +60,36 @@ genrule(
     """,
 )
 
+genrule(
+    name = "build_ecc_cli_bundle",
+    srcs = [
+        ":server_pyinstaller_srcs",
+        "server/ecos.spec",
+        "server/run_ecc_cli.py",
+    ],
+    tools = ["@ecos-bazel//tools:pyinstaller"],
+    outs = ["build_ecc_cli_bundle/ecc-cli.tar"],
+    tags = ["local", "no-sandbox"],
+    cmd = """
+        set -euo pipefail
+
+        export PYTHON_INTERPRETER="ecos/server/.venv/bin/python"
+        export ECOS_PYINSTALLER_MODE="onedir"
+        export ECOS_PYINSTALLER_ENTRYPOINT="ecc-cli"
+        export PYTHONPATH="$$PWD/ecc:$${PYTHONPATH:-}"
+        DIST_DIR="$(@D)/dist-ecc-cli"
+        WORK_DIR="$(@D)/build_ecc_cli_bundle_work"
+
+        $(location @ecos-bazel//tools:pyinstaller) $(location server/ecos.spec) \\
+          --clean \\
+          --noconfirm \\
+          --distpath "$$DIST_DIR" \\
+          --workpath "$$WORK_DIR"
+
+        tar -cf "$@" -C "$$DIST_DIR/ecc-cli" .
+    """,
+)
+
 # Electron bundle - ChipCompiler specific
 genrule(
     name = "ecos_studio_bundle",
@@ -77,9 +107,9 @@ genrule(
         "gui/pnpm-workspace.yaml",
         "gui/tailwind.config.ts",
     ] + [
-        ":build_ecos_server_bundle",
         "@oss_cad_suite_pruned//:all_files",
         "@oss_cad_suite_pruned//:yosys_bin",
+        ":build_ecc_cli_bundle",
         ":build_gui_script",
     ],
     outs = ["ecos_studio_bundle/ecos_studio_bundle.tar"],
@@ -89,8 +119,8 @@ genrule(
 
         bash "$(location :build_gui_script)" \\
             --gui-src-dir "$$(dirname $(location gui/package.json))" \\
-            --api-server-bin "$(location :build_ecos_server_bundle)" \\
             --oss-cad-bin "$(location @oss_cad_suite_pruned//:yosys_bin)" \\
+            --ecc-cli-artifact "$(location :build_ecc_cli_bundle)" \\
             --out-tar "$@"
     """,
 )

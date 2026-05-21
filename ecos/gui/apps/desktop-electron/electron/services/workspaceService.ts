@@ -24,7 +24,6 @@ export interface ProjectScopeProvider {
 }
 
 export interface WorkspaceServiceOptions {
-  apiPortProvider: ApiPortProvider
   projectScopeProvider: ProjectScopeProvider
 }
 
@@ -141,23 +140,17 @@ async function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
 }
 
 export class WorkspaceService {
-  private readonly apiPortProvider: ApiPortProvider
   private readonly projectScopeProvider: ProjectScopeProvider
   private readonly logTailService: LogTailService
   private readonly projectFileWatchers = new Map<string, { close: () => Promise<void> }>()
   private nextProjectFileWatchId = 1
 
   constructor(options: WorkspaceServiceOptions) {
-    this.apiPortProvider = options.apiPortProvider
     this.projectScopeProvider = options.projectScopeProvider
     this.logTailService = new LogTailService({
       projectScopeProvider: this.projectScopeProvider,
       textReader: this,
     })
-  }
-
-  async getApiPort(): Promise<number> {
-    return await this.apiPortProvider.getPort()
   }
 
   async isProjectDirectory(path: string): Promise<boolean> {

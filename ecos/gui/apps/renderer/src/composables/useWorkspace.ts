@@ -4,8 +4,9 @@ import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { loadWorkspaceApi, createWorkspaceApi, waitForApiReady } from '../api'
-import { createSSEClient, type SSEClient, type ECCResponse } from '../api/sse'
+import { loadWorkspaceApi, createWorkspaceApi, waitForRuntimeReady } from '../api'
+import * as runtimeEventApi from '../api/runtimeEvents'
+import type { RuntimeEventClient, ECCResponse } from '../api/runtimeEvents'
 import { setDesktopWindowTitle } from './windowTitle'
 
 interface SerializedProject {
@@ -29,15 +30,18 @@ interface SerializedProject {
 const currentProject = ref<Project | null>()
 const recentProjects = ref<Project[]>([])
 
-// SSE 连接（workspace 级别，跟随 workspace 生命周期）
-const sseClient = ref<SSEClient | null>(null)
-const sseMessages = ref<ECCResponse[]>([])
+// Runtime event connection（workspace 级别，跟随 workspace 生命周期）
+const runtimeEventClient = ref<RuntimeEventClient | null>(null)
+const runtimeEvents = ref<ECCResponse[]>([])
+const sseClient = runtimeEventClient
+const sseMessages = runtimeEvents
+const handledRefreshRuntimeEvents = new Set<string>()
 
 // 跨组件刷新信号：runFlow 完成后递增，DrawingArea / ThumbnailGallery 等组件监听以刷新数据
 const stepRefreshCounter = ref(0)
 
-/** 准备工作区就绪（含轮询 `/health`）时由 App 层显示全屏加载遮罩 */
-const apiBackendConnecting = ref(false)
+/** 准备工作区就绪时由 App 层显示全屏加载遮罩 */
+const runtimeBackendConnecting = ref(false)
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -112,25 +116,24 @@ export function useWorkspace() {
   }
 
   /**
-   * Wait until the FastAPI `/health` endpoint responds (Tauri 下子进程可能晚于窗口出现).
-   * 在调用 load/create workspace 等依赖后端的操作前调用，避免竞态报错。
+   * Wait until the desktop runtime bridge is available.
    */
   const ensureApiReady = async (): Promise<boolean> => {
-    apiBackendConnecting.value = true
+    runtimeBackendConnecting.value = true
     try {
-      await waitForApiReady({ timeoutMs: 180_000 })
+      await waitForRuntimeReady({ timeoutMs: 180_000 })
       return true
     } catch {
       showToast({
         severity: 'error',
-        summary: 'Backend unavailable',
+        summary: 'Desktop runtime unavailable',
         detail:
-          'The API server did not respond in time. Wait a few seconds and try again, or restart the application.',
+          'The desktop runtime bridge is not available. Restart the application and try again.',
         life: 8000
       })
       return false
     } finally {
-      apiBackendConnecting.value = false
+      runtimeBackendConnecting.value = false
     }
   }
 
@@ -251,7 +254,7 @@ export function useWorkspace() {
           await router.isReady()
 
           if (router.currentRoute.value.path.startsWith('/workspace')) {
-            // reload 后需要重新通过 API 加载 workspace 状态并建立 SSE 连接
+            // reload 后需要重新通过桌面 CLI 加载 workspace 状态并建立 runtime event 连接
             try {
               if (!(await ensureApiReady())) return
               const response = await loadWorkspaceApi(restored.path)
@@ -267,7 +270,7 @@ export function useWorkspace() {
                 }
                 await updateWindowTitle(restored.name)
                 const workspaceId = response.data.workspace_id || response.data.directory
-                connectSSE(workspaceId)
+                connectRuntimeEvents(workspaceId)
               }
             } catch (error) {
               console.error('Failed to reload workspace after restore:', error)
@@ -332,7 +335,7 @@ export function useWorkspace() {
 
       if (!(await ensureApiReady())) return false
 
-      // 3. 通过 HTTP API 加载项目状态
+      // 3. 通过桌面 CLI 加载项目状态
       const response = await loadWorkspaceApi(selectedPath)
       if (response.response === 'success') {
         const resolvedPath = normalizePath(response.data.directory || selectedPath)
@@ -372,9 +375,9 @@ export function useWorkspace() {
         // 持久化当前项目路径，以便 reload 后恢复
         await setSetting('current_project_path', normalizePath(loadedProject.path))
 
-        // 建立 SSE 连接
+        // 建立 runtime event 连接
         const workspaceId = response.data.workspace_id || response.data.directory
-        connectSSE(workspaceId)
+        connectRuntimeEvents(workspaceId)
 
         // 更新窗口标题
         await updateWindowTitle(loadedProject.name)
@@ -420,7 +423,7 @@ export function useWorkspace() {
 
       if (!(await ensureApiReady())) return false
 
-      // 3. 通过 HTTP API 创建项目（传递更多配置信息）
+      // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
       // 将前端参数映射为后端期望的格式 (参考 ics55_parameter.json)
       const frontendParams = config?.parameters || {}
       const pdkName = config?.pdk || 'ics55'
@@ -484,9 +487,9 @@ export function useWorkspace() {
         // 持久化当前项目路径，以便 reload 后恢复
         await setSetting('current_project_path', normalizePath(createdProject.path))
 
-        // 建立 SSE 连接
+        // 建立 runtime event 连接
         const workspaceId = response.data.workspace_id || response.data.directory
-        connectSSE(workspaceId)
+        connectRuntimeEvents(workspaceId)
 
         // 更新窗口标题
         await updateWindowTitle(createdProject.name)
@@ -606,59 +609,117 @@ export function useWorkspace() {
     }
 
     currentProject.value = null
-    disconnectSSE()
+    disconnectRuntimeEvents()
     await clearProjectRoot()
     await deleteSetting('current_project_path')
     await updateWindowTitle()
   }
 
   /**
-   * 建立 SSE 连接，订阅 workspace 的所有通知
+   * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
-  function connectSSE(workspaceId: string) {
+  function connectRuntimeEvents(workspaceId: string) {
     // 如果已有连接，先关闭
-    disconnectSSE()
+    disconnectRuntimeEvents()
 
-    const client = createSSEClient(workspaceId)
+    type RuntimeEventApi = typeof runtimeEventApi & {
+      createRuntimeEventClient?: (workspaceId: string) => RuntimeEventClient
+    }
+    const createRuntimeEventClient =
+      (runtimeEventApi as RuntimeEventApi).createRuntimeEventClient ?? runtimeEventApi.createSSEClient
+    const client = createRuntimeEventClient(workspaceId)
 
-    // 注册通用处理器，收集所有通知到 sseMessages
+    // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
       // 过滤心跳消息，不记录到 messages
       if (response.data?.type !== 'heartbeat') {
-        sseMessages.value.push(response)
-        const notifyId = response.data?.id as string | undefined
-        const notifyType = response.data?.type as string | undefined
-        if (
-          notifyId === 'step' ||
-          notifyId === 'subflow' ||
-          notifyType === 'step_start' ||
-          notifyType === 'step_complete' ||
-          notifyType === 'task_complete' ||
-          notifyType === 'data_ready'
-        ) {
+        runtimeEvents.value.push(response)
+        if (shouldTriggerStepRefresh(response)) {
           triggerStepRefresh()
         }
       }
     })
 
     client.connect()
-    sseClient.value = client
-    console.log(`SSE connected for workspace: ${workspaceId}`)
+    runtimeEventClient.value = client
+    console.log(`Runtime events connected for workspace: ${workspaceId}`)
   }
 
   /**
-   * 断开 SSE 连接
+   * 断开 runtime event 连接
    */
-  function disconnectSSE() {
-    if (sseClient.value) {
-      sseClient.value.close()
-      sseClient.value = null
+  function disconnectRuntimeEvents() {
+    if (runtimeEventClient.value) {
+      runtimeEventClient.value.close()
+      runtimeEventClient.value = null
     }
-    sseMessages.value = []
+    runtimeEvents.value = []
+    handledRefreshRuntimeEvents.clear()
   }
 
   function triggerStepRefresh() {
     stepRefreshCounter.value++
+  }
+
+  function shouldTriggerStepRefresh(response: ECCResponse): boolean {
+    const event = response.data
+    const eventType = event?.type as string | undefined
+    if (!eventType || !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)) {
+      return false
+    }
+
+    const cmd = event.cmd as string | undefined
+    if (cmd && !['run_step', 'rtl2gds'].includes(cmd)) {
+      return false
+    }
+
+    const refreshKey = [
+      event.jobId,
+      eventType,
+      event.step,
+      cmd,
+    ]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .join('|')
+
+    if (refreshKey && handledRefreshRuntimeEvents.has(refreshKey)) {
+      return false
+    }
+
+    const hasTopLevelPathPayload =
+      typeof event.subflow_path === 'string'
+      || typeof event.step_path === 'string'
+      || typeof event.home_page === 'string'
+      || typeof event.log_file === 'string'
+
+    const info = event.info
+    if (info && typeof info === 'object') {
+      const payload = info as Record<string, unknown>
+      if (
+        typeof payload.subflow_path === 'string'
+        || typeof payload.step_path === 'string'
+        || typeof payload.home_page === 'string'
+        || typeof payload.log_file === 'string'
+      ) {
+        if (refreshKey) {
+          handledRefreshRuntimeEvents.add(refreshKey)
+        }
+        return false
+      }
+    }
+
+    if (hasTopLevelPathPayload) {
+      if (refreshKey) {
+        handledRefreshRuntimeEvents.add(refreshKey)
+      }
+      return false
+    }
+
+    if (refreshKey) {
+      handledRefreshRuntimeEvents.add(refreshKey)
+    }
+
+    return true
   }
 
   return {
@@ -671,14 +732,16 @@ export function useWorkspace() {
     importProject,
     closeProject,
     updateWindowTitle,
-    // SSE
+    // Runtime events (sse* aliases are kept for compatibility)
+    runtimeEventClient,
+    runtimeEvents,
     sseClient,
     sseMessages,
     // 跨组件刷新
     stepRefreshCounter,
     triggerStepRefresh,
     // 准备工作区时的全屏遮罩（见 App.vue）
-    apiBackendConnecting,
+    runtimeBackendConnecting,
     ensureApiReady,
     // Toast
     showToast,

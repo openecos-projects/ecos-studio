@@ -81,7 +81,7 @@ watch(() => props.templateId, loadDetail, { immediate: true })
             v-if="error.includes('Unknown SoC template')"
             class="mt-4 rounded-xl border border-(--border-color) bg-(--bg-primary)/90 px-4 py-3 text-sm leading-relaxed text-(--text-secondary)"
           >
-            Templates will load from the workspace API when it is connected. Right now only IDs you have imported in this browser exist — open the SoC gallery and import a JSON file, or pick a template from the list.
+            Templates will load from the workspace runtime when it is connected. Right now only IDs you have imported in this browser exist; open the SoC gallery and import a JSON file, or pick a template from the list.
           </p>
         </div>
         <button

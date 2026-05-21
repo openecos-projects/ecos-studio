@@ -9,79 +9,55 @@ RESOURCES_DIR="$APP_DIR/resources"
 BINARIES_DIR="$RESOURCES_DIR/binaries"
 OSS_CAD_DIR="$RESOURCES_DIR/oss-cad-suite"
 
-detect_api_server_triple() {
-  local uname_s
-  local uname_m
-  uname_s="$(uname -s)"
-  uname_m="$(uname -m)"
-
-  case "$uname_s/$uname_m" in
-    Linux/x86_64)
-      echo "x86_64-unknown-linux-gnu"
-      ;;
-    Linux/aarch64|Linux/arm64)
-      echo "aarch64-unknown-linux-gnu"
-      ;;
-    Darwin/arm64)
-      echo "aarch64-apple-darwin"
-      ;;
-    Darwin/x86_64)
-      echo "x86_64-apple-darwin"
-      ;;
-    MINGW*/*|MSYS*/*|CYGWIN*/*)
-      echo "x86_64-pc-windows-msvc"
-      ;;
-    *)
-      echo "ERROR: unsupported host platform for API server bundle naming: $uname_s/$uname_m" >&2
-      exit 1
-      ;;
-  esac
-}
-
-resolve_api_server_artifact() {
-  if [[ -n "${ECOS_API_SERVER_BIN:-}" ]]; then
-    readlink -f "$ECOS_API_SERVER_BIN"
-    return 0
-  fi
-
-  if [[ -n "${ECOS_API_SERVER_BUNDLE:-}" ]]; then
-    readlink -f "$ECOS_API_SERVER_BUNDLE"
+resolve_ecc_cli_artifact() {
+  if [[ -n "${ECOS_ECC_CLI_ARTIFACT:-}" ]]; then
+    readlink -f "$ECOS_ECC_CLI_ARTIFACT"
     return 0
   fi
 
   if ! command -v bazel >/dev/null 2>&1; then
-    echo "ERROR: bazel is required to resolve the packaged API server artifact automatically." >&2
-    echo "Set ECOS_API_SERVER_BIN or ECOS_API_SERVER_BUNDLE explicitly or install bazel." >&2
+    echo "ERROR: bazel is required to resolve the packaged ECC CLI artifact automatically." >&2
+    echo "Set ECOS_ECC_CLI_ARTIFACT explicitly or install bazel." >&2
     exit 1
   fi
 
   (
     cd "$REPO_ROOT"
-    bazel build //ecos:build_ecos_server_bundle >/dev/null
-    readlink -f "$(bazel cquery --output=files //ecos:build_ecos_server_bundle 2>/dev/null | head -n 1)"
+    bazel build //ecos:build_ecc_cli_bundle >/dev/null
+    readlink -f "$(bazel cquery --output=files //ecos:build_ecc_cli_bundle 2>/dev/null | head -n 1)"
   )
 }
 
-install_api_server_artifact() {
+install_ecc_cli_artifact() {
   local artifact_path="$1"
-  local target_path="$2"
+  local target_dir="$2"
 
-  rm -rf "$target_path"
-
-  if tar -tf "$artifact_path" >/dev/null 2>&1; then
-    mkdir -p "$target_path"
-    tar -xf "$artifact_path" -C "$target_path"
-    local executable_path="$target_path/ecos-server"
-    if [[ ! -x "$executable_path" ]]; then
-      echo "ERROR: API server bundle is missing executable: $executable_path" >&2
-      exit 1
-    fi
-    chmod +x "$executable_path"
-    return 0
+  if [[ ! -f "$artifact_path" ]]; then
+    echo "ERROR: ECC CLI artifact not found: $artifact_path" >&2
+    exit 1
   fi
 
-  cp -f "$artifact_path" "$target_path"
-  chmod +x "$target_path"
+  rm -rf "$target_dir"
+  mkdir -p "$target_dir/runtime"
+
+  if tar -tf "$artifact_path" >/dev/null 2>&1; then
+    tar -xf "$artifact_path" -C "$target_dir/runtime"
+  else
+    cp -f "$artifact_path" "$target_dir/runtime/ecc-cli"
+  fi
+
+  if [[ ! -x "$target_dir/runtime/ecc-cli" ]]; then
+    echo "ERROR: ECC CLI bundle is missing executable: $target_dir/runtime/ecc-cli" >&2
+    exit 1
+  fi
+
+  cat > "$target_dir/ecc" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"
+EOF
+  chmod +x "$target_dir/ecc"
 }
 
 verify_yosys_slang_support() {
@@ -147,20 +123,17 @@ prepare_oss_cad_dir() {
 }
 
 main() {
-  local api_server_artifact
-  api_server_artifact="$(resolve_api_server_artifact)"
-  if [[ ! -f "$api_server_artifact" ]]; then
-    echo "ERROR: api server artifact not found: $api_server_artifact" >&2
+  local ecc_cli_artifact
+  if ! ecc_cli_artifact="$(resolve_ecc_cli_artifact)"; then
+    echo "ERROR: ECC CLI artifact is required for desktop packaging." >&2
+    echo "Set ECOS_ECC_CLI_ARTIFACT to the bundled ECC CLI artifact." >&2
     exit 1
   fi
 
-  local target_triple
-  target_triple="${ECOS_API_SERVER_TRIPLE:-$(detect_api_server_triple)}"
-
-  mkdir -p "$BINARIES_DIR"
-  install_api_server_artifact "$api_server_artifact" "$BINARIES_DIR/api-server-$target_triple"
-
+  install_ecc_cli_artifact "$ecc_cli_artifact" "$BINARIES_DIR"
   prepare_oss_cad_dir
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

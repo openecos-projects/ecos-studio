@@ -4,11 +4,8 @@
 
 export {
   alovaInstance,
-  checkApiHealth,
-  initApiPort,
-  waitForApiReady,
-  type WaitForApiReadyOptions,
-  API_BASE_URL
+  waitForRuntimeReady,
+  type WaitForRuntimeReadyOptions
 } from './client'
 export {
   loadWorkspaceApi,
@@ -29,11 +26,18 @@ export {
 } from './flow'
 
 export {
+  createRuntimeEventClient,
   createSSEClient,
+  type RuntimeEventClient,
+  type RuntimeEventResponse,
+  type RuntimeNotifyType,
+  type RuntimeEventHandler,
+  type RuntimeEventClientConfig,
+  type RuntimeEventClientState,
   type SSEClient,
   type ECCResponse,
   type NotifyType,
   type SSEEventHandler,
   type SSEClientConfig,
   type SSEClientState
-} from './sse'
+} from './runtimeEvents'

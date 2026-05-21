@@ -4,15 +4,14 @@ import { join } from 'node:path'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
+import { AppInfoService } from '../services/appInfoService'
+import { DesktopCliBridgeService } from '../services/desktopCliBridgeService'
 import {
-  ApiServerService,
-  getApiServerLatestLogFile,
-  getApiServerLogFile,
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
-} from '../services/apiServerService'
-import { ApiCliAdapter } from '../services/apiCliAdapter'
-import { DesktopCliBridgeService } from '../services/desktopCliBridgeService'
+} from '../services/desktopLogPaths'
+import { EccCliAdapter } from '../services/eccCliAdapter'
+import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
@@ -23,10 +22,9 @@ import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceService } from '../services/workspaceService'
 
 let ipcRegistered = false
-let isShuttingDown = false
 let services:
   | {
-      apiServerService: ApiServerService
+      appInfoService: AppInfoService
       desktopCliBridgeService: DesktopCliBridgeService
       settingsStore: SettingsStore
       shellService: ShellPtyService
@@ -34,11 +32,6 @@ let services:
       workspaceService: WorkspaceService
     }
   | null = null
-
-function isEnabledEnv(name: string): boolean {
-  const value = process.env[name]?.trim().toLowerCase()
-  return value === '1' || value === 'true'
-}
 
 function readHostInfo(path: string): string {
   try {
@@ -65,8 +58,7 @@ configureElectronLoggerFile({
 })
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
-electronLogger.status('[api] Logs: %s', getApiServerLogFile())
-electronLogger.status('[api] Latest logs: %s', getApiServerLatestLogFile())
+electronLogger.status('[runtime] Backend: ECC CLI')
 
 function getDesktopServices() {
   if (services) {
@@ -77,24 +69,38 @@ function getDesktopServices() {
     filePath: join(app.getPath('userData'), 'settings.json'),
   })
   const projectScopeService = new ProjectScopeService()
-  const apiServerService = new ApiServerService()
+  const runtimeEnv = createEccCliRuntimeEnv({
+    appPath: app.getAppPath(),
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...(app.isPackaged ? { ECOS_ELECTRON_RESOURCES_PATH: process.resourcesPath } : {}),
+    },
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    userDataPath: app.getPath('userData'),
+  })
+  const appInfoService = new AppInfoService({
+    appVersionProvider: () => app.getVersion(),
+    env: runtimeEnv,
+  })
   const workspaceService = new WorkspaceService({
-    apiPortProvider: apiServerService,
     projectScopeProvider: projectScopeService,
   })
-  const apiCliAdapter = new ApiCliAdapter({
-    portProvider: apiServerService,
-  })
   const desktopCliBridgeService = new DesktopCliBridgeService({
-    adapter: apiCliAdapter,
+    adapter: new EccCliAdapter({
+      env: runtimeEnv,
+    }),
   })
-  const shellService = new ShellPtyService()
+  const shellService = new ShellPtyService({
+    env: runtimeEnv,
+  })
   const tileService = new TileService({
     projectRootProvider: projectScopeService,
   })
 
   services = {
-    apiServerService,
+    appInfoService,
     desktopCliBridgeService,
     settingsStore,
     shellService,
@@ -110,7 +116,7 @@ async function launchMainWindow(): Promise<void> {
 
   if (!ipcRegistered) {
     registerIpc(undefined, {
-      appInfoService: desktopServices.apiServerService,
+      appInfoService: desktopServices.appInfoService,
       desktopCliBridgeService: desktopServices.desktopCliBridgeService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
@@ -119,8 +125,6 @@ async function launchMainWindow(): Promise<void> {
     })
     ipcRegistered = true
   }
-
-  await desktopServices.apiServerService.start()
 
   const mainWindow = await createMainWindow()
   bindWindowEvents(mainWindow)
@@ -141,19 +145,6 @@ app.whenReady().then(() => {
   })
 
   void launchMainWindow().catch(handleLaunchError)
-})
-
-app.on('before-quit', (event) => {
-  if (isShuttingDown) {
-    return
-  }
-
-  event.preventDefault()
-  isShuttingDown = true
-
-  void (services?.apiServerService.stop() ?? Promise.resolve()).finally(() => {
-    app.exit(0)
-  })
 })
 
 app.on('window-all-closed', () => {

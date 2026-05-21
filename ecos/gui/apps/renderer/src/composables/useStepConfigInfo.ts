@@ -46,7 +46,7 @@ function stableJsonSig(v: unknown): string {
   }
 }
 
-/** Extract `info` from get_info response (Alova / interceptor wrappers). */
+/** Extract `info` from get_info response. */
 function extractInfoPayload(response: unknown): Record<string, unknown> | null {
   const r = response as Record<string, unknown> | null
   if (!r || typeof r !== 'object') return null
@@ -64,14 +64,14 @@ function extractInfoPayload(response: unknown): Record<string, unknown> | null {
   return null
 }
 
-/** Resolved step config file path from `get_info` → `data.info.config`. */
+/** Resolved step config file path from `get_info` -> `data.info.config`. */
 function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
   const v = data.config
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
 /**
- * Fetch get_info/config → read `info.config` from disk as the step configuration file.
+ * Fetch get_info/config and read `info.config` from disk as the step configuration file.
  */
 export function useStepConfigInfo() {
   const route = useRoute()
@@ -82,7 +82,7 @@ export function useStepConfigInfo() {
   const loading = ref(true)
   const error = ref<string | null>(null)
   const info = ref<Record<string, unknown> | null>(null)
-  const serverMessages = ref<string[]>([])
+  const runtimeMessages = ref<string[]>([])
   const responseKind = ref<'idle' | 'success' | 'warning' | 'failed' | 'error'>('idle')
 
   const stepConfigPathResolved = ref<string | null>(null)
@@ -113,7 +113,7 @@ export function useStepConfigInfo() {
     if (!stepEnum) {
       info.value = null
       error.value = null
-      serverMessages.value = []
+      runtimeMessages.value = []
       responseKind.value = 'idle'
       clearFileState()
       loading.value = false
@@ -122,7 +122,7 @@ export function useStepConfigInfo() {
 
     loading.value = true
     error.value = null
-    serverMessages.value = []
+    runtimeMessages.value = []
     clearFileState()
 
     try {
@@ -133,7 +133,7 @@ export function useStepConfigInfo() {
           id: InfoEnum.config,
         },
       })
-      serverMessages.value = response.message ?? []
+      runtimeMessages.value = response.message ?? []
 
       const payload = extractInfoPayload(response)
 
@@ -253,7 +253,7 @@ export function useStepConfigInfo() {
     { immediate: true },
   )
 
-  /** Empty when there is no API payload and no loaded files (loading masks idle). */
+  /** Empty when there is no runtime payload and no loaded files (loading masks idle). */
   const isEmpty = computed(() => {
     if (responseKind.value === 'idle') return true
     if (responseKind.value === 'error' || responseKind.value === 'failed') return false
@@ -371,7 +371,7 @@ export function useStepConfigInfo() {
     loading,
     error,
     info,
-    serverMessages,
+    runtimeMessages,
     responseKind,
     isEmpty,
     refetch,

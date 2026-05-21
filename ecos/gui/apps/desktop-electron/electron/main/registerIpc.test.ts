@@ -45,7 +45,6 @@ function registerHandlers() {
     },
     workspaceService: {
       clearProjectRoot: vi.fn(),
-      getApiPort: vi.fn(),
       isProjectDirectory: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       readOptionalProjectTextFile: vi.fn(),
@@ -127,7 +126,6 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.settingsDelete,
       desktopApiIpcChannels.dialogPickDirectory,
       desktopApiIpcChannels.dialogPickFiles,
-      desktopApiIpcChannels.workspaceGetApiPort,
       desktopApiIpcChannels.workspaceIsProjectDirectory,
       desktopApiIpcChannels.workspaceRegisterProjectRoot,
       desktopApiIpcChannels.workspaceClearProjectRoot,
@@ -160,7 +158,7 @@ describe('registerIpc', () => {
     const { handlers, services } = registerHandlers()
     const versions = {
       gui: '0.1.0-alpha.4',
-      server: '0.1.0-alpha.4',
+      runtime: 'ECC CLI',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     }
@@ -250,7 +248,6 @@ describe('registerIpc', () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     services.settingsStore.get.mockResolvedValue([{ id: 'recent' }])
-    services.workspaceService.getApiPort.mockResolvedValue(9123)
     services.workspaceService.isProjectDirectory.mockResolvedValue(true)
     services.workspaceService.readProjectTextFile.mockResolvedValue('{"steps":[]}')
     services.workspaceService.readOptionalProjectTextFile.mockResolvedValue(null)
@@ -326,9 +323,6 @@ describe('registerIpc', () => {
         filters: [{ name: 'HDL Files', extensions: ['v', 'sv'] }],
       }),
     ).resolves.toEqual(['/tmp/a.v', '/tmp/b.sv'])
-    await expect(handlers.get(desktopApiIpcChannels.workspaceGetApiPort)?.(event)).resolves.toBe(
-      9123,
-    )
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceIsProjectDirectory)?.(event, '/tmp/project'),
     ).resolves.toBe(true)

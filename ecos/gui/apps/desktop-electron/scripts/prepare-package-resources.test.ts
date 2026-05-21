@@ -1,8 +1,9 @@
-import { chmod, copyFile, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const execFile = promisify(execFileCallback)
@@ -16,17 +17,12 @@ async function createWorkspace() {
   const scriptsDir = join(appDir, 'scripts')
   await mkdir(scriptsDir, { recursive: true })
 
-  const sourceScript = '/home/ekko/Desktop/ECOS/ecos-studio/ecos/gui/apps/desktop-electron/scripts/prepare-package-resources.sh'
+  const sourceScript = fileURLToPath(new URL('./prepare-package-resources.sh', import.meta.url))
   const scriptPath = join(scriptsDir, 'prepare-package-resources.sh')
   await copyFile(sourceScript, scriptPath)
   await chmod(scriptPath, 0o755)
 
-  const apiServerPath = join(rootDir, 'api-server-x86_64-unknown-linux-gnu')
-  await copyFile('/bin/true', apiServerPath)
-  await chmod(apiServerPath, 0o755)
-
   return {
-    apiServerPath,
     appDir,
     resourcesDir: join(appDir, 'resources'),
     rootDir,
@@ -56,23 +52,15 @@ exit 1
   }
 }
 
-async function createFakeApiServerBundle(rootDir: string) {
-  const bundleRoot = join(rootDir, 'fake-api-server-bundle')
-  const executablePath = join(bundleRoot, 'ecos-server')
-  const tarPath = join(rootDir, 'ecos-server-bundle.tar')
+async function createFakeEccRuntime(rootDir: string) {
+  const bundleDir = join(rootDir, 'fake-ecc-cli-bundle')
+  const artifactPath = join(rootDir, 'ecc-cli.tar')
+  await mkdir(bundleDir, { recursive: true })
+  await writeFile(join(bundleDir, 'ecc-cli'), '#!/usr/bin/env bash\n')
+  await chmod(join(bundleDir, 'ecc-cli'), 0o755)
+  await execFile('tar', ['-cf', artifactPath, '-C', bundleDir, '.'])
 
-  await mkdir(bundleRoot, { recursive: true })
-  await writeFile(executablePath, '#!/usr/bin/env bash\nexit 0\n')
-  await chmod(executablePath, 0o755)
-  await writeFile(join(bundleRoot, 'libdummy.so'), 'placeholder')
-
-  await execFile('tar', ['-cf', tarPath, '-C', bundleRoot, '.'])
-
-  return {
-    bundleRoot,
-    executablePath,
-    tarPath,
-  }
+  return artifactPath
 }
 
 afterEach(async () => {
@@ -82,58 +70,81 @@ afterEach(async () => {
 })
 
 describe('prepare-package-resources.sh', () => {
+  it('resolves the Bazel-built ECC CLI artifact when no override is provided', async () => {
+    const workspace = await createWorkspace()
+    const fakeBinDir = join(workspace.rootDir, 'bin')
+    const outputDir = join(workspace.rootDir, 'bazel-out')
+    const artifactPath = join(outputDir, 'ecc-cli.tar')
+    await mkdir(fakeBinDir, { recursive: true })
+    await mkdir(outputDir, { recursive: true })
+    await writeFile(artifactPath, 'fake-tar')
+    await writeFile(join(fakeBinDir, 'bazel'), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "build" ]]; then
+  exit 0
+fi
+if [[ "$1" == "cquery" ]]; then
+  printf '%s\\n' "${artifactPath}"
+  exit 0
+fi
+echo "unexpected bazel invocation: $*" >&2
+exit 1
+`)
+    await chmod(join(fakeBinDir, 'bazel'), 0o755)
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${workspace.scriptPath}"; resolve_ecc_cli_artifact`,
+    ], {
+      cwd: dirname(workspace.scriptPath),
+      env: {
+        ...process.env,
+        ECOS_ECC_CLI_ARTIFACT: '',
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+      },
+    })).resolves.toMatchObject({
+      stdout: `${artifactPath}\n`,
+    })
+  })
+
   it('fails instead of silently packaging a placeholder OSS CAD suite by default', async () => {
     const workspace = await createWorkspace()
+    const eccRuntime = await createFakeEccRuntime(workspace.rootDir)
 
     await expect(execFile(workspace.scriptPath, {
       cwd: dirname(workspace.scriptPath),
       env: {
         ...process.env,
-        ECOS_API_SERVER_BIN: workspace.apiServerPath,
+        ECOS_ECC_CLI_ARTIFACT: eccRuntime,
       },
     })).rejects.toMatchObject({
       stderr: expect.stringContaining('OSS CAD'),
     })
   })
 
-  it('copies a provided OSS CAD suite when a yosys binary with slang support is configured', async () => {
+  it('copies the provided OSS CAD suite and installs an ECC CLI wrapper', async () => {
     const workspace = await createWorkspace()
     const ossCadSuite = await createFakeOssCadSuite(workspace.rootDir)
+    const eccRuntime = await createFakeEccRuntime(workspace.rootDir)
 
     await execFile(workspace.scriptPath, {
       cwd: dirname(workspace.scriptPath),
       env: {
         ...process.env,
         CHIPCOMPILER_OSS_CAD_DIR: ossCadSuite.suiteDir,
-        ECOS_API_SERVER_BIN: workspace.apiServerPath,
+        ECOS_ECC_CLI_ARTIFACT: eccRuntime,
       },
     })
 
     const copiedYosysPath = join(workspace.resourcesDir, 'oss-cad-suite', 'bin', 'yosys')
+    const wrapperPath = join(workspace.resourcesDir, 'binaries', 'ecc')
+    const wrapper = await readFile(wrapperPath, 'utf8')
+
     await expect(stat(copiedYosysPath)).resolves.toBeTruthy()
     await expect(stat(join(workspace.resourcesDir, 'oss-cad-suite', 'placeholder.txt'))).rejects.toBeTruthy()
-  })
-
-  it('extracts an onedir API server bundle tar into the packaged binaries directory', async () => {
-    const workspace = await createWorkspace()
-    const ossCadSuite = await createFakeOssCadSuite(workspace.rootDir)
-    const apiBundle = await createFakeApiServerBundle(workspace.rootDir)
-
-    await execFile(workspace.scriptPath, {
-      cwd: dirname(workspace.scriptPath),
-      env: {
-        ...process.env,
-        CHIPCOMPILER_OSS_CAD_DIR: ossCadSuite.suiteDir,
-        ECOS_API_SERVER_BIN: apiBundle.tarPath,
-      },
-    })
-
-    const extractedExecutablePath = join(
-      workspace.resourcesDir,
-      'binaries',
-      'api-server-x86_64-unknown-linux-gnu',
-      'ecos-server',
+    await expect(readdir(join(workspace.resourcesDir, 'binaries', 'runtime'))).resolves.toEqual(
+      expect.arrayContaining(['ecc-cli']),
     )
-    await expect(stat(extractedExecutablePath)).resolves.toBeTruthy()
+    expect(wrapper).toContain('exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"')
   })
 })

@@ -35,7 +35,7 @@ import { CMDEnum, InfoEnum, StepEnum, ResponseEnum } from '@/api/type'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
 
 const route = useRoute()
-const { currentProject, sseMessages, stepRefreshCounter } = useWorkspace()
+const { currentProject, runtimeEvents, stepRefreshCounter } = useWorkspace()
 const { getResourceUrl } = useEDA()
 const layoutState = useLayoutState()
 const tilePrefetchStore = useLayoutTilePrefetchStore()
@@ -708,28 +708,28 @@ watch(() => route.path, (newPath) => {
   handleStageChange(stage)
 })
 
-// SSE 通知驱动：subflow/step 通知到达时刷新当前 step 的版图
+// Runtime event payload 驱动：只有明确携带 subflow/step 路径的事件才直接刷新当前 step 版图。
 watch(
-  () => sseMessages.value.length,
+  () => runtimeEvents.value.length,
   async (newLen, oldLen) => {
     if (newLen <= (oldLen ?? 0)) return
-    const latest = sseMessages.value[newLen - 1]
+    const latest = runtimeEvents.value[newLen - 1]
     if (!latest || latest.cmd !== 'notify') return
 
     const notifyId = latest.data?.id as string | undefined
-    const sseStep = latest.data?.step as string | undefined
+    const runtimeStep = latest.data?.step as string | undefined
     if (notifyId !== 'subflow' && notifyId !== 'step') return
 
     const pathParts = route.path.split('/')
     const currentStage = pathParts[pathParts.length - 1] || ''
-    if (sseStep && currentStage.toLowerCase() === sseStep.toLowerCase()) {
+    if (runtimeStep && currentStage.toLowerCase() === runtimeStep.toLowerCase()) {
       tilePrefetchStore.invalidateStep(currentStage)
       await handleStageChange(currentStage)
     }
   }
 )
 
-// runFlow 完成后的手动刷新信号（兜底：SSE 通知未就绪时使用）
+// CLI 运行命令完成后的兜底刷新信号。
 watch(stepRefreshCounter, () => {
   const pathParts = route.path.split('/')
   const stage = pathParts[pathParts.length - 1] || 'home'

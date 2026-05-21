@@ -21,7 +21,7 @@
         <p class="text-[11px] text-(--text-secondary) mt-3">Loading configuration…</p>
       </div>
 
-      <!-- API error -->
+      <!-- Runtime error -->
       <div v-else-if="error" class="p-3 m-3 rounded-lg border border-red-500/40 bg-red-500/10">
         <div class="flex items-start gap-2">
           <i class="ri-error-warning-line text-red-400 text-lg shrink-0 mt-0.5"></i>
@@ -38,8 +38,8 @@
         class="flex flex-col items-center justify-center text-center py-12 px-2">
         <i class="ri-file-settings-line text-4xl text-(--text-secondary) opacity-40 mb-3"></i>
         <p class="text-[12px] text-(--text-secondary) leading-relaxed">No configuration data.</p>
-        <p v-if="serverMessages.length" class="text-[10px] text-(--text-secondary) opacity-80 mt-2 break-words">
-          {{ serverMessages.join(' ') }}
+        <p v-if="runtimeMessages.length" class="text-[10px] text-(--text-secondary) opacity-80 mt-2 break-words">
+          {{ runtimeMessages.join(' ') }}
         </p>
       </div>
 
@@ -128,7 +128,7 @@ const {
   hasFlowStep,
   loading,
   error,
-  serverMessages,
+  runtimeMessages,
   isEmpty,
   refetch,
   stepConfigPathResolved,

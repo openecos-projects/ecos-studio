@@ -62,7 +62,6 @@ export interface DesktopBridgeServices {
   }
   workspaceService: {
     clearProjectRoot(): Promise<void>
-    getApiPort(): Promise<number>
     isProjectDirectory(path: string): Promise<boolean>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     readOptionalProjectTextFile(path: string): Promise<string | null>
@@ -375,10 +374,6 @@ export function registerIpc(
       return await pickFiles(options as DesktopFileDialogOptions | undefined)
     },
   )
-
-  handle(desktopApiIpcChannels.workspaceGetApiPort, async () => {
-    return await services.workspaceService.getApiPort()
-  })
 
   handle(
     desktopApiIpcChannels.workspaceIsProjectDirectory,

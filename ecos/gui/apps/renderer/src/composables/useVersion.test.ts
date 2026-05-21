@@ -52,7 +52,6 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       pickFiles: async () => null,
     },
     workspace: {
-      getApiPort: async () => 8765,
       isProjectDirectory: async () => false,
       registerProjectRoot: async (path: string) => path,
       clearProjectRoot: async () => undefined,
@@ -114,7 +113,7 @@ describe('useVersion', () => {
   it('loads runtime versions through the Electron desktop bridge', async () => {
     const expectedVersions = {
       gui: '0.1.0-alpha.4',
-      server: '0.1.0-alpha.4',
+      runtime: 'ECC CLI',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     }
@@ -136,7 +135,7 @@ describe('useVersion', () => {
   it('does not refetch versions after they have been loaded', async () => {
     const getVersions = vi.fn().mockResolvedValue({
       gui: '0.1.0-alpha.4',
-      server: '0.1.0-alpha.4',
+      runtime: 'ECC CLI',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     })

@@ -4,19 +4,21 @@ import type { Project } from '@/types'
 
 const {
   createSSEClientMock,
+  createRuntimeEventClientMock,
   loadWorkspaceApiMock,
   settingsData,
   setDesktopWindowTitleMock,
   toastAddMock,
-  waitForApiReadyMock,
+  waitForRuntimeReadyMock,
   waitForDesktopApiMock,
 } = vi.hoisted(() => ({
   createSSEClientMock: vi.fn(),
+  createRuntimeEventClientMock: vi.fn(),
   loadWorkspaceApiMock: vi.fn(),
   settingsData: new Map<string, unknown>(),
   setDesktopWindowTitleMock: vi.fn(),
   toastAddMock: vi.fn(),
-  waitForApiReadyMock: vi.fn(),
+  waitForRuntimeReadyMock: vi.fn(),
   waitForDesktopApiMock: vi.fn(),
 }))
 
@@ -40,11 +42,12 @@ vi.mock('@/platform/desktop', () => ({
 vi.mock('@/api', () => ({
   loadWorkspaceApi: loadWorkspaceApiMock,
   createWorkspaceApi: vi.fn(),
-  waitForApiReady: waitForApiReadyMock,
+  waitForRuntimeReady: waitForRuntimeReadyMock,
 }))
 
-vi.mock('@/api/sse', () => ({
+vi.mock('@/api/runtimeEvents', () => ({
   createSSEClient: createSSEClientMock,
+  createRuntimeEventClient: createRuntimeEventClientMock,
 }))
 
 vi.mock('./windowTitle', () => ({
@@ -89,7 +92,6 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       pickFiles: vi.fn(),
     },
     workspace: {
-      getApiPort: vi.fn(),
       isProjectDirectory: vi.fn(),
       registerProjectRoot: vi.fn(async (path: string) => path),
       clearProjectRoot: vi.fn(),
@@ -116,6 +118,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
 
 describe('useWorkspace openProject', () => {
   let desktopApi: DesktopApi
+  let onRuntimeEvent: ((response: unknown) => void) | undefined
 
   beforeEach(() => {
     const workspace = useWorkspace()
@@ -123,27 +126,56 @@ describe('useWorkspace openProject', () => {
     workspace.recentProjects.value = []
     workspace.sseClient.value?.close()
     workspace.sseClient.value = null
-    workspace.sseMessages.value = []
+    workspace.runtimeEvents.value = []
     workspace.stepRefreshCounter.value = 0
-    workspace.apiBackendConnecting.value = false
+    workspace.runtimeBackendConnecting.value = false
 
     createSSEClientMock.mockReset()
+    createRuntimeEventClientMock.mockReset()
     loadWorkspaceApiMock.mockReset()
     setDesktopWindowTitleMock.mockReset()
     toastAddMock.mockReset()
-    waitForApiReadyMock.mockReset()
+    waitForRuntimeReadyMock.mockReset()
     waitForDesktopApiMock.mockReset()
     settingsData.clear()
 
     desktopApi = createDesktopApiMock()
     waitForDesktopApiMock.mockResolvedValue(desktopApi)
-    waitForApiReadyMock.mockResolvedValue(undefined)
-    createSSEClientMock.mockReturnValue({
-      onAll: vi.fn(),
+    waitForRuntimeReadyMock.mockResolvedValue(undefined)
+    onRuntimeEvent = undefined
+    createRuntimeEventClientMock.mockReturnValue({
+      onAll: vi.fn((handler: (response: unknown) => void) => {
+        onRuntimeEvent = handler
+      }),
       connect: vi.fn(),
       close: vi.fn(),
     })
+    createSSEClientMock.mockImplementation(createRuntimeEventClientMock)
   })
+
+  async function openWorkspaceAndConnectRuntimeEvents() {
+    const workspace = useWorkspace()
+    const project: Project = {
+      id: '/work/demo',
+      name: 'demo',
+      path: '/work/demo',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+    })
+
+    await workspace.openProject(project)
+
+    expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-demo')
+    expect(onRuntimeEvent).toBeDefined()
+    return workspace
+  }
 
   it('keeps the active workspace when the directory picker is canceled', async () => {
     const workspace = useWorkspace()
@@ -236,5 +268,205 @@ describe('useWorkspace openProject', () => {
     expect(await workspace.openProject()).toBe(false)
     expect(workspace.currentProject.value?.path).toBe('/work/old')
     expect(settingsData.get('current_project_path')).toBe('/work/old')
+  })
+
+  it('checks only desktop bridge availability before workspace operations', async () => {
+    const workspace = useWorkspace()
+
+    await expect(workspace.ensureApiReady()).resolves.toBe(true)
+
+    expect(waitForRuntimeReadyMock).toHaveBeenCalled()
+    expect(workspace.runtimeBackendConnecting.value).toBe(false)
+  })
+
+  it('reports desktop runtime availability failures through ensureApiReady', async () => {
+    const workspace = useWorkspace()
+    waitForRuntimeReadyMock.mockRejectedValueOnce(new Error('bridge unavailable'))
+
+    await expect(workspace.ensureApiReady()).resolves.toBe(false)
+
+    expect(workspace.runtimeBackendConnecting.value).toBe(false)
+  })
+
+  it('does not increase stepRefreshCounter for read-only runtime events', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-get-info',
+        cmd: 'get_info',
+        message: 'completed',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-home-page',
+        cmd: 'home_page',
+        message: 'completed',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'data_ready',
+        jobId: 'job-data-ready',
+        cmd: 'run_step',
+        message: 'completed',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-load',
+        cmd: 'load_workspace',
+        message: 'completed',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-create',
+        cmd: 'create_workspace',
+        message: 'completed',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-pdk',
+        cmd: 'set_pdk_root',
+        message: 'completed',
+      },
+    })
+
+    expect(workspace.stepRefreshCounter.value).toBe(0)
+  })
+
+  it('increases stepRefreshCounter once when run_step completes', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      data: {
+        type: 'task_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        step: 'floorplan',
+        message: 'completed',
+      },
+    })
+
+    expect(workspace.stepRefreshCounter.value).toBe(1)
+  })
+
+  it('does not increase stepRefreshCounter for stdout and stderr runtime events', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      data: {
+        type: 'stdout',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        message: 'running',
+      },
+    })
+    onRuntimeEvent?.({
+      data: {
+        type: 'stderr',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        message: 'warning',
+      },
+    })
+
+    expect(workspace.stepRefreshCounter.value).toBe(0)
+  })
+
+  it('does not count the same completed runtime event twice', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const completedEvent = {
+      data: {
+        type: 'task_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        step: 'floorplan',
+        message: 'completed',
+      },
+    }
+
+    onRuntimeEvent?.(completedEvent)
+    onRuntimeEvent?.(completedEvent)
+
+    expect(workspace.stepRefreshCounter.value).toBe(1)
+  })
+
+  it('does not increase stepRefreshCounter for runtime events with explicit data paths', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        step: 'floorplan',
+        info: {
+          subflow_path: '/work/demo/floorplan/subflow.json',
+        },
+      },
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.stepRefreshCounter.value).toBe(0)
+  })
+
+  it('does not increase stepRefreshCounter for runtime events with top-level explicit data paths', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        id: 'subflow',
+        step: 'floorplan',
+        subflow_path: '/work/demo/floorplan/subflow.json',
+      },
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(workspace.stepRefreshCounter.value).toBe(0)
+  })
+
+  it('does not count a final result after an explicit path lifecycle event for the same job', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        step: 'floorplan',
+        info: {
+          subflow_path: '/work/demo/floorplan/subflow.json',
+        },
+      },
+    })
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-run-step',
+        cmd: 'run_step',
+        step: 'floorplan',
+        state: 'Success',
+      },
+      message: ['done'],
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(2)
+    expect(workspace.stepRefreshCounter.value).toBe(0)
   })
 })

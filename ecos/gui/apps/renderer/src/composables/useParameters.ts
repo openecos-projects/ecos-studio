@@ -231,7 +231,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
  */
 export function useParameters() {
   const { isInTauri } = useTauri()
-  const { currentProject, sseMessages, stepRefreshCounter } = useWorkspace()
+  const { currentProject, runtimeEvents, stepRefreshCounter } = useWorkspace()
 
   const config = reactive<ConfigData>(getDefaultConfig())
   const isLoading = ref(false)
@@ -392,15 +392,15 @@ export function useParameters() {
   )
 
   watch(
-    () => sseMessages.value.length,
+    () => runtimeEvents.value.length,
     async (newLen, oldLen) => {
       if (newLen <= (oldLen ?? 0)) return
 
-      const latest = sseMessages.value[newLen - 1]
+      const latest = runtimeEvents.value[newLen - 1]
       if (!latest || latest.cmd !== 'notify') return
 
       const info = latest.data?.info as Record<string, unknown> | undefined
-      if (!info?.home_page) return
+      if (!info?.home_page && !latest.data?.home_page) return
 
       await reloadParametersIfClean()
     }

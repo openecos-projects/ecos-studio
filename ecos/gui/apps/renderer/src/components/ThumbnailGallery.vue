@@ -111,7 +111,7 @@ import type { MapInfo as MapInfoType } from '../types'
 const route = useRoute()
 const messageStore = useMessageStore()
 const { isInTauri } = useTauri()
-const { currentProject, sseMessages, stepRefreshCounter } = useWorkspace()
+const { currentProject, runtimeEvents, stepRefreshCounter } = useWorkspace()
 
 // Tabs 定义
 const tabs = [
@@ -479,20 +479,20 @@ watch(currentStep, async (newStep) => {
   }
 }, { immediate: true })
 
-// SSE 通知驱动：subflow/step 通知到达时清除缓存并刷新当前 tab
+// Runtime event payload 驱动：只有明确携带 subflow/step 路径的事件才刷新当前 tab。
 watch(
-  () => sseMessages.value.length,
+  () => runtimeEvents.value.length,
   async (newLen, oldLen) => {
     if (newLen <= (oldLen ?? 0)) return
-    const latest = sseMessages.value[newLen - 1]
+    const latest = runtimeEvents.value[newLen - 1]
     if (!latest || latest.cmd !== 'notify') return
 
     const notifyId = latest.data?.id as string | undefined
-    const sseStep = latest.data?.step as string | undefined
+    const runtimeStep = latest.data?.step as string | undefined
     if (notifyId !== 'subflow' && notifyId !== 'step') return
 
-    if (!currentStep.value || !sseStep) return
-    if (currentStep.value.toLowerCase() !== sseStep.toLowerCase()) return
+    if (!currentStep.value || !runtimeStep) return
+    if (currentStep.value.toLowerCase() !== runtimeStep.toLowerCase()) return
 
     const keysToDelete = Object.keys(tabInfoCache.value)
       .filter(k => k.startsWith(`${currentStep.value}_`))
@@ -509,7 +509,7 @@ watch(
   }
 )
 
-// runFlow 完成后的手动刷新信号（兜底：SSE 通知未就绪时使用）
+// CLI 运行命令完成后的兜底刷新信号。
 watch(stepRefreshCounter, async () => {
   if (!currentStep.value) return
 

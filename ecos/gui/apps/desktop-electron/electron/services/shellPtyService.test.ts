@@ -60,6 +60,11 @@ describe('ShellPtyService', () => {
     expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
       cols: 120,
       cwd: '/home/ecos',
+      env: expect.objectContaining({
+        HOME: '/home/ecos',
+        SHELL: '/bin/zsh',
+        TERM: 'xterm-256color',
+      }),
       name: 'xterm-256color',
       rows: 32,
     }))

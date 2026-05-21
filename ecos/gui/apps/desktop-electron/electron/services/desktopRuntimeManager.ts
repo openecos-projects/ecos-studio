@@ -55,7 +55,7 @@ function createResult(
     cmd,
     data: {},
     message,
-    ok: response === 'success',
+    ok: response === 'success' || response === 'warning',
     response,
   }
 }
@@ -115,6 +115,7 @@ export class DesktopRuntimeManager {
         'warning',
         ['Another ECOS command is already running. Wait for it to finish before starting a new one.'],
       )
+      result.ok = false
       this.emit({
         cmd: request.cmd,
         jobId,

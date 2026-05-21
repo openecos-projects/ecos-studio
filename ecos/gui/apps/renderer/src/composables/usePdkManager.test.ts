@@ -42,7 +42,7 @@ const desktopBridge = {
   app: {
     getVersions: async () => ({
       gui: '0.1.0-alpha.4',
-      server: 'unknown',
+      runtime: 'ECC CLI',
       ecc: 'unknown',
       dreamplace: 'unknown',
     }),
@@ -74,7 +74,6 @@ const desktopBridge = {
     pickFiles: async () => null,
   },
   workspace: {
-    getApiPort: async () => 8765,
     isProjectDirectory: async () => false,
     registerProjectRoot: async (path: string) => path,
     clearProjectRoot: async () => undefined,

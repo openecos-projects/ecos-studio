@@ -122,7 +122,6 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.dialogPickFiles, options),
   },
   workspace: {
-    getApiPort: () => invokeDesktop(desktopApiIpcChannels.workspaceGetApiPort),
     isProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceIsProjectDirectory, path),
     registerProjectRoot: (path) =>

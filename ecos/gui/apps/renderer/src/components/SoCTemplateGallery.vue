@@ -85,7 +85,7 @@ function onRemoveImported(templateId: string): void {
               Templates
             </h1>
             <p class="mt-3 max-w-lg text-sm leading-relaxed text-(--text-secondary) sm:text-[15px]">
-              Inspect floorplans and core bounding boxes from workspace templates (soc-style JSON). Server-backed listings will arrive later — for now use
+              Inspect floorplans and core bounding boxes from workspace templates (soc-style JSON). Runtime-backed listings will arrive later; for now use
               <strong class="font-semibold text-(--text-primary)"> Import JSON </strong>
               below.
             </p>
@@ -94,7 +94,7 @@ function onRemoveImported(templateId: string): void {
               role="note"
             >
               <span class="font-semibold text-(--text-primary)">Coming soon:</span>
-              templates loaded from the ECOS API instead of only this browser. Imported files stay on this device until sync exists.
+              templates loaded from the ECOS runtime instead of only this browser. Imported files stay on this device until sync exists.
             </p>
           </div>
         </div>
@@ -192,7 +192,7 @@ function onRemoveImported(templateId: string): void {
       </div>
       <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">No templates in this workspace yet</h2>
       <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-(--text-secondary)">
-        The catalog will be filled from the server when that integration ships. Until then, import a <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style file — it will appear here for inspection on this machine.
+        The catalog will be filled from the ECOS runtime when that integration ships. Until then, import a <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style file; it will appear here for inspection on this machine.
       </p>
     </div>
 

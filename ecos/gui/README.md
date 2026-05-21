@@ -1,6 +1,6 @@
 # ECOS Studio (GUI)
 
-Desktop chip-design frontend built with **Electron + Vue 3 + TypeScript**, working with backends such as `ecos/server` as part of ECOS Studio.
+Desktop chip-design frontend built with **Electron + Vue 3 + TypeScript**. The Electron host runs ECC through the local `ecc` CLI for normal workspace and flow actions.
 
 ## Prerequisites
 
@@ -22,11 +22,6 @@ pnpm install
 ```bash
 # Electron shell + renderer workspace
 pnpm run dev
-```
-
-```bash
-# Optional: reuse an already running API server on 127.0.0.1:8765
-pnpm run dev:reuse-api-server
 ```
 
 ```bash
@@ -67,12 +62,12 @@ pnpm --filter @ecos-studio/renderer exec vitest run src/utils/sanitizeHtml.test.
 | `apps/renderer/src/views/` | Routed pages |
 | `apps/renderer/src/composables/` | Composables (workspace state, menus, desktop integration wrappers, etc.) |
 | `apps/renderer/src/stores/` | Pinia state |
-| `apps/renderer/src/api/` | HTTP / SSE client wrappers |
+| `apps/renderer/src/api/` | Desktop runtime bridge wrappers and event-stream helpers |
 | `packages/` | Shared internal workspace packages (desktop bridge, tile helper, shared contracts) |
 
 ## Related docs
 
-- [ECOS package README](../README.md) — overall quick start and release notes for `ecos/server` + GUI  
+- [ECOS package README](../README.md) — overall quick start and release notes for ECOS Studio
 - [ECOS Studio user guide](../docs/user-guide.md) — product usage  
 - [Repository root README](../../README.md) — monorepo overview  
 - [ECC development](../../ecc/docs/development.md), [ECC architecture](../../ecc/docs/architecture.md) — ECC toolchain docs  

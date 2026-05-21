@@ -4,7 +4,7 @@ import { useTauri } from './useTauri'
 import { flowExecutionActive } from './useFlowRunner'
 import { getHomePageApi } from '@/api/flow'
 import { ResponseEnum } from '@/api/type'
-import type { ECCResponse } from '@/api/sse'
+import type { ECCResponse } from '@/api/runtimeEvents'
 import type { DesktopProjectLogTailEvent } from '@ecos-studio/shared'
 import {
   readOptionalProjectTextFile,
@@ -155,7 +155,7 @@ function resetFlowLogState(): void {
  *
  * **Key 约定**：必须是 `resolveProjectPathAccess` 之后的**规范化绝对路径**。
  * 所有读取/失效入口都必须先 `resolvedPathMemo(localPath)` 再触达本 Map，
- * 否则 SSE 失效时会拿未 canonicalize 的路径去 delete，导致旧内容滞留。
+ * 否则 runtime event 失效时会拿未 canonicalize 的路径去 delete，导致旧内容滞留。
  *
  * **上限**：采用简单 LRU（`Map` 迭代顺序 = 插入顺序）。同一项目内跑多次
  * flow、生成大量历史 step log 时，超限自动 evict 最早一条，避免无限增长。
@@ -330,7 +330,7 @@ async function readLogFileSmart(
  * 使某个 log 文件的缓存失效。
  *
  * **前置条件**：`logPath` 必须与读取时的 cache key 一致——即也经过 `resolvedPathMemo`。
- * 传 undefined / 空串时清全部。调用方参考 SSE notify 分支的处理方式。
+ * 传 undefined / 空串时清全部。调用方参考 runtime event 分支的处理方式。
  */
 function invalidateLogFileCache(logPath?: string): void {
   if (!logPath) {
@@ -357,7 +357,7 @@ function pruneLogCacheKeepOnly(aliveKeys: Iterable<string>): void {
 // 即使文件一字节都没变。
 //
 // 做法：把这几个字段提到模块级，按「源路径签名」去重；
-// 只有在 a) 项目切换 或 b) SSE 推送新 home.json 时才让签名失效。
+// 只有在 a) 项目切换 或 b) runtime event 推送新 home.json 时才让签名失效。
 // Blob URL 的 revoke 从"onUnmounted"推迟到"被新 blob 替换 / 项目切换"，
 // 确保 remount 时 <img :src> 拿到的依旧是活的 URL。
 
@@ -407,7 +407,7 @@ function invalidateHomeAssetCache(): void {
 }
 
 /**
- * SSE 推送新 home.json 时调用：签名置空，让下一次 loader 被调用时真的重读磁盘；
+ * Runtime event 推送新 home.json 时调用：签名置空，让下一次 loader 被调用时真的重读磁盘；
  * 但 blob URL / UI 展示保持不变，等新数据到位再平滑替换，避免闪白。
  */
 function markHomeAssetSignaturesStale(): void {
@@ -420,7 +420,7 @@ function markHomeAssetSignaturesStale(): void {
  * 获取 home.json 数据（共享 + 去重）
  *
  * 多个 composable（useHomeData / useFlowStages / useParameters）
- * 同时调用时只发起 **一次** API 请求 + 一次文件读取。
+ * 同时调用时只发起 **一次** runtime 请求 + 一次文件读取。
  *
  * @param projectPath 当前项目路径
  * @param isInTauri   是否在桌面运行时
@@ -462,10 +462,10 @@ export async function fetchSharedHomeData(
 
       if (isStale()) return null
 
-      // 调用 API 获取 home.json 路径
+      // 通过桌面 CLI 获取 home.json 路径
       const apiResponse = await getHomePageApi()
       if (apiResponse.response !== ResponseEnum.success || !apiResponse.data?.path) {
-        console.warn('get_home_page API failed:', apiResponse.message)
+        console.warn('get_home_page runtime command failed:', apiResponse.message)
         return null
       }
       if (isStale()) return null
@@ -494,10 +494,10 @@ export async function fetchSharedHomeData(
   return _fetchPromise
 }
 
-/** 从 SSE 路径更新共享缓存 */
+/** 从 runtime event 路径更新共享缓存 */
 export function updateSharedHomeData(data: HomeData) {
   sharedHomeData.value = data
-  // SSE 代表 home.json 有新内容；把资源签名清空让 loader 下一次真重读。
+  // Runtime event 代表 home.json 有新内容；把资源签名清空让 loader 下一次真重读。
   // 但 blob URL 暂时保留，新 blob 到位后再 revoke，避免 UI 闪白。
   markHomeAssetSignaturesStale()
 }
@@ -531,7 +531,7 @@ export function useHomeData() {
   const { currentProject, stepRefreshCounter, triggerStepRefresh } = useWorkspace()
 
   // 响应式数据全部走模块级——HomeView remount 时直接复用上一次加载结果，
-  // 只有源数据真的变了（项目切换 / SSE 推送 / 本地 flow 执行）才触发重读。
+  // 只有源数据真的变了（项目切换 / runtime event 推送 / 本地 flow 执行）才触发重读。
   const monitorData = monitorDataState
   const checklistItems = checklistItemsState
   const layoutBlobUrl = layoutBlobUrlState
@@ -601,7 +601,7 @@ export function useHomeData() {
    * 加载 layout PNG 图片并转为 blob URL
    *
    * 去重：与模块级 `_loadedLayoutPath` 一致且当前 blob 仍在，则直接返回。
-   * SSE 触发时 `updateSharedHomeData` 会提前清签名，loader 被再次调用会真读磁盘。
+   * Runtime event 触发时 `updateSharedHomeData` 会提前清签名，loader 被再次调用会真读磁盘。
    */
   async function loadLayoutImage(layoutPath: string): Promise<void> {
     if (!layoutPath) {
@@ -1282,7 +1282,7 @@ export function useHomeData() {
 
   /**
    * 从 home.json 加载所有 Home 页面数据
-   * 使用共享缓存避免重复 API 调用
+   * 使用共享缓存避免重复 runtime 调用
    */
   async function loadHomeData(): Promise<void> {
     if (!isInTauri || !currentProject.value?.path) {
@@ -1297,7 +1297,7 @@ export function useHomeData() {
     try {
       // 不再主动 invalidateSharedHomeData()：只要项目没切，就复用上次拉到的
       // home.json（fetchSharedHomeData 内部会在项目路径变化时自动失效）。
-      // 有更新时由 SSE notify → loadHomeDataFromPath 覆盖缓存，不需要每次
+      // 有更新时由 runtime event → loadHomeDataFromPath 覆盖缓存，不需要每次
       // mount 都重请求后端再重读整个 home.json。
       const homeData = await fetchSharedHomeData(currentProject.value.path, isInTauri)
       if (!homeData) {
@@ -1333,7 +1333,7 @@ export function useHomeData() {
 
   /**
    * 从指定的 home.json 路径加载 Home 页面数据
-   * 用于 SSE 通知推送的 home_page 路径
+   * 用于 runtime event 推送的 home_page 路径
    */
   async function loadHomeDataFromPath(homePath: string): Promise<void> {
     if (!isInTauri || !homePath) {
@@ -1348,7 +1348,7 @@ export function useHomeData() {
       // 转换远程路径为本地路径
       const localPath = convertToLocalPath(homePath)
       const resolvedHomePath = await resolvedPathMemo(localPath)
-      console.log('Loading home data from SSE path:', resolvedHomePath ?? localPath)
+      console.log('Loading home data from runtime event path:', resolvedHomePath ?? localPath)
 
       // 请求文件系统访问权限
       if (!resolvedHomePath) return
@@ -1359,7 +1359,7 @@ export function useHomeData() {
       // 更新共享缓存，让其他 composable 也能获取最新数据
       updateSharedHomeData(homeData)
 
-      console.log('Loaded home data from SSE path:', homeData)
+      console.log('Loaded home data from runtime event path:', homeData)
 
       // 更新 monitor 数据
       if (homeData.monitor) {
@@ -1374,7 +1374,7 @@ export function useHomeData() {
         loadAllFlowStepLogsFromFlowPath(homeData.flow),
       ])
 
-      console.log('Home data from SSE path fully loaded')
+      console.log('Home data from runtime event path fully loaded')
     } catch (err) {
       console.error('Failed to load home data from path:', homePath, err)
       error.value = err instanceof Error ? err.message : String(err)
@@ -1518,33 +1518,33 @@ export function useHomeData() {
     },
   )
 
-  // 监听 SSE 通知，当收到包含 home_page 的通知时自动刷新 Home 数据
-  const { sseMessages } = useWorkspace()
+  // 监听 runtime event payload，当收到包含 home_page/log_file 的事件时自动刷新 Home 数据
+  const { runtimeEvents } = useWorkspace()
 
   watch(
-    () => sseMessages.value.length,
+    () => runtimeEvents.value.length,
     async (newLen, oldLen) => {
       if (newLen <= (oldLen ?? 0)) return
 
-      // 获取最新一条 SSE 消息
-      const latest: ECCResponse = sseMessages.value[newLen - 1]
+      // 获取最新一条 runtime event
+      const latest: ECCResponse = runtimeEvents.value[newLen - 1]
       if (!latest) return
 
       // 判断是否为 notify 类型的消息
       if (latest.cmd !== 'notify') return
 
       const info = latest.data?.info as Record<string, unknown> | undefined
-      const homePage = info?.home_page as string | undefined
-      const logFile = info?.log_file as string | undefined
+      const homePage = (info?.home_page ?? latest.data?.home_page) as string | undefined
+      const logFile = (info?.log_file ?? latest.data?.log_file) as string | undefined
       const stepName = latest.data?.step as string | undefined
 
       if (!homePage && !logFile) return
 
       if (homePage) {
-        console.log('Received SSE notification containing home_page path:', homePage)
+        console.log('Received runtime event containing home_page path:', homePage)
       }
       if (logFile) {
-        console.log('Received SSE notification containing log_file path:', logFile)
+        console.log('Received runtime event containing log_file path:', logFile)
       }
 
       if (homePage) {
@@ -1577,7 +1577,7 @@ export function useHomeData() {
   // checklist、layout blob、metrics blob、flowLogSegments。
   // Blob 的 revoke 改由"被新 blob 替换"或"项目切换"两个时机负责；
   // 在 onUnmounted 里 revoke 会导致下一次 mount 的 <img :src> 拿到已失效的 URL。
-  // 数据新鲜度由 SSE 通知（markHomeAssetSignaturesStale）+ 项目切换里的 reset 负责。
+  // 数据新鲜度由 runtime events（markHomeAssetSignaturesStale）+ 项目切换里的 reset 负责。
   onUnmounted(() => {
     liveSession++
     cleanupFlowLogLiveWatch()

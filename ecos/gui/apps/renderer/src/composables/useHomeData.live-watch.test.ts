@@ -4,7 +4,7 @@ import { ref, type Ref } from 'vue'
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
   flowExecutionActive: null as Ref<boolean> | null,
-  sseMessages: null as Ref<unknown[]> | null,
+  runtimeEvents: null as Ref<unknown[]> | null,
   stepRefreshCounter: null as Ref<number> | null,
   getHomePageApi: vi.fn(),
   readProjectBlobUrl: vi.fn(),
@@ -51,7 +51,7 @@ vi.mock('vue', async () => {
 vi.mock('./useWorkspace', () => ({
   useWorkspace: () => ({
     currentProject: testState.currentProject,
-    sseMessages: testState.sseMessages,
+    runtimeEvents: testState.runtimeEvents,
     stepRefreshCounter: testState.stepRefreshCounter,
     triggerStepRefresh: testState.triggerStepRefresh,
   }),
@@ -124,7 +124,7 @@ describe('useHomeData live project file watchers', () => {
   beforeEach(() => {
     testState.currentProject = ref(null)
     testState.flowExecutionActive = ref(false)
-    testState.sseMessages = ref([])
+    testState.runtimeEvents = ref([])
     testState.stepRefreshCounter = ref(0)
     testState.unmountCallbacks.length = 0
     testState.logTailListeners.length = 0

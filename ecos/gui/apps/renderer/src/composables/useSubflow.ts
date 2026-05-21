@@ -7,7 +7,7 @@ import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { getInfoApi } from '@/api/flow'
 import { CMDEnum, InfoEnum, StepEnum, ResponseEnum } from '@/api/type'
-import type { ECCResponse } from '@/api/sse'
+import type { ECCResponse } from '@/api/runtimeEvents'
 
 // ============ 类型定义 ============
 
@@ -113,7 +113,7 @@ function parseTimeString(timeStr: string): number {
  */
 export function useSubflow() {
   const { isInTauri } = useTauri()
-  const { sseMessages, currentProject } = useWorkspace()
+  const { runtimeEvents, currentProject, stepRefreshCounter } = useWorkspace()
   const route = useRoute()
 
   // 状态
@@ -170,7 +170,7 @@ export function useSubflow() {
     error.value = null
 
     try {
-      // 1. 调用 get_info API 获取 subflow 文件路径
+      // 1. 调用 get_info runtime command 获取 subflow 文件路径
       const response = await getInfoApi({
         cmd: CMDEnum.get_info,
         data: {
@@ -228,7 +228,7 @@ export function useSubflow() {
 
   /**
    * 从指定路径直接加载子流程数据
-   * 用于 SSE 通知推送的 subflow_path
+   * 用于 runtime event 推送的 subflow_path
    */
   async function loadSubflowFromPath(subflowPath: string): Promise<void> {
     if (!isInTauri || !subflowPath) {
@@ -241,14 +241,14 @@ export function useSubflow() {
         ? convertRemoteToLocalPath(subflowPath, currentProject.value.path)
         : subflowPath
 
-      console.log('Loading subflow from SSE path:', localPath)
+      console.log('Loading subflow from runtime event path:', localPath)
       const resolvedPath = await resolveProjectPathAccess(localPath)
       if (!resolvedPath) return
 
       const fileContent = await readProjectTextFile(resolvedPath)
       const subflowData: SubflowData = JSON.parse(fileContent)
 
-      console.log('Subflow data from SSE path:', subflowData)
+      console.log('Subflow data from runtime event path:', subflowData)
 
       subflowSteps.value = convertSubflowToSteps(subflowData)
     } catch (err) {
@@ -318,39 +318,38 @@ export function useSubflow() {
     { immediate: true }
   )
 
-  // 监听 SSE 通知，当收到 step 或 subflow 通知时自动刷新当前步骤的子流程数据
+  // 监听 runtime event payload；只有明确携带 subflow_path 的事件才直接刷新子流程数据。
   watch(
-    () => sseMessages.value.length,
+    () => runtimeEvents.value.length,
     async (newLen, oldLen) => {
       if (newLen <= (oldLen ?? 0)) return
 
-      const latest: ECCResponse = sseMessages.value[newLen - 1]
+      const latest: ECCResponse = runtimeEvents.value[newLen - 1]
       if (!latest || latest.cmd !== 'notify') return
 
       const notifyId = latest.data?.id as string | undefined
-      const sseStep = latest.data?.step as string | undefined
+      const runtimeStep = latest.data?.step as string | undefined
       const info = latest.data?.info as Record<string, unknown> | undefined
 
       if (notifyId === 'subflow') {
-        const subflowPath = info?.subflow_path as string | undefined
+        const subflowPath = (info?.subflow_path ?? latest.data?.subflow_path) as string | undefined
         if (!subflowPath) return
 
-        console.log('Received SSE subflow notification, step:', sseStep, 'path:', subflowPath)
+        console.log('Received runtime subflow event, step:', runtimeStep, 'path:', subflowPath)
 
         const currentRouteStep = getCurrentRouteStep()
-        if (currentRouteStep && sseStep &&
-            currentRouteStep.toLowerCase() === sseStep.toLowerCase()) {
+        if (currentRouteStep && runtimeStep &&
+            currentRouteStep.toLowerCase() === runtimeStep.toLowerCase()) {
           await loadSubflowFromPath(subflowPath)
         }
-      } else if (notifyId === 'step') {
-        console.log('Received SSE step notification in useSubflow, step:', sseStep)
-
-        const currentRouteStep = getCurrentRouteStep()
-        if (currentRouteStep && sseStep &&
-            currentRouteStep.toLowerCase() === sseStep.toLowerCase()) {
-          await fetchSubflowInfo(currentRouteStep)
-        }
       }
+    }
+  )
+
+  watch(
+    stepRefreshCounter,
+    async () => {
+      await refreshCurrentSubflow()
     }
   )
 

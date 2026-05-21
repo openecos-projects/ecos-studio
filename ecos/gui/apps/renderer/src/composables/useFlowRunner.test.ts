@@ -99,7 +99,7 @@ describe('useFlowRunner desktop-only guard', () => {
     expect(result).toBeNull()
   })
 
-  it('triggers a refresh after the full flow API returns', async () => {
+  it('does not trigger a refresh after the full flow API returns because runtime events drive refresh', async () => {
     ensureTauri.mockReturnValue(true)
     rtl2gdsApi.mockResolvedValue({
       response: 'success',
@@ -111,10 +111,10 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await expect(runAllFlow()).resolves.toEqual({ rerun: false })
 
-    expect(triggerStepRefresh).toHaveBeenCalledTimes(1)
+    expect(triggerStepRefresh).not.toHaveBeenCalled()
   })
 
-  it('does not mark the full flow running when the API server is unavailable', async () => {
+  it('does not mark the full flow running when the runtime bridge is unavailable', async () => {
     ensureTauri.mockReturnValue(true)
     ensureApiReady.mockResolvedValue(false)
 

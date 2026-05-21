@@ -16,7 +16,9 @@
         </button>
       </div>
     </div>
-    <div ref="terminalElement" class="terminal-surface"></div>
+    <div class="terminal-body">
+      <div ref="terminalElement" class="terminal-surface"></div>
+    </div>
   </section>
 </template>
 
@@ -82,10 +84,19 @@ function fitTerminal() {
   requestAnimationFrame(() => {
     try {
       fitAddon.fit()
+      terminal.scrollToBottom()
       resizeShellSession()
     } catch {
       /* xterm may not be measurable while the panel is animating */
     }
+  })
+}
+
+function fitTerminalAfterLayout() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      fitTerminal()
+    })
   })
 }
 
@@ -142,7 +153,9 @@ async function createShellSession() {
     const pendingData = pendingShellData.get(session.sessionId) ?? []
     pendingShellData.delete(session.sessionId)
     for (const chunk of pendingData) {
-      terminal.write(chunk)
+      terminal.write(chunk, () => {
+        terminal.scrollToBottom()
+      })
     }
   } catch (error) {
     writeLine(`[error] ${error instanceof Error ? error.message : String(error)}`)
@@ -160,7 +173,9 @@ function handleShellData(event: { data: string; sessionId: string }) {
     return
   }
   if (event.sessionId !== shellSessionId) return
-  terminal.write(event.data)
+  terminal.write(event.data, () => {
+    terminal.scrollToBottom()
+  })
 }
 
 function handleShellExit(event: { exitCode: number; sessionId: string }) {
@@ -194,7 +209,7 @@ onMounted(() => {
 
   if (terminalElement.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(fitTerminal)
-    resizeObserver.observe(terminalElement.value)
+    resizeObserver.observe(terminalElement.value.parentElement ?? terminalElement.value)
   }
 
   if (props.expanded) {
@@ -215,8 +230,9 @@ watch(
   async (expanded) => {
     if (expanded) {
       await nextTick()
-      fitTerminal()
+      fitTerminalAfterLayout()
       await startShellSession()
+      fitTerminalAfterLayout()
       terminal.focus()
     }
   },
@@ -228,9 +244,9 @@ watch(
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 24px;
+  bottom: 0;
   z-index: 80;
-  height: min(300px, 42vh);
+  height: var(--terminal-panel-height, min(300px, 42vh));
   min-height: 180px;
   display: flex;
   flex-direction: column;
@@ -290,14 +306,26 @@ watch(
   background: var(--hover-bg);
 }
 
-.terminal-surface {
+.terminal-body {
   flex: 1;
   min-height: 0;
-  padding: 8px 10px;
+  padding: 8px 10px 0;
+  background: #101418;
+}
+
+.terminal-surface {
+  height: 100%;
+  min-height: 0;
+  background: #101418;
 }
 
 :deep(.xterm) {
   height: 100%;
+}
+
+:deep(.xterm-viewport),
+:deep(.xterm-screen) {
+  background: #101418;
 }
 
 :deep(.xterm-viewport) {

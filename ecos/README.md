@@ -53,22 +53,25 @@ when you need more detail while debugging the desktop shell:
 # GUI lifecycle diagnostics
 cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=info pnpm dev
 
-# More detailed API server startup diagnostics
+# More detailed desktop runtime diagnostics
 cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm dev
 ```
 
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
-Python API server startup markers (`[API_PHASE]`, `[API_START]`, `[API_READY]`,
-`[API_LOG]`) are suppressed by default. Set `ECOS_API_LOG_LEVEL=info` to show
-them, or pass `--log-level info` to `run_server.py`:
+Normal desktop workspace and flow actions run through the ECC CLI. The legacy
+Python API server is kept for standalone compatibility work only; it is not
+started by the desktop GUI.
+
+The renderer calls the Electron desktop bridge for workspace and flow commands.
+Read-only commands such as `get_info` and `home_page` return their data through
+the CLI command response. Runtime events are reserved for flow lifecycle changes
+from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as logs
+and do not trigger workspace data reloads.
 
 ```bash
-# Show API server startup phases
+# Legacy standalone server diagnostics
 cd ecos/server && ECOS_API_LOG_LEVEL=info python run_server.py
-
-# Equivalent via CLI flag
-cd ecos/server && python run_server.py --log-level info
 ```
 
 ### DreamPlace Development
@@ -83,10 +86,10 @@ bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (ma
 
 ### Release Wheels
 
-Release builds use pinned GitHub Release wheels through `ecos/server/pyproject.toml` and `ecos/server/uv.lock`.
+The legacy standalone server environment uses pinned GitHub Release wheels through `ecos/server/pyproject.toml` and `ecos/server/uv.lock`.
 
 ```bash
-# Re-sync the server environment from the locked release wheels
+# Re-sync the legacy standalone server environment from the locked release wheels
 cd ecos/server && uv sync --frozen --all-groups --python 3.11
 
 # Optional: switch the server venv to the local ECC checkout for development
@@ -98,7 +101,7 @@ make use-local-ecc
 `make build` runs the full pipeline:
 
 ```
-uv sync locked release wheels → PyInstaller bundle → AppImage
+ECC CLI runtime resources → Electron build → AppImage
 ```
 
 ```bash

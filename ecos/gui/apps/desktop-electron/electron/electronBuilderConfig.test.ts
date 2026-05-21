@@ -9,4 +9,12 @@ describe('desktop electron builder config', () => {
 
     expect(configText).toContain('afterPack: ./scripts/after-pack-linux-sandbox.mjs')
   })
+
+  it('packages the ECC runtime binary resources', () => {
+    const configPath = fileURLToPath(new URL('../electron-builder.yml', import.meta.url))
+    const configText = readFileSync(configPath, 'utf8')
+
+    expect(configText).toContain('from: resources/binaries')
+    expect(configText).toContain('to: binaries')
+  })
 })

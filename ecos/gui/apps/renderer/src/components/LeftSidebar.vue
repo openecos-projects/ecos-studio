@@ -194,10 +194,10 @@
 
         <!-- 底部操作栏 -->
         <div class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
-          <!-- SSE 消息显示区域 -->
-          <!-- <div v-if="sseMessages.length > 0"
+          <!-- Runtime event message display area -->
+          <!-- <div v-if="runtimeEvents.length > 0"
             class="max-h-32 overflow-y-auto bg-(--bg-secondary) rounded p-2 text-[10px] space-y-1">
-            <div v-for="(msg, idx) in sseMessages.slice(-5)" :key="idx" class="flex items-center gap-1" :class="{
+            <div v-for="(msg, idx) in runtimeEvents.slice(-5)" :key="idx" class="flex items-center gap-1" :class="{
               'text-blue-400': msg.data?.type === 'step_start',
               'text-green-500': msg.data?.type === 'step_complete' || msg.data?.type === 'task_complete',
               'text-amber-500': msg.data?.type === 'data_ready',
@@ -439,8 +439,8 @@ const {
   runAllFlow,
 } = useFlowRunner()
 
-// Workspace SSE 消息
-// const { sseMessages } = useWorkspace()
+// Workspace runtime events
+// const { runtimeEvents } = useWorkspace()
 
 // 当前阶段
 const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } = useCurrentStage()
@@ -495,8 +495,7 @@ const closeMenu = () => { showModeMenu.value = false }
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 
-// 跨组件刷新信号
-const { ensureApiReady, triggerStepRefresh } = useWorkspace()
+const { ensureApiReady } = useWorkspace()
 
 // ============ 事件处理 ============
 const handleRunFlow = async () => {
@@ -517,8 +516,6 @@ const handleRunFlow = async () => {
       refreshCurrentSubflow(),
       refreshFlowStages()
     ])
-    // 通知 DrawingArea / ThumbnailGallery 等组件刷新数据
-    triggerStepRefresh()
   }
 }
 </script>

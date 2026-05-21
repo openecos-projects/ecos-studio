@@ -58,7 +58,9 @@ export interface ScannedPdkDirectory {
 
 export interface VersionInfo {
   gui: string
-  server: string
+  runtime: string
+  /** Legacy FastAPI version field. New desktop builds use `runtime` instead. */
+  server?: string
   ecc: string
   dreamplace: string
 }
@@ -115,7 +117,6 @@ export interface DesktopApi {
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
   }
   workspace: {
-    getApiPort(): Promise<number>
     isProjectDirectory(path: string): Promise<boolean>
     registerProjectRoot(path: string): Promise<string>
     clearProjectRoot(): Promise<void>

@@ -37,9 +37,6 @@ function createWorkspaceService(
 } {
   const projectScopeProvider = createProjectScopeProvider(rootPath, canonicalPath)
   const service = new WorkspaceService({
-    apiPortProvider: {
-      getPort: vi.fn(),
-    },
     projectScopeProvider,
   })
 
