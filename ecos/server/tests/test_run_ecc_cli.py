@@ -14,7 +14,10 @@ class FakeService:
             return ECCResponse(
                 cmd="load_workspace",
                 response="success",
-                data={"directory": request.data["directory"], "workspace_id": request.data["directory"]},
+                data={
+                    "directory": request.data["directory"],
+                    "workspace_id": request.data["directory"],
+                },
                 message=["loaded"],
             )
         if request.cmd == "run_step":
@@ -28,7 +31,10 @@ class FakeService:
             return ECCResponse(
                 cmd="create_workspace",
                 response="success",
-                data={"directory": request.data["directory"], "workspace_id": request.data["directory"]},
+                data={
+                    "directory": request.data["directory"],
+                    "workspace_id": request.data["directory"],
+                },
                 message=["created"],
             )
         raise AssertionError(f"unexpected command: {request.cmd}")
