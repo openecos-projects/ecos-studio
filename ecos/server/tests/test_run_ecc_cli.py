@@ -1,7 +1,7 @@
 import json
 
-from ecos_server.ecc.schemas import ECCResponse
 from ecos_server import run_ecc_cli
+from ecos_server.ecc.schemas import ECCResponse
 
 
 class FakeService:

@@ -11,7 +11,6 @@ import sys
 from collections.abc import Callable, Sequence
 from importlib.metadata import PackageNotFoundError, version
 
-
 if hasattr(sys, "_MEIPASS"):
     os.chdir(sys._MEIPASS)
 
@@ -30,10 +29,7 @@ def _default_version_provider() -> str:
 
 
 def _response_to_record(response) -> dict:
-    if hasattr(response, "model_dump"):
-        payload = response.model_dump()
-    else:
-        payload = response.dict()
+    payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
     return {
         "type": "result",
         "cmd": payload.get("cmd", ""),
