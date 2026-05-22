@@ -40,6 +40,12 @@ describe('server bundle build configuration', () => {
     expect(eccBuildFile).not.toContain('export PYTHON_INTERPRETER=".venv/bin/python"')
   })
 
+  it('installs Typer in the server venv used as the ECC CLI PyInstaller fallback', () => {
+    const serverPyproject = readFileSync(`${repoRoot}ecos/server/pyproject.toml`, 'utf8')
+
+    expect(serverPyproject).toContain('"typer>=0.12"')
+  })
+
   it('allows the PyInstaller spec to switch between onefile and onedir modes', () => {
     const specFile = readFileSync(`${repoRoot}ecos/server/ecos.spec`, 'utf8')
 
