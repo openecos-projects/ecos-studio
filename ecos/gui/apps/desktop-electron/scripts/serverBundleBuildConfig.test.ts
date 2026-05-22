@@ -33,7 +33,10 @@ describe('server bundle build configuration', () => {
     const eccBuildFile = readFileSync(`${repoRoot}ecc/BUILD.bazel`, 'utf8')
 
     expect(eccBuildFile).toContain('ECC_ROOT="$$(dirname "$(location ecc.spec)")"')
+    expect(eccBuildFile).toContain('if [[ -x "$$ECC_ROOT/.venv/bin/python" ]]; then')
     expect(eccBuildFile).toContain('export PYTHON_INTERPRETER="$$ECC_ROOT/.venv/bin/python"')
+    expect(eccBuildFile).toContain('fi')
+    expect(eccBuildFile).toContain('export PYTHONPATH="$$ECC_ROOT:$${PYTHONPATH:-}"')
     expect(eccBuildFile).not.toContain('export PYTHON_INTERPRETER=".venv/bin/python"')
   })
 
