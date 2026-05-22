@@ -20,6 +20,7 @@
     let
       overlay = (
         final: prev: {
+          chipcompiler-cli = final.cli;
           ecos-server = final.callPackage ./ecos/server { };
           ecos-studio = final.callPackage ./ecos/gui { };
         }

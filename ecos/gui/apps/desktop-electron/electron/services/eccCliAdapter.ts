@@ -10,6 +10,7 @@ import type {
   DesktopCliCommandResult,
 } from '@ecos-studio/shared'
 import type { DesktopRuntimeAdapterContext } from './desktopRuntimeManager'
+import { electronLogger } from './logger'
 
 type SpawnLike = typeof spawnChild
 
@@ -171,6 +172,44 @@ function isEnabled(value: unknown): boolean {
   return value === true || value === 'true' || value === 1 || value === '1'
 }
 
+function pathKeyForEnv(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
+}
+
+function pathSeparatorForEnv(env: NodeJS.ProcessEnv): string {
+  return (env.PATH ?? env.Path ?? env.path ?? '').includes(';') ? ';' : ':'
+}
+
+function pathEntriesForEnv(env: NodeJS.ProcessEnv): string[] {
+  const pathValue = env[pathKeyForEnv(env)] ?? ''
+  return pathValue.split(pathSeparatorForEnv(env)).filter(Boolean)
+}
+
+function pathHeadForEnv(env: NodeJS.ProcessEnv, count = 3): string {
+  return pathEntriesForEnv(env).slice(0, count).join(pathSeparatorForEnv(env))
+}
+
+function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string {
+  if (command.includes('/') || command.includes('\\')) {
+    return existsSync(command) ? command : '(not found)'
+  }
+
+  const candidates = process.platform === 'win32'
+    ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
+    : [command]
+
+  for (const directory of pathEntriesForEnv(env)) {
+    for (const candidate of candidates) {
+      const fullPath = join(directory, candidate)
+      if (existsSync(fullPath)) {
+        return fullPath
+      }
+    }
+  }
+
+  return '(not found)'
+}
+
 export class EccCliAdapter {
   private readonly command: string
   private env: NodeJS.ProcessEnv
@@ -317,6 +356,15 @@ export class EccCliAdapter {
       let stdoutBuffer = ''
       let stderrText = ''
       let invalidJsonLine: string | null = null
+      const start = Date.now()
+
+      electronLogger.debug(
+        '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
+        this.command,
+        resolveCommandFromPath(this.command, this.env),
+        prepared.args.join(' '),
+        pathHeadForEnv(this.env),
+      )
 
       const child = this.spawnImpl(this.command, prepared.args, {
         env: this.env,
@@ -422,12 +470,25 @@ export class EccCliAdapter {
         }
 
         if (finalResult) {
+          electronLogger.debug(
+            '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
+            request.cmd,
+            finalResult.response,
+            Date.now() - start,
+          )
           resolve(finalResult)
           return
         }
 
         if (code === 0 && invalidJsonLine) {
-          resolve(error(request, `Invalid JSON from ECC CLI: ${invalidJsonLine}`))
+          const result = error(request, `Invalid JSON from ECC CLI: ${invalidJsonLine}`)
+          electronLogger.debug(
+            '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
+            request.cmd,
+            result.response,
+            Date.now() - start,
+          )
+          resolve(result)
           return
         }
 
@@ -435,7 +496,14 @@ export class EccCliAdapter {
           ? `ECC CLI exited with signal ${signal}.`
           : `ECC CLI exited with code ${code ?? 'unknown'}.`
         const details = stderrText.trim() || invalidJsonLine || exitText
-        resolve(error(request, details === exitText ? exitText : `${exitText} ${details}`))
+        const result = error(request, details === exitText ? exitText : `${exitText} ${details}`)
+        electronLogger.debug(
+          '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
+          request.cmd,
+          result.response,
+          Date.now() - start,
+        )
+        resolve(result)
       })
     })
   }

@@ -4,12 +4,24 @@ module(
 )
 
 bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "ecc")
+bazel_dep(name = "ecc-dreamplace", version = "0.1.0")
 
 bazel_dep(name = "ecos-bazel")
 git_override(
     module_name = "ecos-bazel",
     remote = "https://github.com/Emin017/ecos-bazel.git",
-    commit = "db88cd95392ae56e99ceb1cc584eccf3881a2f2f",
+    commit = "1f223bae8abeed392c72162cd5e98ecbd4f13b9c",
+)
+
+local_path_override(
+    module_name = "ecc",
+    path = "ecc",
+)
+
+local_path_override(
+    module_name = "ecc-dreamplace",
+    path = "ecc/chipcompiler/thirdparty/ecc-dreamplace",
 )
 
 appimage_tool = use_extension("@ecos-bazel//rules:appimage-tool.bzl", "appimage_tool")

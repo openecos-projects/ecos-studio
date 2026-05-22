@@ -72,7 +72,6 @@ lint.select = [
 
 [project.scripts]
 ecos-server = "ecos_server.run_server:main"
-ecos-ecc-cli = "ecos_server.run_ecc_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ecos_server"]

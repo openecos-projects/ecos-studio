@@ -17,7 +17,6 @@ python3Packages.buildPythonPackage {
         ./ecos.spec
         ./uv.lock
         ./pyproject.toml
-        ./run_ecc_cli.py
         ./run_server.py
         ./ecos_server
       ];

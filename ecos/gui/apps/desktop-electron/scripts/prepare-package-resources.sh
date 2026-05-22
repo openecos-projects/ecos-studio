@@ -23,8 +23,8 @@ resolve_ecc_cli_artifact() {
 
   (
     cd "$REPO_ROOT"
-    bazel build //ecos:build_ecc_cli_bundle >/dev/null
-    readlink -f "$(bazel cquery --output=files //ecos:build_ecc_cli_bundle 2>/dev/null | head -n 1)"
+    bazel build @ecc//:build_ecc_cli_bundle >/dev/null
+    readlink -f "$(bazel cquery --output=files @ecc//:build_ecc_cli_bundle 2>/dev/null | head -n 1)"
   )
 }
 
@@ -38,16 +38,16 @@ install_ecc_cli_artifact() {
   fi
 
   rm -rf "$target_dir"
-  mkdir -p "$target_dir/runtime"
+  mkdir -p "$target_dir/ecc-runtime"
 
   if tar -tf "$artifact_path" >/dev/null 2>&1; then
-    tar -xf "$artifact_path" -C "$target_dir/runtime"
+    tar -xf "$artifact_path" -C "$target_dir/ecc-runtime"
   else
-    cp -f "$artifact_path" "$target_dir/runtime/ecc-cli"
+    cp -f "$artifact_path" "$target_dir/ecc-runtime/ecc"
   fi
 
-  if [[ ! -x "$target_dir/runtime/ecc-cli" ]]; then
-    echo "ERROR: ECC CLI bundle is missing executable: $target_dir/runtime/ecc-cli" >&2
+  if [[ ! -x "$target_dir/ecc-runtime/ecc" ]]; then
+    echo "ERROR: ECC CLI bundle is missing executable: $target_dir/ecc-runtime/ecc" >&2
     exit 1
   fi
 
@@ -55,7 +55,7 @@ install_ecc_cli_artifact() {
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"
+exec "$SCRIPT_DIR/ecc-runtime/ecc" "$@"
 EOF
   chmod +x "$target_dir/ecc"
 }

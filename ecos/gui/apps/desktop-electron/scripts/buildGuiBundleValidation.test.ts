@@ -37,11 +37,12 @@ describe('build-gui bundle validation', () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'ecos-build-gui-runtime-'))
     tempDirs.push(rootDir)
     const bundleDir = join(rootDir, 'ecc-cli-bundle')
-    const artifactPath = join(rootDir, 'ecc-cli.tar')
+    const artifactPath = join(rootDir, 'ecc.tar')
     const targetDir = join(rootDir, 'resources', 'binaries')
-    await mkdir(bundleDir, { recursive: true })
-    await writeFile(join(bundleDir, 'ecc-cli'), '#!/usr/bin/env bash\n')
-    await chmod(join(bundleDir, 'ecc-cli'), 0o755)
+    await mkdir(join(bundleDir, '_internal'), { recursive: true })
+    await writeFile(join(bundleDir, 'ecc'), '#!/usr/bin/env bash\n')
+    await writeFile(join(bundleDir, '_internal', 'runtime-marker'), 'fake-runtime\n')
+    await chmod(join(bundleDir, 'ecc'), 0o755)
     await execFile('tar', ['-cf', artifactPath, '-C', bundleDir, '.'])
 
     await expect(execFile('bash', [
@@ -52,7 +53,10 @@ describe('build-gui bundle validation', () => {
     })
 
     const wrapper = await readFile(join(targetDir, 'ecc'), 'utf8')
-    expect(wrapper).toContain('exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"')
+    expect(wrapper).toContain('exec "$SCRIPT_DIR/ecc-runtime/ecc" "$@"')
+    await expect(readFile(join(targetDir, 'ecc-runtime', '_internal', 'runtime-marker'), 'utf8')).resolves.toBe(
+      'fake-runtime\n',
+    )
   })
 
   it('runs pnpm from PATH with the repository Node version', async () => {

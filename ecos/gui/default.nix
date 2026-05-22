@@ -2,8 +2,8 @@
   lib,
   stdenv,
   fetchPnpmDeps,
+  chipcompiler-cli,
   electron,
-  ecos-server,
   makeWrapper,
   nodejs,
   pnpmConfigHook,
@@ -51,7 +51,7 @@ stdenv.mkDerivation (finalAttrs: {
     runHook preBuild
 
     mkdir -p apps/desktop-electron/resources/binaries
-    ln -s ${ecos-server}/bin/ecos-ecc-cli apps/desktop-electron/resources/binaries/ecc
+    ln -s ${chipcompiler-cli}/bin/ecc apps/desktop-electron/resources/binaries/ecc
 
     mkdir -p apps/desktop-electron/resources/oss-cad-suite/bin
     ln -s ${yosysWithSlang}/bin/yosys apps/desktop-electron/resources/oss-cad-suite/bin/yosys
@@ -75,7 +75,7 @@ stdenv.mkDerivation (finalAttrs: {
 
     makeWrapper ${electron}/bin/electron "$out/bin/ecos-studio" \
       --add-flags "$app_root/apps/desktop-electron" \
-      --prefix PATH : ${lib.makeBinPath [ ecos-server python3 ]} \
+      --prefix PATH : ${lib.makeBinPath [ chipcompiler-cli python3 ]} \
       --set-default ECOS_ELECTRON_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite" \
       --set-default CHIPCOMPILER_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite"
 

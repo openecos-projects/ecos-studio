@@ -54,10 +54,11 @@ exit 1
 
 async function createFakeEccRuntime(rootDir: string) {
   const bundleDir = join(rootDir, 'fake-ecc-cli-bundle')
-  const artifactPath = join(rootDir, 'ecc-cli.tar')
-  await mkdir(bundleDir, { recursive: true })
-  await writeFile(join(bundleDir, 'ecc-cli'), '#!/usr/bin/env bash\n')
-  await chmod(join(bundleDir, 'ecc-cli'), 0o755)
+  const artifactPath = join(rootDir, 'ecc.tar')
+  await mkdir(join(bundleDir, '_internal'), { recursive: true })
+  await writeFile(join(bundleDir, 'ecc'), '#!/usr/bin/env bash\n')
+  await writeFile(join(bundleDir, '_internal', 'runtime-marker'), 'fake-runtime\n')
+  await chmod(join(bundleDir, 'ecc'), 0o755)
   await execFile('tar', ['-cf', artifactPath, '-C', bundleDir, '.'])
 
   return artifactPath
@@ -81,9 +82,17 @@ describe('prepare-package-resources.sh', () => {
     await writeFile(join(fakeBinDir, 'bazel'), `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1" == "build" ]]; then
+  if [[ "$2" != "@ecc//:build_ecc_cli_bundle" ]]; then
+    echo "unexpected bazel build target: $*" >&2
+    exit 1
+  fi
   exit 0
 fi
 if [[ "$1" == "cquery" ]]; then
+  if [[ "$3" != "@ecc//:build_ecc_cli_bundle" ]]; then
+    echo "unexpected bazel cquery target: $*" >&2
+    exit 1
+  fi
   printf '%s\\n' "${artifactPath}"
   exit 0
 fi
@@ -142,9 +151,12 @@ exit 1
 
     await expect(stat(copiedYosysPath)).resolves.toBeTruthy()
     await expect(stat(join(workspace.resourcesDir, 'oss-cad-suite', 'placeholder.txt'))).rejects.toBeTruthy()
-    await expect(readdir(join(workspace.resourcesDir, 'binaries', 'runtime'))).resolves.toEqual(
-      expect.arrayContaining(['ecc-cli']),
+    await expect(readdir(join(workspace.resourcesDir, 'binaries', 'ecc-runtime'))).resolves.toEqual(
+      expect.arrayContaining(['_internal', 'ecc']),
     )
-    expect(wrapper).toContain('exec "$SCRIPT_DIR/runtime/ecc-cli" "$@"')
+    await expect(stat(join(workspace.resourcesDir, 'binaries', 'ecc-runtime', 'ecc'))).resolves.toMatchObject({
+      mode: expect.any(Number),
+    })
+    expect(wrapper).toContain('exec "$SCRIPT_DIR/ecc-runtime/ecc" "$@"')
   })
 })

@@ -28,8 +28,6 @@ HOOKS_DIR = SERVER_DIR / "hooks"
 # macOS code signing identity (optional)
 CODESIGN_IDENTITY = os.environ.get("APPLE_SIGNING_IDENTITY")
 BUNDLE_MODE = os.environ.get("ECOS_PYINSTALLER_MODE", "onedir").strip().lower()
-ENTRYPOINT = os.environ.get("ECOS_PYINSTALLER_ENTRYPOINT", "ecos-server").strip() or "ecos-server"
-ENTRYPOINT_SCRIPT = "run_ecc_cli.py" if ENTRYPOINT == "ecc-cli" else "run_server.py"
 
 REQUIRED_DISTRIBUTION_METADATA = (
     "ecos-server",
@@ -255,7 +253,7 @@ hiddenimports.extend(
 
 # --- Analysis & packaging ---
 a = Analysis(
-    [str(SERVER_DIR / ENTRYPOINT_SCRIPT)],
+    [str(SERVER_DIR / "run_server.py")],
     pathex=[str(SERVER_DIR)],
     binaries=binaries,
     datas=datas,
@@ -289,7 +287,7 @@ if BUNDLE_MODE == "onedir":
         a.scripts,
         [],
         exclude_binaries=True,
-        name=ENTRYPOINT,
+        name="ecos-server",
         strip=False,
         upx=False,
         console=True,
@@ -303,7 +301,7 @@ if BUNDLE_MODE == "onedir":
         a.datas,
         strip=False,
         upx=False,
-        name=ENTRYPOINT,
+        name="ecos-server",
     )
 else:
     exe = EXE(
@@ -313,7 +311,7 @@ else:
         a.zipfiles,
         a.datas,
         [],
-        name=ENTRYPOINT,
+        name="ecos-server",
         strip=False,
         upx=True,
         console=True,

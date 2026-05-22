@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 import type { spawn as spawnChild } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopCliCommandRequest } from '@ecos-studio/shared'
 import { EccCliAdapter } from './eccCliAdapter'
+import { electronLogger } from './logger'
 
 interface SpawnCall {
   args: string[]
@@ -67,7 +68,7 @@ describe('EccCliAdapter', () => {
     }
   })
 
-  function createTempDir(prefix = 'ecos-ecc-cli-adapter-'): string {
+  function createTempDir(prefix = 'ecos-ecc-adapter-'): string {
     const directory = mkdtempSync(join(tmpdir(), prefix))
     tempDirs.push(directory)
     return directory
@@ -142,6 +143,48 @@ describe('EccCliAdapter', () => {
     })
 
     await expect(stepPromise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('logs the resolved ECC CLI path and spawn argv for diagnostics', async () => {
+    const tempDir = createTempDir()
+    const binDir = join(tempDir, 'bin')
+    const eccBin = join(binDir, 'ecc')
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(eccBin, '#!/usr/bin/env bash\n')
+    chmodSync(eccBin, 0o755)
+
+    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const harness = createSpawnHarness()
+    const adapter = new EccCliAdapter({
+      env: { PATH: `${binDir}:/usr/bin` },
+      spawn: harness.spawn,
+    })
+
+    const loadPromise = adapter.execute(request('load_workspace', {
+      directory: '/work/demo',
+    }), { emit: vi.fn() })
+
+    complete(harness.children[0], {
+      cmd: 'load_workspace',
+      data: { directory: '/work/demo' },
+      message: ['loaded'],
+      response: 'success',
+    })
+    await loadPromise
+
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
+      'ecc',
+      eccBin,
+      'workspace load --directory /work/demo --json',
+      `${binDir}:/usr/bin`,
+    )
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
+      'load_workspace',
+      'success',
+      expect.any(Number),
+    )
   })
 
   it('maps workspace commands to CLI argv and normalizes CLI command aliases', async () => {
