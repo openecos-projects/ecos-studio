@@ -78,6 +78,8 @@ export interface FlowLogSegment {
   logPath?: string
 }
 
+type HomeAssetLoadGuard = () => boolean
+
 // ============ 共享 HomeData 缓存（模块级单例） ============
 
 /**
@@ -550,11 +552,13 @@ export function useHomeData() {
   let pollFlowJsonTimer: ReturnType<typeof setInterval> | null = null
   let pollLogFallbackTimer: ReturnType<typeof setInterval> | null = null
   let unwatchFlowJsonFile: (() => void) | null = null
+  let unwatchHomeJsonFile: (() => void) | null = null
   let unwatchLogFile: (() => void) | null = null
   let liveLogPatchTimer: ReturnType<typeof setTimeout> | null = null
   let liveLogPatchInFlight = false
   let liveLogPatchQueued = false
   let liveProjectPath: string | null = null
+  let liveHomeDataRefreshSession = 0
   let lastOngoingKey: string | null = null
 
   /**
@@ -603,7 +607,11 @@ export function useHomeData() {
    * 去重：与模块级 `_loadedLayoutPath` 一致且当前 blob 仍在，则直接返回。
    * Runtime event 触发时 `updateSharedHomeData` 会提前清签名，loader 被再次调用会真读磁盘。
    */
-  async function loadLayoutImage(layoutPath: string): Promise<void> {
+  async function loadLayoutImage(
+    layoutPath: string,
+    isCurrent: HomeAssetLoadGuard = () => true,
+  ): Promise<void> {
+    if (!isCurrent()) return
     if (!layoutPath) {
       invalidateLayoutCache()
       return
@@ -616,12 +624,17 @@ export function useHomeData() {
     try {
       const localPath = convertToLocalPath(layoutPath)
       const resolvedPath = await resolvedPathMemo(localPath)
+      if (!isCurrent()) return
       if (!resolvedPath) {
         invalidateLayoutCache()
         return
       }
 
       const nextBlobUrl = await readProjectBlobUrl(resolvedPath, { mimeType: 'image/png' })
+      if (!isCurrent()) {
+        URL.revokeObjectURL(nextBlobUrl)
+        return
+      }
 
       // 新 blob 落位后，再 revoke 旧的——<img :src> 不会出现瞬断
       const prevBlobUrl = _currentLayoutBlobUrl
@@ -632,7 +645,7 @@ export function useHomeData() {
       console.log('Layout blob URL created:', nextBlobUrl)
     } catch (err) {
       console.error('Failed to load layout image:', err)
-      invalidateLayoutCache()
+      if (isCurrent()) invalidateLayoutCache()
     }
   }
 
@@ -642,7 +655,11 @@ export function useHomeData() {
    *
    * 去重：label+path 组合签名一致 → 跳过（常见 mount 场景）。
    */
-  async function loadMetricsImages(metrics: Record<string, any>): Promise<void> {
+  async function loadMetricsImages(
+    metrics: Record<string, any>,
+    isCurrent: HomeAssetLoadGuard = () => true,
+  ): Promise<void> {
+    if (!isCurrent()) return
     if (!metrics || typeof metrics !== 'object') {
       invalidateMetricsCache()
       return
@@ -671,6 +688,7 @@ export function useHomeData() {
           const localPath = convertToLocalPath(imagePath as string)
           const resolvedPath = await resolvedPathMemo(localPath)
           if (!resolvedPath) return { label, blobUrl: '' }
+          if (!isCurrent()) return { label, blobUrl: '' }
           const blobUrl = await readProjectBlobUrl(resolvedPath)
           return { label, blobUrl }
         } catch (err) {
@@ -687,6 +705,10 @@ export function useHomeData() {
         if (blobUrl) newBlobUrls.push(blobUrl)
       }
     }
+    if (!isCurrent()) {
+      for (const url of newBlobUrls) URL.revokeObjectURL(url)
+      return
+    }
 
     // 新 blob 全部就位后再 revoke 旧的，避免 <img> 在 render 期间拿到失效 URL
     const prevBlobUrls = _currentMetricsBlobUrls
@@ -702,7 +724,11 @@ export function useHomeData() {
    *
    * 去重：同路径且已有数据 → 跳过。
    */
-  async function loadChecklist(checklistPath: string): Promise<void> {
+  async function loadChecklist(
+    checklistPath: string,
+    isCurrent: HomeAssetLoadGuard = () => true,
+  ): Promise<void> {
+    if (!isCurrent()) return
     if (!checklistPath) {
       invalidateChecklistCache()
       return
@@ -714,6 +740,7 @@ export function useHomeData() {
     try {
       const localPath = convertToLocalPath(checklistPath)
       const resolvedPath = await resolvedPathMemo(localPath)
+      if (!isCurrent()) return
       if (!resolvedPath) {
         invalidateChecklistCache()
         return
@@ -721,12 +748,13 @@ export function useHomeData() {
 
       const fileContent = await readProjectTextFile(resolvedPath)
       const data: ChecklistData = JSON.parse(fileContent)
+      if (!isCurrent()) return
 
       checklistItemsState.value = data.checklist || []
       _loadedChecklistPath = checklistPath
     } catch (err) {
       console.error('Failed to load checklist:', err)
-      invalidateChecklistCache()
+      if (isCurrent()) invalidateChecklistCache()
     }
   }
 
@@ -809,9 +837,12 @@ export function useHomeData() {
   }
 
   function cleanupFlowLogLiveWatch(): void {
+    liveHomeDataRefreshSession++
     cleanupLogWatchOnly()
     unwatchFlowJsonFile?.()
     unwatchFlowJsonFile = null
+    unwatchHomeJsonFile?.()
+    unwatchHomeJsonFile = null
     if (pollFlowJsonTimer != null) {
       clearInterval(pollFlowJsonTimer)
       pollFlowJsonTimer = null
@@ -1280,6 +1311,28 @@ export function useHomeData() {
     return true
   }
 
+  async function loadHomeAssetsFromData(
+    homeData: HomeData,
+    options: { includeFlowLogs?: boolean; isCurrent?: HomeAssetLoadGuard } = {},
+  ): Promise<void> {
+    const isCurrent = options.isCurrent ?? (() => true)
+    if (!isCurrent()) return
+    if (homeData.monitor) {
+      monitorData.value = homeData.monitor
+    }
+
+    const loaders: Array<Promise<void>> = [
+      loadChecklist(homeData.checklist, isCurrent),
+      loadLayoutImage(homeData.layout, isCurrent),
+      loadMetricsImages(homeData.metrics, isCurrent),
+    ]
+    if (options.includeFlowLogs ?? true) {
+      loaders.push(loadAllFlowStepLogsFromFlowPath(homeData.flow))
+    }
+
+    await Promise.all(loaders)
+  }
+
   /**
    * 从 home.json 加载所有 Home 页面数据
    * 使用共享缓存避免重复 runtime 调用
@@ -1308,18 +1361,7 @@ export function useHomeData() {
 
       console.log('Loaded home data:', homeData)
 
-      // 加载 monitor 数据
-      if (homeData.monitor) {
-        monitorData.value = homeData.monitor
-      }
-
-      // 并行加载 checklist、layout、metrics 与各步骤日志
-      await Promise.all([
-        loadChecklist(homeData.checklist),
-        loadLayoutImage(homeData.layout),
-        loadMetricsImages(homeData.metrics),
-        loadAllFlowStepLogsFromFlowPath(homeData.flow),
-      ])
+      await loadHomeAssetsFromData(homeData, { includeFlowLogs: true })
 
       console.log('Home data fully loaded')
     } catch (err) {
@@ -1361,18 +1403,7 @@ export function useHomeData() {
 
       console.log('Loaded home data from runtime event path:', homeData)
 
-      // 更新 monitor 数据
-      if (homeData.monitor) {
-        monitorData.value = homeData.monitor
-      }
-
-      // 并行加载 checklist、layout、metrics 与各步骤日志
-      await Promise.all([
-        loadChecklist(homeData.checklist),
-        loadLayoutImage(homeData.layout),
-        loadMetricsImages(homeData.metrics),
-        loadAllFlowStepLogsFromFlowPath(homeData.flow),
-      ])
+      await loadHomeAssetsFromData(homeData, { includeFlowLogs: true })
 
       console.log('Home data from runtime event path fully loaded')
     } catch (err) {
@@ -1422,6 +1453,34 @@ export function useHomeData() {
     }
   }
 
+  async function refreshHomeDataFromCurrentHomeFile(sid: number): Promise<void> {
+    if (sid !== liveSession) return
+    const projectPath = liveProjectPath
+    if (!projectPath || currentProject.value?.path !== projectPath) return
+
+    const refreshSid = ++liveHomeDataRefreshSession
+    const isCurrent = (): boolean =>
+      sid === liveSession
+      && refreshSid === liveHomeDataRefreshSession
+      && currentProject.value?.path === projectPath
+
+    const resolvedHomePath = await resolvedPathMemo(`${projectPath}/home/home.json`)
+    if (!resolvedHomePath || !isCurrent()) return
+
+    try {
+      const fileContent = await readProjectTextFile(resolvedHomePath)
+      const homeData: HomeData = JSON.parse(fileContent)
+      if (!isCurrent()) return
+
+      updateSharedHomeData(homeData)
+      await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
+      if (!isCurrent()) return
+      await refreshFlowLogLivePanel(sid)
+    } catch (err) {
+      console.error('refreshHomeDataFromCurrentHomeFile:', err)
+    }
+  }
+
   async function startFlowLogLiveWatchForCurrentProject(): Promise<void> {
     if (!isInTauri || !flowExecutionActive.value) return
     const projectPath = currentProject.value?.path
@@ -1446,13 +1505,26 @@ export function useHomeData() {
     if (sid !== liveSession || currentProject.value?.path !== projectPath) return
     if (!resolvedFlowPath) return
 
-    unwatchFlowJsonFile = await startProjectFileWatcher(sid, resolvedFlowPath, () => {
+    const flowJsonUnwatch = await startProjectFileWatcher(sid, resolvedFlowPath, () => {
       void refreshFlowLogLivePanel(sid)
     })
     if (sid !== liveSession || currentProject.value?.path !== projectPath) {
-      unwatchFlowJsonFile?.()
-      unwatchFlowJsonFile = null
+      flowJsonUnwatch?.()
       return
+    }
+    unwatchFlowJsonFile = flowJsonUnwatch
+
+    const resolvedHomePath = await resolvedPathMemo(`${projectPath}/home/home.json`)
+    if (sid !== liveSession || currentProject.value?.path !== projectPath) return
+    if (resolvedHomePath) {
+      const homeJsonUnwatch = await startProjectFileWatcher(sid, resolvedHomePath, () => {
+        void refreshHomeDataFromCurrentHomeFile(sid)
+      })
+      if (sid !== liveSession || currentProject.value?.path !== projectPath) {
+        homeJsonUnwatch?.()
+        return
+      }
+      unwatchHomeJsonFile = homeJsonUnwatch
     }
 
     pollFlowJsonTimer = setInterval(() => {

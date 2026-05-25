@@ -1,10 +1,10 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, getCurrentInstance, onUnmounted, watch } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { useTauri, isTauri } from './useTauri'
 import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
 import type { ECCResponse } from '@/api/runtimeEvents'
-import { readProjectTextFile } from '@/utils/projectFiles'
+import { readProjectTextFile, watchProjectFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 
 // ============ 类型定义 ============
@@ -119,6 +119,8 @@ export function useFlowStages() {
   const dynamicFlowStages = ref<FlowStage[]>([])
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  let unwatchFlowJsonFile: (() => void) | null = null
+  let watchSession = 0
 
   // 合并后的完整流程步骤
   const flowStages = computed<FlowStage[]>(() => {
@@ -248,6 +250,42 @@ export function useFlowStages() {
     }
   }
 
+  function cleanupFlowJsonWatch(): void {
+    unwatchFlowJsonFile?.()
+    unwatchFlowJsonFile = null
+  }
+
+  async function startFlowJsonWatchForCurrentProject(): Promise<void> {
+    cleanupFlowJsonWatch()
+    const projectPath = currentProject.value?.path
+    if (!isInTauri || !projectPath) return
+
+    const sid = ++watchSession
+    try {
+      const homeData = await fetchSharedHomeData(projectPath, isInTauri)
+      if (sid !== watchSession || currentProject.value?.path !== projectPath) return
+      const flowJsonPath = homeData?.flow
+      if (!flowJsonPath) return
+
+      const localFlowPath = convertRemoteToLocalPath(flowJsonPath, projectPath)
+      const resolvedFlowPath = await resolveProjectPathAccess(localFlowPath)
+      if (sid !== watchSession || currentProject.value?.path !== projectPath) return
+      if (!resolvedFlowPath) return
+
+      const unwatch = await watchProjectFile(resolvedFlowPath, () => {
+        if (sid !== watchSession || currentProject.value?.path !== projectPath) return
+        void loadFlowStagesFromPath(resolvedFlowPath)
+      })
+      if (sid !== watchSession || currentProject.value?.path !== projectPath) {
+        unwatch?.()
+        return
+      }
+      unwatchFlowJsonFile = unwatch
+    } catch (err) {
+      console.warn('Failed to watch flow.json for stage updates:', err)
+    }
+  }
+
   /**
    * 乐观更新：将第一个非 Success 的 run 步骤设为 Ongoing
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
@@ -303,7 +341,10 @@ export function useFlowStages() {
     async (newPath) => {
       if (newPath) {
         await loadFlowStages()
+        await startFlowJsonWatchForCurrentProject()
       } else {
+        watchSession++
+        cleanupFlowJsonWatch()
         clearFlowStages()
       }
     },
@@ -364,6 +405,13 @@ export function useFlowStages() {
       }
     }
   )
+
+  if (getCurrentInstance()) {
+    onUnmounted(() => {
+      watchSession++
+      cleanupFlowJsonWatch()
+    })
+  }
 
   return {
     // 状态

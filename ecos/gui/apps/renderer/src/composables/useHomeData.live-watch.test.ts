@@ -19,6 +19,15 @@ const testState = vi.hoisted(() => ({
   triggerStepRefresh: vi.fn(),
   unmountCallbacks: [] as Array<() => void>,
   subscribeProjectLogTail: vi.fn(),
+  projectFileWatchers: [] as Array<{
+    listener: (event: {
+      subscriptionId: string
+      path: string
+      eventType: string
+    }) => void
+    path: string
+    unwatch: ReturnType<typeof vi.fn>
+  }>,
   logTailListeners: [] as Array<{
     listener: (event: {
       subscriptionId: string
@@ -128,6 +137,7 @@ describe('useHomeData live project file watchers', () => {
     testState.stepRefreshCounter = ref(0)
     testState.unmountCallbacks.length = 0
     testState.logTailListeners.length = 0
+    testState.projectFileWatchers.length = 0
 
     testState.getHomePageApi.mockReset()
     testState.readProjectBlobUrl.mockReset()
@@ -197,7 +207,14 @@ describe('useHomeData live project file watchers', () => {
     testState.readProjectTextFileTail.mockImplementation(async (path: string) => {
       return await testState.readProjectTextFile(path)
     })
-    testState.watchProjectFile.mockResolvedValue(vi.fn())
+    testState.watchProjectFile.mockImplementation(async (
+      path: string,
+      listener: (event: { subscriptionId: string; path: string; eventType: string }) => void,
+    ) => {
+      const unwatch = vi.fn()
+      testState.projectFileWatchers.push({ path, listener, unwatch })
+      return unwatch
+    })
   })
 
   afterEach(() => {
@@ -292,6 +309,270 @@ describe('useHomeData live project file watchers', () => {
     })
 
     expect(firstTail!.unwatch).toHaveBeenCalled()
+  })
+
+  it('refreshes step state from flow.json changes and switches the live log tail', async () => {
+    let flowStep = 'Synthesis'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify(homeDataFor(projectPath))
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor(flowStep)
+      return '{}'
+    })
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(testState.subscribeProjectLogTail).toHaveBeenCalledWith(
+        '/workspace/a/Synthesis_yosys/log/Synthesis.log',
+        expect.any(Function),
+        expect.any(Object),
+      )
+    })
+
+    const flowWatch = testState.projectFileWatchers.find((entry) =>
+      entry.path === '/workspace/a/home/flow.json'
+    )
+    expect(flowWatch).toBeDefined()
+
+    flowStep = 'Floorplan'
+    flowWatch!.listener({
+      subscriptionId: 'flow-watch-1',
+      path: '/workspace/a/home/flow.json',
+      eventType: 'change',
+    })
+
+    await vi.waitFor(() => {
+      expect(testState.subscribeProjectLogTail).toHaveBeenCalledWith(
+        '/workspace/a/Floorplan_yosys/log/Floorplan.log',
+        expect.any(Function),
+        expect.any(Object),
+      )
+    })
+
+    expect(home.flowLogSegments.value.find((segment) => segment.live)?.stepName).toBe('Floorplan')
+  })
+
+  it('watches home.json during live execution and reloads Home assets when it changes', async () => {
+    let version = 1
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${version}.png`,
+          checklist: `${projectPath}/home/checklist-${version}.json`,
+          metrics: {
+            [`metric-${version}`]: `${projectPath}/home/metric-${version}.png`,
+          },
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [version],
+          },
+        })
+      }
+      if (path.endsWith('/checklist-1.json')) {
+        return JSON.stringify({
+          path,
+          checklist: [{ step: 'Synthesis', type: 'lint', item: 'v1', state: 'ok' }],
+        })
+      }
+      if (path.endsWith('/checklist-2.json')) {
+        return JSON.stringify({
+          path,
+          checklist: [{ step: 'Floorplan', type: 'drc', item: 'v2', state: 'ok' }],
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-1.png')
+    })
+
+    const homeWatch = testState.projectFileWatchers.find((entry) =>
+      entry.path === '/workspace/a/home/home.json'
+    )
+    expect(homeWatch).toBeDefined()
+
+    version = 2
+    homeWatch!.listener({
+      subscriptionId: 'home-watch-1',
+      path: '/workspace/a/home/home.json',
+      eventType: 'change',
+    })
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-2.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'metric-2', imageBlobUrl: 'blob:/workspace/a/home/metric-2.png' },
+    ])
+    expect(home.checklistItems.value).toEqual([
+      { step: 'Floorplan', type: 'drc', item: 'v2', state: 'ok' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Synthesis'],
+      frequency: [2],
+    })
+  })
+
+  it('ignores older home.json refreshes that finish after newer changes', async () => {
+    let version = 1
+    const delayedHomeReads: Array<{
+      version: number
+      resolve: (content: string) => void
+    }> = []
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        const payload = JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${version}.png`,
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [version],
+          },
+        })
+
+        if (version > 1) {
+          return await new Promise<string>((resolve) => {
+            delayedHomeReads.push({ version, resolve })
+          })
+        }
+        return payload
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-1.png')
+    })
+
+    const homeWatch = testState.projectFileWatchers.find((entry) =>
+      entry.path === '/workspace/a/home/home.json'
+    )
+    expect(homeWatch).toBeDefined()
+
+    version = 2
+    homeWatch!.listener({
+      subscriptionId: 'home-watch-1',
+      path: '/workspace/a/home/home.json',
+      eventType: 'change',
+    })
+    await vi.waitFor(() => {
+      expect(delayedHomeReads.map((entry) => entry.version)).toContain(2)
+    })
+
+    version = 3
+    homeWatch!.listener({
+      subscriptionId: 'home-watch-1',
+      path: '/workspace/a/home/home.json',
+      eventType: 'change',
+    })
+    await vi.waitFor(() => {
+      expect(delayedHomeReads.map((entry) => entry.version)).toContain(3)
+    })
+
+    delayedHomeReads.find((entry) => entry.version === 3)!.resolve(JSON.stringify({
+      ...homeDataFor('/workspace/a'),
+      layout: '/workspace/a/home/layout-3.png',
+      monitor: {
+        step: ['Synthesis'],
+        frequency: [3],
+      },
+    }))
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
+    })
+
+    delayedHomeReads.find((entry) => entry.version === 2)!.resolve(JSON.stringify({
+      ...homeDataFor('/workspace/a'),
+      layout: '/workspace/a/home/layout-2.png',
+      monitor: {
+        step: ['Synthesis'],
+        frequency: [2],
+      },
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
+    expect(home.monitorData.value).toEqual({
+      step: ['Synthesis'],
+      frequency: [3],
+    })
+  })
+
+  it('does not leave a stale flow polling timer when live startup is superseded during home watch setup', async () => {
+    vi.useFakeTimers()
+    const homeWatchResolvers: Array<(unwatch: () => void) => void> = []
+    testState.watchProjectFile.mockImplementation(async (
+      path: string,
+      listener: (event: { subscriptionId: string; path: string; eventType: string }) => void,
+    ) => {
+      const unwatch = vi.fn()
+      testState.projectFileWatchers.push({ path, listener, unwatch })
+      if (path.endsWith('/home/home.json')) {
+        return await new Promise((resolve) => {
+          homeWatchResolvers.push(resolve)
+        })
+      }
+      return unwatch
+    })
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(homeWatchResolvers).toHaveLength(1)
+    })
+
+    testState.currentProject!.value = { path: '/workspace/b' }
+    await vi.waitFor(() => {
+      expect(homeWatchResolvers).toHaveLength(2)
+    })
+
+    homeWatchResolvers[0]!(vi.fn())
+    await Promise.resolve()
+
+    homeWatchResolvers[1]!(vi.fn())
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(testState.readProjectTextFile).toHaveBeenCalledWith('/workspace/b/home/flow.json')
+
+    testState.readProjectTextFile.mockClear()
+    testState.currentProject!.value = null
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(testState.readProjectTextFile).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+
+    vi.useRealTimers()
   })
 
   it('falls back to the on-demand reader only when the live log is explicitly expanded', async () => {
