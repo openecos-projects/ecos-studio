@@ -68,6 +68,7 @@ export interface VersionInfo {
   server?: string
   ecc: string
   dreamplace: string
+  eccTools?: string
 }
 
 export interface DesktopProjectTextFileTail {
