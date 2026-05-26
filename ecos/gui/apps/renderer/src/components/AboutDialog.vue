@@ -22,9 +22,9 @@
 
       <table class="version-table">
         <tbody>
-          <tr v-for="(label, key) in componentLabels" :key="key">
-            <td class="label-cell">{{ label }}</td>
-            <td class="version-cell">{{ versionText(key) }}</td>
+          <tr v-for="row in versionRows" :key="row.key">
+            <td class="label-cell">{{ row.label }}</td>
+            <td class="version-cell">{{ row.version }}</td>
           </tr>
         </tbody>
       </table>
@@ -38,34 +38,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
 import { useVersion } from '@/composables/useVersion'
+import { aboutVersionRows, buildAboutVersionText } from './aboutDialogVersions'
 
 const visible = defineModel<boolean>({ required: true })
 const { versions } = useVersion()
 
-const componentLabels: Record<string, string> = {
-  gui: 'GUI',
-  runtime: 'Runtime',
-  ecc: 'ECC-Tools',
-  dreamplace: 'ECC-DreamPlace',
-}
-
-function versionText(key: string): string {
-  if (key === 'runtime') {
-    return versions.value?.runtime ?? versions.value?.server ?? 'unknown'
-  }
-
-  return versions.value?.[key as keyof typeof versions.value] ?? 'unknown'
-}
+const versionRows = computed(() => aboutVersionRows(versions.value))
 
 const copied = ref(false)
 async function copyVersions(): Promise<void> {
-  const lines = Object.entries(componentLabels)
-    .map(([key, label]) => `${label}: ${versionText(key)}`)
-    .join('\n')
-  const text = `ECOS Studio\n${lines}`
+  const text = buildAboutVersionText(versions.value)
   await navigator.clipboard.writeText(text)
   copied.value = true
   setTimeout(() => { copied.value = false }, 2000)
