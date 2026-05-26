@@ -27,6 +27,10 @@ function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
+function localTestDate(): Date {
+  return new Date(2026, 4, 12, 16, 36, 17, 209)
+}
+
 describe('createElectronLogger', () => {
   const tempDirectories: string[] = []
 
@@ -46,7 +50,7 @@ describe('createElectronLogger', () => {
         ECOS_LOG_COLOR: 'auto',
       },
       isTty: true,
-      now: () => new Date('2026-05-12T08:36:17.209Z'),
+      now: localTestDate,
     })
 
     logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
@@ -67,7 +71,7 @@ describe('createElectronLogger', () => {
         consoleSink,
         env,
         isTty: true,
-        now: () => new Date('2026-05-12T08:36:17.209Z'),
+        now: localTestDate,
       })
 
       logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
@@ -85,7 +89,7 @@ describe('createElectronLogger', () => {
         ECOS_LOG_COLOR: 'auto',
       },
       isTty: false,
-      now: () => new Date('2026-05-12T08:36:17.209Z'),
+      now: localTestDate,
     })
 
     logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
@@ -135,7 +139,7 @@ describe('createElectronLogger', () => {
       consoleSink,
       env: {},
       isTty: false,
-      now: () => new Date('2026-05-12T08:36:17.209Z'),
+      now: localTestDate,
     })
 
     logger.info('[api] Hidden by default')
