@@ -82,7 +82,7 @@ bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (ma
 `make build` runs the full pipeline:
 
 ```
-ECC CLI runtime resources → Electron build → AppImage
+ECC CLI packaging environment → ECC CLI runtime resources → Electron build → AppImage
 ```
 
 ```bash

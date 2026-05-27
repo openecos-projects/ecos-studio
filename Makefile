@@ -108,6 +108,7 @@ dev: check-setup
 	@cd ecos/gui && pnpm install --frozen-lockfile
 
 $(BUNDLE_TAR): check-setup check-platform
+	@cd ecc && uv sync --frozen --all-groups --python 3.11
 	bazel build //:ecos_studio_bundle
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)

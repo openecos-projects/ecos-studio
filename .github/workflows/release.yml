@@ -78,6 +78,10 @@ jobs:
           chmod +x "$HOME/.local/bin/bazel"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Sync ECC CLI packaging environment
+        working-directory: ecc
+        run: uv sync --frozen --all-groups --python 3.11
+
       - name: Build Electron release bundle
         env:
           ENABLE_OSS_CAD_SUITE: "true"
