@@ -21,7 +21,6 @@ jobs:
       pull-requests: read
     outputs:
       version: ${{ steps.filter.outputs.version }}
-      server: ${{ steps.filter.outputs.server }}
       gui: ${{ steps.filter.outputs.gui }}
       build: ${{ steps.filter.outputs.build }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -37,16 +36,10 @@ jobs:
           filters: |
             version:
               - 'MODULE.bazel'
-              - 'ecos/server/pyproject.toml'
-              - 'ecos/server/default.nix'
-              - 'ecos/server/ecos_server/main.py'
-              - 'ecos/server/uv.lock'
               - 'ecos/gui/default.nix'
               - 'ecos/gui/package.json'
               - 'ecos/gui/apps/*/package.json'
               - 'ecos/gui/packages/*/package.json'
-            server:
-              - 'ecos/server/**'
             gui:
               - 'ecos/gui/apps/**'
               - 'ecos/gui/packages/**'
@@ -62,7 +55,6 @@ jobs:
               - 'Makefile'
               - 'ecos/BUILD.bazel'
               - 'ecos/scripts/**'
-              - 'ecos/server/ecos.spec'
             ci:
               - '.github/**'
             docs_only:
@@ -75,36 +67,13 @@ jobs:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
     needs: changes
-    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.gui == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Check version
         uses: ./.github/actions/check-version
-
-  ruff:
-    name: Ruff
-    runs-on: ubuntu-22.04
-    needs: changes
-    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
-    defaults:
-      run:
-        working-directory: ecos/server
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: 0.11.12
-
-      - name: Check formatting
-        run: uvx ruff format --check
-
-      - name: Lint Python
-        run: uvx ruff check
 
   vue-tsc:
     name: Vue Typecheck
@@ -129,17 +98,15 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, ruff, vue-tsc]
+    needs: [changes, check-version, vue-tsc]
     if: >-
       ${{
         always() &&
-        (needs.changes.outputs.server == 'true' ||
-         needs.changes.outputs.gui == 'true' ||
+        (needs.changes.outputs.gui == 'true' ||
          needs.changes.outputs.version == 'true' ||
          needs.changes.outputs.build == 'true' ||
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
-        needs.ruff.result != 'failure' &&
         needs.vue-tsc.result != 'failure'
       }}
     runs-on: ubuntu-22.04
@@ -184,16 +151,11 @@ jobs:
           chmod +x "$HOME/.local/bin/bazel"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Sync server environment
-        working-directory: ecos/server
-        run: uv sync --frozen --all-groups --all-extras --python 3.11
-
       - name: Build Electron release bundle
         env:
           ENABLE_OSS_CAD_SUITE: "true"
           ECOS_ELECTRON_LINUX_TARGETS: AppImage
-        run: |
-          PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
+        run: bazel build //:ecos_studio_bundle
 
       - name: Verify AppImage artifact
         run: |

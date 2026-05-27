@@ -3,7 +3,6 @@ module(
     version = "0.1.0-alpha.5",
 )
 
-bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "ecc")
 bazel_dep(name = "ecc-dreamplace", version = "0.1.0")
 

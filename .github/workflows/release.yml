@@ -78,16 +78,11 @@ jobs:
           chmod +x "$HOME/.local/bin/bazel"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Sync server environment
-        working-directory: ecos/server
-        run: uv sync --frozen --all-groups --all-extras --python 3.11
-
       - name: Build Electron release bundle
         env:
           ENABLE_OSS_CAD_SUITE: "true"
           ECOS_ELECTRON_LINUX_TARGETS: AppImage
-        run: |
-          PATH="$PWD/ecos/server/.venv/bin:$PATH" bazel build //:ecos_studio_bundle
+        run: bazel build //:ecos_studio_bundle
 
       - name: Extract AppImage
         run: |

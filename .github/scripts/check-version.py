@@ -3,7 +3,6 @@ import json
 import os
 import re
 import sys
-import tomllib
 from pathlib import Path
 
 
@@ -53,24 +52,6 @@ module_version = parse_regex(
     label="MODULE.bazel version",
 )
 versions.append(("MODULE.bazel", module_version))
-
-server_pyproject = tomllib.loads(read("ecos/server/pyproject.toml"))["project"]["version"]
-versions.append(("ecos/server/pyproject.toml", server_pyproject))
-
-server_default_nix = parse_regex(
-    "ecos/server/default.nix",
-    r'(?m)^\s*version\s*=\s*"([^"]+)"\s*;',
-    label="ecos/server/default.nix version",
-)
-versions.append(("ecos/server/default.nix", server_default_nix))
-
-server_uv_lock = parse_regex(
-    "ecos/server/uv.lock",
-    r'\[\[package\]\]\s+name\s*=\s*"ecos-server"\s+version\s*=\s*"([^"]+)"',
-    flags=re.S,
-    label="ecos/server/uv.lock root package version",
-)
-versions.append(("ecos/server/uv.lock", server_uv_lock))
 
 gui_package = read_json("ecos/gui/package.json")["version"]
 versions.append(("ecos/gui/package.json", gui_package))

@@ -1,4 +1,4 @@
-.PHONY: help setup check-setup check-platform build dev use-local-ecc gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
+.PHONY: help setup check-setup check-platform build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
 BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
 BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
@@ -18,7 +18,6 @@ help:
 	@echo "  make setup      - Init submodules and setup PDK"
 	@echo "  make build      - Build ECOS Studio bundle (Bazel)"
 	@echo "  make dev        - Setup development environment"
-	@echo "  make use-local-ecc - Use local ECC checkout in server venv"
 	@echo "  make gui        - Launch GUI (release version)"
 	@echo "  make clean-gui  - Clean extracted GUI bundle"
 	@echo "  make demo-gcd   - Run GCD demo"
@@ -92,8 +91,7 @@ check-setup:
 
 check-platform:
 	@if [ "$$(uname -s)" != "Linux" ] || [ "$$(uname -m)" != "x86_64" ]; then \
-		echo "Error: ECOS Studio server development currently requires Linux x86_64 with glibc >= 2.34."; \
-		echo "The locked uv environment uses pinned manylinux_2_34_x86_64 wheels for ecc-dreamplace and ecc-tools."; \
+		echo "Error: ECOS Studio release builds currently require Linux x86_64 with glibc >= 2.34."; \
 		exit 1; \
 	fi; \
 	GLIBC_VERSION=$$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $$2 }'); \
@@ -102,22 +100,15 @@ check-platform:
 	GLIBC_MAJOR=$${GLIBC_MAJOR:-0}; \
 	GLIBC_MINOR=$${GLIBC_MINOR:-0}; \
 	if [ "$$GLIBC_MAJOR" -lt 2 ] || { [ "$$GLIBC_MAJOR" -eq 2 ] && [ "$$GLIBC_MINOR" -lt 34 ]; }; then \
-		echo "Error: ECOS Studio server development requires glibc >= 2.34 (detected: $${GLIBC_VERSION:-unknown})."; \
-		echo "The pinned ecc-dreamplace and ecc-tools wheels are tagged manylinux_2_34_x86_64."; \
+		echo "Error: ECOS Studio release builds require glibc >= 2.34 (detected: $${GLIBC_VERSION:-unknown})."; \
 		exit 1; \
 	fi
 
-dev: check-setup check-platform
-	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
+dev: check-setup
 	@cd ecos/gui && pnpm install --frozen-lockfile
 
-use-local-ecc: check-setup check-platform
-	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	@cd ecos/server && uv pip install --reinstall --no-deps -e ../../ecc
-
 $(BUNDLE_TAR): check-setup check-platform
-	@cd ecos/server && uv sync --frozen --all-groups --all-extras --python 3.11
-	PATH=$(CURDIR)/ecos/server/.venv/bin:$$PATH bazel build //:ecos_studio_bundle
+	bazel build //:ecos_studio_bundle
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
 	@mkdir -p $(BUNDLE_EXTRACT_DIR)

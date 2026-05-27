@@ -26,12 +26,10 @@ chmod +x <latest-release-file>.AppImage
 
 ### Platform Support
 
-Server development and release builds currently require Linux x86_64 with glibc
-2.34 or newer. The server uv environment is locked to pinned GitHub Release
-wheels for `ecc-dreamplace` and `ecc-tools`, and those native wheels are
-published as manylinux_2_34_x86_64 artifacts. macOS, Windows, non-x86_64 Linux
-hosts, and Linux distributions with older glibc are not supported by `make dev`,
-`make use-local-ecc`, or `make build` yet.
+Release builds currently require Linux x86_64 with glibc 2.34 or newer because
+the packaged ECC CLI runtime includes native manylinux_2_34_x86_64 artifacts.
+macOS, Windows, non-x86_64 Linux hosts, and Linux distributions with older glibc
+are not supported by `make build` yet.
 
 ### Development
 
@@ -60,19 +58,14 @@ cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm dev
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
 Normal desktop workspace and flow actions run through the ECC CLI. The legacy
-Python API server is kept for standalone compatibility work only; it is not
-started by the desktop GUI.
+Python API server is not started by the desktop GUI and is no longer part of the
+desktop development or release build path.
 
 The renderer calls the Electron desktop bridge for workspace and flow commands.
 Read-only commands such as `get_info` and `home_page` return their data through
 the CLI command response. Runtime events are reserved for flow lifecycle changes
 from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as logs
 and do not trigger workspace data reloads.
-
-```bash
-# Legacy standalone server diagnostics
-cd ecos/server && ECOS_API_LOG_LEVEL=info python run_server.py
-```
 
 ### DreamPlace Development
 
@@ -82,18 +75,6 @@ DreamPlace C++ operators are compiled by Bazel and installed as `.so` files into
 cd ecc
 bazel run //bazel/scripts:install_dreamplace    # Build + install .so files
 bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (manifest-based)
-```
-
-### Release Wheels
-
-The legacy standalone server environment uses pinned GitHub Release wheels through `ecos/server/pyproject.toml` and `ecos/server/uv.lock`.
-
-```bash
-# Re-sync the legacy standalone server environment from the locked release wheels
-cd ecos/server && uv sync --frozen --all-groups --python 3.11
-
-# Optional: switch the server venv to the local ECC checkout for development
-make use-local-ecc
 ```
 
 ### Release Build
@@ -111,8 +92,6 @@ make build
 # Launch the built AppImage
 make gui
 ```
-
-The release wheels are installed as **non-editable** packages so that PyInstaller's `collect_all("dreamplace")` and `collect_all("chipcompiler")` can discover all package files during bundling.
 
 ## Documentation
 

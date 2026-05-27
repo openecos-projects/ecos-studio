@@ -93,8 +93,8 @@ Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 **Q: Does the desktop app still start the Python API server?**
 
 No. Normal desktop workspace and flow actions run through the ECC CLI managed
-by Electron. The Python API server is legacy standalone infrastructure and is
-not started by the desktop GUI.
+by Electron. The Python API server is legacy standalone infrastructure, is not
+started by the desktop GUI, and is no longer part of the desktop release build.
 
 Workspace queries and flow queries are regular CLI request/response calls over
 the Electron desktop bridge. `get_info`, `home_page`, workspace loading, and
@@ -102,10 +102,3 @@ workspace creation return data to their caller and do not enter the runtime
 refresh stream. Runtime events are used only for running flow lifecycle changes
 from `run_step` and `rtl2gds`; stdout and stderr log output is not treated as a
 workspace data-refresh signal.
-
-```bash
-# Legacy standalone server diagnostics
-ECOS_API_LOG_LEVEL=info python ecos/server/run_server.py
-```
-
-Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.

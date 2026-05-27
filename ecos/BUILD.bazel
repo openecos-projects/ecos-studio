@@ -1,63 +1,8 @@
-load("@ecos-bazel//rules:python_packaging.bzl", "python_pyinstaller_bundle")
-load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
-
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "build_gui_script",
     srcs = ["scripts/build-gui.sh"],
-)
-
-filegroup(
-    name = "server_pyinstaller_srcs",
-    srcs = [
-        "server/pyproject.toml",
-        "server/run_server.py",
-        "server/uv.lock",
-    ] + glob([
-        "server/ecos_server/**/*.py",
-    ]),
-)
-
-sh_binary(
-    name = "prepare_ecos_server",
-    srcs = ["scripts/prepare-ecos-server.sh"],
-)
-
-python_pyinstaller_bundle(
-    name = "build_ecos_server",
-    spec_file = "server/ecos.spec",
-    srcs = [":server_pyinstaller_srcs"],
-    output_name = "ecos-server",
-    env = {"PYTHON_INTERPRETER": "ecos/server/.venv/bin/python"},
-    pyinstaller = "@ecos-bazel//tools:pyinstaller",
-)
-
-genrule(
-    name = "build_ecos_server_bundle",
-    srcs = [
-        ":server_pyinstaller_srcs",
-        "server/ecos.spec",
-    ],
-    tools = ["@ecos-bazel//tools:pyinstaller"],
-    outs = ["build_ecos_server_bundle/ecos-server.tar"],
-    tags = ["local", "no-sandbox"],
-    cmd = """
-        set -euo pipefail
-
-        export PYTHON_INTERPRETER="ecos/server/.venv/bin/python"
-        export ECOS_PYINSTALLER_MODE="onedir"
-        DIST_DIR="$(@D)/dist"
-        WORK_DIR="$(@D)/build_ecos_server_bundle_work"
-
-        $(location @ecos-bazel//tools:pyinstaller) $(location server/ecos.spec) \\
-          --clean \\
-          --noconfirm \\
-          --distpath "$$DIST_DIR" \\
-          --workpath "$$WORK_DIR"
-
-        tar -cf "$@" -C "$$DIST_DIR/ecos-server" .
-    """,
 )
 
 # Electron bundle - ChipCompiler specific
