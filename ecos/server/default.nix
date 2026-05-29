@@ -2,6 +2,8 @@
   lib,
   python3Packages,
   chipcompiler,
+  ecc-tools-python,
+  ecc-dreamplace-python,
 }:
 
 python3Packages.buildPythonPackage {
@@ -24,13 +26,14 @@ python3Packages.buildPythonPackage {
 
   build-system = with python3Packages; [ hatchling ];
 
-  dependencies = [
+  dependencies = with python3Packages; [
     chipcompiler
-  ]
-  ++ (with python3Packages; [
+    ecc-dreamplace-python
+    ecc-tools-python
     fastapi
+    torch
     uvicorn
-  ]);
+  ];
 
   # Skip tests for now (they require full environment setup)
   doCheck = false;

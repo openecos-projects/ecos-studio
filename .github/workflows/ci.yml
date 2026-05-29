@@ -192,3 +192,13 @@ jobs:
           retention-days: 14
           path: |
             dist/ci-appimage/**/*.AppImage
+
+  build-nix:
+    name: Build with Nix
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix build -L -v .#ecos-studio

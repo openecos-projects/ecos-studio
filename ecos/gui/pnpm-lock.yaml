@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  pixi.js: 8.15.0
+
 importers:
 
   .: {}
@@ -23,6 +26,9 @@ importers:
       '@ecos-studio/tile-helper':
         specifier: workspace:*
         version: link:../../packages/tile-helper
+      '@electron/rebuild':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@tailwindcss/vite':
         specifier: ^4.1.18
         version: 4.1.18(vite@7.3.0(@types/node@25.0.6)(jiti@2.6.1)(lightningcss@1.30.2))
@@ -99,7 +105,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3(pixi.js@8.15.0)
       pixi.js:
-        specifier: ^8.15.0
+        specifier: 8.15.0
         version: 8.15.0
       primeicons:
         specifier: ^7.0.0
@@ -2108,7 +2114,7 @@ packages:
   pixi-viewport@6.0.3:
     resolution: {integrity: sha512-2+qPJ0/n+8hQYhWvY+795+x9y3MiUrCOWacK0DY53whowWaGdx9iDocy7z1pBwjkZhC52YvrJQuZKK0sdVLtBw==}
     peerDependencies:
-      pixi.js: '>=8'
+      pixi.js: 8.15.0
 
   pixi.js@8.15.0:
     resolution: {integrity: sha512-J/Ghze/K9fjHRlfwC2EMZ7vnMIhGo4ByKCsKMcS0AB12iT79nf9zzWKUTzMJ8QAQFqQfDOl5ULwmHMUdeih2zQ==}

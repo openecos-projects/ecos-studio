@@ -6,7 +6,7 @@
     parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
-    ecc.url = "git+ssh://git@github.com/openecos-projects/ecc";
+    ecc.url = "github:openecos-projects/ecc";
     ecc.inputs.nixpkgs.follows = "nixpkgs";
   };
 
@@ -55,13 +55,17 @@
             inputsFrom = [
               pkgs.ecos-studio
             ];
-            buildInputs = [
-              pkgs.nixfmt
-              pkgs.git
-              pkgs.uv
-              pkgs.cargo
-              pkgs.rustc
-              pkgs.clippy
+            ELECTRON_EXEC_PATH = "${pkgs.electron}/bin/electron";
+            nativeBuildInputs = with pkgs; [
+              chipcompiler-cli
+              yosysWithSlang
+              (python3.withPackages (_: chipcompiler-cli.dependencies))
+              nixfmt
+              git
+              uv
+              cargo
+              rustc
+              clippy
             ];
           };
           treefmt = {

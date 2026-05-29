@@ -4,11 +4,6 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.0.9",
-  "pnpm": {
-    "overrides": {
-      "pixi.js": "^8.15.0"
-    }
-  },
   "scripts": {
     "dev": "pnpm run desktop:dev",
     "dev:vm": "LIBGL_ALWAYS_SOFTWARE=1 ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_OPEN_DEVTOOLS=1 pnpm run desktop:dev",

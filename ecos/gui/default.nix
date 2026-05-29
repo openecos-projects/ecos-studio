@@ -20,7 +20,7 @@ stdenv.mkDerivation (finalAttrs: {
     with lib.fileset;
     toSource {
       root = ./.;
-      fileset = intersection (gitTracked ./. ) (unions [
+      fileset = unions [
         ./README.md
         ./.gitignore
         ./.nvmrc
@@ -30,14 +30,14 @@ stdenv.mkDerivation (finalAttrs: {
         ./pnpm-lock.yaml
         ./pnpm-workspace.yaml
         ./tailwind.config.ts
-      ]);
+      ];
     };
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
     pname = "${finalAttrs.pname}-${finalAttrs.version}-pnpm-deps";
     fetcherVersion = 2;
-    hash = "sha256-wJBkYmBoG/4LOJcU1+b5o7RKL3Ii6Ph4cLHh67ZkmWY=";
+    hash = "sha256-yspTctYMugjfMTyyaWd+diJHHbByI4T7WlTSnO/eSyg=";
   };
 
   nativeBuildInputs = [
@@ -45,20 +45,24 @@ stdenv.mkDerivation (finalAttrs: {
     nodejs
     pnpm
     pnpmConfigHook
+    python3
   ];
+
+  postPatch = ''
+    cat <<EOF >> ./pnpm-workspace.yaml
+    nodeLinker: hoisted
+    shamefullyHoist: true
+    EOF
+  '';
 
   buildPhase = ''
     runHook preBuild
 
-    mkdir -p apps/desktop-electron/resources/binaries
-    ln -s ${chipcompiler-cli}/bin/ecc apps/desktop-electron/resources/binaries/ecc
-
-    mkdir -p apps/desktop-electron/resources/oss-cad-suite/bin
-    ln -s ${yosysWithSlang}/bin/yosys apps/desktop-electron/resources/oss-cad-suite/bin/yosys
-    echo "nix-provided OSS CAD bundle" > apps/desktop-electron/resources/oss-cad-suite/README
-
-    pnpm install --offline --frozen-lockfile
     pnpm run build
+    # rebuild node-pty
+    npm_config_nodedir=${electron.headers} pnpm --filter @ecos-studio/desktop-electron exec \
+      electron-rebuild -f -v ${electron.version}
+    CI=true pnpm install --frozen-lockfile --ignore-scripts --prod
 
     runHook postBuild
   '';
@@ -69,20 +73,19 @@ stdenv.mkDerivation (finalAttrs: {
     app_root="$out/share/ecos-studio"
     mkdir -p "$app_root/apps/desktop-electron" "$out/bin"
 
+    cp -R node_modules "$app_root/node_modules"
     cp -R apps/desktop-electron/dist "$app_root/apps/desktop-electron/"
     cp apps/desktop-electron/package.json "$app_root/apps/desktop-electron/package.json"
-    cp -R apps/desktop-electron/resources "$app_root/apps/desktop-electron/"
 
     makeWrapper ${electron}/bin/electron "$out/bin/ecos-studio" \
       --add-flags "$app_root/apps/desktop-electron" \
-      --prefix PATH : ${lib.makeBinPath [ chipcompiler-cli python3 ]} \
-      --set-default ECOS_ELECTRON_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite" \
-      --set-default CHIPCOMPILER_OSS_CAD_DIR "$app_root/apps/desktop-electron/resources/oss-cad-suite"
+      --prefix PATH : ${lib.makeBinPath [ chipcompiler-cli yosysWithSlang ]} \
 
     runHook postInstall
   '';
 
   doCheck = false;
+  dontCheckForBrokenSymlinks = true;
 
   meta = {
     mainProgram = "ecos-studio";

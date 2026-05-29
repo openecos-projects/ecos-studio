@@ -22,6 +22,7 @@
   "devDependencies": {
     "@ecos-studio/shared": "workspace:*",
     "@ecos-studio/tile-helper": "workspace:*",
+    "@electron/rebuild": "^4.0.4",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.0.6",
     "@vitejs/plugin-vue": "^6.0.3",

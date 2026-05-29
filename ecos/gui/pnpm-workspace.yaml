@@ -6,3 +6,5 @@ allowBuilds:
   electron-winstaller: true
   esbuild: true
   node-pty: true
+overrides:
+  pixi.js: 8.15.0
