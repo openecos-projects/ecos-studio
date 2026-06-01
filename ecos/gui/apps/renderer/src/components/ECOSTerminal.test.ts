@@ -205,6 +205,9 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toContain('ri-delete-bin-line')
     expect(terminalSource).not.toContain('terminal-session-item--active .terminal-session-delete')
     expect(terminalSource).toMatch(
+      /\.terminal-session-item--active::before\s*\{[\s\S]*background:\s*var\(--accent-color\);/,
+    )
+    expect(terminalSource).toMatch(
       /\.terminal-session-delete\s*\{[^}]*opacity:\s*0;[\s\S]*pointer-events:\s*none;/,
     )
     expect(terminalSource).toMatch(

@@ -955,7 +955,7 @@ watch(
 }
 
 .terminal-session-item--active::before {
-  background: #007acc;
+  background: var(--accent-color);
 }
 
 .terminal-session-activate,
