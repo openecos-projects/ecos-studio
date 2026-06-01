@@ -47,11 +47,14 @@ function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string 
 
 function resolvePackagedOssCadRoot(options: EccCliRuntimeEnvOptions): string | null {
   const resourcesPath = resolvePackagedResourcesPath(options)
-  const ossCadRoot = options.env.ECOS_ELECTRON_OSS_CAD_DIR
-    ?? join(resourcesPath, 'resources', 'oss-cad-suite')
   const yosysExecutable = options.platform === 'win32' ? 'yosys.exe' : 'yosys'
+  const candidateRoots = [
+    options.env.ECOS_ELECTRON_OSS_CAD_DIR,
+    join(resourcesPath, 'resources', 'oss-cad-suite'),
+  ].filter((root): root is string => Boolean(root))
 
-  return existsSync(join(ossCadRoot, 'bin', yosysExecutable)) ? ossCadRoot : null
+  return candidateRoots.find((root) => existsSync(join(root, 'bin', yosysExecutable)))
+    ?? null
 }
 
 export function createEccCliRuntimeEnv(
