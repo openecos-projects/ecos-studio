@@ -159,6 +159,7 @@ jobs:
         env:
           ENABLE_OSS_CAD_SUITE: "true"
           ECOS_ELECTRON_LINUX_TARGETS: AppImage
+          PYTHON_INTERPRETER: ${{ github.workspace }}/ecc/.venv/bin/python
         run: bazel build //:ecos_studio_bundle
 
       - name: Verify AppImage artifact
