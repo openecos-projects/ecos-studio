@@ -303,6 +303,22 @@
         ]
       }
     },
+    "@@ecc-dreamplace+//bazel:pkg_config.bzl%pkg_config": {
+      "general": {
+        "bzlTransitiveDigest": "q+Lh4cUA2ALls8PpOVC4jm5BRyA89tYBMt9caemJ7Ic=",
+        "usagesDigest": "4g4+OdTYB21sDguIyKl/hekTV9p2fGZxljj1XT1WIjY=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "pkg_config_path": {
+            "repoRuleId": "@@ecc-dreamplace+//bazel:pkg_config.bzl%_pkg_config_path_repo",
+            "attributes": {}
+          }
+        },
+        "recordedRepoMappingEntries": []
+      }
+    },
     "@@ecos-bazel+//rules:appimage-tool.bzl%appimage_tool": {
       "general": {
         "bzlTransitiveDigest": "PNR0LYRvoPIaEvYGn5B+v/0b0lPRaBfroqxpzQQK+R4=",
@@ -351,7 +367,7 @@
     "@@ecos-bazel+//rules:oss_cad_suite.bzl%oss_cad_suite": {
       "general": {
         "bzlTransitiveDigest": "03Inx7wQyprKJ4MWxzsdFZLuQH3MHKojPiyQ94ViMA4=",
-        "usagesDigest": "3Fcnd7U0x2hkcyp04BHsYy5pV1Soviz3tgQhH5EuWPU=",
+        "usagesDigest": "x/Le/WtGIeDH2PN7TWyVTDm5S0+wJdzP7lBOL2iTz54=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -585,7 +601,7 @@
     "@@rules_multitool+//multitool:extension.bzl%multitool": {
       "general": {
         "bzlTransitiveDigest": "OmyUzwsloBp1uNITj7Bu1ytDkaGAuF0eMC4A0GZV/Kg=",
-        "usagesDigest": "ov6oS0Cv9Ux3ZDTQJjYiZy8s8zDSrT0/qUw5XaDbhG0=",
+        "usagesDigest": "c47utchW8VdALOFAlCLb+lFsZsKF1XENuPRrctwHOfo=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},

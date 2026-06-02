@@ -5,22 +5,40 @@ module(
 
 bazel_dep(name = "ecc")
 bazel_dep(name = "ecc-dreamplace", version = "0.1.0")
-
 bazel_dep(name = "ecos-bazel")
 git_override(
     module_name = "ecos-bazel",
-    remote = "https://github.com/Emin017/ecos-bazel.git",
     commit = "1f223bae8abeed392c72162cd5e98ecbd4f13b9c",
+    remote = "https://github.com/Emin017/ecos-bazel.git",
 )
 
-local_path_override(
+# Monorepo development mode: uncomment this local override to build the ECC CLI
+# from the checked-out submodule instead of the pinned release tag below.
+# local_path_override(
+#     module_name = "ecc",
+#     path = "ecc",
+# )
+
+git_override(
     module_name = "ecc",
-    path = "ecc",
+    # v0.1.0-alpha.3
+    commit = "58ec4338eaf8504a3e89bd6891b3657d19e7c018",
+    init_submodules = True,
+    remote = "https://github.com/openecos-projects/ecc.git",
 )
 
-local_path_override(
+# Monorepo development mode: uncomment this local override to build
+# ecc-dreamplace from the checked-out nested submodule.
+# local_path_override(
+#     module_name = "ecc-dreamplace",
+#     path = "ecc/chipcompiler/thirdparty/ecc-dreamplace",
+# )
+
+git_override(
     module_name = "ecc-dreamplace",
-    path = "ecc/chipcompiler/thirdparty/ecc-dreamplace",
+    commit = "1e9d038870efa0141b6122e120456c7eb05c8fee",
+    recursive_init_submodules = True,
+    remote = "https://github.com/openecos-projects/ecc-dreamplace.git",
 )
 
 appimage_tool = use_extension("@ecos-bazel//rules:appimage-tool.bzl", "appimage_tool")
