@@ -109,7 +109,7 @@ dev: check-setup
 
 $(BUNDLE_TAR): check-setup check-platform
 	@cd ecc && uv sync --frozen --all-groups --python 3.11
-	bazel build //:ecos_studio_bundle
+	PYTHON_INTERPRETER="$(CURDIR)/ecc/.venv/bin/python" bazel build //:ecos_studio_bundle
 
 $(APPIMAGE_MARKER): $(BUNDLE_TAR)
 	@mkdir -p $(BUNDLE_EXTRACT_DIR)
