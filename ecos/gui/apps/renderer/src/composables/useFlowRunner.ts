@@ -4,12 +4,14 @@ import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
 import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
+import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 
 // ============ 模块级运行标志（run_step / rtl2gds 共用）============
 
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
+const RUN_STEP_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['home', 'parameters']
 
 function normalizeWorkspacePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')
@@ -65,7 +67,14 @@ function clearTransientInteractionLocks() {
  */
 export function useFlowRunner() {
   const { ensureDesktopRuntime } = useDesktopRuntime()
-  const { currentProject, ensureApiReady, showToast } = useWorkspace()
+  const {
+    currentProject,
+    ensureApiReady,
+    showToast,
+    invalidateWorkspaceResources,
+    resourceVersions,
+    workspaceSession,
+  } = useWorkspace()
   const route = useRoute()
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。
@@ -143,6 +152,8 @@ export function useFlowRunner() {
     error.value = null
     try {
       console.log('handleRunFlow', step)
+      const versionsBeforeRunStep = { ...resourceVersions.value }
+      const runSessionId = workspaceSession.value.sessionId
 
       const result = await runStepApi({
         cmd: CMDEnum.run_step,
@@ -153,6 +164,13 @@ export function useFlowRunner() {
         }
       })
       console.log('run step result', result)
+
+      const homeAndParametersAlreadyInvalidated = RUN_STEP_FALLBACK_SCOPES.every(
+        (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
+      )
+      if (!homeAndParametersAlreadyInvalidated) {
+        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, { sessionId: runSessionId })
+      }
 
       if (result.data?.state === StateEnum.Success) {
         showToast({

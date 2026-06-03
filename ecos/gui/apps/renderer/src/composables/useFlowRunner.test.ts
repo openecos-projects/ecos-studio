@@ -5,6 +5,9 @@ const {
   ensureDesktopRuntime,
   ensureApiReady,
   showToast,
+  invalidateWorkspaceResources,
+  resourceVersions,
+  workspaceSession,
   runStepApi,
   rtl2gdsApi,
   currentProject,
@@ -12,6 +15,25 @@ const {
   ensureDesktopRuntime: vi.fn(() => false),
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
   showToast: vi.fn(),
+  invalidateWorkspaceResources: vi.fn(),
+  resourceVersions: {
+    value: {
+      home: 0,
+      flow: 0,
+      parameters: 0,
+      step: 0,
+      'step-config': 0,
+      maps: 0,
+      logs: 0,
+      tiles: 0,
+      all: 0,
+    },
+  },
+  workspaceSession: {
+    value: {
+      sessionId: 'session-1',
+    },
+  },
   runStepApi: vi.fn(),
   rtl2gdsApi: vi.fn(),
   currentProject: { value: null as { path: string } | null },
@@ -37,6 +59,9 @@ vi.mock('./useWorkspace', () => ({
     currentProject,
     ensureApiReady,
     showToast,
+    invalidateWorkspaceResources,
+    resourceVersions,
+    workspaceSession,
   }),
 }))
 
@@ -59,6 +84,21 @@ describe('useFlowRunner desktop-only guard', () => {
     ensureApiReady.mockReset()
     ensureApiReady.mockResolvedValue(true)
     showToast.mockReset()
+    invalidateWorkspaceResources.mockReset()
+    resourceVersions.value = {
+      home: 0,
+      flow: 0,
+      parameters: 0,
+      step: 0,
+      'step-config': 0,
+      maps: 0,
+      logs: 0,
+      tiles: 0,
+      all: 0,
+    }
+    workspaceSession.value = {
+      sessionId: 'session-1',
+    }
     runStepApi.mockReset()
     rtl2gdsApi.mockReset()
     flowExecutionActive.value = false
@@ -157,6 +197,112 @@ describe('useFlowRunner desktop-only guard', () => {
         step: StepEnum.FLOORPLAN,
       },
     })
+  })
+
+  it('invalidates Home and parameters after a single step completes without runtime events', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    runStepApi.mockResolvedValue({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+
+    const { runFlow } = useFlowRunner()
+
+    await runFlow()
+
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
+      ['home', 'parameters'],
+      { sessionId: 'session-1' },
+    )
+  })
+
+  it('still invalidates Home and parameters when runtime events only updated flow resources', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    runStepApi.mockImplementation(async () => {
+      resourceVersions.value = {
+        ...resourceVersions.value,
+        flow: resourceVersions.value.flow + 1,
+      }
+      return {
+        data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+        message: ['done'],
+        response: 'success',
+      }
+    })
+
+    const { runFlow } = useFlowRunner()
+
+    await runFlow()
+
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
+      ['home', 'parameters'],
+      { sessionId: 'session-1' },
+    )
+  })
+
+  it('does not duplicate fallback invalidations when runtime events already updated Home and parameters', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    runStepApi.mockImplementation(async () => {
+      resourceVersions.value = {
+        ...resourceVersions.value,
+        home: resourceVersions.value.home + 1,
+        parameters: resourceVersions.value.parameters + 1,
+      }
+      return {
+        data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+        message: ['done'],
+        response: 'success',
+      }
+    })
+
+    const { runFlow } = useFlowRunner()
+
+    await runFlow()
+
+    expect(invalidateWorkspaceResources).not.toHaveBeenCalled()
+  })
+
+  it('binds fallback invalidation to the workspace session active when the step started', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    workspaceSession.value = {
+      sessionId: 'session-a',
+    }
+    currentProject.value = { path: '/work/a' }
+    let resolveRunStep: ((value: {
+      data: { state: StateEnum; step: StepEnum }
+      message: string[]
+      response: string
+    }) => void) | undefined
+    runStepApi.mockReturnValue(new Promise((resolve) => {
+      resolveRunStep = resolve
+    }))
+
+    const { runFlow } = useFlowRunner()
+    const runPromise = runFlow()
+    await vi.waitFor(() => {
+      expect(runStepApi).toHaveBeenCalled()
+    })
+
+    workspaceSession.value = {
+      sessionId: 'session-b',
+    }
+    currentProject.value = { path: '/work/b' }
+    resolveRunStep?.({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+
+    await runPromise
+
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
+      ['home', 'parameters'],
+      { sessionId: 'session-a' },
+    )
   })
 
   it('tracks running flow state per workspace', () => {

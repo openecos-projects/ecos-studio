@@ -369,6 +369,7 @@ const monitorDataState = ref<MonitorData | null>(null)
 const checklistItemsState = ref<ChecklistItem[]>([])
 const layoutBlobUrlState = ref<string>('')
 const analysisChartsState = ref<AnalysisChartItem[]>([])
+const HOME_DATA_RESOURCE_VERSION_KEYS = ['home', 'flow', 'logs', 'all'] as const
 
 /** 记录当前持有的 blob URL，替换 / 失效时用来 revoke */
 let _currentLayoutBlobUrl: string | null = null
@@ -378,6 +379,13 @@ let _currentMetricsBlobUrls: string[] = []
 let _loadedChecklistPath = ''
 let _loadedLayoutPath = ''
 let _loadedMetricsSignature = ''
+let _loadedHomeResourceVersionSignature = ''
+
+function homeResourceVersionSignature(
+  versions: Record<typeof HOME_DATA_RESOURCE_VERSION_KEYS[number], number>,
+): string {
+  return HOME_DATA_RESOURCE_VERSION_KEYS.map((key) => `${key}:${versions[key] ?? 0}`).join('|')
+}
 
 function invalidateLayoutCache(): void {
   if (_currentLayoutBlobUrl) {
@@ -408,6 +416,7 @@ function invalidateHomeAssetCache(): void {
   invalidateMetricsCache()
   invalidateChecklistCache()
   monitorDataState.value = null
+  _loadedHomeResourceVersionSignature = ''
 }
 
 /**
@@ -497,6 +506,13 @@ export function invalidateSharedHomeData() {
   sharedHomeData.value = null
   _fetchPromise = null
   _fetchGeneration += 1
+}
+
+function invalidateHomeDataForResourceChange() {
+  invalidateSharedHomeData()
+  markHomeAssetSignaturesStale()
+  resetFlowLogState()
+  invalidateLogFileCache()
 }
 
 export function resetSharedHomeDataProjectState() {
@@ -1361,6 +1377,14 @@ export function useHomeData() {
       // 有更新时由 runtime event → loadHomeDataFromPath 覆盖缓存，不需要每次
       // mount 都重请求后端再重读整个 home.json。
       const projectPath = currentProject.value.path
+      const resourceVersionSignature = homeResourceVersionSignature(resourceVersions.value)
+      if (
+        _loadedHomeResourceVersionSignature
+        && resourceVersionSignature !== _loadedHomeResourceVersionSignature
+      ) {
+        invalidateHomeDataForResourceChange()
+      }
+
       const homeData = await workspaceLifecycle.runForSession(
         sessionId,
         () => fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
@@ -1376,6 +1400,7 @@ export function useHomeData() {
 
       await loadHomeAssetsFromData(homeData, { includeFlowLogs: true, isCurrent })
       if (!isCurrent()) return
+      _loadedHomeResourceVersionSignature = resourceVersionSignature
 
       console.log('Home data fully loaded')
     } catch (err) {
@@ -1648,10 +1673,7 @@ export function useHomeData() {
     ],
     async () => {
       if (!currentProject.value?.path) return
-      invalidateSharedHomeData()
-      markHomeAssetSignaturesStale()
-      resetFlowLogState()
-      invalidateLogFileCache()
+      invalidateHomeDataForResourceChange()
       await loadHomeData()
     },
   )

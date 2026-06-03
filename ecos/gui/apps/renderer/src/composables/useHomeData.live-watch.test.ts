@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref, type Ref } from 'vue'
+import { effectScope, ref, type Ref } from 'vue'
 
 const testState = vi.hoisted(() => ({
   currentProject: null as Ref<{ path: string } | null> | null,
@@ -846,6 +846,69 @@ describe('useHomeData live project file watchers', () => {
         frequency: [2],
       })
     })
+  })
+
+  it('refreshes stale cached Home assets when remounted after resource versions changed', async () => {
+    let version = 1
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${version}.png`,
+          metrics: {
+            [`metric-${version}`]: `${projectPath}/home/metric-${version}.png`,
+          },
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [version],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const firstScope = effectScope()
+    const firstHome = firstScope.run(() => useHomeData())!
+    await vi.waitFor(() => {
+      expect(firstHome.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-1.png')
+    })
+    expect(firstHome.analysisCharts.value).toEqual([
+      { label: 'metric-1', imageBlobUrl: 'blob:/workspace/a/home/metric-1.png' },
+    ])
+
+    firstScope.stop()
+    for (const callback of testState.unmountCallbacks.splice(0)) {
+      callback()
+    }
+
+    version = 2
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+
+    const secondScope = effectScope()
+    const remountedHome = secondScope.run(() => useHomeData())!
+
+    await vi.waitFor(() => {
+      expect(remountedHome.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-2.png')
+    })
+    expect(remountedHome.analysisCharts.value).toEqual([
+      { label: 'metric-2', imageBlobUrl: 'blob:/workspace/a/home/metric-2.png' },
+    ])
+    expect(remountedHome.monitorData.value).toEqual({
+      step: ['Synthesis'],
+      frequency: [2],
+    })
+
+    secondScope.stop()
   })
 
   it('keeps the newest same-session home refresh when an older resource-version reload resolves last', async () => {
