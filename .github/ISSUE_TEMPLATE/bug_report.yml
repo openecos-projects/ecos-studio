@@ -48,19 +48,32 @@ body:
       required: true
 
   - type: dropdown
-    id: run-mode
+    id: ecos-source
     attributes:
-      label: How are you running ECOS Studio?
-      description: Select the installation or development mode where the bug appears.
+      label: How did you get ECOS Studio?
+      description: Select how this ECOS Studio build was obtained.
       multiple: true
       options:
         - Release AppImage
         - AppImage built from source
         - Source checkout with `pnpm run dev`
-        - Nix/dev shell
+        - Source checkout with `make build`
+        - CI/GitHub Actions artifact
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: run-environment
+    attributes:
+      label: Where are you running ECOS Studio?
+      description: Select the runtime environment where the bug appears.
+      multiple: true
+      options:
+        - Native Linux desktop
         - Virtual machine
+        - Nix/dev shell
         - Docker or devcontainer
-        - CI/GitHub Actions
         - Other
     validations:
       required: true
