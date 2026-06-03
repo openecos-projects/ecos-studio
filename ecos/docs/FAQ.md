@@ -90,11 +90,7 @@ ECOS_ELECTRON_LOG_LEVEL=debug ./ECOS-Studio_*.AppImage
 
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
-**Q: Does the desktop app still start the Python API server?**
-
-No. Normal desktop workspace and flow actions run through the ECC CLI managed
-by Electron. The Python API server is legacy standalone infrastructure, is not
-started by the desktop GUI, and is no longer part of the desktop release build.
+**Q: How does the desktop app run workspace and flow actions?**
 
 Workspace queries and flow queries are regular CLI request/response calls over
 the Electron desktop bridge. `get_info`, `home_page`, workspace loading, and

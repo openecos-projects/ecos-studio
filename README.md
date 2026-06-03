@@ -51,23 +51,17 @@ chmod +x <latest-release-file>.AppImage
 
 ## Quick Start (For Developers)
 
-Server development and release builds currently require Linux x86_64 with glibc
-2.34 or newer because the server uv environment uses pinned
-manylinux_2_34_x86_64 wheels for `ecc-dreamplace` and `ecc-tools`.
-
 ```bash
-# Setup (init submodules, PDK, and ECC environment)
 make setup
-
-# Development
 make dev
-
-# Release build (locked release wheels + bundle + AppImage)
 make build
-
-# Launch GUI
 make gui
 ```
+
+Release builds currently require Linux x86_64 with glibc 2.34 or newer. For
+development, validation, branch, and submodule guidelines, see
+[CONTRIBUTING.md](CONTRIBUTING.md). For GUI and release build details, see
+[ecos/README.md](ecos/README.md).
 
 ### CLI Demos
 
@@ -76,7 +70,9 @@ make demo-gcd           # GCD example
 make demo-retrosoc      # retroSoC example
 ```
 
-For development setup, release wheel usage, and release build details, see [ecos/README.md](ecos/README.md).
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Documentation
 
