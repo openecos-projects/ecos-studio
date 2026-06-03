@@ -58,6 +58,7 @@ body:
         - AppImage built from source
         - Source checkout with `pnpm run dev`
         - Nix/dev shell
+        - Virtual machine
         - Docker or devcontainer
         - CI/GitHub Actions
         - Other
