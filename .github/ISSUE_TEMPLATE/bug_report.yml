@@ -1,0 +1,152 @@
+name: Bug report
+description: Report errors or unexpected behavior in ECOS Studio.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: checkboxes
+    id: self-checks
+    attributes:
+      label: Self checks
+      description: Please confirm these before submitting the bug report.
+      options:
+        - label: I have searched existing issues, including closed issues.
+          required: true
+        - label: I have read the Contributing Guide.
+          required: true
+        - label: This is a bug report, not a question, feature request, or usage discussion.
+          required: true
+        - label: I will include logs, screenshots, or command output where they help reproduce the issue.
+          required: true
+        - label: I have removed secrets, private paths, tokens, and other sensitive information from the report.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ECOS Studio version
+      description: Use the About dialog, AppImage filename, release tag, or source commit. If unknown, write "unknown" and describe how you installed it.
+      placeholder: "v0.1.0-alpha.5, AppImage filename, or git commit"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every area that appears related to the bug.
+      multiple: true
+      options:
+        - GUI
+        - ECC
+        - Resource management
+        - Build, packaging, Bazel, Nix, or release workflow
+        - CI
+        - Documentation only
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ecos-source
+    attributes:
+      label: How did you get ECOS Studio?
+      description: Select how this ECOS Studio build was obtained.
+      multiple: true
+      options:
+        - Release AppImage
+        - AppImage built from source
+        - Source checkout with `pnpm run dev`
+        - Source checkout with `make build`
+        - CI/GitHub Actions artifact
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: run-environment
+    attributes:
+      label: Where are you running ECOS Studio?
+      description: Select the runtime environment where the bug appears.
+      multiple: true
+      options:
+        - Native Linux desktop
+        - Virtual machine
+        - Nix/dev shell
+        - Docker or devcontainer
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS distribution/version, architecture, glibc version if known, desktop session, and display server when relevant.
+      placeholder: "Ubuntu 22.04, x86_64, glibc 2.35, GNOME, Wayland"
+    validations:
+      required: true
+
+  - type: textarea
+    id: resource-context
+    attributes:
+      label: ECC, PDK, and resource context
+      description: Required for flow, PDK, resource manager, or ECC integration bugs. Include ECC version output, selected PDK, installed resources, workspace path shape, or relevant configuration.
+      placeholder: |
+        ECC version:
+        PDK/resource:
+        Workspace type:
+        Relevant config:
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps, commands, input files, and UI actions. Use fenced code blocks for logs or commands.
+      placeholder: |
+        1. Open ...
+        2. Run ...
+        3. Click ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what should have happened.
+      placeholder: "What did you expect ECOS Studio to do?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: Describe what happened instead.
+      placeholder: "What happened instead? Include error messages if any."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: Logs, screenshots, or recordings
+      description: Attach screenshots for GUI issues and paste relevant logs or command output in fenced code blocks.
+      placeholder: |
+        ```text
+        Paste logs here.
+        ```
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add anything else that may help diagnose the issue.
+    validations:
+      required: false

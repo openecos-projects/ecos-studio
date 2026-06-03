@@ -1,0 +1,98 @@
+name: Feature request
+description: Suggest an improvement or new capability for ECOS Studio.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    id: self-checks
+    attributes:
+      label: Self checks
+      description: Please confirm these before submitting the feature request.
+      options:
+        - label: I have searched existing issues, including closed issues.
+          required: true
+        - label: I have read the Contributing Guide.
+          required: true
+        - label: This is a feature request, not a bug report or usage question.
+          required: true
+        - label: I have described the user problem or workflow need before proposing a solution.
+          required: true
+
+  - type: dropdown
+    id: affected-area
+    attributes:
+      label: Affected area
+      description: Select every area related to this request.
+      multiple: true
+      options:
+        - GUI
+        - ECC
+        - Resource management
+        - Build, packaging, Bazel, Nix, or release workflow
+        - CI
+        - Documentation only
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow need
+      description: Describe the user problem, limitation, or workflow that motivates this request.
+      placeholder: |
+        As a user, I want to ...
+        Today this is difficult because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, UI, command, resource flow, or documentation change you would like to see.
+      placeholder: "What should ECOS Studio add or change?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any workaround, alternative design, or existing tool you considered.
+      placeholder: "What alternatives or workarounds have you tried?"
+    validations:
+      required: false
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples, mockups, or references
+      description: Attach screenshots, sketches, command examples, links, or related prior art that clarify the request.
+      placeholder: |
+        Screenshots:
+        Example command:
+        Related links:
+    validations:
+      required: false
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Are you willing to contribute this feature?
+      description: This helps maintainers understand whether design support or implementation review is needed.
+      options:
+        - "Yes, I can submit a PR."
+        - "Yes, but I need design or implementation guidance."
+        - "No, I am only suggesting the idea."
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add anything else that may help evaluate the request.
+    validations:
+      required: false

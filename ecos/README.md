@@ -57,9 +57,8 @@ cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm dev
 
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
 
-Normal desktop workspace and flow actions run through the ECC CLI. The legacy
-Python API server is not started by the desktop GUI and is no longer part of the
-desktop development or release build path.
+Normal desktop workspace and flow actions run through the ECC CLI managed by the
+Electron desktop bridge.
 
 The renderer calls the Electron desktop bridge for workspace and flow commands.
 Read-only commands such as `get_info` and `home_page` return their data through
