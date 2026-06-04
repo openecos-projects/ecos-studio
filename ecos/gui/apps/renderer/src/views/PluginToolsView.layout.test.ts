@@ -8,4 +8,23 @@ describe('PluginToolsView resource table layout', () => {
     )
     expect(pluginToolsViewSource).not.toContain('.resource-table {\n  min-width: 680px;')
   })
+
+  it('renders mini progress with a transform driven by the row progress percent', () => {
+    expect(pluginToolsViewSource).toContain(
+      ":style=\"{ '--progress': row.progressPercent / 100 }\"",
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.mini-progress span\s*\{[\s\S]*transform:\s*scaleX\(var\(--progress,\s*0\)\);/,
+    )
+  })
+
+  it('uses only a lightweight background blur and avoids backdrop blur', () => {
+    expect(pluginToolsViewSource).toMatch(
+      /\.blurred-home\s*\{[\s\S]*filter:\s*blur\(1\.5px\)\s+brightness\(0\.82\);/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.blurred-home\s*\{[\s\S]*transform:\s*translateZ\(0\)\s+scale\(1\.006\);/,
+    )
+    expect(pluginToolsViewSource).not.toContain('backdrop-filter: blur(')
+  })
 })

@@ -90,8 +90,14 @@ async function flushPromises(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('pluginStore', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(installResourceApi).mockReset()
@@ -198,7 +204,7 @@ describe('pluginStore', () => {
       progress: 1,
       message: 'Done',
     })
-    await flushPromises()
+    await flushMicrotasks()
 
     expect(close).toHaveBeenCalledTimes(1)
     expect(store.resourceProgress['pdk:ics55']).toBeUndefined()
@@ -257,6 +263,69 @@ describe('pluginStore', () => {
       status: 'installed',
       installed_version: '1.01',
     })
+  })
+
+  it('throttles high-frequency resource progress updates while flushing terminal events immediately', async () => {
+    vi.useFakeTimers()
+    const availablePdk = makePdkResource()
+    let onProgress: ((progress: InstallProgress) => void) | undefined
+    const close = vi.fn()
+
+    vi.mocked(listResourcesApi).mockResolvedValue([availablePdk])
+    vi.mocked(installResourceApi).mockResolvedValue({
+      status: 'started',
+      resource_id: 'pdk:ics55',
+      version: '1.01',
+    })
+    vi.mocked(subscribeResourceProgress).mockImplementation((_resourceId, callback) => {
+      onProgress = callback
+      return { close }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.installResource('pdk:ics55', '1.01')
+
+    onProgress?.({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'downloading',
+      progress: 0.1,
+      message: 'Downloading 10%',
+    })
+    onProgress?.({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'downloading',
+      progress: 0.2,
+      message: 'Downloading 20%',
+    })
+
+    expect(store.resourceProgress['pdk:ics55']).toMatchObject({
+      progress: 0.1,
+      message: 'Downloading 10%',
+    })
+
+    await vi.advanceTimersByTimeAsync(180)
+    expect(store.resourceProgress['pdk:ics55']).toMatchObject({
+      progress: 0.2,
+      message: 'Downloading 20%',
+    })
+
+    onProgress?.({
+      resourceId: 'pdk:ics55',
+      resourceName: 'ics55',
+      tool: 'ics55',
+      phase: 'done',
+      progress: 1,
+      message: 'Done',
+    })
+    await flushMicrotasks()
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(store.resourceProgress['pdk:ics55']).toBeUndefined()
   })
 
   it('updates a resource by resourceId and syncs legacy tool progress and errors', async () => {
