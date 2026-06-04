@@ -158,24 +158,18 @@ export const usePluginStore = defineStore('plugin', () => {
     _sseConnections.set(resourceId, conn)
   }
 
-  function _subscribeProgress(toolName: string): void {
-    _subscribeResourceProgress(_toolResourceId(toolName))
-  }
-
   async function installResource(resourceId: string, version?: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
+    _setResourceStatus(resourceId, 'installing')
+    _subscribeResourceProgress(resourceId)
     try {
       await installResourceApi(resourceId, version)
-      _setResourceStatus(resourceId, 'installing')
-
-      const toolName = _toolNameForResourceId(resourceId)
-      if (toolName) {
-        _subscribeProgress(toolName)
-      } else {
-        _subscribeResourceProgress(resourceId)
-      }
     } catch (e) {
+      _sseConnections.get(resourceId)?.close()
+      _sseConnections.delete(resourceId)
+      delete resourceProgress.value[resourceId]
+      _syncLegacyToolProgress(resourceId)
       _setResourceError(
         resourceId,
         e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
@@ -186,17 +180,15 @@ export const usePluginStore = defineStore('plugin', () => {
   async function updateResource(resourceId: string): Promise<void> {
     delete resourceErrors.value[resourceId]
     _syncLegacyToolError(resourceId)
+    _setResourceStatus(resourceId, 'installing')
+    _subscribeResourceProgress(resourceId)
     try {
       await updateResourceApi(resourceId)
-      _setResourceStatus(resourceId, 'installing')
-
-      const toolName = _toolNameForResourceId(resourceId)
-      if (toolName) {
-        _subscribeProgress(toolName)
-      } else {
-        _subscribeResourceProgress(resourceId)
-      }
     } catch (e) {
+      _sseConnections.get(resourceId)?.close()
+      _sseConnections.delete(resourceId)
+      delete resourceProgress.value[resourceId]
+      _syncLegacyToolProgress(resourceId)
       _setResourceError(
         resourceId,
         e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,

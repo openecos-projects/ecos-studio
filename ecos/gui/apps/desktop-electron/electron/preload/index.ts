@@ -12,6 +12,8 @@ import type {
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
+  ResourceJob,
+  ResourceInstallRequest,
   DesktopSettingsValue,
   DesktopShellDataEvent,
   DesktopShellExitEvent,
@@ -229,6 +231,35 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
     resolveStepInfo: (request: WorkspaceStepInfoRequest) =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesResolveStepInfo, request),
+  },
+  resources: {
+    list: () =>
+      invokeDesktop(desktopApiIpcChannels.resourcesList),
+    get: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesGet, resourceId),
+    install: (request: ResourceInstallRequest) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesInstall, request),
+    update: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesUpdate, resourceId),
+    uninstall: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesUninstall, resourceId),
+    activatePdk: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesActivatePdk, resourceId),
+    validatePdk: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesValidatePdk, resourceId),
+    removePdkReference: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesRemovePdkReference, resourceId),
+    importPdkPath: (request) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesImportPdkPath, request),
+    refreshRegistry: () =>
+      invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
+    onProgress: (listener) =>
+      subscribeToDesktopEvent(
+        desktopApiEventChannels.resourcesProgress,
+        (_event, payload: unknown) => {
+          listener(payload as ResourceJob)
+        },
+      ),
   },
   cli: {
     execute: (request: DesktopCliCommandRequest) =>

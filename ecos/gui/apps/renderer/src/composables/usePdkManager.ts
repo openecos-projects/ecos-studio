@@ -28,11 +28,8 @@ function isMissingBackendReference(error: unknown): boolean {
     response?: { status?: number }
     message?: string
   }
-
   const status = maybe.status ?? maybe.statusCode ?? maybe.response?.status
-  if (status === 404) {
-    return true
-  }
+  if (status === 404) return true
 
   const message = maybe.message?.toLowerCase() ?? ''
   return message.includes('404') || message.includes('not found')
@@ -191,7 +188,7 @@ export function usePdkManager() {
           }),
         )
 
-        if (deduped.length !== saved.length && desktopApi) {
+        if (desktopApi && deduped.length !== saved.length) {
           await savePdks(desktopApi)
         }
       }
@@ -286,7 +283,7 @@ export function usePdkManager() {
         return existing
       }
 
-      await syncImportedPdkReference(path)
+      await syncImportedPdkReference(detected.canonicalPath)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)
@@ -339,7 +336,7 @@ export function usePdkManager() {
         return existing
       }
 
-      await syncImportedPdkReference(path)
+      await syncImportedPdkReference(detected.canonicalPath)
       const pdk = buildImportedPdk(detected)
 
       importedPdks.value.push(pdk)
@@ -359,17 +356,17 @@ export function usePdkManager() {
 
   /** 删除已导入的 PDK */
   const removePdk = async (id: string) => {
-    const target = importedPdks.value.find(p => p.id === id)
-    if (target) {
+    const desktopApi = hasDesktopApi() ? await waitForDesktopApi() : undefined
+    const pdk = importedPdks.value.find(p => p.id === id)
+    if (pdk) {
       try {
-        await removePdkReferenceApi(`pdk:${target.pdkId}`)
+        await removePdkReferenceApi(`pdk:${pdk.pdkId}`)
       } catch (error) {
         if (!isMissingBackendReference(error)) {
           throw error
         }
       }
     }
-    const desktopApi = hasDesktopApi() ? await waitForDesktopApi() : undefined
     importedPdks.value = importedPdks.value.filter(p => p.id !== id)
     await savePdks(desktopApi)
   }

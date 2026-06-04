@@ -8,25 +8,6 @@ export {
 } from './client'
 
 export {
-  listToolsApi,
-  listResourcesApi,
-  getToolStatusApi,
-  installToolApi,
-  uninstallToolApi,
-  activatePdkApi,
-  validatePdkApi,
-  removePdkReferenceApi,
-  refreshRegistryApi,
-  subscribePluginProgress,
-  type ToolInfo,
-  type ToolStatus,
-  type ResourceInfo,
-  type ResourceType,
-  type ResourceAction,
-  type InstallProgress,
-  type InstallPhase,
-} from './plugin'
-export {
   loadWorkspaceApi,
   createWorkspaceApi,
   type ProjectInfo,
@@ -50,3 +31,36 @@ export {
   type RuntimeEventClientState,
   type RuntimeResponseType
 } from './runtimeEvents'
+
+export {
+  activatePdkApi,
+  getToolStatusApi,
+  importPdkPathApi,
+  installResourceApi,
+  installToolApi,
+  listResourcesApi,
+  listToolsApi,
+  refreshRegistryApi,
+  removePdkReferenceApi,
+  resourceJobToInstallProgress,
+  resourceListToResources,
+  resourceListToTools,
+  resourceToResourceItem,
+  subscribePluginProgress,
+  subscribeResourceProgress,
+  uninstallResourceApi,
+  uninstallToolApi,
+  updateResourceApi,
+  updateToolApi,
+  validatePdkApi,
+  type InstallProgress,
+  type ResourceAction,
+  type ResourceInfo,
+  type ResourceItem,
+  type ResourceJob,
+  type ResourceList,
+  type ResourceStatus,
+  type ResourceType,
+  type ToolInfo,
+  type ToolStatus,
+} from './plugin'

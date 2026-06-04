@@ -1,6 +1,18 @@
-import { alovaInstance, API_BASE_URL } from './client'
+import type {
+  ResourceAction as DesktopResourceAction,
+  ResourceInfo as DesktopResourceInfo,
+  ResourceJob as DesktopResourceJob,
+  ResourceList as DesktopResourceList,
+  ResourceStatus as DesktopResourceStatus,
+  ResourceType as DesktopResourceType,
+} from '@ecos-studio/shared'
+import { getDesktopApi } from '@/platform/desktop'
 
-export type ResourceType = 'tool' | 'pdk'
+export type ResourceType = DesktopResourceType
+export type ResourceStatus = DesktopResourceStatus
+export type ResourceInfo = DesktopResourceInfo
+export type ResourceList = DesktopResourceList
+export type ResourceJob = DesktopResourceJob
 
 export type ToolStatus =
   | 'available'
@@ -13,13 +25,7 @@ export type ToolStatus =
   | 'invalid'
   | 'removing'
 
-export type ResourceAction =
-  | 'install'
-  | 'update'
-  | 'uninstall'
-  | 'validate'
-  | 'activate'
-  | 'remove_reference'
+export type ResourceAction = DesktopResourceAction
 
 export interface ToolInfo {
   name: string
@@ -32,47 +38,7 @@ export interface ToolInfo {
   install_path: string | null
 }
 
-export type ResourceStatus = ToolStatus
-
-export interface ResourceInfo {
-  id: string
-  type: ResourceType
-  name: string
-  display_name: string
-  description: string
-  category: string
-  status: ResourceStatus
-  installed_version: string | null
-  available_versions: string[]
-  active_version: string | null
-  active: boolean
-  path: string | null
-  managed_root: string | null
-  platform: string | null
-  size: number | null
-  source: string
-  homepage: string
-  actions: ResourceAction[]
-  health: Record<string, unknown>
-  error: string | null
-}
-
 export interface ResourceItem extends ResourceInfo {}
-
-export interface ResourceList {
-  resources: ResourceInfo[]
-  diagnostics: string[]
-}
-
-export interface ResourceJob {
-  id: string
-  resource_id: string
-  action: ResourceAction
-  phase: string
-  progress: number
-  message: string
-  error: string | null
-}
 
 export type InstallPhase =
   | 'downloading'
@@ -92,9 +58,6 @@ export interface InstallProgress {
   progress: number
   message: string
 }
-
-/** Alova 默认缓存 GET 5 分钟；工具列表必须始终打后端，否则会一直看到旧状态 */
-const NO_CACHE = { cacheFor: 0 as const }
 
 function resourceIdForTool(name: string): string {
   return `tool:${name}`
@@ -144,67 +107,46 @@ export function resourceJobToInstallProgress(job: ResourceJob): InstallProgress 
 }
 
 export async function listToolsApi(): Promise<ToolInfo[]> {
-  const payload = await alovaInstance.Get<ResourceList>('/api/resources', NO_CACHE)
+  const payload = await getDesktopApi().resources.list()
   return resourceListToTools(payload)
 }
 
 export async function listResourcesApi(): Promise<ResourceItem[]> {
-  const payload = await alovaInstance.Get<ResourceList>('/api/resources', NO_CACHE)
+  const payload = await getDesktopApi().resources.list()
   return resourceListToResources(payload)
 }
 
 export async function getToolStatusApi(name: string): Promise<ToolInfo> {
-  const resource = await alovaInstance.Get<ResourceInfo>(
-    `/api/resources/${encodeURIComponent(resourceIdForTool(name))}`,
-    NO_CACHE,
-  )
+  const resource = await getDesktopApi().resources.get(resourceIdForTool(name))
   return resourceToToolInfo(resource)
 }
 
 export function activatePdkApi(resourceId: string) {
-  return alovaInstance.Post<{ status: string; resource_id: string }>(
-    `/api/resources/${encodeURIComponent(resourceId)}/activate`,
-    {},
-  )
+  return getDesktopApi().resources.activatePdk(resourceId)
 }
 
 export function validatePdkApi(resourceId: string) {
-  return alovaInstance.Post<{ resource_id: string; health: { status: string } }>(
-    `/api/resources/${encodeURIComponent(resourceId)}/validate`,
-    {},
-  )
+  return getDesktopApi().resources.validatePdk(resourceId)
 }
 
 export function removePdkReferenceApi(resourceId: string) {
-  const pdkId = resourceNameFromId(resourceId)
-  return alovaInstance.Delete<{ status: string; resource_id: string }>(
-    `/api/resources/pdks/${encodeURIComponent(pdkId)}`,
-  )
+  return getDesktopApi().resources.removePdkReference(resourceId)
 }
 
 export function importPdkPathApi(path: string) {
-  return alovaInstance.Post<ResourceItem>('/api/resources/pdks/import', { path })
+  return getDesktopApi().resources.importPdkPath({ path })
 }
 
 export function installResourceApi(resourceId: string, version?: string) {
-  return alovaInstance.Post<{ status: string; resource_id: string; version: string }>(
-    `/api/resources/${encodeURIComponent(resourceId)}/install`,
-    version ? { version } : {},
-  )
+  return getDesktopApi().resources.install({ resourceId, version })
 }
 
 export function updateResourceApi(resourceId: string) {
-  return alovaInstance.Post<{ status: string; resource_id: string; version: string }>(
-    `/api/resources/${encodeURIComponent(resourceId)}/update`,
-    {},
-  )
+  return getDesktopApi().resources.update(resourceId)
 }
 
 export function uninstallResourceApi(resourceId: string) {
-  return alovaInstance.Post<{ status: string; resource_id: string }>(
-    `/api/resources/${encodeURIComponent(resourceId)}/uninstall`,
-    {},
-  )
+  return getDesktopApi().resources.uninstall(resourceId)
 }
 
 export function installToolApi(name: string, version?: string) {
@@ -220,7 +162,7 @@ export function uninstallToolApi(name: string) {
 }
 
 export function refreshRegistryApi() {
-  return alovaInstance.Post<{ status: string; tools_count: number }>('/api/resources/registry/refresh')
+  return getDesktopApi().resources.refreshRegistry()
 }
 
 export function subscribeResourceProgress(
@@ -228,24 +170,19 @@ export function subscribeResourceProgress(
   onProgress: (progress: InstallProgress) => void,
   onError?: (ev: Event) => void,
 ): { close: () => void } {
-  const url = `${API_BASE_URL}/api/resources/sse/${encodeURIComponent(resourceId)}`
-  const es = new EventSource(url)
-
-  es.addEventListener('progress', (e: MessageEvent) => {
-    try {
-      const job: ResourceJob = JSON.parse(e.data as string)
-      onProgress(resourceJobToInstallProgress(job))
-    } catch (err) {
-      console.error('Resource SSE parse error:', err)
-    }
+  const unsubscribe = getDesktopApi().resources.onProgress((job) => {
+    if (job.resource_id !== resourceId) return
+    onProgress(resourceJobToInstallProgress(job))
   })
 
-  es.onerror = (e) => {
-    onError?.(e)
-  }
-
   return {
-    close: () => es.close(),
+    close: () => {
+      try {
+        unsubscribe()
+      } catch (error) {
+        onError?.(error instanceof Event ? error : new Event('error'))
+      }
+    },
   }
 }
 

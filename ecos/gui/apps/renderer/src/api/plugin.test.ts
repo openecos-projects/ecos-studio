@@ -1,12 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('./client', () => ({
-  API_BASE_URL: 'http://127.0.0.1:8765',
-  alovaInstance: {
-    Get: vi.fn(),
-    Post: vi.fn(),
-    Delete: vi.fn(),
-  },
+const resourcesBridge = vi.hoisted(() => ({
+  activatePdk: vi.fn(),
+  get: vi.fn(),
+  importPdkPath: vi.fn(),
+  install: vi.fn(),
+  list: vi.fn(),
+  onProgress: vi.fn(),
+  refreshRegistry: vi.fn(),
+  removePdkReference: vi.fn(),
+  uninstall: vi.fn(),
+  update: vi.fn(),
+  validatePdk: vi.fn(),
+}))
+
+vi.mock('@/platform/desktop', () => ({
+  getDesktopApi: () => ({
+    resources: resourcesBridge,
+  }),
 }))
 
 import {
@@ -15,9 +26,9 @@ import {
   resourceListToResources,
   resourceListToTools,
   resourceToResourceItem,
+  subscribeResourceProgress,
   type ResourceList,
 } from './plugin'
-import { alovaInstance } from './client'
 
 describe('Resource Manager tool API adapter', () => {
   const resourceListPayload: ResourceList = {
@@ -190,7 +201,7 @@ describe('Resource Manager tool API adapter', () => {
     expect(item.actions).toContain('remove_reference')
   })
 
-  it('posts manual PDK imports to the backend resource manifest', async () => {
+  it('imports manual PDK paths through the desktop resource bridge', async () => {
     const imported = {
       id: 'pdk:local55',
       type: 'pdk' as const,
@@ -213,13 +224,56 @@ describe('Resource Manager tool API adapter', () => {
       health: { managed: false },
       error: null,
     }
-    vi.mocked(alovaInstance.Post).mockResolvedValue(imported)
+    resourcesBridge.importPdkPath.mockResolvedValue(imported)
 
     await expect(importPdkPathApi('/tmp/pdks/local55')).resolves.toEqual(imported)
 
-    expect(alovaInstance.Post).toHaveBeenCalledWith('/api/resources/pdks/import', {
+    expect(resourcesBridge.importPdkPath).toHaveBeenCalledWith({
       path: '/tmp/pdks/local55',
     })
+  })
+
+  it('subscribes to resource progress through the desktop event bridge', () => {
+    const unsubscribe = vi.fn()
+    let listener: ((job: Parameters<Parameters<typeof subscribeResourceProgress>[1]>[0]) => void) | undefined
+    resourcesBridge.onProgress.mockImplementation((callback) => {
+      listener = callback
+      return unsubscribe
+    })
+    const onProgress = vi.fn()
+
+    const subscription = subscribeResourceProgress('tool:yosys', onProgress)
+
+    listener?.({
+      id: 'job-ignored',
+      resource_id: 'pdk:ics55',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.2,
+      message: 'Downloading PDK',
+      error: null,
+    } as never)
+    listener?.({
+      id: 'job-1',
+      resource_id: 'tool:yosys',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.5,
+      message: 'Downloading...',
+      error: null,
+    } as never)
+    subscription.close()
+
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onProgress).toHaveBeenCalledWith({
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'downloading',
+      progress: 0.5,
+      message: 'Downloading...',
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('maps Resource Manager jobs to install progress rows', () => {

@@ -72,6 +72,18 @@ function registerHandlers() {
       readParameters: vi.fn(),
       resolveStepInfo: vi.fn(),
     },
+    resourceManagerService: {
+      activatePdk: vi.fn(),
+      getResource: vi.fn(),
+      importPdkPath: vi.fn(),
+      installResource: vi.fn(),
+      listResources: vi.fn(),
+      refreshRegistry: vi.fn(),
+      removePdkReference: vi.fn(),
+      uninstallResource: vi.fn(),
+      updateResource: vi.fn(),
+      validatePdk: vi.fn(),
+    },
     appInfoService: {
       getVersions: vi.fn(),
     },
@@ -154,6 +166,16 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.workspaceResourcesReadFlow,
       desktopApiIpcChannels.workspaceResourcesReadParameters,
       desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
+      desktopApiIpcChannels.resourcesList,
+      desktopApiIpcChannels.resourcesGet,
+      desktopApiIpcChannels.resourcesInstall,
+      desktopApiIpcChannels.resourcesUpdate,
+      desktopApiIpcChannels.resourcesUninstall,
+      desktopApiIpcChannels.resourcesActivatePdk,
+      desktopApiIpcChannels.resourcesValidatePdk,
+      desktopApiIpcChannels.resourcesRemovePdkReference,
+      desktopApiIpcChannels.resourcesImportPdkPath,
+      desktopApiIpcChannels.resourcesRefreshRegistry,
       desktopApiIpcChannels.tilesGenerate,
       desktopApiIpcChannels.tilesStatus,
       desktopApiIpcChannels.systemOpenExternal,
@@ -181,6 +203,106 @@ describe('registerIpc', () => {
     expect(handler).toBeDefined()
     await expect(handler?.({ sender: { id: 'web-contents' } })).resolves.toEqual(versions)
     expect(services.appInfoService.getVersions).toHaveBeenCalledTimes(1)
+  })
+
+  it('delegates resource manager calls to the resource manager service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const resources = {
+      diagnostics: [],
+      resources: [
+        {
+          id: 'pdk:ics55',
+          type: 'pdk',
+          name: 'ics55',
+          display_name: 'ICSPROUT 55nm PDK',
+          description: '',
+          category: 'pdk',
+          status: 'installed',
+          installed_version: null,
+          available_versions: [],
+          active_version: null,
+          active: false,
+          path: '/tmp/pdk',
+          managed_root: null,
+          platform: null,
+          size: null,
+          source: 'local',
+          homepage: '',
+          actions: ['activate'],
+          health: {},
+          error: null,
+        },
+      ],
+    }
+    services.resourceManagerService.listResources.mockResolvedValue(resources)
+    services.resourceManagerService.installResource.mockResolvedValue({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '0.61',
+    })
+    services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
+
+    await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesInstall)?.(event, {
+        resourceId: 'tool:yosys',
+        version: '0.61',
+      }),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '0.61',
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesImportPdkPath)?.(event, {
+        path: '/tmp/pdk',
+      }),
+    ).resolves.toEqual(resources.resources[0])
+
+    expect(services.resourceManagerService.listResources).toHaveBeenCalledTimes(1)
+    expect(services.resourceManagerService.installResource).toHaveBeenCalledWith(
+      'tool:yosys',
+      '0.61',
+      expect.any(Function),
+    )
+    expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
+  })
+
+  it('forwards resource progress to the requesting renderer during installs', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = {
+      id: 'web-contents',
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    }
+    services.resourceManagerService.installResource.mockImplementation(async (_resourceId, _version, listener) => {
+      listener?.({
+        id: 'job-1',
+        resource_id: 'tool:yosys',
+        action: 'install',
+        phase: 'downloading',
+        progress: 0.5,
+        message: 'Downloading...',
+        error: null,
+      })
+      return { status: 'started', resource_id: 'tool:yosys', version: '0.61' }
+    })
+
+    await handlers.get(desktopApiIpcChannels.resourcesInstall)?.(
+      { sender },
+      { resourceId: 'tool:yosys', version: '0.61' },
+    )
+
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.resourcesProgress, {
+      id: 'job-1',
+      resource_id: 'tool:yosys',
+      action: 'install',
+      phase: 'downloading',
+      progress: 0.5,
+      message: 'Downloading...',
+      error: null,
+    })
   })
 
   it('logs unexpected handler errors and returns an IPC error result', async () => {

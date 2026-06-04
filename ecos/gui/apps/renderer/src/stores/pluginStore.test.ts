@@ -94,6 +94,11 @@ describe('pluginStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(installResourceApi).mockReset()
+    vi.mocked(listResourcesApi).mockReset()
+    vi.mocked(subscribeResourceProgress).mockReset()
+    vi.mocked(uninstallResourceApi).mockReset()
+    vi.mocked(updateResourceApi).mockReset()
   })
 
   it('fetches unified resources while keeping tools as the legacy tool projection', async () => {
@@ -198,6 +203,55 @@ describe('pluginStore', () => {
     expect(close).toHaveBeenCalledTimes(1)
     expect(store.resourceProgress['pdk:ics55']).toBeUndefined()
     expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'pdk:ics55',
+      status: 'installed',
+      installed_version: '1.01',
+    })
+  })
+
+  it('subscribes before starting a resource install so desktop progress events are not missed', async () => {
+    const availablePdk = makePdkResource()
+    const installedPdk = makePdkResource({
+      status: 'installed',
+      installed_version: '1.01',
+      path: '/tmp/pdks/ics55',
+      actions: ['validate', 'activate'],
+    })
+    let onProgress: ((progress: InstallProgress) => void) | undefined
+    const close = vi.fn()
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availablePdk])
+      .mockResolvedValueOnce([installedPdk])
+    vi.mocked(subscribeResourceProgress).mockImplementation((resourceId, callback) => {
+      expect(resourceId).toBe('pdk:ics55')
+      onProgress = callback
+      return { close }
+    })
+    vi.mocked(installResourceApi).mockImplementation(async () => {
+      onProgress?.({
+        resourceId: 'pdk:ics55',
+        resourceName: 'ics55',
+        tool: 'ics55',
+        phase: 'done',
+        progress: 1,
+        message: 'Done',
+      })
+      return {
+        status: 'started',
+        resource_id: 'pdk:ics55',
+        version: '1.01',
+      }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    await store.installResource('pdk:ics55', '1.01')
+    await flushPromises()
+
+    expect(subscribeResourceProgress).toHaveBeenCalledBefore(vi.mocked(installResourceApi))
+    expect(close).toHaveBeenCalledTimes(1)
     expect(store.resources[0]).toMatchObject({
       id: 'pdk:ics55',
       status: 'installed',

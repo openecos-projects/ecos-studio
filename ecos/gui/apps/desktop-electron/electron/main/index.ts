@@ -15,6 +15,7 @@ import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
+import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
 import { TileService } from '../services/tileService'
@@ -28,6 +29,7 @@ let services:
       appInfoService: AppInfoService
       desktopRuntimeManager: DesktopRuntimeManager
       settingsStore: SettingsStore
+      resourceManagerService: ResourceManagerService
       shellService: ShellPtyService
       tileService: TileService
       workspaceResourceService: WorkspaceResourceService
@@ -92,6 +94,7 @@ function getDesktopServices() {
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
   })
+  const resourceManagerService = new ResourceManagerService()
   const desktopRuntimeManager = new DesktopRuntimeManager({
     adapter: new EccCliAdapter({
       env: runtimeEnv,
@@ -107,6 +110,7 @@ function getDesktopServices() {
   services = {
     appInfoService,
     desktopRuntimeManager,
+    resourceManagerService,
     settingsStore,
     shellService,
     tileService,
@@ -124,6 +128,7 @@ async function launchMainWindow(): Promise<void> {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
       desktopRuntimeManager: desktopServices.desktopRuntimeManager,
+      resourceManagerService: desktopServices.resourceManagerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
       tileService: desktopServices.tileService,

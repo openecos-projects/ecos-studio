@@ -19,6 +19,9 @@ import {
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
+  type ResourceImportPdkRequest,
+  type ResourceInstallRequest,
+  type ResourceJob,
   type DesktopShellDataEvent,
   type DesktopShellExitEvent,
   type DesktopShellSession,
@@ -109,6 +112,22 @@ export interface DesktopBridgeServices {
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
+  }
+  resourceManagerService: {
+    listResources(): Promise<unknown>
+    getResource(resourceId: string): Promise<unknown>
+    installResource(
+      resourceId: string,
+      version?: string,
+      listener?: (event: ResourceJob) => void,
+    ): Promise<unknown>
+    updateResource(resourceId: string, listener?: (event: ResourceJob) => void): Promise<unknown>
+    uninstallResource(resourceId: string): Promise<unknown>
+    activatePdk(resourceId: string): Promise<unknown>
+    validatePdk(resourceId: string): Promise<unknown>
+    removePdkReference(resourceId: string): Promise<unknown>
+    importPdkPath(path: string): Promise<unknown>
+    refreshRegistry(): Promise<unknown>
   }
   desktopRuntimeManager: {
     execute(
@@ -617,6 +636,67 @@ export function registerIpc(
       )
     },
   )
+
+  handle(desktopApiIpcChannels.resourcesList, async () => {
+    return await services.resourceManagerService.listResources()
+  })
+
+  handle(desktopApiIpcChannels.resourcesGet, async (_event, resourceId) => {
+    return await services.resourceManagerService.getResource(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesInstall, async (event, request) => {
+    const sender = event.sender
+    const listener = (payload: ResourceJob): void => {
+      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+      if (typeof sender.send === 'function') {
+        sender.send(desktopApiEventChannels.resourcesProgress, payload)
+      }
+    }
+    const installRequest = request as ResourceInstallRequest
+    return await services.resourceManagerService.installResource(
+      installRequest.resourceId,
+      installRequest.version,
+      listener,
+    )
+  })
+
+  handle(desktopApiIpcChannels.resourcesUpdate, async (event, resourceId) => {
+    const sender = event.sender
+    const listener = (payload: ResourceJob): void => {
+      if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+      if (typeof sender.send === 'function') {
+        sender.send(desktopApiEventChannels.resourcesProgress, payload)
+      }
+    }
+    return await services.resourceManagerService.updateResource(resourceId as string, listener)
+  })
+
+  handle(desktopApiIpcChannels.resourcesUninstall, async (_event, resourceId) => {
+    return await services.resourceManagerService.uninstallResource(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesActivatePdk, async (_event, resourceId) => {
+    return await services.resourceManagerService.activatePdk(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesValidatePdk, async (_event, resourceId) => {
+    return await services.resourceManagerService.validatePdk(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesRemovePdkReference, async (_event, resourceId) => {
+    return await services.resourceManagerService.removePdkReference(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesImportPdkPath, async (_event, request) => {
+    return await services.resourceManagerService.importPdkPath(
+      (request as ResourceImportPdkRequest).path,
+    )
+  })
+
+  handle(desktopApiIpcChannels.resourcesRefreshRegistry, async () => {
+    return await services.resourceManagerService.refreshRegistry()
+  })
 
   handle(
     desktopApiIpcChannels.cliExecute,

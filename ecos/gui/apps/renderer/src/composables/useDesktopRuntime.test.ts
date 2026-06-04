@@ -132,6 +132,19 @@ const desktopBridge = {
       message: [],
     }),
   },
+  resources: {
+    list: async () => ({ diagnostics: [], resources: [] }),
+    get: async () => { throw new Error('not found') },
+    install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
+    update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
+    uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
+    activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
+    validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
+    removePdkReference: async (resourceId) => ({ status: 'removed', resource_id: resourceId }),
+    importPdkPath: async () => { throw new Error('not implemented') },
+    refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
+    onProgress: () => () => undefined,
+  },
   cli: {
     execute: async (request) => ({
       cmd: request.cmd,

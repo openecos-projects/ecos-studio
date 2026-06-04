@@ -27,6 +27,17 @@ export type {
   DesktopCliCommandSource,
 } from './contracts/desktopCli.ts';
 export type {
+  ResourceAction,
+  ResourceImportPdkRequest,
+  ResourceInfo,
+  ResourceInstallRequest,
+  ResourceJob,
+  ResourceList,
+  ResourceOperationResult,
+  ResourceStatus,
+  ResourceType,
+} from './contracts/resources.ts';
+export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSession,

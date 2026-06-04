@@ -5,6 +5,14 @@ import type {
   WorkspaceStepInfoResult,
 } from '../types/workspaceResources.ts'
 import type {
+  ResourceImportPdkRequest,
+  ResourceInfo,
+  ResourceInstallRequest,
+  ResourceJob,
+  ResourceList,
+  ResourceOperationResult,
+} from './resources.ts'
+import type {
   DesktopCliCommandEvent,
   DesktopCliCommandRequest,
   DesktopCliCommandResult,
@@ -160,6 +168,19 @@ export interface DesktopApi {
     readFlow(): Promise<Record<string, unknown> | null>
     readParameters(): Promise<Record<string, unknown> | null>
     resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult>
+  }
+  resources: {
+    list(): Promise<ResourceList>
+    get(resourceId: string): Promise<ResourceInfo>
+    install(request: ResourceInstallRequest): Promise<ResourceOperationResult>
+    update(resourceId: string): Promise<ResourceOperationResult>
+    uninstall(resourceId: string): Promise<ResourceOperationResult>
+    activatePdk(resourceId: string): Promise<ResourceOperationResult>
+    validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>
+    removePdkReference(resourceId: string): Promise<ResourceOperationResult>
+    importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
+    refreshRegistry(): Promise<{ status: string; tools_count: number }>
+    onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
   cli: {
     execute(request: DesktopCliCommandRequest): Promise<DesktopCliCommandResult>
