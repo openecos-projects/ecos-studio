@@ -241,6 +241,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesInstall, request),
     update: (resourceId) =>
       invokeDesktop(desktopApiIpcChannels.resourcesUpdate, resourceId),
+    cancel: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesCancel, resourceId),
     uninstall: (resourceId) =>
       invokeDesktop(desktopApiIpcChannels.resourcesUninstall, resourceId),
     activatePdk: (resourceId) =>

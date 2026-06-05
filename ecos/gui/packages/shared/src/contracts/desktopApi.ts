@@ -174,6 +174,7 @@ export interface DesktopApi {
     get(resourceId: string): Promise<ResourceInfo>
     install(request: ResourceInstallRequest): Promise<ResourceOperationResult>
     update(resourceId: string): Promise<ResourceOperationResult>
+    cancel(resourceId: string): Promise<ResourceOperationResult>
     uninstall(resourceId: string): Promise<ResourceOperationResult>
     activatePdk(resourceId: string): Promise<ResourceOperationResult>
     validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>

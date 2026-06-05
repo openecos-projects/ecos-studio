@@ -2,7 +2,7 @@ import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin
 
 export type ResourceType = 'tool' | 'pdk'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
-export type RowAction = 'install' | 'update' | 'uninstall' | 'remove_reference' | 'none'
+export type RowAction = 'install' | 'update' | 'cancel' | 'uninstall' | 'remove_reference' | 'none'
 export type PrimaryRowAction = 'install' | 'update'
 
 export interface ResourceActionExecutor {
@@ -153,6 +153,12 @@ function mapStatus(
 export function rowActionForStatus(resource: ResourceItem): RowAction {
   const actions = new Set<ResourceAction>(resource.actions)
 
+  if (resource.status === 'installing') {
+    return 'cancel'
+  }
+  if (resource.status === 'uninstalling' || resource.status === 'removing') {
+    return 'none'
+  }
   if (
     (resource.status === 'update_available' || resource.status === 'error') &&
     actions.has('update')

@@ -188,9 +188,10 @@
                     <template
                       v-if="
                         rowActionForStatus(row.resource) !== 'none' ||
-                        row.statusKind === 'installing' ||
-                        row.actions.includes('activate') ||
-                        row.actions.includes('validate')
+                        (
+                          row.statusKind !== 'installing' &&
+                          (row.actions.includes('activate') || row.actions.includes('validate'))
+                        )
                       "
                     >
                       <button
@@ -212,13 +213,13 @@
                         <i class="ri-refresh-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.statusKind === 'installing'"
+                        v-else-if="rowActionForStatus(row.resource) === 'cancel'"
                         type="button"
-                        class="row-action-btn icon-only warn"
-                        data-title="Installing"
-                        disabled
+                        class="row-action-btn icon-only danger"
+                        data-title="Cancel"
+                        @click.stop="handleRowCancel(row)"
                       >
-                        <i class="ri-loader-4-line spin" aria-hidden="true"></i>
+                        <i class="ri-close-line" aria-hidden="true"></i>
                       </button>
                       <button
                         v-else-if="row.statusKind === 'error'"
@@ -230,7 +231,7 @@
                         <i class="ri-restart-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.actions.includes('activate')"
+                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('activate')"
                         type="button"
                         class="row-action-btn icon-only primary"
                         data-title="Activate"
@@ -239,7 +240,7 @@
                         <i class="ri-check-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.actions.includes('validate')"
+                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('validate')"
                         type="button"
                         class="row-action-btn icon-only info"
                         data-title="Validate"
@@ -518,6 +519,10 @@ function rowError(row: ResourceRow): string | undefined {
 
 async function handleRowInstall(row: ResourceRow): Promise<void> {
   await runPrimaryAction(row, pluginStore)
+}
+
+async function handleRowCancel(row: ResourceRow): Promise<void> {
+  await pluginStore.cancelResource(row.id)
 }
 
 async function handleImportPdk(): Promise<void> {

@@ -135,6 +135,12 @@ interface RegistryCacheResult {
   diagnostics: string[]
 }
 
+interface ActiveResourceJob {
+  action: ResourceAction
+  controller: AbortController
+  listener?: (event: ResourceJob) => void
+}
+
 export interface ResourceManagerServiceOptions {
   archiveExtractor?: ArchiveExtractor
   cacheDir?: string
@@ -161,7 +167,7 @@ export class ResourceManagerService {
 
   private registryMemory: ResourceRegistry | null = null
   private registryRefreshPromise: Promise<void> | null = null
-  private activeJobs = new Set<string>()
+  private activeJobs = new Map<string, ActiveResourceJob>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
     this.resourcesDir = options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
@@ -238,6 +244,15 @@ export class ResourceManagerService {
       return await this.installPdk(resourceId.slice('pdk:'.length), undefined, 'update', listener)
     }
     throw new Error(`Update is not implemented for ${resourceId}`)
+  }
+
+  async cancelResource(resourceId: string): Promise<ResourceOperationResult> {
+    const job = this.activeJobs.get(resourceId)
+    if (!job) {
+      throw new Error(`No active job for ${resourceId}`)
+    }
+    job.controller.abort()
+    return { status: 'cancelled', resource_id: resourceId }
   }
 
   async uninstallResource(resourceId: string): Promise<ResourceOperationResult> {
@@ -360,7 +375,10 @@ export class ResourceManagerService {
     if (this.activeJobs.has(resourceId)) {
       throw new Error(`Job already active for ${resourceId}`)
     }
-    this.activeJobs.add(resourceId)
+    const controller = new AbortController()
+    this.activeJobs.set(resourceId, { action, controller, listener })
+    let tempArchive = ''
+    let tempExtract = ''
 
     try {
       const state = await this.fetchRegistry()
@@ -374,8 +392,8 @@ export class ResourceManagerService {
       if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      const tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}.archive`)
-      const tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}.archive`)
+      tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
       electronLogger.info(
@@ -409,22 +427,26 @@ export class ResourceManagerService {
           progress.totalBytes ?? '?',
           Math.round(progress.progress * 100),
         )
-      })
+      }, controller.signal)
+      throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
       electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
       const verified = await this.sha256Verifier(tempArchive, asset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${name}`)
       }
+      throwIfAborted(controller.signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(resourceId, action, name, listener, async () => {
         await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
       })
+      throwIfAborted(controller.signal)
       await rm(destination, { force: true, recursive: true })
       await mkdir(dirname(destination), { recursive: true })
       await rm(destination, { force: true, recursive: true })
       await rename(tempExtract, destination)
+      throwIfAborted(controller.signal)
 
       const detected = await detectExecutables(destination)
       const manifest = await this.readManifest()
@@ -452,6 +474,19 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      if (isAbortError(error) || controller.signal.aborted) {
+        const cancelMessage = `Cancelled download for ${resourceId}`
+        electronLogger.info('[resources] Cancelled %s', resourceId)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'cancelled',
+          progress: 0,
+          message: cancelMessage,
+          error: cancelMessage,
+        })
+        throw new Error(cancelMessage, { cause: error })
+      }
       electronLogger.error('[resources] Failed to install %s: %s', resourceId, message)
       this.publish(listener, {
         resource_id: resourceId,
@@ -464,6 +499,8 @@ export class ResourceManagerService {
       throw error
     } finally {
       this.activeJobs.delete(resourceId)
+      if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
+      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -477,7 +514,10 @@ export class ResourceManagerService {
     if (this.activeJobs.has(resourceId)) {
       throw new Error(`Job already active for ${resourceId}`)
     }
-    this.activeJobs.add(resourceId)
+    const controller = new AbortController()
+    this.activeJobs.set(resourceId, { action, controller, listener })
+    let tempArchive = ''
+    let tempExtract = ''
 
     try {
       const state = await this.fetchRegistry()
@@ -492,8 +532,8 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      const tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}.archive`)
-      const tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}.archive`)
+      tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
       electronLogger.info(
@@ -527,23 +567,28 @@ export class ResourceManagerService {
           progress.totalBytes ?? '?',
           Math.round(progress.progress * 100),
         )
-      })
+      }, controller.signal)
+      throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
       electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
       const verified = await this.sha256Verifier(tempArchive, asset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
       }
+      throwIfAborted(controller.signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(resourceId, action, displayName, listener, async () => {
         await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
       })
+      throwIfAborted(controller.signal)
       await rm(destination, { force: true, recursive: true })
       await mkdir(dirname(destination), { recursive: true })
       await rename(tempExtract, destination)
-      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, asset, listener)
+      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, asset, listener, controller.signal)
+      throwIfAborted(controller.signal)
       await this.runPostInstallSteps(resourceId, action, displayName, destination, asset.post_install, listener)
+      throwIfAborted(controller.signal)
 
       const scanned = await scanPdkDirectory(destination)
       const manifest = await this.readManifest()
@@ -589,6 +634,19 @@ export class ResourceManagerService {
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      if (isAbortError(error) || controller.signal.aborted) {
+        const cancelMessage = `Cancelled download for ${resourceId}`
+        electronLogger.info('[resources] Cancelled %s', resourceId)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'cancelled',
+          progress: 0,
+          message: cancelMessage,
+          error: cancelMessage,
+        })
+        throw new Error(cancelMessage, { cause: error })
+      }
       electronLogger.error('[resources] Failed to install %s: %s', resourceId, message)
       this.publish(listener, {
         resource_id: resourceId,
@@ -601,6 +659,8 @@ export class ResourceManagerService {
       throw error
     } finally {
       this.activeJobs.delete(resourceId)
+      if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
+      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -635,6 +695,7 @@ export class ResourceManagerService {
     version: string,
     asset: PlatformAsset,
     listener?: (event: ResourceJob) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (asset.post_install.length === 0) return
     const assetNames = await readPdkReleaseAssetNames(destination)
@@ -652,7 +713,7 @@ export class ResourceManagerService {
         progress: 0.98,
         message: `Downloading ${name} post-install asset ${index + 1}/${assetNames.length}: ${assetName}`,
       })
-      await downloadAsset(downloadUrl, targetPath, this.fetchImpl, null)
+      await downloadAsset(downloadUrl, targetPath, this.fetchImpl, null, undefined, signal)
     }
   }
 
@@ -1306,7 +1367,9 @@ async function downloadAsset(
   fetchImpl: typeof fetch,
   expectedSize: number | null,
   onProgress?: DownloadProgressListener,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal)
   if (url.startsWith('file://')) {
     const fileUrl = new URL(url)
     await copyFile(fileUrl, destination)
@@ -1318,7 +1381,13 @@ async function downloadAsset(
     })
     return
   }
-  const response = await fetchImpl(url)
+  let response: Response
+  try {
+    response = await fetchImpl(url, { signal })
+  } catch (error) {
+    if (isAbortError(error) || signal?.aborted) throw error
+    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, { cause: error })
+  }
   if (!response.ok) {
     throw new Error(`Download failed with ${response.status}: ${url}`)
   }
@@ -1363,6 +1432,7 @@ async function downloadAsset(
 
   try {
     while (true) {
+      throwIfAborted(signal)
       const { done, value } = await reader.read()
       if (done) break
       if (!value) continue
@@ -1375,6 +1445,30 @@ async function downloadAsset(
     reader.releaseLock()
     await file.close()
   }
+}
+
+function formatDownloadError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+
+  const cause = error.cause
+  if (cause instanceof Error) {
+    const code = typeof (cause as NodeJS.ErrnoException).code === 'string'
+      ? `${(cause as NodeJS.ErrnoException).code}: `
+      : ''
+    return `${error.message} (${code}${cause.message})`
+  }
+
+  return error.message
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+    || error instanceof Error && error.name === 'AbortError'
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  throw new DOMException('The operation was aborted.', 'AbortError')
 }
 
 async function pathExists(path: string): Promise<boolean> {

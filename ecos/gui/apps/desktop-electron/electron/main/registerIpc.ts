@@ -122,6 +122,7 @@ export interface DesktopBridgeServices {
       listener?: (event: ResourceJob) => void,
     ): Promise<unknown>
     updateResource(resourceId: string, listener?: (event: ResourceJob) => void): Promise<unknown>
+    cancelResource(resourceId: string): Promise<unknown>
     uninstallResource(resourceId: string): Promise<unknown>
     activatePdk(resourceId: string): Promise<unknown>
     validatePdk(resourceId: string): Promise<unknown>
@@ -670,6 +671,10 @@ export function registerIpc(
       }
     }
     return await services.resourceManagerService.updateResource(resourceId as string, listener)
+  })
+
+  handle(desktopApiIpcChannels.resourcesCancel, async (_event, resourceId) => {
+    return await services.resourceManagerService.cancelResource(resourceId as string)
   })
 
   handle(desktopApiIpcChannels.resourcesUninstall, async (_event, resourceId) => {

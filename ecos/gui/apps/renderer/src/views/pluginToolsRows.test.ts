@@ -111,6 +111,9 @@ describe('pluginToolsRows', () => {
     expect(rowActionForStatus(resource({ status: 'update_available', actions: ['update'] }))).toBe('update')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] }))).toBe('uninstall')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['remove_reference'] }))).toBe('remove_reference')
+    expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe('cancel')
+    expect(rowActionForStatus(resource({ status: 'uninstalling', actions: ['uninstall'] }))).toBe('none')
+    expect(rowActionForStatus(resource({ status: 'removing', actions: ['remove_reference'] }))).toBe('none')
   })
 
   it('identifies rows with primary download actions', () => {

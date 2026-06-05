@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const resourcesBridge = vi.hoisted(() => ({
   activatePdk: vi.fn(),
+  cancel: vi.fn(),
   get: vi.fn(),
   importPdkPath: vi.fn(),
   install: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('@/platform/desktop', () => ({
 }))
 
 import {
+  cancelResourceApi,
   importPdkPathApi,
   resourceJobToInstallProgress,
   resourceListToResources,
@@ -231,6 +233,20 @@ describe('Resource Manager tool API adapter', () => {
     expect(resourcesBridge.importPdkPath).toHaveBeenCalledWith({
       path: '/tmp/pdks/local55',
     })
+  })
+
+  it('cancels resource jobs through the desktop resource bridge', async () => {
+    resourcesBridge.cancel.mockResolvedValue({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+
+    await expect(cancelResourceApi('tool:yosys')).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+
+    expect(resourcesBridge.cancel).toHaveBeenCalledWith('tool:yosys')
   })
 
   it('subscribes to resource progress through the desktop event bridge', () => {

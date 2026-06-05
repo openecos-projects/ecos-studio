@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import {
   activatePdkApi,
+  cancelResourceApi,
   installResourceApi,
   listResourcesApi,
   removePdkReferenceApi,
@@ -31,6 +32,7 @@ export const usePluginStore = defineStore('plugin', () => {
   const _sseConnections = new Map<string, { close: () => void }>()
   const _pendingProgress = new Map<string, InstallProgress>()
   const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const _cancelledResources = new Set<string>()
 
   const categories = computed(() => {
     const cats = new Set(tools.value.map((t) => t.category))
@@ -176,11 +178,11 @@ export const usePluginStore = defineStore('plugin', () => {
     const conn = subscribeResourceProgress(
       resourceId,
       (progress) => {
-        if (progress.phase === 'done' || progress.phase === 'error') {
+        if (progress.phase === 'done' || progress.phase === 'error' || progress.phase === 'cancelled') {
           conn.close()
           _sseConnections.delete(resourceId)
           _clearResourceProgress(progress.resourceId)
-          if (progress.phase === 'done') {
+          if (progress.phase === 'done' || progress.phase === 'cancelled') {
             delete resourceErrors.value[progress.resourceId]
             _syncLegacyToolError(progress.resourceId)
           } else {
@@ -207,14 +209,22 @@ export const usePluginStore = defineStore('plugin', () => {
     _subscribeResourceProgress(resourceId)
     try {
       await installResourceApi(resourceId, version)
+      _cancelledResources.delete(resourceId)
     } catch (e) {
       _sseConnections.get(resourceId)?.close()
       _sseConnections.delete(resourceId)
       _clearResourceProgress(resourceId)
-      _setResourceError(
-        resourceId,
-        e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
-      )
+      if (_cancelledResources.has(resourceId)) {
+        _cancelledResources.delete(resourceId)
+        delete resourceErrors.value[resourceId]
+        _syncLegacyToolError(resourceId)
+        await fetchTools({ silent: true })
+      } else {
+        _setResourceError(
+          resourceId,
+          e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
+        )
+      }
     }
   }
 
@@ -225,14 +235,33 @@ export const usePluginStore = defineStore('plugin', () => {
     _subscribeResourceProgress(resourceId)
     try {
       await updateResourceApi(resourceId)
+      _cancelledResources.delete(resourceId)
     } catch (e) {
       _sseConnections.get(resourceId)?.close()
       _sseConnections.delete(resourceId)
       _clearResourceProgress(resourceId)
-      _setResourceError(
-        resourceId,
-        e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
-      )
+      if (_cancelledResources.has(resourceId)) {
+        _cancelledResources.delete(resourceId)
+        delete resourceErrors.value[resourceId]
+        _syncLegacyToolError(resourceId)
+        await fetchTools({ silent: true })
+      } else {
+        _setResourceError(
+          resourceId,
+          e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
+        )
+      }
+    }
+  }
+
+  async function cancelResource(resourceId: string): Promise<void> {
+    _cancelledResources.add(resourceId)
+    try {
+      await cancelResourceApi(resourceId)
+      _clearResourceProgress(resourceId)
+    } catch (e) {
+      _cancelledResources.delete(resourceId)
+      throw e
     }
   }
 
@@ -324,6 +353,7 @@ export const usePluginStore = defineStore('plugin', () => {
     fetchTools,
     installResource,
     updateResource,
+    cancelResource,
     uninstallResource,
     install,
     uninstall,

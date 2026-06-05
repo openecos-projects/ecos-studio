@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ResourceManagerService } from './resourceManagerService'
@@ -341,6 +341,132 @@ describe('ResourceManagerService', () => {
       phase: 'extracting',
       progress: 0.98,
     }))
+  })
+
+  it('reports the source URL and network cause when a tool download fails before a response', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'https://github.com/YosysHQ/oss-cad-suite-build/releases/download/0.61/yosys.tar',
+                  sha256: '',
+                  size: 20,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const cause = Object.assign(new Error('Connect Timeout Error'), {
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    })
+    const fetchError = Object.assign(new TypeError('fetch failed'), { cause })
+    const fetchImpl = vi.fn(async () => {
+      throw fetchError
+    }) as unknown as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl,
+    })
+    const progress = vi.fn()
+    const expectedMessage = 'Failed to download https://github.com/YosysHQ/oss-cad-suite-build/releases/download/0.61/yosys.tar: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error)'
+
+    await expect(service.installResource('tool:yosys', '0.61', progress)).rejects.toThrow(expectedMessage)
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'error',
+      message: expectedMessage,
+      error: expectedMessage,
+    }))
+  })
+
+  it('cancels an active tool download and removes temporary downloads', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: 'https://example.com/yosys.tar',
+                  sha256: '',
+                  size: 9,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+    let started = false
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      init?.signal?.addEventListener('abort', () => {
+        controller?.error(new DOMException('The operation was aborted.', 'AbortError'))
+      })
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(nextController) {
+            started = true
+            controller = nextController
+            nextController.enqueue(new Uint8Array([1, 2, 3]))
+          },
+        }),
+        { status: 200 },
+      )
+    }) as typeof fetch
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl,
+    })
+    const progress = vi.fn()
+
+    const install = service.installResource('tool:yosys', '0.61', progress)
+    await vi.waitFor(() => {
+      expect(started).toBe(true)
+    })
+
+    await expect(service.cancelResource('tool:yosys')).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    await expect(install).rejects.toThrow('Cancelled download for tool:yosys')
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      resource_id: 'tool:yosys',
+      phase: 'cancelled',
+      message: 'Cancelled download for tool:yosys',
+      error: 'Cancelled download for tool:yosys',
+    }))
+    await expect(readdir(join(root, 'state', 'resources', 'downloads'))).resolves.toEqual([])
   })
 
   it('returns cached registry data immediately and refreshes the registry in the background', async () => {

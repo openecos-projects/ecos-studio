@@ -74,6 +74,7 @@ function registerHandlers() {
     },
     resourceManagerService: {
       activatePdk: vi.fn(),
+      cancelResource: vi.fn(),
       getResource: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -170,6 +171,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesGet,
       desktopApiIpcChannels.resourcesInstall,
       desktopApiIpcChannels.resourcesUpdate,
+      desktopApiIpcChannels.resourcesCancel,
       desktopApiIpcChannels.resourcesUninstall,
       desktopApiIpcChannels.resourcesActivatePdk,
       desktopApiIpcChannels.resourcesValidatePdk,
@@ -241,6 +243,10 @@ describe('registerIpc', () => {
       resource_id: 'tool:yosys',
       version: '0.61',
     })
+    services.resourceManagerService.cancelResource.mockResolvedValue({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
     services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
 
     await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
@@ -259,6 +265,12 @@ describe('registerIpc', () => {
         path: '/tmp/pdk',
       }),
     ).resolves.toEqual(resources.resources[0])
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesCancel)?.(event, 'tool:yosys'),
+    ).resolves.toEqual({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
 
     expect(services.resourceManagerService.listResources).toHaveBeenCalledTimes(1)
     expect(services.resourceManagerService.installResource).toHaveBeenCalledWith(
@@ -267,6 +279,7 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
   })
 
   it('forwards resource progress to the requesting renderer during installs', async () => {

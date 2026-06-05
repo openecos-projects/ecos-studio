@@ -27,4 +27,11 @@ describe('PluginToolsView resource table layout', () => {
     )
     expect(pluginToolsViewSource).not.toContain('backdrop-filter: blur(')
   })
+
+  it('renders cancel only for the explicit cancel row action', () => {
+    expect(pluginToolsViewSource).toMatch(
+      /<button\s+v-else-if="rowActionForStatus\(row\.resource\) === 'cancel'"\s+type="button"\s+class="row-action-btn icon-only danger"\s+data-title="Cancel"/,
+    )
+    expect(pluginToolsViewSource).not.toContain('data-title="Installing"')
+  })
 })

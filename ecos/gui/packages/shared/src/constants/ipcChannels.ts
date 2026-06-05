@@ -36,6 +36,7 @@ export const desktopApiIpcChannels = {
   resourcesGet: 'resources:get',
   resourcesInstall: 'resources:install',
   resourcesUpdate: 'resources:update',
+  resourcesCancel: 'resources:cancel',
   resourcesUninstall: 'resources:uninstall',
   resourcesActivatePdk: 'resources:activate-pdk',
   resourcesValidatePdk: 'resources:validate-pdk',

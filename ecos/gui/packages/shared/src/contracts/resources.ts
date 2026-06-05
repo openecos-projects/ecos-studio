@@ -18,6 +18,7 @@ export type ResourceAction =
   | 'validate'
   | 'activate'
   | 'remove_reference'
+  | 'cancel'
 
 export interface ResourceInfo {
   id: string

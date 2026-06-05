@@ -137,6 +137,7 @@ const desktopBridge = {
     get: async () => { throw new Error('not found') },
     install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
+    cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
     activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
     validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),

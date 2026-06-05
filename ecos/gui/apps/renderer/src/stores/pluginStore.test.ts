@@ -7,6 +7,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
   return {
     ...actual,
     activatePdkApi: vi.fn(),
+    cancelResourceApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
 })
 
 import {
+  cancelResourceApi,
   installResourceApi,
   listResourcesApi,
   resourceListToTools,
@@ -100,6 +102,7 @@ describe('pluginStore', () => {
     vi.useRealTimers()
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    vi.mocked(cancelResourceApi).mockReset()
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
@@ -407,6 +410,152 @@ describe('pluginStore', () => {
     expect(store.tools[0]).toMatchObject({
       name: 'yosys',
       status: 'error',
+    })
+  })
+
+  it('cancels an active resource install, clears progress, and refreshes resources', async () => {
+    const availableTool = makeToolResource()
+    const refreshedAvailableTool = makeToolResource()
+    const close = vi.fn()
+    let onProgress: ((progress: InstallProgress) => void) | undefined
+    let rejectInstall: ((error: Error) => void) | undefined
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availableTool])
+      .mockResolvedValueOnce([refreshedAvailableTool])
+      .mockResolvedValueOnce([refreshedAvailableTool])
+    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectInstall = reject
+    }))
+    vi.mocked(cancelResourceApi).mockResolvedValue({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    vi.mocked(subscribeResourceProgress).mockImplementation((_resourceId, callback) => {
+      onProgress = callback
+      return { close }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    const install = store.installResource('tool:yosys', '0.61')
+    await flushMicrotasks()
+
+    store.resourceProgress['tool:yosys'] = {
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'downloading',
+      progress: 0.25,
+      message: 'Downloading...',
+    }
+
+    await store.cancelResource('tool:yosys')
+
+    expect(cancelResourceApi).toHaveBeenCalledWith('tool:yosys')
+    expect(close).not.toHaveBeenCalled()
+    expect(store.resourceProgress['tool:yosys']).toBeUndefined()
+
+    onProgress?.({
+      resourceId: 'tool:yosys',
+      resourceName: 'yosys',
+      tool: 'yosys',
+      phase: 'cancelled',
+      progress: 0,
+      message: 'Cancelled download for tool:yosys',
+    })
+    await flushPromises()
+    rejectInstall?.(new Error('Cancelled download for tool:yosys'))
+    await install
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(store.resourceProgress['tool:yosys']).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'available',
+    })
+  })
+
+  it('does not store an install error when the cancelled install promise rejects', async () => {
+    const availableTool = makeToolResource()
+    const refreshedAvailableTool = makeToolResource()
+    const close = vi.fn()
+    let rejectInstall: ((error: Error) => void) | undefined
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availableTool])
+      .mockResolvedValueOnce([refreshedAvailableTool])
+    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectInstall = reject
+    }))
+    vi.mocked(cancelResourceApi).mockResolvedValue({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    vi.mocked(subscribeResourceProgress).mockReturnValue({ close })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    const install = store.installResource('tool:yosys', '0.61')
+    await flushMicrotasks()
+
+    await store.cancelResource('tool:yosys')
+    rejectInstall?.(new Error('Cancelled download for tool:yosys'))
+    await install
+
+    expect(store.resourceErrors['tool:yosys']).toBeUndefined()
+    expect(store.toolErrors.yosys).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'available',
+      error: null,
+    })
+  })
+
+  it('does not store an update error when the cancelled update promise rejects', async () => {
+    const updateAvailableTool = makeToolResource({
+      status: 'update_available',
+      installed_version: '0.60',
+      available_versions: ['0.61'],
+      actions: ['update', 'uninstall'],
+    })
+    const refreshedUpdateAvailableTool = makeToolResource({
+      status: 'update_available',
+      installed_version: '0.60',
+      available_versions: ['0.61'],
+      actions: ['update', 'uninstall'],
+    })
+    const close = vi.fn()
+    let rejectUpdate: ((error: Error) => void) | undefined
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([updateAvailableTool])
+      .mockResolvedValueOnce([refreshedUpdateAvailableTool])
+    vi.mocked(updateResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
+      rejectUpdate = reject
+    }))
+    vi.mocked(cancelResourceApi).mockResolvedValue({
+      status: 'cancelled',
+      resource_id: 'tool:yosys',
+    })
+    vi.mocked(subscribeResourceProgress).mockReturnValue({ close })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    const update = store.updateResource('tool:yosys')
+    await flushMicrotasks()
+
+    await store.cancelResource('tool:yosys')
+    rejectUpdate?.(new Error('Cancelled download for tool:yosys'))
+    await update
+
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(store.resourceErrors['tool:yosys']).toBeUndefined()
+    expect(store.toolErrors.yosys).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'update_available',
+      error: null,
     })
   })
 

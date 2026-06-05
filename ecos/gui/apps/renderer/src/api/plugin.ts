@@ -46,6 +46,7 @@ export type InstallPhase =
   | 'extracting'
   | 'post_install'
   | 'done'
+  | 'cancelled'
   | 'error'
   | 'uninstalling'
   | string
@@ -143,6 +144,10 @@ export function installResourceApi(resourceId: string, version?: string) {
 
 export function updateResourceApi(resourceId: string) {
   return getDesktopApi().resources.update(resourceId)
+}
+
+export function cancelResourceApi(resourceId: string) {
+  return getDesktopApi().resources.cancel(resourceId)
 }
 
 export function uninstallResourceApi(resourceId: string) {
