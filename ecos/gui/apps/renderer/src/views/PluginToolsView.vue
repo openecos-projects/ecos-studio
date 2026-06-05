@@ -173,12 +173,13 @@
                       v-if="row.progressPercent !== null"
                       class="mini-progress"
                       role="progressbar"
+                      :style="{ '--progress': row.progressPercent / 100 }"
                       :aria-valuenow="row.progressPercent"
                       aria-valuemin="0"
                       aria-valuemax="100"
                       :aria-label="`${row.name} installation progress`"
                     >
-                      <span :style="{ width: `${row.progressPercent}%` }"></span>
+                      <span></span>
                     </span>
                     <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
                   </span>
@@ -598,6 +599,14 @@ async function openDocs(): Promise<void> {
 <style scoped>
 /* ---- Layout ---- */
 .resource-manager-view {
+  --success-color: #2f9f6f;
+  --success-bg: color-mix(in srgb, var(--success-color) 14%, transparent);
+  --info-color: var(--accent-color);
+  --info-bg: color-mix(in srgb, var(--info-color) 14%, transparent);
+  --warn-color: #d99a2b;
+  --warn-bg: color-mix(in srgb, var(--warn-color) 14%, transparent);
+  --danger-color: #d85d5d;
+  --danger-bg: color-mix(in srgb, var(--danger-color) 14%, transparent);
   position: relative;
   display: flex;
   align-items: center;
@@ -614,8 +623,8 @@ async function openDocs(): Promise<void> {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  filter: blur(2px);
-  transform: scale(1.015);
+  filter: blur(1.5px) brightness(0.82);
+  transform: translateZ(0) scale(1.006);
   transform-origin: center;
   background:
     radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%),
@@ -691,8 +700,7 @@ async function openDocs(): Promise<void> {
   position: absolute;
   inset: 0;
   z-index: 1;
-  background: rgba(17, 24, 39, 0.25);
-  backdrop-filter: blur(5px);
+  background: rgba(17, 24, 39, 0.32);
 }
 
 /* ---- Dialog ---- */
@@ -1198,20 +1206,33 @@ async function openDocs(): Promise<void> {
 }
 
 .mini-progress {
+  --progress: 0;
   display: block;
+  position: relative;
   width: 62px;
   height: 4px;
   margin-top: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--info-color) 16%, var(--bg-secondary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info-color) 10%, transparent);
 }
 
 .mini-progress span {
   display: block;
+  width: 100%;
   height: 100%;
   border-radius: inherit;
-  background: var(--info-color);
+  background: linear-gradient(
+    90deg,
+    var(--info-color),
+    color-mix(in srgb, var(--info-color) 70%, var(--accent-text))
+  );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--info-color) 34%, transparent);
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left center;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 
 .row-error-msg {

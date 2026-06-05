@@ -14,6 +14,8 @@ import {
 } from '@/api/plugin'
 import type { InstallProgress, ResourceItem, ToolInfo } from '@/api/plugin'
 
+const PROGRESS_UPDATE_INTERVAL_MS = 180
+
 export const usePluginStore = defineStore('plugin', () => {
   const resources = ref<ResourceItem[]>([])
   const tools = ref<ToolInfo[]>([])
@@ -27,6 +29,8 @@ export const usePluginStore = defineStore('plugin', () => {
   const resourceProgress = ref<Record<string, InstallProgress>>({})
 
   const _sseConnections = new Map<string, { close: () => void }>()
+  const _pendingProgress = new Map<string, InstallProgress>()
+  const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   const categories = computed(() => {
     const cats = new Set(tools.value.map((t) => t.category))
@@ -84,6 +88,44 @@ export const usePluginStore = defineStore('plugin', () => {
     delete installProgress.value[toolName]
   }
 
+  function _applyResourceProgress(progress: InstallProgress): void {
+    resourceProgress.value[progress.resourceId] = progress
+    _syncLegacyToolProgress(progress.resourceId, progress)
+  }
+
+  function _clearProgressTimer(resourceId: string): void {
+    const timer = _progressTimers.get(resourceId)
+    if (timer) {
+      clearTimeout(timer)
+      _progressTimers.delete(resourceId)
+    }
+    _pendingProgress.delete(resourceId)
+  }
+
+  function _queueResourceProgress(progress: InstallProgress): void {
+    const resourceId = progress.resourceId
+    if (!_progressTimers.has(resourceId)) {
+      _applyResourceProgress(progress)
+      _progressTimers.set(resourceId, setTimeout(() => {
+        _progressTimers.delete(resourceId)
+        const pending = _pendingProgress.get(resourceId)
+        _pendingProgress.delete(resourceId)
+        if (pending) {
+          _queueResourceProgress(pending)
+        }
+      }, PROGRESS_UPDATE_INTERVAL_MS))
+      return
+    }
+
+    _pendingProgress.set(resourceId, progress)
+  }
+
+  function _clearResourceProgress(resourceId: string): void {
+    _clearProgressTimer(resourceId)
+    delete resourceProgress.value[resourceId]
+    _syncLegacyToolProgress(resourceId)
+  }
+
   function _setResourceStatus(resourceId: string, status: ResourceItem['status']): void {
     const resource = resources.value.find((item) => item.id === resourceId)
     if (!resource) {
@@ -134,14 +176,10 @@ export const usePluginStore = defineStore('plugin', () => {
     const conn = subscribeResourceProgress(
       resourceId,
       (progress) => {
-        resourceProgress.value[progress.resourceId] = progress
-        _syncLegacyToolProgress(progress.resourceId, progress)
-
         if (progress.phase === 'done' || progress.phase === 'error') {
           conn.close()
           _sseConnections.delete(resourceId)
-          delete resourceProgress.value[progress.resourceId]
-          _syncLegacyToolProgress(progress.resourceId)
+          _clearResourceProgress(progress.resourceId)
           if (progress.phase === 'done') {
             delete resourceErrors.value[progress.resourceId]
             _syncLegacyToolError(progress.resourceId)
@@ -149,9 +187,13 @@ export const usePluginStore = defineStore('plugin', () => {
             _setResourceError(progress.resourceId, progress.message || 'Installation failed')
           }
           void fetchTools({ silent: true })
+          return
         }
+
+        _queueResourceProgress(progress)
       },
       () => {
+        _clearProgressTimer(resourceId)
         _sseConnections.delete(resourceId)
       },
     )
@@ -168,8 +210,7 @@ export const usePluginStore = defineStore('plugin', () => {
     } catch (e) {
       _sseConnections.get(resourceId)?.close()
       _sseConnections.delete(resourceId)
-      delete resourceProgress.value[resourceId]
-      _syncLegacyToolProgress(resourceId)
+      _clearResourceProgress(resourceId)
       _setResourceError(
         resourceId,
         e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
@@ -187,8 +228,7 @@ export const usePluginStore = defineStore('plugin', () => {
     } catch (e) {
       _sseConnections.get(resourceId)?.close()
       _sseConnections.delete(resourceId)
-      delete resourceProgress.value[resourceId]
-      _syncLegacyToolProgress(resourceId)
+      _clearResourceProgress(resourceId)
       _setResourceError(
         resourceId,
         e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
@@ -265,6 +305,9 @@ export const usePluginStore = defineStore('plugin', () => {
       conn.close()
     }
     _sseConnections.clear()
+    for (const resourceId of _progressTimers.keys()) {
+      _clearProgressTimer(resourceId)
+    }
   }
 
   return {
