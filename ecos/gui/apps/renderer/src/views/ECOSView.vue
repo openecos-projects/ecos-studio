@@ -55,19 +55,11 @@
         </div>
       </div>
 
-      <!-- Resources & Explore -->
+      <!-- Quick links -->
       <div class="w-full max-w-2xl mb-8">
         <div class="grid grid-cols-2 gap-4">
-          <!-- Resources column -->
           <div>
-            <h3 class="text-xs font-semibold text-(--text-secondary) uppercase tracking-wider mb-3 px-1">Resources</h3>
             <div class="space-y-2">
-              <button @click="handleNotReady"
-                class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left opacity-50">
-                <i class="ri-puzzle-line text-lg text-(--text-secondary)"></i>
-                <span class="text-sm text-(--text-primary)">IP Catalog</span>
-              </button>
-
               <button @click="navigateToTools"
                 class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left">
                 <i class="ri-tools-line text-lg text-(--accent-color)"></i>
@@ -78,58 +70,20 @@
                 <i class="ri-arrow-right-s-line text-lg text-(--text-secondary) group-hover:text-(--accent-color) transition-colors"></i>
               </button>
 
-              <!-- PDK Manager card -->
-              <div class="bg-(--bg-secondary) rounded-xl border border-(--border-color) overflow-hidden">
-                <div class="flex items-center justify-between px-4 py-3">
-                  <div class="flex items-center gap-2">
-                    <i class="ri-database-2-line text-lg text-(--text-secondary)"></i>
-                    <span class="text-sm font-medium text-(--text-primary)">PDK Manager</span>
-                    <span v-if="importedPdks.length > 0" class="text-[10px] text-(--text-secondary)">({{ importedPdks.length }})</span>
-                  </div>
-                  <button @click="handleImportPdk"
-                    class="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-(--accent-color) hover:bg-(--accent-color)/10 transition-colors cursor-pointer">
-                    <i class="ri-add-line text-sm"></i>
-                    Import
-                  </button>
-                </div>
-                <div v-if="importedPdks.length > 0" class="border-t border-(--border-color)">
-                  <div v-for="pdk in importedPdks" :key="pdk.id"
-                    class="flex items-center gap-3 px-4 py-2.5 hover:bg-(--bg-primary)/50 transition-colors group">
-                    <div class="w-6 h-6 rounded-md bg-(--accent-color)/10 flex items-center justify-center shrink-0">
-                      <i class="ri-cpu-line text-xs text-(--accent-color)"></i>
-                    </div>
-                    <span class="text-sm text-(--text-primary) truncate flex-1">{{ pdk.name }}</span>
-                    <span v-if="pdk.techNode"
-                      class="text-[9px] px-1.5 py-0.5 rounded bg-(--accent-color)/10 text-(--accent-color) font-medium shrink-0">
-                      {{ pdk.techNode }}
-                    </span>
-                    <button @click.stop="handleRemovePdk(pdk.id)"
-                      class="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all cursor-pointer"
-                      title="Remove this PDK">
-                      <i class="ri-close-line text-xs text-(--text-secondary) hover:text-red-500"></i>
-                    </button>
-                  </div>
-                </div>
-                <div v-else class="px-4 py-3 border-t border-(--border-color)">
-                  <p class="text-xs text-(--text-secondary) opacity-60">No PDKs imported yet</p>
-                </div>
-              </div>
+              <button @click="handleNotReady"
+                class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left opacity-50">
+                <i class="ri-puzzle-line text-lg text-(--text-secondary)"></i>
+                <span class="text-sm text-(--text-primary)">IP Catalog</span>
+              </button>
             </div>
           </div>
 
-          <!-- Explore column -->
           <div>
-            <h3 class="text-xs font-semibold text-(--text-secondary) uppercase tracking-wider mb-3 px-1">Explore</h3>
             <div class="space-y-2">
               <button @click="handleNotReady"
                 class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left opacity-50">
                 <i class="ri-bar-chart-box-line text-lg text-(--text-secondary)"></i>
                 <span class="text-sm text-(--text-primary)">Benchmarks</span>
-              </button>
-              <button @click="handleNotReady"
-                class="w-full flex items-center gap-3 px-4 py-3 bg-(--bg-secondary) rounded-lg border border-(--border-color) hover:border-(--accent-color) transition-all duration-200 cursor-pointer group text-left opacity-50">
-                <i class="ri-book-open-line text-lg text-(--text-secondary)"></i>
-                <span class="text-sm text-(--text-primary)">Documentation</span>
               </button>
             </div>
           </div>
@@ -187,14 +141,12 @@ import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import type { ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
-import { usePdkManager } from '../composables/usePdkManager'
 
 const router = useRouter()
 const { recentProjects, openProject, loadRecentProjects } = useWorkspace()
-const { importedPdks, loadPdks, importPdk, removePdk } = usePdkManager()
 
 onMounted(async () => {
-  await Promise.all([loadRecentProjects(), loadPdks()])
+  await loadRecentProjects()
 })
 
 const lastProject = computed(() => {
@@ -205,14 +157,6 @@ const navigateToECC = () => router.push('/ecc')
 const navigateToProjects = () => router.push('/projects')
 const navigateToTools = () => router.push('/tools')
 const handleNotReady = () => { /* placeholder */ }
-
-const handleImportPdk = async () => {
-  await importPdk()
-}
-
-const handleRemovePdk = async (id: string) => {
-  await removePdk(id)
-}
 
 const handleResume = async () => {
   if (!lastProject.value || lastProject.value.workspaceRecognized === false) return

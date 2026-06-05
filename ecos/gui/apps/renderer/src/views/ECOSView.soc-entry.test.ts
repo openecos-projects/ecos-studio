@@ -21,16 +21,10 @@ const {
   push,
   loadRecentProjects,
   openProject,
-  loadPdks,
-  importPdk,
-  removePdk,
 } = vi.hoisted(() => ({
   push: vi.fn(),
   loadRecentProjects: vi.fn(async () => {}),
   openProject: vi.fn(async () => true),
-  loadPdks: vi.fn(async () => {}),
-  importPdk: vi.fn(async () => {}),
-  removePdk: vi.fn(async () => {}),
 }))
 
 const originalGlobals = {
@@ -359,16 +353,6 @@ function loadECOSViewComponent(vue: VueRuntime) {
         }),
       }
     }
-    if (id === '../composables/usePdkManager') {
-      return {
-        usePdkManager: () => ({
-          importedPdks: vue.ref([]),
-          loadPdks,
-          importPdk,
-          removePdk,
-        }),
-      }
-    }
     return require(id)
   }
 
@@ -384,9 +368,6 @@ describe('ECOSView SoC entry card', () => {
     push.mockReset()
     loadRecentProjects.mockClear()
     openProject.mockClear()
-    loadPdks.mockClear()
-    importPdk.mockClear()
-    removePdk.mockClear()
     document.body.innerHTML = ''
   })
 
@@ -414,6 +395,30 @@ describe('ECOSView SoC entry card', () => {
     socCard?.click()
 
     expect(push).not.toHaveBeenCalled()
+
+    app.unmount()
+  })
+
+  it('keeps the home resources compact without duplicate documentation or PDK manager entries', async () => {
+    const vue = await loadVueRuntime()
+    const ECOSView = loadECOSViewComponent(vue)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const app = vue.createApp(ECOSView)
+    app.mount(container as never)
+    await vue.nextTick()
+
+    expect(container.textContent).toContain('Resource Manager')
+    expect(container.textContent).toContain('IP Catalog')
+    expect(container.textContent).toContain('Benchmarks')
+    expect(container.textContent.indexOf('Resource Manager')).toBeLessThan(
+      container.textContent.indexOf('IP Catalog')
+    )
+    expect(container.textContent).not.toContain('Resources')
+    expect(container.textContent).not.toContain('Explore')
+    expect(container.textContent).not.toContain('Documentation')
+    expect(container.textContent).not.toContain('PDK Manager')
 
     app.unmount()
   })
