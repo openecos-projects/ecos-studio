@@ -41,5 +41,3 @@ git_override(
 appimage_tool = use_extension("@ecos-bazel//rules:appimage-tool.bzl", "appimage_tool")
 use_repo(appimage_tool, "appimagetool_x86_64_linux")
 
-oss_cad_suite = use_extension("@ecos-bazel//rules:oss_cad_suite.bzl", "oss_cad_suite")
-use_repo(oss_cad_suite, "oss_cad_suite", "oss_cad_suite_pruned")

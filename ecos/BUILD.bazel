@@ -22,8 +22,6 @@ genrule(
         "gui/pnpm-workspace.yaml",
         "gui/tailwind.config.ts",
     ] + [
-        "@oss_cad_suite_pruned//:all_files",
-        "@oss_cad_suite_pruned//:yosys_bin",
         "@ecc//:build_ecc_cli_bundle",
         ":build_gui_script",
     ],
@@ -34,7 +32,6 @@ genrule(
 
         bash "$(location :build_gui_script)" \\
             --gui-src-dir "$$(dirname $(location gui/package.json))" \\
-            --oss-cad-bin "$(location @oss_cad_suite_pruned//:yosys_bin)" \\
             --ecc-cli-artifact "$(location @ecc//:build_ecc_cli_bundle)" \\
             --out-tar "$@"
     """,

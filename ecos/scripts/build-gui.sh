@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<EOF
-Usage: $0 --gui-src-dir <dir> --out-tar <path> --ecc-cli-artifact <path> [--oss-cad-bin <path>]
+Usage: $0 --gui-src-dir <dir> --out-tar <path> --ecc-cli-artifact <path> [--oss-cad-bin <ignored>]
 EOF
 }
 
@@ -59,37 +59,6 @@ map_linux_target() {
     esac
 }
 
-prepare_placeholder_oss_cad_suite() {
-    local target_dir="$1"
-    rm -rf "$target_dir"
-    mkdir -p "$target_dir"
-    echo "placeholder for electron package build" > "$target_dir/README"
-    echo "placeholder" > "$target_dir/placeholder.txt"
-}
-
-verify_yosys_slang_support() {
-    local yosys_bin="$1"
-
-    if ! "$yosys_bin" -Q -m slang -p 'help' >/dev/null 2>&1; then
-        echo "ERROR: yosys slang plugin check failed for $yosys_bin" >&2
-        echo "Provide an OSS CAD suite bundle whose yosys can load the slang plugin." >&2
-        exit 1
-    fi
-}
-
-resolve_oss_cad_bin() {
-    if [[ -n "$OSS_CAD_BIN" ]]; then
-        readlink -f "$OSS_CAD_BIN"
-        return 0
-    fi
-
-    if [[ -n "${CHIPCOMPILER_OSS_CAD_DIR:-}" && -f "${CHIPCOMPILER_OSS_CAD_DIR}/bin/yosys" ]]; then
-        readlink -f "${CHIPCOMPILER_OSS_CAD_DIR}/bin/yosys"
-        return 0
-    fi
-
-    return 1
-}
 
 install_ecc_cli_artifact() {
     local artifact_path="$1"
@@ -123,34 +92,60 @@ EOF
     chmod +x "$target_dir/ecc"
 }
 
-validate_packaged_oss_cad_suite() {
+validate_no_packaged_oss_cad_suite() {
     local release_dir="$1"
+    local packaged_root
 
-    if [[ "${ENABLE_OSS_CAD_SUITE:-true}" != "true" ]]; then
-        return 0
-    fi
-
-    local packaged_root="$release_dir/linux-unpacked/resources/resources/oss-cad-suite"
-    local packaged_yosys="$packaged_root/bin/yosys"
-    local packaged_slang="$packaged_root/share/yosys/plugins/slang.so"
-
-    if [[ ! -x "$packaged_yosys" ]]; then
-        echo "ERROR: packaged OSS CAD suite is missing yosys at: $packaged_yosys" >&2
+    packaged_root="$(find "$release_dir" -path '*/resources/oss-cad-suite' -print -quit)"
+    if [[ -n "$packaged_root" ]]; then
+        echo "ERROR: packaged OSS CAD suite must not be present: $packaged_root" >&2
         exit 1
     fi
+}
 
-    if [[ ! -f "$packaged_slang" ]]; then
-        echo "ERROR: packaged OSS CAD suite is missing slang plugin at: $packaged_slang" >&2
-        exit 1
+validate_requested_linux_artifacts() {
+    local release_dir="$1"
+    local requested_targets="$2"
+    local lower_targets
+
+    lower_targets="$(echo "$requested_targets" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ ",$lower_targets," == *",appimage,"* ]]; then
+        if [[ -z "$(find "$release_dir" -type f -name "*.AppImage" -print -quit)" ]]; then
+            echo "ERROR: AppImage artifact not found under: $release_dir" >&2
+            find "$release_dir" -maxdepth 4 -mindepth 1 -print >&2 || true
+            exit 1
+        fi
     fi
 
-    verify_yosys_slang_support "$packaged_yosys"
+    if [[ ",$lower_targets," == *",deb,"* ]]; then
+        if [[ -z "$(find "$release_dir" -type f -name "*.deb" -print -quit)" ]]; then
+            echo "ERROR: deb artifact not found under: $release_dir" >&2
+            find "$release_dir" -maxdepth 4 -mindepth 1 -print >&2 || true
+            exit 1
+        fi
+    fi
+
+    if [[ ",$lower_targets," == *",rpm,"* ]]; then
+        if [[ -z "$(find "$release_dir" -type f -name "*.rpm" -print -quit)" ]]; then
+            echo "ERROR: rpm artifact not found under: $release_dir" >&2
+            find "$release_dir" -maxdepth 4 -mindepth 1 -print >&2 || true
+            exit 1
+        fi
+    fi
+
+    if [[ ",$lower_targets," == *",dir,"* ]]; then
+        if [[ ! -d "$release_dir/linux-unpacked" ]]; then
+            echo "ERROR: dir artifact not found under: $release_dir" >&2
+            find "$release_dir" -maxdepth 4 -mindepth 1 -print >&2 || true
+            exit 1
+        fi
+    fi
 }
 
 main() {
     GUI_SRC_DIR=""
     OUT_TAR=""
-    OSS_CAD_BIN=""
     ECC_CLI_ARTIFACT=""
 
     while [[ $# -gt 0 ]]; do
@@ -164,7 +159,7 @@ main() {
                 shift 2
                 ;;
             --oss-cad-bin)
-                OSS_CAD_BIN="$2"
+                echo "WARN: --oss-cad-bin is deprecated and ignored; desktop Yosys comes from Resource Manager." >&2
                 shift 2
                 ;;
             --ecc-cli-artifact)
@@ -201,7 +196,6 @@ main() {
     ELECTRON_APP_DIR="$GUI_DIR/apps/desktop-electron"
     ELECTRON_RESOURCES_DIR="$ELECTRON_APP_DIR/resources"
     ELECTRON_BINARIES_DIR="$ELECTRON_RESOURCES_DIR/binaries"
-    OSS_CAD_BUNDLE_DIR="$ELECTRON_RESOURCES_DIR/oss-cad-suite"
     RELEASE_DIR="$ELECTRON_APP_DIR/release"
 
     rm -rf "$WORK_ROOT"
@@ -249,33 +243,10 @@ main() {
         ELECTRON_TARGET_ARGS+=("$(map_linux_target "$raw_target")")
     done
 
-    if [[ "${ENABLE_OSS_CAD_SUITE:-true}" == "true" ]]; then
-        if ! OSS_CAD_BIN="$(resolve_oss_cad_bin)"; then
-            echo "ERROR: OSS CAD suite is required for GUI packaging, but no yosys binary was provided." >&2
-            echo "Pass --oss-cad-bin or set CHIPCOMPILER_OSS_CAD_DIR to a yosys/slang-capable bundle." >&2
-            echo "If you intentionally want a package without flow support, set ENABLE_OSS_CAD_SUITE=false." >&2
-            exit 1
-        fi
-        if [[ ! -f "$OSS_CAD_BIN" ]]; then
-            echo "ERROR: OSS CAD yosys binary not found: $OSS_CAD_BIN" >&2
-            exit 1
-        fi
-        verify_yosys_slang_support "$OSS_CAD_BIN"
-        OSS_CAD_ROOT="$(dirname "$(dirname "$OSS_CAD_BIN")")"
-        if [[ ! -f "$OSS_CAD_ROOT/bin/yosys" ]]; then
-            echo "ERROR: invalid OSS CAD suite root: $OSS_CAD_ROOT" >&2
-            exit 1
-        fi
-        rm -rf "$OSS_CAD_BUNDLE_DIR"
-        cp -a "$OSS_CAD_ROOT" "$OSS_CAD_BUNDLE_DIR"
-        verify_yosys_slang_support "$OSS_CAD_BUNDLE_DIR/bin/yosys"
-    else
-        prepare_placeholder_oss_cad_suite "$OSS_CAD_BUNDLE_DIR"
-    fi
 
-    # cp -RL above dereferences pnpm's symlinked node_modules, breaking module
-    # resolution. Remove any copied workspace node_modules so pnpm can recreate
-    # the proper symlink layout from a clean tree.
+    # The source copy above dereferences pnpm's symlinked node_modules, breaking
+    # module resolution. Remove any copied workspace node_modules so pnpm can
+    # recreate the proper symlink layout from a clean tree.
     find "$GUI_DIR" -type d -name node_modules -prune -exec rm -rf '{}' +
 
     pnpm_with_repo_node "$GUI_DIR" install --frozen-lockfile
@@ -288,31 +259,15 @@ main() {
         exit 1
     fi
 
-    if ! find "$RELEASE_DIR" -mindepth 1 -print -quit | grep -q .; then
+    if [[ -z "$(find "$RELEASE_DIR" -mindepth 1 -print -quit)" ]]; then
         echo "ERROR: Electron release directory is empty: $RELEASE_DIR" >&2
         find "$ELECTRON_APP_DIR" -maxdepth 4 -mindepth 1 -print >&2 || true
         exit 1
     fi
 
-    validate_packaged_oss_cad_suite "$RELEASE_DIR"
+    validate_no_packaged_oss_cad_suite "$RELEASE_DIR"
 
-    LOWER_ELECTRON_TARGETS="$(echo "$ECOS_ELECTRON_LINUX_TARGETS" | tr '[:upper:]' '[:lower:]')"
-
-    if [[ ",$LOWER_ELECTRON_TARGETS," == *",appimage,"* ]]; then
-        if ! find "$RELEASE_DIR" -type f -name "*.AppImage" -print -quit | grep -q .; then
-            echo "ERROR: AppImage artifact not found under: $RELEASE_DIR" >&2
-            find "$RELEASE_DIR" -maxdepth 4 -mindepth 1 -print >&2 || true
-            exit 1
-        fi
-    fi
-
-    if [[ ",$LOWER_ELECTRON_TARGETS," == *",deb,"* ]]; then
-        if ! find "$RELEASE_DIR" -type f -name "*.deb" -print -quit | grep -q .; then
-            echo "ERROR: deb artifact not found under: $RELEASE_DIR" >&2
-            find "$RELEASE_DIR" -maxdepth 4 -mindepth 1 -print >&2 || true
-            exit 1
-        fi
-    fi
+    validate_requested_linux_artifacts "$RELEASE_DIR" "$ECOS_ELECTRON_LINUX_TARGETS"
 
     mkdir -p "$(dirname "$OUT_TAR")"
     tar -cf "$OUT_TAR" -C "$RELEASE_DIR" .

@@ -380,37 +380,6 @@
         "recordedRepoMappingEntries": []
       }
     },
-    "@@ecos-bazel+//rules:oss_cad_suite.bzl%oss_cad_suite": {
-      "general": {
-        "bzlTransitiveDigest": "03Inx7wQyprKJ4MWxzsdFZLuQH3MHKojPiyQ94ViMA4=",
-        "usagesDigest": "x/Le/WtGIeDH2PN7TWyVTDm5S0+wJdzP7lBOL2iTz54=",
-        "recordedFileInputs": {},
-        "recordedDirentsInputs": {},
-        "envVariables": {},
-        "generatedRepoSpecs": {
-          "oss_cad_suite": {
-            "repoRuleId": "@@ecos-bazel+//rules:download_and_extract.bzl%download_and_extract",
-            "attributes": {
-              "urls": [
-                "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-01-22/oss-cad-suite-linux-x64-20260122.tgz"
-              ],
-              "sha256": "b536961118dd7497707752d9fd45714c5f6dacd150e02387bac4f75c28a16567",
-              "build_file_template": "@@ecos-bazel+//rules:oss_cad_suite.BUILD.bazel"
-            }
-          },
-          "oss_cad_suite_pruned": {
-            "repoRuleId": "@@ecos-bazel+//rules:oss_cad_suite.bzl%_oss_cad_suite_pruned_repo",
-            "attributes": {
-              "urls": [
-                "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-01-22/oss-cad-suite-linux-x64-20260122.tgz"
-              ],
-              "sha256": "b536961118dd7497707752d9fd45714c5f6dacd150e02387bac4f75c28a16567"
-            }
-          }
-        },
-        "recordedRepoMappingEntries": []
-      }
-    },
     "@@ecos-bazel+//rules:patchelf.bzl%patchelf": {
       "general": {
         "bzlTransitiveDigest": "AFzYBso+CG+yLIee4gmiWLkWo0vVUfDLJYJD4BHy7tA=",

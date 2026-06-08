@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { execFile as execFileCallback } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -15,12 +15,9 @@ async function makeFakeRelease() {
   tempDirs.push(rootDir)
 
   const releaseDir = join(rootDir, 'release')
-  const ossCadDir = join(releaseDir, 'linux-unpacked', 'resources', 'resources', 'oss-cad-suite')
-  await mkdir(join(ossCadDir, 'bin'), { recursive: true })
-  await mkdir(join(ossCadDir, 'share', 'yosys', 'plugins'), { recursive: true })
+  await mkdir(releaseDir, { recursive: true })
 
   return {
-    ossCadDir,
     releaseDir,
     rootDir,
   }
@@ -111,39 +108,71 @@ install
 `)
   })
 
-  it('fails when the packaged release is missing a usable OSS CAD suite', async () => {
+  it('accepts a release without packaged OSS CAD suite', async () => {
     const { releaseDir } = await makeFakeRelease()
 
     await expect(execFile('bash', [
       '-lc',
-      `source "${scriptPath}"; validate_packaged_oss_cad_suite "${releaseDir}"`,
-    ])).rejects.toMatchObject({
-      stderr: expect.stringContaining('packaged OSS CAD'),
-    })
-  })
-
-  it('accepts a packaged OSS CAD suite when yosys and slang plugin are present and usable', async () => {
-    const { ossCadDir, releaseDir } = await makeFakeRelease()
-    const yosysPath = join(ossCadDir, 'bin', 'yosys')
-    const slangPluginPath = join(ossCadDir, 'share', 'yosys', 'plugins', 'slang.so')
-
-    await writeFile(yosysPath, `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$*" == *"-m slang"* ]]; then
-  exit 0
-fi
-echo "unexpected yosys invocation: $*" >&2
-exit 1
-`)
-    await chmod(yosysPath, 0o755)
-    await writeFile(slangPluginPath, 'fake-slang-plugin')
-
-    await expect(execFile('bash', [
-      '-lc',
-      `source "${scriptPath}"; validate_packaged_oss_cad_suite "${releaseDir}"`,
+      `source "${scriptPath}"; validate_no_packaged_oss_cad_suite "${releaseDir}"`,
     ])).resolves.toMatchObject({
       stderr: '',
       stdout: '',
     })
   })
+
+  it('fails when a release still contains packaged OSS CAD suite', async () => {
+    const { releaseDir } = await makeFakeRelease()
+    await mkdir(join(releaseDir, 'linux-unpacked', 'resources', 'resources', 'oss-cad-suite'), {
+      recursive: true,
+    })
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${scriptPath}"; validate_no_packaged_oss_cad_suite "${releaseDir}"`,
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining('packaged OSS CAD suite must not be present'),
+    })
+  })
+
+  it('fails when any release entry contains packaged OSS CAD suite', async () => {
+    const { releaseDir } = await makeFakeRelease()
+    await mkdir(join(releaseDir, 'custom-layout', 'resources', 'oss-cad-suite'), {
+      recursive: true,
+    })
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${scriptPath}"; validate_no_packaged_oss_cad_suite "${releaseDir}"`,
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining('packaged OSS CAD suite must not be present'),
+    })
+  })
+
+  it('fails when a requested rpm artifact is missing', async () => {
+    const { releaseDir } = await makeFakeRelease()
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${scriptPath}"; validate_requested_linux_artifacts "${releaseDir}" rpm`,
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining('rpm artifact not found'),
+    })
+  })
+
+  it('accepts all requested Linux artifacts when they exist', async () => {
+    const { releaseDir } = await makeFakeRelease()
+    await writeFile(join(releaseDir, 'ECOS-Studio.AppImage'), '')
+    await writeFile(join(releaseDir, 'ecos-studio.deb'), '')
+    await writeFile(join(releaseDir, 'ecos-studio.rpm'), '')
+    await mkdir(join(releaseDir, 'linux-unpacked'), { recursive: true })
+
+    await expect(execFile('bash', [
+      '-lc',
+      `source "${scriptPath}"; validate_requested_linux_artifacts "${releaseDir}" appimage,deb,rpm,dir`,
+    ])).resolves.toMatchObject({
+      stderr: '',
+      stdout: '',
+    })
+  })
+
 })
