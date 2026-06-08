@@ -52,14 +52,15 @@ export function createEccCliRuntimeEnv(
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
+    const {
+      CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
+      ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
+      ...baseEnv
+    } = options.env
+
 
     if (packagedRuntimeBin) {
-      const nextPath = prependPath(options.env, packagedRuntimeBin, options.platform)
-      const {
-        CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
-        ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
-        ...baseEnv
-      } = options.env
+      const nextPath = prependPath(baseEnv, packagedRuntimeBin, options.platform)
 
       return {
         ...baseEnv,
@@ -68,7 +69,7 @@ export function createEccCliRuntimeEnv(
       }
     }
 
-    return { ...options.env }
+    return { ...baseEnv }
   }
 
   return { ...options.env }

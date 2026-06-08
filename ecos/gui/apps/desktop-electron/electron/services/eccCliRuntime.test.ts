@@ -372,7 +372,7 @@ describe('createEccCliRuntimeEnv', () => {
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
-  it('does not inject the development wrapper in packaged mode without bundled ecc', () => {
+  it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
 
@@ -380,6 +380,8 @@ describe('createEccCliRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        CHIPCOMPILER_OSS_CAD_DIR: '/host/oss-cad-suite',
+        ECOS_ELECTRON_OSS_CAD_DIR: '/host/electron-oss-cad-suite',
         PATH: '/usr/bin',
       },
       isPackaged: true,
