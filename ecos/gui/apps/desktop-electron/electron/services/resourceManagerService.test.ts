@@ -165,6 +165,139 @@ describe('ResourceManagerService', () => {
     ]))
   })
 
+  it('builds a runtime env from active healthy Resource Manager resources', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const pdksDir = join(root, 'data', 'pdks')
+    const packagedBin = join(root, 'packaged', 'binaries')
+    const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
+    const duplicateRoot = join(toolsDir, 'duplicate', '1.0')
+    const inactiveRoot = join(toolsDir, 'inactive', '1.0')
+    const missingRoot = join(toolsDir, 'missing', '1.0')
+    const ics55Root = join(pdksDir, 'ics55', '1.10.100')
+    await mkdir(join(yosysRoot, 'bin'), { recursive: true })
+    await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
+    await mkdir(join(inactiveRoot, 'bin'), { recursive: true })
+    await mkdir(ics55Root, { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(duplicateRoot, 'bin', 'duplicate'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(inactiveRoot, 'bin', 'inactive'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
+    await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
+    await chmod(join(inactiveRoot, 'bin', 'inactive'), 0o755)
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:yosys': {
+          type: 'tool',
+          name: 'yosys',
+          version: '2026-05-13',
+          path: yosysRoot,
+          executable: 'bin/yosys',
+          active: true,
+          managed: true,
+        },
+        'tool:duplicate': {
+          type: 'tool',
+          name: 'duplicate',
+          version: '1.0',
+          path: duplicateRoot,
+          executable: 'bin/duplicate',
+          active: true,
+          managed: true,
+        },
+        'tool:inactive': {
+          type: 'tool',
+          name: 'inactive',
+          version: '1.0',
+          path: inactiveRoot,
+          executable: 'bin/inactive',
+          active: false,
+          managed: true,
+        },
+        'tool:missing': {
+          type: 'tool',
+          name: 'missing',
+          version: '1.0',
+          path: missingRoot,
+          executable: 'bin/missing',
+          active: true,
+          managed: true,
+        },
+        'pdk:ics55': {
+          type: 'pdk',
+          id: 'ics55',
+          name: 'ICsprout 55nm',
+          pdk_id: 'ics55',
+          version: '1.10.100',
+          path: ics55Root,
+          canonical_path: ics55Root,
+          active: true,
+          managed: true,
+          health: 'ok',
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir,
+    })
+    const baseEnv = {
+      PATH: [
+        packagedBin,
+        join(duplicateRoot, 'bin'),
+        '/usr/bin',
+        join(yosysRoot, 'bin'),
+      ].join(':'),
+      ECOS_ELECTRON_OSS_CAD_DIR: '/packaged/oss-cad-suite',
+      KEEP_ME: 'yes',
+    }
+
+    const env = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })
+
+    expect(baseEnv.PATH).toBe([
+      packagedBin,
+      join(duplicateRoot, 'bin'),
+      '/usr/bin',
+      join(yosysRoot, 'bin'),
+    ].join(':'))
+    expect(env).not.toBe(baseEnv)
+    expect(env.PATH?.split(':')).toEqual([
+      packagedBin,
+      join(yosysRoot, 'bin'),
+      join(duplicateRoot, 'bin'),
+      '/usr/bin',
+    ])
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(yosysRoot)
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
+    expect(env.CHIPCOMPILER_ICS55_PDK_ROOT).toBe(ics55Root)
+    expect(env.ICS55_PDK_ROOT).toBe(ics55Root)
+    expect(env.KEEP_ME).toBe('yes')
+    expect(env.PATH).not.toContain(join(inactiveRoot, 'bin'))
+    expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
+  })
+
+  it('returns a copied base env when no Resource Manager manifest exists', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+    const baseEnv = {
+      PATH: '/usr/bin',
+      ECOS_ELECTRON_OSS_CAD_DIR: '/packaged/oss-cad-suite',
+    }
+
+    const env = await service.createRuntimeEnv(baseEnv, { platform: 'linux' })
+
+    expect(env).toEqual(baseEnv)
+    expect(env).not.toBe(baseEnv)
+  })
+
   it('installs a managed tool and emits progress without using the legacy server', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createFixtureArchive(root)
