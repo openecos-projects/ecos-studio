@@ -45,17 +45,6 @@ function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string 
     ?? join(options.appPath, 'resources')
 }
 
-function resolvePackagedOssCadRoot(options: EccCliRuntimeEnvOptions): string | null {
-  const resourcesPath = resolvePackagedResourcesPath(options)
-  const yosysExecutable = options.platform === 'win32' ? 'yosys.exe' : 'yosys'
-  const candidateRoots = [
-    options.env.ECOS_ELECTRON_OSS_CAD_DIR,
-    join(resourcesPath, 'resources', 'oss-cad-suite'),
-  ].filter((root): root is string => Boolean(root))
-
-  return candidateRoots.find((root) => existsSync(join(root, 'bin', yosysExecutable)))
-    ?? null
-}
 
 export function createEccCliRuntimeEnv(
   options: EccCliRuntimeEnvOptions,
@@ -63,7 +52,6 @@ export function createEccCliRuntimeEnv(
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
-    const ossCadRoot = resolvePackagedOssCadRoot(options)
 
     if (packagedRuntimeBin) {
       const nextPath = prependPath(options.env, packagedRuntimeBin, options.platform)
@@ -76,12 +64,6 @@ export function createEccCliRuntimeEnv(
       return {
         ...baseEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
-        ...(ossCadRoot
-          ? {
-              CHIPCOMPILER_OSS_CAD_DIR: ossCadRoot,
-              ECOS_ELECTRON_OSS_CAD_DIR: ossCadRoot,
-            }
-          : {}),
         [nextPath.key]: nextPath.value,
       }
     }
