@@ -59,6 +59,14 @@ function complete(
   child.emit('close', exitCode, null)
 }
 
+async function waitForSpawn(harness: ReturnType<typeof createSpawnHarness>, index: number): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (harness.children[index]) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`Timed out waiting for spawn ${index}`)
+}
+
 describe('EccCliAdapter', () => {
   const tempDirs: string[] = []
 
@@ -184,6 +192,105 @@ describe('EccCliAdapter', () => {
       'load_workspace',
       'success',
       expect.any(Number),
+    )
+  })
+
+  it('resolves envProvider for each spawned command and uses it for logging and spawn env', async () => {
+    const firstTempDir = createTempDir()
+    const secondTempDir = createTempDir()
+    const firstBin = join(firstTempDir, 'bin')
+    const secondBin = join(secondTempDir, 'bin')
+    mkdirSync(firstBin, { recursive: true })
+    mkdirSync(secondBin, { recursive: true })
+    writeFileSync(join(firstBin, 'ecc'), '#!/usr/bin/env bash\n')
+    writeFileSync(join(secondBin, 'ecc'), '#!/usr/bin/env bash\n')
+    chmodSync(join(firstBin, 'ecc'), 0o755)
+    chmodSync(join(secondBin, 'ecc'), 0o755)
+
+    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const harness = createSpawnHarness()
+    const envProvider = vi.fn()
+      .mockResolvedValueOnce({ PATH: `${firstBin}:/usr/bin`, ECOS_DYNAMIC: 'first' })
+      .mockResolvedValueOnce({ PATH: `${secondBin}:/usr/bin`, ECOS_DYNAMIC: 'second' })
+    const adapter = new EccCliAdapter({
+      env: { PATH: '/static/bin:/usr/bin', ECOS_STATIC: 'yes' },
+      envProvider,
+      spawn: harness.spawn,
+    })
+
+    const firstPromise = adapter.execute(request('load_workspace', {
+      directory: '/work/one',
+    }), { emit: vi.fn() })
+    await waitForSpawn(harness, 0)
+    complete(harness.children[0], {
+      cmd: 'load_workspace',
+      data: { directory: '/work/one' },
+      message: ['loaded'],
+      response: 'success',
+    })
+    await firstPromise
+
+    const secondPromise = adapter.execute(request('load_workspace', {
+      directory: '/work/two',
+    }), { emit: vi.fn() })
+    await waitForSpawn(harness, 1)
+    complete(harness.children[1], {
+      cmd: 'load_workspace',
+      data: { directory: '/work/two' },
+      message: ['loaded'],
+      response: 'success',
+    })
+    await secondPromise
+
+    expect(envProvider).toHaveBeenCalledTimes(2)
+    expect(harness.calls[0].options.env).toMatchObject({ ECOS_DYNAMIC: 'first' })
+    expect(harness.calls[1].options.env).toMatchObject({ ECOS_DYNAMIC: 'second' })
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
+      'ecc',
+      join(firstBin, 'ecc'),
+      'workspace load --directory /work/one --json',
+      `${firstBin}:/usr/bin`,
+    )
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
+      'ecc',
+      join(secondBin, 'ecc'),
+      'workspace load --directory /work/two --json',
+      `${secondBin}:/usr/bin`,
+    )
+  })
+
+  it('falls back to static env when envProvider fails', async () => {
+    const harness = createSpawnHarness()
+    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const adapter = new EccCliAdapter({
+      env: { PATH: '/static/bin:/usr/bin', ECOS_STATIC: 'yes' },
+      envProvider: vi.fn(async () => {
+        throw new Error('manifest unavailable')
+      }),
+      spawn: harness.spawn,
+    })
+
+    const loadPromise = adapter.execute(request('load_workspace', {
+      directory: '/work/demo',
+    }), { emit: vi.fn() })
+    await waitForSpawn(harness, 0)
+
+    expect(harness.calls[0].options.env).toMatchObject({
+      PATH: '/static/bin:/usr/bin',
+      ECOS_STATIC: 'yes',
+    })
+    complete(harness.children[0], {
+      cmd: 'load_workspace',
+      data: { directory: '/work/demo' },
+      message: ['loaded'],
+      response: 'success',
+    })
+    await expect(loadPromise).resolves.toMatchObject({ ok: true })
+    expect(loggerDebug).toHaveBeenCalledWith(
+      '[ECC CLI] env provider failed: %s',
+      'manifest unavailable',
     )
   })
 
