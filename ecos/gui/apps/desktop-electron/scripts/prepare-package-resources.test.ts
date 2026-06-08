@@ -30,27 +30,6 @@ async function createWorkspace() {
   }
 }
 
-async function createFakeOssCadSuite(rootDir: string) {
-  const suiteDir = join(rootDir, 'fake-oss-cad-suite')
-  const binDir = join(suiteDir, 'bin')
-  await mkdir(binDir, { recursive: true })
-
-  const yosysPath = join(binDir, 'yosys')
-  await writeFile(yosysPath, `#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$*" == *"-m slang"* ]]; then
-  exit 0
-fi
-echo "expected slang check" >&2
-exit 1
-`)
-  await chmod(yosysPath, 0o755)
-
-  return {
-    suiteDir,
-    yosysPath,
-  }
-}
 
 async function createFakeEccRuntime(rootDir: string) {
   const bundleDir = join(rootDir, 'fake-ecc-cli-bundle')
@@ -116,47 +95,48 @@ exit 1
     })
   })
 
-  it('fails instead of silently packaging a placeholder OSS CAD suite by default', async () => {
+  it('succeeds with only an ECC CLI artifact', async () => {
     const workspace = await createWorkspace()
-    const eccRuntime = await createFakeEccRuntime(workspace.rootDir)
-
-    await expect(execFile(workspace.scriptPath, {
-      cwd: dirname(workspace.scriptPath),
-      env: {
-        ...process.env,
-        ECOS_ECC_CLI_ARTIFACT: eccRuntime,
-      },
-    })).rejects.toMatchObject({
-      stderr: expect.stringContaining('OSS CAD'),
-    })
-  })
-
-  it('copies the provided OSS CAD suite and installs an ECC CLI wrapper', async () => {
-    const workspace = await createWorkspace()
-    const ossCadSuite = await createFakeOssCadSuite(workspace.rootDir)
     const eccRuntime = await createFakeEccRuntime(workspace.rootDir)
 
     await execFile(workspace.scriptPath, {
       cwd: dirname(workspace.scriptPath),
       env: {
         ...process.env,
-        CHIPCOMPILER_OSS_CAD_DIR: ossCadSuite.suiteDir,
         ECOS_ECC_CLI_ARTIFACT: eccRuntime,
       },
     })
 
-    const copiedYosysPath = join(workspace.resourcesDir, 'oss-cad-suite', 'bin', 'yosys')
     const wrapperPath = join(workspace.resourcesDir, 'binaries', 'ecc')
     const wrapper = await readFile(wrapperPath, 'utf8')
 
-    await expect(stat(copiedYosysPath)).resolves.toBeTruthy()
-    await expect(stat(join(workspace.resourcesDir, 'oss-cad-suite', 'placeholder.txt'))).rejects.toBeTruthy()
+    await expect(stat(join(workspace.resourcesDir, 'oss-cad-suite'))).rejects.toBeTruthy()
     await expect(readdir(join(workspace.resourcesDir, 'binaries', 'ecc-runtime'))).resolves.toEqual(
       expect.arrayContaining(['_internal', 'ecc']),
     )
     await expect(stat(join(workspace.resourcesDir, 'binaries', 'ecc-runtime', 'ecc'))).resolves.toMatchObject({
       mode: expect.any(Number),
     })
+    await expect(stat(wrapperPath)).resolves.toMatchObject({
+      mode: expect.any(Number),
+    })
     expect(wrapper).toContain('exec "$SCRIPT_DIR/ecc-runtime/ecc" "$@"')
+  })
+
+  it('ignores host OSS CAD env while preparing desktop resources', async () => {
+    const workspace = await createWorkspace()
+    const eccRuntime = await createFakeEccRuntime(workspace.rootDir)
+
+    await execFile(workspace.scriptPath, {
+      cwd: dirname(workspace.scriptPath),
+      env: {
+        ...process.env,
+        CHIPCOMPILER_OSS_CAD_DIR: join(workspace.rootDir, 'missing-oss-cad-suite'),
+        ECOS_OSS_CAD_BIN: join(workspace.rootDir, 'missing-oss-cad-suite', 'bin', 'yosys'),
+        ECOS_ECC_CLI_ARTIFACT: eccRuntime,
+      },
+    })
+
+    await expect(stat(join(workspace.resourcesDir, 'oss-cad-suite'))).rejects.toBeTruthy()
   })
 })
