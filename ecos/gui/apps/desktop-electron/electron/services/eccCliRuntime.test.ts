@@ -22,7 +22,7 @@ function createRepoFixture(): { appPath: string; repoRoot: string; userDataPath:
 }
 
 describe('createEccCliRuntimeEnv', () => {
-  it('leaves development env unchanged so global ecc from PATH is used', () => {
+  it('prepends the source-tree ECC venv in development mode when available', () => {
     const fixture = createRepoFixture()
     mkdirSync(join(fixture.repoRoot, 'ecc'), { recursive: true })
     const pyprojectPath = join(fixture.repoRoot, 'ecc', 'pyproject.toml')
@@ -48,7 +48,7 @@ describe('createEccCliRuntimeEnv', () => {
 
     expect(env).toEqual({
       HOME: '/home/ecos',
-      PATH: '/usr/bin',
+      PATH: `${venvBin}:/usr/bin`,
     })
     expect(existsSync(wrapperPath)).toBe(false)
   })

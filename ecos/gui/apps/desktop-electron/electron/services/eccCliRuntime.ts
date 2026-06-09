@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -40,6 +40,29 @@ function resolvePackagedRuntimeBin(options: EccCliRuntimeEnvOptions): string | n
   return existsSync(join(binariesPath, executableName)) ? binariesPath : null
 }
 
+function findRepoRootFromAppPath(appPath: string): string | null {
+  let current = appPath
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(join(current, 'ecc', 'pyproject.toml'))) {
+      return current
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
+}
+
+function resolveDevelopmentRuntimeBin(options: EccCliRuntimeEnvOptions): string | null {
+  if (options.platform === 'win32') return null
+
+  const repoRoot = findRepoRootFromAppPath(options.appPath)
+  if (!repoRoot) return null
+
+  const venvBin = join(repoRoot, 'ecc', '.venv', 'bin')
+  return existsSync(join(venvBin, 'ecc')) ? venvBin : null
+}
+
 function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string {
   return options.env.ECOS_ELECTRON_RESOURCES_PATH
     ?? join(options.appPath, 'resources')
@@ -70,6 +93,15 @@ export function createEccCliRuntimeEnv(
     }
 
     return { ...baseEnv }
+  }
+
+  const developmentRuntimeBin = resolveDevelopmentRuntimeBin(options)
+  if (developmentRuntimeBin) {
+    const nextPath = prependPath(options.env, developmentRuntimeBin, options.platform)
+    return {
+      ...options.env,
+      [nextPath.key]: nextPath.value,
+    }
   }
 
   return { ...options.env }
