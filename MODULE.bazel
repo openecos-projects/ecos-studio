@@ -15,8 +15,8 @@ git_override(
 # Pin the ECC CLI bundle input used by the Bazel release build.
 git_override(
     module_name = "ecc",
-    # v0.1.0-alpha.3-unstable-e2515dc
-    commit = "e2515dc1a97035c1221e3b954b3c66d38162a1a0",
+    # workspace config sync and rerun artifact preparation companion PR
+    commit = "125e39c6559b4440d79505a3685b6b04a28519f9",
     init_submodules = True,
     remote = "https://github.com/openecos-projects/ecc.git",
 )
