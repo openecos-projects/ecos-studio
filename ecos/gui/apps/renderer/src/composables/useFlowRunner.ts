@@ -5,6 +5,10 @@ import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
 import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
 import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
+import {
+  clearHomeRunArtifactResetAwaitingBackendStart,
+  markHomeRunArtifactResetAwaitingBackendStart,
+} from './homeRunArtifacts'
 
 // ============ 模块级运行标志（run_step / rtl2gds 共用）============
 
@@ -12,6 +16,10 @@ import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
 const RUN_STEP_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['home', 'parameters']
+
+export interface FlowRunOptions {
+  rerun?: boolean
+}
 
 function normalizeWorkspacePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')
@@ -111,7 +119,7 @@ export function useFlowRunner() {
   /**
    * 运行当前步骤
    */
-  async function runFlow(): Promise<RunStepResponse | null> {
+  async function runFlow(options: FlowRunOptions = {}): Promise<RunStepResponse | null> {
     // 从动态路由参数获取当前步骤
     const step = getCurrentStep()
 
@@ -160,7 +168,7 @@ export function useFlowRunner() {
         data: {
           directory,
           step: step as StepEnum,
-          rerun: false
+          rerun: Boolean(options.rerun)
         }
       })
       console.log('run step result', result)
@@ -211,7 +219,7 @@ export function useFlowRunner() {
    * 执行过程中，Electron runtime 转发 CLI lifecycle events，
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
-  async function runAllFlow(): Promise<any | null> {
+  async function runAllFlow(options: FlowRunOptions = {}): Promise<any | null> {
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
       console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
@@ -239,6 +247,9 @@ export function useFlowRunner() {
     }
 
     clearTransientInteractionLocks()
+    if (options.rerun) {
+      markHomeRunArtifactResetAwaitingBackendStart(directory)
+    }
     markFlowExecutionActiveForWorkspace(directory)
     state.value = StateEnum.Ongoing
     error.value = null
@@ -250,7 +261,7 @@ export function useFlowRunner() {
         cmd: CMDEnum.rtl2gds,
         data: {
           directory,
-          rerun: false
+          rerun: Boolean(options.rerun)
         }
       })
       console.log('rtl2gds result:', result)
@@ -287,6 +298,7 @@ export function useFlowRunner() {
       })
     } finally {
       clearTransientInteractionLocks()
+      clearHomeRunArtifactResetAwaitingBackendStart(directory)
       clearFlowExecutionActiveForWorkspace(directory)
     }
     return null

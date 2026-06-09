@@ -11,6 +11,9 @@ const {
   runStepApi,
   rtl2gdsApi,
   currentProject,
+  requestHomeRunArtifactReset,
+  markHomeRunArtifactResetAwaitingBackendStart,
+  clearHomeRunArtifactResetAwaitingBackendStart,
 } = vi.hoisted(() => ({
   ensureDesktopRuntime: vi.fn(() => false),
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
@@ -37,6 +40,9 @@ const {
   runStepApi: vi.fn(),
   rtl2gdsApi: vi.fn(),
   currentProject: { value: null as { path: string } | null },
+  requestHomeRunArtifactReset: vi.fn(),
+  markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
+  clearHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -70,6 +76,12 @@ vi.mock('@/api/flow', () => ({
   rtl2gdsApi,
 }))
 
+vi.mock('./homeRunArtifacts', () => ({
+  requestHomeRunArtifactReset,
+  markHomeRunArtifactResetAwaitingBackendStart,
+  clearHomeRunArtifactResetAwaitingBackendStart,
+}))
+
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
@@ -101,6 +113,9 @@ describe('useFlowRunner desktop-only guard', () => {
     }
     runStepApi.mockReset()
     rtl2gdsApi.mockReset()
+    requestHomeRunArtifactReset.mockReset()
+    markHomeRunArtifactResetAwaitingBackendStart.mockReset()
+    clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
     flowExecutionActive.value = false
     currentProject.value = null
   })
@@ -161,6 +176,29 @@ describe('useFlowRunner desktop-only guard', () => {
         rerun: false,
       },
     })
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
+  })
+
+  it('passes rerun=true to the full flow API when requested', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: true },
+      message: ['done'],
+    })
+
+    const { runAllFlow } = useFlowRunner()
+
+    await expect(runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
+    expect(rtl2gdsApi).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      data: {
+        directory: '/work/demo',
+        rerun: true,
+      },
+    })
   })
 
   it('does not mark the full flow running when the runtime bridge is unavailable', async () => {
@@ -194,6 +232,30 @@ describe('useFlowRunner desktop-only guard', () => {
       data: {
         directory: '/work/demo',
         rerun: false,
+        step: StepEnum.FLOORPLAN,
+      },
+    })
+  })
+
+  it('passes rerun=true to the single step API when requested', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    runStepApi.mockResolvedValue({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+
+    const { runFlow } = useFlowRunner()
+
+    await runFlow({ rerun: true })
+
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
+    expect(runStepApi).toHaveBeenCalledWith({
+      cmd: 'run_step',
+      data: {
+        directory: '/work/demo',
+        rerun: true,
         step: StepEnum.FLOORPLAN,
       },
     })

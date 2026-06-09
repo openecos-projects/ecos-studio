@@ -82,6 +82,7 @@ import {
   markFlowExecutionActiveForWorkspace,
 } from './useFlowRunner'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { requestHomeRunArtifactReset } from './homeRunArtifacts'
 
 function createDeferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void
@@ -223,6 +224,261 @@ describe('useParameters desktop bridge integration', () => {
       '/workspace/demo/home/parameters.json',
       expect.stringContaining('"Design": "updated_demo"'),
     )
+    expect(refreshConfigApi).toHaveBeenCalledWith({
+      cmd: 'refresh_config',
+      data: {
+        directory: '/workspace/demo',
+      },
+    })
+  })
+
+  it('keeps displayed parameters unchanged when rerun reset is requested before parameters.json changes', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile
+      .mockResolvedValueOnce(JSON.stringify({
+      PDK: 'ics55',
+      Design: 'demo',
+      'Top module': 'chip_top',
+      Die: { Size: [100, 100], Area: 10000 },
+      Core: {
+        Size: [80, 80],
+        Area: 6400,
+        'Bounding box': '(0,0) (80,80)',
+        Utilitization: 0.5,
+        Margin: [4, 4],
+        'Aspect ratio': 1,
+      },
+      'Max fanout': 20,
+      'Target density': 0.3,
+      'Target overflow': 0.1,
+      'Global right padding': 0,
+      'Cell padding x': 600,
+      'Routability opt flag': 1,
+      Clock: 'clk',
+      'Frequency max [MHz]': 100,
+      'Bottom layer': 'MET2',
+      'Top layer': 'MET5',
+      'PDK Root': '/pdks/ics55',
+    }))
+      .mockResolvedValueOnce(JSON.stringify({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'chip_top',
+        Die: { Size: [110, 110], Area: 12100 },
+        Core: {
+          Size: [88, 88],
+          Area: 7744,
+          'Bounding box': '(0,0) (88,88)',
+          Utilitization: 0.5,
+          Margin: [4, 4],
+          'Aspect ratio': 1,
+        },
+        'Max fanout': 20,
+        'Target density': 0.3,
+        'Target overflow': 0.1,
+        'Global right padding': 0,
+        'Cell padding x': 600,
+        'Routability opt flag': 1,
+        Clock: 'clk',
+        'Frequency max [MHz]': 100,
+        'Bottom layer': 'MET2',
+        'Top layer': 'MET5',
+        'PDK Root': '/pdks/ics55',
+      }))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+
+    requestHomeRunArtifactReset('/workspace/demo')
+
+    expect(parameters.config.design).toBe('demo')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.frequencyMax).toBe(100)
+    expect(parameters.config.bottomLayer).toBe('MET2')
+    expect(parameters.config.topLayer).toBe('MET5')
+    expect(parameters.config.die.Size).toEqual([100, 100])
+    expect(parameters.config.die.area).toBe(10000)
+    expect(parameters.config.core.Size).toEqual([80, 80])
+    expect(parameters.config.core.area).toBe(6400)
+    expect(parameters.config.core.boundingBox).toBe('(0,0) (80,80)')
+    expect(parameters.config.core.utilization).toBe(0.5)
+    expect(parameters.config.core.margin).toEqual([4, 4])
+    await vi.waitFor(() => {
+      expect(parameters.hasChanges.value).toBe(false)
+    })
+
+    await parameters.loadParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.die.Size).toEqual([110, 110])
+    })
+    expect(parameters.config.core.Size).toEqual([88, 88])
+    expect(parameters.config.core.boundingBox).toBe('(0,0) (88,88)')
+    expect(parameters.hasChanges.value).toBe(false)
+  })
+
+  it('keeps the last valid parameters during transient rerun home reloads without a parameters path', async () => {
+    fetchSharedHomeData
+      .mockResolvedValueOnce({
+        parameters: '/workspace/demo/home/parameters.json',
+      })
+      .mockResolvedValueOnce({
+        parameters: '',
+      })
+      .mockResolvedValueOnce({
+        parameters: '/workspace/demo/home/parameters.json',
+      })
+    readProjectTextFile
+      .mockResolvedValueOnce(JSON.stringify({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'chip_top',
+        Die: { Size: [100, 100], Area: 10000 },
+        Core: {
+          Size: [80, 80],
+          Area: 6400,
+          'Bounding box': '(0,0) (80,80)',
+          Utilitization: 0.5,
+          Margin: [4, 4],
+          'Aspect ratio': 1,
+        },
+        'Max fanout': 20,
+        'Target density': 0.3,
+        'Target overflow': 0.1,
+        'Global right padding': 0,
+        'Cell padding x': 600,
+        'Routability opt flag': 1,
+        Clock: 'clk',
+        'Frequency max [MHz]': 100,
+        'Bottom layer': 'MET2',
+        'Top layer': 'MET5',
+        'PDK Root': '/pdks/ics55',
+      }))
+      .mockResolvedValueOnce(JSON.stringify({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'chip_top',
+        Die: { Size: [], Area: 0 },
+        Core: {
+          Size: [],
+          Area: 0,
+          'Bounding box': '',
+          Utilitization: 0.5,
+          Margin: [4, 4],
+          'Aspect ratio': 1,
+        },
+        'Max fanout': 20,
+        'Target density': 0.3,
+        'Target overflow': 0.1,
+        'Global right padding': 0,
+        'Cell padding x': 600,
+        'Routability opt flag': 1,
+        Clock: 'clk',
+        'Frequency max [MHz]': 100,
+        'Bottom layer': 'MET2',
+        'Top layer': 'MET5',
+        'PDK Root': '/pdks/ics55',
+      }))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+    await parameters.loadParameters()
+
+    expect(parameters.config.design).toBe('demo')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.die.Size).toEqual([100, 100])
+    expect(parameters.config.core.Size).toEqual([80, 80])
+    expect(parameters.hasChanges.value).toBe(false)
+
+    await parameters.loadParameters()
+
+    expect(parameters.config.design).toBe('demo')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(parameters.config.die.Size).toEqual([])
+    expect(parameters.config.core.Size).toEqual([])
+    expect(parameters.hasChanges.value).toBe(false)
+
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
+  })
+
+  it('reloads parameters directly from the cached file path while a flow is running', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile
+      .mockResolvedValueOnce(parametersJson())
+      .mockResolvedValueOnce(parametersJson({
+        Die: { Size: [], Area: 0 },
+        Core: {
+          Size: [],
+          Area: 0,
+          'Bounding box': '',
+          Utilitization: 0.5,
+          Margin: [4, 4],
+          'Aspect ratio': 1,
+        },
+      }))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+    expect(parameters.config.die.Size).toEqual([100, 100])
+    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+    await parameters.refreshParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.die.Size).toEqual([])
+    })
+
+    expect(parameters.config.design).toBe('demo')
+    expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.clock).toBe('clk')
+    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+    expect(readProjectTextFile).toHaveBeenLastCalledWith('/workspace/demo/home/parameters.json')
+
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
+  })
+
+  it('does not replace config objects when a direct running-flow refresh reads unchanged parameters', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(parameters.config.design).toBe('demo')
+    })
+
+    const dieRef = parameters.config.die
+    const coreRef = parameters.config.core
+
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+    await parameters.refreshParameters()
+
+    expect(parameters.config.die).toBe(dieRef)
+    expect(parameters.config.core).toBe(coreRef)
+    expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
   it('polls the known parameters file while a flow is running without touching shared home data', async () => {

@@ -7,6 +7,11 @@ import { readProjectTextFile, watchProjectFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readWorkspaceFlowResourceApi, readWorkspaceHomeResourceApi } from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import {
+  consumePendingHomeRunArtifactReset,
+  isHomeRunArtifactResetPending,
+  onHomeRunArtifactReset,
+} from './homeRunArtifacts'
 
 // ============ 类型定义 ============
 
@@ -97,6 +102,16 @@ function fallbackRunStepKeys(): string[] {
     .map((m) => m.path)
 }
 
+function flowDataHasStartedRun(flowData: FlowData): boolean {
+  return flowData.steps.some((step) => {
+    const state = (step.state ?? '').trim().toLowerCase()
+    return state === 'ongoing'
+      || state === 'running'
+      || state === 'unstart'
+      || state === 'pending'
+  })
+}
+
 // ============ Composable ============
 
 /**
@@ -114,6 +129,8 @@ export function useFlowStages() {
   const error = ref<string | null>(null)
   let unwatchFlowJsonFile: (() => void) | null = null
   let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
+  let unregisterHomeRunArtifactReset: (() => void) | null = null
+  let pendingRerunFlowStartProjectPath = ''
   let watchSession = 0
 
   // 合并后的完整流程步骤
@@ -162,6 +179,7 @@ export function useFlowStages() {
       )
       if (!isCurrent() || fileContent === undefined) return
       const flowData: FlowData = JSON.parse(fileContent)
+      if (!shouldApplyFlowData(flowData)) return
 
       console.log('Loaded flow data from path:', flowData)
 
@@ -206,6 +224,7 @@ export function useFlowStages() {
         dynamicFlowStages.value = []
         return
       }
+      if (!shouldApplyFlowData(flowData)) return
 
       console.log('Loaded flow data:', flowData)
 
@@ -229,6 +248,36 @@ export function useFlowStages() {
     unregisterFlowJsonLifecycleCleanup = null
     unwatchFlowJsonFile?.()
     unwatchFlowJsonFile = null
+  }
+
+  function normalizeProjectPath(path: string): string {
+    const normalized = path.trim().replace(/\\/g, '/')
+    return normalized.length > 1 && normalized.endsWith('/')
+      ? normalized.slice(0, -1)
+      : normalized
+  }
+
+  function resetRunStagesForRerun(): void {
+    if (dynamicFlowStages.value.length === 0) return
+    dynamicFlowStages.value = dynamicFlowStages.value.map((stage) => ({
+      ...stage,
+      state: 'Unstart',
+      runtime: '',
+      'peak memory (mb)': 0,
+    }))
+  }
+
+  function shouldApplyFlowData(flowData: FlowData): boolean {
+    const projectPath = currentProject.value?.path
+    if (!projectPath) return true
+    const normalizedProjectPath = normalizeProjectPath(projectPath)
+    const resetPending = pendingRerunFlowStartProjectPath === normalizedProjectPath
+      || isHomeRunArtifactResetPending(projectPath)
+    if (!resetPending) return true
+    if (!flowDataHasStartedRun(flowData)) return false
+    pendingRerunFlowStartProjectPath = ''
+    consumePendingHomeRunArtifactReset(projectPath)
+    return true
   }
 
   async function startFlowJsonWatchForCurrentProject(): Promise<void> {
@@ -348,10 +397,25 @@ export function useFlowStages() {
     },
   )
 
+  unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
+    const currentProjectPath = currentProject.value?.path
+    if (
+      !currentProjectPath
+      || normalizeProjectPath(projectPath) !== normalizeProjectPath(currentProjectPath)
+    ) {
+      return
+    }
+
+    pendingRerunFlowStartProjectPath = normalizeProjectPath(currentProjectPath)
+    resetRunStagesForRerun()
+  })
+
   if (getCurrentInstance()) {
     onUnmounted(() => {
       watchSession++
       cleanupFlowJsonWatch()
+      unregisterHomeRunArtifactReset?.()
+      unregisterHomeRunArtifactReset = null
     })
   }
 

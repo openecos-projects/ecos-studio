@@ -306,6 +306,7 @@ export class DesktopRuntimeManager {
 
     this.emit({
       cmd: request.cmd,
+      data: { ...request.data },
       jobId,
       ...eventWorkspace,
       stream: 'system',

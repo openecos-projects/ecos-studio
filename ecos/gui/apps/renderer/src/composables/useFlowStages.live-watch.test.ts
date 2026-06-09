@@ -243,4 +243,101 @@ describe('useFlowStages live project file watchers', () => {
 
     expect(flowWatch!.unwatch).toHaveBeenCalledTimes(1)
   })
+
+  it('resets run stage states when a full-flow rerun reset is requested for the current workspace', async () => {
+    const { useFlowStages } = await importFreshFlowStagesModule()
+    await startLifecycleSession('/workspace/a')
+    testState.readProjectTextFile.mockResolvedValue(flowJsonFor({
+      Synthesis: 'Success',
+      Floorplan: 'Ongoing',
+    }))
+
+    const flow = useFlowStages()
+
+    await vi.waitFor(() => {
+      expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Ongoing',
+      ])
+    })
+
+    ;(await import('./homeRunArtifacts')).requestHomeRunArtifactReset('/workspace/a')
+    await nextTick()
+    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset('/workspace/a')
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Unstart',
+      'Unstart',
+    ])
+  })
+
+  it('does not reload a stale completed flow snapshot after a rerun reset until flow.json starts changing', async () => {
+    const { useFlowStages } = await importFreshFlowStagesModule()
+    await startLifecycleSession('/workspace/a')
+    let states = {
+      Synthesis: 'Success',
+      Floorplan: 'Success',
+    }
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor(states)
+      return '{}'
+    })
+
+    const flow = useFlowStages()
+
+    await vi.waitFor(() => {
+      expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Success',
+      ])
+    })
+
+    ;(await import('./homeRunArtifacts')).requestHomeRunArtifactReset('/workspace/a')
+    await nextTick()
+    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset('/workspace/a')
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Unstart',
+      'Unstart',
+    ])
+
+    await flow.loadFlowStages()
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Unstart',
+      'Unstart',
+    ])
+
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      flow: testState.resourceVersions!.value.flow + 1,
+    }
+    await nextTick()
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Unstart',
+      'Unstart',
+    ])
+
+    states = {
+      Synthesis: 'Ongoing',
+      Floorplan: 'Unstart',
+    }
+    const flowWatch = testState.projectFileWatchers.find((entry) =>
+      entry.path === '/workspace/a/home/flow.json'
+    )
+    expect(flowWatch).toBeDefined()
+    flowWatch!.listener({
+      subscriptionId: 'flow-watch-1',
+      path: '/workspace/a/home/flow.json',
+      eventType: 'change',
+    })
+
+    await vi.waitFor(() => {
+      expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Ongoing',
+        'Unstart',
+      ])
+    })
+  })
 })

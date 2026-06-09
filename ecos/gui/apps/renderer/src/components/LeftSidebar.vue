@@ -228,8 +228,8 @@
             <div class="mode-selector" @click.stop>
               <!-- 当前模式显示 + 触发器 -->
               <button class="mode-trigger" @click="showModeMenu = !showModeMenu" :disabled="flowRunControlBusy">
-                <i :class="runModes[runMode].icon" class="mode-trigger-icon"></i>
-                <span>{{ runModes[runMode].label }}</span>
+                <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
+                <span>{{ runModes[activeRunMode].label }}</span>
                 <i class="ri-arrow-down-s-line mode-chevron" :class="{ open: showModeMenu }"></i>
               </button>
 
@@ -237,7 +237,7 @@
               <Transition name="mode-menu">
                 <div v-if="showModeMenu" class="mode-menu">
                   <button v-for="(mode, key) in runModes" :key="key" class="mode-menu-item"
-                    :class="{ active: runMode === key }" @click="runMode = key as string; showModeMenu = false">
+                    :class="{ active: activeRunMode === key }" @click="selectRunMode(key); showModeMenu = false">
                     <i :class="mode.icon" class="mode-item-icon"></i>
                     <span class="mode-item-label">{{ mode.label }}</span>
                     <span v-if="mode.shortcut" class="mode-item-shortcut">{{ mode.shortcut }}</span>
@@ -385,11 +385,29 @@
         <!-- 底部操作栏 -->
         <div class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
           <!-- 操作按钮组 -->
-          <div class="flex gap-2">
-            <button @click="handleRunFlow" :disabled="flowRunControlBusy"
-              class="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-(--accent-color) text-white text-[11px] font-bold rounded hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50 shadow-lg shadow-(--accent-color)/20">
-              <i :class="flowRunControlBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-fill'"></i>
-              {{ flowRunControlBusy ? 'RUNNING' : 'RUN' }}
+          <div class="step-run-control">
+            <div class="mode-selector" @click.stop>
+              <button class="mode-trigger" @click="showModeMenu = !showModeMenu" :disabled="flowRunControlBusy">
+                <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
+                <span>{{ runModes[activeRunMode].label }}</span>
+                <i class="ri-arrow-down-s-line mode-chevron" :class="{ open: showModeMenu }"></i>
+              </button>
+
+              <Transition name="mode-menu">
+                <div v-if="showModeMenu" class="mode-menu">
+                  <button v-for="(mode, key) in runModes" :key="key" class="mode-menu-item"
+                    :class="{ active: activeRunMode === key }" @click="selectRunMode(key); showModeMenu = false">
+                    <i :class="mode.icon" class="mode-item-icon"></i>
+                    <span class="mode-item-label">{{ mode.label }}</span>
+                    <span v-if="mode.shortcut" class="mode-item-shortcut">{{ mode.shortcut }}</span>
+                  </button>
+                </div>
+              </Transition>
+            </div>
+
+            <button @click="handleRunFlow" :disabled="flowRunControlBusy" class="run-go-btn"
+              :class="{ running: flowRunControlBusy }">
+              <i :class="flowRunControlBusy ? 'ri-loader-4-line animate-spin' : runModes[activeRunMode].icon"></i>
             </button>
           </div>
         </div>
@@ -403,6 +421,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useFlowRunner } from '@/composables/useFlowRunner'
+import { useFlowRunMode } from '@/composables/useFlowRunMode'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useWorkspace } from '@/composables/useWorkspace'
 
@@ -445,6 +464,13 @@ const {
 // 当前阶段
 const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } = useCurrentStage()
 
+const {
+  activeRunMode,
+  isRerun,
+  runModes,
+  selectRunMode,
+} = useFlowRunMode(currentStage)
+
 // ============ Flow 概览计算 ============
 // 只统计 run 组的步骤
 const runStages = computed(() => flowStages.value.filter(s => s.group === 'run'))
@@ -478,13 +504,7 @@ const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.
 
 
 // ============ 运行模式 ============
-const runMode = ref('run')
 const showModeMenu = ref(false)
-
-const runModes: Record<string, { label: string; icon: string; shortcut?: string }> = {
-  run: { label: 'Run RTL2GDS', icon: 'ri-play-fill' },
-  rerun: { label: 'ReRun', icon: 'ri-restart-line' },
-}
 
 // 点击外部关闭菜单
 const closeMenu = () => { showModeMenu.value = false }
@@ -505,11 +525,11 @@ const handleRunFlow = async () => {
 
   if (currentStage.value === 'home') {
     setFirstRunStepOngoing()
-    await runAllFlow()
+    await runAllFlow({ rerun: isRerun.value })
     await refreshFlowStages()
   } else {
     setRunStepOngoingByPath(currentStage.value)
-    await runFlow()
+    await runFlow({ rerun: isRerun.value })
     await Promise.all([
       refreshCurrentSubflow(),
       refreshFlowStages()
@@ -543,6 +563,12 @@ const handleRunFlow = async () => {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
+}
+
+.step-run-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* 状态指示灯 */

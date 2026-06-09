@@ -4,6 +4,7 @@ import { useDesktopRuntime } from './useDesktopRuntime'
 import {
   clearFlowExecutionActiveForWorkspace,
   isFlowExecutionActiveForWorkspace,
+  markFlowExecutionActiveForWorkspace,
 } from './useFlowRunner'
 import { getWorkspaceResourceIndexApi, readWorkspaceHomeResourceApi } from '@/api/workspaceResources'
 import type { DesktopProjectLogTailEvent } from '@ecos-studio/shared'
@@ -20,6 +21,11 @@ import { requestProjectPathAccess, resolveProjectPathAccess } from '@/utils/proj
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import { mergePlannedFlowLogSegments } from './flowLogSegmentPlan'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import {
+  consumePendingHomeRunArtifactReset,
+  isHomeRunArtifactResetAwaitingBackendStart,
+  onHomeRunArtifactReset,
+} from './homeRunArtifacts'
 
 export { convertRemoteToLocalPath } from '@/utils/projectPaths'
 
@@ -380,11 +386,65 @@ let _loadedChecklistPath = ''
 let _loadedLayoutPath = ''
 let _loadedMetricsSignature = ''
 let _loadedHomeResourceVersionSignature = ''
+let _rerunStartupWatchHandledForWorkspace = ''
+let _pendingRerunResetConfirmationWorkspace = ''
+let _pendingRerunStaleHomeSignature = ''
+let _pendingRerunFlowStartWorkspace = ''
 
 function homeResourceVersionSignature(
   versions: Record<typeof HOME_DATA_RESOURCE_VERSION_KEYS[number], number>,
 ): string {
   return HOME_DATA_RESOURCE_VERSION_KEYS.map((key) => `${key}:${versions[key] ?? 0}`).join('|')
+}
+
+function homeMetricSourceEntries(metrics: unknown): string[] {
+  return metrics && typeof metrics === 'object'
+    ? Object.entries(metrics)
+        .filter(([, value]) => typeof value === 'string' && value.length > 0)
+        .map(([label, value]) => `${label}=${value}`)
+        .sort()
+    : []
+}
+
+function homeMonitorSignature(monitor: MonitorData | null | undefined): string {
+  if (!monitor || typeof monitor !== 'object') return ''
+  return JSON.stringify(
+    Object.entries(monitor)
+      .filter(([, value]) => Array.isArray(value))
+      .map(([key, value]) => [key, value])
+      .sort(([a], [b]) => String(a).localeCompare(String(b))),
+  )
+}
+
+function homeAssetSourceSignature(data: HomeData | null): string {
+  if (!data) return '__none__'
+  const metrics = homeMetricSourceEntries(data.metrics)
+  return JSON.stringify({
+    checklist: data.checklist ?? '',
+    layout: data.layout ?? '',
+    metrics,
+  })
+}
+
+function homeRerunContentSignature(data: HomeData | null): string {
+  if (!data) return '__none__'
+  return JSON.stringify({
+    checklist: data.checklist ?? '',
+    layout: data.layout ?? '',
+    metrics: homeMetricSourceEntries(data.metrics),
+    monitor: homeMonitorSignature(data.monitor),
+  })
+}
+
+function currentDisplayedHomeRerunContentSignature(): string {
+  const sharedSignature = homeRerunContentSignature(sharedHomeData.value)
+  if (sharedSignature !== '__none__') return sharedSignature
+  return JSON.stringify({
+    checklist: _loadedChecklistPath,
+    layout: _loadedLayoutPath,
+    metrics: _loadedMetricsSignature,
+    monitor: homeMonitorSignature(monitorDataState.value),
+  })
 }
 
 function invalidateLayoutCache(): void {
@@ -494,11 +554,16 @@ export async function fetchSharedHomeData(
 }
 
 /** 从 runtime event 路径更新共享缓存 */
-export function updateSharedHomeData(data: HomeData) {
+export function updateSharedHomeData(
+  data: HomeData,
+  options: { markAssetsStale?: boolean } = {},
+) {
   sharedHomeData.value = data
   // Runtime event 代表 home.json 有新内容；把资源签名清空让 loader 下一次真重读。
   // 但 blob URL 暂时保留，新 blob 到位后再 revoke，避免 UI 闪白。
-  markHomeAssetSignaturesStale()
+  if (options.markAssetsStale ?? true) {
+    markHomeAssetSignaturesStale()
+  }
 }
 
 /** 清除共享缓存 */
@@ -515,11 +580,145 @@ function invalidateHomeDataForResourceChange() {
   invalidateLogFileCache()
 }
 
+function normalizeWorkspaceEventPath(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const normalized = value.trim().replace(/\\/g, '/')
+  return normalized.length > 1 && normalized.endsWith('/')
+    ? normalized.slice(0, -1)
+    : normalized
+}
+
+function clearHomeRunArtifactsForRerun(projectPath: string): void {
+  const workspaceKey = normalizeWorkspaceEventPath(projectPath)
+  if (!workspaceKey) return
+
+  _rerunStartupWatchHandledForWorkspace = workspaceKey
+  _pendingRerunFlowStartWorkspace = workspaceKey
+  if (_pendingRerunResetConfirmationWorkspace !== workspaceKey) {
+    _pendingRerunStaleHomeSignature = currentDisplayedHomeRerunContentSignature()
+  }
+  _pendingRerunResetConfirmationWorkspace = workspaceKey
+  invalidateSharedHomeData()
+  invalidateHomeAssetCache()
+  resetFlowLogState()
+  invalidateLogFileCache()
+}
+
+function hasHomeRunArtifacts(data: HomeData | null): boolean {
+  if (!data) return false
+  const hasLayout = typeof data.layout === 'string' && data.layout.length > 0
+  const hasMetrics = homeMetricSourceEntries(data.metrics).length > 0
+  const hasMonitor = Boolean(
+    data.monitor
+    && typeof data.monitor === 'object'
+    && Object.values(data.monitor).some((value) => Array.isArray(value) && value.length > 0),
+  )
+  return hasLayout || hasMetrics || hasMonitor
+}
+
+function shouldDeferHomeDataUntilRerunReset(projectPath: string, data: HomeData): boolean {
+  const key = normalizeWorkspaceEventPath(projectPath)
+  if (!key || _pendingRerunResetConfirmationWorkspace !== key) return false
+
+  const nextSignature = homeRerunContentSignature(data)
+  if (!hasHomeRunArtifacts(data)) {
+    _pendingRerunResetConfirmationWorkspace = ''
+    _pendingRerunStaleHomeSignature = ''
+    return false
+  }
+
+  if (
+    _pendingRerunStaleHomeSignature
+    && nextSignature === _pendingRerunStaleHomeSignature
+  ) {
+    if (homeRerunContentSignature(sharedHomeData.value) === nextSignature) {
+      sharedHomeData.value = null
+      _fetchPromise = null
+      _fetchGeneration += 1
+    }
+    return true
+  }
+
+  _pendingRerunResetConfirmationWorkspace = ''
+  _pendingRerunStaleHomeSignature = ''
+  return false
+}
+
+function shouldDeferHomeDataUntilBackendRerunStart(projectPath: string, data: HomeData): boolean {
+  return isHomeRunArtifactResetAwaitingBackendStart(projectPath) && !hasHomeRunArtifacts(data)
+}
+
+function isWaitingForRerunFlowStart(projectPath: string): boolean {
+  const key = normalizeWorkspaceEventPath(projectPath)
+  return Boolean(key) && _pendingRerunFlowStartWorkspace === key
+}
+
+function updateRerunFlowStartState(
+  projectPath: string,
+  plan: {
+    hasOngoingStep: boolean
+    hasPendingStep: boolean
+  },
+): void {
+  if (!isWaitingForRerunFlowStart(projectPath)) return
+  if (plan.hasOngoingStep || plan.hasPendingStep) {
+    _pendingRerunFlowStartWorkspace = ''
+  }
+}
+
+function consumeRerunStartupWatchHandledFor(projectPath: unknown): boolean {
+  const key = normalizeWorkspaceEventPath(projectPath)
+  if (!key || _rerunStartupWatchHandledForWorkspace !== key) return false
+  _rerunStartupWatchHandledForWorkspace = ''
+  return true
+}
+
+function isCurrentWorkspaceRerunStartEvent(event: unknown, projectPath: string): boolean {
+  if (!event || typeof event !== 'object') return false
+  const payload = event as Record<string, unknown>
+  const data = payload.data
+  if (!data || typeof data !== 'object') return false
+
+  const eventData = data as Record<string, unknown>
+  if (eventData.cmd !== 'rtl2gds') return false
+  if (eventData.type !== 'message') return false
+  if (eventData.rerun !== true) return false
+
+  const eventWorkspace = normalizeWorkspaceEventPath(eventData.workspaceId)
+    || normalizeWorkspaceEventPath(eventData.directory)
+  return eventWorkspace === normalizeWorkspaceEventPath(projectPath)
+}
+
+function isCurrentWorkspaceRerunTerminalEvent(event: unknown, projectPath: string): boolean {
+  if (!event || typeof event !== 'object') return false
+  const payload = event as Record<string, unknown>
+  const data = payload.data
+  if (!data || typeof data !== 'object') return false
+
+  const eventData = data as Record<string, unknown>
+  if (eventData.cmd !== 'rtl2gds') return false
+  if (
+    eventData.type !== 'task_complete'
+    && eventData.type !== 'error'
+    && eventData.type !== 'cancelled'
+  ) {
+    return false
+  }
+
+  const eventWorkspace = normalizeWorkspaceEventPath(eventData.workspaceId)
+    || normalizeWorkspaceEventPath(eventData.directory)
+  return eventWorkspace === normalizeWorkspaceEventPath(projectPath)
+}
+
 export function resetSharedHomeDataProjectState() {
   sharedHomeData.value = null
   _fetchPromise = null
   _cachedForProject = ''
   _fetchGeneration += 1
+  _rerunStartupWatchHandledForWorkspace = ''
+  _pendingRerunResetConfirmationWorkspace = ''
+  _pendingRerunStaleHomeSignature = ''
+  _pendingRerunFlowStartWorkspace = ''
   // 项目切换时，所有跨组件的模块级缓存一并失效
   logFileCache.clear()
   resolvedPathCache.clear()
@@ -537,6 +736,7 @@ export function useHomeData() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
   const {
     currentProject,
+    runtimeEvents,
     resourceVersions,
   } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
@@ -562,6 +762,7 @@ export function useHomeData() {
   /** flow log 渐进刷新会话：递增后旧异步回调全部失效 */
   let liveSession = 0
   let pollFlowJsonTimer: ReturnType<typeof setInterval> | null = null
+  let pollHomeJsonTimer: ReturnType<typeof setInterval> | null = null
   let pollLogFallbackTimer: ReturnType<typeof setInterval> | null = null
   let unwatchFlowJsonFile: (() => void) | null = null
   let unwatchHomeJsonFile: (() => void) | null = null
@@ -575,6 +776,7 @@ export function useHomeData() {
   let homeDataLoadSession = 0
   let lastOngoingKey: string | null = null
   let unregisterLiveLifecycleCleanup: (() => void) | null = null
+  let unregisterHomeRunArtifactReset: (() => void) | null = null
 
   /**
    * 将远程路径转换为本地项目路径
@@ -686,8 +888,10 @@ export function useHomeData() {
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const { label, blobUrl } = result.value
-        charts.push({ label, imageBlobUrl: blobUrl })
-        if (blobUrl) newBlobUrls.push(blobUrl)
+        if (blobUrl) {
+          charts.push({ label, imageBlobUrl: blobUrl })
+          newBlobUrls.push(blobUrl)
+        }
       }
     }
     if (!isCurrent()) {
@@ -857,6 +1061,10 @@ export function useHomeData() {
     if (pollFlowJsonTimer != null) {
       clearInterval(pollFlowJsonTimer)
       pollFlowJsonTimer = null
+    }
+    if (pollHomeJsonTimer != null) {
+      clearInterval(pollHomeJsonTimer)
+      pollHomeJsonTimer = null
     }
     liveProjectPath = null
     lastOngoingKey = null
@@ -1111,9 +1319,15 @@ export function useHomeData() {
     try {
       const plan = await planFlowLogSegments(flowLocal, true)
       if (!plan || sid !== liveSession || currentProject.value?.path !== projectPath) return
+      const waitingForRerunFlowStart = isWaitingForRerunFlowStart(projectPath)
+      if (waitingForRerunFlowStart && !plan.hasOngoingStep && !plan.hasPendingStep) {
+        return
+      }
+      updateRerunFlowStartState(projectPath, plan)
 
       if (
         isFlowExecutionActiveForWorkspace(projectPath)
+        && !waitingForRerunFlowStart
         && !plan.hasOngoingStep
         && !plan.hasPendingStep
       ) {
@@ -1395,6 +1609,12 @@ export function useHomeData() {
         clearHomeData()
         return
       }
+      if (shouldDeferHomeDataUntilBackendRerunStart(projectPath, homeData)) {
+        return
+      }
+      if (shouldDeferHomeDataUntilRerunReset(projectPath, homeData)) {
+        return
+      }
 
       console.log('Loaded home data:', homeData)
 
@@ -1512,10 +1732,10 @@ export function useHomeData() {
     }
   }
 
-  async function refreshHomeDataFromCurrentHomeFile(sid: number): Promise<void> {
-    if (sid !== liveSession) return
+  async function refreshHomeAssetsFromCurrentHomeFile(sid: number): Promise<boolean> {
+    if (sid !== liveSession) return false
     const projectPath = liveProjectPath
-    if (!projectPath || currentProject.value?.path !== projectPath) return
+    if (!projectPath || currentProject.value?.path !== projectPath) return false
 
     const sessionId = workspaceLifecycle.currentSessionId.value
     const loadSession = ++homeDataLoadSession
@@ -1528,24 +1748,46 @@ export function useHomeData() {
       && currentProject.value?.path === projectPath
 
     const resolvedHomePath = await resolvedPathMemo(`${projectPath}/home/home.json`)
-    if (!resolvedHomePath || !isCurrent()) return
+    if (!resolvedHomePath || !isCurrent()) return false
 
     try {
       const fileContent = await readProjectTextFile(resolvedHomePath)
       const homeData: HomeData = JSON.parse(fileContent)
-      if (!isCurrent()) return
+      if (!isCurrent()) return false
+      if (shouldDeferHomeDataUntilBackendRerunStart(projectPath, homeData)) {
+        return false
+      }
+      if (shouldDeferHomeDataUntilRerunReset(projectPath, homeData)) {
+        return false
+      }
 
-      updateSharedHomeData(homeData)
+      updateSharedHomeData(homeData, {
+        markAssetsStale: homeAssetSourceSignature(sharedHomeData.value) !== homeAssetSourceSignature(homeData),
+      })
       await loadHomeAssetsFromData(homeData, { includeFlowLogs: false, isCurrent })
-      if (!isCurrent()) return
+      return isCurrent()
+    } catch (err) {
+      console.error('refreshHomeAssetsFromCurrentHomeFile:', err)
+      return false
+    }
+  }
+
+  async function refreshHomeDataFromCurrentHomeFile(sid: number): Promise<void> {
+    const loaded = await refreshHomeAssetsFromCurrentHomeFile(sid)
+    if (!loaded) return
+
+    try {
       await refreshFlowLogLivePanel(sid)
     } catch (err) {
       console.error('refreshHomeDataFromCurrentHomeFile:', err)
     }
   }
 
-  async function startFlowLogLiveWatchForCurrentProject(): Promise<void> {
-    if (!isDesktopRuntimeAvailable || !currentWorkspaceFlowExecutionActive.value) return
+  async function startFlowLogLiveWatchForCurrentProject(
+    options: { force?: boolean; initialRefresh?: boolean } = {},
+  ): Promise<void> {
+    if (!isDesktopRuntimeAvailable) return
+    if (!options.force && !currentWorkspaceFlowExecutionActive.value) return
     const projectPath = currentProject.value?.path
     if (!projectPath) return
 
@@ -1562,17 +1804,7 @@ export function useHomeData() {
       label: 'home live file watchers',
     })
 
-    const homeData = await fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable)
-    if (sid !== liveSession || currentProject.value?.path !== projectPath) return
-
-    const flowRemote = homeData?.flow ?? ''
-    if (!flowRemote) {
-      console.warn('flow-log live: no flow path in home data')
-      return
-    }
-
-    const flowLocal = convertRemoteToLocalPath(flowRemote, projectPath)
-    const resolvedFlowPath = await resolvedPathMemo(flowLocal)
+    const resolvedFlowPath = await resolvedPathMemo(`${projectPath}/home/flow.json`)
     if (sid !== liveSession || currentProject.value?.path !== projectPath) return
     if (!resolvedFlowPath) return
 
@@ -1614,8 +1846,13 @@ export function useHomeData() {
     pollFlowJsonTimer = setInterval(() => {
       void refreshFlowLogLivePanel(sid)
     }, 1600)
+    pollHomeJsonTimer = setInterval(() => {
+      void refreshHomeAssetsFromCurrentHomeFile(sid)
+    }, 1600)
 
-    await refreshFlowLogLivePanel(sid)
+    if (options.initialRefresh ?? true) {
+      await refreshFlowLogLivePanel(sid)
+    }
   }
 
   // run_step / rtl2gds 期间：监听 flow.json 与当前步日志文件，渐进更新 Flow step log
@@ -1634,7 +1871,13 @@ export function useHomeData() {
         return
       }
 
-      await startFlowLogLiveWatchForCurrentProject()
+      if (consumeRerunStartupWatchHandledFor(currentProject.value?.path)) {
+        return
+      }
+
+      await startFlowLogLiveWatchForCurrentProject({
+        initialRefresh: true,
+      })
     },
     { immediate: true },
   )
@@ -1648,6 +1891,12 @@ export function useHomeData() {
         if (projectChanged) {
           liveSession++
           cleanupFlowLogLiveWatch()
+        }
+        if (consumePendingHomeRunArtifactReset(newPath)) {
+          clearHomeRunArtifactsForRerun(newPath)
+          markFlowExecutionActiveForWorkspace(newPath)
+          await startFlowLogLiveWatchForCurrentProject({ force: true, initialRefresh: false })
+          return
         }
         await loadHomeData()
         if (
@@ -1678,6 +1927,56 @@ export function useHomeData() {
     },
   )
 
+  watch(
+    () => runtimeEvents.value[runtimeEvents.value.length - 1],
+    (event) => {
+      const projectPath = currentProject.value?.path
+      if (!projectPath) return
+      if (isCurrentWorkspaceRerunStartEvent(event, projectPath)) {
+        const hasLiveWatchForProject = liveProjectPath === projectPath
+          && Boolean(
+            unwatchFlowJsonFile
+            || unwatchHomeJsonFile
+            || pollFlowJsonTimer
+            || pollHomeJsonTimer,
+          )
+        clearHomeRunArtifactsForRerun(projectPath)
+        markFlowExecutionActiveForWorkspace(projectPath)
+        if (!hasLiveWatchForProject) {
+          void startFlowLogLiveWatchForCurrentProject({ force: true, initialRefresh: false })
+        }
+        return
+      }
+      if (isCurrentWorkspaceRerunTerminalEvent(event, projectPath)) {
+        _pendingRerunResetConfirmationWorkspace = ''
+        _pendingRerunStaleHomeSignature = ''
+      }
+    },
+  )
+
+  unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
+    const currentProjectPath = currentProject.value?.path
+    if (
+      !currentProjectPath
+      || normalizeWorkspaceEventPath(projectPath) !== normalizeWorkspaceEventPath(currentProjectPath)
+    ) {
+      return
+    }
+
+    const hasLiveWatchForProject = liveProjectPath === currentProjectPath
+      && Boolean(
+        unwatchFlowJsonFile
+        || unwatchHomeJsonFile
+        || pollFlowJsonTimer
+        || pollHomeJsonTimer,
+      )
+    consumePendingHomeRunArtifactReset(currentProjectPath)
+    clearHomeRunArtifactsForRerun(currentProjectPath)
+    if (!hasLiveWatchForProject) {
+      void startFlowLogLiveWatchForCurrentProject({ force: true, initialRefresh: false })
+    }
+  })
+
   // 组件卸载：只停掉本实例挂载的 live watcher / 定时器；
   // **不** 清模块级缓存或 revoke blob —— 下次 mount 直接复用 home.json、
   // checklist、layout blob、metrics blob、flowLogSegments。
@@ -1685,6 +1984,8 @@ export function useHomeData() {
   // 在 onUnmounted 里 revoke 会导致下一次 mount 的 <img :src> 拿到已失效的 URL。
   // 数据新鲜度由 runtime events（markHomeAssetSignaturesStale）+ 项目切换里的 reset 负责。
   onUnmounted(() => {
+    unregisterHomeRunArtifactReset?.()
+    unregisterHomeRunArtifactReset = null
     liveSession++
     cleanupFlowLogLiveWatch()
   })

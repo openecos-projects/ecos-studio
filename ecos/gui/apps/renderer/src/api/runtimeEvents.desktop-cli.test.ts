@@ -294,6 +294,50 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     }))
   })
 
+  it('publishes rtl2gds started rerun request data as a lifecycle message', async () => {
+    const listeners: Array<(event: DesktopCliCommandEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        cli: {
+          onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
+            listeners.push(listener)
+            return () => undefined
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('/work/demo')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    listeners[0]({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo', rerun: true },
+      directory: '/work/demo',
+      jobId: 'job-flow',
+      stream: 'system',
+      text: 'Started rtl2gds',
+      type: 'started',
+      workspaceId: '/work/demo',
+    })
+
+    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        jobId: 'job-flow',
+        rerun: true,
+        type: 'message',
+        workspaceId: '/work/demo',
+      }),
+      message: ['Started rtl2gds'],
+      response: 'success',
+    }))
+  })
+
   it('preserves structured lifecycle event data from the desktop bridge', async () => {
     const listeners: Array<(event: DesktopCliCommandEvent) => void> = []
     setWindow({

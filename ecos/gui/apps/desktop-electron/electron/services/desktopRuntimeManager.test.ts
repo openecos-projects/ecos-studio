@@ -91,6 +91,36 @@ describe('DesktopRuntimeManager', () => {
     expect(new Set(jobIds).size).toBe(1)
   })
 
+  it('includes request data on started events so renderers can react to rerun startup', async () => {
+    const listener = vi.fn()
+    const manager = createManager({
+      adapter: {
+        execute: vi.fn(async () => result({
+          cmd: 'rtl2gds',
+          data: { rerun: true },
+          message: ['ok'],
+        })),
+      },
+    })
+
+    await manager.execute({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo', rerun: true },
+      source: 'button',
+    }, listener)
+
+    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      cmd: 'rtl2gds',
+      data: expect.objectContaining({
+        directory: '/work/demo',
+        rerun: true,
+      }),
+      directory: '/work/demo',
+      stream: 'system',
+      type: 'started',
+    }))
+  })
+
   it('lets adapters emit normalized stdout and stderr events for the active job', async () => {
     const listener = vi.fn()
     const manager = createManager({
