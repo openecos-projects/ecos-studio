@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { constants, createReadStream } from 'node:fs'
 import { access, copyFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
 import { electronLogger } from './logger'
@@ -153,6 +153,10 @@ export interface ResourceManagerServiceOptions {
   toolsDir?: string
 }
 
+export interface RuntimeEnvOptions {
+  platform: NodeJS.Platform
+}
+
 export class ResourceManagerService {
   private readonly archiveExtractor: ArchiveExtractor
   private readonly cacheDir: string
@@ -217,6 +221,65 @@ export class ResourceManagerService {
       throw new Error(`Resource '${resourceId}' not found`)
     }
     return resource
+  }
+
+  async createRuntimeEnv(
+    baseEnv: NodeJS.ProcessEnv,
+    options: RuntimeEnvOptions,
+  ): Promise<NodeJS.ProcessEnv> {
+    const env = { ...baseEnv }
+    const manifest = await this.readRuntimeManifest()
+    const toolBinDirs: string[] = []
+    let activeYosysRoot: string | null = null
+
+    for (const entry of Object.values(manifest.installed)) {
+      if (!isToolEntry(entry) || !entry.active) continue
+
+      const executablePath = join(entry.path, entry.executable)
+      if (!await isUsableExecutable(executablePath, options.platform)) {
+        electronLogger.debug(
+          '[resources] Skipping runtime tool %s: executable is missing or not executable at %s',
+          entry.name,
+          executablePath,
+        )
+        continue
+      }
+
+      toolBinDirs.push(dirname(executablePath))
+      if (entry.name === 'yosys') {
+        activeYosysRoot = entry.path
+      }
+    }
+
+    if (toolBinDirs.length > 0) {
+      const pathKey = pathKeyForRuntimeEnv(env)
+      env[pathKey] = mergeRuntimePath(env[pathKey] ?? '', toolBinDirs, options.platform)
+    }
+
+    if (activeYosysRoot) {
+      env.CHIPCOMPILER_OSS_CAD_DIR = activeYosysRoot
+      env.ECOS_ELECTRON_OSS_CAD_DIR = activeYosysRoot
+    }
+
+    for (const entry of Object.values(manifest.installed)) {
+      if (!isPdkEntry(entry) || !entry.active || entry.health !== 'ok') continue
+      if (!await isExistingDirectory(entry.canonical_path)) {
+        electronLogger.debug(
+          '[resources] Skipping runtime PDK %s: canonical path is missing at %s',
+          entry.id,
+          entry.canonical_path,
+        )
+        continue
+      }
+
+      const pdkId = (entry.pdk_id || entry.id).toUpperCase().replace(/[^A-Z0-9]/g, '_')
+      env[`CHIPCOMPILER_${pdkId}_PDK_ROOT`] = entry.canonical_path
+      if (pdkId === 'ICS55') {
+        env.ICS55_PDK_ROOT = entry.canonical_path
+      }
+    }
+
+    return env
   }
 
   async installResource(
@@ -807,6 +870,20 @@ export class ResourceManagerService {
     }
   }
 
+  private async readRuntimeManifest(): Promise<ResourceManifest> {
+    try {
+      return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        electronLogger.debug(
+          '[resources] Failed to read runtime manifest: %s',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+      return this.emptyManifest()
+    }
+  }
+
   private async writeManifest(manifest: ResourceManifest): Promise<void> {
     manifest.resources_dir = this.resourcesDir
     manifest.tools_dir = this.toolsDir
@@ -1227,6 +1304,66 @@ function readNumber(value: unknown): number {
 
 function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item)) : []
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT'
+}
+
+function pathKeyForRuntimeEnv(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
+}
+
+function runtimePathSeparator(platform: NodeJS.Platform): string {
+  return platform === 'win32' ? ';' : ':'
+}
+
+function splitRuntimePath(value: string, platform: NodeJS.Platform): string[] {
+  return value.split(runtimePathSeparator(platform)).filter(Boolean)
+}
+
+function mergeRuntimePath(
+  basePath: string,
+  resourceManagerDirs: string[],
+  platform: NodeJS.Platform,
+): string {
+  const baseEntries = splitRuntimePath(basePath, platform)
+  const packagedBin = baseEntries[0] && basename(baseEntries[0]).toLowerCase() === 'binaries'
+    ? baseEntries[0]
+    : null
+  const orderedEntries = [
+    ...(packagedBin ? [packagedBin] : []),
+    ...resourceManagerDirs,
+    ...baseEntries.filter((entry) => entry !== packagedBin),
+  ]
+  const seen = new Set<string>()
+  return orderedEntries
+    .filter((entry) => {
+      if (seen.has(entry)) return false
+      seen.add(entry)
+      return true
+    })
+    .join(runtimePathSeparator(platform))
+}
+
+async function isUsableExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
+  try {
+    await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function isExistingDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promise<ResourceRegistry> {

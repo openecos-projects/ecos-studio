@@ -7,8 +7,10 @@ import type {
   DesktopShellSessionOptions,
 } from '@ecos-studio/shared'
 import { spawn as spawnPty } from 'node-pty'
+import { electronLogger } from './logger'
 
 type ShellPlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
+type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
 
 interface PtyEventDisposable {
   dispose(): void
@@ -43,6 +45,7 @@ export type ShellPtyEventListener = (
 
 export interface ShellPtyServiceOptions {
   env?: NodeJS.ProcessEnv
+  envProvider?: RuntimeEnvProvider
   platform?: ShellPlatform
   ptyBackend?: PtyBackend
 }
@@ -75,12 +78,14 @@ function normalizePositiveInteger(value: number, fallback: number): number {
 
 export class ShellPtyService {
   private readonly env: NodeJS.ProcessEnv
+  private readonly envProvider?: RuntimeEnvProvider
   private readonly platform: ShellPlatform
   private readonly ptyBackend: PtyBackend
   private readonly sessions = new Map<string, ShellSessionRecord>()
 
   constructor(options: ShellPtyServiceOptions = {}) {
     this.env = options.env ?? process.env
+    this.envProvider = options.envProvider
     this.platform = options.platform ?? process.platform
     this.ptyBackend = options.ptyBackend ?? { spawn: spawnPty }
   }
@@ -89,14 +94,15 @@ export class ShellPtyService {
     options: DesktopShellSessionOptions,
     listener: ShellPtyEventListener,
   ): Promise<DesktopShellSession> {
+    const env = await this.resolveEnv()
     const sessionId = randomUUID()
-    const shell = getDefaultShell(this.platform, this.env)
-    const cwd = options.cwd || getDefaultCwd(this.env)
+    const shell = getDefaultShell(this.platform, env)
+    const cwd = options.cwd || getDefaultCwd(env)
     const pty = this.ptyBackend.spawn(shell, [], {
       cols: normalizePositiveInteger(options.cols, 80),
       cwd,
       env: {
-        ...this.env,
+        ...env,
         TERM: 'xterm-256color',
       },
       name: 'xterm-256color',
@@ -157,5 +163,21 @@ export class ShellPtyService {
     }
 
     return session
+  }
+
+  private async resolveEnv(): Promise<NodeJS.ProcessEnv> {
+    if (!this.envProvider) {
+      return this.env
+    }
+
+    try {
+      return await this.envProvider()
+    } catch (error) {
+      electronLogger.debug(
+        '[shell] env provider failed: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+      return this.env
+    }
   }
 }

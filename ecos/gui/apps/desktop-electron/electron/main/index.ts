@@ -95,13 +95,19 @@ function getDesktopServices() {
     projectScopeProvider: projectScopeService,
   })
   const resourceManagerService = new ResourceManagerService()
+  const runtimeEnvProvider = () =>
+    resourceManagerService.createRuntimeEnv(runtimeEnv, {
+      platform: process.platform,
+    })
   const desktopRuntimeManager = new DesktopRuntimeManager({
     adapter: new EccCliAdapter({
       env: runtimeEnv,
+      envProvider: runtimeEnvProvider,
     }),
   })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
+    envProvider: runtimeEnvProvider,
   })
   const tileService = new TileService({
     projectRootProvider: projectScopeService,

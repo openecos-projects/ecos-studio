@@ -13,10 +13,12 @@ import type { DesktopRuntimeAdapterContext } from './desktopRuntimeManager'
 import { electronLogger } from './logger'
 
 type SpawnLike = typeof spawnChild
+type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
 
 export interface EccCliAdapterOptions {
   command?: string
   env?: NodeJS.ProcessEnv
+  envProvider?: RuntimeEnvProvider
   spawn?: SpawnLike
   tempDir?: string
 }
@@ -206,7 +208,8 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
 
 export class EccCliAdapter {
   private readonly command: string
-  private env: NodeJS.ProcessEnv
+  private readonly env: NodeJS.ProcessEnv
+  private readonly envProvider?: RuntimeEnvProvider
   private readonly spawnImpl: SpawnLike
   private readonly tempDir: string
   private activeWorkspace: string | null = null
@@ -214,6 +217,7 @@ export class EccCliAdapter {
   constructor(options: EccCliAdapterOptions = {}) {
     this.command = options.command ?? 'ecc'
     this.env = { ...(options.env ?? process.env) }
+    this.envProvider = options.envProvider
     this.spawnImpl = options.spawn ?? spawnChild
     this.tempDir = options.tempDir ?? tmpdir()
   }
@@ -341,6 +345,8 @@ export class EccCliAdapter {
     prepared: PreparedCommand,
     context: DesktopRuntimeAdapterContext,
   ): Promise<DesktopCliCommandResult> {
+    const env = this.envProvider ? await this.resolveProvidedEnv() : this.env
+
     return await new Promise((resolve) => {
       let finalResult: DesktopCliCommandResult | null = null
       let stdoutBuffer = ''
@@ -351,13 +357,13 @@ export class EccCliAdapter {
       electronLogger.debug(
         '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
         this.command,
-        resolveCommandFromPath(this.command, this.env),
+        resolveCommandFromPath(this.command, env),
         prepared.args.join(' '),
-        pathHeadForEnv(this.env),
+        pathHeadForEnv(env),
       )
 
       const child = this.spawnImpl(this.command, prepared.args, {
-        env: this.env,
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
@@ -495,6 +501,18 @@ export class EccCliAdapter {
         resolve(result)
       })
     })
+  }
+
+  private async resolveProvidedEnv(): Promise<NodeJS.ProcessEnv> {
+    try {
+      return await this.envProvider?.() ?? this.env
+    } catch (error) {
+      electronLogger.debug(
+        '[ECC CLI] env provider failed: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+      return this.env
+    }
   }
 
 }
