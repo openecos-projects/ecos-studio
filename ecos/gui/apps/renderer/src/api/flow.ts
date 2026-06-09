@@ -59,6 +59,43 @@ export function runStepApi(request: RequestData<RunStepRequest>) {
   }) as unknown as Promise<ResponseData<RunStepResponse>>
 }
 
+export interface RefreshConfigRequest {
+  directory: string
+}
+
+export interface RefreshConfigResponse {
+  directory: string
+  refreshed: boolean
+}
+
+export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
+  return getDesktopApi().cli.execute({
+    cmd: 'refresh_config',
+    data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
+    source: 'button',
+  }) as unknown as Promise<ResponseData<RefreshConfigResponse>>
+}
+
+export interface SyncConfigRequest {
+  directory: string
+  config_path: string
+}
+
+export interface SyncConfigResponse {
+  directory: string
+  config_path: string
+  parameters_changed: boolean
+  refreshed: boolean
+}
+
+export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
+  return getDesktopApi().cli.execute({
+    cmd: 'sync_config',
+    data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
+    source: 'button',
+  }) as unknown as Promise<ResponseData<SyncConfigResponse>>
+}
+
 // ============ Home Page API ============
 
 export interface HomePageResponse {

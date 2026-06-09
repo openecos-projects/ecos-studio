@@ -36,6 +36,8 @@ const supportedCommands = new Set<DesktopCliCommandName>([
   'rtl2gds',
   'get_info',
   'home_page',
+  'refresh_config',
+  'sync_config',
 ])
 
 const longRunningCommands = new Set<DesktopCliCommandName>([

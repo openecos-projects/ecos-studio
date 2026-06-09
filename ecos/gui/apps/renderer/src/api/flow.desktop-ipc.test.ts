@@ -47,7 +47,7 @@ describe('flow API desktop bridge payloads', () => {
       },
     })
 
-    const { getInfoApi, rtl2gdsApi, runStepApi } = await import('./flow')
+    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } = await import('./flow')
 
     await runStepApi(reactive({
       cmd: CMDEnum.run_step,
@@ -71,8 +71,21 @@ describe('flow API desktop bridge payloads', () => {
         step: StepEnum.ROUTING,
       },
     }))
+    await refreshConfigApi(reactive({
+      cmd: CMDEnum.refresh_config,
+      data: {
+        directory: '/work/demo',
+      },
+    }))
+    await syncConfigApi(reactive({
+      cmd: CMDEnum.sync_config,
+      data: {
+        config_path: '/work/demo/config/rt_default_config.json',
+        directory: '/work/demo',
+      },
+    }))
 
-    expect(execute).toHaveBeenCalledTimes(3)
+    expect(execute).toHaveBeenCalledTimes(5)
     expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({
       cmd: 'run_step',
       data: {
@@ -93,6 +106,19 @@ describe('flow API desktop bridge payloads', () => {
       data: {
         id: InfoEnum.layout,
         step: StepEnum.ROUTING,
+      },
+    }))
+    expect(execute).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      cmd: 'refresh_config',
+      data: {
+        directory: '/work/demo',
+      },
+    }))
+    expect(execute).toHaveBeenNthCalledWith(5, expect.objectContaining({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/work/demo/config/rt_default_config.json',
+        directory: '/work/demo',
       },
     }))
   })

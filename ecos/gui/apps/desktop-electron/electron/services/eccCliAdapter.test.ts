@@ -382,6 +382,57 @@ describe('EccCliAdapter', () => {
       cmd: 'home_page',
       ok: true,
     })
+
+    const refreshPromise = adapter.execute(request('refresh_config'), { emit: vi.fn() })
+    expect(harness.calls[4]?.args).toEqual([
+      'workspace',
+      'refresh-config',
+      '--directory',
+      '/work/loaded',
+      '--json',
+    ])
+    complete(harness.children[4], {
+      cmd: 'refresh_config',
+      data: { directory: '/work/loaded', refreshed: true },
+      message: ['refreshed'],
+      response: 'success',
+    })
+    await expect(refreshPromise).resolves.toMatchObject({
+      cmd: 'refresh_config',
+      ok: true,
+    })
+
+    const syncPromise = adapter.execute(request('sync_config', {
+      config_path: '/work/loaded/config/rt_default_config.json',
+    }), { emit: vi.fn() })
+    expect(harness.calls[5]?.args).toEqual([
+      'workspace',
+      'sync-config',
+      '--directory',
+      '/work/loaded',
+      '--config-path',
+      '/work/loaded/config/rt_default_config.json',
+      '--json',
+    ])
+    complete(harness.children[5], {
+      cmd: 'sync_config',
+      data: {
+        config_path: '/work/loaded/config/rt_default_config.json',
+        directory: '/work/loaded',
+        parameters_changed: true,
+        refreshed: true,
+      },
+      message: ['synced'],
+      response: 'success',
+    })
+    await expect(syncPromise).resolves.toMatchObject({
+      cmd: 'sync_config',
+      data: {
+        parameters_changed: true,
+        refreshed: true,
+      },
+      ok: true,
+    })
   })
 
   it('forwards stdout and stderr events while using JSON stdout as the final result', async () => {
@@ -501,6 +552,15 @@ describe('EccCliAdapter', () => {
       response: 'failed',
     })
     expect(harness.spawn).not.toHaveBeenCalled()
+
+    await expect(adapter.execute(request('sync_config', {
+      directory: '/work/demo',
+    }), { emit: vi.fn() })).resolves.toMatchObject({
+      cmd: 'sync_config',
+      message: ['missing required field: config_path'],
+      ok: false,
+      response: 'failed',
+    })
 
     const nonzero = adapter.execute(request('run_step', {
       directory: '/work/demo',

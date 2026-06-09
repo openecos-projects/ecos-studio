@@ -164,6 +164,13 @@ function requiredString(
   return readString(request.data[field]).trim()
 }
 
+function configPathFromRequest(request: DesktopCliCommandRequest): string {
+  return (
+    readString(request.data.config_path).trim()
+    || readString(request.data.configPath).trim()
+  )
+}
+
 function isEnabled(value: unknown): boolean {
   return value === true || value === 'true' || value === 1 || value === '1'
 }
@@ -333,6 +340,30 @@ export class EccCliAdapter {
         if (!directory) return failed(request, 'missing required field: directory')
         return {
           args: ['workspace', 'get-home', '--directory', directory, '--json'],
+        }
+      }
+      case 'refresh_config': {
+        const directory = directoryFromRequest(request, this.activeWorkspace)
+        if (!directory) return failed(request, 'missing required field: directory')
+        return {
+          args: ['workspace', 'refresh-config', '--directory', directory, '--json'],
+        }
+      }
+      case 'sync_config': {
+        const directory = directoryFromRequest(request, this.activeWorkspace)
+        const configPath = configPathFromRequest(request)
+        if (!directory) return failed(request, 'missing required field: directory')
+        if (!configPath) return failed(request, 'missing required field: config_path')
+        return {
+          args: [
+            'workspace',
+            'sync-config',
+            '--directory',
+            directory,
+            '--config-path',
+            configPath,
+            '--json',
+          ],
         }
       }
       default:
