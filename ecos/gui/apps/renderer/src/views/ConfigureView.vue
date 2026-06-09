@@ -12,6 +12,7 @@ const {
   isSaving,
   error,
   hasChanges,
+  isMutationLocked,
   saveParameters,
   resetParameters,
   refreshParameters,
@@ -61,11 +62,11 @@ const resetConfig = () => {
           <i class="ri-refresh-line"></i>
           Reload
         </button>
-        <button class="btn-text" @click="resetConfig" :disabled="!hasChanges || isLoading">
+        <button class="btn-text" @click="resetConfig" :disabled="!hasChanges || isLoading || isMutationLocked">
           <i class="ri-arrow-go-back-line"></i>
           Reset
         </button>
-        <button class="btn-primary" @click="saveConfig" :disabled="!hasChanges || isSaving">
+        <button class="btn-primary" @click="saveConfig" :disabled="!hasChanges || isSaving || isMutationLocked">
           <i :class="isSaving ? 'ri-loader-4-line spin' : 'ri-save-line'"></i>
           {{ isSaving ? 'Saving...' : 'Save' }}
         </button>

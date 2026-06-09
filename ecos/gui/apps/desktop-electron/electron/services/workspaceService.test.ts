@@ -31,6 +31,9 @@ function createProjectScopeProvider(
 function createWorkspaceService(
   rootPath: string,
   canonicalPath: string,
+  options: {
+    runtimeMutationGuard?: ConstructorParameters<typeof WorkspaceService>[0]['runtimeMutationGuard']
+  } = {},
 ): {
   projectScopeProvider: ProjectScopeProviderDouble
   service: WorkspaceService
@@ -38,6 +41,7 @@ function createWorkspaceService(
   const projectScopeProvider = createProjectScopeProvider(rootPath, canonicalPath)
   const service = new WorkspaceService({
     projectScopeProvider,
+    ...options,
   })
 
   return {
@@ -223,6 +227,44 @@ describe('WorkspaceService', () => {
     expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
       '/workspace/home/parameters.json',
     )
+  })
+
+  it('blocks configuration writes while the workspace runtime is active', async () => {
+    const directory = await createTempDir('ecos-workspace-service-write-lock-')
+    const filePath = join(directory, 'home', 'parameters.json')
+    const runtimeMutationGuard = {
+      isWorkspaceRuntimeActive: vi.fn().mockReturnValue(true),
+    }
+
+    const { service } = createWorkspaceService(directory, filePath, {
+      runtimeMutationGuard,
+    })
+
+    await expect(
+      service.writeProjectTextFile('/workspace/home/parameters.json', '{"PDK":"ics55"}'),
+    ).rejects.toThrow('workspace flow is running')
+
+    await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(directory)
+  })
+
+  it('blocks step config writes while the workspace runtime is active', async () => {
+    const directory = await createTempDir('ecos-workspace-service-step-config-lock-')
+    const filePath = join(directory, 'config', 'cts_default_config.json')
+    const runtimeMutationGuard = {
+      isWorkspaceRuntimeActive: vi.fn().mockReturnValue(true),
+    }
+
+    const { service } = createWorkspaceService(directory, filePath, {
+      runtimeMutationGuard,
+    })
+
+    await expect(
+      service.writeProjectTextFile('/workspace/config/cts_default_config.json', '{"skew_bound":0.1}'),
+    ).rejects.toThrow('workspace flow is running')
+
+    await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(directory)
   })
 
   it('watches a project-scoped file through the validated canonical path', async () => {

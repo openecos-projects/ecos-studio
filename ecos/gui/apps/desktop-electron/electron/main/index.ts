@@ -88,9 +88,6 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
-  const workspaceService = new WorkspaceService({
-    projectScopeProvider: projectScopeService,
-  })
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
   })
@@ -104,6 +101,10 @@ function getDesktopServices() {
       env: runtimeEnv,
       envProvider: runtimeEnvProvider,
     }),
+  })
+  const workspaceService = new WorkspaceService({
+    projectScopeProvider: projectScopeService,
+    runtimeMutationGuard: desktopRuntimeManager,
   })
   const shellService = new ShellPtyService({
     env: runtimeEnv,

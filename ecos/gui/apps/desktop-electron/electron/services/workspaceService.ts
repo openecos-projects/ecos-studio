@@ -21,9 +21,16 @@ export interface ProjectScopeProvider {
 
 export interface WorkspaceServiceOptions {
   projectScopeProvider: ProjectScopeProvider
+  runtimeMutationGuard?: RuntimeMutationGuard
+}
+
+export interface RuntimeMutationGuard {
+  isWorkspaceRuntimeActive(projectRoot: string): boolean | Promise<boolean>
 }
 
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
+const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
+  'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
 
 function boundedTextCharCount(maxChars: number): number {
   return Math.max(1, Math.min(Math.floor(maxChars), 2 * 1024 * 1024))
@@ -54,6 +61,18 @@ function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
   return !isSameOrAncestorPath(path, targetPath)
+}
+
+function normalizeRelativePathForMatch(path: string): string {
+  return path.replace(/\\/g, '/')
+}
+
+function isRuntimeProtectedProjectPath(canonicalPath: string, projectRoot: string): boolean {
+  const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
+  return (
+    relativePath === 'home/parameters.json'
+    || (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
+  )
 }
 
 async function findProjectFileWatchDirectory(
@@ -137,12 +156,14 @@ async function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
 
 export class WorkspaceService {
   private readonly projectScopeProvider: ProjectScopeProvider
+  private readonly runtimeMutationGuard?: RuntimeMutationGuard
   private readonly logTailService: LogTailService
   private readonly projectFileWatchers = new Map<string, { close: () => Promise<void> }>()
   private nextProjectFileWatchId = 1
 
   constructor(options: WorkspaceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
+    this.runtimeMutationGuard = options.runtimeMutationGuard
     this.logTailService = new LogTailService({
       projectScopeProvider: this.projectScopeProvider,
       textReader: this,
@@ -293,6 +314,7 @@ export class WorkspaceService {
 
   async writeProjectTextFile(path: string, content: string): Promise<void> {
     const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    await this.assertCanWriteProjectTextFile(canonicalPath)
     await writeFile(canonicalPath, content, 'utf8')
   }
 
@@ -400,5 +422,16 @@ export class WorkspaceService {
       }),
     )
     this.projectFileWatchers.clear()
+  }
+
+  private async assertCanWriteProjectTextFile(canonicalPath: string): Promise<void> {
+    if (!this.runtimeMutationGuard) return
+
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (!isRuntimeProtectedProjectPath(canonicalPath, projectRoot)) return
+
+    if (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(projectRoot)) {
+      throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
+    }
   }
 }

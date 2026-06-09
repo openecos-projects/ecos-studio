@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope } from 'vue'
 
 const {
   currentProject,
   fetchSharedHomeData,
   invalidateWorkspaceResources,
   readProjectTextFile,
+  refreshConfigApi,
   runtimeEvents,
   resourceVersions,
   writeProjectTextFile,
@@ -21,6 +23,7 @@ const {
     resourceVersions.value = lifecycle.resourceVersions.value
   }),
   readProjectTextFile: vi.fn(),
+  refreshConfigApi: vi.fn(),
   runtimeEvents: { value: [] },
   resourceVersions: {
     __v_isRef: true,
@@ -69,7 +72,15 @@ vi.mock('@/utils/projectFs', () => ({
   resolveProjectPathAccess,
 }))
 
+vi.mock('@/api/flow', () => ({
+  refreshConfigApi,
+}))
+
 import { useParameters } from './useParameters'
+import {
+  clearFlowExecutionActiveForWorkspace,
+  markFlowExecutionActiveForWorkspace,
+} from './useFlowRunner'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 function createDeferred<T = void>() {
@@ -80,6 +91,35 @@ function createDeferred<T = void>() {
     reject = rej
   })
   return { promise, resolve, reject }
+}
+
+function parametersJson(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    PDK: 'ics55',
+    Design: 'demo',
+    'Top module': 'chip_top',
+    Die: { Size: [100, 100], Area: 10000 },
+    Core: {
+      Size: [80, 80],
+      Area: 6400,
+      'Bounding box': '(0,0) (80,80)',
+      Utilitization: 0.5,
+      Margin: [4, 4],
+      'Aspect ratio': 1,
+    },
+    'Max fanout': 20,
+    'Target density': 0.3,
+    'Target overflow': 0.1,
+    'Global right padding': 0,
+    'Cell padding x': 600,
+    'Routability opt flag': 1,
+    Clock: 'clk',
+    'Frequency max [MHz]': 100,
+    'Bottom layer': 'MET2',
+    'Top layer': 'MET5',
+    'PDK Root': '/pdks/ics55',
+    ...overrides,
+  })
 }
 
 describe('useParameters desktop bridge integration', () => {
@@ -118,8 +158,21 @@ describe('useParameters desktop bridge integration', () => {
     fetchSharedHomeData.mockReset()
     invalidateWorkspaceResources.mockClear()
     readProjectTextFile.mockReset()
+    refreshConfigApi.mockReset()
+    refreshConfigApi.mockResolvedValue({
+      cmd: 'refresh_config',
+      data: { directory: '/workspace/demo', refreshed: true },
+      message: ['refreshed'],
+      response: 'success',
+    })
     writeProjectTextFile.mockReset()
     resolveProjectPathAccess.mockClear()
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
   it('loads and saves parameters through the bridge-backed file helpers', async () => {
@@ -172,7 +225,98 @@ describe('useParameters desktop bridge integration', () => {
     )
   })
 
-  it('increments home and parameters resource versions only after a successful save', async () => {
+  it('polls the known parameters file while a flow is running without touching shared home data', async () => {
+    vi.useFakeTimers()
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile
+      .mockResolvedValueOnce(parametersJson())
+      .mockResolvedValueOnce(parametersJson({
+        Die: { Size: [], Area: 0 },
+        Core: {
+          Size: [],
+          Area: 0,
+          'Bounding box': '',
+          Utilitization: 0.5,
+          Margin: [4, 4],
+          'Aspect ratio': 1,
+        },
+      }))
+
+    const scope = effectScope()
+    const parameters = scope.run(() => useParameters())!
+
+    try {
+      await vi.waitFor(() => {
+        expect(parameters.config.die.Size).toEqual([100, 100])
+      })
+      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+
+      markFlowExecutionActiveForWorkspace('/workspace/demo')
+      await vi.advanceTimersByTimeAsync(1600)
+
+      await vi.waitFor(() => {
+        expect(parameters.config.die.Size).toEqual([])
+      })
+      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+
+      clearFlowExecutionActiveForWorkspace('/workspace/demo')
+      await vi.advanceTimersByTimeAsync(1600)
+
+      expect(readProjectTextFile).toHaveBeenCalledTimes(2)
+      expect(fetchSharedHomeData).toHaveBeenCalledTimes(1)
+    } finally {
+      scope.stop()
+    }
+  })
+
+  it('rejects parameter saves while the workspace flow is running', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(JSON.stringify({
+      PDK: 'ics55',
+      Design: 'demo',
+      'Top module': 'chip_top',
+      Die: { Size: [100, 100], Area: 10000 },
+      Core: {
+        Size: [80, 80],
+        Area: 6400,
+        'Bounding box': '(0,0) (80,80)',
+        Utilitization: 0.5,
+        Margin: [4, 4],
+        'Aspect ratio': 1,
+      },
+      'Max fanout': 20,
+      'Target density': 0.3,
+      'Target overflow': 0.1,
+      'Global right padding': 0,
+      'Cell padding x': 600,
+      'Routability opt flag': 1,
+      Clock: 'clk',
+      'Frequency max [MHz]': 100,
+      'Bottom layer': 'MET2',
+      'Top layer': 'MET5',
+      'PDK Root': '/pdks/ics55',
+    }))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(readProjectTextFile).toHaveBeenCalledWith('/workspace/demo/home/parameters.json')
+    })
+
+    parameters.config.design = 'blocked_update'
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+
+    await expect(parameters.saveParameters()).resolves.toBe(false)
+
+    expect(writeProjectTextFile).not.toHaveBeenCalled()
+    expect(parameters.error.value).toContain('Flow is running')
+  })
+
+  it('increments dependent resource versions only after a successful save', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',
     })
@@ -216,7 +360,61 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(resourceVersions.value.parameters).toBe(initialVersions.parameters + 1)
     expect(resourceVersions.value.home).toBe(initialVersions.home + 1)
+    expect(resourceVersions.value['step-config']).toBe(initialVersions['step-config'] + 1)
+    expect(resourceVersions.value.flow).toBe(initialVersions.flow + 1)
     expect(resourceVersions.value.all).toBe(initialVersions.all)
+  })
+
+  it('refreshes workspace config after saving a max fanout parameter change', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(JSON.stringify({
+      PDK: 'ics55',
+      Design: 'demo',
+      'Top module': 'chip_top',
+      Die: { Size: [100, 100], Area: 10000 },
+      Core: {
+        Size: [80, 80],
+        Area: 6400,
+        'Bounding box': '(0,0) (80,80)',
+        Utilitization: 0.5,
+        Margin: [4, 4],
+        'Aspect ratio': 1,
+      },
+      'Max fanout': 20,
+      'Target density': 0.3,
+      'Target overflow': 0.1,
+      'Global right padding': 0,
+      'Cell padding x': 600,
+      'Routability opt flag': 1,
+      Clock: 'clk',
+      'Frequency max [MHz]': 100,
+      'Bottom layer': 'MET2',
+      'Top layer': 'MET5',
+      'PDK Root': '/pdks/ics55',
+    }))
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(readProjectTextFile).toHaveBeenCalledWith('/workspace/demo/home/parameters.json')
+    })
+
+    parameters.config.maxFanout = 64
+
+    await expect(parameters.saveParameters()).resolves.toBe(true)
+
+    expect(writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/demo/home/parameters.json',
+      expect.stringContaining('"Max fanout": 64'),
+    )
+    expect(refreshConfigApi).toHaveBeenCalledWith({
+      cmd: 'refresh_config',
+      data: {
+        directory: '/workspace/demo',
+      },
+    })
   })
 
   it('does not increment home or parameters resource versions when save fails', async () => {
@@ -263,6 +461,57 @@ describe('useParameters desktop bridge integration', () => {
     await expect(parameters.saveParameters()).resolves.toBe(false)
 
     expect(resourceVersions.value).toEqual(initialVersions)
+  })
+
+  it('keeps written parameters as the baseline when refresh config fails after save', async () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(JSON.stringify({
+      PDK: 'ics55',
+      Design: 'demo',
+      'Top module': 'chip_top',
+      Die: { Size: [100, 100], Area: 10000 },
+      Core: {
+        Size: [80, 80],
+        Area: 6400,
+        'Bounding box': '(0,0) (80,80)',
+        Utilitization: 0.5,
+        Margin: [4, 4],
+        'Aspect ratio': 1,
+      },
+      'Max fanout': 20,
+      'Target density': 0.3,
+      'Target overflow': 0.1,
+      'Global right padding': 0,
+      'Cell padding x': 600,
+      'Routability opt flag': 1,
+      Clock: 'clk',
+      'Frequency max [MHz]': 100,
+      'Bottom layer': 'MET2',
+      'Top layer': 'MET5',
+      'PDK Root': '/pdks/ics55',
+    }))
+    refreshConfigApi.mockResolvedValue({
+      cmd: 'refresh_config',
+      data: { directory: '/workspace/demo', refreshed: false },
+      message: ['refresh failed'],
+      response: 'error',
+    })
+
+    const parameters = useParameters()
+
+    await vi.waitFor(() => {
+      expect(readProjectTextFile).toHaveBeenCalledWith('/workspace/demo/home/parameters.json')
+    })
+
+    parameters.config.design = 'updated_demo'
+
+    await expect(parameters.saveParameters()).resolves.toBe(false)
+
+    expect(writeProjectTextFile).toHaveBeenCalled()
+    expect(parameters.hasChanges.value).toBe(false)
+    expect(parameters.error.value).toBe('refresh failed')
   })
 
   it('does not invalidate the new workspace when an old save resolves after a session switch', async () => {

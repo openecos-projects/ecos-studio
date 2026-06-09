@@ -1,10 +1,13 @@
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch, computed, getCurrentScope, onScopeDispose } from 'vue'
 import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { fetchSharedHomeData, convertRemoteToLocalPath } from './useHomeData'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
+import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
+import { refreshConfigApi } from '@/api/flow'
+import { CMDEnum, ResponseEnum } from '@/api/type'
 
 // ============ 类型定义 ============
 // 与 ecc/chipcompiler/data/parameter.py 中 ICS55_PARAMETERS_TEMPLATE 及 workspace 写入的 PDK Root 对齐
@@ -70,6 +73,9 @@ export interface ConfigData {
 
 /** 用于 Bottom/Top 金属层下拉的常见顺序（与 PDK 文档一致即可） */
 const ROUTING_LAYER_ORDER = ['LI1', 'MET1', 'MET2', 'MET3', 'MET4', 'MET5', 'MET6', 'MET7', 'MET8']
+const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
+  'Flow is running. Configuration is read-only until the current run finishes.'
+const RUNNING_FLOW_PARAMETERS_POLL_MS = 1600
 
 function getDefaultConfig(): ConfigData {
   return {
@@ -97,6 +103,10 @@ function getDefaultConfig(): ConfigData {
     bottomLayer: 'MET2',
     topLayer: 'MET5'
   }
+}
+
+function firstResponseMessage(response: { message?: string[] } | undefined, fallback: string): string {
+  return response?.message?.[0] || fallback
 }
 
 function normalizeDie(d: unknown): ParametersData['Die'] {
@@ -240,6 +250,7 @@ export function useParameters() {
   const isSaving = ref(false)
   const error = ref<string | null>(null)
   const hasChanges = ref(false)
+  const isMutationLocked = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
 
   let originalConfig: string = ''
   let resolvedParametersPath: string = ''
@@ -248,6 +259,12 @@ export function useParameters() {
   let activeSaveRequestId = 0
   let parametersResourceToken = 0
   let saveWriteQueue: Promise<void> = Promise.resolve()
+  let runningFlowParametersPollTimer: ReturnType<typeof setInterval> | null = null
+  let runningFlowParametersPollInFlight = false
+
+  function fallbackParametersPath(projectPath: string): string {
+    return `${projectPath}/home/parameters.json`
+  }
 
   function advanceParametersResourceToken(): number {
     parametersResourceToken += 1
@@ -273,6 +290,11 @@ export function useParameters() {
     return projectPath ? convertRemoteToLocalPath(remotePath, projectPath) : remotePath
   }
 
+  function keepLastParametersDuringFlowReload(): boolean {
+    if (!currentProject.value?.path) return false
+    return Boolean(originalConfig) && isFlowExecutionActiveForWorkspace(currentProject.value.path)
+  }
+
   function isSaveContextCurrent(options: {
     sessionId: string
     requestId: number
@@ -287,6 +309,98 @@ export function useParameters() {
       && resolvedParametersPath === options.parametersPath
       && currentProject.value?.path === options.projectPath
     )
+  }
+
+  function blockSaveWhileFlowRunning(projectPath = currentProject.value?.path): boolean {
+    if (!isFlowExecutionActiveForWorkspace(projectPath)) return false
+    error.value = FLOW_RUNNING_SAVE_BLOCKED_MESSAGE
+    return true
+  }
+
+  function applyParametersFileContent(fileContent: string): void {
+    const parametersData = parseParametersData(fileContent)
+
+    console.log('Loaded parameters data:', parametersData)
+
+    const transformedConfig = transformParametersToConfig(parametersData)
+    const nextConfigSnapshot = JSON.stringify(transformedConfig)
+    if (nextConfigSnapshot === originalConfig) {
+      hasChanges.value = false
+      return
+    }
+
+    Object.assign(config, transformedConfig)
+    console.log('Loaded config:', config)
+    originalConfig = JSON.stringify(config)
+    hasChanges.value = false
+
+    console.log('Parameters loaded:', config)
+  }
+
+  async function reloadParametersFromKnownPathIfRunning(): Promise<boolean> {
+    const projectPath = currentProject.value?.path
+    if (!projectPath || !isFlowExecutionActiveForWorkspace(projectPath)) return false
+
+    const sessionId = workspaceLifecycle.currentSessionId.value
+    const knownPath = resolvedParametersPath || fallbackParametersPath(projectPath)
+    isLoading.value = true
+    error.value = null
+    const loadResourceToken = advanceParametersResourceToken()
+
+    try {
+      const resolvedPath = await workspaceLifecycle.runForSession(
+        sessionId,
+        () => resolveProjectPathAccess(knownPath),
+      )
+      if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return true
+      if (!resolvedPath) {
+        if (keepLastParametersDuringFlowReload()) return true
+        resetParametersState()
+        return true
+      }
+
+      const fileContent = await workspaceLifecycle.runForSession(
+        sessionId,
+        () => readProjectTextFile(resolvedPath),
+      )
+      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return true
+      if (fileContent === undefined) return true
+      if (loadResourceToken !== parametersResourceToken) return true
+
+      resolvedParametersPath = resolvedPath
+      applyParametersFileContent(fileContent)
+      return true
+    } catch (err) {
+      if (!workspaceLifecycle.isCurrentSession(sessionId)) return true
+      console.error('Failed to reload running flow parameters:', err)
+      if (!keepLastParametersDuringFlowReload()) {
+        error.value = err instanceof Error ? err.message : String(err)
+        resetParametersState()
+      }
+      return true
+    } finally {
+      if (workspaceLifecycle.isCurrentSession(sessionId)) {
+        isLoading.value = false
+      }
+    }
+  }
+
+  function stopRunningFlowParametersPoll(): void {
+    if (runningFlowParametersPollTimer == null) return
+    clearInterval(runningFlowParametersPollTimer)
+    runningFlowParametersPollTimer = null
+    runningFlowParametersPollInFlight = false
+  }
+
+  function startRunningFlowParametersPoll(): void {
+    if (runningFlowParametersPollTimer != null) return
+    runningFlowParametersPollTimer = setInterval(() => {
+      if (runningFlowParametersPollInFlight || hasChanges.value) return
+      runningFlowParametersPollInFlight = true
+      void reloadParametersFromKnownPathIfRunning().finally(() => {
+        runningFlowParametersPollInFlight = false
+      })
+    }, RUNNING_FLOW_PARAMETERS_POLL_MS)
   }
 
   async function loadParameters(): Promise<void> {
@@ -315,12 +429,14 @@ export function useParameters() {
       if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
       if (!homeData) {
         console.warn('Failed to get home data')
+        if (keepLastParametersDuringFlowReload()) return
         resetParametersState()
         return
       }
 
       if (!homeData.parameters) {
         console.warn('No parameters field found in home.json')
+        if (keepLastParametersDuringFlowReload()) return
         resetParametersState()
         return
       }
@@ -333,6 +449,7 @@ export function useParameters() {
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
       console.log('Loading parameters from:', resolvedPath ?? parametersPath)
       if (!resolvedPath) {
+        if (keepLastParametersDuringFlowReload()) return
         resetParametersState()
         return
       }
@@ -343,20 +460,11 @@ export function useParameters() {
       )
       if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
       if (fileContent === undefined) return
-      const parametersData = parseParametersData(fileContent)
-
-      console.log('Loaded parameters data:', parametersData)
 
       if (loadResourceToken !== parametersResourceToken) return
       resolvedParametersPath = resolvedPath
 
-      const transformedConfig = transformParametersToConfig(parametersData)
-      Object.assign(config, transformedConfig)
-      console.log('Loaded config:', config)
-      originalConfig = JSON.stringify(config)
-      hasChanges.value = false
-
-      console.log('Parameters loaded:', config)
+      applyParametersFileContent(fileContent)
     } catch (err) {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       console.error('Failed to load parameters:', err)
@@ -377,6 +485,10 @@ export function useParameters() {
 
     if (!resolvedParametersPath) {
       console.warn('Parameters file path is not resolved. Call loadParameters first.')
+      return false
+    }
+
+    if (blockSaveWhileFlowRunning()) {
       return false
     }
 
@@ -404,6 +516,9 @@ export function useParameters() {
           parametersPath: saveParametersPath,
           projectPath: saveProjectPath,
         })) {
+          return
+        }
+        if (blockSaveWhileFlowRunning(saveProjectPath)) {
           return
         }
         console.log('Saving parameters to:', saveParametersPath)
@@ -436,7 +551,32 @@ export function useParameters() {
       } else {
         hasChanges.value = true
       }
-      invalidateWorkspaceResources(['parameters', 'home'], { sessionId: saveSessionId })
+
+      const refreshResult = await workspaceLifecycle.runForSession(
+        saveSessionId,
+        () => refreshConfigApi({
+          cmd: CMDEnum.refresh_config,
+          data: {
+            directory: saveProjectPath,
+          },
+        }),
+      )
+      if (!isSaveContextCurrent({
+        sessionId: saveSessionId,
+        requestId: saveRequestId,
+        resourceToken: saveResourceToken,
+        parametersPath: saveParametersPath,
+        projectPath: saveProjectPath,
+      })) {
+        return refreshResult?.response === ResponseEnum.success
+      }
+
+      invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], { sessionId: saveSessionId })
+
+      if (refreshResult?.response !== ResponseEnum.success) {
+        error.value = firstResponseMessage(refreshResult, 'Refresh workspace config failed')
+        return false
+      }
 
       console.log('Parameters saved successfully')
       return true
@@ -478,6 +618,7 @@ export function useParameters() {
   }
 
   async function refreshParameters(): Promise<void> {
+    if (await reloadParametersFromKnownPathIfRunning()) return
     await loadParameters()
   }
 
@@ -486,6 +627,7 @@ export function useParameters() {
       console.warn('Skip automatic parameters reload because there are unsaved changes')
       return
     }
+    if (await reloadParametersFromKnownPathIfRunning()) return
     await loadParameters()
   }
 
@@ -501,6 +643,7 @@ export function useParameters() {
     () => currentProject.value?.path,
     async (newPath) => {
       isSaving.value = false
+      stopRunningFlowParametersPoll()
       if (newPath) {
         await loadParameters()
       } else {
@@ -520,6 +663,25 @@ export function useParameters() {
       await reloadParametersIfClean()
     },
   )
+
+  if (getCurrentScope()) {
+    const stopFlowExecutionWatch = watch(
+      () => isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+      (active) => {
+        if (active) {
+          startRunningFlowParametersPoll()
+        } else {
+          stopRunningFlowParametersPoll()
+        }
+      },
+      { immediate: true },
+    )
+
+    onScopeDispose(() => {
+      stopFlowExecutionWatch()
+      stopRunningFlowParametersPoll()
+    })
+  }
 
   const layerOptions = computed(() => {
     return ROUTING_LAYER_ORDER.map(layer => ({ label: layer, value: layer }))
@@ -549,6 +711,7 @@ export function useParameters() {
     isSaving,
     error,
     hasChanges,
+    isMutationLocked,
     layerOptions,
     layersList,
     isLayerInRange,

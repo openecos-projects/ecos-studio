@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { InfoEnum, StepEnum } from '@/api/type'
+import { CMDEnum, InfoEnum, ResponseEnum, StepEnum } from '@/api/type'
+import { syncConfigApi } from '@/api/flow'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { convertRemoteToLocalPath } from '@/composables/useHomeData'
 import { readProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
@@ -8,8 +9,11 @@ import { resolveProjectPathAccess } from '@/utils/projectFs'
 import { useDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
+import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 
 const stepEnumValues = Object.values(StepEnum)
+const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
+  'Flow is running. Configuration is read-only until the current run finishes.'
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
   return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
@@ -52,6 +56,10 @@ function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | und
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
+function firstResponseMessage(response: { message?: string[] } | undefined, fallback: string): string {
+  return response?.message?.[0] || fallback
+}
+
 export function useStepConfigInfo() {
   const route = useRoute()
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
@@ -81,6 +89,7 @@ export function useStepConfigInfo() {
   const isSavingStepConfig = ref(false)
   const activeStepConfigSave = ref<symbol | null>(null)
   const stepConfigSaveError = ref<string | null>(null)
+  const isMutationLocked = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
   let activeRefetchToken: symbol | null = null
   let lastLoadedStep: StepEnum | null = null
 
@@ -352,6 +361,12 @@ export function useStepConfigInfo() {
     return stableJsonSig(stepConfigDraft.value) !== stepConfigBaselineSig.value
   })
 
+  function blockStepConfigSaveWhileFlowRunning(): boolean {
+    if (!isMutationLocked.value) return false
+    stepConfigSaveError.value = FLOW_RUNNING_SAVE_BLOCKED_MESSAGE
+    return true
+  }
+
   async function saveStepConfig(): Promise<boolean> {
     stepConfigSaveError.value = null
     const path = stepConfigPathResolved.value
@@ -374,6 +389,9 @@ export function useStepConfigInfo() {
       stepConfigSaveError.value = 'Saving requires the ECOS Studio desktop runtime'
       return false
     }
+    if (blockStepConfigSaveWhileFlowRunning()) {
+      return false
+    }
     const rawBeforeSave = stepConfigRaw.value
     const textDraftBeforeSave = stepConfigTextDraft.value
     const draftBeforeSave = stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
@@ -389,6 +407,50 @@ export function useStepConfigInfo() {
         stepConfigSaveError.value = `No file-system access to ${path}`
         return false
       }
+      if (blockStepConfigSaveWhileFlowRunning()) {
+        return false
+      }
+
+      const syncWorkspaceConfig = async (): Promise<boolean> => {
+        const projectPath = currentProject.value?.path
+        if (!projectPath) {
+          stepConfigSaveError.value = 'No workspace is open'
+          return false
+        }
+        const syncResult = await workspaceLifecycle.runForSession(
+          sessionId,
+          () => syncConfigApi({
+            cmd: CMDEnum.sync_config,
+            data: {
+              config_path: resolvedPath,
+              directory: projectPath,
+            },
+          }),
+        )
+        if (!canApply()) return false
+
+        workspaceLifecycle.invalidate('step-config', {
+          reason: 'step-config-save',
+          sessionId,
+          step,
+        })
+
+        if (syncResult?.data?.parameters_changed === true) {
+          workspaceLifecycle.invalidate(['parameters', 'home'], {
+            reason: 'step-config-sync',
+            sessionId,
+            step,
+          })
+        }
+
+        if (syncResult?.response !== ResponseEnum.success) {
+          stepConfigSaveError.value = firstResponseMessage(syncResult, 'Sync workspace config failed')
+          return false
+        }
+
+        return true
+      }
+
       let text: string
       if (!rawLooksValidJson(rawBeforeSave ?? '')) {
         text = textDraftBeforeSave
@@ -402,12 +464,7 @@ export function useStepConfigInfo() {
         if (!canApply() || writeResult !== true) return false
         stepConfigRaw.value = text
         stepConfigTextBaseline.value = text
-        workspaceLifecycle.invalidate('step-config', {
-          reason: 'step-config-save',
-          sessionId,
-          step,
-        })
-        return true
+        return await syncWorkspaceConfig()
       }
       if (draftBeforeSave === null) {
         stepConfigSaveError.value = 'Nothing to save'
@@ -424,12 +481,7 @@ export function useStepConfigInfo() {
       if (!canApply() || writeResult !== true) return false
       stepConfigRaw.value = text
       stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
-      workspaceLifecycle.invalidate('step-config', {
-        reason: 'step-config-save',
-        sessionId,
-        step,
-      })
-      return true
+      return await syncWorkspaceConfig()
     } catch (e) {
       if (!canApply()) return false
       stepConfigSaveError.value = e instanceof Error ? e.message : String(e)
@@ -469,6 +521,7 @@ export function useStepConfigInfo() {
     hasStepConfigChanges,
     isSavingStepConfig,
     stepConfigSaveError,
+    isMutationLocked,
     saveStepConfig,
     resetStepConfig,
     reloadStepConfigFiles,
