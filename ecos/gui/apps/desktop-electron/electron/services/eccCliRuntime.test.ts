@@ -191,7 +191,7 @@ describe('createEccCliRuntimeEnv', () => {
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
   })
 
-  it('injects bundled OSS CAD env when packaged resources include yosys', () => {
+  it('does not inject bundled OSS CAD env when packaged resources include yosys', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const ossCadRoot = join(resourcesPath, 'resources', 'oss-cad-suite')
@@ -213,11 +213,11 @@ describe('createEccCliRuntimeEnv', () => {
     })
 
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
-    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(ossCadRoot)
-    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(ossCadRoot)
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
-  it('prefers bundled OSS CAD over an inherited host OSS CAD path', () => {
+  it('removes inherited host OSS CAD vars in packaged mode', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const ossCadRoot = join(resourcesPath, 'resources', 'oss-cad-suite')
@@ -231,6 +231,7 @@ describe('createEccCliRuntimeEnv', () => {
       cwd: fixture.appPath,
       env: {
         CHIPCOMPILER_OSS_CAD_DIR: '/host/oss-cad-suite',
+        ECOS_ELECTRON_OSS_CAD_DIR: '/host/electron-oss-cad-suite',
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         PATH: '/usr/bin',
       },
@@ -239,7 +240,8 @@ describe('createEccCliRuntimeEnv', () => {
       userDataPath: fixture.userDataPath,
     })
 
-    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(ossCadRoot)
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
   it('does not inject OSS CAD env when packaged yosys is missing', () => {
@@ -292,7 +294,7 @@ describe('createEccCliRuntimeEnv', () => {
     expect(env).toEqual({ PATH: '/usr/bin' })
   })
 
-  it('uses ECOS_ELECTRON_OSS_CAD_DIR when it points at a usable OSS CAD root', () => {
+  it('ignores ECOS_ELECTRON_OSS_CAD_DIR as a packaged fallback', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const customOssCadRoot = join(fixture.repoRoot, 'custom-oss-cad-suite')
@@ -314,8 +316,8 @@ describe('createEccCliRuntimeEnv', () => {
       userDataPath: fixture.userDataPath,
     })
 
-    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(customOssCadRoot)
-    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(customOssCadRoot)
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
   it('does not preserve ECOS_ELECTRON_OSS_CAD_DIR when it points at an unusable root', () => {
@@ -343,35 +345,8 @@ describe('createEccCliRuntimeEnv', () => {
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
-  it('falls back to bundled OSS CAD when ECOS_ELECTRON_OSS_CAD_DIR is unusable', () => {
-    const fixture = createRepoFixture()
-    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
-    const customOssCadRoot = join(fixture.repoRoot, 'custom-oss-cad-suite')
-    const bundledOssCadRoot = join(resourcesPath, 'resources', 'oss-cad-suite')
-    mkdirSync(join(resourcesPath, 'binaries'), { recursive: true })
-    mkdirSync(customOssCadRoot, { recursive: true })
-    mkdirSync(join(bundledOssCadRoot, 'bin'), { recursive: true })
-    writeFileSync(join(resourcesPath, 'binaries', 'ecc'), '#!/usr/bin/env bash\n')
-    writeFileSync(join(bundledOssCadRoot, 'bin', 'yosys'), '#!/usr/bin/env bash\n')
 
-    const env = createEccCliRuntimeEnv({
-      appPath: fixture.appPath,
-      cwd: fixture.appPath,
-      env: {
-        ECOS_ELECTRON_OSS_CAD_DIR: customOssCadRoot,
-        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
-        PATH: '/usr/bin',
-      },
-      isPackaged: true,
-      platform: 'linux',
-      userDataPath: fixture.userDataPath,
-    })
-
-    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(bundledOssCadRoot)
-    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(bundledOssCadRoot)
-  })
-
-  it('checks for yosys.exe when resolving packaged OSS CAD on Windows', () => {
+  it('prepends Windows packaged runtime without injecting packaged OSS CAD', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const ossCadRoot = join(resourcesPath, 'resources', 'oss-cad-suite')
@@ -393,11 +368,11 @@ describe('createEccCliRuntimeEnv', () => {
     })
 
     expect(env.Path).toBe(`${join(resourcesPath, 'binaries')};C:\\Windows\\System32`)
-    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(ossCadRoot)
-    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(ossCadRoot)
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
 
-  it('does not inject the development wrapper in packaged mode without bundled ecc', () => {
+  it('strips inherited OSS CAD vars in packaged mode without bundled ecc', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
 
@@ -405,6 +380,8 @@ describe('createEccCliRuntimeEnv', () => {
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
+        CHIPCOMPILER_OSS_CAD_DIR: '/host/oss-cad-suite',
+        ECOS_ELECTRON_OSS_CAD_DIR: '/host/electron-oss-cad-suite',
         PATH: '/usr/bin',
       },
       isPackaged: true,
