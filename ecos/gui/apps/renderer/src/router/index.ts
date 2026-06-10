@@ -11,6 +11,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'soc', name: 'SoCGallery', component: () => import('../views/SoCTemplateGalleryView.vue') },
       { path: 'soc/:templateId', name: 'SoCTemplateDetail', component: () => import('../views/SoCTemplateDetailView.vue'), props: true },
       { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
+      { path: 'fe', name: 'FE', component: () => import('../views/FEView.vue') },
       { path: 'tools', name: 'PluginTools', component: () => import('../views/PluginToolsView.vue') },
       { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') }
     ],
@@ -25,14 +26,14 @@ const routes: RouteRecordRaw[] = [
     redirect: '/workspace/home',
     children: [
       // 固定的设置页面
-      { path: 'home', name: 'Home', component: () => import('../views/HomeView.vue') },
+      { path: 'home', name: 'Home', component: () => import('../views/WorkspaceRouteView.vue') },
       { path: 'configure', name: 'Configure', component: () => import('../views/ConfigureView.vue') },
       // 动态步骤路由：匹配所有 flow 步骤
       // 路由验证放宽，允许任何步骤路径（由 flow.json 动态决定）
       {
         path: ':step',
         name: ':step',
-        component: () => import('../views/WorkspaceView.vue')
+        component: () => import('../views/WorkspaceRouteView.vue')
       }
     ],
     meta: {

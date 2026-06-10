@@ -1,4 +1,5 @@
 import type {
+  DesignTool,
   WorkspaceConfig as SharedWorkspaceConfig,
   WorkspaceParameters as SharedWorkspaceParameters,
   WorkspaceStatus as SharedWorkspaceStatus,
@@ -64,6 +65,7 @@ export interface Thumbnail {
 }
 
 export type ProjectStatus = SharedWorkspaceStatus
+export type { DesignTool }
 
 export interface Project extends Omit<WorkspaceSummary, 'lastOpened'> {
   lastOpened: Date

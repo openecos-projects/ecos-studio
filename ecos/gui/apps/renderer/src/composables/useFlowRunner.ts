@@ -2,7 +2,7 @@ import { computed, ref, shallowReactive } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
-import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
+import { CMDEnum, StateEnum } from '@/api/type'
 import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
 import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 
@@ -124,11 +124,11 @@ export function useFlowRunner() {
     if (!ensureDesktopRuntime()) {
       console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
       showDesktopRequiredToast()
-      return { step: step as StepEnum, state: StateEnum.Invalid }
+      return { step, state: StateEnum.Invalid }
     }
 
     if (!(await ensureApiReady())) {
-      return { step: step as StepEnum, state: StateEnum.Invalid }
+      return { step, state: StateEnum.Invalid }
     }
 
     const directory = getCurrentWorkspacePath()
@@ -139,11 +139,11 @@ export function useFlowRunner() {
         detail: 'Open a workspace before running a flow step.',
         life: 5000,
       })
-      return { step: step as StepEnum, state: StateEnum.Invalid }
+      return { step, state: StateEnum.Invalid }
     }
 
     if (isRunning.value) {
-      return { step: step as StepEnum, state: StateEnum.Ongoing }
+      return { step, state: StateEnum.Ongoing }
     }
 
     clearTransientInteractionLocks()
@@ -158,8 +158,9 @@ export function useFlowRunner() {
       const result = await runStepApi({
         cmd: CMDEnum.run_step,
         data: {
+          designTool: currentProject.value?.designTool,
           directory,
-          step: step as StepEnum,
+          step,
           rerun: false
         }
       })
@@ -244,31 +245,34 @@ export function useFlowRunner() {
     error.value = null
 
     try {
-      console.log('Starting rtl2gds flow...')
+      const isFrontendProject = currentProject.value?.designTool === 'frontend'
+      const flowLabel = isFrontendProject ? 'Frontend Flow' : 'RTL2GDS'
+      console.log(`Starting ${flowLabel} flow...`)
 
       const result = await rtl2gdsApi({
         cmd: CMDEnum.rtl2gds,
         data: {
+          designTool: currentProject.value?.designTool,
           directory,
           rerun: false
         }
       })
-      console.log('rtl2gds result:', result)
+      console.log(`${flowLabel} result:`, result)
 
       if (result.response === 'success') {
         state.value = StateEnum.Success
         showToast({
           severity: 'success',
-          summary: 'RTL2GDS Completed',
+          summary: `${flowLabel} Completed`,
           detail: 'All flow steps finished successfully',
           life: 5000
         })
       } else {
         state.value = StateEnum.Imcomplete
-        error.value = result.message?.[0] || 'rtl2gds failed'
+        error.value = result.message?.[0] || `${flowLabel} failed`
         showToast({
           severity: 'error',
-          summary: 'RTL2GDS Failed',
+          summary: `${flowLabel} Failed`,
           detail: error.value ?? 'Unknown error',
           life: 8000
         })
@@ -281,7 +285,7 @@ export function useFlowRunner() {
       state.value = StateEnum.Imcomplete
       showToast({
         severity: 'error',
-        summary: 'RTL2GDS Error',
+        summary: `${currentProject.value?.designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
         detail: error.value ?? 'Unknown error',
         life: 8000
       })

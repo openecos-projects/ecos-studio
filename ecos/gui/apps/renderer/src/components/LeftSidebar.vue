@@ -51,7 +51,7 @@
             </div>
             <div>
               <h3 class="text-[14px] font-semibold text-(--text-primary) tracking-wide">Flow Overview</h3>
-              <p class="text-[11px] text-(--text-secondary) mt-0.5">RTL to GDS Pipeline</p>
+              <p class="text-[11px] text-(--text-secondary) mt-0.5">{{ flowSubtitle }}</p>
             </div>
           </div>
         </div>
@@ -215,7 +215,7 @@
             </div>
           </div> -->
 
-          <!-- RTL2GDS 控制区 -->
+          <!-- Flow 控制区 -->
           <div class="rtl2gds-control">
             <!-- 状态指示灯 -->
             <div class="rtl2gds-status-dots">
@@ -481,17 +481,19 @@ const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.
 const runMode = ref('run')
 const showModeMenu = ref(false)
 
-const runModes: Record<string, { label: string; icon: string; shortcut?: string }> = {
-  run: { label: 'Run RTL2GDS', icon: 'ri-play-fill' },
+const { ensureApiReady, currentProject } = useWorkspace()
+const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
+const flowSubtitle = computed(() => isFrontendProject.value ? 'Frontend Verification Flow' : 'RTL to GDS Pipeline')
+
+const runModes = computed<Record<string, { label: string; icon: string; shortcut?: string }>>(() => ({
+  run: { label: isFrontendProject.value ? 'Run Frontend Flow' : 'Run RTL2GDS', icon: 'ri-play-fill' },
   rerun: { label: 'ReRun', icon: 'ri-restart-line' },
-}
+}))
 
 // 点击外部关闭菜单
 const closeMenu = () => { showModeMenu.value = false }
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
-
-const { ensureApiReady } = useWorkspace()
 
 // ============ 事件处理 ============
 const handleRunFlow = async () => {

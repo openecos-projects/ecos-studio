@@ -1,10 +1,13 @@
 import { toDesktopCliData } from './desktopPayload'
-import { RequestData, ResponseData, StepEnum, InfoEnum, StateEnum } from './type';
+import { CMDEnum, RequestData, ResponseData, InfoEnum, StateEnum } from './type';
 import { getDesktopApi } from '@/platform/desktop'
+import type { DesignTool } from '@ecos-studio/shared'
 
 export interface GetInfoRequest {
-  step: StepEnum;
+  directory?: string;
+  step: string;
   id: InfoEnum;
+  designTool?: DesignTool;
 }
 
 export interface GetInfoResponse {
@@ -24,6 +27,7 @@ export function getInfoApi(request: RequestData<GetInfoRequest>) {
 
 
 export interface RTL2GDSRequest {
+  designTool?: DesignTool;
   directory: string;
   rerun: boolean;
 }
@@ -41,13 +45,17 @@ export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
 }
 
 export interface RunStepRequest {
+  designTool?: DesignTool;
   directory: string;
-  step: StepEnum;
+  step: string;
   rerun: boolean;
+  sim_test_suite?: string;
+  sim_cpu_test_mode?: 'all' | 'selected';
+  sim_cpu_test_cases?: string[];
 }
 
 export interface RunStepResponse {
-  step: StepEnum;
+  step: string;
   state: StateEnum;
 }
 
@@ -68,10 +76,13 @@ export interface HomePageResponse {
 /**
  * 调用 home_page runtime command 获取 home.json 的路径
  */
-export function getHomePageApi() {
+export function getHomePageApi(request: RequestData<{ directory?: string; designTool?: DesignTool }> = {
+  cmd: CMDEnum.home_page,
+  data: {},
+}) {
   return getDesktopApi().cli.execute({
     cmd: 'home_page',
-    data: toDesktopCliData({}),
+    data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
     source: 'button',
   }) as unknown as Promise<ResponseData<HomePageResponse>>
 }

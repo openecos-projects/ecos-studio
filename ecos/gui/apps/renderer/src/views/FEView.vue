@@ -1,0 +1,223 @@
+<template>
+  <div
+    class="flex flex-col items-center justify-center min-h-full w-full text-(--text-primary) relative overflow-y-auto overflow-x-hidden py-8">
+
+    <button @click="goBack"
+      class="absolute top-6 left-6 z-20 flex items-center gap-2 px-3 py-2 rounded-lg bg-(--bg-secondary) border border-(--border-color) hover:border-(--accent-color) text-(--text-secondary) hover:text-(--accent-color) transition-all cursor-pointer text-sm">
+      <i class="ri-arrow-left-line"></i>
+      <span>Back to ECOS</span>
+    </button>
+
+    <div class="relative z-10 flex flex-col items-center w-full">
+      <div class="flex items-center justify-center mb-12">
+        <div class="relative">
+          <div class="absolute -inset-4 bg-(--accent-color)/10 rounded-full blur-xl"></div>
+          <i class="ri-code-s-slash-line text-6xl text-(--accent-color) relative"></i>
+        </div>
+        <div class="flex flex-col ml-5">
+          <h1 class="text-4xl font-bold text-(--text-primary) tracking-tight">Frontend Design</h1>
+        </div>
+      </div>
+
+      <div class="flex gap-5 mb-16">
+        <button @click="handleOpenWorkspace"
+          class="group flex flex-col items-center gap-3 px-8 py-6 bg-(--bg-secondary) hover:bg-(--bg-sidebar) rounded-xl transition-all hover:scale-[1.02] hover:-translate-y-1 border border-(--border-color) hover:border-(--accent-color) min-w-[180px] cursor-pointer shadow-sm hover:shadow-lg hover:shadow-(--accent-color)/5">
+          <div
+            class="w-14 h-14 rounded-xl bg-(--bg-primary) flex items-center justify-center group-hover:bg-(--accent-color)/10 transition-colors">
+            <i
+              class="ri-book-open-line text-2xl text-(--text-secondary) group-hover:text-(--accent-color) transition-colors"></i>
+          </div>
+          <span class="text-sm font-medium text-(--text-primary)">Open Workspace</span>
+        </button>
+
+        <button @click="showWizard = true"
+          class="group flex flex-col items-center gap-3 px-8 py-6 bg-(--bg-secondary) hover:bg-(--bg-sidebar) rounded-xl transition-all hover:scale-[1.02] hover:-translate-y-1 border border-(--border-color) hover:border-(--accent-color) min-w-[180px] cursor-pointer shadow-sm hover:shadow-lg hover:shadow-(--accent-color)/5">
+          <div
+            class="w-14 h-14 rounded-xl bg-(--bg-primary) flex items-center justify-center group-hover:bg-(--accent-color)/10 transition-colors">
+            <i
+              class="ri-folder-open-line text-2xl text-(--text-secondary) group-hover:text-(--accent-color) transition-colors"></i>
+          </div>
+          <span class="text-sm font-medium text-(--text-primary)">New Workspace</span>
+        </button>
+      </div>
+
+      <div class="w-full max-w-3xl px-4">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-(--text-primary) flex items-center gap-2">
+            <i class="ri-time-line text-(--text-secondary)"></i>
+            Recent Workspaces
+          </h2>
+          <button v-if="frontendProjects.length > 3" @click="showAllProjects = !showAllProjects"
+            class="text-sm text-(--accent-color) hover:opacity-80 transition-opacity cursor-pointer flex items-center gap-1">
+            <template v-if="showAllProjects">
+              Collapse
+              <i class="ri-arrow-up-s-line"></i>
+            </template>
+            <template v-else>
+              View All ({{ frontendProjects.length }})
+              <i class="ri-arrow-right-s-line"></i>
+            </template>
+          </button>
+        </div>
+
+        <div v-if="frontendProjects.length === 0"
+          class="text-center py-16 text-(--text-secondary) bg-(--bg-secondary)/50 rounded-xl border border-dashed border-(--border-color)">
+          <i class="ri-folder-2-line text-5xl mb-4 opacity-30 block"></i>
+          <p class="text-sm">No recent workspaces</p>
+          <p class="text-xs mt-2 opacity-60">Click "New Workspace" to start your frontend design flow</p>
+        </div>
+
+        <div v-else class="space-y-2">
+          <div v-for="project in displayedProjects" :key="project.id"
+            class="w-full flex items-center justify-between px-5 py-4 bg-(--bg-secondary) rounded-xl transition-all border text-left group"
+            :class="project.workspaceRecognized === false
+              ? 'border-(--border-color) opacity-55 cursor-default'
+              : 'border-(--border-color) hover:border-(--accent-color) hover:bg-(--bg-sidebar) cursor-pointer hover:shadow-md'"
+            @click="project.workspaceRecognized !== false && handleOpenRecent(project)">
+            <div class="flex items-center gap-4 flex-1 min-w-0">
+              <div class="w-10 h-10 rounded-lg flex items-center justify-center transition-colors" :class="project.workspaceRecognized === false
+                ? 'bg-red-500/10'
+                : 'bg-(--accent-color)/10 group-hover:bg-(--accent-color)/20'">
+                <i :class="project.workspaceRecognized === false
+                  ? 'ri-folder-warning-line text-lg text-red-400'
+                  : 'ri-folder-line text-lg text-(--accent-color)'"></i>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap min-w-0">
+                  <p class="font-medium truncate min-w-0"
+                    :class="project.workspaceRecognized === false ? 'text-(--text-secondary)' : 'text-(--text-primary)'">
+                    {{ project.name }}
+                  </p>
+                  <span v-if="project.status" :class="statusBadgeClass(project.status)"
+                    class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0">
+                    {{ statusLabel(project.status) }}
+                  </span>
+                </div>
+                <p v-if="project.completedSteps != null && project.totalSteps"
+                  class="text-[11px] text-(--text-secondary) mt-0.5">
+                  {{ project.completedSteps }}/{{ project.totalSteps }} steps
+                </p>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <p class="text-xs text-(--text-secondary) truncate">{{ project.path }}</p>
+                  <span v-if="project.workspaceRecognized === false"
+                    class="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-medium">
+                    Workspace not recognized
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span
+                class="text-xs text-(--text-secondary) group-hover:text-(--text-primary) transition-colors whitespace-nowrap">
+                {{ formatDate(project.lastOpened) }}
+              </span>
+              <button @click.stop="handleRemoveRecent(project.id)"
+                class="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all cursor-pointer"
+                title="Remove from list">
+                <i class="ri-close-line text-sm text-(--text-secondary) hover:text-red-500"></i>
+              </button>
+              <i v-if="project.workspaceRecognized !== false"
+                class="ri-arrow-right-s-line text-(--text-secondary) opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <FrontendProjectWizard v-if="showWizard" @close="showWizard = false" @create="handleWizardCreate" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
+import FrontendProjectWizard from '../components/FrontendProjectWizard.vue'
+import { useWorkspace } from '../composables/useWorkspace'
+
+const router = useRouter()
+const {
+  recentProjects,
+  openProject,
+  newProject,
+  loadRecentProjects,
+  removeRecentProject,
+} = useWorkspace()
+
+const showWizard = ref(false)
+const showAllProjects = ref(false)
+
+const frontendProjects = computed(() => {
+  return recentProjects.value.filter(project => project.designTool === 'frontend')
+})
+
+const displayedProjects = computed(() => {
+  return showAllProjects.value ? frontendProjects.value : frontendProjects.value.slice(0, 3)
+})
+
+onMounted(async () => {
+  await loadRecentProjects()
+})
+
+const goBack = () => {
+  router.push('/')
+}
+
+const handleOpenWorkspace = async () => {
+  const success = await openProject(undefined, { designTool: 'frontend' })
+  if (success) router.push('/workspace')
+}
+
+const handleOpenRecent = async (project: Project) => {
+  const success = await openProject(project, { designTool: 'frontend' })
+  if (success) router.push('/workspace')
+}
+
+const handleRemoveRecent = async (projectId: string) => {
+  await removeRecentProject(projectId)
+}
+
+const handleWizardCreate = async (config: WorkspaceConfig) => {
+  showWizard.value = false
+  const success = await newProject({
+    ...config,
+    designTool: 'frontend'
+  })
+  if (success) router.push('/workspace')
+}
+
+const formatDate = (date: Date) => {
+  const now = new Date()
+  const diff = now.getTime() - new Date(date).getTime()
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  if (days < 7) return `${days} days ago`
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`
+  return new Date(date).toLocaleDateString('en-US')
+}
+
+function statusBadgeClass(status: ProjectStatus): string {
+  const map: Record<ProjectStatus, string> = {
+    success: 'bg-emerald-500/15 text-emerald-400',
+    failed: 'bg-red-500/15 text-red-400',
+    running: 'bg-blue-500/15 text-blue-400',
+    in_progress: 'bg-amber-500/15 text-amber-400',
+    not_started: 'bg-gray-500/15 text-gray-400',
+  }
+  return map[status] || 'bg-gray-500/15 text-gray-400'
+}
+
+function statusLabel(status: ProjectStatus): string {
+  const map: Record<ProjectStatus, string> = {
+    success: 'Success',
+    failed: 'Failed',
+    running: 'Running',
+    in_progress: 'In Progress',
+    not_started: 'Not Started',
+  }
+  return map[status] || 'Unknown'
+}
+</script>

@@ -17,7 +17,8 @@ export enum InfoEnum {
   maps = "maps",
   checklist = "checklist",
   sta = "sta",
-  config = "config"
+  config = "config",
+  frontend_detail = "frontend_detail"
 }
 
 export enum StepEnum {
@@ -45,6 +46,13 @@ export enum StepEnum {
   RCX = "RCX",
   ABSTRACT_LEF = "Abstract lef",
   MERGE = "GDS merge"
+}
+
+export enum FrontendStepEnum {
+  PREPARE = "prepare",
+  ELAB = "elab",
+  LINT = "lint",
+  SIM = "sim",
 }
 
 /** 步骤元数据配置 */
@@ -86,6 +94,11 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
   [StepEnum.RCX.toLowerCase()]: { label: 'RCX', icon: 'ri-flashlight-line', path: StepEnum.RCX, showInSidebar: false, group: 'run' },
   [StepEnum.ABSTRACT_LEF.toLowerCase()]: { label: 'AbsLef', icon: 'ri-file-text-line', path: StepEnum.ABSTRACT_LEF, showInSidebar: false, group: 'run' },
   [StepEnum.MERGE.toLowerCase()]: { label: 'Merge', icon: 'ri-merge-cells-horizontal', path: StepEnum.MERGE, showInSidebar: false, group: 'run' },
+
+  [FrontendStepEnum.PREPARE]: { label: 'Prepare', icon: 'ri-file-list-3-line', path: FrontendStepEnum.PREPARE, showInSidebar: true, group: 'run' },
+  [FrontendStepEnum.ELAB]: { label: 'Elab', icon: 'ri-node-tree', path: FrontendStepEnum.ELAB, showInSidebar: true, group: 'run' },
+  [FrontendStepEnum.LINT]: { label: 'Lint', icon: 'ri-bug-line', path: FrontendStepEnum.LINT, showInSidebar: true, group: 'run' },
+  [FrontendStepEnum.SIM]: { label: 'Sim', icon: 'ri-play-circle-line', path: FrontendStepEnum.SIM, showInSidebar: true, group: 'run' },
 }
 
 /**

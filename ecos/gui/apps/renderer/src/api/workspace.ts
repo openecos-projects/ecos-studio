@@ -1,6 +1,7 @@
 import { toDesktopCliData } from './desktopPayload'
 import { CMDEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
+import type { DesignTool } from '@ecos-studio/shared'
 
 // Types for API requests and responses
 export interface ProjectInfo {
@@ -23,20 +24,40 @@ export interface LoadWorkspaceRequest {
   cmd: CMDEnum.load_workspace;
   data: {
     directory: string;
+    designTool?: DesignTool;
   }
 }
 
 export interface CreateWorkspaceRequest {
   cmd: CMDEnum.create_workspace;
   data: {
-    pdk: string,
-    pdk_root: string,
+    cpu_filelist?: string,
+    designTool?: DesignTool,
     directory: string,
-    parameters: Record<string, unknown>,
+    filelist: string,
     origin_def: string,
     origin_verilog: string,
-    filelist: string,
+    parameters: Record<string, unknown>,
+    pdk: string,
+    pdk_root: string,
     rtl_list: string[]
+    sim_build_all_programs?: boolean,
+    sim_build_test_script?: string,
+    sim_cflags?: string[],
+    sim_cpp_sources?: string[],
+    sim_images?: string[],
+    sim_ldflags?: string[],
+    sim_program_names?: string[],
+    sim_program_sources?: string[],
+    sim_programs_dir?: string,
+    sim_run_args?: string[],
+    sim_soc_root?: string,
+    sim_test_suite?: string,
+    sim_tests_dir?: string,
+    sim_tests_out_dir?: string,
+    soc_filelist?: string,
+    soc_variant?: string,
+    testbench?: string,
   }
 }
 
@@ -44,10 +65,13 @@ export interface CreateWorkspaceRequest {
  * Open an existing project
  * @param path - Full path to the project directory
  */
-export function loadWorkspaceApi(directory: string) {
+export function loadWorkspaceApi(directory: string, designTool?: DesignTool) {
   return getDesktopApi().cli.execute({
     cmd: 'load_workspace',
-    data: { directory },
+    data: toDesktopCliData({
+      directory,
+      ...(designTool ? { designTool } : {}),
+    }),
     source: 'button',
   }) as unknown as Promise<WorkspaceResponse>
 }
@@ -61,6 +85,7 @@ export function loadWorkspaceApi(directory: string) {
 export function createWorkspaceApi(
   options: {
     directory?: string,
+    designTool?: DesignTool,
     pdk?: string,
     parameters?: Record<string, unknown>,
     origin_def?: string,
@@ -68,17 +93,52 @@ export function createWorkspaceApi(
     rtl_list?: string[]
     pdk_root?: string
     filelist?: string
+    cpu_filelist?: string
+    soc_filelist?: string
+    testbench?: string
+    sim_cpp_sources?: string[]
+    sim_cflags?: string[]
+    sim_ldflags?: string[]
+    sim_run_args?: string[]
+    sim_images?: string[]
+    sim_program_names?: string[]
+    sim_program_sources?: string[]
+    sim_programs_dir?: string
+    sim_tests_dir?: string
+    sim_tests_out_dir?: string
+    sim_build_all_programs?: boolean
+    sim_soc_root?: string
+    sim_build_test_script?: string
+    soc_variant?: string
   }
 ) {
   const data = toDesktopCliData({
+    cpu_filelist: options.cpu_filelist || '',
+    designTool: options.designTool,
     directory: options?.directory || '',
-    pdk: options?.pdk || '',
-    parameters: options.parameters || {},
+    filelist: options.filelist || '',
     origin_def: options.origin_def || '',
     origin_verilog: options.origin_verilog || '',
-    rtl_list: options.rtl_list || [],
+    parameters: options.parameters || {},
+    pdk: options?.pdk || '',
     pdk_root: options.pdk_root || '',
-    filelist: options.filelist || ''
+    rtl_list: options.rtl_list || [],
+    sim_build_all_programs: options.sim_build_all_programs ?? false,
+    sim_build_test_script: options.sim_build_test_script || '',
+    sim_cflags: options.sim_cflags || [],
+    sim_cpp_sources: options.sim_cpp_sources || [],
+    sim_images: options.sim_images || [],
+    sim_ldflags: options.sim_ldflags || [],
+    sim_program_names: options.sim_program_names || [],
+    sim_program_sources: options.sim_program_sources || [],
+    sim_programs_dir: options.sim_programs_dir || '',
+    sim_run_args: options.sim_run_args || [],
+    sim_soc_root: options.sim_soc_root || '',
+    sim_tests_dir: options.sim_tests_dir || '',
+    sim_tests_out_dir: options.sim_tests_out_dir || '',
+    soc_filelist: options.soc_filelist || '',
+    soc_variant: options.soc_variant || '',
+    testbench: options.testbench || '',
   })
   return getDesktopApi().cli.execute({
     cmd: 'create_workspace',

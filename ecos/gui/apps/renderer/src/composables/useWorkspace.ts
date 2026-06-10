@@ -1,6 +1,6 @@
 import { ref, getCurrentInstance } from 'vue'
 import type { DesktopSettingsValue } from '@ecos-studio/shared'
-import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
+import type { DesignTool, Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { waitForDesktopApi } from '@/platform/desktop'
@@ -25,6 +25,7 @@ interface SerializedProject {
   name: string
   path: string
   lastOpened: string
+  designTool?: DesignTool
   pdk?: string
   topModule?: string
   frequencyTarget?: number
@@ -285,7 +286,7 @@ export function useWorkspace() {
             try {
               if (!(await ensureApiReady())) return
               workspaceLifecycle.setSessionLoading(session.sessionId)
-              const response = await loadWorkspaceApi(restored.path)
+              const response = await loadWorkspaceApi(restored.path, restored.designTool)
               if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
               if (response.response === 'success') {
                 const resolvedPath = normalizePath(response.data.directory || restored.path)
@@ -360,7 +361,7 @@ export function useWorkspace() {
       return false
     }
   }
-  const openProject = async (project?: Project) => {
+  const openProject = async (project?: Project, options: { designTool?: DesignTool } = {}) => {
     const openProjectRequestId = ++openProjectRequestSequence
     const isLatestOpenProjectRequest = () => openProjectRequestId === openProjectRequestSequence
     let sessionId: string | null = null
@@ -442,7 +443,8 @@ export function useWorkspace() {
       }
 
       // 3. 通过桌面 CLI 加载项目状态
-      const response = await loadWorkspaceApi(selectedPath)
+      const requestedDesignTool = options.designTool ?? project?.designTool
+      const response = await loadWorkspaceApi(selectedPath, requestedDesignTool)
       if (!isLatestOpenProjectRequest()) return false
       if (session && !workspaceLifecycle.isCurrentSession(session.sessionId)) return false
       if (response.response === 'success') {
@@ -470,6 +472,7 @@ export function useWorkspace() {
           id: canonicalProjectRoot,
           name: resolvedName,
           path: canonicalProjectRoot,
+          ...(requestedDesignTool ? { designTool: requestedDesignTool } : {}),
           lastOpened: new Date()
         }
 
@@ -557,38 +560,84 @@ export function useWorkspace() {
       runtimeBackendSubtitle.value = 'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
-      // 将前端参数映射为后端期望的格式 (参考 ics55_parameter.json)
+      const designTool = config?.designTool ?? 'backend'
       const frontendParams = config?.parameters || {}
-      const pdkName = config?.pdk || 'ics55'
-      const backendParameters = {
-        // 基本设计信息 (必需)
-        'Design': frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
-        'Top module': frontendParams.top_module || 'top',
-        'Clock': frontendParams.clock || 'clk',
-        'Frequency max [MHz]': frontendParams.frequency_max || 100,
-        // PDK 信息
-        'PDK': pdkName,
-        // 核心配置
-        'Core': {
-          'Utilitization': frontendParams.core_utilization || 0.5
-        },
-        // 布局参数
-        'Target density': frontendParams.target_density || 0.6,
-        'Max fanout': frontendParams.max_fanout || 20
+      const designName = String(
+        frontendParams.design
+        || frontendParams.Design
+        || selectedPath.split('/').filter(Boolean).pop()
+        || 'New_Chip_Design',
+      )
+      let response: Awaited<ReturnType<typeof createWorkspaceApi>>
+      let createdProjectName = designName
+
+      if (designTool === 'frontend') {
+        const parameters = {
+          ...frontendParams,
+          Design: designName,
+          'Design Tool': 'frontend',
+          'Top module': frontendParams.top_module || frontendParams['Top module'] || 'ysyxSoCTop',
+          Clock: frontendParams.clock || frontendParams.Clock || 'clk',
+          'Frequency max [MHz]': frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
+        }
+
+        response = await createWorkspaceApi({
+          cpu_filelist: String(frontendParams.cpu_filelist || ''),
+          designTool: 'frontend',
+          directory: selectedPath,
+          parameters,
+          sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
+          sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
+          sim_cflags: Array.isArray(frontendParams.sim_cflags) ? frontendParams.sim_cflags as string[] : [],
+          sim_cpp_sources: Array.isArray(frontendParams.sim_cpp_sources) ? frontendParams.sim_cpp_sources as string[] : [],
+          sim_images: Array.isArray(frontendParams.sim_images) ? frontendParams.sim_images as string[] : [],
+          sim_ldflags: Array.isArray(frontendParams.sim_ldflags) ? frontendParams.sim_ldflags as string[] : [],
+          sim_program_names: Array.isArray(frontendParams.sim_program_names) ? frontendParams.sim_program_names as string[] : [],
+          sim_program_sources: Array.isArray(frontendParams.sim_program_sources) ? frontendParams.sim_program_sources as string[] : [],
+          sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
+          sim_run_args: Array.isArray(frontendParams.sim_run_args) ? frontendParams.sim_run_args as string[] : [],
+          sim_soc_root: String(frontendParams.sim_soc_root || ''),
+          sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
+          sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
+          soc_filelist: String(frontendParams.soc_filelist || ''),
+          soc_variant: String(frontendParams.soc_variant || 'soc1'),
+          testbench: String(frontendParams.testbench || ''),
+        })
+      } else {
+        // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
+        // 将前端参数映射为后端期望的格式 (参考 ics55_parameter.json)
+        const pdkName = config?.pdk || 'ics55'
+        const backendParameters = {
+          // 基本设计信息 (必需)
+          'Design': frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+          'Top module': frontendParams.top_module || 'top',
+          'Clock': frontendParams.clock || 'clk',
+          'Frequency max [MHz]': frontendParams.frequency_max || 100,
+          // PDK 信息
+          'PDK': pdkName,
+          // 核心配置
+          'Core': {
+            'Utilitization': frontendParams.core_utilization || 0.5
+          },
+          // 布局参数
+          'Target density': frontendParams.target_density || 0.6,
+          'Max fanout': frontendParams.max_fanout || 20
+        }
+
+        const resolvedPdkRoot = config?.pdk_root || ''
+
+        response = await createWorkspaceApi({
+          directory: selectedPath,
+          designTool: 'backend',
+          pdk: pdkName,
+          pdk_root: resolvedPdkRoot,
+          parameters: backendParameters,
+          origin_def: config?.origin_def,
+          origin_verilog: config?.origin_verilog,
+          rtl_list: config?.rtl_list || []
+        })
+        createdProjectName = backendParameters['Design'] as string
       }
-
-      const resolvedPdkRoot = config?.pdk_root || ''
-
-      const response = await createWorkspaceApi({
-        directory: selectedPath,
-        pdk: pdkName,
-        pdk_root: resolvedPdkRoot,
-        parameters: backendParameters,
-        origin_def: config?.origin_def,
-        origin_verilog: config?.origin_verilog,
-        rtl_list: config?.rtl_list || []
-      })
       console.log(response)
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
       if (response.response === 'success') {
@@ -606,8 +655,9 @@ export function useWorkspace() {
         }
         const createdProject: Project = {
           id: canonicalProjectRoot,
-          name: backendParameters['Design'] as string,
+          name: createdProjectName,
           path: canonicalProjectRoot,
+          designTool,
           lastOpened: new Date()
         }
 
