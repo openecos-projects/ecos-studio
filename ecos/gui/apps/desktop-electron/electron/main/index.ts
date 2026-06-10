@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createMainWindow } from './createMainWindow'
@@ -18,6 +18,7 @@ import { ProjectScopeService } from '../services/projectScopeService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
+import { registerSurferProtocolSchemes, SurferProtocolService } from '../services/surferProtocolService'
 import { TileService } from '../services/tileService'
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
@@ -31,6 +32,7 @@ let services:
       settingsStore: SettingsStore
       resourceManagerService: ResourceManagerService
       shellService: ShellPtyService
+      surferProtocolService: SurferProtocolService
       tileService: TileService
       workspaceResourceService: WorkspaceResourceService
       workspaceService: WorkspaceService
@@ -63,6 +65,7 @@ configureElectronLoggerFile({
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
 electronLogger.status('[runtime] Runtime: ECC CLI + frontend CLI')
+registerSurferProtocolSchemes(protocol)
 
 function getDesktopServices() {
   if (services) {
@@ -115,6 +118,10 @@ function getDesktopServices() {
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
   })
+  const surferProtocolService = new SurferProtocolService({
+    projectScopeProvider: projectScopeService,
+  })
+  surferProtocolService.register(protocol)
   const tileService = new TileService({
     projectRootProvider: projectScopeService,
   })
@@ -125,6 +132,7 @@ function getDesktopServices() {
     resourceManagerService,
     settingsStore,
     shellService,
+    surferProtocolService,
     tileService,
     workspaceResourceService,
     workspaceService,

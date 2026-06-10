@@ -1,9 +1,16 @@
-import { readdir, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, win32 } from 'node:path'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const TOP_LEVEL_ENTRY_LIMIT = 20
+const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
+  'cpu_filelist',
+  'soc_filelist',
+  'sim_soc_root',
+  'sim_programs_dir',
+  'sim_tests_dir',
+]
 
 async function canonicalizeExistingPath(path: string): Promise<string> {
   return await realpath(path)
@@ -126,6 +133,7 @@ function getPathLeafName(path: string): string | null {
 
 export class ProjectScopeService {
   private activeProjectRoot: string | null = null
+  private activeExtraRoots: string[] = []
 
   async getProjectRoot(): Promise<string> {
     if (!this.activeProjectRoot) {
@@ -138,11 +146,13 @@ export class ProjectScopeService {
   async registerProjectRoot(path: string): Promise<string> {
     const canonicalPath = await canonicalizeExistingDirectory(path)
     this.activeProjectRoot = canonicalPath
+    this.activeExtraRoots = await detectFrontendExtraRoots(canonicalPath)
     return canonicalPath
   }
 
   async clearProjectRoot(): Promise<void> {
     this.activeProjectRoot = null
+    this.activeExtraRoots = []
   }
 
   async requestProjectPathAccess(path: string): Promise<string> {
@@ -150,15 +160,26 @@ export class ProjectScopeService {
       throw new Error('Project root is not registered')
     }
 
-    const canonicalPath = await canonicalizePotentialPathWithinRoot(path, this.activeProjectRoot)
+    const allowedRoots = [this.activeProjectRoot, ...this.activeExtraRoots]
+    for (const root of allowedRoots) {
+      try {
+        const canonicalPath = await canonicalizePotentialPathWithinRoot(path, root)
 
-    if (!isWithinRoot(canonicalPath, this.activeProjectRoot)) {
-      throw new Error(
-        `Refusing to grant access outside current project root: ${canonicalPath}`,
-      )
+        if (isWithinRoot(canonicalPath, root)) {
+          return canonicalPath
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('Refusing to grant access outside')) {
+          continue
+        }
+
+        throw error
+      }
     }
 
-    return canonicalPath
+    throw new Error(
+      `Refusing to grant access outside current project scope: ${resolve(path)}`,
+    )
   }
 
   async isProjectDirectory(path: string): Promise<boolean> {
@@ -208,4 +229,38 @@ export class ProjectScopeService {
       detectedFiles,
     }
   }
+}
+
+async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> {
+  const parametersPath = join(projectRoot, 'home', 'parameters.json')
+  let parameters: Record<string, unknown>
+  try {
+    parameters = JSON.parse(await readFile(parametersPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return []
+  }
+
+  if (parameters['Design Tool'] !== 'frontend') {
+    return []
+  }
+
+  const roots = new Set<string>()
+  await Promise.all(
+    FRONTEND_EXTRA_ROOT_PATH_FIELDS.map(async (field) => {
+      const value = parameters[field]
+      if (typeof value !== 'string' || !value.trim()) return
+
+      try {
+        const path = resolve(value)
+        const pathStats = await stat(path)
+        const root = pathStats.isDirectory() ? path : dirname(path)
+        roots.add(await canonicalizeExistingDirectory(root))
+      } catch {
+        // Missing optional frontend inputs should not block opening the workspace.
+      }
+    }),
+  )
+
+  roots.delete(projectRoot)
+  return [...roots].filter((root) => !isWithinRoot(root, projectRoot))
 }
