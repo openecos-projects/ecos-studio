@@ -10,8 +10,8 @@ import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
 } from '../services/desktopLogPaths'
-import { EccCliAdapter } from '../services/eccCliAdapter'
 import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
+import { createFrontendAwareRuntimeAdapter } from '../services/frontendAwareRuntimeAdapter'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
@@ -62,7 +62,7 @@ configureElectronLoggerFile({
 })
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
-electronLogger.status('[runtime] Runtime: ECC CLI')
+electronLogger.status('[runtime] Runtime: ECC CLI + frontend CLI')
 
 function getDesktopServices() {
   if (services) {
@@ -100,9 +100,15 @@ function getDesktopServices() {
       platform: process.platform,
     })
   const desktopRuntimeManager = new DesktopRuntimeManager({
-    adapter: new EccCliAdapter({
-      env: runtimeEnv,
-      envProvider: runtimeEnvProvider,
+    adapter: createFrontendAwareRuntimeAdapter({
+      backend: {
+        env: runtimeEnv,
+        envProvider: runtimeEnvProvider,
+      },
+      frontend: {
+        env: runtimeEnv,
+        envProvider: runtimeEnvProvider,
+      },
     }),
   })
   const shellService = new ShellPtyService({

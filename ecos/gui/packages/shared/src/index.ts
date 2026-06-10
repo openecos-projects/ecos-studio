@@ -56,7 +56,13 @@ export {
 } from './contracts/desktopEvents.ts';
 export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts';
 export type { DesktopFailure, DesktopResult, DesktopSuccess, VoidDesktopResult } from './types/desktop.ts';
-export type { WorkspaceConfig, WorkspaceParameters, WorkspaceStatus, WorkspaceSummary } from './types/workspace.ts';
+export type {
+  DesignTool,
+  WorkspaceConfig,
+  WorkspaceParameters,
+  WorkspaceStatus,
+  WorkspaceSummary,
+} from './types/workspace.ts';
 export type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,

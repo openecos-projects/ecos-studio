@@ -66,7 +66,17 @@ export interface WorkspaceResourceIndex {
 
 export interface WorkspaceStepInfoRequest {
   step: string;
-  id: 'views' | 'layout' | 'metrics' | 'subflow' | 'analysis' | 'maps' | 'checklist' | 'sta' | 'config';
+  id:
+    | 'views'
+    | 'layout'
+    | 'metrics'
+    | 'subflow'
+    | 'analysis'
+    | 'maps'
+    | 'checklist'
+    | 'sta'
+    | 'config'
+    | 'frontend_detail';
 }
 
 export interface WorkspaceStepInfoResult {
