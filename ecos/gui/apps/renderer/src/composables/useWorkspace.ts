@@ -70,9 +70,33 @@ const runtimeBackendSubtitle = ref('First load or restoring your project may tak
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
+const TOAST_DETAIL_MAX_LENGTH = 140
+const TOAST_LOG_DETAIL_HINT = 'Open Log for details.'
+const LOG_LIKE_DETAIL_PATTERNS = [
+  /\b(traceback|stack trace|calledprocesserror|command failed|stdout|stderr)\b/i,
+  /\b(info|debug|warning|warn|error|critical)\s*[:\[]/i,
+  /\b(bazel|verilator|make|pnpm|python|uv|cargo)\b.*\b(error|failed|warning|warn)\b/i,
+  /(^|\s)\/(?:[^/\s]+\/){3,}[^/\s]+/,
+]
 
 // 应用名称常量
 const APP_NAME = 'ECOS Studio'
+
+function compactToastDetail(detail?: string): string | undefined {
+  const raw = detail?.trim()
+  if (!raw) return undefined
+  if (isLogLikeToastDetail(raw)) return TOAST_LOG_DETAIL_HINT
+  const normalized = raw.replace(/\s+/g, ' ')
+  if (!normalized) return undefined
+  if (normalized.length <= TOAST_DETAIL_MAX_LENGTH) return normalized
+  return `${normalized.slice(0, TOAST_DETAIL_MAX_LENGTH - 1).trimEnd()}...`
+}
+
+function isLogLikeToastDetail(detail: string): boolean {
+  if (detail.includes('\n')) return true
+  if (detail.length > 600) return true
+  return LOG_LIKE_DETAIL_PATTERNS.some((pattern) => pattern.test(detail))
+}
 
 async function getSetting<T>(key: string): Promise<T | null> {
   const desktopApi = await waitForDesktopApi()
@@ -128,7 +152,7 @@ export function useWorkspace() {
       _toast.add({
         severity: options.severity ?? 'info',
         summary: options.summary,
-        detail: options.detail,
+        detail: compactToastDetail(options.detail),
         life: options.life ?? 4000
       })
     } else {

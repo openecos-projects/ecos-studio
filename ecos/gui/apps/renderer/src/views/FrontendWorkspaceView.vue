@@ -530,14 +530,18 @@ async function runCurrentStep(): Promise<void> {
     showToast({
       severity: response.data?.state === StateEnum.Success ? 'success' : 'error',
       summary: response.data?.state === StateEnum.Success ? 'Step Completed' : 'Step Failed',
-      detail: currentStepName.value,
+      detail: response.data?.state === StateEnum.Success
+        ? currentStepName.value
+        : `${currentStepName.value} failed. Open Log for details.`,
       life: 4000,
     })
-  } catch (err) {
+  } catch {
     showToast({
       severity: 'error',
       summary: 'Run Failed',
-      detail: err instanceof Error ? err.message : String(err),
+      detail: currentStepName.value
+        ? `${currentStepName.value} failed. Open Log for details.`
+        : 'Open Log for details.',
       life: 6000,
     })
   } finally {
@@ -567,14 +571,14 @@ async function cancelCurrentRun(): Promise<void> {
     showToast({
       severity: response.response === 'cancelled' ? 'warn' : 'info',
       summary: response.response === 'cancelled' ? 'Run Cancelled' : 'Cancel Request',
-      detail: response.message?.join('\n') || currentStepName.value,
+      detail: currentStepName.value,
       life: 3500,
     })
-  } catch (err) {
+  } catch {
     showToast({
       severity: 'error',
       summary: 'Cancel Failed',
-      detail: err instanceof Error ? err.message : String(err),
+      detail: 'Unable to stop the current CLI job.',
       life: 5000,
     })
   }
@@ -673,11 +677,11 @@ function openWaveform(path: string, caseName?: string): void {
 async function openWaveExternal(path: string): Promise<void> {
   try {
     await getDesktopApi().system.openExternal(pathToFileUrl(path))
-  } catch (err) {
+  } catch {
     showToast({
       severity: 'error',
       summary: 'Open Waveform Failed',
-      detail: err instanceof Error ? err.message : String(err),
+      detail: 'Unable to open waveform in external viewer.',
       life: 5000,
     })
   }

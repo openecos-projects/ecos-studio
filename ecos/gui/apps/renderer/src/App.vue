@@ -27,7 +27,7 @@
     </div>
 
     <!-- 全局 Toast 通知 -->
-    <Toast position="top-right" class="app-toast" />
+    <Toast position="bottom-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
     <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
