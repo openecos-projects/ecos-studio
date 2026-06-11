@@ -147,6 +147,13 @@ const desktopBridge = {
     onProgress: () => () => undefined,
   },
   cli: {
+    cancel: async (jobId) => ({
+      cmd: 'run_step',
+      data: { jobId },
+      message: [],
+      ok: false,
+      response: 'cancelled',
+    }),
     execute: async (request) => ({
       cmd: request.cmd,
       data: {},

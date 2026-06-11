@@ -42,6 +42,7 @@ describe('flow API desktop bridge payloads', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
           execute,
         },
       },

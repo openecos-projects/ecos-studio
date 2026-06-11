@@ -41,6 +41,7 @@ describe('createWorkspaceApi desktop bridge payload', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
           execute,
         },
       },

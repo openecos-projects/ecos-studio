@@ -37,6 +37,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent,
         },
       },
@@ -87,6 +89,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -150,6 +154,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -194,6 +200,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -252,6 +260,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -299,6 +309,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -346,6 +358,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
@@ -392,6 +406,8 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel: vi.fn(),
+          execute: vi.fn(),
           onEvent: (listener: (event: DesktopCliCommandEvent) => void) => {
             listeners.push(listener)
             return () => undefined
