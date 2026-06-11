@@ -13,26 +13,6 @@
         </div>
         <div class="source-actions">
           <span class="source-state" :class="{ dirty: isDirty, saving }">{{ sourceStateText }}</span>
-          <div class="theme-toggle" title="Editor theme">
-            <button
-              type="button"
-              :class="{ active: editorTheme === 'dark' }"
-              title="Dark"
-              @mousedown.prevent
-              @click="setTheme('dark')"
-            >
-              <i class="ri-moon-line"></i>
-            </button>
-            <button
-              type="button"
-              :class="{ active: editorTheme === 'light' }"
-              title="Light"
-              @mousedown.prevent
-              @click="setTheme('light')"
-            >
-              <i class="ri-sun-line"></i>
-            </button>
-          </div>
           <button type="button" class="icon-action" title="Reload" :disabled="busy" @click="void loadSource()">
             <i :class="loading ? 'ri-loader-4-line spin' : 'ri-refresh-line'"></i>
           </button>
@@ -116,6 +96,7 @@ import { search, searchKeymap } from '@codemirror/search'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useThemeStore } from '@/stores/themeStore'
 import { readOptionalProjectTextFileTail, writeProjectTextFile } from '@/utils/projectFiles'
 import {
   countVerilatorDiagnostics,
@@ -152,14 +133,13 @@ const emit = defineEmits<{
 
 const SOURCE_CHAR_LIMIT = 4_000_000
 const LINT_LOG_CHAR_LIMIT = 300_000
-const SOURCE_THEME_KEY = 'ecos.frontend.codemirror.theme'
 
 const { currentProject, showToast, invalidateWorkspaceResources } = useWorkspace()
+const themeStore = useThemeStore()
 const editorHost = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const editorTheme = ref<'dark' | 'light'>(initialTheme())
 const isDirty = ref(false)
 const lintRunning = ref(false)
 const lintStatus = ref<'idle' | 'running' | 'success' | 'failed' | 'error'>('idle')
@@ -173,6 +153,7 @@ let savedContent = ''
 let loadToken = 0
 const themeCompartment = new Compartment()
 
+const editorTheme = computed<'dark' | 'light'>(() => themeStore.themeName === 'dark' ? 'dark' : 'light')
 const busy = computed(() => loading.value || saving.value || lintRunning.value)
 const canSave = computed(() => Boolean(props.source?.path && view && isDirty.value && !busy.value && !sourceTruncated.value))
 const canLint = computed(() => Boolean(props.source?.path && !busy.value))
@@ -210,6 +191,10 @@ onBeforeUnmount(() => {
 watch(() => props.source?.path, () => {
   resetLint()
   void loadSource()
+})
+
+watch(editorTheme, (theme) => {
+  view?.dispatch({ effects: themeCompartment.reconfigure(editorThemeExtension(theme)) })
 })
 
 function ensureEditor(): void {
@@ -387,12 +372,6 @@ function parseCurrentDiagnostics(text: string): VerilatorDiagnostic[] {
   )
 }
 
-function setTheme(theme: 'dark' | 'light'): void {
-  editorTheme.value = theme
-  localStorage.setItem(SOURCE_THEME_KEY, theme)
-  view?.dispatch({ effects: themeCompartment.reconfigure(editorThemeExtension(theme)) })
-}
-
 function setEditorContent(content: string): void {
   if (!view) return
   view.dispatch({
@@ -432,12 +411,6 @@ function resetLint(): void {
   lintLog.value = ''
   showLintLog.value = false
   diagnostics.value = []
-}
-
-function initialTheme(): 'dark' | 'light' {
-  const saved = localStorage.getItem(SOURCE_THEME_KEY)
-  if (saved === 'dark' || saved === 'light') return saved
-  return 'dark'
 }
 
 function editorThemeExtension(theme: 'dark' | 'light'): Extension {
@@ -667,15 +640,6 @@ function tokenClass(token: string): string {
   color: #60a5fa;
 }
 
-.theme-toggle {
-  display: flex;
-  padding: 2px;
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  background: var(--bg-primary);
-}
-
-.theme-toggle button,
 .icon-action,
 .text-action {
   border: 0;
@@ -684,23 +648,9 @@ function tokenClass(token: string): string {
   cursor: pointer;
 }
 
-.theme-toggle button {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
-}
-
-.theme-toggle button:focus,
 .icon-action:focus,
 .text-action:focus {
   outline: none;
-}
-
-.theme-toggle button.active {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.14);
-  color: var(--accent-color);
 }
 
 .icon-action {

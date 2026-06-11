@@ -5,6 +5,15 @@
       ECOS Studio{{ guiVersion ? ` v${guiVersion}` : '' }}
     </span>
     <button
+      class="status-theme-toggle"
+      type="button"
+      :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
+      :aria-label="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
+      @click="toggleTheme"
+    >
+      <i :class="isDark ? 'ri-sun-line' : 'ri-moon-line'" aria-hidden="true"></i>
+    </button>
+    <button
       class="status-terminal-toggle"
       type="button"
       :title="terminalExpanded ? 'Hide terminal' : 'Show terminal'"
@@ -19,6 +28,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useVersion } from '@/composables/useVersion'
+import { useThemeStore } from '@/stores/themeStore'
 
 defineProps<{
   terminalExpanded?: boolean
@@ -29,7 +39,13 @@ defineEmits<{
 }>()
 
 const { versions } = useVersion()
+const themeStore = useThemeStore()
 const guiVersion = computed(() => versions.value?.gui ?? '')
+const isDark = computed(() => themeStore.themeName === 'dark')
+
+function toggleTheme() {
+  themeStore.toggleTheme()
+}
 </script>
 
 <style scoped>
@@ -50,9 +66,9 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
   color: var(--text-secondary);
 }
 
+.status-theme-toggle,
 .status-terminal-toggle {
   height: 20px;
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -65,11 +81,23 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
   cursor: pointer;
 }
 
+.status-theme-toggle {
+  width: 24px;
+  justify-content: center;
+  padding: 0;
+}
+
+.status-terminal-toggle {
+  margin-left: auto;
+}
+
+.status-theme-toggle:hover,
 .status-terminal-toggle:hover {
   color: var(--text-primary);
   background: var(--hover-bg);
 }
 
+.status-theme-toggle i,
 .status-terminal-toggle i {
   font-size: 13px;
 }
