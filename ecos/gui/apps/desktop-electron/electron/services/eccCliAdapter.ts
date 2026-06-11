@@ -89,6 +89,13 @@ function error(
   return result(request.cmd, 'error', [message])
 }
 
+function cancelled(
+  request: DesktopCliCommandRequest,
+  message: string,
+): DesktopCliCommandResult {
+  return result(request.cmd, 'cancelled', [message])
+}
+
 function normalizeCliResult(
   request: DesktopCliCommandRequest,
   payload: unknown,
@@ -147,6 +154,28 @@ function normalizeEventType(value: unknown): CliEventType | null {
 
 function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
+}
+
+function terminateChildProcess(child: ReturnType<SpawnLike>): void {
+  const pid = child.pid
+  const terminate = (signal: NodeJS.Signals): void => {
+    if (process.platform === 'win32' || !pid) {
+      child.kill(signal)
+      return
+    }
+
+    try {
+      process.kill(-pid, signal)
+    } catch {
+      child.kill(signal)
+    }
+  }
+
+  terminate('SIGTERM')
+  setTimeout(() => {
+    if (child.exitCode !== null || child.signalCode !== null) return
+    terminate('SIGKILL')
+  }, 2500)
 }
 
 function directoryFromRequest(
@@ -352,6 +381,8 @@ export class EccCliAdapter {
       let stdoutBuffer = ''
       let stderrText = ''
       let invalidJsonLine: string | null = null
+      let settled = false
+      let aborted = false
       const start = Date.now()
 
       electronLogger.debug(
@@ -363,9 +394,27 @@ export class EccCliAdapter {
       )
 
       const child = this.spawnImpl(this.command, prepared.args, {
+        detached: process.platform !== 'win32',
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+
+      const settle = (value: DesktopCliCommandResult): void => {
+        if (settled) return
+        settled = true
+        resolve(value)
+      }
+
+      const handleAbort = (): void => {
+        aborted = true
+        terminateChildProcess(child)
+      }
+
+      if (context.signal?.aborted) {
+        handleAbort()
+      } else {
+        context.signal?.addEventListener('abort', handleAbort, { once: true })
+      }
 
       const emitText = (stream: 'stdout' | 'stderr', text: string): void => {
         context.emit({
@@ -444,13 +493,18 @@ export class EccCliAdapter {
       })
 
       child.once('error', (spawnError) => {
-        resolve(error(
+        if (aborted) {
+          settle(cancelled(request, `Cancelled ${request.cmd}`))
+          return
+        }
+        settle(error(
           request,
           spawnError instanceof Error ? spawnError.message : String(spawnError),
         ))
       })
 
       child.once('close', (code, signal) => {
+        context.signal?.removeEventListener('abort', handleAbort)
         const remaining = stdoutBuffer.trim()
         if (remaining) {
           try {
@@ -464,14 +518,25 @@ export class EccCliAdapter {
           }
         }
 
-        if (finalResult) {
+        if (finalResult && !aborted) {
           electronLogger.debug(
             '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
             request.cmd,
             finalResult.response,
             Date.now() - start,
           )
-          resolve(finalResult)
+          settle(finalResult)
+          return
+        }
+
+        if (aborted || signal === 'SIGTERM' || signal === 'SIGKILL') {
+          const result = cancelled(request, `Cancelled ${request.cmd}`)
+          electronLogger.debug(
+            '[ECC CLI] cancelled cmd=%s elapsed=%dms',
+            request.cmd,
+            Date.now() - start,
+          )
+          settle(result)
           return
         }
 
@@ -483,7 +548,7 @@ export class EccCliAdapter {
             result.response,
             Date.now() - start,
           )
-          resolve(result)
+          settle(result)
           return
         }
 
@@ -498,7 +563,7 @@ export class EccCliAdapter {
           result.response,
           Date.now() - start,
         )
-        resolve(result)
+        settle(result)
       })
     })
   }

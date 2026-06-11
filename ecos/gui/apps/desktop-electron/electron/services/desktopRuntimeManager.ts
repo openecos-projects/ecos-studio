@@ -12,6 +12,7 @@ import type {
 export type DesktopRuntimeEventListener = (event: DesktopCliCommandEvent) => void
 
 export interface DesktopRuntimeAdapterContext {
+  signal?: AbortSignal
   emit(event: Omit<DesktopCliCommandEvent, 'cmd' | 'jobId'>): void
 }
 
@@ -179,6 +180,15 @@ export class DesktopRuntimeManager {
   private readonly adapter: DesktopRuntimeAdapter
   private readonly runtimeLockRoot: string
   private readonly activeLongRunningJobsByScope = new Map<string, string>()
+  private readonly activeLongRunningJobsById = new Map<string, {
+    controller: AbortController
+    request: DesktopCliCommandRequest
+    scope: string
+    workspace?: {
+      directory?: string
+      workspaceId?: string
+    }
+  }>()
   private readonly listeners = new Set<DesktopRuntimeEventListener>()
 
   constructor(options: DesktopRuntimeManagerOptions) {
@@ -219,6 +229,7 @@ export class DesktopRuntimeManager {
     const jobId = randomUUID()
     const isLongRunning = longRunningCommands.has(request.cmd)
     const workspaceScope = workspaceScopeForRequest(request)
+    const controller = new AbortController()
     let runtimeLock: RuntimeLockHandle | null = null
     const eventWorkspace = workspaceScope.directory
       ? {
@@ -280,6 +291,12 @@ export class DesktopRuntimeManager {
         return result
       }
       this.activeLongRunningJobsByScope.set(workspaceScope.scope, jobId)
+      this.activeLongRunningJobsById.set(jobId, {
+        controller,
+        request,
+        scope: workspaceScope.scope,
+        workspace: eventWorkspace,
+      })
     }
 
     this.emit({
@@ -292,6 +309,7 @@ export class DesktopRuntimeManager {
     }, listener)
 
     const context: DesktopRuntimeAdapterContext = {
+      signal: controller.signal,
       emit: (event) => {
         this.emit({
           ...event,
@@ -303,6 +321,20 @@ export class DesktopRuntimeManager {
     }
 
     try {
+      if (controller.signal.aborted) {
+        const result = createResult(request.cmd, 'cancelled', [`Cancelled ${request.cmd}`])
+        this.emit({
+          cmd: request.cmd,
+          jobId,
+          ...eventWorkspace,
+          result,
+          stream: 'system',
+          text: result.message.join('\n'),
+          type: 'cancelled',
+        }, listener)
+        return result
+      }
+
       const result = request.cmd === 'help'
         ? createResult(request.cmd, 'success', ['Type "ecos help" to list available commands.'])
         : request.cmd === 'clear'
@@ -340,7 +372,20 @@ export class DesktopRuntimeManager {
       if (isLongRunning && this.activeLongRunningJobsByScope.get(workspaceScope.scope) === jobId) {
         this.activeLongRunningJobsByScope.delete(workspaceScope.scope)
       }
+      if (isLongRunning) {
+        this.activeLongRunningJobsById.delete(jobId)
+      }
       await runtimeLock?.release()
     }
+  }
+
+  async cancel(jobId: string): Promise<DesktopCliCommandResult> {
+    const job = this.activeLongRunningJobsById.get(jobId)
+    if (!job) {
+      return createResult('clear', 'warning', [`No running ECOS command found for job ${jobId}.`])
+    }
+
+    job.controller.abort()
+    return createResult(job.request.cmd, 'cancelled', [`Cancelling ${job.request.cmd}`])
   }
 }

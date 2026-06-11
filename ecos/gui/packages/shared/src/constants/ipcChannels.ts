@@ -46,6 +46,7 @@ export const desktopApiIpcChannels = {
   tilesGenerate: 'tiles:generate',
   tilesStatus: 'tiles:status',
   cliExecute: 'cli:execute',
+  cliCancel: 'cli:cancel',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',

@@ -377,4 +377,49 @@ describe('DesktopRuntimeManager', () => {
       response: 'success',
     })
   })
+
+  it('cancels active long-running commands by job id and aborts the adapter context', async () => {
+    let capturedJobId = ''
+    const listener = vi.fn((event) => {
+      if (event.type === 'started') capturedJobId = event.jobId
+    })
+    const adapterExecute = vi.fn((_request, context) => new Promise<DesktopCliCommandResult>((resolve) => {
+      context.signal?.addEventListener('abort', () => {
+        resolve(result({
+          cmd: 'run_step',
+          message: ['cancelled by test'],
+          ok: false,
+          response: 'cancelled',
+        }))
+      })
+    }))
+    const manager = createManager({
+      adapter: {
+        execute: adapterExecute,
+      },
+    })
+
+    const running = manager.execute({
+      cmd: 'run_step',
+      data: { directory: '/work/demo', step: 'sim', rerun: true },
+      source: 'button',
+    }, listener)
+
+    await vi.waitFor(() => {
+      expect(capturedJobId).toMatch(/\S/)
+    })
+
+    await expect(manager.cancel(capturedJobId)).resolves.toMatchObject({
+      cmd: 'run_step',
+      response: 'cancelled',
+    })
+    await expect(running).resolves.toMatchObject({
+      cmd: 'run_step',
+      response: 'cancelled',
+    })
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      jobId: capturedJobId,
+      type: 'cancelled',
+    }))
+  })
 })

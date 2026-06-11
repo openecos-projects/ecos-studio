@@ -185,6 +185,7 @@ export interface DesktopApi {
   }
   cli: {
     execute(request: DesktopCliCommandRequest): Promise<DesktopCliCommandResult>
+    cancel(jobId: string): Promise<DesktopCliCommandResult>
     onEvent(listener: (event: DesktopCliCommandEvent) => void): DesktopEventUnsubscribe
   }
   shell: {

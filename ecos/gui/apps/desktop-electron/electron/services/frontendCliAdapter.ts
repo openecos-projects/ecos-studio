@@ -86,6 +86,10 @@ function error(request: DesktopCliCommandRequest, message: string): DesktopCliCo
   return result(request.cmd, 'error', [message])
 }
 
+function cancelled(request: DesktopCliCommandRequest, message: string): DesktopCliCommandResult {
+  return result(request.cmd, 'cancelled', [message])
+}
+
 function normalizeCliResult(
   request: DesktopCliCommandRequest,
   payload: unknown,
@@ -140,6 +144,28 @@ function normalizeEventType(value: unknown): CliEventType | null {
 
 function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
+}
+
+function terminateChildProcess(child: ReturnType<SpawnLike>): void {
+  const pid = child.pid
+  const terminate = (signal: NodeJS.Signals): void => {
+    if (process.platform === 'win32' || !pid) {
+      child.kill(signal)
+      return
+    }
+
+    try {
+      process.kill(-pid, signal)
+    } catch {
+      child.kill(signal)
+    }
+  }
+
+  terminate('SIGTERM')
+  setTimeout(() => {
+    if (child.exitCode !== null || child.signalCode !== null) return
+    terminate('SIGKILL')
+  }, 2500)
 }
 
 function directoryFromRequest(
@@ -438,6 +464,8 @@ export class FrontendCliAdapter {
       let stdoutBuffer = ''
       let stderrText = ''
       let invalidJsonLine: string | null = null
+      let settled = false
+      let aborted = false
       const start = Date.now()
 
       electronLogger.debug(
@@ -451,9 +479,27 @@ export class FrontendCliAdapter {
 
       const child = this.spawnImpl(this.command, prepared.args, {
         cwd: existsSync(this.frontendRoot) ? this.frontendRoot : undefined,
+        detached: process.platform !== 'win32',
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+
+      const settle = (value: DesktopCliCommandResult): void => {
+        if (settled) return
+        settled = true
+        resolve(value)
+      }
+
+      const handleAbort = (): void => {
+        aborted = true
+        terminateChildProcess(child)
+      }
+
+      if (context.signal?.aborted) {
+        handleAbort()
+      } else {
+        context.signal?.addEventListener('abort', handleAbort, { once: true })
+      }
 
       const emitText = (stream: 'stdout' | 'stderr', text: string): void => {
         context.emit({ stream, text, type: stream })
@@ -520,13 +566,18 @@ export class FrontendCliAdapter {
       })
 
       child.once('error', (spawnError) => {
-        resolve(error(
+        if (aborted) {
+          settle(cancelled(request, `Cancelled ${request.cmd}`))
+          return
+        }
+        settle(error(
           request,
           spawnError instanceof Error ? spawnError.message : String(spawnError),
         ))
       })
 
       child.once('close', (code, signal) => {
+        context.signal?.removeEventListener('abort', handleAbort)
         const remaining = stdoutBuffer.trim()
         if (remaining) {
           try {
@@ -538,20 +589,31 @@ export class FrontendCliAdapter {
           }
         }
 
-        if (finalResult) {
+        if (finalResult && !aborted) {
           electronLogger.debug(
             '[Frontend CLI] completed cmd=%s response=%s elapsed=%dms',
             request.cmd,
             finalResult.response,
             Date.now() - start,
           )
-          resolve(finalResult)
+          settle(finalResult)
+          return
+        }
+
+        if (aborted || signal === 'SIGTERM' || signal === 'SIGKILL') {
+          const result = cancelled(request, `Cancelled ${request.cmd}`)
+          electronLogger.debug(
+            '[Frontend CLI] cancelled cmd=%s elapsed=%dms',
+            request.cmd,
+            Date.now() - start,
+          )
+          settle(result)
           return
         }
 
         if (code === 0 && invalidJsonLine) {
           const result = error(request, `Invalid JSON from frontend CLI: ${invalidJsonLine}`)
-          resolve(result)
+          settle(result)
           return
         }
 
@@ -559,7 +621,7 @@ export class FrontendCliAdapter {
           ? `Frontend CLI exited with signal ${signal}.`
           : `Frontend CLI exited with code ${code ?? 'unknown'}.`
         const details = stderrText.trim() || invalidJsonLine || exitText
-        resolve(error(request, details === exitText ? exitText : `${exitText} ${details}`))
+        settle(error(request, details === exitText ? exitText : `${exitText} ${details}`))
       })
     })
   }

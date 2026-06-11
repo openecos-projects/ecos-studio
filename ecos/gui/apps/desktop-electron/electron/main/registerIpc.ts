@@ -135,6 +135,7 @@ export interface DesktopBridgeServices {
       request: DesktopCliCommandRequest,
       listener?: (event: DesktopCliCommandEvent) => void,
     ): Promise<DesktopCliCommandResult>
+    cancel(jobId: string): Promise<DesktopCliCommandResult>
   }
   shellService: {
     createSession(
@@ -719,6 +720,13 @@ export function registerIpc(
           }
         },
       )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.cliCancel,
+    async (_event, jobId) => {
+      return await services.desktopRuntimeManager.cancel(String(jobId))
     },
   )
 

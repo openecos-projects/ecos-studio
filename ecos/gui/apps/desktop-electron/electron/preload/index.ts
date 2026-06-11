@@ -266,6 +266,8 @@ const desktopApi: DesktopApi = {
   cli: {
     execute: (request: DesktopCliCommandRequest) =>
       invokeDesktop(desktopApiIpcChannels.cliExecute, request),
+    cancel: (jobId: string) =>
+      invokeDesktop(desktopApiIpcChannels.cliCancel, jobId),
     onEvent: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.cliEvent,

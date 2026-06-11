@@ -89,6 +89,7 @@ function registerHandlers() {
       getVersions: vi.fn(),
     },
     desktopRuntimeManager: {
+      cancel: vi.fn(),
       execute: vi.fn(),
       onEvent: vi.fn(),
     },
@@ -181,6 +182,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.tilesGenerate,
       desktopApiIpcChannels.tilesStatus,
       desktopApiIpcChannels.systemOpenExternal,
+      desktopApiIpcChannels.cliCancel,
       desktopApiIpcChannels.cliExecute,
       desktopApiIpcChannels.shellCreateSession,
       desktopApiIpcChannels.shellWrite,
@@ -743,6 +745,25 @@ describe('registerIpc', () => {
       request,
       expect.any(Function),
     )
+  })
+
+  it('cancels desktop runtime jobs through the runtime manager', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const result = {
+      cmd: 'run_step',
+      data: {},
+      message: ['Cancelling run_step'],
+      ok: false,
+      response: 'cancelled',
+    }
+    services.desktopRuntimeManager.cancel.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.cliCancel)?.(event, 'job-1'),
+    ).resolves.toEqual(result)
+
+    expect(services.desktopRuntimeManager.cancel).toHaveBeenCalledWith('job-1')
   })
 
   it('forwards command events to the requesting renderer when it is alive', async () => {
