@@ -5,11 +5,13 @@ import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const TOP_LEVEL_ENTRY_LIMIT = 20
 const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
-  'cpu_filelist',
-  'soc_filelist',
   'sim_soc_root',
   'sim_programs_dir',
   'sim_tests_dir',
+]
+const FRONTEND_FILELIST_FIELDS = [
+  'cpu_filelist',
+  'soc_filelist',
 ]
 
 async function canonicalizeExistingPath(path: string): Promise<string> {
@@ -260,7 +262,97 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
       }
     }),
   )
+  await Promise.all(
+    FRONTEND_FILELIST_FIELDS.map(async (field) => {
+      const value = parameters[field]
+      if (typeof value !== 'string' || !value.trim()) return
+
+      try {
+        const filelistPath = resolve(value)
+        const filelistRoot = dirname(await canonicalizeExistingPath(filelistPath))
+        for (const sourceRoot of await readFrontendFilelistSourceRoots(filelistPath, filelistRoot)) {
+          roots.add(sourceRoot)
+        }
+      } catch {
+        // Missing optional frontend filelists should not block opening the workspace.
+      }
+    }),
+  )
 
   roots.delete(projectRoot)
   return [...roots].filter((root) => !isWithinRoot(root, projectRoot))
+}
+
+async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoot: string): Promise<string[]> {
+  const raw = await readFile(filelistPath, 'utf8')
+  const roots = new Set<string>()
+  const pending: Array<{ path: string; root: string }> = [{ path: filelistPath, root: filelistRoot }]
+  const visited = new Set<string>()
+
+  while (pending.length) {
+    const current = pending.pop()
+    if (!current) break
+    let canonicalFilelist: string
+    try {
+      canonicalFilelist = await canonicalizeExistingPath(current.path)
+    } catch {
+      continue
+    }
+    if (visited.has(canonicalFilelist)) continue
+    visited.add(canonicalFilelist)
+
+    let content: string
+    try {
+      content = current.path === filelistPath ? raw : await readFile(canonicalFilelist, 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of content.split(/\r?\n/)) {
+      const token = normalizeFrontendFilelistToken(line)
+      if (!token) continue
+      if (token.startsWith('+incdir+')) {
+        const incdir = token.slice('+incdir+'.length).trim()
+        if (incdir) {
+          try {
+            roots.add(await canonicalizeExistingDirectory(resolve(current.root, incdir)))
+          } catch {
+            // Ignore stale include directories; the CLI will report required missing inputs.
+          }
+        }
+        continue
+      }
+      if (token.startsWith('-f')) {
+        const includePath = token.slice(2).trim()
+        if (includePath) {
+          const resolvedInclude = resolve(current.root, includePath)
+          pending.push({ path: resolvedInclude, root: dirname(resolvedInclude) })
+        }
+        continue
+      }
+      if (!/\.(sv|svh|v|vh|f|fl|filelist)$/i.test(token)) continue
+      const resolvedPath = resolve(current.root, token)
+      if (/\.(f|fl|filelist)$/i.test(token)) {
+        pending.push({ path: resolvedPath, root: dirname(resolvedPath) })
+        continue
+      }
+      try {
+        roots.add(dirname(await canonicalizeExistingPath(resolvedPath)))
+      } catch {
+        // Ignore stale filelist entries; the CLI will surface missing required inputs.
+      }
+    }
+  }
+
+  return [...roots]
+}
+
+function normalizeFrontendFilelistToken(line: string): string {
+  const withoutComment = line.replace(/\/\/.*$/, '').trim()
+  if (!withoutComment) return ''
+  if (withoutComment.startsWith('+define+')) return ''
+  const parts = withoutComment.split(/\s+/)
+  const first = parts[0] ?? ''
+  const second = parts[1] ?? ''
+  if (first === '-f' && second) return `-f${second}`
+  return first
 }

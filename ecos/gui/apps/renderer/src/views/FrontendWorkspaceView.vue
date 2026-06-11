@@ -10,9 +10,9 @@
           <i :class="runBusy ? 'ri-loader-4-line animate-spin' : 'ri-terminal-box-line'"></i>
           RT-Thread
         </button>
-        <button type="button" class="run-btn" :disabled="runBusy" @click="runCurrentStep">
-          <i :class="runBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-circle-line'"></i>
-          Run
+        <button type="button" class="run-btn" :class="{ danger: runBusy }" @click="runBusy ? cancelCurrentRun() : runCurrentStep()">
+          <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
+          {{ runBusy ? 'Cancel' : 'Run' }}
         </button>
         <button type="button" class="refresh-btn" :disabled="loading" @click="refresh">
           <i :class="loading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
@@ -306,7 +306,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import type { WorkspaceStepResource } from '@ecos-studio/shared'
+import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
@@ -367,6 +367,7 @@ const {
 const steps = ref<WorkspaceStepResource[]>([])
 const loading = ref(false)
 const runBusy = ref(false)
+const runJobId = ref('')
 const logLoading = ref(false)
 const error = ref('')
 const detail = ref<FrontendStepDetail | null>(null)
@@ -384,6 +385,7 @@ const surferReady = ref(false)
 const waveformLoading = ref(false)
 const waveformError = ref('')
 let waveformLoadToken = 0
+let unsubscribeCliEvents: (() => void) | null = null
 
 const currentStepName = computed(() => {
   const param = String(route.params.step || '')
@@ -510,6 +512,7 @@ async function loadSelectedLog(): Promise<void> {
 async function runCurrentStep(): Promise<void> {
   if (!currentProject.value?.path || !currentStepName.value) return
   runBusy.value = true
+  runJobId.value = ''
   try {
     const payload = simRunPayload()
     const response = await runStepApi({
@@ -539,12 +542,68 @@ async function runCurrentStep(): Promise<void> {
     })
   } finally {
     runBusy.value = false
+    runJobId.value = ''
   }
 }
 
 function runRtThread(): void {
   simSuite.value = 'rtthread'
   void runCurrentStep()
+}
+
+async function cancelCurrentRun(): Promise<void> {
+  const jobId = runJobId.value
+  if (!jobId) {
+    showToast({
+      severity: 'warn',
+      summary: 'Cancel Pending',
+      detail: 'The runtime job is still starting.',
+      life: 2500,
+    })
+    return
+  }
+  try {
+    const response = await getDesktopApi().cli.cancel(jobId)
+    showToast({
+      severity: response.response === 'cancelled' ? 'warn' : 'info',
+      summary: response.response === 'cancelled' ? 'Run Cancelled' : 'Cancel Request',
+      detail: response.message?.join('\n') || currentStepName.value,
+      life: 3500,
+    })
+  } catch (err) {
+    showToast({
+      severity: 'error',
+      summary: 'Cancel Failed',
+      detail: err instanceof Error ? err.message : String(err),
+      life: 5000,
+    })
+  }
+}
+
+function handleCliEvent(event: DesktopCliCommandEvent): void {
+  const projectPath = currentProject.value?.path
+  if (!projectPath || !event.directory || normalizeWorkspacePath(event.directory) !== normalizeWorkspacePath(projectPath)) {
+    return
+  }
+  if (event.cmd !== 'run_step' && event.cmd !== 'rtl2gds') return
+
+  if (event.type === 'started') {
+    runBusy.value = true
+    runJobId.value = event.jobId
+    return
+  }
+
+  if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
+    runBusy.value = false
+    runJobId.value = ''
+    invalidateWorkspaceResources(['flow', 'step', 'logs'])
+    void refresh()
+  }
+}
+
+function normalizeWorkspacePath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/')
+  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
 }
 
 function simRunPayload() {
@@ -792,11 +851,14 @@ const ResourceFileList = defineComponent({
 
 onMounted(refresh)
 onMounted(() => {
+  unsubscribeCliEvents = getDesktopApi().cli.onEvent(handleCliEvent)
   window.addEventListener('message', handleSurferMessage)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleSurferMessage)
+  unsubscribeCliEvents?.()
+  unsubscribeCliEvents = null
 })
 
 watch(
@@ -943,6 +1005,15 @@ h2 {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
   color: var(--accent-color);
   font-weight: 700;
+}
+
+.run-btn.danger {
+  background: #b91c1c;
+  box-shadow: 0 10px 24px rgba(185, 28, 28, 0.2);
+}
+
+.run-btn.danger:hover {
+  background: #991b1b;
 }
 
 .run-btn.subtle {

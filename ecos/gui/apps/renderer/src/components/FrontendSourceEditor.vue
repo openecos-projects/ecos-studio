@@ -166,6 +166,7 @@ const lintStatus = ref<'idle' | 'running' | 'success' | 'failed' | 'error'>('idl
 const lintLog = ref('')
 const showLintLog = ref(false)
 const diagnostics = ref<VerilatorDiagnostic[]>([])
+const sourceTruncated = ref(false)
 
 let view: EditorView | null = null
 let savedContent = ''
@@ -173,7 +174,7 @@ let loadToken = 0
 const themeCompartment = new Compartment()
 
 const busy = computed(() => loading.value || saving.value || lintRunning.value)
-const canSave = computed(() => Boolean(props.source?.path && view && isDirty.value && !busy.value))
+const canSave = computed(() => Boolean(props.source?.path && view && isDirty.value && !busy.value && !sourceTruncated.value))
 const canLint = computed(() => Boolean(props.source?.path && !busy.value))
 const sourceStateText = computed(() => {
   if (saving.value) return 'Saving'
@@ -244,6 +245,7 @@ async function loadSource(): Promise<void> {
     setEditorContent('')
     savedContent = ''
     isDirty.value = false
+    sourceTruncated.value = false
     return
   }
   const token = ++loadToken
@@ -260,6 +262,7 @@ async function loadSource(): Promise<void> {
     const content = result.truncated
       ? `/* File is too large; showing tail only. */\n${result.content}`
       : result.content
+    sourceTruncated.value = result.truncated
     setEditorContent(content)
     savedContent = content
     isDirty.value = false
@@ -269,6 +272,7 @@ async function loadSource(): Promise<void> {
       setEditorContent('')
       savedContent = ''
       isDirty.value = false
+      sourceTruncated.value = false
     }
   } finally {
     if (token === loadToken) loading.value = false
@@ -277,6 +281,16 @@ async function loadSource(): Promise<void> {
 
 async function saveSource(): Promise<void> {
   if (!props.source?.path || !view) return
+  if (sourceTruncated.value) {
+    error.value = 'This source file is displayed as a truncated tail and cannot be saved safely.'
+    showToast({
+      severity: 'warn',
+      summary: 'Save Blocked',
+      detail: error.value,
+      life: 5000,
+    })
+    return
+  }
   saving.value = true
   error.value = ''
   try {
