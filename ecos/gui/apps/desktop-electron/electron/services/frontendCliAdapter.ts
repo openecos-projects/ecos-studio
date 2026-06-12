@@ -2,7 +2,7 @@ import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type {
   DesktopCliCommandName,
   DesktopCliCommandRequest,
@@ -193,6 +193,30 @@ function defaultPythonCommand(): string {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
+function candidateFrontendPythonCommands(
+  env: NodeJS.ProcessEnv,
+  frontendRoot: string,
+): string[] {
+  const siblingEccVenvPython = process.platform === 'win32'
+    ? join(dirname(frontendRoot), 'ecc', '.venv', 'Scripts', 'python.exe')
+    : join(dirname(frontendRoot), 'ecc', '.venv', 'bin', 'python')
+  return [
+    env.ECOS_FE_PYTHON ?? '',
+    env.PYTHON_INTERPRETER ?? '',
+    siblingEccVenvPython,
+  ].map((candidate) => candidate.trim()).filter(Boolean)
+}
+
+function resolveFrontendPythonCommand(
+  env: NodeJS.ProcessEnv,
+  frontendRoot: string,
+): string {
+  for (const candidate of candidateFrontendPythonCommands(env, frontendRoot)) {
+    if (existsSync(candidate)) return candidate
+  }
+  return defaultPythonCommand()
+}
+
 function pathKeyForEnv(env: NodeJS.ProcessEnv): string {
   return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
 }
@@ -309,6 +333,7 @@ function prependPythonPath(
 
 export class FrontendCliAdapter {
   private readonly command: string
+  private readonly hasExplicitCommand: boolean
   private readonly env: NodeJS.ProcessEnv
   private readonly envProvider?: RuntimeEnvProvider
   private readonly frontendRoot: string
@@ -318,12 +343,13 @@ export class FrontendCliAdapter {
   private activeWorkspace: string | null = null
 
   constructor(options: FrontendCliAdapterOptions = {}) {
-    this.command = options.command ?? defaultPythonCommand()
+    this.hasExplicitCommand = Boolean(options.command)
     this.env = { ...(options.env ?? process.env) }
     this.envProvider = options.envProvider
     this.frontendRoot = options.frontendRoot
       ?? process.env.ECOS_FE_COMPILER_ROOT
       ?? join(process.cwd(), 'ecc-fe')
+    this.command = options.command ?? defaultPythonCommand()
     this.moduleArgs = options.moduleArgs ?? ['-m', 'fecompiler.cli.main']
     this.spawnImpl = options.spawn ?? spawnChild
     this.tempDir = options.tempDir ?? tmpdir()
@@ -463,6 +489,9 @@ export class FrontendCliAdapter {
       this.envProvider ? await this.resolveProvidedEnv() : this.env,
       this.frontendRoot,
     )
+    const command = !this.hasExplicitCommand
+      ? resolveFrontendPythonCommand(env, this.frontendRoot)
+      : this.command
 
     return await new Promise((resolve) => {
       let finalResult: DesktopCliCommandResult | null = null
@@ -475,14 +504,14 @@ export class FrontendCliAdapter {
 
       electronLogger.debug(
         '[Frontend CLI] spawn command=%s resolved=%s args=%s pathHead=%s frontendRoot=%s',
-        this.command,
-        resolveCommandFromPath(this.command, env),
+        command,
+        resolveCommandFromPath(command, env),
         prepared.args.join(' '),
         pathHeadForEnv(env),
         this.frontendRoot,
       )
 
-      const child = this.spawnImpl(this.command, prepared.args, {
+      const child = this.spawnImpl(command, prepared.args, {
         cwd: existsSync(this.frontendRoot) ? this.frontendRoot : undefined,
         detached: process.platform !== 'win32',
         env,
