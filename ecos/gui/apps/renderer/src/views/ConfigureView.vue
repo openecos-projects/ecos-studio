@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import Select from 'primevue/select'
+import { useRouter } from 'vue-router'
 import { useParameters } from '@/composables/useParameters'
+import { useWorkspace } from '@/composables/useWorkspace'
+
+const router = useRouter()
+const { currentProject } = useWorkspace()
+const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
 
 const {
   config,
@@ -37,10 +43,16 @@ const resetConfig = () => {
   console.log('Configuration reset to last saved state')
 }
 
+watchEffect(() => {
+  if (isFrontendProject.value) {
+    void router.replace('/workspace/home')
+  }
+})
+
 </script>
 
 <template>
-  <div class="config-view">
+  <div v-if="!isFrontendProject" class="config-view">
     <header class="topbar">
       <div class="topbar-left">
         <i class="ri-cpu-line"></i>

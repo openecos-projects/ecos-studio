@@ -136,6 +136,7 @@ export interface DesktopBridgeServices {
       listener?: (event: DesktopCliCommandEvent) => void,
     ): Promise<DesktopCliCommandResult>
     cancel(jobId: string): Promise<DesktopCliCommandResult>
+    cancelAll?(message?: string): DesktopCliCommandResult[]
   }
   shellService: {
     createSession(

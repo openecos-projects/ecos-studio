@@ -2,15 +2,17 @@
   <div class="frontend-workspace">
     <div class="frontend-header">
       <div>
-        <p class="frontend-kicker">Frontend Flow</p>
+        <p class="frontend-kicker">{{ isHomeView ? 'Frontend Workspace' : 'Frontend Flow' }}</p>
         <h1>{{ stepTitle }}</h1>
       </div>
-      <div class="header-actions">
-        <button v-if="isSimStep" type="button" class="run-btn subtle" :disabled="runBusy" @click="runRtThread">
-          <i :class="runBusy ? 'ri-loader-4-line animate-spin' : 'ri-terminal-box-line'"></i>
-          RT-Thread
-        </button>
-        <button type="button" class="run-btn" :class="{ danger: runBusy }" @click="runBusy ? cancelCurrentRun() : runCurrentStep()">
+      <div v-if="!isHomeView" class="header-actions">
+        <button
+          v-if="!isSimStep"
+          type="button"
+          class="run-btn"
+          :class="{ danger: runBusy }"
+          @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
+        >
           <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
           {{ runBusy ? 'Cancel' : 'Run' }}
         </button>
@@ -26,56 +28,68 @@
     </div>
 
     <div v-else class="frontend-grid">
-      <section class="panel flow-panel">
+      <section class="panel detail-panel detail-panel-full">
         <div class="panel-header">
-          <h2>Flow Steps</h2>
-          <span>{{ completedCount }}/{{ steps.length }} done</span>
-        </div>
-        <div class="step-list">
-          <RouterLink
-            v-for="step in steps"
-            :key="step.name"
-            class="step-row"
-            :class="{ active: step.name === currentStepName }"
-            :to="`/workspace/${step.name}`"
-          >
-            <div class="step-icon" :class="stateClass(step.state)">
-              <i :class="stateIcon(step.state)"></i>
-            </div>
-            <div class="step-body">
-              <div class="step-title">
-                <span>{{ labelForStep(step.name) }}</span>
-                <span class="tool">{{ step.tool }}</span>
-              </div>
-              <div class="step-meta">
-                <span>{{ step.state || 'Unstart' }}</span>
-                <span v-if="step.runtime">{{ step.runtime }}</span>
-              </div>
-            </div>
-          </RouterLink>
-        </div>
-      </section>
-
-      <section class="panel detail-panel">
-        <div class="panel-header">
-          <h2>Step Detail</h2>
-          <span>{{ currentStep?.tool || '--' }}</span>
+          <h2>{{ isHomeView ? 'Workspace Summary' : 'Step Detail' }}</h2>
+          <span>{{ isHomeView ? 'frontend' : currentStep?.tool || '--' }}</span>
         </div>
 
-        <div v-if="!currentStep" class="state-panel">
+        <div v-if="isHomeView" class="detail-content">
+          <section class="summary-grid">
+            <div class="summary-tile">
+              <span>Workspace</span>
+              <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Workspace' }}</strong>
+            </div>
+            <div class="summary-tile">
+              <span>Flow Steps</span>
+              <strong>{{ steps.length }}</strong>
+            </div>
+            <div class="summary-tile">
+              <span>Completed</span>
+              <strong>{{ completedCount }}/{{ steps.length }}</strong>
+            </div>
+            <div class="summary-tile" :class="nextPendingStep ? stateClass(nextPendingStep.state) : ''">
+              <span>Next Step</span>
+              <strong>{{ nextPendingStep ? labelForStep(nextPendingStep.name) : 'Complete' }}</strong>
+            </div>
+          </section>
+
+          <section class="workspace-home-card">
+            <div class="workspace-home-card__head">
+              <strong>Workspace Home</strong>
+              <span>Choose a step from the left sidebar to inspect logs, artifacts, source, and waveforms.</span>
+            </div>
+            <div class="workspace-home-card__body">
+              <div class="workspace-home-metric">
+                <span>Current Status</span>
+                <strong>{{ currentOverallState }}</strong>
+              </div>
+              <div class="workspace-home-metric">
+                <span>Latest Tool</span>
+                <strong>{{ latestActiveTool }}</strong>
+              </div>
+              <div class="workspace-home-metric">
+                <span>Simulation</span>
+                <strong>{{ simStepState }}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div v-else-if="!currentStep" class="state-panel">
           <i class="ri-file-list-3-line"></i>
           <span>No flow step selected.</span>
         </div>
 
         <div v-else class="detail-content">
           <section class="summary-grid">
-            <div class="summary-tile status" :class="stateClass(detail?.state || currentStep.state)">
+            <div class="summary-tile status" :class="stateClass(currentStepDisplayState)">
               <span>Status</span>
-              <strong>{{ detail?.state || currentStep.state || 'Unstart' }}</strong>
+              <strong>{{ currentStepDisplayState }}</strong>
             </div>
             <div class="summary-tile">
               <span>Runtime</span>
-              <strong>{{ detail?.runtime || currentStep.runtime || '--' }}</strong>
+              <strong>{{ currentStepRuntime }}</strong>
             </div>
             <div class="summary-tile">
               <span>Tool</span>
@@ -88,33 +102,46 @@
           </section>
 
           <section v-if="isSimStep" class="sim-run-card">
-            <div class="suite-row">
-              <button
-                type="button"
-                class="suite-pill"
-                :class="{ active: simSuite === 'cpu_tests' }"
-                @click="simSuite = 'cpu_tests'"
-              >
-                <i class="ri-cpu-line"></i>
-                CPU Tests
-              </button>
-              <button
-                type="button"
-                class="suite-pill"
-                :class="{ active: simSuite === 'rtthread' }"
-                @click="simSuite = 'rtthread'"
-              >
-                <i class="ri-terminal-box-line"></i>
-                RT-Thread
-              </button>
-              <div v-if="simSuite === 'cpu_tests'" class="mode-segment">
-                <button type="button" :class="{ active: simCpuMode === 'selected' }" @click="simCpuMode = 'selected'">
-                  Selected
+            <div class="sim-run-head">
+              <div class="suite-row">
+                <button
+                  type="button"
+                  class="suite-pill"
+                  :class="{ active: simSuite === 'cpu_tests' }"
+                  :disabled="runBusy"
+                  @click="simSuite = 'cpu_tests'"
+                >
+                  <i class="ri-cpu-line"></i>
+                  CPU Tests
                 </button>
-                <button type="button" :class="{ active: simCpuMode === 'all' }" @click="simCpuMode = 'all'">
-                  All
+                <button
+                  type="button"
+                  class="suite-pill"
+                  :class="{ active: simSuite === 'rtthread' }"
+                  :disabled="runBusy"
+                  @click="simSuite = 'rtthread'"
+                >
+                  <i class="ri-terminal-box-line"></i>
+                  RT-Thread
                 </button>
+                <div v-if="simSuite === 'cpu_tests'" class="mode-segment">
+                  <button type="button" :disabled="runBusy" :class="{ active: simCpuMode === 'selected' }" @click="simCpuMode = 'selected'">
+                    Selected
+                  </button>
+                  <button type="button" :disabled="runBusy" :class="{ active: simCpuMode === 'all' }" @click="simCpuMode = 'all'">
+                    All
+                  </button>
+                </div>
               </div>
+              <button
+                type="button"
+                class="run-btn sim-run-action"
+                :class="{ running: runBusy }"
+                @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
+              >
+                <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
+                {{ runBusy ? `Cancel ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
+              </button>
             </div>
             <div v-if="simSuite === 'cpu_tests' && simCpuMode === 'selected'" class="case-picker">
               <button
@@ -175,7 +202,12 @@
                       <td>
                         <div class="case-name">
                           <i :class="testCase.ok ? 'ri-checkbox-circle-line' : 'ri-close-circle-line'"></i>
-                          <span>{{ testCase.name }}</span>
+                          <span>
+                            <strong>{{ testCase.name }}</strong>
+                            <small v-if="caseIssue(testCase)" :title="caseIssue(testCase)">
+                              {{ caseIssue(testCase) }}
+                            </small>
+                          </span>
                         </div>
                       </td>
                       <td>
@@ -305,7 +337,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
@@ -323,6 +355,7 @@ interface PathItem {
 interface SimCase {
   name: string
   ok: boolean
+  suite?: string
   returncode?: number
   image?: string
   log?: string
@@ -330,6 +363,11 @@ interface SimCase {
   run_log?: string
   wave?: string
   run_id?: string
+  validation?: {
+    type?: string
+    required_markers?: string[]
+    missing_markers?: string[]
+  }
 }
 
 interface FrontendStepDetail {
@@ -378,6 +416,7 @@ const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
 const activeWaveform = ref<WaveSelection | null>(null)
 const simSuite = ref<'cpu_tests' | 'rtthread'>('cpu_tests')
+const runningSimSuite = ref<'cpu_tests' | 'rtthread' | null>(null)
 const simCpuMode = ref<'all' | 'selected'>('selected')
 const selectedCpuCases = ref<string[]>([])
 const surferFrame = ref<HTMLIFrameElement | null>(null)
@@ -387,16 +426,44 @@ const waveformError = ref('')
 let waveformLoadToken = 0
 let unsubscribeCliEvents: (() => void) | null = null
 
+const isHomeView = computed(() => route.path.endsWith('/home'))
 const currentStepName = computed(() => {
   const param = String(route.params.step || '')
-  return param && param !== 'home' ? param : steps.value[0]?.name || ''
+  return param && param !== 'home' ? param : ''
 })
 const currentStep = computed(() =>
   steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
 )
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
-const stepTitle = computed(() => labelForStep(currentStepName.value || 'Workspace Home'))
+const nextPendingStep = computed(() =>
+  steps.value.find((step) => step.state !== 'Success') ?? null,
+)
+const stepTitle = computed(() => {
+  if (isHomeView.value) {
+    return currentProject.value?.name || 'Frontend Workspace'
+  }
+  return labelForStep(currentStepName.value || 'Step')
+})
+const currentOverallState = computed(() => {
+  if (steps.value.some((step) => step.state === 'Ongoing')) return 'Running'
+  if (steps.value.some((step) => step.state === 'Invalid' || step.state === 'Incomplete')) return 'Attention Needed'
+  if (steps.value.length > 0 && steps.value.every((step) => step.state === 'Success')) return 'Complete'
+  return 'Ready'
+})
+const latestActiveTool = computed(() => nextPendingStep.value?.tool || steps.value.at(-1)?.tool || 'frontend')
+const simStepState = computed(() => {
+  const simStep = steps.value.find((step) => step.name.toLowerCase() === 'sim')
+  return simStep?.state || 'Unstart'
+})
+const currentStepDisplayState = computed(() =>
+  runBusy.value && currentStep.value ? 'Ongoing' : detail.value?.state || currentStep.value?.state || 'Unstart',
+)
+const currentStepRuntime = computed(() =>
+  runBusy.value ? 'Running' : detail.value?.runtime || currentStep.value?.runtime || '--',
+)
+const simSuiteLabel = computed(() => simSuiteLabelFor(simSuite.value))
+const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.value || simSuite.value))
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
@@ -454,7 +521,11 @@ async function refresh(): Promise<void> {
   try {
     const index = await getWorkspaceResourceIndexApi()
     steps.value = index.flow.steps
-    await loadDetail()
+    if (!isHomeView.value) {
+      await loadDetail()
+    } else {
+      detail.value = null
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
     steps.value = []
@@ -481,7 +552,7 @@ async function loadDetail(): Promise<void> {
     }
     detail.value = response.data.info as FrontendStepDetail
     selectedCase.value = cases.value[0] || null
-    selectedLogPath.value = availableLogs.value[0]?.path || ''
+    selectedLogPath.value = preferredLogPath()
     syncDefaultCpuSelection()
     if (!activeSource.value && sourceArtifacts.value.length) {
       activeSource.value = toSourceSelection(sourceArtifacts.value[0])
@@ -509,12 +580,13 @@ async function loadSelectedLog(): Promise<void> {
   }
 }
 
-async function runCurrentStep(): Promise<void> {
+async function runCurrentStep(suiteOverride?: 'cpu_tests' | 'rtthread'): Promise<void> {
   if (!currentProject.value?.path || !currentStepName.value) return
   runBusy.value = true
+  runningSimSuite.value = isSimStep.value ? suiteOverride || simSuite.value : null
   runJobId.value = ''
   try {
-    const payload = simRunPayload()
+    const payload = simRunPayload(suiteOverride)
     const response = await runStepApi({
       cmd: CMDEnum.run_step,
       data: {
@@ -532,27 +604,21 @@ async function runCurrentStep(): Promise<void> {
       summary: response.data?.state === StateEnum.Success ? 'Step Completed' : 'Step Failed',
       detail: response.data?.state === StateEnum.Success
         ? currentStepName.value
-        : `${currentStepName.value} failed. Open Log for details.`,
+        : runFailureDetail(response.message, currentStepName.value),
       life: 4000,
     })
-  } catch {
+  } catch (err) {
     showToast({
       severity: 'error',
       summary: 'Run Failed',
-      detail: currentStepName.value
-        ? `${currentStepName.value} failed. Open Log for details.`
-        : 'Open Log for details.',
+      detail: err instanceof Error ? err.message : runFailureDetail([], currentStepName.value),
       life: 6000,
     })
   } finally {
     runBusy.value = false
+    runningSimSuite.value = null
     runJobId.value = ''
   }
-}
-
-function runRtThread(): void {
-  simSuite.value = 'rtthread'
-  void runCurrentStep()
 }
 
 async function cancelCurrentRun(): Promise<void> {
@@ -568,6 +634,10 @@ async function cancelCurrentRun(): Promise<void> {
   }
   try {
     const response = await getDesktopApi().cli.cancel(jobId)
+    invalidateWorkspaceResources(['flow', 'step', 'logs'])
+    window.setTimeout(() => {
+      void refresh()
+    }, 400)
     showToast({
       severity: response.response === 'cancelled' ? 'warn' : 'info',
       summary: response.response === 'cancelled' ? 'Run Cancelled' : 'Cancel Request',
@@ -594,11 +664,13 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
   if (event.type === 'started') {
     runBusy.value = true
     runJobId.value = event.jobId
+    runningSimSuite.value = runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
     return
   }
 
   if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
     runBusy.value = false
+    runningSimSuite.value = null
     runJobId.value = ''
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
     void refresh()
@@ -610,15 +682,21 @@ function normalizeWorkspacePath(path: string): string {
   return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
 }
 
-function simRunPayload() {
+function simRunPayload(suiteOverride?: 'cpu_tests' | 'rtthread') {
   if (!isSimStep.value) return {}
-  if (simSuite.value === 'rtthread') {
+  const suite = suiteOverride || simSuite.value
+  if (suite === 'rtthread') {
     return { sim_test_suite: 'rtthread' }
   }
+  const selectedCases = selectedCpuCases.value.length
+    ? selectedCpuCases.value
+    : defaultCpuTests.value.length
+      ? defaultCpuTests.value
+      : availableCpuTests.value.slice(0, 2)
   return {
     sim_test_suite: 'cpu_tests',
     sim_cpu_test_mode: simCpuMode.value,
-    sim_cpu_test_cases: simCpuMode.value === 'selected' ? selectedCpuCases.value : [],
+    sim_cpu_test_cases: simCpuMode.value === 'selected' ? selectedCases : [],
   }
 }
 
@@ -629,9 +707,42 @@ function syncDefaultCpuSelection(): void {
 }
 
 function toggleCpuCase(name: string): void {
+  if (runBusy.value) return
   selectedCpuCases.value = selectedCpuCases.value.includes(name)
     ? selectedCpuCases.value.filter((item) => item !== name)
     : [...selectedCpuCases.value, name]
+}
+
+function simSuiteLabelFor(suite: 'cpu_tests' | 'rtthread'): string {
+  return suite === 'rtthread' ? 'RT-Thread' : 'CPU Tests'
+}
+
+function preferredLogPath(): string {
+  if (isSimStep.value && detail.value?.state !== StateEnum.Success) {
+    const preferred = availableLogs.value.find((log) => log.label === 'Build programs log')
+      || availableLogs.value.find((log) => log.label === 'Tool log')
+    if (preferred) return preferred.path
+  }
+  return availableLogs.value[0]?.path || ''
+}
+
+function runFailureDetail(messages: string[] | undefined, step: string): string {
+  const lines = (messages || []).map((line) => line.trim()).filter(Boolean)
+  if (!lines.length) {
+    return step ? `${step} failed. Open Log for details.` : 'Open Log for details.'
+  }
+  return lines.slice(-4).join('\n')
+}
+
+function caseIssue(testCase: SimCase): string {
+  const missing = testCase.validation?.missing_markers || []
+  if (missing.length) {
+    return `Missing markers: ${missing.join(', ')}`
+  }
+  if (!testCase.ok && testCase.returncode && testCase.returncode !== 0) {
+    return `Return code ${testCase.returncode}`
+  }
+  return ''
 }
 
 function selectCase(testCase: SimCase): void {
@@ -768,13 +879,6 @@ function stateClass(state: string): string {
   return 'pending'
 }
 
-function stateIcon(state: string): string {
-  if (state === 'Success') return 'ri-checkbox-circle-fill'
-  if (state === 'Ongoing') return 'ri-loader-4-line animate-spin'
-  if (state === 'Incomplete' || state === 'Invalid') return 'ri-close-circle-fill'
-  return 'ri-time-line'
-}
-
 function fileName(path: string): string {
   return path.split('/').filter(Boolean).pop() || path
 }
@@ -885,7 +989,9 @@ watch(currentStepName, () => {
   selectedLogPath.value = ''
   activeTab.value = 'summary'
   activeSource.value = null
-  void loadDetail()
+  if (!isHomeView.value) {
+    void loadDetail()
+  }
 })
 
 watch(activeTab, (tab) => {
@@ -916,6 +1022,7 @@ watch(activeTab, (tab) => {
 .step-title,
 .step-meta,
 .summary-grid,
+.sim-run-head,
 .suite-row,
 .frontend-step-tabs,
 .panel-tools,
@@ -1011,6 +1118,17 @@ h2 {
   font-weight: 700;
 }
 
+.run-btn.running {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.16);
+}
+
+.run-btn.running:hover {
+  background: rgba(16, 185, 129, 0.2);
+}
+
 .run-btn.danger {
   background: #b91c1c;
   box-shadow: 0 10px 24px rgba(185, 28, 28, 0.2);
@@ -1032,10 +1150,14 @@ button:disabled {
 
 .frontend-grid {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   flex: 1;
+}
+
+.detail-panel-full {
+  min-width: 0;
 }
 
 .panel,
@@ -1062,48 +1184,12 @@ button:disabled {
   flex-shrink: 0;
 }
 
-.step-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.step-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-  color: inherit;
-  text-decoration: none;
-}
-
-.step-row:hover,
-.step-row.active {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
-}
-
-.step-row.active {
-  box-shadow: inset 2px 0 0 var(--accent-color);
-}
-
-.step-icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--bg-primary);
-  flex-shrink: 0;
-}
-
 .success {
   color: #10b981;
 }
 
 .running {
-  color: #60a5fa;
+  color: #10b981;
 }
 
 .failed {
@@ -1112,18 +1198,6 @@ button:disabled {
 
 .pending {
   color: var(--text-secondary);
-}
-
-.step-body {
-  min-width: 0;
-  flex: 1;
-}
-
-.step-title,
-.step-meta {
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .step-title span:first-child,
@@ -1138,19 +1212,9 @@ button:disabled {
 }
 
 .tool,
-.step-meta,
 .log-viewer,
 .text-panel pre {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-}
-
-.tool {
-  font-size: 10px;
-}
-
-.step-meta {
-  margin-top: 3px;
-  font-size: 10px;
 }
 
 .detail-content {
@@ -1186,6 +1250,58 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.workspace-home-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  padding: 14px;
+}
+
+.workspace-home-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-home-card__head span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.workspace-home-card__body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.workspace-home-metric {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.workspace-home-metric span,
+.workspace-home-metric strong {
+  display: block;
+}
+
+.workspace-home-metric span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.workspace-home-metric strong {
+  margin-top: 6px;
+  font-size: 15px;
+}
+
 .sim-run-card {
   padding: 10px;
   border: 1px solid var(--border-color);
@@ -1193,10 +1309,21 @@ button:disabled {
   background: var(--bg-primary);
 }
 
+.sim-run-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .suite-row {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.sim-run-action {
+  min-width: 138px;
+  flex-shrink: 0;
 }
 
 .suite-pill,
@@ -1450,6 +1577,26 @@ button:disabled {
   gap: 7px;
 }
 
+.case-name span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.case-name strong,
+.case-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-name small {
+  max-width: 420px;
+  color: #ef4444;
+  font-size: 10px;
+}
+
 .case-status {
   display: inline-flex;
   padding: 2px 7px;
@@ -1610,8 +1757,23 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .flow-panel {
-    min-height: 180px;
+  .workspace-home-card__head,
+  .workspace-home-card__body {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-home-card__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sim-run-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sim-run-action {
+    width: 100%;
   }
 }
 </style>

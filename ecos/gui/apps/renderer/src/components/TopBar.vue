@@ -50,6 +50,14 @@
 
     <!-- 右侧：窗口控制按钮 -->
     <div class="topbar-right" @mousedown.stop>
+      <button
+        @click="toggleTheme"
+        class="window-btn theme-btn"
+        :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
+        :aria-label="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
+      >
+        <i :class="isDark ? 'ri-sun-line' : 'ri-moon-line'" class="text-base"></i>
+      </button>
       <template v-if="desktopApi">
         <!-- 最小化 -->
         <button @click="handleMinimize" class="window-btn" aria-label="Minimize window">
@@ -88,6 +96,7 @@
 import type { AppMenuAction } from '@ecos-studio/shared'
 import { appMenuActionIds } from '@ecos-studio/shared'
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { useThemeStore } from '@/stores/themeStore'
 import { useRoute, useRouter } from 'vue-router'
 import type { DesktopApi } from '@ecos-studio/shared'
 import { getOptionalDesktopApi, waitForDesktopApi } from '@/platform/desktop'
@@ -119,7 +128,13 @@ const emit = defineEmits<{
   (e: 'menu-action', action: AppMenuAction): void
 }>()
 
+const themeStore = useThemeStore()
+const isDark = computed(() => themeStore.themeName === 'dark')
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+
+function toggleTheme() {
+  themeStore.toggleTheme()
+}
 
 const handleGoHome = () => {
   activeMenu.value = null
@@ -503,6 +518,10 @@ const handleClose = async () => {
 .window-btn:hover {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.theme-btn {
+  width: 40px;
 }
 
 .window-btn-close {

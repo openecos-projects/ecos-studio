@@ -47,6 +47,11 @@ function readStringList(value: unknown): string[] {
   return []
 }
 
+function readOptionalStringList(value: unknown): string[] | null {
+  const items = readStringList(value)
+  return items.length > 0 ? items : null
+}
+
 function readMessage(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item))
   if (typeof value === 'string' && value.trim()) return [value]
@@ -261,10 +266,10 @@ function normalizeCreateData(
     sim_all_tests: data.sim_all_tests ?? data.simAllTests ?? false,
     sim_build_all_programs: data.sim_build_all_programs ?? data.simBuildAllPrograms ?? false,
     sim_build_test_script: readString(data.sim_build_test_script) || readString(data.simBuildTestScript) || defaults.sim_build_test_script,
-    sim_cflags: data.sim_cflags ?? data.simCflags ?? defaults.sim_cflags,
-    sim_cpp_sources: data.sim_cpp_sources ?? data.simCppSources ?? defaults.sim_cpp_sources,
+    sim_cflags: readOptionalStringList(data.sim_cflags ?? data.simCflags) ?? defaults.sim_cflags,
+    sim_cpp_sources: readOptionalStringList(data.sim_cpp_sources ?? data.simCppSources) ?? defaults.sim_cpp_sources,
     sim_images: data.sim_images ?? data.simImages ?? [],
-    sim_ldflags: data.sim_ldflags ?? data.simLdflags ?? defaults.sim_ldflags,
+    sim_ldflags: readOptionalStringList(data.sim_ldflags ?? data.simLdflags) ?? defaults.sim_ldflags,
     sim_program_names: data.sim_program_names ?? data.simProgramNames ?? [],
     sim_program_sources: data.sim_program_sources ?? data.simProgramSources ?? [],
     sim_programs_dir: readString(data.sim_programs_dir) || readString(data.simProgramsDir) || readString(defaults.sim_programs_dir),

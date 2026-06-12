@@ -4,7 +4,7 @@
     <div
       class="w-[64px] shrink-0 bg-(--bg-sidebar) border-r border-(--border-color) flex flex-col justify-between py-3 overflow-y-auto">
       <div class="overflow-y-auto">
-        <router-link v-for="stage in flowStages" :key="stage.path" :to="'/workspace/' + stage.path"
+        <router-link v-for="stage in sidebarStages" :key="stage.path" :to="'/workspace/' + stage.path"
           class="flex flex-col items-center justify-center py-4 transition-all group relative mb-1" :class="[
             currentStage === stage.path ? 'text-(--accent-color)' : 'text-(--text-secondary)',
           ]">
@@ -50,7 +50,9 @@
               <i class="ri-flow-chart text-(--text-secondary) text-xl"></i>
             </div>
             <div>
-              <h3 class="text-[14px] font-semibold text-(--text-primary) tracking-wide">Flow Overview</h3>
+              <h3 class="text-[14px] font-semibold text-(--text-primary) tracking-wide">
+                {{ isFrontendProject ? 'Frontend Workspace' : 'Flow Overview' }}
+              </h3>
               <p class="text-[11px] text-(--text-secondary) mt-0.5">{{ flowSubtitle }}</p>
             </div>
           </div>
@@ -99,13 +101,34 @@
           </div>
         </div>
 
-        <!-- 步骤列表 -->
+        <!-- Home 摘要 -->
         <div class="flex-1 overflow-y-auto">
           <div v-if="runStages.length === 0" class="flex items-center justify-center h-full">
             <div class="text-center px-4">
               <i class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"></i>
               <p class="text-[11px] text-(--text-secondary) mt-2">No flow data available</p>
               <p class="text-[10px] text-(--text-secondary) opacity-70 mt-1">Load a project to see the flow</p>
+            </div>
+          </div>
+
+          <div v-else-if="isFrontendProject" class="p-3">
+            <div class="frontend-overview-card">
+              <div class="frontend-overview-row">
+                <span>Workspace</span>
+                <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Flow' }}</strong>
+              </div>
+              <div class="frontend-overview-row">
+                <span>Flow Steps</span>
+                <strong>{{ runStages.length }}</strong>
+              </div>
+              <div class="frontend-overview-row">
+                <span>Next Step</span>
+                <strong>{{ nextFrontendStage?.label || 'Complete' }}</strong>
+              </div>
+              <div class="frontend-overview-row">
+                <span>Running</span>
+                <strong>{{ flowStats.ongoing > 0 ? 'Yes' : 'No' }}</strong>
+              </div>
             </div>
           </div>
 
@@ -383,7 +406,7 @@
         </div>
 
         <!-- 底部操作栏 -->
-        <div class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
+        <div v-if="!isFrontendProject" class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
           <!-- 操作按钮组 -->
           <div class="flex gap-2">
             <button @click="handleRunFlow" :disabled="flowRunControlBusy"
@@ -448,6 +471,10 @@ const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
 // ============ Flow 概览计算 ============
 // 只统计 run 组的步骤
 const runStages = computed(() => flowStages.value.filter(s => s.group === 'run'))
+const sidebarStages = computed(() => {
+  if (!isFrontendProject.value) return flowStages.value
+  return flowStages.value.filter((stage) => stage.path !== 'configure')
+})
 
 const flowStats = computed(() => {
   const stages = runStages.value
@@ -484,6 +511,9 @@ const showModeMenu = ref(false)
 const { ensureApiReady, currentProject } = useWorkspace()
 const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
 const flowSubtitle = computed(() => isFrontendProject.value ? 'Frontend Verification Flow' : 'RTL to GDS Pipeline')
+const nextFrontendStage = computed(() =>
+  runStages.value.find((stage) => stage.state !== 'Success') ?? null,
+)
 
 const runModes = computed<Record<string, { label: string; icon: string; shortcut?: string }>>(() => ({
   run: { label: isFrontendProject.value ? 'Run Frontend Flow' : 'Run RTL2GDS', icon: 'ri-play-fill' },
@@ -691,6 +721,53 @@ const handleRunFlow = async () => {
 
 .mode-menu-item.active .mode-item-shortcut {
   color: rgba(255, 255, 255, 0.6);
+}
+
+.frontend-overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.frontend-overview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
+  font-size: 11px;
+}
+
+.frontend-overview-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.frontend-overview-row:first-child {
+  padding-top: 0;
+}
+
+.frontend-overview-row span {
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.frontend-overview-row strong {
+  min-width: 0;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text-primary);
+  font-size: 12px;
 }
 
 /* 菜单动画 */

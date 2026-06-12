@@ -388,4 +388,13 @@ export class DesktopRuntimeManager {
     job.controller.abort()
     return createResult(job.request.cmd, 'cancelled', [`Cancelling ${job.request.cmd}`])
   }
+
+  cancelAll(message = 'Cancelling running ECOS commands'): DesktopCliCommandResult[] {
+    const results: DesktopCliCommandResult[] = []
+    for (const [jobId, job] of this.activeLongRunningJobsById.entries()) {
+      job.controller.abort()
+      results.push(createResult(job.request.cmd, 'cancelled', [`${message}: ${jobId}`]))
+    }
+    return results
+  }
 }

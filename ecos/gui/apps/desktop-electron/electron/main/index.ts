@@ -180,7 +180,12 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  services?.desktopRuntimeManager.cancelAll('Cancelling running ECOS commands before app quit')
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  services?.desktopRuntimeManager.cancelAll('Cancelling running ECOS commands before app quit')
 })
