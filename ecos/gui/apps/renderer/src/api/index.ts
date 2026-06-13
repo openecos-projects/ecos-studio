@@ -16,6 +16,15 @@ export {
   type CreateWorkspaceRequest,
 } from './workspace'
 
+export {
+  listFrontendCatalogApi,
+  validateFrontendConfigApi,
+  type FrontendCatalogEntry,
+  type FrontendCatalogPayload,
+  type FrontendValidationIssue,
+  type FrontendValidationResult,
+} from './frontendCatalog'
+
 
 export {
 

@@ -1,0 +1,69 @@
+import { toDesktopCliData } from './desktopPayload'
+import { getDesktopApi } from '@/platform/desktop'
+import type { ResponseData } from './type'
+
+export interface FrontendCatalogEntry {
+  id: string
+  name: string
+  description: string
+  status: string
+  integration_level?: string
+  isa?: string[]
+  tags?: string[]
+  [key: string]: unknown
+}
+
+export interface FrontendCatalogPayload {
+  version: number
+  defaults: {
+    core_id: string
+    soc_harness_id: string
+    toolchain_id: string
+    test_suite_id: string
+  }
+  cores: FrontendCatalogEntry[]
+  soc_harnesses: FrontendCatalogEntry[]
+  toolchains: FrontendCatalogEntry[]
+  test_suites: FrontendCatalogEntry[]
+}
+
+export interface FrontendValidationIssue {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  field: string
+}
+
+export interface FrontendValidationResult {
+  ok: boolean
+  support_level: 'supported' | 'experimental' | 'unsupported'
+  summary: string
+  normalized: {
+    core_id: string
+    soc_harness_id: string
+    soc_variant: string
+    toolchain_id: string
+    test_suite_id: string
+    cpu_filelist: string
+  }
+  issues: FrontendValidationIssue[]
+}
+
+export function listFrontendCatalogApi() {
+  return getDesktopApi().cli.execute({
+    cmd: 'catalog_list',
+    data: toDesktopCliData({ designTool: 'frontend' }),
+    source: 'button',
+  }) as unknown as Promise<ResponseData<FrontendCatalogPayload>>
+}
+
+export function validateFrontendConfigApi(config: Record<string, unknown>) {
+  return getDesktopApi().cli.execute({
+    cmd: 'validate_frontend_config',
+    data: toDesktopCliData({
+      ...config,
+      designTool: 'frontend',
+    }),
+    source: 'button',
+  }) as unknown as Promise<ResponseData<FrontendValidationResult>>
+}

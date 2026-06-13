@@ -55,9 +55,13 @@ export interface CreateWorkspaceRequest {
     sim_test_suite?: string,
     sim_tests_dir?: string,
     sim_tests_out_dir?: string,
+    soc_harness_id?: string,
     soc_filelist?: string,
     soc_variant?: string,
     testbench?: string,
+    toolchain_id?: string,
+    test_suite_id?: string,
+    core_id?: string,
   }
 }
 
@@ -109,7 +113,11 @@ export function createWorkspaceApi(
     sim_build_all_programs?: boolean
     sim_soc_root?: string
     sim_build_test_script?: string
+    soc_harness_id?: string
     soc_variant?: string
+    toolchain_id?: string
+    test_suite_id?: string
+    core_id?: string
   }
 ) {
   const data = toDesktopCliData({
@@ -136,9 +144,13 @@ export function createWorkspaceApi(
     sim_soc_root: options.sim_soc_root || '',
     sim_tests_dir: options.sim_tests_dir || '',
     sim_tests_out_dir: options.sim_tests_out_dir || '',
+    soc_harness_id: options.soc_harness_id || '',
     soc_filelist: options.soc_filelist || '',
     soc_variant: options.soc_variant || '',
     testbench: options.testbench || '',
+    toolchain_id: options.toolchain_id || '',
+    test_suite_id: options.test_suite_id || '',
+    core_id: options.core_id || '',
   })
   return getDesktopApi().cli.execute({
     cmd: 'create_workspace',

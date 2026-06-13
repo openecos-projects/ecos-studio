@@ -312,6 +312,18 @@ function normalizeCreateData(
   }
 }
 
+function normalizeFrontendCatalogConfigData(data: Record<string, unknown>): Record<string, unknown> {
+  const parameters = readRecord(data.parameters)
+  return {
+    ...data,
+    core_id: readString(data.core_id) || readString(data.coreId) || readString(parameters.frontend_core_id) || readString(parameters.core_id),
+    cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist) || readString(parameters.cpu_filelist),
+    soc_harness_id: readString(data.soc_harness_id) || readString(data.socHarnessId) || readString(data.soc_id) || readString(data.soc_variant) || readString(parameters.soc_harness_id) || readString(parameters.soc_variant),
+    test_suite_id: readString(data.test_suite_id) || readString(data.testSuiteId) || readString(data.sim_test_suite) || readString(parameters.test_suite_id) || readString(parameters.sim_test_suite),
+    toolchain_id: readString(data.toolchain_id) || readString(data.toolchainId) || readString(parameters.toolchain_id),
+  }
+}
+
 function prependPythonPath(
   env: NodeJS.ProcessEnv,
   frontendRoot: string,
@@ -380,6 +392,25 @@ export class FrontendCliAdapter {
     request: DesktopCliCommandRequest,
   ): PreparedCommand | DesktopCliCommandResult {
     switch (request.cmd) {
+      case 'catalog_list':
+        return {
+          args: [...this.moduleArgs, 'workspace', 'catalog-list', '--json'],
+        }
+      case 'validate_frontend_config': {
+        mkdirSync(this.tempDir, { recursive: true })
+        const inputJson = join(this.tempDir, `fe-validate-config-${randomUUID()}.json`)
+        writeFileSync(inputJson, JSON.stringify(normalizeFrontendCatalogConfigData(request.data)), 'utf8')
+        return {
+          args: [...this.moduleArgs, 'workspace', 'validate-config', '--input-json', inputJson, '--json'],
+          cleanup: () => {
+            try {
+              unlinkSync(inputJson)
+            } catch {
+              // Best-effort cleanup only.
+            }
+          },
+        }
+      }
       case 'create_workspace': {
         mkdirSync(this.tempDir, { recursive: true })
         const inputJson = join(this.tempDir, `fe-create-workspace-${randomUUID()}.json`)

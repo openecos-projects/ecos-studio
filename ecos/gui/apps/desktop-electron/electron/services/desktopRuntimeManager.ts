@@ -31,6 +31,8 @@ export interface DesktopRuntimeManagerOptions {
 const supportedCommands = new Set<DesktopCliCommandName>([
   'help',
   'clear',
+  'catalog_list',
+  'validate_frontend_config',
   'load_workspace',
   'create_workspace',
   'run_step',

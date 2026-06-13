@@ -1,6 +1,8 @@
 export type DesktopCliCommandName =
   | 'help'
   | 'clear'
+  | 'catalog_list'
+  | 'validate_frontend_config'
   | 'load_workspace'
   | 'create_workspace'
   | 'run_step'

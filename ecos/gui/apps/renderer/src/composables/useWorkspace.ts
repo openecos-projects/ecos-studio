@@ -623,9 +623,13 @@ export function useWorkspace() {
           sim_soc_root: String(frontendParams.sim_soc_root || ''),
           sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
           sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
+          soc_harness_id: String(frontendParams.soc_harness_id || ''),
           soc_filelist: String(frontendParams.soc_filelist || ''),
           soc_variant: String(frontendParams.soc_variant || 'soc1'),
           testbench: String(frontendParams.testbench || ''),
+          toolchain_id: String(frontendParams.toolchain_id || ''),
+          test_suite_id: String(frontendParams.test_suite_id || ''),
+          core_id: String(frontendParams.frontend_core_id || frontendParams.core_id || ''),
         })
       } else {
         // 3. 通过桌面 CLI 创建项目（传递更多配置信息）

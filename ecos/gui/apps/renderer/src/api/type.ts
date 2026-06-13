@@ -1,4 +1,6 @@
 export enum CMDEnum {
+  catalog_list = "catalog_list",
+  validate_frontend_config = "validate_frontend_config",
   create_workspace = "create_workspace",
   load_workspace = "load_workspace",
   rtl2gds = "rtl2gds",

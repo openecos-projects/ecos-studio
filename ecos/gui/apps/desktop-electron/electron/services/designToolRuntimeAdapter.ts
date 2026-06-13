@@ -131,6 +131,8 @@ export class DesignToolRuntimeAdapter implements DesktopRuntimeAdapter {
   }
 
   private isFrontendRequest(request: DesktopCliCommandRequest): boolean {
+    if (request.cmd === 'catalog_list' || request.cmd === 'validate_frontend_config') return true
+
     const data = readRecord(request.data)
     if (isFrontendDesignTool(readDesignTool(data))) return true
     if (hasFrontendOnlyFields(data)) return true
