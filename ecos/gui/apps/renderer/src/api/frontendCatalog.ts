@@ -45,6 +45,10 @@ export interface FrontendValidationResult {
     toolchain_id: string
     test_suite_id: string
     cpu_filelist: string
+    core_cpu_filelist?: string
+    core_capability?: string
+    soc_harness_capability?: string
+    required_capability?: string
   }
   issues: FrontendValidationIssue[]
 }

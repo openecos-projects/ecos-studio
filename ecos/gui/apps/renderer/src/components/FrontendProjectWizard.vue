@@ -280,10 +280,11 @@
 
                   <ReviewSection title="Verification setup" icon="ri-file-list-3-line" @edit="jumpToStep(2)">
                     <ReviewItem label="CPU Source" :value="selectedCore?.name || '-'" />
+                    <ReviewItem label="Core Capability" :value="capabilityLabel(validation?.normalized.core_capability || selectedCore?.integration_level)" />
                     <ReviewItem label="SoC Harness" :value="selectedSocHarness?.name || '-'" />
                     <ReviewItem label="Toolchain" :value="selectedToolchain?.name || '-'" />
                     <ReviewItem label="Test Suite" :value="selectedTestSuite?.name || '-'" />
-                    <ReviewItem label="CPU Filelist" :value="config.parameters.cpu_filelist || '-'" monospace wide />
+                    <ReviewItem label="CPU Filelist" :value="effectiveCpuFilelist || '-'" monospace wide />
                     <ReviewItem label="Default Flow" value="prepare -> elab -> lint -> sim" monospace wide />
                   </ReviewSection>
 
@@ -489,6 +490,12 @@ const selectedCore = computed(() => entryById(catalog.value.cores, selectedCoreI
 const selectedSocHarness = computed(() => entryById(catalog.value.soc_harnesses, selectedSocHarnessId.value))
 const selectedToolchain = computed(() => entryById(catalog.value.toolchains, selectedToolchainId.value))
 const selectedTestSuite = computed(() => entryById(catalog.value.test_suites, selectedTestSuiteId.value))
+const effectiveCpuFilelist = computed(() =>
+  config.value.parameters.cpu_filelist
+  || validation.value?.normalized?.cpu_filelist
+  || stringField(selectedCore.value, 'cpu_filelist')
+  || '',
+)
 const visibleSocHarnesses = computed(() =>
   catalog.value.soc_harnesses.filter((entry) => entry.status === 'stable' || entry.id === selectedSocHarnessId.value),
 )
@@ -686,6 +693,17 @@ function entryById(entries: FrontendCatalogEntry[], id: string): FrontendCatalog
   return entries.find((entry) => entry.id === id) || null
 }
 
+function stringField(entry: FrontendCatalogEntry | null, field: string): string {
+  const value = entry?.[field]
+  return typeof value === 'string' ? value : ''
+}
+
+function capabilityLabel(value: unknown): string {
+  const text = String(value || '').trim()
+  if (!text) return '-'
+  return text.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 const selectLocation = async () => {
   const desktopApi = await waitForDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
@@ -787,6 +805,8 @@ const CatalogCard = defineComponent({
   },
   emits: ['select'],
   setup(props, { emit }) {
+    const capability = () => capabilityLabel(props.entry.integration_level)
+    const hasBuiltInFilelist = () => typeof props.entry.cpu_filelist === 'string' && props.entry.cpu_filelist.length > 0
     return () => h('button', {
       class: [
         'group cursor-pointer rounded-xl border bg-(--bg-secondary)/30 p-4 text-left transition-colors hover:bg-(--bg-secondary)/70',
@@ -813,6 +833,19 @@ const CatalogCard = defineComponent({
       h('h3', { class: 'mt-4 text-sm font-bold text-(--text-primary)' }, props.entry.name),
       h('p', { class: 'mt-1 line-clamp-2 text-xs text-(--text-secondary)' }, props.entry.description),
       h('div', { class: 'mt-3 flex flex-wrap gap-1' }, [
+        h('span', {
+          class: [
+            'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+            props.entry.integration_level === 'sim_ready'
+              ? 'bg-emerald-500/10 text-emerald-400'
+              : props.entry.integration_level === 'filelist_ready'
+                ? 'bg-sky-500/10 text-sky-400'
+                : 'bg-(--bg-primary)/70 text-(--text-secondary)',
+          ],
+        }, capability()),
+        ...(hasBuiltInFilelist()
+          ? [h('span', { class: 'rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-400' }, 'Built-in filelist')]
+          : []),
         ...(Array.isArray(props.entry.isa) ? props.entry.isa.slice(0, 3) : []).map((isa) =>
           h('span', { class: 'rounded bg-(--bg-primary)/70 px-1.5 py-0.5 text-[10px] text-(--text-secondary)' }, String(isa)),
         ),
