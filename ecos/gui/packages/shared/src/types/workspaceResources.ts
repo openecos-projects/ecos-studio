@@ -10,6 +10,7 @@ export interface WorkspaceResourceFile {
     | 'checklist'
     | 'layout-image'
     | 'layout-json'
+    | 'view-json'
     | 'metrics'
     | 'analysis'
     | 'subflow'

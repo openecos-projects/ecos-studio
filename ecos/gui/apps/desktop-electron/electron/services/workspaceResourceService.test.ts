@@ -125,6 +125,31 @@ describe('WorkspaceResourceService', () => {
     ]))
   })
 
+  it('returns the step view JSON package from resolveStepInfo(layout)', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'dreamplace' }])
+    await mkdir(join(root, 'place_dreamplace', 'output', 'gcd_place_view'), { recursive: true })
+    await writeFile(
+      join(root, 'place_dreamplace', 'output', 'gcd_place_view', 'manifest.json'),
+      '{}',
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({ step: 'place', id: 'layout' })
+
+    expect(result).toMatchObject({
+      step: 'place',
+      id: 'layout',
+      response: 'missing',
+      info: {
+        viewJson: join(root, 'place_dreamplace', 'output', 'gcd_place_view'),
+      },
+    })
+    expect(result.missing).toContain(join(root, 'place_dreamplace', 'output', 'gcd_place.json'))
+    expect(result.missing).not.toContain(join(root, 'place_dreamplace', 'output', 'gcd_place_view'))
+  })
+
   it('maps yosys config to flow_config.json', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })

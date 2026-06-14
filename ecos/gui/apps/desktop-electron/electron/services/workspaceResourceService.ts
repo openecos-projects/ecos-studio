@@ -285,6 +285,7 @@ export class WorkspaceResourceService {
         return stepInfo({
           image: step.resources.output.image?.path,
           json: step.resources.output.json?.path,
+          viewJson: step.resources.output.viewJson?.path,
         })
       case 'views':
         return stepInfo({
@@ -345,7 +346,11 @@ export class WorkspaceResourceService {
   ): WorkspaceResourceFile[] {
     switch (id) {
       case 'layout':
-        return existingResourceRefs([step.resources.output.image, step.resources.output.json])
+        return existingResourceRefs([
+          step.resources.output.image,
+          step.resources.output.json,
+          step.resources.output.viewJson,
+        ])
       case 'views':
         return existingResourceRefs([
           step.resources.output.image,
@@ -404,6 +409,7 @@ function addEccLikeResources(
   resources.output.db = createFile(join(directory, 'output', `${design}_${stepName}_db`), 'output')
   resources.output.image = createFile(join(directory, 'output', `${design}_${stepName}.png`), 'layout-image')
   resources.output.json = createFile(join(directory, 'output', `${design}_${stepName}.json`), 'layout-json')
+  resources.output.viewJson = createFile(join(directory, 'output', `${design}_${stepName}_view`), 'view-json')
   resources.output.lef = createFile(join(directory, 'output', `${design}_${stepName}.lef`), 'output')
   resources.output.lib = createFile(join(directory, 'output', `${design}_${stepName}.lib`), 'output')
   resources.data.dir = createFile(join(directory, 'data'), 'unknown')
