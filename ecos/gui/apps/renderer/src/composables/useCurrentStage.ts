@@ -1,6 +1,33 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+export interface WorkspaceStageFlags {
+  showProgressPanel: boolean
+  showOverviewPanel: boolean
+  showSubflowPanel: boolean
+  isHome: boolean
+  isConfigure: boolean
+  isTech: boolean
+  isFlowStep: boolean
+}
+
+export function getWorkspaceStageFlags(stage: string): WorkspaceStageFlags {
+  const isHome = stage === 'home'
+  const isConfigure = stage === 'configure'
+  const isTech = stage === 'tech'
+  const isWorkspaceTool = isConfigure || isTech
+
+  return {
+    showProgressPanel: !isWorkspaceTool,
+    showOverviewPanel: isHome,
+    showSubflowPanel: !isWorkspaceTool && !isHome,
+    isHome,
+    isConfigure,
+    isTech,
+    isFlowStep: !isHome && !isWorkspaceTool,
+  }
+}
+
 // ============ Composable ============
 
 /**
@@ -18,28 +45,31 @@ export function useCurrentStage() {
 
   /** 是否显示进度面板 (Configure 页面不显示) */
   const showProgressPanel = computed(() => {
-    return currentStage.value !== 'configure'
+    return getWorkspaceStageFlags(currentStage.value).showProgressPanel
   })
 
   /** 是否显示概览面板 (Home 页面显示概览) */
   const showOverviewPanel = computed(() => {
-    return currentStage.value === 'home'
+    return getWorkspaceStageFlags(currentStage.value).showOverviewPanel
   })
 
   /** 是否显示子流程面板 (非 Home 和非 Configure 页面显示) */
   const showSubflowPanel = computed(() => {
-    return currentStage.value !== 'configure' && currentStage.value !== 'home'
+    return getWorkspaceStageFlags(currentStage.value).showSubflowPanel
   })
 
   /** 是否在首页 */
-  const isHome = computed(() => currentStage.value === 'home')
+  const isHome = computed(() => getWorkspaceStageFlags(currentStage.value).isHome)
 
   /** 是否在配置页 */
-  const isConfigure = computed(() => currentStage.value === 'configure')
+  const isConfigure = computed(() => getWorkspaceStageFlags(currentStage.value).isConfigure)
+
+  /** 是否在 Tech Library 页 */
+  const isTech = computed(() => getWorkspaceStageFlags(currentStage.value).isTech)
 
   /** 是否在流程步骤页面 */
   const isFlowStep = computed(() => {
-    return !isHome.value && !isConfigure.value
+    return getWorkspaceStageFlags(currentStage.value).isFlowStep
   })
 
   /**
@@ -64,6 +94,7 @@ export function useCurrentStage() {
     showSubflowPanel,
     isHome,
     isConfigure,
+    isTech,
     isFlowStep,
 
     // 方法

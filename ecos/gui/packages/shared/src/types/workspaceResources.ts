@@ -11,6 +11,7 @@ export interface WorkspaceResourceFile {
     | 'layout-image'
     | 'layout-json'
     | 'view-json'
+    | 'tech-json'
     | 'metrics'
     | 'analysis'
     | 'subflow'
@@ -45,6 +46,17 @@ export interface WorkspaceStepResource {
   };
 }
 
+export interface WorkspaceTechResources {
+  packageRoot: string;
+  source: 'view-package';
+  manifest: WorkspaceResourceFile;
+  meta?: WorkspaceResourceFile;
+  layers: WorkspaceResourceFile;
+  sites: WorkspaceResourceFile;
+  vias: WorkspaceResourceFile;
+  cellMasters: WorkspaceResourceFile;
+}
+
 export interface WorkspaceResourceIndex {
   root: string;
   design: string;
@@ -61,6 +73,7 @@ export interface WorkspaceResourceIndex {
   flow: {
     steps: WorkspaceStepResource[];
   };
+  tech?: WorkspaceTechResources;
   status: WorkspaceResourceStatus;
   messages: string[];
 }

@@ -64,6 +64,7 @@ export type {
   WorkspaceStepInfoRequest,
   WorkspaceStepInfoResult,
   WorkspaceStepResource,
+  WorkspaceTechResources,
 } from './types/workspaceResources.ts';
 export type { TileGenerationRequest, TileGenerationResult } from './types/tile.ts';
 export {
