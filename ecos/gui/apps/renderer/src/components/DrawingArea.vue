@@ -4,15 +4,9 @@ import { useRoute } from 'vue-router'
 import { EditorContainer, type Editor } from '@/applications/editor'
 import { LayerManagerPlugin } from '@/applications/editor/plugins'
 import {
-  TileManager,
-  TileInteraction,
   ViewportAnimator,
-  EditManager,
-  PlacementTool,
   DrcViolationOverlay,
 } from '@/applications/editor/tile'
-import type { CellDefStore } from '@/applications/editor/tile/CellDefStore'
-import type { GlobalLayerStore } from '@/applications/editor/tile/GlobalLayerStore'
 import DrawingToolbar from './DrawingToolbar.vue'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useEDA } from '@/composables/useEDA'
@@ -20,7 +14,6 @@ import { useLayoutState } from '@/composables/useLayoutState'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import {
   deriveDrcStepPathFromLayoutJsonRelative,
-  getLayoutTileGenerationStatus,
   pickDrcJsonPath,
   pickLayoutJsonPath,
   resolveLayoutJsonAbsolutePath,
@@ -28,41 +21,31 @@ import {
 import { parseDrcStepJson, violationToFitRect } from '@/composables/drcStepParser'
 import { requestProjectPathAccess } from '@/utils/projectFs'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { runLayoutTileGenerationSingleFlight } from '@/composables/layoutTilePipeline'
-import { useLayoutTilePrefetchStore } from '@/stores/layoutTilePrefetchStore'
 import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
+import {
+  loadViewJsonOverview,
+  type ViewJsonRenderMode,
+  type ViewJsonRendererStats,
+  type ViewJsonLoadStats,
+  type ViewJsonOverviewData,
+  ViewJsonOverviewRenderer,
+} from '@/applications/editor/view-json/overview'
+import { createViewJsonOverviewWorker } from '@/applications/editor/view-json/overviewWorker'
 
 const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
 const { getResourceUrl } = useEDA()
 const layoutState = useLayoutState()
-const tilePrefetchStore = useLayoutTilePrefetchStore()
 
 const editor = shallowRef<Editor | null>(null)
+const PERFORMANCE_HUD_UPDATE_INTERVAL_MS = 250
 
 /** Resource resolver 返回的布局 JSON 相对路径，供工具栏生成瓦片 */
 const layoutJsonRelativePath = ref<string | null>(null)
 /** DRC 结果 JSON 相对路径：resolver 显式字段，或与布局同目录的 `drc.step.json` */
 const drcJsonRelativePath = ref<string | null>(null)
-/** 当前步骤预览图相对路径（与 handleStageChange 中 info.image 一致），供「矢量 / 预览图」切换 */
-const previewImageRelativePath = ref<string | null>(null)
-/** 最近一次成功加载的瓦片包（切换回矢量时复用，步骤切换时在 handleStageChange 中清空） */
-const lastSuccessfulTileBundle = ref<{ baseUrl: string, outDir?: string } | null>(null)
-const currentLayoutTileCacheReady = ref(false)
-const tileGenBusy = ref(false)
-/** 矢量 ↔ 预览图切换中（与生成瓦片并列禁用工具栏） */
-const previewModeSwitchBusy = ref(false)
-const showTileGenerate = computed(() => isDesktopRuntime())
-
-const showPreviewModeToggle = computed(() =>
-  showTileGenerate.value
-  && previewImageRelativePath.value != null
-  && previewImageRelativePath.value.length > 0,
-)
-
-const canSwitchToLayoutMode = computed(() => lastSuccessfulTileBundle.value != null)
 
 /** 当前路由阶段名，用作瓦片缓存子目录 stepKey（与 handleStageChange 一致） */
 const currentStepKey = computed(() => {
@@ -125,18 +108,10 @@ function attachCanvasPointerTracking(ed: Editor): void {
 
 watch(
   () => [currentProject.value?.path ?? null, currentStepKey.value] as const,
-  ([projectPath, stepKey], prev) => {
+  ([projectPath], prev) => {
     const prevPath = prev?.[0] ?? null
     if (projectPath !== prevPath) {
       resetLoadingState()
-      tilePrefetchStore.setProject(projectPath, {
-        sessionId: workspaceSession.value.sessionId,
-      })
-    }
-    if (projectPath) {
-      tilePrefetchStore.notifyNavigatedStep(stepKey, {
-        sessionId: workspaceSession.value.sessionId,
-      })
     }
   },
   { immediate: true },
@@ -152,7 +127,7 @@ watch(
   { immediate: true }
 )
 
-/** 画布底部居中、标尺上方：版图快捷键（可点击，与 TileInteraction / PlacementTool 一致） */
+/** 画布底部居中、标尺上方：版图快捷键（可点击） */
 const LAYOUT_HOTKEY_BAR_BOTTOM_PX = RULER_THICKNESS + 10
 
 function isMacPlatform(): boolean {
@@ -239,17 +214,53 @@ function dispatchRedoChord(): void {
   }
 }
 
-// Tile rendering module
-let tileManager: TileManager | null = null
-let tileInteraction: TileInteraction | null = null
 let viewportAnimator: ViewportAnimator | null = null
-let editManager: EditManager | null = null
-let placementTool: PlacementTool | null = null
 let drcViolationOverlay: DrcViolationOverlay | null = null
+let viewJsonOverviewRenderer: ViewJsonOverviewRenderer | null = null
+let performanceHudRaf = 0
+let performanceHudLastFrameAt = 0
+let performanceHudFrameCount = 0
+let performanceHudAccumulatedMs = 0
+let performanceHudFrameRunning = false
+let performanceHudLastUiUpdateAt = 0
 
-// 记住最近选中的 instance cell 信息，用于 Place 工具
-let lastSelectedCellId: number | null = null
-let lastSelectedOrient = 0
+interface ViewJsonPerformanceHudState {
+  fps: number
+  frameMs: number
+  renderMode: ViewJsonRenderMode
+  visibleInstanceCount: number
+  visibleChunkCount: number
+  activeRasterTileCount: number
+  activeVectorChunkCount: number
+  scale: number
+  rebuildMs: number
+  loadStats: ViewJsonLoadStats | null
+}
+
+const viewJsonPerformanceHud = ref<ViewJsonPerformanceHudState>({
+  fps: 0,
+  frameMs: 0,
+  renderMode: 'idle',
+  visibleInstanceCount: 0,
+  visibleChunkCount: 0,
+  activeRasterTileCount: 0,
+  activeVectorChunkCount: 0,
+  scale: 1,
+  rebuildMs: 0,
+  loadStats: null,
+})
+const currentViewJsonOverview = shallowRef<ViewJsonOverviewData | null>(null)
+const currentViewJsonPackageRoot = ref<string | null>(null)
+const previewImageRelativePath = ref<string | null>(null)
+const previewImageUrl = ref<string | null>(null)
+const previewModeSwitchBusy = ref(false)
+const showPreviewModeToggle = computed(() =>
+  previewImageRelativePath.value != null && currentViewJsonPackageRoot.value != null,
+)
+const canSwitchToLayoutMode = computed(() => currentViewJsonPackageRoot.value != null)
+const showViewJsonPerformanceHud = computed(() =>
+  import.meta.env.DEV && layoutState.renderMode.value === 'layout',
+)
 
 const stepEnumValues = Object.values(StepEnum)
 
@@ -262,39 +273,91 @@ function resetLoadingState(): void {
   layoutState.loadingMessage.value = ''
 }
 
-async function refreshCurrentLayoutTileCacheStatus(): Promise<void> {
-  const projectPath = currentProject.value?.path
-  const rel = layoutJsonRelativePath.value
-  const stepKey = currentStepKey.value
-  currentLayoutTileCacheReady.value = false
-  if (!projectPath || !rel || !isDesktopRuntime()) {
+function formatPerformanceNumber(value: number, digits = 1): string {
+  return Number.isFinite(value) ? value.toFixed(digits) : '0.0'
+}
+
+function formatPerformanceInteger(value: number): string {
+  return Number.isFinite(value) ? Math.round(value).toLocaleString() : '0'
+}
+
+function applyRendererStatsToHud(stats: ViewJsonRendererStats | null): void {
+  if (!stats) return
+  viewJsonPerformanceHud.value = {
+    ...viewJsonPerformanceHud.value,
+    renderMode: stats.renderMode,
+    visibleInstanceCount: stats.visibleInstanceCount,
+    visibleChunkCount: stats.visibleChunkCount,
+    activeRasterTileCount: stats.activeRasterTileCount,
+    activeVectorChunkCount: stats.activeVectorChunkCount,
+    scale: stats.scale,
+    rebuildMs: stats.rebuildMs,
+  }
+}
+
+function stopPerformanceHudSampling(): void {
+  if (performanceHudRaf) {
+    cancelAnimationFrame(performanceHudRaf)
+    performanceHudRaf = 0
+  }
+  performanceHudLastFrameAt = 0
+  performanceHudFrameCount = 0
+  performanceHudAccumulatedMs = 0
+  performanceHudLastUiUpdateAt = 0
+}
+
+function samplePerformanceHudFrame(now: number): void {
+  if (performanceHudFrameRunning) {
     return
   }
-
+  performanceHudFrameRunning = true
   try {
-    const status = await getLayoutTileGenerationStatus({
-      projectPath,
-      layoutJsonRelative: rel,
-      stepKey,
-    })
-    if (
-      currentProject.value?.path !== projectPath
-      || layoutJsonRelativePath.value !== rel
-      || currentStepKey.value !== stepKey
-    ) {
+    if (layoutState.renderMode.value !== 'layout' || !viewJsonOverviewRenderer) {
+      stopPerformanceHudSampling()
       return
     }
-    currentLayoutTileCacheReady.value = status.fromCache
-  } catch {
-    if (
-      currentProject.value?.path !== projectPath
-      || layoutJsonRelativePath.value !== rel
-      || currentStepKey.value !== stepKey
-    ) {
-      return
+
+    const shouldUpdateHud = now - performanceHudLastUiUpdateAt >= PERFORMANCE_HUD_UPDATE_INTERVAL_MS
+
+    if (performanceHudLastFrameAt > 0) {
+      const delta = now - performanceHudLastFrameAt
+      performanceHudFrameCount += 1
+      performanceHudAccumulatedMs += delta
+      if (shouldUpdateHud && performanceHudAccumulatedMs > 0) {
+        const fps = performanceHudFrameCount * 1000 / performanceHudAccumulatedMs
+        viewJsonPerformanceHud.value = {
+          ...viewJsonPerformanceHud.value,
+          fps,
+          frameMs: performanceHudAccumulatedMs / performanceHudFrameCount,
+        }
+        performanceHudFrameCount = 0
+        performanceHudAccumulatedMs = 0
+      }
     }
-    currentLayoutTileCacheReady.value = false
+    performanceHudLastFrameAt = now
+
+    if (shouldUpdateHud) {
+      applyRendererStatsToHud(viewJsonOverviewRenderer?.getPerformanceStats() ?? null)
+      performanceHudLastUiUpdateAt = now
+    }
+    performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
+  } finally {
+    performanceHudFrameRunning = false
   }
+}
+
+function startPerformanceHudSampling(): void {
+  stopPerformanceHudSampling()
+  performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
+}
+
+function pickViewJsonPackageRoot(info: Record<string, unknown>): string | null {
+  const value = info.viewJson
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function isViewJsonLoadCancelled(error: unknown): boolean {
+  return error instanceof Error && error.message.toLowerCase().includes('cancelled')
 }
 
 const onEditorReady = (editorInstance: Editor) => {
@@ -311,18 +374,12 @@ const onEditorReady = (editorInstance: Editor) => {
 }
 
 function cleanupLayout(): void {
-  // 注意：不在这里清空 lastSuccessfulTileBundle，以便从矢量切到预览图后能再切回缓存瓦片包。
-  placementTool?.destroy()
-  editManager?.destroy()
-  tileInteraction?.destroy()
+  stopPerformanceHudSampling()
   viewportAnimator?.destroy()
-  tileManager?.destroy()
+  viewJsonOverviewRenderer?.destroy()
 
-  placementTool = null
-  editManager = null
-  tileInteraction = null
   viewportAnimator = null
-  tileManager = null
+  viewJsonOverviewRenderer = null
 
   drcViolationOverlay?.destroy()
   drcViolationOverlay = null
@@ -342,25 +399,152 @@ function cleanupLayout(): void {
   layoutState.hasUnsavedEdits.value = false
   layoutState.isPlacementMode.value = false
   layoutState.renderMode.value = 'image'
+  viewJsonPerformanceHud.value = {
+    fps: 0,
+    frameMs: 0,
+    renderMode: 'idle',
+    visibleInstanceCount: 0,
+    visibleChunkCount: 0,
+    activeRasterTileCount: 0,
+    activeVectorChunkCount: 0,
+    scale: 1,
+    rebuildMs: 0,
+    loadStats: null,
+  }
 }
 
-/** manifest.layer id（= layerIdx）在 cells.bin / global.bin 中是否出现几何 */
-function manifestLayerIdsWithGeometry(
-  cellStore: CellDefStore,
-  globalStore: GlobalLayerStore,
-): Set<number> {
-  const ids = new Set<number>()
-  for (const cid of cellStore.getAllCellIds()) {
-    const def = cellStore.getCellDef(cid)
-    if (!def) continue
-    for (const { layerIdx, rects } of def.layers) {
-      if (rects.length > 0) ids.add(layerIdx)
-    }
+function clearCurrentViewJsonOverview(): void {
+  currentViewJsonOverview.value = null
+  currentViewJsonPackageRoot.value = null
+  previewImageRelativePath.value = null
+  previewImageUrl.value = null
+}
+
+function worldCenterForViewJson(overview: ViewJsonOverviewData): { x: number; y: number } {
+  return {
+    x: overview.dieWorld.x + overview.dieWorld.w / 2,
+    y: overview.dieWorld.y + overview.dieWorld.h / 2,
   }
-  for (const s of globalStore.shapes) {
-    ids.add(s.layerIdx)
+}
+
+function setupViewJsonLayoutActions(ed: Editor, overview: ViewJsonOverviewData): void {
+  const view = ed.view
+  if (!view) return
+
+  viewportAnimator = markRaw(new ViewportAnimator(view))
+  viewportAnimator.setManifest({
+    version: 1,
+    designName: 'view-json-overview',
+    dbuPerMicron: overview.dbuPerMicron,
+    dieArea: {
+      x: overview.dieWorld.x,
+      y: overview.dieWorld.y,
+      w: overview.dieWorld.w,
+      h: overview.dieWorld.h,
+    },
+    tileConfig: {
+      tilePixelSize: 0,
+      minZ: 0,
+      maxZ: 0,
+      rasterMaxZ: 0,
+      rasterFormat: 'png',
+      vectorFormat: 'bin',
+    },
+    layers: [],
+    cellsFile: { path: '', size: 0, hash: '' },
+    globalFile: { path: '', size: 0, hash: '' },
+    stats: {
+      totalInstances: overview.totalInstanceCount,
+      generatedAt: '',
+    },
+  })
+
+  layoutState.focusDrcViolationByIndex.value = (index: number) => {
+    const list = layoutState.drcViolations.value
+    const v = list[index]
+    if (!v || !viewportAnimator) return
+    void viewportAnimator.fitToBbox(violationToFitRect(v), 0.18, 450)
   }
-  return ids
+
+  drcViolationOverlay = markRaw(new DrcViolationOverlay(view))
+  drcViolationOverlay.bindViewportEvents()
+  view.addChild(drcViolationOverlay)
+
+  layoutState.tileDbuPerMicron.value = overview.dbuPerMicron
+  layoutState.tileDieWorldH.value = overview.worldHeight
+  layoutState.tileActions.value = {
+    clearSelection: () => {
+      layoutState.tileSelection.value = null
+    },
+    fitToView: () => {
+      ed.fitToWorld(40, { worldCenter: worldCenterForViewJson(overview) })
+    },
+  }
+}
+
+async function loadStepImagePreview(
+  imagePath: string,
+  guard: DrawingAsyncGuard,
+): Promise<void> {
+  const ed = editor.value
+  if (!ed || !guard.isCurrent()) return
+  cleanupLayout()
+  const imageUrl = previewImageUrl.value
+    ?? await getResourceUrl(imagePath, currentProject.value?.path || '')
+  if (!guard.isCurrent() || editor.value !== ed) return
+  previewImageUrl.value = imageUrl
+  await ed.setBackgroundImage(imageUrl)
+  if (!guard.isCurrent() || editor.value !== ed) return
+  layoutState.tileActions.value = {
+    clearSelection: () => {
+      layoutState.tileSelection.value = null
+    },
+    fitToView: () => {
+      ed.fitToWorld(10)
+    },
+  }
+  layoutState.renderMode.value = 'image'
+  layoutState.loadingState.value = 'ready'
+  layoutState.loadingMessage.value = ''
+  void nextTick(() => {
+    editor.value?.fitToWorld(10)
+    requestAnimationFrame(() => editor.value?.fitToWorld(10))
+  })
+}
+
+function showViewJsonLayout(
+  overview: ViewJsonOverviewData,
+  guard: DrawingAsyncGuard,
+): void {
+  const ed = editor.value
+  if (!ed?.view || !guard.isCurrent()) return
+
+  cleanupLayout()
+  ed.clearBackground()
+  previewImageUrl.value = null
+  ed.setWorldBounds(overview.worldWidth, overview.worldHeight)
+  viewJsonOverviewRenderer = markRaw(new ViewJsonOverviewRenderer(ed.view))
+  viewJsonOverviewRenderer.render(overview)
+  setupViewJsonLayoutActions(ed, overview)
+  void loadDrcViolationOverlayAfterTiles(ed, overview.worldHeight, guard)
+
+  layoutState.renderMode.value = 'layout'
+  layoutState.loadingState.value = 'ready'
+  layoutState.loadingMessage.value = ''
+  viewJsonPerformanceHud.value = {
+    ...viewJsonPerformanceHud.value,
+    loadStats: overview.loadStats,
+  }
+  applyRendererStatsToHud(viewJsonOverviewRenderer.getPerformanceStats())
+  if (showViewJsonPerformanceHud.value) {
+    startPerformanceHudSampling()
+  }
+
+  const worldCenter = worldCenterForViewJson(overview)
+  void nextTick(() => {
+    editor.value?.fitToWorld(40, { worldCenter })
+    requestAnimationFrame(() => editor.value?.fitToWorld(40, { worldCenter }))
+  })
 }
 
 async function loadDrcViolationOverlayAfterTiles(
@@ -400,201 +584,78 @@ async function loadDrcViolationOverlayAfterTiles(
   }
 }
 
-/** @param localRoot 瓦片输出目录绝对路径；桌面端通过桥接按项目作用域读取该 bundle 根目录下的文件。 */
-async function loadTileLayout(
-  baseUrl: string,
-  localRoot?: string,
+async function loadStepViewJsonOverview(
+  viewJsonPackageRoot: string,
   guard: DrawingAsyncGuard = createDrawingAsyncGuard(currentStepKey.value),
-): Promise<void> {
+): Promise<ViewJsonOverviewData | null> {
   const ed = editor.value
-  if (!ed?.view || !guard.isCurrent()) return
+  if (!ed?.view || !guard.isCurrent()) return null
 
-  cleanupLayout()
+  if (currentViewJsonOverview.value && currentViewJsonPackageRoot.value === viewJsonPackageRoot) {
+    return currentViewJsonOverview.value
+  }
 
-  layoutState.loadingState.value = 'loading'
-  layoutState.loadingMessage.value = 'Loading tile manifest...'
+  currentViewJsonOverview.value = null
+  layoutState.loadingMessage.value = 'Loading view JSON layout...'
 
   try {
-    tileManager = markRaw(new TileManager(ed.view, baseUrl, localRoot))
-    await tileManager.init()
-    await Promise.all([tileManager.cellStore.ready, tileManager.globalStore.ready])
-    if (!guard.isCurrent() || editor.value !== ed || tileManager == null) {
-      cleanupLayout()
-      return
+    const projectPath = currentProject.value?.path
+    if (!projectPath) {
+      throw new Error('Project path is required to load view JSON overview.')
     }
-
-    // 与 COORDINATES.md 一致：瓦片数据是 Pixi 世界坐标 [0,dieW)×[0,dieH)，须同步 Editor 世界盒，
-    // 否则 worldToDisplay / 标尺使用的 worldHeight 仍是旧值（如默认 4000），鼠标 EDA 读数会错。
-    {
-      const d = tileManager.manifest!.dieArea
-      const worldCenter = { x: d.x + d.w / 2, y: d.y + d.h / 2 }
-      ed.setWorldBounds(d.w, d.h)
-      ed.fitToWorld(40, { worldCenter })
-    }
-
-    // ViewportAnimator
-    viewportAnimator = markRaw(new ViewportAnimator(ed.view))
-    if (tileManager.manifest) {
-      viewportAnimator.setManifest(tileManager.manifest)
-    }
-
-    layoutState.focusDrcViolationByIndex.value = (index: number) => {
-      const list = layoutState.drcViolations.value
-      const v = list[index]
-      if (!v || !viewportAnimator) return
-      void viewportAnimator.fitToBbox(violationToFitRect(v), 0.18, 450)
-    }
-
-    // TileInteraction (RBush + hit-test + selection overlay)
-    tileInteraction = markRaw(new TileInteraction(
-      ed.view,
-      tileManager,
-      tileManager.cellStore,
-      tileManager.globalStore,
-    ))
-
-    // EditManager
-    editManager = markRaw(new EditManager(tileManager, tileManager.cellStore))
-    ed.view.addChild(editManager.editOverlay)
-
-    tileManager.setEditDirtyGetter(() => editManager!.hasUnsavedChanges)
-
-    // 绑定 EditManager → TileInteraction
-    tileInteraction.setEditManager(editManager)
-
-    // 挂载 overlays 到 viewport（渲染顺序：edit → ghost → highlight → drc → selection）
-    ed.view.addChild(tileInteraction.ghostOverlay)
-    ed.view.addChild(tileInteraction.highlightOverlay)
-    drcViolationOverlay = markRaw(new DrcViolationOverlay(ed.view))
-    drcViolationOverlay.bindViewportEvents()
-    ed.view.addChild(drcViolationOverlay)
-    ed.view.addChild(tileInteraction.selectionOverlay)
-
-    // PlacementTool
-    placementTool = markRaw(new PlacementTool(
-      ed.view,
-      editManager,
-      tileManager,
-      tileManager.cellStore,
-    ))
-    ed.view.addChild(placementTool.ghostOverlay)
-
-    // EditManager 变更 → 更新 hasUnsavedEdits
-    editManager.onChange(() => {
-      layoutState.hasUnsavedEdits.value = editManager?.hasUnsavedChanges ?? false
+    const overview = await loadViewJsonOverview(viewJsonPackageRoot, {
+      projectPath,
+      shouldCancel: () => !guard.isCurrent(),
+      workerFactory: createViewJsonOverviewWorker,
     })
-
-    // 选中回调 → 更新 Vue 响应式状态 + 记住 cellId 供 Place 使用
-    tileInteraction.onSelectionChange((info) => {
-      layoutState.tileSelection.value = info
-      if (info?.type === 'instance' && info.cellId != null) {
-        lastSelectedCellId = info.cellId
-        lastSelectedOrient = info.orient ?? 0
-      }
-    })
-
-    // C 键 → 进入放置模式
-    tileInteraction.onRequestPlacement((cellId, orient) => {
-      _enterPlacement(cellId, orient)
-    })
-
-    // PlacementTool 停用 → 回到 select 模式
-    placementTool.onDeactivate(() => {
-      layoutState.isPlacementMode.value = false
-      tileInteraction?.enable()
-    })
-
-    // viewport 缩放时刷新选中框线宽
-    ed.view.on('zoomed', () => tileInteraction?.refreshSelectionStroke())
-
-    // 注册 tile 操作回调给 PropertiesPanel 使用
-    const mf = tileManager.manifest!
-    layoutState.tileDbuPerMicron.value = mf.dbuPerMicron
-    layoutState.tileDieWorldH.value = mf.dieArea.h
-    layoutState.tileActions.value = {
-      clearSelection: () => tileInteraction?.clearSelection(),
-      fitToView: () => handleFitToView(),
+    if (!guard.isCurrent() || editor.value !== ed) {
+      return null
     }
 
-    // 注册编辑操作
-    layoutState.tileEditActions.value = {
-      deleteSelected: () => {
-        const sel = tileInteraction?.currentSelection
-        if (sel?.type === 'instance' && sel.instanceId != null && editManager) {
-          editManager.deleteInstance(sel.instanceId)
-          tileInteraction?.clearSelection()
-        }
-      },
-      undo: () => editManager?.undo(),
-      redo: () => editManager?.redo(),
-      startPlacement: (cellId: number, orient?: number) => {
-        _enterPlacement(cellId, orient ?? 0)
-      },
-      cancelPlacement: () => {
-        placementTool?.deactivate()
-      },
-    }
-
-    // 注册图层列表和操作给 LayerPanel：只列当前数据集中有几何的 layer（cells + global）
-    const usedLayerIds = manifestLayerIdsWithGeometry(tileManager.cellStore, tileManager.globalStore)
-    const layersForUi = mf.layers.filter(l => usedLayerIds.has(l.id))
-    layoutState.tileLayers.value = layersForUi.map(l => ({
-      id: l.id, name: l.name, color: l.color,
-      alpha: l.alpha, zOrder: l.zOrder, visible: true,
-    }))
-    layoutState.tileLayerActions.value = {
-      toggleLayer: (id: number) => {
-        const vis = !tileManager!.isLayerVisible(id)
-        tileManager!.setLayerVisible(id, vis)
-        layoutState.tileLayers.value = layoutState.tileLayers.value.map(l =>
-          l.id === id ? { ...l, visible: vis } : l,
-        )
-      },
-      showAll: () => {
-        for (const l of layersForUi) tileManager!.setLayerVisible(l.id, true)
-        layoutState.tileLayers.value = layoutState.tileLayers.value.map(l => ({ ...l, visible: true }))
-      },
-      hideAll: () => {
-        for (const l of layersForUi) tileManager!.setLayerVisible(l.id, false)
-        layoutState.tileLayers.value = layoutState.tileLayers.value.map(l => ({ ...l, visible: false }))
-      },
-    }
-
-    // 瓦片就绪后去掉步骤预览用的底图，避免与矢量/栅格瓦片叠在一起
-    ed.clearBackground()
-
-    void loadDrcViolationOverlayAfterTiles(ed, mf.dieArea.h, guard)
-
-    layoutState.renderMode.value = 'layout'
-    layoutState.loadingState.value = 'ready'
-    layoutState.loadingMessage.value = ''
-
-    {
-      const d = tileManager.manifest!.dieArea
-      const worldCenter = { x: d.x + d.w / 2, y: d.y + d.h / 2 }
-      void nextTick(() => {
-        editor.value?.fitToWorld(40, { worldCenter })
-        requestAnimationFrame(() => editor.value?.fitToWorld(40, { worldCenter }))
-      })
-    }
-
-    lastSuccessfulTileBundle.value = { baseUrl, outDir: localRoot }
+    currentViewJsonOverview.value = overview
+    return overview
   } catch (err) {
-    console.error('Failed to load tile layout:', err)
+    if (isViewJsonLoadCancelled(err) && !guard.isCurrent()) {
+      return null
+    }
+    console.error('Failed to load view JSON overview:', err)
     layoutState.loadingState.value = 'error'
     layoutState.loadingMessage.value = String(err)
     cleanupLayout()
-    lastSuccessfulTileBundle.value = null
+    currentViewJsonOverview.value = null
+    return null
   }
 }
 
-function _enterPlacement(cellId: number, orient: number): void {
-  if (!placementTool || !tileInteraction) return
-  tileInteraction.disable()
-  tileInteraction.clearSelection()
-  tileInteraction.highlightOverlay.clear()
-  placementTool.activate(cellId, orient)
-  layoutState.isPlacementMode.value = true
+async function onPreviewModeChange(mode: 'layout' | 'image'): Promise<void> {
+  if (previewModeSwitchBusy.value || mode === layoutState.renderMode.value) return
+
+  previewModeSwitchBusy.value = true
+  const guard = createDrawingAsyncGuard(currentStepKey.value)
+  layoutState.loadingState.value = 'loading'
+  layoutState.loadingMessage.value = mode === 'image'
+    ? 'Loading preview image...'
+    : 'Loading view JSON layout...'
+  try {
+    if (mode === 'image') {
+      const imagePath = previewImageRelativePath.value
+      if (!imagePath) return
+      await loadStepImagePreview(imagePath, guard)
+    } else {
+      const packageRoot = currentViewJsonPackageRoot.value
+      if (!packageRoot) return
+      const overview = await loadStepViewJsonOverview(packageRoot, guard)
+      if (!overview) return
+      showViewJsonLayout(overview, guard)
+    }
+  } catch (err) {
+    console.error('Preview mode switch failed:', err)
+    if (!guard.isCurrent()) return
+    layoutState.loadingState.value = 'error'
+    layoutState.loadingMessage.value = String(err)
+  } finally {
+    previewModeSwitchBusy.value = false
+  }
 }
 
 const handleStageChange = async (stage: string) => {
@@ -606,10 +667,9 @@ const handleStageChange = async (stage: string) => {
   if (!stepEnum) {
     editor.value.clearBackground()
     cleanupLayout()
+    clearCurrentViewJsonOverview()
     layoutJsonRelativePath.value = null
     drcJsonRelativePath.value = null
-    previewImageRelativePath.value = null
-    lastSuccessfulTileBundle.value = null
     return
   }
 
@@ -626,124 +686,33 @@ const handleStageChange = async (stage: string) => {
       drcJsonRelativePath.value = pickDrcJsonPath(info)
         ?? deriveDrcStepPathFromLayoutJsonRelative(layoutJsonRelativePath.value ?? '')
         ?? null
-      void refreshCurrentLayoutTileCacheStatus()
-
       const imagePath = typeof info.image === 'string' && info.image.length > 0 ? info.image : null
-      previewImageRelativePath.value = imagePath
-
-      lastSuccessfulTileBundle.value = null
-
-      // Fallback to image mode
-      if (imagePath) {
-        cleanupLayout()
-        const imageUrl = await getResourceUrl(imagePath, currentProject.value?.path || '')
-        if (!guard.isCurrent()) return
-        await editor.value?.setBackgroundImage(imageUrl)
-        layoutState.renderMode.value = 'image'
-        void nextTick(() => {
-          editor.value?.fitToWorld(10)
-          requestAnimationFrame(() => editor.value?.fitToWorld(10))
-        })
-        return
+      if (!imagePath) {
+        throw new Error(`Preview image is not available for ${stepEnum}.`)
       }
+      const viewJsonPackageRoot = pickViewJsonPackageRoot(info)
+      cleanupLayout()
+      clearCurrentViewJsonOverview()
+      currentViewJsonPackageRoot.value = viewJsonPackageRoot
+      previewImageRelativePath.value = imagePath
+      layoutState.loadingState.value = 'loading'
+      layoutState.loadingMessage.value = 'Loading preview image...'
+      await loadStepImagePreview(imagePath, guard)
+      return
     }
 
     editor.value?.clearBackground()
     cleanupLayout()
+    clearCurrentViewJsonOverview()
     layoutJsonRelativePath.value = null
     drcJsonRelativePath.value = null
-    previewImageRelativePath.value = null
-    currentLayoutTileCacheReady.value = false
-    lastSuccessfulTileBundle.value = null
   } catch (error) {
     console.error('Failed to load stage results:', error)
     editor.value?.clearBackground()
     cleanupLayout()
+    clearCurrentViewJsonOverview()
     layoutJsonRelativePath.value = null
     drcJsonRelativePath.value = null
-    previewImageRelativePath.value = null
-    currentLayoutTileCacheReady.value = false
-    lastSuccessfulTileBundle.value = null
-  }
-}
-
-async function onGenerateTilesFromToolbar(): Promise<void> {
-  const projectPath = currentProject.value?.path
-  const rel = layoutJsonRelativePath.value
-  if (!projectPath || !rel) {
-    layoutState.loadingState.value = 'error'
-    layoutState.loadingMessage.value =
-      'Layout JSON path was not found for the current step.'
-    return
-  }
-
-  tileGenBusy.value = true
-  const guard = createDrawingAsyncGuard(currentStepKey.value)
-  layoutState.loadingState.value = 'loading'
-  layoutState.loadingMessage.value = 'Rendering layout…'
-  try {
-    tilePrefetchStore.clearDeferredPrefetchQueue()
-    const { baseUrl, outDir, fromCache } = await runLayoutTileGenerationSingleFlight({
-      projectPath,
-      layoutJsonRelative: rel,
-      stepKey: currentStepKey.value,
-      source: 'user',
-    })
-    if (!guard.isCurrent()) return
-    if (fromCache) {
-      layoutState.loadingMessage.value = 'Loading cached layout tiles...'
-    }
-    await loadTileLayout(baseUrl, outDir, guard)
-    if (!guard.isCurrent()) return
-    currentLayoutTileCacheReady.value = true
-  } catch (err) {
-    if (!guard.isCurrent()) return
-    console.error('Tile generation failed:', err)
-    layoutState.loadingState.value = 'error'
-    layoutState.loadingMessage.value = String(err)
-    cleanupLayout()
-    currentLayoutTileCacheReady.value = false
-    lastSuccessfulTileBundle.value = null
-  } finally {
-    tileGenBusy.value = false
-  }
-}
-
-async function onPreviewModeChange(mode: 'layout' | 'image'): Promise<void> {
-  if (previewModeSwitchBusy.value || tileGenBusy.value) return
-  if (mode === layoutState.renderMode.value) return
-  if (mode === 'layout' && !lastSuccessfulTileBundle.value) return
-  const rel = previewImageRelativePath.value
-  if (mode === 'image' && (!rel || !editor.value)) return
-
-  previewModeSwitchBusy.value = true
-  layoutState.loadingState.value = 'loading'
-  layoutState.loadingMessage.value = mode === 'image' ? 'Loading preview image...' : 'Loading vector layout...'
-  try {
-    if (mode === 'image') {
-      tilePrefetchStore.clearDeferredPrefetchQueue()
-      cleanupLayout()
-      const imageUrl = await getResourceUrl(rel!, currentProject.value?.path || '')
-      await editor.value!.setBackgroundImage(imageUrl)
-      layoutState.renderMode.value = 'image'
-      layoutState.loadingState.value = 'ready'
-      layoutState.loadingMessage.value = ''
-      void nextTick(() => {
-        editor.value?.fitToWorld(10)
-        requestAnimationFrame(() => editor.value?.fitToWorld(10))
-      })
-      return
-    }
-
-    const bundle = lastSuccessfulTileBundle.value
-    if (!bundle) return
-    await loadTileLayout(bundle.baseUrl, bundle.outDir)
-  } catch (err) {
-    console.error('Preview mode switch failed:', err)
-    layoutState.loadingState.value = 'error'
-    layoutState.loadingMessage.value = String(err)
-  } finally {
-    previewModeSwitchBusy.value = false
   }
 }
 
@@ -763,37 +732,13 @@ watch(
   () => {
     const pathParts = route.path.split('/')
     const stage = pathParts[pathParts.length - 1] || 'home'
-    tilePrefetchStore.invalidateStep(stage)
     handleStageChange(stage)
   }
 )
 
-// ─── 工具切换 → Tile 交互模式管理 ─────────────────────────────────────────────
-
-function onToolChange(toolId: string): void {
-  if (!tileInteraction) return
-
-  // 退出放置模式（如果在）
-  placementTool?.deactivate()
-
-  if (toolId === 'select') {
-    tileInteraction.enable()
-  } else if (toolId === 'place') {
-    // 进入放置模式：使用最近选中的 cellId
-    if (lastSelectedCellId != null) {
-      _enterPlacement(lastSelectedCellId, lastSelectedOrient)
-    } else {
-      // 没有选过 instance → 回退到 select 模式
-      tileInteraction.enable()
-    }
-  } else {
-    tileInteraction.disable()
-    tileInteraction.clearSelection()
-    tileInteraction.highlightOverlay.clear()
-  }
+function onToolChange(_toolId: string): void {
+  layoutState.tileSelection.value = null
 }
-
-// ─── Tile 交互操作 ──────────────────────────────────────────────────────────
 
 function handleFitToView(): void {
   const sel = layoutState.tileSelection.value
@@ -818,6 +763,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   detachCanvasPointerListeners?.()
+  stopPerformanceHudSampling()
   window.removeEventListener('keydown', onWindowKeyDownForLayoutFit)
 })
 </script>
@@ -826,17 +772,13 @@ onUnmounted(() => {
   <div class="flex flex-col h-full overflow-hidden">
     <DrawingToolbar
       :editor="editor"
-      :show-tile-generate="showTileGenerate"
-      :tile-gen-busy="tileGenBusy"
       :layout-tile-shortcuts-hint="layoutState.renderMode.value === 'layout' && layoutState.tileSelection.value != null"
       :show-preview-mode-toggle="showPreviewModeToggle"
       :render-mode="layoutState.renderMode.value"
       :can-switch-to-layout-mode="canSwitchToLayoutMode"
-      :tile-cache-ready="currentLayoutTileCacheReady"
       :tile-generate-confirm-reset-key="route.path"
       :preview-mode-switch-busy="previewModeSwitchBusy"
       @toolChange="onToolChange"
-      @generateTiles="onGenerateTilesFromToolbar"
       @previewModeChange="onPreviewModeChange"
     />
 
@@ -958,10 +900,67 @@ onUnmounted(() => {
           <span class="ml-2 text-(--text-secondary)">Y</span> {{ formatCursorCoord(cursorEda.y) }}
         </div>
         <div
-          v-if="layoutState.renderMode.value === 'layout'"
-          class="px-2 py-1 bg-green-900/60 text-green-300 text-[10px] rounded"
+          v-if="showViewJsonPerformanceHud"
+          data-testid="view-json-performance-hud"
+          class="min-w-44 rounded border border-(--border-color) bg-(--bg-primary)/90 px-2 py-1.5 font-mono text-[10px] leading-4 text-(--text-primary) tabular-nums shadow-sm backdrop-blur"
         >
-          Layout Mode
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">FPS</span>
+            <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.fps, 0) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Frame</span>
+            <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.frameMs) }}ms</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Mode</span>
+            <span class="uppercase">{{ viewJsonPerformanceHud.renderMode }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Scale</span>
+            <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.scale, 3) }}x</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Instances</span>
+            <span>{{ formatPerformanceInteger(viewJsonPerformanceHud.visibleInstanceCount) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Chunks</span>
+            <span>{{ formatPerformanceInteger(viewJsonPerformanceHud.visibleChunkCount) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Tiles/Vec</span>
+            <span>
+              {{ formatPerformanceInteger(viewJsonPerformanceHud.activeRasterTileCount) }}
+              /
+              {{ formatPerformanceInteger(viewJsonPerformanceHud.activeVectorChunkCount) }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Rebuild</span>
+            <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.rebuildMs) }}ms</span>
+          </div>
+          <div
+            v-if="viewJsonPerformanceHud.loadStats"
+            class="mt-1 border-t border-(--border-color) pt-1"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-(--text-secondary)">Load</span>
+              <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.loadStats.totalMs) }}ms</span>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-(--text-secondary)">R/P/X/C</span>
+              <span>
+                {{ formatPerformanceNumber(viewJsonPerformanceHud.loadStats.readMs, 0) }}
+                /
+                {{ formatPerformanceNumber(viewJsonPerformanceHud.loadStats.parseMs, 0) }}
+                /
+                {{ formatPerformanceNumber(viewJsonPerformanceHud.loadStats.transformMs, 0) }}
+                /
+                {{ formatPerformanceNumber(viewJsonPerformanceHud.loadStats.chunkMs, 0) }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

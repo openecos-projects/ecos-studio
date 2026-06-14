@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest'
 import source from './DrawingArea.vue?raw'
 
 describe('DrawingArea loading state copy and reset', () => {
-  it('uses English copy for missing layout JSON errors', () => {
-    expect(source).toContain(
-      'Layout JSON path was not found for the current step.',
-    )
-    expect(source).not.toContain('未找到布局 JSON 路径')
+  it('loads the old step image preview and keeps view JSON for layout mode instead of the fixed package', () => {
+    expect(source).toContain('loadStepViewJsonOverview')
+    expect(source).toContain('loadStepImagePreview')
+    expect(source).toContain('Loading preview image...')
+    expect(source).toContain('loadViewJsonOverview(viewJsonPackageRoot, {')
+    expect(source).toContain('shouldCancel: () => !guard.isCurrent()')
+    expect(source).toContain('createViewJsonOverviewWorker')
+    expect(source).toContain('workerFactory: createViewJsonOverviewWorker')
+    expect(source).toContain('getResourceUrl')
+    expect(source).toContain('setBackgroundImage')
+    expect(source).not.toContain("const VIEW_JSON_PACKAGE_ROOT = 'gcd_place_view'")
+    expect(source).not.toContain('createViewJsonOverviewPreviewDataUrl')
   })
 
   it('clears stale loading errors before handling a stage change', () => {
@@ -18,5 +25,44 @@ describe('DrawingArea loading state copy and reset', () => {
     expect(source).toContain('readOptionalProjectTextFile')
     expect(source).toMatch(/const text = await readOptionalProjectTextFile\(abs\)[\s\S]*?if \(text === null\) return/)
     expect(source).not.toContain('workspace.readProjectTextFile(abs)')
+  })
+
+  it('does not register view JSON process layers with the Layers panel', () => {
+    expect(source).not.toContain('refreshViewJsonLayerPanel')
+    expect(source).not.toContain('viewJsonOverviewRenderer.getLayerItems()')
+    expect(source).not.toContain('viewJsonOverviewRenderer.setLayerVisible')
+    expect(source).not.toContain('viewJsonOverviewRenderer.showAllLayers')
+    expect(source).not.toContain('viewJsonOverviewRenderer.hideAllLayers')
+  })
+
+  it('wires the toolbar preview mode toggle to image/layout modes', () => {
+    expect(source).toContain('showPreviewModeToggle')
+    expect(source).toContain('canSwitchToLayoutMode')
+    expect(source).toContain('@previewModeChange="onPreviewModeChange"')
+    expect(source).toContain("async function onPreviewModeChange(mode: 'layout' | 'image')")
+    expect(source).toContain("layoutState.renderMode.value = 'image'")
+    expect(source).toContain("layoutState.renderMode.value = 'layout'")
+  })
+
+  it('renders a lightweight performance HUD for view JSON layout profiling', () => {
+    expect(source).toContain('const showViewJsonPerformanceHud = computed(')
+    expect(source).toContain('import.meta.env.DEV')
+    expect(source).toContain("layoutState.renderMode.value === 'layout'")
+    expect(source).toContain('viewJsonPerformanceHud')
+    expect(source).toContain('startPerformanceHudSampling')
+    expect(source).toContain('stopPerformanceHudSampling')
+    expect(source).toContain('samplePerformanceHudFrame')
+    expect(source).toContain('PERFORMANCE_HUD_UPDATE_INTERVAL_MS')
+    expect(source).toContain('viewJsonOverviewRenderer?.getPerformanceStats()')
+    expect(source).toContain('FPS')
+    expect(source).toContain('Rebuild')
+    expect(source).toContain('Load')
+    expect(source).toContain('loadStats')
+    expect(source).toContain('Instances')
+    expect(source).toContain('data-testid="view-json-performance-hud"')
+    expect(source).toContain('v-if="showViewJsonPerformanceHud"')
+    expect(source).toContain('if (showViewJsonPerformanceHud.value) {')
+    expect(source).toContain('startPerformanceHudSampling()')
+    expect(source).not.toContain('Layout Mode')
   })
 })
