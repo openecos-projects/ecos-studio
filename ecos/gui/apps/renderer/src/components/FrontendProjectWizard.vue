@@ -431,11 +431,12 @@ const fallbackCatalog: FrontendCatalogPayload = {
     {
       id: 'ibex',
       name: 'Ibex',
-      description: 'lowRISC 32-bit RISC-V core; ECOS adapter planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
+      description: 'lowRISC 32-bit RISC-V core with an experimental ECOS CPU wrapper.',
+      status: 'experimental',
+      integration_level: 'sim_ready',
       requires_filelist: false,
       supports_difftest: false,
+      supported_test_suites: ['cpu-tests', 'smoke'],
     },
     {
       id: 'cv32e40p',
