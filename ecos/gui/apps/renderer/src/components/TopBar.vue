@@ -275,7 +275,7 @@ const handleClose = async () => {
   height: 100%;
   padding-left: 16px;
   gap: 8px;
-  z-index: 10;
+  z-index: 30;
   position: relative;
   -webkit-app-region: no-drag;
 }
