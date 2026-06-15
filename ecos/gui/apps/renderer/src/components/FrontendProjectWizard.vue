@@ -160,11 +160,11 @@
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
                       <label class="text-sm font-semibold text-(--text-primary)">CPU Source <span class="text-red-500">*</span></label>
-                      <span class="text-xs text-(--text-secondary)">{{ catalog.cores.length }} options</span>
+                      <span class="text-xs text-(--text-secondary)">{{ visibleCores.length }} options</span>
                     </div>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                       <CatalogCard
-                        v-for="core in catalog.cores"
+                        v-for="core in visibleCores"
                         :key="core.id"
                         :active="selectedCoreId === core.id"
                         :entry="core"
@@ -205,7 +205,7 @@
                       <label class="mb-3 block text-sm font-semibold text-(--text-primary)">Toolchain</label>
                       <div class="space-y-2">
                         <button
-                          v-for="toolchain in catalog.toolchains"
+                          v-for="toolchain in visibleToolchains"
                           :key="toolchain.id"
                           type="button"
                           class="option-row"
@@ -216,6 +216,7 @@
                             <strong>{{ toolchain.name }}</strong>
                             <small>{{ toolchain.id }}</small>
                           </span>
+                          <StatusPill :status="toolchain.status" />
                           <i v-if="selectedToolchainId === toolchain.id" class="ri-check-line"></i>
                         </button>
                       </div>
@@ -225,7 +226,7 @@
                       <label class="mb-3 block text-sm font-semibold text-(--text-primary)">Test Suite</label>
                       <div class="space-y-2">
                         <button
-                          v-for="suite in catalog.test_suites"
+                          v-for="suite in visibleTestSuites"
                           :key="suite.id"
                           type="button"
                           class="option-row"
@@ -234,8 +235,9 @@
                         >
                           <span>
                             <strong>{{ suite.name }}</strong>
-                            <small>{{ suite.status }}</small>
+                            <small>{{ suite.id }}</small>
                           </span>
+                          <StatusPill :status="suite.status" />
                           <i v-if="selectedTestSuiteId === suite.id" class="ri-check-line"></i>
                         </button>
                       </div>
@@ -416,6 +418,30 @@ const fallbackCatalog: FrontendCatalogPayload = {
       integration_level: 'sim_ready',
       variant: 'soc1',
     },
+    {
+      id: 'ysyx-am-soc-alt',
+      name: 'YSYX AM SoC Harness Alt',
+      description: 'Alternative copy of the current YSYX AM SoC harness kept for compatibility experiments.',
+      status: 'experimental',
+      integration_level: 'sim_ready',
+      variant: 'soc2',
+    },
+    {
+      id: 'ysyx-am-soc-extended',
+      name: 'YSYX AM SoC Harness Extended',
+      description: 'Extended compatibility copy of the current YSYX AM SoC harness.',
+      status: 'experimental',
+      integration_level: 'sim_ready',
+      variant: 'soc3',
+    },
+    {
+      id: 'minimal-riscv-soc',
+      name: 'Minimal RISC-V SoC Harness',
+      description: 'Planned small memory/UART harness for lightweight open-source RISC-V core demos.',
+      status: 'planned',
+      integration_level: 'metadata_only',
+      variant: 'minimal-riscv',
+    },
   ],
   toolchains: [
     {
@@ -497,7 +523,16 @@ const effectiveCpuFilelist = computed(() =>
   || '',
 )
 const visibleSocHarnesses = computed(() =>
-  catalog.value.soc_harnesses.filter((entry) => entry.status === 'stable' || entry.id === selectedSocHarnessId.value),
+  sortedCatalogEntries(catalog.value.soc_harnesses),
+)
+const visibleCores = computed(() =>
+  sortedCatalogEntries(catalog.value.cores),
+)
+const visibleToolchains = computed(() =>
+  sortedCatalogEntries(catalog.value.toolchains),
+)
+const visibleTestSuites = computed(() =>
+  sortedCatalogEntries(catalog.value.test_suites),
 )
 
 const validationIssues = computed(() => [
@@ -693,6 +728,20 @@ function entryById(entries: FrontendCatalogEntry[], id: string): FrontendCatalog
   return entries.find((entry) => entry.id === id) || null
 }
 
+function sortedCatalogEntries(entries: FrontendCatalogEntry[]): FrontendCatalogEntry[] {
+  const statusOrder: Record<string, number> = {
+    stable: 0,
+    experimental: 1,
+    planned: 2,
+  }
+  return [...entries].sort((left, right) => {
+    const leftRank = statusOrder[String(left.status || '')] ?? 3
+    const rightRank = statusOrder[String(right.status || '')] ?? 3
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return left.name.localeCompare(right.name)
+  })
+}
+
 function stringField(entry: FrontendCatalogEntry | null, field: string): string {
   const value = entry?.[field]
   return typeof value === 'string' ? value : ''
@@ -854,6 +903,24 @@ const CatalogCard = defineComponent({
   },
 })
 
+const StatusPill = defineComponent({
+  props: {
+    status: { type: String, default: 'planned' },
+  },
+  setup(props) {
+    return () => h('span', {
+      class: [
+        'ml-auto shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase',
+        props.status === 'stable'
+          ? 'bg-emerald-500/10 text-emerald-400'
+          : props.status === 'experimental'
+            ? 'bg-amber-500/10 text-amber-400'
+            : 'bg-(--bg-primary) text-(--text-secondary)',
+      ],
+    }, props.status || 'planned')
+  },
+})
+
 const PathPicker = defineComponent({
   props: {
     label: { type: String, required: true },
@@ -999,6 +1066,10 @@ const ReviewItem = defineComponent({
 .option-row.active {
   border-color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.option-row > span:first-child {
+  min-width: 0;
 }
 
 .option-row strong,
