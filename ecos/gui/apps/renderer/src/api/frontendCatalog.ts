@@ -47,9 +47,13 @@ export interface FrontendValidationResult {
     cpu_filelist: string
     core_cpu_filelist?: string
     core_capability?: string
+    cpu_wrapper_contract?: string
+    cpu_socket_contract?: string
+    cpu_wrapper_top?: string
     soc_harness_capability?: string
     soc_wrapper_contract?: string
     soc_wrapper_top?: string
+    soc_cpu_socket_contract?: string
     required_capability?: string
   }
   issues: FrontendValidationIssue[]

@@ -47,8 +47,14 @@ export interface ParametersData {
   soc_filelist?: string
   soc_variant?: string
   soc_harness_id?: string
+  soc_wrapper_id?: string
+  soc_wrapper_contract?: string
   frontend_core_id?: string
   core_id?: string
+  cpu_wrapper_id?: string
+  cpu_wrapper_contract?: string
+  cpu_socket_contract?: string
+  cpu_wrapper_top?: string
   toolchain_id?: string
   test_suite_id?: string
   input_filelist?: string
@@ -59,7 +65,13 @@ export interface ParametersData {
 /** 前端编辑用（驼峰） */
 export interface FrontendConfigData {
   coreId: string
+  cpuWrapperId: string
+  cpuWrapperContract: string
+  cpuSocketContract: string
+  cpuWrapperTop: string
   socHarnessId: string
+  socWrapperId: string
+  socWrapperContract: string
   socVariant: string
   toolchainId: string
   testSuiteId: string
@@ -133,7 +145,13 @@ function getDefaultConfig(): ConfigData {
     topLayer: 'MET5',
     frontend: {
       coreId: '',
+      cpuWrapperId: '',
+      cpuWrapperContract: '',
+      cpuSocketContract: '',
+      cpuWrapperTop: '',
       socHarnessId: '',
+      socWrapperId: '',
+      socWrapperContract: '',
       socVariant: '',
       toolchainId: '',
       testSuiteId: '',
@@ -221,8 +239,14 @@ export function parseParametersData(fileContent: string): ParametersData {
     soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
     soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
     soc_harness_id: raw.soc_harness_id != null ? String(raw.soc_harness_id) : undefined,
+    soc_wrapper_id: raw.soc_wrapper_id != null ? String(raw.soc_wrapper_id) : undefined,
+    soc_wrapper_contract: raw.soc_wrapper_contract != null ? String(raw.soc_wrapper_contract) : undefined,
     frontend_core_id: raw.frontend_core_id != null ? String(raw.frontend_core_id) : undefined,
     core_id: raw.core_id != null ? String(raw.core_id) : undefined,
+    cpu_wrapper_id: raw.cpu_wrapper_id != null ? String(raw.cpu_wrapper_id) : undefined,
+    cpu_wrapper_contract: raw.cpu_wrapper_contract != null ? String(raw.cpu_wrapper_contract) : undefined,
+    cpu_socket_contract: raw.cpu_socket_contract != null ? String(raw.cpu_socket_contract) : undefined,
+    cpu_wrapper_top: raw.cpu_wrapper_top != null ? String(raw.cpu_wrapper_top) : undefined,
     toolchain_id: raw.toolchain_id != null ? String(raw.toolchain_id) : undefined,
     test_suite_id: raw.test_suite_id != null ? String(raw.test_suite_id) : undefined,
     input_filelist: raw.input_filelist != null ? String(raw.input_filelist) : undefined,
@@ -263,7 +287,13 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     topLayer: data['Top layer'] || 'MET5',
     frontend: {
       coreId: data.frontend_core_id || data.core_id || '',
+      cpuWrapperId: data.cpu_wrapper_id || data.frontend_core_id || data.core_id || '',
+      cpuWrapperContract: data.cpu_wrapper_contract || '',
+      cpuSocketContract: data.cpu_socket_contract || '',
+      cpuWrapperTop: data.cpu_wrapper_top || '',
       socHarnessId: data.soc_harness_id || '',
+      socWrapperId: data.soc_wrapper_id || data.soc_harness_id || '',
+      socWrapperContract: data.soc_wrapper_contract || '',
       socVariant: data.soc_variant || '',
       toolchainId: data.toolchain_id || '',
       testSuiteId: data.test_suite_id || '',

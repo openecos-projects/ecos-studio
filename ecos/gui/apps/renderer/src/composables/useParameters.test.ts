@@ -107,7 +107,13 @@ describe('useParameters helpers', () => {
       topLayer: 'MET7',
       frontend: {
         coreId: '',
+        cpuWrapperId: '',
+        cpuWrapperContract: '',
+        cpuSocketContract: '',
+        cpuWrapperTop: '',
         socHarnessId: '',
+        socWrapperId: '',
+        socWrapperContract: '',
         socVariant: '',
         toolchainId: '',
         testSuiteId: '',
@@ -125,7 +131,7 @@ describe('useParameters helpers', () => {
   it('keeps frontend catalog selections for read-only Home summaries', () => {
     const config = transformParametersToConfig(parseParametersData(JSON.stringify({
       design: 'frontend_demo',
-      top_module: 'ysyxSoCTop',
+      top_module: 'ecos_sim_top',
       clock: 'clk',
       frequency_max: 100,
       'Design Tool': 'frontend',
@@ -133,7 +139,13 @@ describe('useParameters helpers', () => {
       soc_filelist: '/soc/filelist.soc.f',
       soc_variant: 'soc1',
       soc_harness_id: 'ysyx-am-soc',
+      soc_wrapper_id: 'ysyx-am-soc',
+      soc_wrapper_contract: 'ecos-sim-wrapper-v1',
       frontend_core_id: 'custom-filelist',
+      cpu_wrapper_id: 'custom-filelist',
+      cpu_wrapper_contract: 'ecos-cpu-wrapper-v1',
+      cpu_socket_contract: 'ysyx-axi-cpu-socket-v1',
+      cpu_wrapper_top: 'ysyx_00000000',
       toolchain_id: 'riscv32-unknown-elf',
       test_suite_id: 'cpu-tests',
       input_filelist: '/workspace/prepare_fe/output/merged_rtl.f',
@@ -143,10 +155,16 @@ describe('useParameters helpers', () => {
 
     expect(config.designTool).toBe('frontend')
     expect(config.design).toBe('frontend_demo')
-    expect(config.topModule).toBe('ysyxSoCTop')
+    expect(config.topModule).toBe('ecos_sim_top')
     expect(config.frontend).toEqual({
       coreId: 'custom-filelist',
+      cpuWrapperId: 'custom-filelist',
+      cpuWrapperContract: 'ecos-cpu-wrapper-v1',
+      cpuSocketContract: 'ysyx-axi-cpu-socket-v1',
+      cpuWrapperTop: 'ysyx_00000000',
       socHarnessId: 'ysyx-am-soc',
+      socWrapperId: 'ysyx-am-soc',
+      socWrapperContract: 'ecos-sim-wrapper-v1',
       socVariant: 'soc1',
       toolchainId: 'riscv32-unknown-elf',
       testSuiteId: 'cpu-tests',

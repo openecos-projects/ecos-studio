@@ -511,6 +511,16 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
     value: displayCatalogId(config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : '')),
   },
   {
+    label: 'CPU Wrapper',
+    value: displayCatalogId(config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || ''),
+    mono: true,
+  },
+  {
+    label: 'CPU Socket',
+    value: displayCatalogId(config.frontend.cpuSocketContract || ''),
+    mono: true,
+  },
+  {
     label: 'SoC Harness',
     value: displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || ''),
   },
