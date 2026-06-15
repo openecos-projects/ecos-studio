@@ -21,11 +21,29 @@
       <section class="section-card chip-info-area">
         <div class="section-header">
           <div class="header-icon"><i class="ri-cpu-line"></i></div>
-          <h2>Chip Basic Info</h2>
-          <span class="header-badge" v-if="config.pdk">{{ config.pdk }}</span>
+          <h2>{{ isFrontendWorkspace ? 'Frontend Configuration' : 'Chip Basic Info' }}</h2>
+          <span class="header-badge" v-if="isFrontendWorkspace">Read only</span>
+          <span class="header-badge" v-else-if="config.pdk">{{ config.pdk }}</span>
         </div>
         <div class="chip-info-content">
-          <div class="info-grid">
+          <div v-if="isFrontendWorkspace" class="info-grid frontend-info-grid" aria-label="Read-only frontend workspace configuration">
+            <div
+              v-for="item in frontendInfoItems"
+              :key="item.label"
+              class="info-item readonly"
+              :class="{ wide: item.wide }"
+            >
+              <span class="info-label">{{ item.label }}</span>
+              <span
+                class="info-value"
+                :class="{ highlight: item.highlight, mono: item.mono }"
+                :title="item.value"
+              >
+                {{ item.value }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="info-grid">
             <div class="info-item">
               <span class="info-label">Design</span>
               <span class="info-value highlight">{{ config.design || '--' }}</span>
@@ -584,6 +602,47 @@ const {
   ensureFlowLogSegmentContentLoaded,
   expandFlowLogSegment,
 } = useHomeData()
+
+const isFrontendWorkspace = computed(() =>
+  config.designTool === 'frontend'
+  || Boolean(config.frontend.coreId || config.frontend.cpuFilelist || config.frontend.socHarnessId),
+)
+
+const frontendInfoItems = computed(() => [
+  { label: 'Design', value: config.design || '--', highlight: true },
+  { label: 'Top Module', value: config.topModule || '--', mono: true },
+  { label: 'CPU Source', value: displayCatalogId(config.frontend.coreId || 'custom-filelist') },
+  { label: 'SoC Harness', value: displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || 'ysyx-am-soc') },
+  { label: 'Toolchain', value: displayCatalogId(config.frontend.toolchainId || 'riscv32-unknown-elf') },
+  { label: 'Test Suite', value: displayCatalogId(config.frontend.testSuiteId || 'cpu-tests') },
+  { label: 'Clock', value: config.clock || '--' },
+  { label: 'Target Frequency', value: `${config.frequencyMax || '--'} MHz` },
+  {
+    label: 'CPU Filelist',
+    value: config.frontend.cpuFilelist || '--',
+    mono: true,
+    wide: true,
+  },
+  {
+    label: 'Default Cases',
+    value: config.frontend.simAllTests
+      ? 'All CPU tests'
+      : config.frontend.simProgramNames.length
+        ? config.frontend.simProgramNames.join(', ')
+        : '--',
+    mono: true,
+    wide: true,
+  },
+])
+
+function displayCatalogId(value: string): string {
+  if (!value) return '--'
+  return value
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.toUpperCase() === part ? part : part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
 
 /** 正在展开完整日志的 step key 集合，避免同一步连点多次以及按钮 loading 状态 */
 const expandingFlowLogKeys = reactive<Record<string, boolean>>({})
@@ -1650,6 +1709,10 @@ function stateClass(state: string): string {
   height: 100%;
 }
 
+.frontend-info-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .info-item {
   padding: 8px 10px;
   background: var(--bg-primary);
@@ -1663,6 +1726,18 @@ function stateClass(state: string): string {
 
 .info-item:hover {
   border-color: var(--accent-color);
+}
+
+.info-item.readonly {
+  cursor: default;
+}
+
+.info-item.readonly:hover {
+  border-color: var(--border-color);
+}
+
+.info-item.wide {
+  grid-column: span 2;
 }
 
 .info-label {
@@ -1680,6 +1755,10 @@ function stateClass(state: string): string {
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 html.dark .info-value {

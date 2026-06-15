@@ -13,7 +13,11 @@ import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 export interface ParametersData {
   PDK: string
   Design: string
+  design?: string
+  description?: string
+  'Design Tool'?: string
   'Top module': string
+  top_module?: string
   Die: {
     Size: number[]
     Area?: number
@@ -33,14 +37,42 @@ export interface ParametersData {
   'Cell padding x': number
   'Routability opt flag': number
   Clock: string
+  clock?: string
   'Frequency max [MHz]': number
+  frequency_max?: number
   'Bottom layer': string
   'Top layer': string
   'PDK Root'?: string
+  cpu_filelist?: string
+  soc_filelist?: string
+  soc_variant?: string
+  soc_harness_id?: string
+  frontend_core_id?: string
+  core_id?: string
+  toolchain_id?: string
+  test_suite_id?: string
+  input_filelist?: string
+  sim_program_names?: string[]
+  sim_all_tests?: boolean
 }
 
 /** 前端编辑用（驼峰） */
+export interface FrontendConfigData {
+  coreId: string
+  socHarnessId: string
+  socVariant: string
+  toolchainId: string
+  testSuiteId: string
+  cpuFilelist: string
+  socFilelist: string
+  inputFilelist: string
+  simProgramNames: string[]
+  simAllTests: boolean
+}
+
 export interface ConfigData {
+  designTool: string
+  description: string
   pdk: string
   pdkRoot: string
   design: string
@@ -64,6 +96,7 @@ export interface ConfigData {
   frequencyMax: number
   bottomLayer: string
   topLayer: string
+  frontend: FrontendConfigData
 }
 
 // ============ 工具函数 ============
@@ -73,6 +106,8 @@ const ROUTING_LAYER_ORDER = ['LI1', 'MET1', 'MET2', 'MET3', 'MET4', 'MET5', 'MET
 
 function getDefaultConfig(): ConfigData {
   return {
+    designTool: 'backend',
+    description: '',
     pdk: '',
     pdkRoot: '',
     design: '',
@@ -95,7 +130,19 @@ function getDefaultConfig(): ConfigData {
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET2',
-    topLayer: 'MET5'
+    topLayer: 'MET5',
+    frontend: {
+      coreId: '',
+      socHarnessId: '',
+      socVariant: '',
+      toolchainId: '',
+      testSuiteId: '',
+      cpuFilelist: '',
+      socFilelist: '',
+      inputFilelist: '',
+      simProgramNames: [],
+      simAllTests: false
+    }
   }
 }
 
@@ -139,12 +186,22 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
   }
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item)).filter((item) => item.length > 0)
+    : []
+}
+
 export function parseParametersData(fileContent: string): ParametersData {
   const raw = JSON.parse(fileContent) as Record<string, unknown>
   return {
     PDK: String(raw.PDK ?? ''),
-    Design: String(raw.Design ?? ''),
-    'Top module': String(raw['Top module'] ?? ''),
+    Design: String(raw.Design ?? raw.design ?? ''),
+    design: raw.design != null ? String(raw.design) : undefined,
+    description: raw.description != null ? String(raw.description) : undefined,
+    'Design Tool': raw['Design Tool'] != null ? String(raw['Design Tool']) : undefined,
+    'Top module': String(raw['Top module'] ?? raw.top_module ?? ''),
+    top_module: raw.top_module != null ? String(raw.top_module) : undefined,
     Die: normalizeDie(raw.Die),
     Core: normalizeCore(raw.Core),
     'Max fanout': Number(raw['Max fanout'] ?? 20),
@@ -153,16 +210,31 @@ export function parseParametersData(fileContent: string): ParametersData {
     'Global right padding': Number(raw['Global right padding'] ?? 0),
     'Cell padding x': Number(raw['Cell padding x'] ?? 600),
     'Routability opt flag': Number(raw['Routability opt flag'] ?? 1),
-    Clock: String(raw.Clock ?? ''),
-    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? 100),
+    Clock: String(raw.Clock ?? raw.clock ?? ''),
+    clock: raw.clock != null ? String(raw.clock) : undefined,
+    'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? raw.frequency_max ?? 100),
+    frequency_max: raw.frequency_max != null ? Number(raw.frequency_max) : undefined,
     'Bottom layer': String(raw['Bottom layer'] ?? 'MET2'),
     'Top layer': String(raw['Top layer'] ?? 'MET5'),
-    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined
+    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined,
+    cpu_filelist: raw.cpu_filelist != null ? String(raw.cpu_filelist) : undefined,
+    soc_filelist: raw.soc_filelist != null ? String(raw.soc_filelist) : undefined,
+    soc_variant: raw.soc_variant != null ? String(raw.soc_variant) : undefined,
+    soc_harness_id: raw.soc_harness_id != null ? String(raw.soc_harness_id) : undefined,
+    frontend_core_id: raw.frontend_core_id != null ? String(raw.frontend_core_id) : undefined,
+    core_id: raw.core_id != null ? String(raw.core_id) : undefined,
+    toolchain_id: raw.toolchain_id != null ? String(raw.toolchain_id) : undefined,
+    test_suite_id: raw.test_suite_id != null ? String(raw.test_suite_id) : undefined,
+    input_filelist: raw.input_filelist != null ? String(raw.input_filelist) : undefined,
+    sim_program_names: normalizeStringArray(raw.sim_program_names),
+    sim_all_tests: Boolean(raw.sim_all_tests)
   }
 }
 
 export function transformParametersToConfig(data: ParametersData): ConfigData {
   return {
+    designTool: data['Design Tool'] || 'backend',
+    description: data.description || '',
     pdk: data.PDK || '',
     pdkRoot: data['PDK Root'] ?? '',
     design: data.Design || '',
@@ -188,7 +260,19 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] ?? 100,
     bottomLayer: data['Bottom layer'] || 'MET2',
-    topLayer: data['Top layer'] || 'MET5'
+    topLayer: data['Top layer'] || 'MET5',
+    frontend: {
+      coreId: data.frontend_core_id || data.core_id || '',
+      socHarnessId: data.soc_harness_id || '',
+      socVariant: data.soc_variant || '',
+      toolchainId: data.toolchain_id || '',
+      testSuiteId: data.test_suite_id || '',
+      cpuFilelist: data.cpu_filelist || '',
+      socFilelist: data.soc_filelist || '',
+      inputFilelist: data.input_filelist || '',
+      simProgramNames: [...(data.sim_program_names || [])],
+      simAllTests: Boolean(data.sim_all_tests)
+    }
   }
 }
 
