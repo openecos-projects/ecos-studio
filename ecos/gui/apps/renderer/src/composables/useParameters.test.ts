@@ -149,7 +149,7 @@ describe('useParameters helpers', () => {
       toolchain_id: 'riscv32-unknown-elf',
       test_suite_id: 'cpu-tests',
       input_filelist: '/workspace/prepare_fe/output/merged_rtl.f',
-      sim_program_names: ['add', 'load-store'],
+      sim_program_names: ['add'],
       sim_all_tests: false,
     })))
 
@@ -171,7 +171,7 @@ describe('useParameters helpers', () => {
       cpuFilelist: '/cpu/filelist.cpu.f',
       socFilelist: '/soc/filelist.soc.f',
       inputFilelist: '/workspace/prepare_fe/output/merged_rtl.f',
-      simProgramNames: ['add', 'load-store'],
+      simProgramNames: ['add'],
       simAllTests: false,
     })
   })

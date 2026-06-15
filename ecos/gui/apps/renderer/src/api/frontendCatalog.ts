@@ -56,6 +56,8 @@ export interface FrontendValidationResult {
     soc_wrapper_contract?: string
     soc_wrapper_top?: string
     soc_cpu_socket_contract?: string
+    soc_supports_difftest?: boolean
+    soc_supported_test_suites?: string[]
     required_capability?: string
   }
   issues: FrontendValidationIssue[]

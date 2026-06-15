@@ -770,7 +770,7 @@ function simRunPayload(suiteOverride?: 'cpu_tests' | 'rtthread') {
     ? selectedCpuCases.value
     : defaultCpuTests.value.length
       ? defaultCpuTests.value
-      : availableCpuTests.value.slice(0, 2)
+      : availableCpuTests.value.slice(0, 1)
   return {
     sim_test_suite: 'cpu_tests',
     sim_cpu_test_mode: simCpuMode.value,
@@ -780,7 +780,7 @@ function simRunPayload(suiteOverride?: 'cpu_tests' | 'rtthread') {
 
 function syncDefaultCpuSelection(): void {
   if (!isSimStep.value || selectedCpuCases.value.length) return
-  const defaults = defaultCpuTests.value.length ? defaultCpuTests.value : availableCpuTests.value.slice(0, 2)
+  const defaults = defaultCpuTests.value.length ? defaultCpuTests.value : availableCpuTests.value.slice(0, 1)
   selectedCpuCases.value = defaults
 }
 
