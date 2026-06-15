@@ -48,6 +48,8 @@ export interface FrontendValidationResult {
     core_cpu_filelist?: string
     core_capability?: string
     soc_harness_capability?: string
+    soc_wrapper_contract?: string
+    soc_wrapper_top?: string
     required_capability?: string
   }
   issues: FrontendValidationIssue[]
