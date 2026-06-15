@@ -497,7 +497,7 @@ const config = ref<FrontendWorkspaceConfig>({
   parameters: {
     design: '',
     description: '',
-    top_module: 'ysyxSoCTop',
+    top_module: 'ecos_sim_top',
     clock: 'clk',
     frequency_max: 100,
     cpu_filelist: '',
