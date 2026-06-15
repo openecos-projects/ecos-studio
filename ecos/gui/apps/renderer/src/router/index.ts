@@ -26,6 +26,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       // 固定的设置页面
       { path: 'home', name: 'Home', component: () => import('../views/HomeView.vue') },
+      { path: 'tech', name: 'TechLibrary', component: () => import('../views/TechLibraryView.vue') },
       { path: 'configure', name: 'Configure', component: () => import('../views/ConfigureView.vue') },
       // 动态步骤路由：匹配所有 flow 步骤
       // 路由验证放宽，允许任何步骤路径（由 flow.json 动态决定）

@@ -67,6 +67,7 @@ export interface StepMetadata {
 export const STEP_METADATA: Record<string, StepMetadata> = {
   // 设置页面
   'home': { label: 'Home', icon: 'ri-home-4-line', path: 'home', showInSidebar: true, group: 'setup' },
+  'tech': { label: 'Tech', icon: 'ri-database-2-line', path: 'tech', showInSidebar: true, group: 'setup' },
   'configure': { label: 'Config', icon: 'ri-settings-3-line', path: 'configure', showInSidebar: true, group: 'setup' },
 
   // 运行步骤 (key 为 flow.json 中的 step.name 小写)
