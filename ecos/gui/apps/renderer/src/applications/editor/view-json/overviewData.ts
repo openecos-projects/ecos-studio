@@ -13,6 +13,15 @@ export interface ViewJsonOverviewInstance {
   orient: string
 }
 
+export interface ViewJsonRasterInstance {
+  id: number
+  x: number
+  y: number
+  w: number
+  h: number
+  status: string
+}
+
 export interface ViewJsonOverviewData {
   dbuPerMicron: number
   dieArea: ViewJsonBBox
@@ -22,7 +31,7 @@ export interface ViewJsonOverviewData {
   worldWidth: number
   worldHeight: number
   chunks: Map<string, ViewJsonInstanceChunk>
-  rasterTileBuckets: Map<string, ViewJsonOverviewInstance[]>
+  rasterTileBuckets: Map<string, ViewJsonRasterInstance[]>
   totalInstanceCount: number
   maxChunkInstanceCount: number
   loadStats: ViewJsonLoadStats
@@ -54,7 +63,7 @@ export interface ViewJsonChunkRange {
 
 export interface ViewJsonInstanceChunkIndex {
   chunks: Map<string, ViewJsonInstanceChunk>
-  rasterTileBuckets: Map<string, ViewJsonOverviewInstance[]>
+  rasterTileBuckets: Map<string, ViewJsonRasterInstance[]>
   totalInstanceCount: number
   maxChunkInstanceCount: number
 }
@@ -101,6 +110,37 @@ export interface ViewJsonOverviewWorkerLike {
 }
 
 export type ViewJsonOverviewWorkerFactory = () => ViewJsonOverviewWorkerLike | null
+
+export interface ViewJsonRasterTileWorkerRequest {
+  id: number
+  type: 'render-view-json-raster-tile'
+  tileX: number
+  tileY: number
+  rasterInstances: ViewJsonRasterInstance[]
+}
+
+export type ViewJsonRasterTileWorkerResponse =
+  | {
+    id: number
+    ok: true
+    tileX: number
+    tileY: number
+    bitmap: ImageBitmap
+  }
+  | {
+    id: number
+    ok: false
+    error: string
+  }
+
+export interface ViewJsonRasterTileWorkerLike {
+  onmessage: ((event: MessageEvent<ViewJsonRasterTileWorkerResponse>) => void) | null
+  onerror: ((event: ErrorEvent) => void) | null
+  postMessage(message: ViewJsonRasterTileWorkerRequest, transfer?: Transferable[]): void
+  terminate(): void
+}
+
+export type ViewJsonRasterTileWorkerFactory = () => ViewJsonRasterTileWorkerLike | null
 
 export const VIEW_JSON_INSTANCE_HATCH_MIN_SCALE = 0.05
 export const VIEW_JSON_INSTANCE_CHUNK_SIZE = 8000
@@ -159,10 +199,11 @@ export function shouldRenderChunkOverview(
   scale: number,
   visibleChunkCount: number,
   visibleInstanceCount = 0,
+  detailInstanceLimit = VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES,
 ): boolean {
   return (
     shouldRenderChunkOverviewBase(scale, visibleChunkCount)
-    || visibleInstanceCount > VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES
+    || visibleInstanceCount > detailInstanceLimit
   )
 }
 
@@ -214,7 +255,7 @@ export async function buildViewJsonInstanceChunkIndex(
   chunkSize = VIEW_JSON_INSTANCE_CHUNK_SIZE,
 ): Promise<ViewJsonInstanceChunkIndex> {
   const chunks = new Map<string, ViewJsonInstanceChunk>()
-  const rasterTileBuckets = new Map<string, ViewJsonOverviewInstance[]>()
+  const rasterTileBuckets = new Map<string, ViewJsonRasterInstance[]>()
   let maxChunkInstanceCount = 1
   const batchSize = Math.max(1, options.batchSize ?? VIEW_JSON_INSTANCE_INDEX_BATCH_SIZE)
   const yieldToMainThread = options.yieldToMainThread ?? defaultYieldToMainThread
@@ -255,11 +296,21 @@ export async function buildViewJsonInstanceChunkIndex(
     }
   }
 
+  sortRasterTileBucketsForPaint(rasterTileBuckets)
+
   return {
     chunks,
     rasterTileBuckets,
     totalInstanceCount: rawInstances.length,
     maxChunkInstanceCount,
+  }
+}
+
+function sortRasterTileBucketsForPaint(
+  buckets: Map<string, ViewJsonRasterInstance[]>,
+): void {
+  for (const bucket of buckets.values()) {
+    bucket.sort((a, b) => Number(a.status === 'FIXED') - Number(b.status === 'FIXED'))
   }
 }
 
@@ -296,7 +347,7 @@ function indexInstanceDetailChunks(
 
 function indexInstanceRasterTileBuckets(
   instance: ViewJsonOverviewInstance,
-  buckets: Map<string, ViewJsonOverviewInstance[]>,
+  buckets: Map<string, ViewJsonRasterInstance[]>,
 ): void {
   if (instance.world.w <= 0 || instance.world.h <= 0) return
 
@@ -315,7 +366,14 @@ function indexInstanceRasterTileBuckets(
         bucket = []
         buckets.set(key, bucket)
       }
-      bucket.push(instance)
+      bucket.push({
+        id: instance.id,
+        x: instance.world.x,
+        y: instance.world.y,
+        w: instance.world.w,
+        h: instance.world.h,
+        status: instance.status,
+      })
     }
   }
 }

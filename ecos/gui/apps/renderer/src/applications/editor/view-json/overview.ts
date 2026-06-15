@@ -2,6 +2,12 @@ import { Container, Graphics, Sprite, Texture } from 'pixi.js'
 import type { Viewport } from 'pixi-viewport'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { GpuInstanceMeshRenderer } from './gpuInstances'
+import { ViewJsonRasterTileWorkerClient } from './rasterTileWorker'
+import { drawViewJsonRasterTileToCanvasLike } from './rasterTileDrawing'
+import {
+  ViewJsonPerformanceCounters,
+  type ViewJsonRendererStats,
+} from './performanceStats'
 import {
   VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_CHUNKS,
   VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES,
@@ -36,6 +42,8 @@ import {
   type ViewJsonOverviewWorkerLike,
   type ViewJsonOverviewWorkerRequest,
   type ViewJsonOverviewWorkerResponse,
+  type ViewJsonRasterInstance,
+  type ViewJsonRasterTileWorkerFactory,
   type ViewJsonRenderMode,
 } from './overviewData'
 
@@ -72,27 +80,89 @@ export {
   type ViewJsonOverviewWorkerLike,
   type ViewJsonOverviewWorkerRequest,
   type ViewJsonOverviewWorkerResponse,
+  type ViewJsonRasterInstance,
   type ViewJsonRenderMode,
 }
-
-export interface ViewJsonRendererStats {
-  renderMode: ViewJsonRenderMode
-  visibleInstanceCount: number
-  visibleChunkCount: number
-  activeRasterTileCount: number
-  activeVectorChunkCount: number
-  scale: number
-  rebuildMs: number
-}
+export {
+  VIEW_JSON_RASTER_FIXED_FILL_STYLE,
+  VIEW_JSON_RASTER_PLACED_FILL_STYLE,
+  drawViewJsonRasterTileToCanvasLike,
+  getViewJsonRasterFillStyle,
+  sortViewJsonRasterInstancesForPaint,
+} from './rasterTileDrawing'
+export {
+  ViewJsonPerformanceCounters,
+  createViewJsonPerformanceHudState,
+  mergeViewJsonRendererStatsIntoHudState,
+  type ViewJsonPerformanceHudState,
+  type ViewJsonRendererStats,
+} from './performanceStats'
 
 export const VIEW_JSON_RASTER_TILE_CACHE_LIMIT = 160
+export const VIEW_JSON_RASTER_TILE_BUILD_FRAME_BUDGET_MS = 4
+export const VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS = 2
 export const VIEW_JSON_USE_GPU_INSTANCE_MESH = true
 export const VIEW_JSON_INTERACTIVE_PREVIEW_RESTORE_MS = 120
+export const VIEW_JSON_RASTER_TILE_PREFETCH_PADDING = VIEW_JSON_RASTER_TILE_WORLD_SIZE
+export const VIEW_JSON_GPU_OUTLINE_SCREEN_WIDTH = 1
+export const VIEW_JSON_GPU_OUTLINE_MIN_SCALE = 0.035
+export const VIEW_JSON_ADAPTIVE_LOW_FPS_THRESHOLD = 24
+export const VIEW_JSON_ADAPTIVE_DETAIL_INSTANCE_LIMIT = 5000
+
+export interface ViewJsonAdaptiveRenderState {
+  lowFpsSampleCount: number
+}
+
+export function updateViewJsonAdaptiveRenderState(
+  state: ViewJsonAdaptiveRenderState,
+  fps: number,
+): ViewJsonAdaptiveRenderState {
+  if (!Number.isFinite(fps) || fps <= 0) return state
+  return {
+    lowFpsSampleCount: fps < VIEW_JSON_ADAPTIVE_LOW_FPS_THRESHOLD
+      ? Math.min(state.lowFpsSampleCount + 1, 3)
+      : 0,
+  }
+}
+
+export function getViewJsonAdaptiveDetailInstanceLimit(
+  state: ViewJsonAdaptiveRenderState,
+): number {
+  return state.lowFpsSampleCount > 0
+    ? VIEW_JSON_ADAPTIVE_DETAIL_INSTANCE_LIMIT
+    : VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES
+}
+
+export function clampViewJsonRasterTileRangeToWorld(
+  range: ViewJsonChunkRange,
+  worldWidth: number,
+  worldHeight: number,
+): ViewJsonChunkRange {
+  const maxX = Math.max(0, Math.ceil(worldWidth / VIEW_JSON_RASTER_TILE_WORLD_SIZE) - 1)
+  const maxY = Math.max(0, Math.ceil(worldHeight / VIEW_JSON_RASTER_TILE_WORLD_SIZE) - 1)
+
+  return {
+    minX: Math.max(0, range.minX),
+    minY: Math.max(0, range.minY),
+    maxX: Math.min(maxX, range.maxX),
+    maxY: Math.min(maxY, range.maxY),
+  }
+}
+
+export function getViewJsonGpuOutlineWorldWidth(scale: number): number {
+  if (scale < VIEW_JSON_GPU_OUTLINE_MIN_SCALE) return 0
+  return VIEW_JSON_GPU_OUTLINE_SCREEN_WIDTH / scale
+}
+
+export function getViewJsonVectorChunkSignature(chunk: ViewJsonInstanceChunk): string {
+  return `${chunk.key}:${chunk.instances.map(inst => `${inst.id}:${inst.status}`).join(',')}`
+}
 
 interface ActiveViewJsonChunk {
   container: Container
   placedGraphics: Graphics
   fixedGraphics: Graphics
+  instanceSignature: string
 }
 
 interface ActiveViewJsonRasterTile {
@@ -100,6 +170,79 @@ interface ActiveViewJsonRasterTile {
   sprite: Sprite
   texture: Texture
   lastUsedAt: number
+}
+
+interface PendingViewJsonRasterTile {
+  key: string
+  tileX: number
+  tileY: number
+}
+
+export function sortViewJsonRasterTileQueueByDistance<T extends PendingViewJsonRasterTile>(
+  queue: T[],
+  center: { x: number; y: number },
+): T[] {
+  return [...queue].sort((a, b) =>
+    getRasterTileDistanceSquaredToPoint(a, center)
+    - getRasterTileDistanceSquaredToPoint(b, center),
+  )
+}
+
+function getRasterTileDistanceSquaredToPoint(
+  tile: PendingViewJsonRasterTile,
+  point: { x: number; y: number },
+): number {
+  const tileCenterX = (tile.tileX + 0.5) * VIEW_JSON_RASTER_TILE_WORLD_SIZE
+  const tileCenterY = (tile.tileY + 0.5) * VIEW_JSON_RASTER_TILE_WORLD_SIZE
+  const dx = tileCenterX - point.x
+  const dy = tileCenterY - point.y
+  return dx * dx + dy * dy
+}
+
+export function shouldStartViewJsonRasterTileBuild(
+  queueLength: number,
+  maxInFlight: number,
+  currentInFlight: number,
+): boolean {
+  return queueLength > 0 && currentInFlight < maxInFlight
+}
+
+export function isViewJsonRasterTileBuildCancelled(
+  key: string,
+  requestId: number,
+  currentRequestId: number,
+  visibleRasterTileKeys: Set<string>,
+  destroyed: boolean,
+): boolean {
+  return (
+    destroyed
+    || requestId !== currentRequestId
+    || !visibleRasterTileKeys.has(key)
+  )
+}
+
+export function countViewJsonUniqueInstancesInRange(
+  chunks: Map<string, ViewJsonInstanceChunk>,
+  range: ViewJsonChunkRange,
+  limit = Number.POSITIVE_INFINITY,
+): number {
+  let count = 0
+  const seenInstanceIds = new Set<number>()
+
+  for (let chunkY = range.minY; chunkY <= range.maxY; chunkY += 1) {
+    for (let chunkX = range.minX; chunkX <= range.maxX; chunkX += 1) {
+      const chunk = chunks.get(`${chunkX}:${chunkY}`)
+      if (!chunk) continue
+      for (const inst of chunk.instances) {
+        if (seenInstanceIds.has(inst.id)) continue
+        seenInstanceIds.add(inst.id)
+        count += 1
+        if (count >= limit) return count
+      }
+    }
+  }
+
+  return count
 }
 
 export interface ViewJsonOverviewReader {
@@ -238,25 +381,37 @@ export class ViewJsonOverviewRenderer {
   private readonly gpuInstanceRenderer: GpuInstanceMeshRenderer
   private readonly instanceChunksContainer = new Container()
   private readonly viewport: Viewport
+  private readonly rasterTileWorkerClient: ViewJsonRasterTileWorkerClient | null
   private currentData: ViewJsonOverviewData | null = null
   private chunks = new Map<string, ViewJsonInstanceChunk>()
-  private rasterTileBuckets = new Map<string, ViewJsonOverviewInstance[]>()
+  private rasterTileBuckets = new Map<string, ViewJsonRasterInstance[]>()
   private activeRasterTiles = new Map<string, ActiveViewJsonRasterTile>()
+  private visibleRasterTileKeys = new Set<string>()
+  private pendingRasterTileKeys = new Set<string>()
+  private buildingRasterTileKeys = new Set<string>()
+  private rasterTileBuildQueue: PendingViewJsonRasterTile[] = []
   private activeChunks = new Map<string, ActiveViewJsonChunk>()
   private lastHatchVisible: boolean | null = null
   private lastChunkRenderSignature = ''
-  private lastRenderMode: ViewJsonRenderMode = 'idle'
-  private lastVisibleInstanceCount = 0
-  private lastVisibleChunkCount = 0
-  private lastActiveRasterTileCount = 0
-  private lastRebuildMs = 0
+  private readonly performanceCounters = new ViewJsonPerformanceCounters()
+  private adaptiveRenderState: ViewJsonAdaptiveRenderState = { lowFpsSampleCount: 0 }
   private detachViewport: (() => void) | null = null
   private interactivePreviewMode = false
   private interactivePreviewRestoreTimer: ReturnType<typeof setTimeout> | null = null
+  private rasterTileBuildRaf = 0
+  private rasterTileBuildRequestId = 0
+  private rasterTileBuildInFlightCount = 0
+  private destroyed = false
   private raf = 0
 
-  constructor(viewport: Viewport) {
+  constructor(
+    viewport: Viewport,
+    options: { rasterTileWorkerFactory?: ViewJsonRasterTileWorkerFactory | null } = {},
+  ) {
     this.viewport = viewport
+    this.rasterTileWorkerClient = options.rasterTileWorkerFactory
+      ? new ViewJsonRasterTileWorkerClient(options.rasterTileWorkerFactory)
+      : null
     this.container.label = 'view-json-overview-root'
     this.dieGraphics.label = 'view-json-die'
     this.coreGraphics.label = 'view-json-core'
@@ -272,29 +427,38 @@ export class ViewJsonOverviewRenderer {
   }
 
   getPerformanceStats(): ViewJsonRendererStats {
-    return {
-      renderMode: this.lastRenderMode,
-      visibleInstanceCount: this.lastVisibleInstanceCount,
-      visibleChunkCount: this.lastVisibleChunkCount,
-      activeRasterTileCount: this.lastActiveRasterTileCount,
+    const gpuCacheStats = this.gpuInstanceRenderer.getCacheStats()
+    return this.performanceCounters.snapshot({
       activeVectorChunkCount: this.activeChunks.size,
+      adaptiveDetailInstanceLimit: getViewJsonAdaptiveDetailInstanceLimit(this.adaptiveRenderState),
+      pendingRasterTileCount: this.pendingRasterTileKeys.size,
+      buildingRasterTileCount: this.buildingRasterTileKeys.size,
+      gpuChunkBufferCacheSize: gpuCacheStats.chunkBufferCacheSize,
       scale: this.viewport.scale.x,
-      rebuildMs: this.lastRebuildMs,
+    })
+  }
+
+  updateAdaptiveFrameRate(fps: number): void {
+    const previousLimit = getViewJsonAdaptiveDetailInstanceLimit(this.adaptiveRenderState)
+    this.adaptiveRenderState = updateViewJsonAdaptiveRenderState(this.adaptiveRenderState, fps)
+    if (getViewJsonAdaptiveDetailInstanceLimit(this.adaptiveRenderState) !== previousLimit) {
+      this.lastChunkRenderSignature = ''
+      this.requestVisibleChunkUpdate()
     }
   }
 
   render(data: ViewJsonOverviewData): void {
+    this.destroyed = false
     this.currentData = data
     this.chunks = data.chunks
     this.rasterTileBuckets = data.rasterTileBuckets
+    this.gpuInstanceRenderer.resetCache()
+    this.clearRasterTiles()
     this.clearActiveChunks()
     this.lastHatchVisible = null
     this.lastChunkRenderSignature = ''
-    this.lastRenderMode = 'idle'
-    this.lastVisibleInstanceCount = 0
-    this.lastVisibleChunkCount = 0
-    this.lastActiveRasterTileCount = 0
-    this.lastRebuildMs = 0
+    this.performanceCounters.reset()
+    this.adaptiveRenderState = { lowFpsSampleCount: 0 }
     this.dieGraphics.clear()
     this.coreGraphics.clear()
 
@@ -312,15 +476,21 @@ export class ViewJsonOverviewRenderer {
   }
 
   destroy(): void {
+    this.destroyed = true
     if (this.raf) {
       cancelAnimationFrame(this.raf)
       this.raf = 0
+    }
+    if (this.rasterTileBuildRaf) {
+      cancelAnimationFrame(this.rasterTileBuildRaf)
+      this.rasterTileBuildRaf = 0
     }
     if (this.interactivePreviewRestoreTimer) {
       clearTimeout(this.interactivePreviewRestoreTimer)
       this.interactivePreviewRestoreTimer = null
     }
     this.detachViewport?.()
+    this.rasterTileWorkerClient?.destroy()
     this.gpuInstanceRenderer.destroy()
     this.clearActiveChunks()
     this.clearRasterTiles()
@@ -375,7 +545,9 @@ export class ViewJsonOverviewRenderer {
     if (enabled) {
       if (this.interactivePreviewMode) return
       this.interactivePreviewMode = true
-      this.lastRenderMode = 'preview'
+      this.performanceCounters.renderMode = 'preview'
+      this.cancelPendingRasterTileBuilds()
+      this.lastChunkRenderSignature = ''
       this.freezeInteractivePreview()
       return
     }
@@ -385,7 +557,7 @@ export class ViewJsonOverviewRenderer {
   }
 
   private freezeInteractivePreview(): void {
-    this.lastRebuildMs = 0
+    this.performanceCounters.rebuildMs = 0
   }
 
   private requestVisibleChunkUpdate(): void {
@@ -415,12 +587,20 @@ export class ViewJsonOverviewRenderer {
       visibleChunkCount,
     )
     let visibleInstanceCount = 0
+    const detailInstanceLimit = getViewJsonAdaptiveDetailInstanceLimit(this.adaptiveRenderState)
     if (!shouldUseRasterWithoutCountingInstances) {
-      visibleInstanceCount = this.countInstancesInRange(overviewRange)
+      visibleInstanceCount = this.countInstancesInRange(overviewRange, detailInstanceLimit + 1)
     }
-    if (shouldRenderChunkOverview(this.viewport.scale.x, visibleChunkCount, visibleInstanceCount)) {
+    if (shouldRenderChunkOverview(this.viewport.scale.x, visibleChunkCount, visibleInstanceCount, detailInstanceLimit)) {
       const rebuildStartedAt = performance.now()
-      const rasterRange = getViewJsonRasterTileRangeForBounds(visible)
+      const rasterRange = clampViewJsonRasterTileRangeToWorld(
+        getViewJsonRasterTileRangeForBounds(
+          visible,
+          VIEW_JSON_RASTER_TILE_PREFETCH_PADDING,
+        ),
+        this.currentData.worldWidth,
+        this.currentData.worldHeight,
+      )
       const signature = this.getChunkRenderSignature('overview', rasterRange, hatchVisible)
       if (signature === this.lastChunkRenderSignature) return
       this.clearActiveChunks()
@@ -429,11 +609,11 @@ export class ViewJsonOverviewRenderer {
       this.updateRasterTiles(rasterRange)
       this.rasterTileContainer.visible = true
       this.instanceChunksContainer.visible = false
-      this.lastRenderMode = 'raster'
-      this.lastVisibleInstanceCount = visibleInstanceCount
-      this.lastVisibleChunkCount = visibleChunkCount
-      this.lastActiveRasterTileCount = estimateChunkCountForRange(rasterRange)
-      this.lastRebuildMs = performance.now() - rebuildStartedAt
+      this.performanceCounters.renderMode = 'raster'
+      this.performanceCounters.visibleInstanceCount = visibleInstanceCount
+      this.performanceCounters.visibleChunkCount = visibleChunkCount
+      this.performanceCounters.activeRasterTileCount = estimateChunkCountForRange(rasterRange)
+      this.performanceCounters.rebuildMs = performance.now() - rebuildStartedAt
       this.lastHatchVisible = hatchVisible
       this.lastChunkRenderSignature = signature
       return
@@ -444,18 +624,20 @@ export class ViewJsonOverviewRenderer {
     if (signature === this.lastChunkRenderSignature) return
 
     this.rasterTileContainer.visible = false
+    this.cancelPendingRasterTileBuilds()
     if (VIEW_JSON_USE_GPU_INSTANCE_MESH && !hatchVisible) {
       const rebuildStartedAt = performance.now()
       const detailChunks = this.getUniqueChunksInRange(detailRange)
+      const gpuOutlineWidth = getViewJsonGpuOutlineWorldWidth(this.viewport.scale.x)
       this.clearActiveChunks()
-      this.gpuInstanceRenderer.renderChunks(detailChunks)
+      this.gpuInstanceRenderer.renderChunks(detailChunks, gpuOutlineWidth)
       this.gpuInstanceRenderer.setVisible(true)
       this.instanceChunksContainer.visible = false
-      this.lastRenderMode = 'gpu'
-      this.lastVisibleInstanceCount = this.countInstancesInChunks(detailChunks)
-      this.lastVisibleChunkCount = detailChunks.length
-      this.lastActiveRasterTileCount = 0
-      this.lastRebuildMs = performance.now() - rebuildStartedAt
+      this.performanceCounters.renderMode = 'gpu'
+      this.performanceCounters.visibleInstanceCount = this.countInstancesInChunks(detailChunks)
+      this.performanceCounters.visibleChunkCount = detailChunks.length
+      this.performanceCounters.activeRasterTileCount = 0
+      this.performanceCounters.rebuildMs = performance.now() - rebuildStartedAt
       this.lastHatchVisible = hatchVisible
       this.lastChunkRenderSignature = signature
       return
@@ -466,16 +648,16 @@ export class ViewJsonOverviewRenderer {
     this.gpuInstanceRenderer.clear()
     this.gpuInstanceRenderer.setVisible(false)
     this.instanceChunksContainer.visible = true
-    this.clearActiveChunks()
     const needed = new Set<string>()
 
     for (const chunk of detailChunks) {
       const key = chunk.key
       needed.add(key)
       const active = this.activeChunks.get(key)
+      const chunkSignature = getViewJsonVectorChunkSignature(chunk)
       if (!active) {
         this.activeChunks.set(key, this.createChunkGraphics(chunk, hatchVisible))
-      } else if (hatchChanged) {
+      } else if (hatchChanged || active.instanceSignature !== chunkSignature) {
         this.redrawChunkGraphics(chunk, active, hatchVisible)
       }
     }
@@ -486,11 +668,11 @@ export class ViewJsonOverviewRenderer {
       this.activeChunks.delete(key)
     }
 
-    this.lastRenderMode = 'vector'
-    this.lastVisibleInstanceCount = this.countInstancesInChunks(detailChunks)
-    this.lastVisibleChunkCount = detailChunks.length
-    this.lastActiveRasterTileCount = 0
-    this.lastRebuildMs = performance.now() - rebuildStartedAt
+    this.performanceCounters.renderMode = 'vector'
+    this.performanceCounters.visibleInstanceCount = this.countInstancesInChunks(detailChunks)
+    this.performanceCounters.visibleChunkCount = detailChunks.length
+    this.performanceCounters.activeRasterTileCount = 0
+    this.performanceCounters.rebuildMs = performance.now() - rebuildStartedAt
     this.lastHatchVisible = hatchVisible
     this.lastChunkRenderSignature = signature
   }
@@ -535,11 +717,17 @@ export class ViewJsonOverviewRenderer {
     return result
   }
 
-  private countInstancesInRange(range: ViewJsonChunkRange): number {
-    return this.countInstancesInChunks(this.getChunksInRange(range))
+  private countInstancesInRange(
+    range: ViewJsonChunkRange,
+    limit = Number.POSITIVE_INFINITY,
+  ): number {
+    return countViewJsonUniqueInstancesInRange(this.chunks, range, limit)
   }
 
-  private countInstancesInChunks(chunks: ViewJsonInstanceChunk[]): number {
+  private countInstancesInChunks(
+    chunks: ViewJsonInstanceChunk[],
+    limit = Number.POSITIVE_INFINITY,
+  ): number {
     let count = 0
     const seenInstanceIds = new Set<number>()
 
@@ -548,6 +736,7 @@ export class ViewJsonOverviewRenderer {
         if (seenInstanceIds.has(inst.id)) continue
         seenInstanceIds.add(inst.id)
         count += 1
+        if (count >= limit) return count
       }
     }
 
@@ -556,20 +745,28 @@ export class ViewJsonOverviewRenderer {
 
   private updateRasterTiles(range: ViewJsonChunkRange): void {
     const needed = new Set<string>()
+    this.rasterTileBuildRequestId += 1
+    const requestId = this.rasterTileBuildRequestId
 
     for (let tileY = range.minY; tileY <= range.maxY; tileY += 1) {
       for (let tileX = range.minX; tileX <= range.maxX; tileX += 1) {
         const key = `${tileX}:${tileY}`
         needed.add(key)
-        let tile = this.activeRasterTiles.get(key)
+        const tile = this.activeRasterTiles.get(key)
         if (!tile) {
-          tile = this.createRasterTile(tileX, tileY)
-          this.activeRasterTiles.set(key, tile)
+          this.performanceCounters.recordRasterTileCacheMiss()
+          this.queueRasterTileBuild(tileX, tileY, key)
+          continue
         }
+        this.performanceCounters.recordRasterTileCacheHit()
         tile.lastUsedAt = performance.now()
         tile.sprite.visible = true
       }
     }
+
+    this.visibleRasterTileKeys = needed
+    this.dropStaleRasterTileBuilds()
+    this.prioritizeRasterTileBuildQueue()
 
     for (const [key, tile] of this.activeRasterTiles) {
       if (needed.has(key)) continue
@@ -577,11 +774,162 @@ export class ViewJsonOverviewRenderer {
     }
 
     this.pruneRasterTileCache()
+    this.scheduleRasterTileBuild(requestId)
+  }
+
+  private queueRasterTileBuild(tileX: number, tileY: number, key: string): void {
+    if (this.activeRasterTiles.has(key)) return
+    if (this.pendingRasterTileKeys.has(key)) return
+    if (this.buildingRasterTileKeys.has(key)) return
+    this.pendingRasterTileKeys.add(key)
+    this.rasterTileBuildQueue.push({ key, tileX, tileY })
+  }
+
+  private dropStaleRasterTileBuilds(): void {
+    this.rasterTileBuildQueue = this.rasterTileBuildQueue.filter((tile) => {
+      const keep = this.visibleRasterTileKeys.has(tile.key)
+      if (!keep) {
+        this.pendingRasterTileKeys.delete(tile.key)
+      }
+      return keep
+    })
+  }
+
+  private prioritizeRasterTileBuildQueue(): void {
+    const visible = this.viewport.getVisibleBounds()
+    this.rasterTileBuildQueue = sortViewJsonRasterTileQueueByDistance(
+      this.rasterTileBuildQueue,
+      {
+        x: visible.x + visible.width / 2,
+        y: visible.y + visible.height / 2,
+      },
+    )
+  }
+
+  private scheduleRasterTileBuild(requestId: number): void {
+    void requestId
+    if (this.rasterTileBuildRaf) return
+    if (!shouldStartViewJsonRasterTileBuild(
+      this.rasterTileBuildQueue.length,
+      VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS,
+      this.rasterTileBuildInFlightCount,
+    )) {
+      return
+    }
+    this.rasterTileBuildRaf = requestAnimationFrame(() => {
+      this.rasterTileBuildRaf = 0
+      this.processRasterTileBuildQueue(this.rasterTileBuildRequestId)
+    })
+  }
+
+  private processRasterTileBuildQueue(requestId: number): void {
+    if (requestId !== this.rasterTileBuildRequestId) return
+    const startedAt = performance.now()
+
+    while (
+      shouldStartViewJsonRasterTileBuild(
+        this.rasterTileBuildQueue.length,
+        VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS,
+        this.rasterTileBuildInFlightCount,
+      )
+      && performance.now() - startedAt < VIEW_JSON_RASTER_TILE_BUILD_FRAME_BUDGET_MS
+    ) {
+      const next = this.rasterTileBuildQueue.shift()
+      if (!next) continue
+      this.pendingRasterTileKeys.delete(next.key)
+      if (!this.visibleRasterTileKeys.has(next.key)) continue
+      if (this.activeRasterTiles.has(next.key)) continue
+      if (this.buildingRasterTileKeys.has(next.key)) continue
+
+      this.buildingRasterTileKeys.add(next.key)
+      this.rasterTileBuildInFlightCount += 1
+      void this.createRasterTileAsync(next.tileX, next.tileY, requestId)
+    }
+
+    this.pruneRasterTileCache()
+    this.scheduleRasterTileBuild(requestId)
+  }
+
+  private async createRasterTileAsync(
+    tileX: number,
+    tileY: number,
+    requestId: number,
+  ): Promise<void> {
+    const key = `${tileX}:${tileY}`
+    let tile: ActiveViewJsonRasterTile
+
+    try {
+      const bitmap = await this.renderRasterTileWithWorker(tileX, tileY)
+      if (this.isRasterTileBuildCancelled(key, requestId)) {
+        bitmap.close()
+        return
+      }
+      tile = this.createRasterTileSprite(tileX, tileY, Texture.from(bitmap))
+    } catch {
+      if (this.isRasterTileBuildCancelled(key, requestId)) return
+      this.performanceCounters.recordRasterTileFallback()
+      tile = this.createRasterTile(tileX, tileY)
+    } finally {
+      this.buildingRasterTileKeys.delete(key)
+      this.rasterTileBuildInFlightCount -= 1
+      if (this.rasterTileBuildInFlightCount < 0) {
+        this.rasterTileBuildInFlightCount = 0
+      }
+      this.scheduleRasterTileBuild(requestId)
+    }
+
+    if (
+      this.isRasterTileBuildCancelled(key, requestId)
+      || this.activeRasterTiles.has(key)
+    ) {
+      this.destroyRasterTile(tile)
+      return
+    }
+
+    this.activeRasterTiles.set(key, tile)
+    tile.sprite.visible = true
+    tile.lastUsedAt = performance.now()
+  }
+
+  private isRasterTileBuildCancelled(key: string, requestId: number): boolean {
+    return isViewJsonRasterTileBuildCancelled(
+      key,
+      requestId,
+      this.rasterTileBuildRequestId,
+      this.visibleRasterTileKeys,
+      this.destroyed,
+    )
+  }
+
+  private async renderRasterTileWithWorker(
+    tileX: number,
+    tileY: number,
+  ): Promise<ImageBitmap> {
+    const startedAt = performance.now()
+    const result = await this.rasterTileWorkerClient?.renderTile(
+      tileX,
+      tileY,
+      this.rasterTileBuckets.get(`${tileX}:${tileY}`) ?? [],
+    )
+    if (!result) {
+      throw new Error('View JSON raster tile worker is not available.')
+    }
+    this.performanceCounters.recordRasterTileWorkerMs(performance.now() - startedAt)
+
+    return result.bitmap
   }
 
   private createRasterTile(tileX: number, tileY: number): ActiveViewJsonRasterTile {
     const canvas = this.drawRasterTileCanvas(tileX, tileY)
     const texture = Texture.from(canvas)
+    return this.createRasterTileSprite(tileX, tileY, texture)
+  }
+
+  private createRasterTileSprite(
+    tileX: number,
+    tileY: number,
+    texture: Texture,
+  ): ActiveViewJsonRasterTile {
     const sprite = new Sprite(texture)
     const worldX = tileX * VIEW_JSON_RASTER_TILE_WORLD_SIZE
     const worldY = tileY * VIEW_JSON_RASTER_TILE_WORLD_SIZE
@@ -604,40 +952,8 @@ export class ViewJsonOverviewRenderer {
     const canvas = document.createElement('canvas')
     canvas.width = VIEW_JSON_RASTER_TILE_PIXEL_SIZE
     canvas.height = VIEW_JSON_RASTER_TILE_PIXEL_SIZE
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return canvas
-
-    const worldX = tileX * VIEW_JSON_RASTER_TILE_WORLD_SIZE
-    const worldY = tileY * VIEW_JSON_RASTER_TILE_WORLD_SIZE
-    const scale = VIEW_JSON_RASTER_TILE_PIXEL_SIZE / VIEW_JSON_RASTER_TILE_WORLD_SIZE
     const instances = this.rasterTileBuckets.get(`${tileX}:${tileY}`) ?? []
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.imageSmoothingEnabled = false
-
-    for (const inst of instances) {
-      const localX = (inst.world.x - worldX) * scale
-      const localY = (inst.world.y - worldY) * scale
-      const localW = Math.max(1, inst.world.w * scale)
-      const localH = Math.max(1, inst.world.h * scale)
-      if (
-        localX > canvas.width
-        || localY > canvas.height
-        || localX + localW < 0
-        || localY + localH < 0
-      ) {
-        continue
-      }
-      ctx.fillStyle = inst.status === 'FIXED'
-        ? 'rgba(217, 119, 6, 0.45)'
-        : 'rgba(37, 99, 235, 0.32)'
-      ctx.fillRect(
-        Math.floor(localX),
-        Math.floor(localY),
-        Math.ceil(localW),
-        Math.ceil(localH),
-      )
-    }
+    drawViewJsonRasterTileToCanvasLike(canvas, tileX, tileY, instances)
 
     return canvas
   }
@@ -656,7 +972,20 @@ export class ViewJsonOverviewRenderer {
     }
   }
 
+  private cancelPendingRasterTileBuilds(): void {
+    if (this.rasterTileBuildRaf) {
+      cancelAnimationFrame(this.rasterTileBuildRaf)
+      this.rasterTileBuildRaf = 0
+    }
+    this.rasterTileBuildRequestId += 1
+    this.visibleRasterTileKeys.clear()
+    this.pendingRasterTileKeys.clear()
+    this.buildingRasterTileKeys.clear()
+    this.rasterTileBuildQueue = []
+  }
+
   private clearRasterTiles(): void {
+    this.cancelPendingRasterTileBuilds()
     for (const tile of this.activeRasterTiles.values()) {
       this.destroyRasterTile(tile)
     }
@@ -685,7 +1014,12 @@ export class ViewJsonOverviewRenderer {
     container.addChild(fixedGraphics)
     this.instanceChunksContainer.addChild(container)
 
-    const active = { container, placedGraphics, fixedGraphics }
+    const active = {
+      container,
+      placedGraphics,
+      fixedGraphics,
+      instanceSignature: getViewJsonVectorChunkSignature(chunk),
+    }
     this.redrawChunkGraphics(chunk, active, hatchVisible)
     return active
   }
@@ -695,6 +1029,7 @@ export class ViewJsonOverviewRenderer {
     active: ActiveViewJsonChunk,
     hatchVisible: boolean,
   ): void {
+    active.instanceSignature = getViewJsonVectorChunkSignature(chunk)
     active.placedGraphics.clear()
     active.fixedGraphics.clear()
 

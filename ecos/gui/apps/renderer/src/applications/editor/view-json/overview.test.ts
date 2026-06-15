@@ -4,17 +4,34 @@ import {
   VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES,
   VIEW_JSON_CHUNK_OVERVIEW_SCALE,
   VIEW_JSON_INSTANCE_CHUNK_SIZE,
+  VIEW_JSON_GPU_OUTLINE_MIN_SCALE,
+  VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS,
+  VIEW_JSON_RASTER_TILE_PREFETCH_PADDING,
   VIEW_JSON_RASTER_TILE_WORLD_SIZE,
   buildViewJsonInstanceChunkIndex,
   buildViewJsonInstanceChunks,
+  clampViewJsonRasterTileRangeToWorld,
+  getViewJsonRasterFillStyle,
+  getViewJsonGpuOutlineWorldWidth,
   getViewJsonChunkRangeForBounds,
   getViewJsonRasterTileRangeForBounds,
+  drawViewJsonRasterTileToCanvasLike,
+  sortViewJsonRasterTileQueueByDistance,
+  countViewJsonUniqueInstancesInRange,
+  getViewJsonVectorChunkSignature,
+  updateViewJsonAdaptiveRenderState,
+  getViewJsonAdaptiveDetailInstanceLimit,
+  isViewJsonRasterTileBuildCancelled,
   loadViewJsonOverview,
   parseViewJsonOverviewPackageTexts,
+  shouldStartViewJsonRasterTileBuild,
   shouldRenderChunkOverviewBase,
   shouldRenderChunkOverview,
   shouldRenderInstanceHatch,
+  sortViewJsonRasterInstancesForPaint,
+  type ViewJsonInstanceChunk,
   type ViewJsonOverviewInstance,
+  type ViewJsonRasterInstance,
   viewJsonBBoxToWorldRect,
 } from './overview'
 import source from './overview.ts?raw'
@@ -201,66 +218,52 @@ describe('loadViewJsonOverview', () => {
 describe('ViewJsonOverviewRenderer', () => {
   it('renders only die, core, and instance hatches without process layer controls', () => {
     expect(source).toContain('GpuInstanceMeshRenderer')
-    expect(source).toContain('VIEW_JSON_USE_GPU_INSTANCE_MESH')
-    expect(source).toContain('gpuInstanceRenderer')
-    expect(source).toContain('gpuInstanceRenderer.renderChunks(')
     expect(source).toContain('drawDiagonalHatchRect(')
     expect(source).toContain('const spacing = Math.max(Math.min(rect.w, rect.h) / 12, 36)')
-    expect(source).toContain('shouldRenderInstanceHatch(')
     expect(dataSource).toContain('buildViewJsonInstanceChunks(')
     expect(dataSource).toContain('buildViewJsonInstanceChunkIndex(')
-    expect(dataSource).toContain('const chunkIndex = await buildViewJsonInstanceChunkIndex(')
-    expect(dataSource).toContain('VIEW_JSON_INSTANCE_INDEX_BATCH_SIZE')
-    expect(dataSource).toContain('yieldToMainThread')
-    expect(dataSource).toContain('shouldCancel')
     expect(dataSource).not.toContain('const instances = instancesFile.data.map')
     expect(dataSource).not.toContain('const chunks = buildViewJsonInstanceChunks(instances)')
-    expect(dataSource).toContain('chunks,')
-    expect(dataSource).toContain('rasterTileBuckets,')
-    expect(dataSource).toContain('loadStats:')
-    expect(dataSource).toContain('readMs:')
-    expect(dataSource).toContain('parseMs:')
-    expect(dataSource).toContain('transformMs:')
-    expect(dataSource).toContain('chunkMs:')
-    expect(dataSource).toContain('totalInstanceCount: chunkIndex.totalInstanceCount')
-    expect(dataSource).toContain('maxChunkInstanceCount: chunkIndex.maxChunkInstanceCount')
     expect(source).toContain('this.chunks = data.chunks')
     expect(source).toContain('this.rasterTileBuckets = data.rasterTileBuckets')
+    expect(source).toContain('this.rasterTileBuckets = data.rasterTileBuckets\n    this.gpuInstanceRenderer.resetCache()\n    this.clearRasterTiles()')
     expect(source).not.toContain('buildViewJsonInstanceChunks(data.instances)')
     expect(source).toContain('updateVisibleChunks(')
     expect(source).toContain('getVisibleBounds()')
-    expect(source).toContain('visibleChunkCount')
-    expect(source).toContain('VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES')
-    expect(source).toContain('estimateChunkCountForRange(')
-    expect(source).toContain('const shouldUseRasterWithoutCountingInstances = shouldRenderChunkOverviewBase(')
-    expect(source).toContain('shouldUseRasterWithoutCountingInstances')
-    expect(source).toContain('let visibleInstanceCount = 0')
-    expect(source).toContain('if (!shouldUseRasterWithoutCountingInstances)')
-    expect(source).toContain('shouldRenderChunkOverview(this.viewport.scale.x, visibleChunkCount, visibleInstanceCount)')
-    expect(source).toContain('lastChunkRenderSignature')
     expect(source).toContain('getChunksInRange(')
     expect(source).toContain('const seenInstanceIds = new Set<number>()')
-    expect(source).toContain('seenInstanceIds.has(inst.id)')
     expect(source).toContain('countInstancesInChunks(')
-    expect(source).toContain('countInstancesInRange(')
-    expect(source).toContain('this.lastVisibleInstanceCount = visibleInstanceCount')
     expect(source).toContain('const chunk = this.chunks.get(`${chunkX}:${chunkY}`)')
     expect(source).toContain('const detailChunks = this.getUniqueChunksInRange(detailRange)')
-    expect(source).toContain('this.gpuInstanceRenderer.renderChunks(detailChunks)')
-    expect(source).toContain('this.lastVisibleInstanceCount = this.countInstancesInChunks(detailChunks)')
-    expect(source).toContain('this.lastVisibleChunkCount = detailChunks.length')
+    expect(source).toContain('const gpuOutlineWidth = getViewJsonGpuOutlineWorldWidth(this.viewport.scale.x)')
+    expect(source).toContain('this.gpuInstanceRenderer.renderChunks(detailChunks, gpuOutlineWidth)')
+    expect(source).toContain('getViewJsonVectorChunkSignature(chunk)')
+    expect(source).toContain('active.instanceSignature !== chunkSignature')
+    expect(source).not.toContain('this.instanceChunksContainer.visible = true\n    this.clearActiveChunks()')
     expect(source).not.toContain('this.gpuInstanceRenderer.render(detail.instances)')
     expect(source).not.toContain('const visibleInstances = this.getInstancesInRange(detailRange)')
     expect(source).not.toContain('getChunksAndInstancesInRange(')
-    expect(source).not.toContain('this.lastVisibleChunkCount = this.getChunksInRange(detailRange).length')
     expect(source).toContain('rasterTileContainer')
     expect(source).toContain('activeRasterTiles')
-    expect(source).toContain('updateRasterTiles(')
-    expect(source).toContain('createRasterTile(')
-    expect(source).toContain('drawRasterTileCanvas(')
+    expect(source).toContain('clampViewJsonRasterTileRangeToWorld(')
+    expect(source).toContain("from './rasterTileDrawing'")
+    expect(source).toContain('sortViewJsonRasterInstancesForPaint,')
+    expect(source).toContain('pendingRasterTileKeys')
+    expect(source).toContain('buildingRasterTileKeys')
+    expect(source).toContain('this.buildingRasterTileKeys.has(key)')
+    expect(source).toContain('this.buildingRasterTileKeys.delete(key)')
+    expect(source).toContain('rasterTileBuildQueue')
+    expect(source).toContain('ViewJsonRasterTileWorkerClient')
+    expect(source).toContain('createRasterTileAsync(')
+    expect(source).toContain('this.rasterTileWorkerClient?.renderTile(')
+    expect(source).toContain('scheduleRasterTileBuild(')
+    expect(source).toContain('processRasterTileBuildQueue(')
+    expect(source).toContain('VIEW_JSON_RASTER_TILE_BUILD_FRAME_BUDGET_MS')
+    expect(source).toContain('requestId !== this.rasterTileBuildRequestId')
+    expect(source).toContain('cancelPendingRasterTileBuilds(')
+    expect(source).toMatch(/this\.rasterTileContainer\.visible = false[\s\S]*?this\.cancelPendingRasterTileBuilds\(\)/)
     expect(source).toContain('Texture.from(canvas)')
     expect(source).toContain('new Sprite(texture)')
-    expect(source).toContain('const instances = this.rasterTileBuckets.get')
     expect(source).not.toContain('const chunks = this.getChunksInRange(getViewJsonChunkRangeForBounds(tileWorld')
     expect(source).toContain('pruneRasterTileCache(')
     expect(source).toContain("this.viewport.on('moved'")
@@ -268,27 +271,12 @@ describe('ViewJsonOverviewRenderer', () => {
     expect(source).toContain("this.viewport.on('moved-end'")
     expect(source).toContain("this.viewport.on('zoomed-end'")
     expect(source).toContain('setInteractivePreviewMode(')
-    expect(source).toContain('VIEW_JSON_INTERACTIVE_PREVIEW_RESTORE_MS')
-    expect(source).toContain('freezeInteractivePreview(')
-    expect(source).toContain('this.freezeInteractivePreview()')
+    expect(source).toMatch(/this\.performanceCounters\.renderMode = 'preview'[\s\S]*?this\.cancelPendingRasterTileBuilds\(\)[\s\S]*?this\.lastChunkRenderSignature = ''/)
     expect(source).not.toContain('showInteractivePreviewRaster(')
     expect(source).not.toContain('restoreFrozenPreviewLayers(')
-    expect(source).not.toContain('this.showInteractivePreviewRaster()')
-    expect(source).not.toContain('this.restoreFrozenPreviewLayers()')
     expect(source).not.toContain('frozenDetailRenderMode')
-    const previewModeMethod = source.match(/private setInteractivePreviewMode\(enabled: boolean\): void \{[\s\S]*?\n  \}/)?.[0] ?? ''
-    expect(previewModeMethod).toContain('if (this.interactivePreviewMode) return')
-    expect(source).toMatch(
-      /if \(enabled\) \{[\s\S]*?this\.freezeInteractivePreview\(\)[\s\S]*?return/,
-    )
-    const onChangeBlock = source.match(/const onChange = \(\): void => \{[\s\S]*?\n    \}/)?.[0] ?? ''
-    expect(onChangeBlock).not.toContain('this.requestVisibleChunkUpdate()')
-    const restoreMethod = source.match(/private restoreInteractivePreviewMode\(\): void \{[\s\S]*?\n  \}/)?.[0] ?? ''
-    expect(restoreMethod).not.toContain("this.lastChunkRenderSignature = ''")
-    expect(restoreMethod).toContain('this.requestVisibleChunkUpdate()')
     expect(source).not.toContain('renderInteractivePreviewTiles(')
     expect(source).toContain('redrawVisibleChunks(')
-    expect(source).toContain('this.lastHatchVisible')
     expect(source).toContain('lineTo(')
     expect(source).toContain('pixelLine: true')
     expect(source).toContain('.stroke(')
@@ -308,12 +296,253 @@ describe('ViewJsonOverviewRenderer', () => {
 
   it('exposes lightweight performance stats for the DrawingArea HUD', () => {
     expect(dataSource).toContain('export type ViewJsonRenderMode')
-    expect(source).toContain('export interface ViewJsonRendererStats')
+    expect(source).toContain("from './performanceStats'")
+    expect(source).toContain('type ViewJsonRendererStats')
+    expect(source).toContain('ViewJsonPerformanceCounters')
     expect(source).toContain('getPerformanceStats()')
-    expect(source).toContain('lastRenderMode')
-    expect(source).toContain('lastVisibleInstanceCount')
-    expect(source).toContain('lastRebuildMs')
+    expect(source).toContain('this.performanceCounters.snapshot({')
+    expect(source).toContain('this.performanceCounters.reset()')
+    expect(source).toContain('this.performanceCounters.renderMode')
+    expect(source).toContain('this.performanceCounters.visibleInstanceCount')
+    expect(source).toContain('this.performanceCounters.rebuildMs')
+    expect(source).toContain('pendingRasterTileKeys.size')
+    expect(source).toContain('buildingRasterTileKeys.size')
+    expect(source).toContain('activeRasterTiles.size')
+    expect(source).toContain('recordRasterTileCacheHit()')
+    expect(source).toContain('recordRasterTileCacheMiss()')
+    expect(source).toContain('recordRasterTileFallback()')
+    expect(source).toContain('recordRasterTileWorkerMs(')
+    expect(source).toContain('this.gpuInstanceRenderer.getCacheStats()')
     expect(source).toContain('performance.now()')
+  })
+})
+
+describe('raster overview rendering', () => {
+  it('uses opaque pastel fills so same-status overlaps do not darken', () => {
+    expect(getViewJsonRasterFillStyle('PLACED')).toBe('rgb(191, 219, 254)')
+    expect(getViewJsonRasterFillStyle('FIXED')).toBe('rgb(254, 215, 170)')
+    expect(getViewJsonRasterFillStyle('')).not.toContain('rgba')
+  })
+
+  it('draws raster tiles through a canvas-like API shared with the worker', () => {
+    const calls: string[] = []
+    const context = {
+      fillStyle: '',
+      imageSmoothingEnabled: true,
+      clearRect: (...args: number[]) => calls.push(`clear:${args.join(',')}`),
+      fillRect: (...args: number[]) => calls.push(`fill:${context.fillStyle}:${args.join(',')}`),
+    }
+    const canvas = {
+      width: 512,
+      height: 512,
+      getContext: () => context,
+    }
+
+    drawViewJsonRasterTileToCanvasLike(canvas, 0, 0, [
+      {
+        id: 1,
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 10,
+        status: 'PLACED',
+      },
+    ])
+
+    expect(context.imageSmoothingEnabled).toBe(false)
+    expect(calls).toEqual([
+      'clear:0,0,512,512',
+      'fill:rgb(191, 219, 254):0,0,1,1',
+    ])
+  })
+
+  it('paints placed instances before fixed instances in raster overview tiles', () => {
+    const instances: ViewJsonRasterInstance[] = [
+      {
+        id: 1,
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 10,
+        status: 'FIXED',
+      },
+      {
+        id: 2,
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 10,
+        status: 'PLACED',
+      },
+      {
+        id: 3,
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 10,
+        status: 'PLACED',
+      },
+    ]
+
+    expect(sortViewJsonRasterInstancesForPaint(instances).map(inst => inst.id)).toEqual([2, 3, 1])
+  })
+
+  it('prefetches one raster tile around the visible area for smoother panning', () => {
+    expect(VIEW_JSON_RASTER_TILE_PREFETCH_PADDING).toBe(VIEW_JSON_RASTER_TILE_WORLD_SIZE)
+  })
+
+  it('clamps prefetched raster tiles to the overview world bounds', () => {
+    expect(clampViewJsonRasterTileRangeToWorld(
+      { minX: -1, minY: -1, maxX: 2, maxY: 2 },
+      VIEW_JSON_RASTER_TILE_WORLD_SIZE * 2,
+      VIEW_JSON_RASTER_TILE_WORLD_SIZE * 2,
+    )).toEqual({
+      minX: 0,
+      minY: 0,
+      maxX: 1,
+      maxY: 1,
+    })
+  })
+
+  it('only enables GPU outlines after instances are large enough on screen', () => {
+    expect(getViewJsonGpuOutlineWorldWidth(VIEW_JSON_GPU_OUTLINE_MIN_SCALE / 2)).toBe(0)
+    expect(getViewJsonGpuOutlineWorldWidth(VIEW_JSON_GPU_OUTLINE_MIN_SCALE)).toBeGreaterThan(0)
+  })
+
+  it('detects when a cached vector chunk needs to be redrawn', () => {
+    const chunk: ViewJsonInstanceChunk = {
+      key: '0:0',
+      x: 0,
+      y: 0,
+      instances: [
+        {
+          id: 1,
+          name: 'a',
+          bbox: [0, 0, 10, 10],
+          world: { x: 0, y: 0, w: 10, h: 10 },
+          status: 'PLACED',
+          masterId: null,
+          origin: null,
+          orient: 'N',
+        },
+        {
+          id: 2,
+          name: 'b',
+          bbox: [0, 0, 10, 10],
+          world: { x: 10, y: 10, w: 10, h: 10 },
+          status: 'FIXED',
+          masterId: null,
+          origin: null,
+          orient: 'N',
+        },
+      ],
+    }
+
+    expect(getViewJsonVectorChunkSignature(chunk)).toBe('0:0:1:PLACED,2:FIXED')
+  })
+
+  it('prioritizes queued raster tiles near the viewport center', () => {
+    const queue = [
+      { key: '3:3', tileX: 3, tileY: 3 },
+      { key: '1:1', tileX: 1, tileY: 1 },
+      { key: '2:2', tileX: 2, tileY: 2 },
+    ]
+
+    expect(sortViewJsonRasterTileQueueByDistance(queue, {
+      x: VIEW_JSON_RASTER_TILE_WORLD_SIZE * 2.25,
+      y: VIEW_JSON_RASTER_TILE_WORLD_SIZE * 2.25,
+    }).map(tile => tile.key)).toEqual(['2:2', '1:1', '3:3'])
+  })
+
+  it('counts unique instances in a chunk range without exceeding the limit', () => {
+    const shared: ViewJsonOverviewInstance = {
+      id: 1,
+      name: 'shared',
+      bbox: [0, 0, 10, 10],
+      world: { x: 0, y: 0, w: 10, h: 10 },
+      status: 'PLACED',
+      masterId: null,
+      origin: null,
+      orient: 'N',
+    }
+    const second: ViewJsonOverviewInstance = {
+      ...shared,
+      id: 2,
+      name: 'second',
+    }
+    const chunks = new Map<string, ViewJsonInstanceChunk>([
+      ['0:0', { key: '0:0', x: 0, y: 0, instances: [shared, second] }],
+      ['1:0', { key: '1:0', x: 1, y: 0, instances: [shared] }],
+    ])
+
+    expect(countViewJsonUniqueInstancesInRange(chunks, {
+      minX: 0,
+      minY: 0,
+      maxX: 1,
+      maxY: 0,
+    })).toBe(2)
+    expect(countViewJsonUniqueInstancesInRange(chunks, {
+      minX: 0,
+      minY: 0,
+      maxX: 1,
+      maxY: 0,
+    }, 1)).toBe(1)
+  })
+
+  it('caps visible instance counting for raster threshold checks', () => {
+    expect(source).toContain('countViewJsonUniqueInstancesInRange(')
+    expect(source).toContain('const detailInstanceLimit = getViewJsonAdaptiveDetailInstanceLimit(this.adaptiveRenderState)')
+    expect(source).toContain('countInstancesInRange(overviewRange, detailInstanceLimit + 1)')
+    expect(source).toContain('if (count >= limit) return count')
+  })
+
+  it('does not fall back to main-thread tile drawing when an async tile request was cancelled', () => {
+    expect(isViewJsonRasterTileBuildCancelled(
+      '0:0',
+      1,
+      2,
+      new Set(['0:0']),
+      false,
+    )).toBe(true)
+    expect(isViewJsonRasterTileBuildCancelled(
+      '0:0',
+      2,
+      2,
+      new Set(['0:0']),
+      false,
+    )).toBe(false)
+    expect(isViewJsonRasterTileBuildCancelled(
+      '1:0',
+      2,
+      2,
+      new Set(['0:0']),
+      false,
+    )).toBe(true)
+    expect(isViewJsonRasterTileBuildCancelled(
+      '0:0',
+      2,
+      2,
+      new Set(['0:0']),
+      true,
+    )).toBe(true)
+    expect(source).toContain('this.destroyed = true')
+    expect(source).toContain('isViewJsonRasterTileBuildCancelled(')
+    expect(source).toContain('if (this.isRasterTileBuildCancelled(key, requestId)) return')
+  })
+
+  it('limits concurrent raster tile worker builds instead of flooding the worker queue', () => {
+    expect(VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS).toBeGreaterThan(0)
+    expect(shouldStartViewJsonRasterTileBuild(0, 1, 0)).toBe(false)
+    expect(shouldStartViewJsonRasterTileBuild(1, 1, 0)).toBe(true)
+    expect(shouldStartViewJsonRasterTileBuild(1, 1, 1)).toBe(false)
+    expect(source).toContain('VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS')
+    expect(source).toContain('shouldStartViewJsonRasterTileBuild(')
+    expect(source).toContain('private rasterTileBuildInFlightCount = 0')
+    expect(source).toContain('this.rasterTileBuildInFlightCount += 1')
+    expect(source).toContain('this.rasterTileBuildInFlightCount -= 1')
+    expect(source).toContain('this.processRasterTileBuildQueue(this.rasterTileBuildRequestId)')
+    expect(source).not.toContain('this.processRasterTileBuildQueue(requestId)')
+    expect(source).toContain('this.scheduleRasterTileBuild(requestId)')
   })
 })
 
@@ -434,6 +663,23 @@ describe('shouldRenderChunkOverview', () => {
   })
 })
 
+describe('adaptive view JSON render strategy', () => {
+  it('tightens the detail instance limit when FPS is low and relaxes it when FPS recovers', () => {
+    const state = updateViewJsonAdaptiveRenderState({ lowFpsSampleCount: 0 }, 18)
+
+    expect(state.lowFpsSampleCount).toBe(1)
+    expect(getViewJsonAdaptiveDetailInstanceLimit(state)).toBeLessThan(
+      VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES,
+    )
+
+    const recovered = updateViewJsonAdaptiveRenderState(state, 55)
+    expect(recovered.lowFpsSampleCount).toBe(0)
+    expect(getViewJsonAdaptiveDetailInstanceLimit(recovered)).toBe(
+      VIEW_JSON_CHUNK_OVERVIEW_MAX_DETAIL_INSTANCES,
+    )
+  })
+})
+
 describe('buildViewJsonInstanceChunks', () => {
   it('groups instances by world-space chunk coordinates', () => {
     const instances: ViewJsonOverviewInstance[] = [
@@ -509,6 +755,14 @@ describe('buildViewJsonInstanceChunkIndex', () => {
     expect(index.maxChunkInstanceCount).toBe(5)
     expect(index.chunks.get('0:0')?.instances.map(inst => inst.id)).toEqual([0, 1, 2, 3, 4])
     expect(index.rasterTileBuckets.get('0:0')?.map(inst => inst.id)).toEqual([0, 1, 2, 3, 4])
+    expect(Object.keys(index.rasterTileBuckets.get('0:0')?.[0] ?? {}).sort()).toEqual([
+      'h',
+      'id',
+      'status',
+      'w',
+      'x',
+      'y',
+    ])
   })
 
   it('indexes instances into every raster tile they overlap', async () => {
@@ -538,6 +792,46 @@ describe('buildViewJsonInstanceChunkIndex', () => {
     expect([...index.rasterTileBuckets.keys()].sort()).toEqual(['0:1', '1:1'])
     expect(index.rasterTileBuckets.get('0:1')?.map(inst => inst.id)).toEqual([1])
     expect(index.rasterTileBuckets.get('1:1')?.map(inst => inst.id)).toEqual([1])
+  })
+
+  it('stores raster tile buckets in paint order', async () => {
+    const rawInstances = [
+      {
+        id: 1,
+        name: 'fixed-a',
+        master_id: 1,
+        bbox: [0, 0, 10, 10],
+        origin: [0, 0],
+        orient: 'N',
+        status: 'FIXED',
+      },
+      {
+        id: 2,
+        name: 'placed-a',
+        master_id: 2,
+        bbox: [10, 0, 20, 10],
+        origin: [10, 0],
+        orient: 'N',
+        status: 'PLACED',
+      },
+      {
+        id: 3,
+        name: 'fixed-b',
+        master_id: 3,
+        bbox: [20, 0, 30, 10],
+        origin: [20, 0],
+        orient: 'N',
+        status: 'FIXED',
+      },
+    ]
+
+    const index = await buildViewJsonInstanceChunkIndex(
+      rawInstances,
+      VIEW_JSON_RASTER_TILE_WORLD_SIZE,
+      { batchSize: 10 },
+    )
+
+    expect(index.rasterTileBuckets.get('0:0')?.map(inst => inst.id)).toEqual([2, 1, 3])
   })
 
   it('indexes instances into every detail chunk touched by their bbox', async () => {
