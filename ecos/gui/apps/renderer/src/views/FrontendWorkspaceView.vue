@@ -54,6 +54,32 @@
             </div>
           </section>
 
+          <section class="frontend-config-card">
+            <div class="frontend-config-card__head">
+              <div>
+                <strong>Frontend Configuration</strong>
+                <span>Read-only selections from this workspace.</span>
+              </div>
+              <span class="frontend-config-card__badge">Read only</span>
+            </div>
+            <div class="frontend-config-grid">
+              <div
+                v-for="item in frontendConfigItems"
+                :key="item.label"
+                class="frontend-config-item"
+                :class="{ wide: item.wide }"
+              >
+                <span>{{ item.label }}</span>
+                <strong
+                  :title="item.value"
+                  :class="{ mono: item.mono, highlight: item.highlight }"
+                >
+                  {{ item.value }}
+                </strong>
+              </div>
+            </div>
+          </section>
+
           <section class="workspace-home-card">
             <div class="workspace-home-card__head">
               <strong>Workspace Home</strong>
@@ -343,6 +369,7 @@ import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendSourceEditor from '@/components/FrontendSourceEditor.vue'
@@ -393,6 +420,14 @@ interface FrontendSourceSelection {
   path: string
 }
 
+interface FrontendConfigItem {
+  label: string
+  value: string
+  mono?: boolean
+  highlight?: boolean
+  wide?: boolean
+}
+
 type TabId = 'summary' | 'cases' | 'log' | 'reports' | 'artifacts' | 'src' | 'wave'
 
 const route = useRoute()
@@ -402,6 +437,7 @@ const {
   showToast,
   invalidateWorkspaceResources,
 } = useWorkspace()
+const { config } = useParameters()
 const steps = ref<WorkspaceStepResource[]>([])
 const loading = ref(false)
 const runBusy = ref(false)
@@ -467,6 +503,38 @@ const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.val
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
+const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
+  { label: 'Design', value: config.design || currentProject.value?.name || '--', highlight: true },
+  { label: 'Top Module', value: config.topModule || '--', mono: true },
+  {
+    label: 'CPU Source',
+    value: displayCatalogId(config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : '')),
+  },
+  {
+    label: 'SoC Harness',
+    value: displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || ''),
+  },
+  { label: 'Toolchain', value: displayCatalogId(config.frontend.toolchainId || '') },
+  { label: 'Test Suite', value: displayCatalogId(config.frontend.testSuiteId || '') },
+  { label: 'Clock', value: config.clock || '--' },
+  { label: 'Target Frequency', value: config.frequencyMax ? `${config.frequencyMax} MHz` : '--' },
+  {
+    label: 'CPU Filelist',
+    value: config.frontend.cpuFilelist || config.frontend.inputFilelist || '--',
+    mono: true,
+    wide: true,
+  },
+  {
+    label: 'Default Cases',
+    value: config.frontend.simAllTests
+      ? 'All CPU tests'
+      : config.frontend.simProgramNames.length
+        ? config.frontend.simProgramNames.join(', ')
+        : '--',
+    mono: true,
+    wide: true,
+  },
+])
 const availableCpuTests = computed(() => {
   const raw = detail.value?.summary?.available_cpu_tests
   return Array.isArray(raw) ? raw.map((item) => String(item)).filter(Boolean) : []
@@ -715,6 +783,15 @@ function toggleCpuCase(name: string): void {
 
 function simSuiteLabelFor(suite: 'cpu_tests' | 'rtthread'): string {
   return suite === 'rtthread' ? 'RT-Thread' : 'CPU Tests'
+}
+
+function displayCatalogId(value: string): string {
+  if (!value) return '--'
+  return value
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part.toUpperCase() === part ? part : part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 function preferredLogPath(): string {
@@ -1250,6 +1327,99 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.frontend-config-card {
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.frontend-config-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.frontend-config-card__head div {
+  min-width: 0;
+}
+
+.frontend-config-card__head div > strong,
+.frontend-config-card__head div > span {
+  display: block;
+}
+
+.frontend-config-card__head div > span {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.frontend-config-card__badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.frontend-config-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.frontend-config-item {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: default;
+}
+
+.frontend-config-item.wide {
+  grid-column: span 2;
+}
+
+.frontend-config-item span,
+.frontend-config-item strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frontend-config-item span {
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.frontend-config-item strong {
+  font-size: 13px;
+}
+
+.frontend-config-item strong.mono {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.frontend-config-item strong.highlight {
+  color: var(--accent-color);
+}
+
 .workspace-home-card {
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -1757,6 +1927,10 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .frontend-config-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .workspace-home-card__head,
   .workspace-home-card__body {
     grid-template-columns: 1fr;
@@ -1774,6 +1948,21 @@ button:disabled {
 
   .sim-run-action {
     width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .frontend-config-card__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .frontend-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .frontend-config-item.wide {
+    grid-column: auto;
   }
 }
 </style>
