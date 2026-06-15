@@ -1,246 +1,104 @@
 import { Container, Mesh, MeshGeometry, Texture } from 'pixi.js'
 import type { ViewJsonInstanceChunk, ViewJsonOverviewInstance } from './overview'
-
-const PLACED_INSTANCE_COLOR = 0x2563eb
-const FIXED_INSTANCE_COLOR = 0xd97706
-const PLACED_INSTANCE_ALPHA = 0.28
-const FIXED_INSTANCE_ALPHA = 0.42
-
-export interface GpuInstanceMeshBuffers {
-  positions: Float32Array
-  uvs: Float32Array
-  indices: Uint32Array
-  instanceCount: number
-}
-
-export interface GpuInstanceMeshGroups {
-  placed: ViewJsonOverviewInstance[]
-  fixed: ViewJsonOverviewInstance[]
-}
-
-export interface GpuInstanceMeshBufferGroups {
-  placed: GpuInstanceMeshBuffers
-  fixed: GpuInstanceMeshBuffers
-}
-
-type GpuInstanceMeshGroup = 'placed' | 'fixed'
-
-export function splitGpuInstanceMeshGroups(
-  instances: ViewJsonOverviewInstance[],
-): GpuInstanceMeshGroups {
-  const placed: ViewJsonOverviewInstance[] = []
-  const fixed: ViewJsonOverviewInstance[] = []
-
-  for (const inst of instances) {
-    if (inst.status === 'FIXED') {
-      fixed.push(inst)
-    } else {
-      placed.push(inst)
-    }
-  }
-
-  return { placed, fixed }
-}
-
-export function buildGpuInstanceMeshBuffers(
-  instances: ViewJsonOverviewInstance[],
-): GpuInstanceMeshBuffers {
-  return buildGpuInstanceMeshBuffersFromIterable(instances)
-}
-
-export function buildGpuInstanceMeshBuffersFromChunks(
-  chunks: ViewJsonInstanceChunk[],
-  group?: GpuInstanceMeshGroup,
-): GpuInstanceMeshBuffers {
-  let validInstanceCount = 0
-
-  for (const chunk of chunks) {
-    for (const inst of chunk.instances) {
-      if (isRenderableGpuInstance(inst, group)) {
-        validInstanceCount += 1
-      }
-    }
-  }
-
-  return buildGpuInstanceMeshBuffersFromIterable(iterChunkInstances(chunks), validInstanceCount, group)
-}
-
-export function buildGpuInstanceMeshBufferGroupsFromChunks(
-  chunks: ViewJsonInstanceChunk[],
-): GpuInstanceMeshBufferGroups {
-  let placedInstanceCount = 0
-  let fixedInstanceCount = 0
-
-  for (const chunk of chunks) {
-    for (const inst of chunk.instances) {
-      if (!isRenderableGpuInstance(inst)) continue
-      if (inst.status === 'FIXED') {
-        fixedInstanceCount += 1
-      } else {
-        placedInstanceCount += 1
-      }
-    }
-  }
-
-  const placed = createEmptyGpuInstanceMeshBuffers(placedInstanceCount)
-  const fixed = createEmptyGpuInstanceMeshBuffers(fixedInstanceCount)
-  let placedIndex = 0
-  let fixedIndex = 0
-
-  for (const chunk of chunks) {
-    for (const inst of chunk.instances) {
-      if (!isRenderableGpuInstance(inst)) continue
-      if (inst.status === 'FIXED') {
-        writeGpuInstanceQuad(inst, fixedIndex, fixed.positions, fixed.uvs, fixed.indices)
-        fixedIndex += 1
-      } else {
-        writeGpuInstanceQuad(inst, placedIndex, placed.positions, placed.uvs, placed.indices)
-        placedIndex += 1
-      }
-    }
-  }
-
-  return { placed, fixed }
-}
-
-function* iterChunkInstances(chunks: ViewJsonInstanceChunk[]): Iterable<ViewJsonOverviewInstance> {
-  for (const chunk of chunks) {
-    yield* chunk.instances
-  }
-}
-
-function buildGpuInstanceMeshBuffersFromIterable(
-  instances: Iterable<ViewJsonOverviewInstance>,
-  knownValidInstanceCount?: number,
-  group?: GpuInstanceMeshGroup,
-): GpuInstanceMeshBuffers {
-  const validInstanceCount = knownValidInstanceCount ?? countValidGpuInstances(instances, group)
-  const buffers = createEmptyGpuInstanceMeshBuffers(validInstanceCount)
-  let i = 0
-
-  for (const inst of instances) {
-    if (!isRenderableGpuInstance(inst, group)) continue
-    writeGpuInstanceQuad(inst, i, buffers.positions, buffers.uvs, buffers.indices)
-    i += 1
-  }
-
-  return buffers
-}
-
-function createEmptyGpuInstanceMeshBuffers(instanceCount: number): GpuInstanceMeshBuffers {
-  return {
-    positions: new Float32Array(instanceCount * 8),
-    uvs: new Float32Array(instanceCount * 8),
-    indices: new Uint32Array(instanceCount * 6),
-    instanceCount,
-  }
-}
-
-function countValidGpuInstances(
-  instances: Iterable<ViewJsonOverviewInstance>,
-  group?: GpuInstanceMeshGroup,
-): number {
-  let count = 0
-
-  for (const inst of instances) {
-    if (isRenderableGpuInstance(inst, group)) {
-      count += 1
-    }
-  }
-
-  return count
-}
-
-function isRenderableGpuInstance(
-  inst: ViewJsonOverviewInstance,
-  group?: GpuInstanceMeshGroup,
-): boolean {
-  if (inst.world.w <= 0 || inst.world.h <= 0) return false
-  if (!group) return true
-  return group === 'fixed' ? inst.status === 'FIXED' : inst.status !== 'FIXED'
-}
-
-function writeGpuInstanceQuad(
-  inst: ViewJsonOverviewInstance,
-  index: number,
-  positions: Float32Array,
-  uvs: Float32Array,
-  indices: Uint32Array,
-): void {
-  const { x, y, w, h } = inst.world
-  const vertexOffset = index * 8
-  const indexOffset = index * 6
-  const baseVertex = index * 4
-  const x1 = x + w
-  const y1 = y + h
-
-  positions.set([
-    x, y,
-    x1, y,
-    x1, y1,
-    x, y1,
-  ], vertexOffset)
-  uvs.set([
-    0, 0,
-    1, 0,
-    1, 1,
-    0, 1,
-  ], vertexOffset)
-  indices.set([
-    baseVertex,
-    baseVertex + 1,
-    baseVertex + 2,
-    baseVertex,
-    baseVertex + 2,
-    baseVertex + 3,
-  ], indexOffset)
-}
+import {
+  GPU_FIXED_INSTANCE_ALPHA,
+  GPU_FIXED_INSTANCE_COLOR,
+  GPU_INSTANCE_OUTLINE_ALPHA,
+  GPU_PLACED_INSTANCE_ALPHA,
+  GPU_PLACED_INSTANCE_COLOR,
+  GpuInstanceChunkBufferCache,
+  buildGpuInstanceMeshBufferGroupsFromCachedChunks,
+  buildGpuInstanceMeshBuffers,
+  buildGpuInstanceOutlineMeshBufferGroupsFromCachedChunks,
+  buildGpuInstanceOutlineMeshBuffers,
+  splitGpuInstanceMeshGroups,
+  type GpuInstanceMeshBuffers,
+} from './gpuInstanceBuffers'
 
 export class GpuInstanceMeshRenderer {
   readonly container = new Container()
   private placedMesh: Mesh<MeshGeometry> | null = null
   private fixedMesh: Mesh<MeshGeometry> | null = null
+  private placedOutlineMesh: Mesh<MeshGeometry> | null = null
+  private fixedOutlineMesh: Mesh<MeshGeometry> | null = null
+  private readonly chunkBufferCache = new GpuInstanceChunkBufferCache()
 
   constructor(parent: Container) {
     this.container.label = 'view-json-gpu-instance-meshes'
     parent.addChild(this.container)
   }
 
-  render(instances: ViewJsonOverviewInstance[]): void {
+  render(instances: ViewJsonOverviewInstance[], outlineWidth = 0): void {
     const groups = splitGpuInstanceMeshGroups(instances)
 
     this.placedMesh = this.replaceMesh(
       this.placedMesh,
       groups.placed,
       'view-json-gpu-placed-instances',
-      PLACED_INSTANCE_COLOR,
-      PLACED_INSTANCE_ALPHA,
+      GPU_PLACED_INSTANCE_COLOR,
+      GPU_PLACED_INSTANCE_ALPHA,
     )
     this.fixedMesh = this.replaceMesh(
       this.fixedMesh,
       groups.fixed,
       'view-json-gpu-fixed-instances',
-      FIXED_INSTANCE_COLOR,
-      FIXED_INSTANCE_ALPHA,
+      GPU_FIXED_INSTANCE_COLOR,
+      GPU_FIXED_INSTANCE_ALPHA,
+    )
+    this.placedOutlineMesh = this.replaceOutlineMesh(
+      this.placedOutlineMesh,
+      groups.placed,
+      outlineWidth,
+      'view-json-gpu-placed-instance-outlines',
+      GPU_PLACED_INSTANCE_COLOR,
+    )
+    this.fixedOutlineMesh = this.replaceOutlineMesh(
+      this.fixedOutlineMesh,
+      groups.fixed,
+      outlineWidth,
+      'view-json-gpu-fixed-instance-outlines',
+      GPU_FIXED_INSTANCE_COLOR,
     )
   }
 
-  renderChunks(chunks: ViewJsonInstanceChunk[]): void {
-    const buffers = buildGpuInstanceMeshBufferGroupsFromChunks(chunks)
+  renderChunks(chunks: ViewJsonInstanceChunk[], outlineWidth = 0): void {
+    const buffers = buildGpuInstanceMeshBufferGroupsFromCachedChunks(
+      chunks,
+      this.chunkBufferCache,
+    )
+    const outlineBuffers = outlineWidth > 0
+      ? buildGpuInstanceOutlineMeshBufferGroupsFromCachedChunks(
+        chunks,
+        this.chunkBufferCache,
+        outlineWidth,
+      )
+      : null
 
     this.placedMesh = this.replaceMeshFromBuffers(
       this.placedMesh,
       buffers.placed,
       'view-json-gpu-placed-instances',
-      PLACED_INSTANCE_COLOR,
-      PLACED_INSTANCE_ALPHA,
+      GPU_PLACED_INSTANCE_COLOR,
+      GPU_PLACED_INSTANCE_ALPHA,
     )
     this.fixedMesh = this.replaceMeshFromBuffers(
       this.fixedMesh,
       buffers.fixed,
       'view-json-gpu-fixed-instances',
-      FIXED_INSTANCE_COLOR,
-      FIXED_INSTANCE_ALPHA,
+      GPU_FIXED_INSTANCE_COLOR,
+      GPU_FIXED_INSTANCE_ALPHA,
+    )
+    this.placedOutlineMesh = this.replaceOutlineMeshFromBuffers(
+      this.placedOutlineMesh,
+      outlineBuffers?.placed ?? null,
+      'view-json-gpu-placed-instance-outlines',
+      GPU_PLACED_INSTANCE_COLOR,
+    )
+    this.fixedOutlineMesh = this.replaceOutlineMeshFromBuffers(
+      this.fixedOutlineMesh,
+      outlineBuffers?.fixed ?? null,
+      'view-json-gpu-fixed-instance-outlines',
+      GPU_FIXED_INSTANCE_COLOR,
     )
   }
 
@@ -248,15 +106,30 @@ export class GpuInstanceMeshRenderer {
     this.container.visible = visible
   }
 
+  getCacheStats(): { chunkBufferCacheSize: number } {
+    return {
+      chunkBufferCacheSize: this.chunkBufferCache.size,
+    }
+  }
+
   clear(): void {
     this.destroyMesh(this.placedMesh)
     this.destroyMesh(this.fixedMesh)
+    this.destroyMesh(this.placedOutlineMesh)
+    this.destroyMesh(this.fixedOutlineMesh)
     this.placedMesh = null
     this.fixedMesh = null
+    this.placedOutlineMesh = null
+    this.fixedOutlineMesh = null
+  }
+
+  resetCache(): void {
+    this.chunkBufferCache.clear()
   }
 
   destroy(): void {
     this.clear()
+    this.resetCache()
     if (this.container.parent) {
       this.container.parent.removeChild(this.container)
     }
@@ -285,6 +158,32 @@ export class GpuInstanceMeshRenderer {
   ): Mesh<MeshGeometry> | null {
     this.destroyMesh(current)
     return this.createMeshFromBuffers(buffers, label, color, alpha)
+  }
+
+  private replaceOutlineMesh(
+    current: Mesh<MeshGeometry> | null,
+    instances: ViewJsonOverviewInstance[],
+    outlineWidth: number,
+    label: string,
+    color: number,
+  ): Mesh<MeshGeometry> | null {
+    this.destroyMesh(current)
+    if (outlineWidth <= 0) return null
+
+    const buffers = buildGpuInstanceOutlineMeshBuffers(instances, outlineWidth)
+    return this.createMeshFromBuffers(buffers, label, color, GPU_INSTANCE_OUTLINE_ALPHA)
+  }
+
+  private replaceOutlineMeshFromBuffers(
+    current: Mesh<MeshGeometry> | null,
+    buffers: GpuInstanceMeshBuffers | null,
+    label: string,
+    color: number,
+  ): Mesh<MeshGeometry> | null {
+    this.destroyMesh(current)
+    if (!buffers) return null
+
+    return this.createMeshFromBuffers(buffers, label, color, GPU_INSTANCE_OUTLINE_ALPHA)
   }
 
   private createMeshFromBuffers(
