@@ -50,6 +50,8 @@ export interface FrontendValidationResult {
     cpu_wrapper_contract?: string
     cpu_socket_contract?: string
     cpu_wrapper_top?: string
+    cpu_supports_difftest?: boolean
+    core_supported_test_suites?: string[]
     soc_harness_capability?: string
     soc_wrapper_contract?: string
     soc_wrapper_top?: string

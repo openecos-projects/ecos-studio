@@ -408,6 +408,16 @@ const fallbackCatalog: FrontendCatalogPayload = {
       integration_level: 'sim_ready',
       requires_filelist: true,
     },
+    {
+      id: 'picorv32',
+      name: 'PicoRV32',
+      description: 'Small RV32IM Verilog core with an ECOS CPU wrapper for CPU tests.',
+      status: 'experimental',
+      integration_level: 'sim_ready',
+      requires_filelist: false,
+      supports_difftest: false,
+      supported_test_suites: ['cpu-tests', 'smoke'],
+    },
   ],
   soc_harnesses: [
     {
