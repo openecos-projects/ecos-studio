@@ -25,14 +25,16 @@ import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
 import {
+  createViewJsonPerformanceHudState,
   loadViewJsonOverview,
-  type ViewJsonRenderMode,
-  type ViewJsonRendererStats,
-  type ViewJsonLoadStats,
+  mergeViewJsonRendererStatsIntoHudState,
+  type ViewJsonPerformanceHudState,
   type ViewJsonOverviewData,
+  type ViewJsonRendererStats,
   ViewJsonOverviewRenderer,
 } from '@/applications/editor/view-json/overview'
 import { createViewJsonOverviewWorker } from '@/applications/editor/view-json/overviewWorker'
+import { createViewJsonRasterTileWorker } from '@/applications/editor/view-json/rasterTileWorker'
 
 const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
@@ -224,31 +226,7 @@ let performanceHudAccumulatedMs = 0
 let performanceHudFrameRunning = false
 let performanceHudLastUiUpdateAt = 0
 
-interface ViewJsonPerformanceHudState {
-  fps: number
-  frameMs: number
-  renderMode: ViewJsonRenderMode
-  visibleInstanceCount: number
-  visibleChunkCount: number
-  activeRasterTileCount: number
-  activeVectorChunkCount: number
-  scale: number
-  rebuildMs: number
-  loadStats: ViewJsonLoadStats | null
-}
-
-const viewJsonPerformanceHud = ref<ViewJsonPerformanceHudState>({
-  fps: 0,
-  frameMs: 0,
-  renderMode: 'idle',
-  visibleInstanceCount: 0,
-  visibleChunkCount: 0,
-  activeRasterTileCount: 0,
-  activeVectorChunkCount: 0,
-  scale: 1,
-  rebuildMs: 0,
-  loadStats: null,
-})
+const viewJsonPerformanceHud = ref<ViewJsonPerformanceHudState>(createViewJsonPerformanceHudState())
 const currentViewJsonOverview = shallowRef<ViewJsonOverviewData | null>(null)
 const currentViewJsonPackageRoot = ref<string | null>(null)
 const previewImageRelativePath = ref<string | null>(null)
@@ -281,18 +259,20 @@ function formatPerformanceInteger(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString() : '0'
 }
 
+function formatPerformanceMetric(visible: boolean, value: string): string {
+  return visible ? value : '-'
+}
+
+function formatPerformancePercent(value: number): string {
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : '0%'
+}
+
 function applyRendererStatsToHud(stats: ViewJsonRendererStats | null): void {
   if (!stats) return
-  viewJsonPerformanceHud.value = {
-    ...viewJsonPerformanceHud.value,
-    renderMode: stats.renderMode,
-    visibleInstanceCount: stats.visibleInstanceCount,
-    visibleChunkCount: stats.visibleChunkCount,
-    activeRasterTileCount: stats.activeRasterTileCount,
-    activeVectorChunkCount: stats.activeVectorChunkCount,
-    scale: stats.scale,
-    rebuildMs: stats.rebuildMs,
-  }
+  viewJsonPerformanceHud.value = mergeViewJsonRendererStatsIntoHudState(
+    viewJsonPerformanceHud.value,
+    stats,
+  )
 }
 
 function stopPerformanceHudSampling(): void {
@@ -325,10 +305,13 @@ function samplePerformanceHudFrame(now: number): void {
       performanceHudAccumulatedMs += delta
       if (shouldUpdateHud && performanceHudAccumulatedMs > 0) {
         const fps = performanceHudFrameCount * 1000 / performanceHudAccumulatedMs
-        viewJsonPerformanceHud.value = {
-          ...viewJsonPerformanceHud.value,
-          fps,
-          frameMs: performanceHudAccumulatedMs / performanceHudFrameCount,
+        viewJsonOverviewRenderer?.updateAdaptiveFrameRate(fps)
+        if (showViewJsonPerformanceHud.value) {
+          viewJsonPerformanceHud.value = {
+            ...viewJsonPerformanceHud.value,
+            fps,
+            frameMs: performanceHudAccumulatedMs / performanceHudFrameCount,
+          }
         }
         performanceHudFrameCount = 0
         performanceHudAccumulatedMs = 0
@@ -337,7 +320,9 @@ function samplePerformanceHudFrame(now: number): void {
     performanceHudLastFrameAt = now
 
     if (shouldUpdateHud) {
-      applyRendererStatsToHud(viewJsonOverviewRenderer?.getPerformanceStats() ?? null)
+      if (showViewJsonPerformanceHud.value) {
+        applyRendererStatsToHud(viewJsonOverviewRenderer?.getPerformanceStats() ?? null)
+      }
       performanceHudLastUiUpdateAt = now
     }
     performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
@@ -349,6 +334,10 @@ function samplePerformanceHudFrame(now: number): void {
 function startPerformanceHudSampling(): void {
   stopPerformanceHudSampling()
   performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
+}
+
+function startViewJsonPerformanceSampling(): void {
+  startPerformanceHudSampling()
 }
 
 function pickViewJsonPackageRoot(info: Record<string, unknown>): string | null {
@@ -399,18 +388,7 @@ function cleanupLayout(): void {
   layoutState.hasUnsavedEdits.value = false
   layoutState.isPlacementMode.value = false
   layoutState.renderMode.value = 'image'
-  viewJsonPerformanceHud.value = {
-    fps: 0,
-    frameMs: 0,
-    renderMode: 'idle',
-    visibleInstanceCount: 0,
-    visibleChunkCount: 0,
-    activeRasterTileCount: 0,
-    activeVectorChunkCount: 0,
-    scale: 1,
-    rebuildMs: 0,
-    loadStats: null,
-  }
+  viewJsonPerformanceHud.value = createViewJsonPerformanceHudState()
 }
 
 function clearCurrentViewJsonOverview(): void {
@@ -523,7 +501,9 @@ function showViewJsonLayout(
   ed.clearBackground()
   previewImageUrl.value = null
   ed.setWorldBounds(overview.worldWidth, overview.worldHeight)
-  viewJsonOverviewRenderer = markRaw(new ViewJsonOverviewRenderer(ed.view))
+  viewJsonOverviewRenderer = markRaw(new ViewJsonOverviewRenderer(ed.view, {
+    rasterTileWorkerFactory: createViewJsonRasterTileWorker,
+  }))
   viewJsonOverviewRenderer.render(overview)
   setupViewJsonLayoutActions(ed, overview)
   void loadDrcViolationOverlayAfterTiles(ed, overview.worldHeight, guard)
@@ -536,9 +516,7 @@ function showViewJsonLayout(
     loadStats: overview.loadStats,
   }
   applyRendererStatsToHud(viewJsonOverviewRenderer.getPerformanceStats())
-  if (showViewJsonPerformanceHud.value) {
-    startPerformanceHudSampling()
-  }
+  startViewJsonPerformanceSampling()
 
   const worldCenter = worldCenterForViewJson(overview)
   void nextTick(() => {
@@ -929,12 +907,50 @@ onUnmounted(() => {
             <span>{{ formatPerformanceInteger(viewJsonPerformanceHud.visibleChunkCount) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Limit</span>
+            <span>{{ formatPerformanceInteger(viewJsonPerformanceHud.adaptiveDetailInstanceLimit) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Tiles/Vec</span>
             <span>
               {{ formatPerformanceInteger(viewJsonPerformanceHud.activeRasterTileCount) }}
               /
               {{ formatPerformanceInteger(viewJsonPerformanceHud.activeVectorChunkCount) }}
             </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Tile Q/B/C</span>
+            <span>
+              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.pendingRasterTileCount)) }}
+              /
+              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.buildingRasterTileCount)) }}
+              /
+              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.activeRasterTileCount)) }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Hit/Miss</span>
+            <span>
+              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheHitCount)) }}
+              /
+              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheMissCount)) }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Hit%</span>
+            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformancePercent(viewJsonPerformanceHud.rasterTileCacheHitRate)) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Fallback%</span>
+            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformancePercent(viewJsonPerformanceHud.rasterTileFallbackRate)) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Worker</span>
+            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', `${formatPerformanceNumber(viewJsonPerformanceHud.lastRasterTileWorkerMs)}ms`) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">GPU Cache</span>
+            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'gpu', formatPerformanceInteger(viewJsonPerformanceHud.gpuChunkBufferCacheSize)) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Rebuild</span>

@@ -374,6 +374,7 @@ const getResourceUrl = vi.fn()
 const requestProjectPathAccess = vi.fn()
 const readOptionalProjectTextFile = vi.fn()
 const createViewJsonOverviewWorker = vi.fn()
+const createViewJsonRasterTileWorker = vi.fn()
 
 const mountedApps: Array<{ unmount: () => void }> = []
 
@@ -496,6 +497,16 @@ class MockViewJsonOverviewRenderer {
       visibleChunkCount: 1,
       activeRasterTileCount: 0,
       activeVectorChunkCount: 0,
+      adaptiveDetailInstanceLimit: 0,
+      pendingRasterTileCount: 0,
+      buildingRasterTileCount: 0,
+      rasterTileCacheHitCount: 0,
+      rasterTileCacheMissCount: 0,
+      rasterTileCacheHitRate: 0,
+      rasterTileFallbackCount: 0,
+      rasterTileFallbackRate: 0,
+      lastRasterTileWorkerMs: 0,
+      gpuChunkBufferCacheSize: 0,
       scale: 1,
       rebuildMs: 0,
     }
@@ -562,13 +573,44 @@ function compileDrawingArea(vue: VueRuntime) {
     }
     if (id === '@/applications/editor/view-json/overview') {
       return {
+        createViewJsonPerformanceHudState: () => ({
+          fps: 0,
+          frameMs: 0,
+          renderMode: 'idle',
+          visibleInstanceCount: 0,
+          visibleChunkCount: 0,
+          activeRasterTileCount: 0,
+          activeVectorChunkCount: 0,
+          adaptiveDetailInstanceLimit: 0,
+          pendingRasterTileCount: 0,
+          buildingRasterTileCount: 0,
+          rasterTileCacheHitCount: 0,
+          rasterTileCacheMissCount: 0,
+          rasterTileCacheHitRate: 0,
+          rasterTileFallbackCount: 0,
+          rasterTileFallbackRate: 0,
+          lastRasterTileWorkerMs: 0,
+          gpuChunkBufferCacheSize: 0,
+          scale: 1,
+          rebuildMs: 0,
+          loadStats: null,
+        }),
         loadViewJsonOverview,
+        mergeViewJsonRendererStatsIntoHudState: (state: Record<string, unknown>, stats: Record<string, unknown>) => ({
+          ...state,
+          ...stats,
+        }),
         ViewJsonOverviewRenderer: MockViewJsonOverviewRenderer,
       }
     }
     if (id === '@/applications/editor/view-json/overviewWorker') {
       return {
         createViewJsonOverviewWorker,
+      }
+    }
+    if (id === '@/applications/editor/view-json/rasterTileWorker') {
+      return {
+        createViewJsonRasterTileWorker,
       }
     }
     if (id === './DrawingToolbar.vue') {
@@ -701,6 +743,7 @@ function resetTestState(vue: VueRuntime, routePath: string): void {
   requestProjectPathAccess.mockClear()
   readOptionalProjectTextFile.mockClear()
   createViewJsonOverviewWorker.mockClear()
+  createViewJsonRasterTileWorker.mockClear()
 
   if (!requestProjectPathAccess.getMockImplementation()) {
     requestProjectPathAccess.mockResolvedValue(true)
@@ -773,6 +816,7 @@ afterEach(() => {
   requestProjectPathAccess.mockReset()
   readOptionalProjectTextFile.mockReset()
   createViewJsonOverviewWorker.mockReset()
+  createViewJsonRasterTileWorker.mockReset()
 
   restoreDomGlobals()
 })
