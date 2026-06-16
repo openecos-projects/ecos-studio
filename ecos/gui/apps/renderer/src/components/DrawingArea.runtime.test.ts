@@ -895,6 +895,57 @@ describe('DrawingArea runtime guards', () => {
     expect(container.querySelector('.to-layout-mode')).toBeNull()
   })
 
+  it('stops preview image loading when the image resource cannot be read', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        image: 'synth/output/missing.png',
+        json: 'synth/output/layout.json',
+      },
+    })
+    getResourceUrl.mockRejectedValue(new Error('ENOENT: missing preview image'))
+
+    try {
+      await mountDrawingArea('/workspace/Synthesis')
+
+      expect(getResourceUrl).toHaveBeenCalledWith(
+        'synth/output/missing.png',
+        '/workspace/demo',
+      )
+      expect(consoleError).toHaveBeenCalledWith(
+        'Failed to load stage results:',
+        expect.any(Error),
+      )
+      expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalled()
+      expect(testState!.fakeEditor.clearBackground).toHaveBeenCalled()
+      expect(testState!.layoutState.loadingState.value).toBe('idle')
+      expect(testState!.layoutState.loadingMessage.value).toBe('')
+      expect(testState!.layoutState.renderMode.value).toBe('image')
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('does not enter preview image loading when the stage has no image path', async () => {
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'missing',
+      info: {
+        json: 'synth/output/layout.json',
+      },
+      missing: ['synth/output/gcd_synth.png'],
+    })
+
+    await mountDrawingArea('/workspace/Synthesis')
+
+    expect(getResourceUrl).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.clearBackground).toHaveBeenCalled()
+    expect(testState!.layoutState.loadingState.value).toBe('idle')
+    expect(testState!.layoutState.loadingMessage.value).toBe('')
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+  })
+
   it('does not let a stale preview image load from the previous route overwrite the current stage', async () => {
     const staleImage = deferred<string>()
     resolveWorkspaceStepInfoApi.mockImplementation(async ({ step }: { step: string }) => {

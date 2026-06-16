@@ -617,11 +617,17 @@ async function onPreviewModeChange(mode: 'layout' | 'image'): Promise<void> {
   try {
     if (mode === 'image') {
       const imagePath = previewImageRelativePath.value
-      if (!imagePath) return
+      if (!imagePath) {
+        if (guard.isCurrent()) resetLoadingState()
+        return
+      }
       await loadStepImagePreview(imagePath, guard)
     } else {
       const packageRoot = currentViewJsonPackageRoot.value
-      if (!packageRoot) return
+      if (!packageRoot) {
+        if (guard.isCurrent()) resetLoadingState()
+        return
+      }
       const overview = await loadStepViewJsonOverview(packageRoot, guard)
       if (!overview) return
       showViewJsonLayout(overview, guard)
@@ -666,7 +672,10 @@ const handleStageChange = async (stage: string) => {
         ?? null
       const imagePath = typeof info.image === 'string' && info.image.length > 0 ? info.image : null
       if (!imagePath) {
-        throw new Error(`Preview image is not available for ${stepEnum}.`)
+        editor.value?.clearBackground()
+        cleanupLayout()
+        clearCurrentViewJsonOverview()
+        return
       }
       const viewJsonPackageRoot = pickViewJsonPackageRoot(info)
       cleanupLayout()
@@ -686,11 +695,13 @@ const handleStageChange = async (stage: string) => {
     drcJsonRelativePath.value = null
   } catch (error) {
     console.error('Failed to load stage results:', error)
+    if (!guard.isCurrent()) return
     editor.value?.clearBackground()
     cleanupLayout()
     clearCurrentViewJsonOverview()
     layoutJsonRelativePath.value = null
     drcJsonRelativePath.value = null
+    resetLoadingState()
   }
 }
 
