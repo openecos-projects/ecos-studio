@@ -14,7 +14,7 @@
           @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
         >
           <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
-          {{ runBusy ? 'Cancel' : 'Run' }}
+          {{ runBusy ? `Cancel ${runPhaseDisplayLabel(runPhase)}` : 'Run' }}
         </button>
         <button type="button" class="refresh-btn" :disabled="loading" @click="refresh">
           <i :class="loading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
@@ -100,6 +100,20 @@
               </div>
             </div>
           </section>
+
+          <section class="workspace-guide-card">
+            <div
+              v-for="item in workspaceGuideItems"
+              :key="item.title"
+              class="workspace-guide-item"
+            >
+              <i :class="item.icon"></i>
+              <div>
+                <strong>{{ item.title }}</strong>
+                <span>{{ item.text }}</span>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div v-else-if="!currentStep" class="state-panel">
@@ -166,8 +180,22 @@
                 @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
               >
                 <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
-                {{ runBusy ? `Cancel ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
+                {{ runBusy ? `Cancel ${runPhaseDisplayLabel(runPhase)} · ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
               </button>
+            </div>
+            <div class="sim-run-context" :class="simResultFreshness.state">
+              <div>
+                <span>Current Selection</span>
+                <strong>{{ simContextLabel(currentSimRunContext) }}</strong>
+              </div>
+              <div>
+                <span>Displayed Result</span>
+                <strong>{{ resultSimRunContext ? simContextLabel(resultSimRunContext) : 'No result yet' }}</strong>
+              </div>
+              <div>
+                <span>Result State</span>
+                <strong>{{ simRunSubtitle }}</strong>
+              </div>
             </div>
             <div v-if="simSuite === 'cpu_tests' && simCpuMode === 'selected'" class="case-picker">
               <button
@@ -203,6 +231,10 @@
             </section>
 
             <section v-else-if="activeTab === 'cases'" class="cases-panel">
+              <div v-if="simResultIsStale" class="sim-stale-banner">
+                <i class="ri-time-line"></i>
+                <span>{{ simResultFreshness.message }} Run again to refresh these case results.</span>
+              </div>
               <div v-if="cases.length === 0" class="empty-panel">
                 <i class="ri-file-list-3-line"></i>
                 <span>No simulation case result yet.</span>
@@ -285,7 +317,11 @@
             </section>
 
             <section v-else-if="activeTab === 'artifacts'" class="files-panel">
-              <ResourceFileList :items="artifacts" empty-label="No artifacts yet." @select="handleArtifactClick" />
+              <ArtifactGroupList
+                :groups="artifactGroups"
+                empty-label="No artifacts yet."
+                @select="handleArtifactClick"
+              />
             </section>
 
             <section v-else-if="activeTab === 'src'" class="source-layout">
@@ -295,11 +331,15 @@
                   <span>{{ sourceArtifacts.length }} files</span>
                 </div>
                 <button
-                  v-for="item in sourceArtifacts"
+                  v-for="item in sourceItems"
                   :key="item.path"
                   type="button"
                   class="source-row"
-                  :class="{ active: activeSource?.path === item.path }"
+                  :class="{
+                    active: activeSource?.path === item.path,
+                    diagnostic: Boolean(item.diagnostics?.total),
+                    error: Boolean(item.diagnostics?.errors),
+                  }"
                   :title="item.path"
                   @click="openSource(item)"
                 >
@@ -308,13 +348,25 @@
                     <strong>{{ sourceDisplayName(item) }}</strong>
                     <small>{{ shortPath(item.path) }}</small>
                   </span>
+                  <em
+                    v-if="item.diagnostics?.total"
+                    class="source-diagnostic-badge"
+                    :class="{ error: Boolean(item.diagnostics?.errors) }"
+                  >
+                    {{ item.diagnostics ? sourceDiagnosticLabel(item.diagnostics) : '' }}
+                  </em>
                 </button>
                 <div v-if="sourceArtifacts.length === 0" class="empty-panel compact">
                   <i class="ri-code-s-slash-line"></i>
                   <span>No source files discovered.</span>
                 </div>
               </aside>
-              <FrontendSourceEditor :source="activeSource" @saved="refresh" @linted="refresh" />
+              <FrontendSourceEditor
+                :source="activeSource"
+                :focus-target="sourceFocusTarget"
+                @saved="refresh"
+                @linted="refresh"
+              />
             </section>
 
             <section v-else-if="activeTab === 'wave'" class="wave-panel">
@@ -355,6 +407,93 @@
               </div>
             </section>
           </main>
+
+          <section class="frontend-console" :class="{ collapsed: consoleCollapsed, resizing: consoleResizing }" :style="consoleStyle">
+            <div
+              v-if="!consoleCollapsed"
+              class="console-resizer"
+              role="separator"
+              aria-orientation="horizontal"
+              title="Drag to resize console"
+              @pointerdown="startConsoleResize"
+              @dblclick="resetConsoleHeight"
+            ></div>
+            <header class="console-head">
+              <div class="console-tabs">
+                <button
+                  type="button"
+                  class="console-tab"
+                  :class="{ active: consoleTab === 'problems' }"
+                  @click="consoleTab = 'problems'; consoleCollapsed = false"
+                >
+                  <i class="ri-error-warning-line"></i>
+                  <span>Problems</span>
+                  <em v-if="consoleProblemCount">{{ consoleProblemCount }}</em>
+                </button>
+                <button
+                  type="button"
+                  class="console-tab"
+                  :class="{ active: consoleTab === 'log' }"
+                  @click="consoleTab = 'log'; consoleCollapsed = false"
+                >
+                  <i class="ri-terminal-box-line"></i>
+                  <span>Log</span>
+                </button>
+              </div>
+              <div class="console-actions">
+                <span :title="consoleContext">{{ consoleContext }}</span>
+                <button
+                  type="button"
+                  class="icon-action compact"
+                  :title="consoleCollapsed ? 'Expand console' : 'Collapse console'"
+                  @click="consoleCollapsed = !consoleCollapsed"
+                >
+                  <i :class="consoleCollapsed ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'"></i>
+                </button>
+              </div>
+            </header>
+
+            <div v-if="!consoleCollapsed" class="console-body">
+              <section v-if="consoleTab === 'problems'" class="problem-panel">
+                <button
+                  v-for="problem in consoleProblems"
+                  :key="problemKey(problem)"
+                  type="button"
+                  class="problem-row"
+                  :class="problem.severity"
+                  :title="problemTooltip(problem)"
+                  @click="openProblem(problem)"
+                >
+                  <i :class="problemIcon(problem.severity)"></i>
+                  <span>
+                    <strong>{{ problem.title }}</strong>
+                    <small>{{ problem.detail }}</small>
+                  </span>
+                  <em class="problem-target">
+                    {{ problem.sourcePath ? 'Src' : 'Log' }}
+                  </em>
+                </button>
+                <div v-if="!consoleProblems.length" class="console-empty">
+                  <i class="ri-checkbox-circle-line"></i>
+                  <span>No problems detected in the selected log.</span>
+                </div>
+              </section>
+
+              <section v-else class="console-log-panel">
+                <div class="console-log-tools">
+                  <select v-model="selectedLogPath" class="log-select compact" @change="loadSelectedLog">
+                    <option v-for="log in availableLogs" :key="log.path" :value="log.path">
+                      {{ log.label }}
+                    </option>
+                  </select>
+                  <button type="button" class="icon-action compact" :disabled="logLoading || !selectedLogPath" @click="loadSelectedLog">
+                    <i :class="logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
+                  </button>
+                </div>
+                <pre class="console-log">{{ logContent || 'No log content.' }}</pre>
+              </section>
+            </div>
+          </section>
         </div>
       </section>
     </div>
@@ -373,6 +512,12 @@ import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendSourceEditor from '@/components/FrontendSourceEditor.vue'
+import {
+  diagnosticMatchesPath,
+  fileName as diagnosticFileName,
+  parseVerilatorDiagnostics,
+  type VerilatorDiagnostic,
+} from '@/utils/verilatorDiagnostics'
 
 interface PathItem {
   label: string
@@ -428,7 +573,43 @@ interface FrontendConfigItem {
   wide?: boolean
 }
 
+type ArtifactKind = 'source' | 'wave' | 'log' | 'report' | 'image' | 'other'
 type TabId = 'summary' | 'cases' | 'log' | 'reports' | 'artifacts' | 'src' | 'wave'
+type ConsoleTabId = 'problems' | 'log'
+type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
+
+interface ArtifactGroup {
+  id: ArtifactKind
+  label: string
+  icon: string
+  items: PathItem[]
+}
+
+interface ConsoleProblem {
+  severity: 'error' | 'warning' | 'info'
+  title: string
+  detail: string
+  path?: string
+  sourcePath?: string
+  line?: number
+  column?: number
+}
+
+interface DiagnosticCount {
+  errors: number
+  warnings: number
+  total: number
+}
+
+interface SourcePathItem extends PathItem {
+  diagnostics?: DiagnosticCount
+}
+
+interface SimRunContext {
+  suite: 'cpu_tests' | 'rtthread'
+  mode: 'all' | 'selected'
+  cases: string[]
+}
 
 const route = useRoute()
 const {
@@ -438,9 +619,16 @@ const {
   invalidateWorkspaceResources,
 } = useWorkspace()
 const { config } = useParameters()
+const CONSOLE_MIN_HEIGHT = 128
+const CONSOLE_DEFAULT_HEIGHT = 178
+const CONSOLE_MAX_HEIGHT = 420
+
 const steps = ref<WorkspaceStepResource[]>([])
 const loading = ref(false)
 const runBusy = ref(false)
+const runPhase = ref<RunPhase>('idle')
+const runStartedAt = ref(0)
+const runClockTick = ref(0)
 const runJobId = ref('')
 const logLoading = ref(false)
 const error = ref('')
@@ -451,6 +639,12 @@ const selectedLogPath = ref('')
 const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
 const activeWaveform = ref<WaveSelection | null>(null)
+const consoleCollapsed = ref(false)
+const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
+const consoleResizing = ref(false)
+const consoleTab = ref<ConsoleTabId>('problems')
+const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
+let sourceFocusToken = 0
 const simSuite = ref<'cpu_tests' | 'rtthread'>('cpu_tests')
 const runningSimSuite = ref<'cpu_tests' | 'rtthread' | null>(null)
 const simCpuMode = ref<'all' | 'selected'>('selected')
@@ -461,6 +655,9 @@ const waveformLoading = ref(false)
 const waveformError = ref('')
 let waveformLoadToken = 0
 let unsubscribeCliEvents: (() => void) | null = null
+let consoleResizeStartY = 0
+let consoleResizeStartHeight = 0
+let runClockTimer: ReturnType<typeof window.setInterval> | null = null
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
 const currentStepName = computed(() => {
@@ -493,16 +690,30 @@ const simStepState = computed(() => {
   return simStep?.state || 'Unstart'
 })
 const currentStepDisplayState = computed(() =>
-  runBusy.value && currentStep.value ? 'Ongoing' : detail.value?.state || currentStep.value?.state || 'Unstart',
+  runBusy.value && currentStep.value ? runPhaseDisplayLabel(runPhase.value) : detail.value?.state || currentStep.value?.state || 'Unstart',
 )
 const currentStepRuntime = computed(() =>
-  runBusy.value ? 'Running' : detail.value?.runtime || currentStep.value?.runtime || '--',
+  runBusy.value ? runElapsedLabel() : detail.value?.runtime || currentStep.value?.runtime || '--',
 )
 const simSuiteLabel = computed(() => simSuiteLabelFor(simSuite.value))
 const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.value || simSuite.value))
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
+const selectedCpuRunCases = computed(() => cpuRunCasesForSelection())
+const currentSimRunContext = computed<SimRunContext>(() => ({
+  suite: simSuite.value,
+  mode: simSuite.value === 'cpu_tests' ? simCpuMode.value : 'selected',
+  cases: simSuite.value === 'cpu_tests' ? selectedCpuRunCases.value : ['rtthread.soc'],
+}))
+const resultSimRunContext = computed<SimRunContext | null>(() => resultContextFromDetail())
+const simResultFreshness = computed(() => simResultFreshnessText())
+const simResultIsStale = computed(() => isSimStep.value && simResultFreshness.value.state === 'stale')
+const simRunSubtitle = computed(() => {
+  if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
+  if (!cases.value.length) return 'No simulation result yet'
+  return simResultFreshness.value.message
+})
 const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
   { label: 'Design', value: config.design || currentProject.value?.name || '--', highlight: true },
   { label: 'Top Module', value: config.topModule || '--', mono: true },
@@ -545,6 +756,23 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
     wide: true,
   },
 ])
+const workspaceGuideItems = computed(() => [
+  {
+    icon: 'ri-cpu-line',
+    title: 'CPU and SoC contract',
+    text: `${displayCatalogId(config.frontend.coreId || 'Custom CPU')} runs through ${displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || 'Selected harness')}.`,
+  },
+  {
+    icon: 'ri-play-list-2-line',
+    title: 'Simulation workflow',
+    text: 'Run prepare first, then choose CPU Tests or RT-Thread in Sim. Changed selections are marked stale until rerun.',
+  },
+  {
+    icon: 'ri-bug-line',
+    title: 'Debug loop',
+    text: 'Use Problems for diagnostics, Src for editable RTL, and Wave for waveform inspection.',
+  },
+])
 const availableCpuTests = computed(() => {
   const raw = detail.value?.summary?.available_cpu_tests
   return Array.isArray(raw) ? raw.map((item) => String(item)).filter(Boolean) : []
@@ -563,7 +791,43 @@ const allArtifacts = computed(() => {
   return uniquePathItems([...(detail.value?.artifacts || []), ...fromCases])
 })
 const sourceArtifacts = computed(() => allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)))
-const artifacts = computed(() => allArtifacts.value.filter((item) => !isSourceArtifactPath(item.path)))
+const logDiagnostics = computed(() => parseVerilatorDiagnostics(logContent.value))
+const sourceDiagnosticCounts = computed(() => {
+  const counts = new Map<string, DiagnosticCount>()
+  for (const source of sourceArtifacts.value) {
+    const next: DiagnosticCount = { errors: 0, warnings: 0, total: 0 }
+    for (const diagnostic of logDiagnostics.value) {
+      if (!diagnosticMatchesPath(diagnostic.file, source.path)) continue
+      if (diagnostic.severity === 'error') next.errors += 1
+      if (diagnostic.severity === 'warning') next.warnings += 1
+      next.total += 1
+    }
+    if (next.total) counts.set(source.path, next)
+  }
+  return counts
+})
+const sourceItems = computed<SourcePathItem[]>(() =>
+  sourceArtifacts.value.map((item) => ({
+    ...item,
+    diagnostics: sourceDiagnosticCounts.value.get(item.path),
+  })),
+)
+const artifactGroups = computed<ArtifactGroup[]>(() => {
+  const specs: Array<Omit<ArtifactGroup, 'items'>> = [
+    { id: 'source', label: 'Source', icon: 'ri-code-s-slash-line' },
+    { id: 'wave', label: 'Waves', icon: 'ri-pulse-line' },
+    { id: 'log', label: 'Logs', icon: 'ri-terminal-box-line' },
+    { id: 'report', label: 'Reports', icon: 'ri-file-chart-line' },
+    { id: 'image', label: 'Images', icon: 'ri-cpu-line' },
+    { id: 'other', label: 'Other', icon: 'ri-folder-3-line' },
+  ]
+  return specs
+    .map((spec) => ({
+      ...spec,
+      items: allArtifacts.value.filter((item) => artifactKind(item) === spec.id),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 const availableLogs = computed(() => {
   const logs = [...(detail.value?.logs || [])]
   const selected = selectedCase.value
@@ -576,6 +840,57 @@ const availableLogs = computed(() => {
   return uniquePathItems([...caseLogs, ...logs])
 })
 const formattedSummary = computed(() => JSON.stringify(detail.value?.summary || {}, null, 2))
+const consoleStyle = computed(() => ({
+  '--console-height': `${consoleHeight.value}px`,
+}))
+const consoleContext = computed(() => {
+  if (selectedCase.value) return `${labelForStep(currentStepName.value)} · ${selectedCase.value.name}`
+  return labelForStep(currentStepName.value || 'Workspace')
+})
+const consoleProblems = computed<ConsoleProblem[]>(() => {
+  const problems: ConsoleProblem[] = []
+  const diagnostics = logDiagnostics.value
+  const diagnosticLines = new Set(diagnostics.map((diagnostic) => diagnostic.raw.trim()))
+  const state = currentStepDisplayState.value
+  if (state === 'Incomplete' || state === 'Invalid') {
+    problems.push({
+      severity: 'error',
+      title: `${labelForStep(currentStepName.value)} needs attention`,
+      detail: 'Open the selected log for the tool failure details.',
+    })
+  }
+  if (simResultIsStale.value) {
+    problems.push({
+      severity: 'warning',
+      title: 'Simulation results out of date',
+      detail: `${simContextLabel(resultSimRunContext.value || currentSimRunContext.value)} is displayed, but ${simContextLabel(currentSimRunContext.value)} is selected.`,
+    })
+  }
+  for (const testCase of cases.value.filter((item) => !item.ok)) {
+    problems.push({
+      severity: 'error',
+      title: `${testCase.name} failed`,
+      detail: caseIssue(testCase) || 'Simulation case did not pass.',
+      path: testCase.log || testCase.report_log || testCase.run_log,
+    })
+  }
+  for (const line of problemLinesFromLog(logContent.value)) {
+    if (diagnosticLines.has(line)) continue
+    problems.push({
+      severity: /warning/i.test(line) ? 'warning' : 'error',
+      title: /warning/i.test(line) ? 'Log warning' : 'Log error',
+      detail: line,
+      path: selectedLogPath.value,
+    })
+  }
+  for (const diagnostic of diagnostics) {
+    problems.push(problemFromDiagnostic(diagnostic, selectedLogPath.value))
+  }
+  return uniqueProblems(problems).slice(0, 40)
+})
+const consoleProblemCount = computed(() =>
+  consoleProblems.value.filter((problem) => problem.severity !== 'info').length,
+)
 const visibleTabs = computed(() => [
   { id: 'summary' as const, label: 'Summary', icon: 'ri-dashboard-3-line' },
   ...(isSimStep.value ? [{ id: 'cases' as const, label: 'Cases', icon: 'ri-list-check-3' }] : []),
@@ -629,7 +944,11 @@ async function loadDetail(): Promise<void> {
       throw new Error(response.message?.join(', ') || 'Failed to load frontend detail')
     }
     detail.value = response.data.info as FrontendStepDetail
-    selectedCase.value = cases.value[0] || null
+    const previousCaseName = selectedCase.value?.name || ''
+    selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
+    if (isSimStep.value && activeTab.value === 'summary') {
+      activeTab.value = 'cases'
+    }
     selectedLogPath.value = preferredLogPath()
     syncDefaultCpuSelection()
     if (!activeSource.value && sourceArtifacts.value.length) {
@@ -661,6 +980,9 @@ async function loadSelectedLog(): Promise<void> {
 async function runCurrentStep(suiteOverride?: 'cpu_tests' | 'rtthread'): Promise<void> {
   if (!currentProject.value?.path || !currentStepName.value) return
   runBusy.value = true
+  runPhase.value = 'queued'
+  runStartedAt.value = Date.now()
+  startRunClock()
   runningSimSuite.value = isSimStep.value ? suiteOverride || simSuite.value : null
   runJobId.value = ''
   try {
@@ -676,6 +998,7 @@ async function runCurrentStep(suiteOverride?: 'cpu_tests' | 'rtthread'): Promise
       },
     })
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
+    runPhase.value = 'refreshing'
     await refresh()
     showToast({
       severity: response.data?.state === StateEnum.Success ? 'success' : 'error',
@@ -694,6 +1017,9 @@ async function runCurrentStep(suiteOverride?: 'cpu_tests' | 'rtthread'): Promise
     })
   } finally {
     runBusy.value = false
+    runPhase.value = 'idle'
+    runStartedAt.value = 0
+    stopRunClock()
     runningSimSuite.value = null
     runJobId.value = ''
   }
@@ -738,16 +1064,33 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
     return
   }
   if (event.cmd !== 'run_step' && event.cmd !== 'rtl2gds') return
+  if (runJobId.value && event.jobId && event.jobId !== runJobId.value) return
+
+  if (event.type === 'queued') {
+    runBusy.value = true
+    runJobId.value = event.jobId
+    runPhase.value = 'queued'
+    runStartedAt.value = runStartedAt.value || Date.now()
+    startRunClock()
+    runningSimSuite.value = runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
+    return
+  }
 
   if (event.type === 'started') {
     runBusy.value = true
     runJobId.value = event.jobId
+    runPhase.value = 'running'
+    runStartedAt.value = runStartedAt.value || Date.now()
+    startRunClock()
     runningSimSuite.value = runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
     return
   }
 
   if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
     runBusy.value = false
+    runPhase.value = 'idle'
+    runStartedAt.value = 0
+    stopRunClock()
     runningSimSuite.value = null
     runJobId.value = ''
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
@@ -766,16 +1109,66 @@ function simRunPayload(suiteOverride?: 'cpu_tests' | 'rtthread') {
   if (suite === 'rtthread') {
     return { sim_test_suite: 'rtthread' }
   }
-  const selectedCases = selectedCpuCases.value.length
-    ? selectedCpuCases.value
-    : defaultCpuTests.value.length
-      ? defaultCpuTests.value
-      : availableCpuTests.value.slice(0, 1)
   return {
     sim_test_suite: 'cpu_tests',
     sim_cpu_test_mode: simCpuMode.value,
-    sim_cpu_test_cases: simCpuMode.value === 'selected' ? selectedCases : [],
+    sim_cpu_test_cases: simCpuMode.value === 'selected' ? selectedCpuRunCases.value : [],
   }
+}
+
+function cpuRunCasesForSelection(): string[] {
+  if (simCpuMode.value === 'all') return []
+  if (selectedCpuCases.value.length) return selectedCpuCases.value
+  if (defaultCpuTests.value.length) return defaultCpuTests.value
+  return availableCpuTests.value.slice(0, 1)
+}
+
+function resultContextFromDetail(): SimRunContext | null {
+  if (!isSimStep.value || !cases.value.length) return null
+  const resultSuite = String(detail.value?.summary?.test_suite || '')
+  const suite: SimRunContext['suite'] = resultSuite === 'RT-Thread' || resultCaseNames().includes('rtthread.soc')
+    ? 'rtthread'
+    : 'cpu_tests'
+  if (suite === 'rtthread') {
+    return { suite, mode: 'selected', cases: ['rtthread.soc'] }
+  }
+  const mode = String(detail.value?.summary?.cpu_test_mode || '') === 'all' ? 'all' : 'selected'
+  return {
+    suite,
+    mode,
+    cases: mode === 'all' ? [] : resultCaseNames(),
+  }
+}
+
+function simResultFreshnessText(): { state: 'empty' | 'fresh' | 'stale' | 'running'; message: string } {
+  if (!isSimStep.value) return { state: 'empty', message: 'No simulation context' }
+  if (runBusy.value) return { state: 'running', message: `Running ${runningSimSuiteLabel.value}` }
+  const result = resultSimRunContext.value
+  if (!result) return { state: 'empty', message: 'No result yet' }
+  if (simContextsEqual(currentSimRunContext.value, result)) {
+    return { state: 'fresh', message: 'Matches current selection' }
+  }
+  return { state: 'stale', message: 'Results out of date' }
+}
+
+function simContextsEqual(left: SimRunContext, right: SimRunContext): boolean {
+  return left.suite === right.suite
+    && left.mode === right.mode
+    && normalizedCaseKey(left.cases) === normalizedCaseKey(right.cases)
+}
+
+function normalizedCaseKey(items: string[]): string {
+  return [...new Set(items.map((item) => item.trim()).filter(Boolean))].sort().join('\n')
+}
+
+function resultCaseNames(): string[] {
+  return cases.value.map((testCase) => testCase.name).filter(Boolean)
+}
+
+function simContextLabel(context: SimRunContext): string {
+  if (context.suite === 'rtthread') return 'RT-Thread'
+  if (context.mode === 'all') return 'CPU Tests · All'
+  return `CPU Tests · ${context.cases.length ? context.cases.join(', ') : 'Selected'}`
 }
 
 function syncDefaultCpuSelection(): void {
@@ -834,7 +1227,6 @@ function caseIssue(testCase: SimCase): string {
 
 function selectCase(testCase: SimCase): void {
   selectedCase.value = testCase
-  activeTab.value = 'log'
   selectedLogPath.value = testCase.log || testCase.report_log || testCase.run_log || availableLogs.value[0]?.path || ''
   void loadSelectedLog()
 }
@@ -848,6 +1240,10 @@ function selectTextFile(item: PathItem): void {
 function handleArtifactClick(item: PathItem): void {
   if (isWaveformPath(item.path)) {
     openWaveform(item.path, caseNameFromArtifactLabel(item.label))
+    return
+  }
+  if (isSourceArtifactPath(item.path)) {
+    openSource(item)
     return
   }
   selectTextFile(item)
@@ -961,9 +1357,36 @@ function labelForStep(step: string): string {
 
 function stateClass(state: string): string {
   if (state === 'Success') return 'success'
-  if (state === 'Ongoing') return 'running'
+  if (state === 'Ongoing' || state === 'Queued' || state === 'Running' || state === 'Refreshing') return 'running'
   if (state === 'Incomplete' || state === 'Invalid') return 'failed'
   return 'pending'
+}
+
+function runPhaseDisplayLabel(phase: RunPhase): string {
+  if (phase === 'queued') return 'Queued'
+  if (phase === 'refreshing') return 'Refreshing'
+  if (phase === 'running') return 'Running'
+  return 'Idle'
+}
+
+function runElapsedLabel(): string {
+  void runClockTick.value
+  if (!runStartedAt.value) return runPhaseDisplayLabel(runPhase.value)
+  const seconds = Math.max(0, Math.floor((Date.now() - runStartedAt.value) / 1000))
+  return `${runPhaseDisplayLabel(runPhase.value)} · ${seconds}s`
+}
+
+function startRunClock(): void {
+  if (runClockTimer) return
+  runClockTimer = window.setInterval(() => {
+    runClockTick.value += 1
+  }, 1000)
+}
+
+function stopRunClock(): void {
+  if (!runClockTimer) return
+  window.clearInterval(runClockTimer)
+  runClockTimer = null
 }
 
 function fileName(path: string): string {
@@ -977,6 +1400,13 @@ function shortPath(path: string): string {
 function sourceDisplayName(item: PathItem): string {
   const label = item.label || fileName(item.path)
   return label.startsWith('CPU RTL · ') ? label.slice('CPU RTL · '.length) : label
+}
+
+function sourceDiagnosticLabel(count: DiagnosticCount): string {
+  const parts: string[] = []
+  if (count.errors) parts.push(`${count.errors}E`)
+  if (count.warnings) parts.push(`${count.warnings}W`)
+  return parts.join(' ')
 }
 
 function fileIcon(path: string): string {
@@ -998,8 +1428,154 @@ function isWaveformPath(path: string): boolean {
   return /\.(vcd|fst|ghw)$/i.test(path)
 }
 
+function isLogArtifactPath(path: string): boolean {
+  return /\.(log|txt|out)$/i.test(path)
+}
+
+function isReportArtifactPath(path: string): boolean {
+  return /\.(rpt|json|yaml|yml)$/i.test(path)
+}
+
+function isImageArtifactPath(path: string): boolean {
+  return /\.(bin|elf|hex|mem|img)$/i.test(path)
+}
+
+function artifactKind(item: PathItem): ArtifactKind {
+  const path = item.path
+  const label = item.label.toLowerCase()
+  if (isSourceArtifactPath(path)) return 'source'
+  if (isWaveformPath(path)) return 'wave'
+  if (isLogArtifactPath(path) || label.includes(' log')) return 'log'
+  if (isReportArtifactPath(path) || label.includes('report')) return 'report'
+  if (isImageArtifactPath(path) || label.includes('image')) return 'image'
+  return 'other'
+}
+
 function caseNameFromArtifactLabel(label: string): string | undefined {
   return label.endsWith(' wave') ? label.slice(0, -5) : undefined
+}
+
+function problemLinesFromLog(content: string): string[] {
+  const pattern = /(%Error|%Warning|fatal error|error:|warning:|failed|failure|timeout|bad trap|not found|missing image|cannot load)/i
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && pattern.test(line))
+    .slice(-20)
+}
+
+function uniqueProblems(items: ConsoleProblem[]): ConsoleProblem[] {
+  const seen = new Set<string>()
+  const result: ConsoleProblem[] = []
+  for (const item of items) {
+    const key = problemKey(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(item)
+  }
+  return result
+}
+
+function problemKey(problem: ConsoleProblem): string {
+  return [
+    problem.severity,
+    problem.title,
+    problem.detail,
+    problem.path || '',
+    problem.sourcePath || '',
+    problem.line || '',
+    problem.column || '',
+  ].join(':')
+}
+
+function problemIcon(severity: ConsoleProblem['severity']): string {
+  if (severity === 'warning') return 'ri-alert-line'
+  if (severity === 'info') return 'ri-information-line'
+  return 'ri-close-circle-line'
+}
+
+function problemTooltip(problem: ConsoleProblem): string {
+  const location = problem.sourcePath
+    ? `${problem.sourcePath}:${problem.line || 1}:${problem.column || 1}`
+    : problem.path || ''
+  return [problem.title, location, problem.detail].filter(Boolean).join('\n')
+}
+
+function openProblem(problem: ConsoleProblem): void {
+  consoleCollapsed.value = false
+  if (problem.title === 'Simulation results out of date') {
+    activeTab.value = 'cases'
+    return
+  }
+  if (problem.sourcePath) {
+    openSourceAt(problem.sourcePath, problem.line || 1, problem.column || 1)
+    return
+  }
+  consoleTab.value = 'log'
+  if (problem.path) {
+    selectedLogPath.value = problem.path
+    void loadSelectedLog()
+  }
+}
+
+function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string): ConsoleProblem {
+  return {
+    severity: diagnostic.severity,
+    title: `${diagnostic.code} · ${diagnosticFileName(diagnostic.file)}:${diagnostic.line}`,
+    detail: diagnostic.message || diagnostic.raw,
+    path: logPath,
+    sourcePath: diagnostic.file,
+    line: diagnostic.line,
+    column: diagnostic.column,
+  }
+}
+
+function openSourceAt(path: string, line: number, column: number): void {
+  const source = sourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
+  const targetPath = source?.path || path
+  activeSource.value = source ? toSourceSelection(source) : { label: fileName(targetPath), path: targetPath }
+  sourceFocusTarget.value = {
+    path: targetPath,
+    line,
+    column,
+    token: ++sourceFocusToken,
+  }
+  activeTab.value = 'src'
+}
+
+function startConsoleResize(event: PointerEvent): void {
+  if (consoleCollapsed.value) return
+  event.preventDefault()
+  const target = event.currentTarget as HTMLElement | null
+  target?.setPointerCapture?.(event.pointerId)
+  consoleResizing.value = true
+  consoleResizeStartY = event.clientY
+  consoleResizeStartHeight = consoleHeight.value
+  window.addEventListener('pointermove', handleConsoleResize)
+  window.addEventListener('pointerup', stopConsoleResize)
+  window.addEventListener('pointercancel', stopConsoleResize)
+}
+
+function handleConsoleResize(event: PointerEvent): void {
+  if (!consoleResizing.value) return
+  const delta = consoleResizeStartY - event.clientY
+  consoleHeight.value = clampConsoleHeight(consoleResizeStartHeight + delta)
+}
+
+function stopConsoleResize(): void {
+  if (!consoleResizing.value) return
+  consoleResizing.value = false
+  window.removeEventListener('pointermove', handleConsoleResize)
+  window.removeEventListener('pointerup', stopConsoleResize)
+  window.removeEventListener('pointercancel', stopConsoleResize)
+}
+
+function resetConsoleHeight(): void {
+  consoleHeight.value = CONSOLE_DEFAULT_HEIGHT
+}
+
+function clampConsoleHeight(value: number): number {
+  return Math.min(CONSOLE_MAX_HEIGHT, Math.max(CONSOLE_MIN_HEIGHT, Math.round(value)))
 }
 
 function uniquePathItems(items: PathItem[]): PathItem[] {
@@ -1044,6 +1620,48 @@ const ResourceFileList = defineComponent({
   },
 })
 
+const ArtifactGroupList = defineComponent({
+  props: {
+    groups: { type: Array as () => ArtifactGroup[], required: true },
+    emptyLabel: { type: String, required: true },
+  },
+  emits: ['select'],
+  setup(props, { emit }) {
+    return () => props.groups.length
+      ? h('div', { class: 'artifact-groups' }, props.groups.map((group) =>
+          h('section', { key: group.id, class: 'artifact-group' }, [
+            h('div', { class: 'artifact-group-head' }, [
+              h('span', [
+                h('i', { class: group.icon }),
+                h('strong', group.label),
+              ]),
+              h('em', `${group.items.length}`),
+            ]),
+            h('div', { class: 'artifact-group-list' }, group.items.map((item) =>
+              h('button', {
+                key: item.path,
+                class: 'file-row',
+                title: item.path,
+                type: 'button',
+                onClick: () => emit('select', item),
+              }, [
+                h('i', { class: fileIcon(item.path) }),
+                h('span', { class: 'file-row-main' }, [
+                  h('strong', item.label || fileName(item.path)),
+                  h('small', shortPath(item.path)),
+                ]),
+                h('i', { class: artifactKind(item) === 'wave' ? 'ri-pulse-line' : 'ri-arrow-right-s-line' }),
+              ]),
+            )),
+          ]),
+        ))
+      : h('div', { class: 'empty-panel' }, [
+          h('i', { class: 'ri-folder-open-line' }),
+          h('span', props.emptyLabel),
+        ])
+  },
+})
+
 onMounted(refresh)
 onMounted(() => {
   unsubscribeCliEvents = getDesktopApi().cli.onEvent(handleCliEvent)
@@ -1052,6 +1670,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleSurferMessage)
+  stopConsoleResize()
+  stopRunClock()
   unsubscribeCliEvents?.()
   unsubscribeCliEvents = null
 })
@@ -1074,7 +1694,7 @@ watch(currentStepName, () => {
   logContent.value = ''
   selectedCase.value = null
   selectedLogPath.value = ''
-  activeTab.value = 'summary'
+  activeTab.value = currentStepName.value.toLowerCase() === 'sim' ? 'cases' : 'summary'
   activeSource.value = null
   if (!isHomeView.value) {
     void loadDetail()
@@ -1118,7 +1738,15 @@ watch(activeTab, (tab) => {
 .wave-header,
 .wave-title,
 .case-name,
-.path-button {
+.path-button,
+.console-head,
+.console-tabs,
+.console-tab,
+.console-actions,
+.console-log-tools,
+.problem-row,
+.artifact-group-head,
+.artifact-group-head span {
   display: flex;
   min-width: 0;
 }
@@ -1172,9 +1800,11 @@ h2 {
 .suite-pill,
 .mode-segment button,
 .frontend-step-tab,
+.console-tab,
 .case-chip,
 .file-row,
 .source-row,
+.problem-row,
 .text-action {
   border: 0;
   color: var(--text-primary);
@@ -1192,6 +1822,11 @@ h2 {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
+}
+
+.icon-action.compact {
+  width: 30px;
+  height: 30px;
 }
 
 .refresh-btn {
@@ -1300,7 +1935,8 @@ button:disabled {
 
 .tool,
 .log-viewer,
-.text-panel pre {
+.text-panel pre,
+.console-log {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
 }
 
@@ -1482,6 +2118,54 @@ button:disabled {
   font-size: 15px;
 }
 
+.workspace-guide-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-guide-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.workspace-guide-item > i {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+  color: var(--accent-color);
+}
+
+.workspace-guide-item div {
+  min-width: 0;
+}
+
+.workspace-guide-item strong,
+.workspace-guide-item span {
+  display: block;
+}
+
+.workspace-guide-item strong {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.workspace-guide-item span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .sim-run-card {
   padding: 10px;
   border: 1px solid var(--border-color);
@@ -1504,6 +2188,58 @@ button:disabled {
 .sim-run-action {
   min-width: 138px;
   flex-shrink: 0;
+}
+
+.sim-run-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.sim-run-context div {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.sim-run-context.stale div:last-child {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.sim-run-context.fresh div:last-child {
+  border-color: rgba(16, 185, 129, 0.28);
+  background: rgba(16, 185, 129, 0.07);
+}
+
+.sim-run-context.running div:last-child {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+}
+
+.sim-run-context span,
+.sim-run-context strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-run-context span {
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.sim-run-context strong {
+  font-size: 12px;
 }
 
 .suite-pill,
@@ -1644,6 +2380,67 @@ button:disabled {
   overflow: auto;
 }
 
+.artifact-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.artifact-group {
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.artifact-group-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.artifact-group-head span {
+  align-items: center;
+  gap: 7px;
+}
+
+.artifact-group-head i {
+  color: var(--accent-color);
+}
+
+.artifact-group-head strong {
+  font-size: 12px;
+}
+
+.artifact-group-head em {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+
+.artifact-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
 .file-row {
   align-items: center;
   gap: 10px;
@@ -1708,10 +2505,37 @@ button:disabled {
   text-align: left;
 }
 
+.source-row.diagnostic {
+  border-left: 2px solid rgba(245, 158, 11, 0.75);
+}
+
+.source-row.diagnostic.error {
+  border-left-color: rgba(239, 68, 68, 0.85);
+}
+
 .source-row span {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
+}
+
+.source-diagnostic-badge {
+  flex-shrink: 0;
+  min-width: 28px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  text-align: center;
+}
+
+.source-diagnostic-badge.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
 }
 
 .cases-table-wrap {
@@ -1720,6 +2544,32 @@ button:disabled {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-primary);
+}
+
+.cases-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sim-stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  color: #f59e0b;
+  font-size: 11px;
+}
+
+.sim-stale-banner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cases-table {
@@ -1902,6 +2752,251 @@ button:disabled {
   border-color: rgba(239, 68, 68, 0.35);
 }
 
+.frontend-console {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.frontend-console.resizing,
+.frontend-console.resizing * {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+.frontend-console.collapsed .console-head {
+  border-bottom: 0;
+}
+
+.console-resizer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 9px;
+  cursor: ns-resize;
+  background: transparent;
+}
+
+.console-resizer::after {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 54px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-color);
+  content: '';
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.console-resizer:hover::after,
+.frontend-console.resizing .console-resizer::after {
+  background: var(--accent-color);
+  opacity: 0.85;
+}
+
+.console-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.console-tabs {
+  align-items: center;
+  gap: 5px;
+}
+
+.console-tab {
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.console-tab.active {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+  color: var(--accent-color);
+}
+
+.console-tab em {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+
+.console-actions {
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.console-actions > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.console-body {
+  height: var(--console-height, 178px);
+  min-height: 0;
+}
+
+.problem-panel,
+.console-log-panel {
+  height: 100%;
+  min-height: 0;
+}
+
+.problem-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.problem-row {
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  text-align: left;
+}
+
+.problem-row.error {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.problem-row.warning {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.problem-row > i {
+  margin-top: 2px;
+}
+
+.problem-row.error > i {
+  color: #ef4444;
+}
+
+.problem-row.warning > i {
+  color: #f59e0b;
+}
+
+.problem-row span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.problem-row strong,
+.problem-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-row strong {
+  font-size: 12px;
+}
+
+.problem-row small {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.problem-target {
+  flex-shrink: 0;
+  min-width: 32px;
+  margin-top: 1px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.problem-row.error .problem-target {
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.problem-row.warning .problem-target {
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.console-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.console-log-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.console-log-tools {
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.log-select.compact {
+  height: 28px;
+  min-width: 180px;
+  font-size: 11px;
+}
+
+.console-log {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .text-action {
   display: inline-flex;
   align-items: center;
@@ -1933,7 +3028,8 @@ button:disabled {
 
 @media (max-width: 1180px) {
   .frontend-grid,
-  .source-layout {
+  .source-layout,
+  .artifact-groups {
     grid-template-columns: 1fr;
   }
 
@@ -1942,7 +3038,9 @@ button:disabled {
   }
 
   .workspace-home-card__head,
-  .workspace-home-card__body {
+  .workspace-home-card__body,
+  .workspace-guide-card,
+  .sim-run-context {
     grid-template-columns: 1fr;
   }
 

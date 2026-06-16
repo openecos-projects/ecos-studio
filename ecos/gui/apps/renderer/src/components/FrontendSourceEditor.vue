@@ -124,6 +124,12 @@ interface FrontendStepDetail {
 
 const props = defineProps<{
   source: FrontendSourceSelection | null
+  focusTarget?: {
+    path?: string
+    line?: number
+    column?: number
+    token?: number
+  } | null
 }>()
 
 const emit = defineEmits<{
@@ -193,6 +199,10 @@ watch(() => props.source?.path, () => {
   void loadSource()
 })
 
+watch(() => props.focusTarget?.token, () => {
+  focusExternalTarget()
+})
+
 watch(editorTheme, (theme) => {
   view?.dispatch({ effects: themeCompartment.reconfigure(editorThemeExtension(theme)) })
 })
@@ -251,6 +261,7 @@ async function loadSource(): Promise<void> {
     setEditorContent(content)
     savedContent = content
     isDirty.value = false
+    focusExternalTarget()
   } catch (err) {
     if (token === loadToken) {
       error.value = err instanceof Error ? err.message : String(err)
@@ -388,9 +399,20 @@ function currentContent(): string {
 }
 
 function jumpToDiagnostic(diagnostic: VerilatorDiagnostic): void {
+  jumpToPosition(diagnostic.line, diagnostic.column)
+}
+
+function focusExternalTarget(): void {
+  const target = props.focusTarget
+  if (!target?.line) return
+  if (target.path && props.source?.path && !diagnosticMatchesPath(target.path, props.source.path)) return
+  jumpToPosition(target.line, target.column || 1)
+}
+
+function jumpToPosition(lineNumber: number, columnNumber = 1): void {
   if (!view) return
-  const line = view.state.doc.line(Math.min(diagnostic.line, view.state.doc.lines))
-  const pos = Math.min(line.to, line.from + Math.max(0, diagnostic.column - 1))
+  const line = view.state.doc.line(Math.min(Math.max(1, lineNumber), view.state.doc.lines))
+  const pos = Math.min(line.to, line.from + Math.max(0, columnNumber - 1))
   view.dispatch({
     selection: { anchor: pos },
     effects: EditorView.scrollIntoView(pos, { y: 'center' }),
