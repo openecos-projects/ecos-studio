@@ -49,6 +49,7 @@ export interface CreateWorkspaceRequest {
     sim_ldflags?: string[],
     sim_program_names?: string[],
     sim_program_sources?: string[],
+    sim_program_link_base?: string,
     sim_programs_dir?: string,
     sim_run_args?: string[],
     sim_soc_root?: string,
@@ -107,6 +108,7 @@ export function createWorkspaceApi(
     sim_images?: string[]
     sim_program_names?: string[]
     sim_program_sources?: string[]
+    sim_program_link_base?: string
     sim_programs_dir?: string
     sim_tests_dir?: string
     sim_tests_out_dir?: string
@@ -139,6 +141,7 @@ export function createWorkspaceApi(
     sim_ldflags: options.sim_ldflags || [],
     sim_program_names: options.sim_program_names || [],
     sim_program_sources: options.sim_program_sources || [],
+    sim_program_link_base: options.sim_program_link_base || '',
     sim_programs_dir: options.sim_programs_dir || '',
     sim_run_args: options.sim_run_args || [],
     sim_soc_root: options.sim_soc_root || '',

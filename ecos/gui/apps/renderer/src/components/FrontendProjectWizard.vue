@@ -168,6 +168,7 @@
                         :key="core.id"
                         :active="selectedCoreId === core.id"
                         :entry="core"
+                        :compatibility="compatibilityFor(core.id, selectedSocHarnessId)"
                         icon="ri-cpu-line"
                         @select="selectCore(core.id)"
                       />
@@ -194,6 +195,7 @@
                         :key="soc.id"
                         :active="selectedSocHarnessId === soc.id"
                         :entry="soc"
+                        :compatibility="compatibilityFor(selectedCoreId, soc.id)"
                         icon="ri-layout-grid-line"
                         @select="selectSocHarness(soc.id)"
                       />
@@ -284,6 +286,8 @@
                     <ReviewItem label="CPU Source" :value="selectedCore?.name || '-'" />
                     <ReviewItem label="Core Capability" :value="capabilityLabel(validation?.normalized.core_capability || selectedCore?.integration_level)" />
                     <ReviewItem label="SoC Harness" :value="selectedSocHarness?.name || '-'" />
+                    <ReviewItem label="Combination" :value="combinationSummary" wide />
+                    <ReviewItem label="Compatible Tests" :value="compatibleTestSuitesLabel" />
                     <ReviewItem label="Toolchain" :value="selectedToolchain?.name || '-'" />
                     <ReviewItem label="Test Suite" :value="selectedTestSuite?.name || '-'" />
                     <ReviewItem label="CPU Filelist" :value="effectiveCpuFilelist || '-'" monospace wide />
@@ -359,7 +363,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
-import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
+import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendCompatibilityEntry, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
 
@@ -471,12 +475,12 @@ const fallbackCatalog: FrontendCatalogPayload = {
     {
       id: 'darkriscv',
       name: 'DarkRISCV',
-      description: 'Small BSD-licensed RISC-V core; RTL filelist is ready and ECOS simulation wrapper is planned.',
-      status: 'planned',
-      integration_level: 'filelist_ready',
+      description: 'Small BSD-licensed RISC-V core with an experimental ECOS CPU wrapper. Start with one basic CPU test such as add.',
+      status: 'experimental',
+      integration_level: 'sim_ready',
       requires_filelist: false,
       supports_difftest: false,
-      supported_test_suites: [],
+      supported_test_suites: ['cpu-tests', 'smoke'],
     },
     {
       id: 'vexriscv',
@@ -641,6 +645,7 @@ const fallbackCatalog: FrontendCatalogPayload = {
       status: 'stable',
     },
   ],
+  compatibility: [],
 }
 
 const currentStep = ref(1)
@@ -692,12 +697,24 @@ const selectedCore = computed(() => entryById(catalog.value.cores, selectedCoreI
 const selectedSocHarness = computed(() => entryById(catalog.value.soc_harnesses, selectedSocHarnessId.value))
 const selectedToolchain = computed(() => entryById(catalog.value.toolchains, selectedToolchainId.value))
 const selectedTestSuite = computed(() => entryById(catalog.value.test_suites, selectedTestSuiteId.value))
+const selectedCompatibility = computed(() => compatibilityFor(selectedCoreId.value, selectedSocHarnessId.value))
 const effectiveCpuFilelist = computed(() =>
   config.value.parameters.cpu_filelist
   || validation.value?.normalized?.cpu_filelist
   || stringField(selectedCore.value, 'cpu_filelist')
   || '',
 )
+const combinationSummary = computed(() =>
+  validation.value?.normalized?.compatibility_summary
+  || selectedCompatibility.value?.summary
+  || validationSummary.value,
+)
+const compatibleTestSuitesLabel = computed(() => {
+  const suites = validation.value?.normalized?.compatible_test_suites
+    || selectedCompatibility.value?.supported_test_suites
+    || []
+  return suites.length ? suites.join(', ') : '-'
+})
 const visibleSocHarnesses = computed(() =>
   sortedCatalogEntries(catalog.value.soc_harnesses),
 )
@@ -929,6 +946,13 @@ function capabilityLabel(value: unknown): string {
   return text.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+function compatibilityFor(coreId: string, socHarnessId: string): FrontendCompatibilityEntry | null {
+  if (!coreId || !socHarnessId) return null
+  return (catalog.value.compatibility || []).find((item) =>
+    item.core_id === coreId && item.soc_harness_id === socHarnessId,
+  ) || null
+}
+
 const selectLocation = async () => {
   const desktopApi = await waitForDesktopApi()
   const result = await desktopApi.dialog.pickDirectory({
@@ -1014,6 +1038,7 @@ const createProject = async () => {
         soc_variant: config.value.parameters.soc_variant || String(selectedSocHarness.value.variant || 'soc1'),
         toolchain_id: selectedToolchainId.value,
         test_suite_id: selectedTestSuiteId.value,
+        sim_program_link_base: validation.value?.normalized?.core_sim_program_link_base || stringField(selectedCore.value, 'sim_program_link_base'),
       },
       rtl_list: [],
     })
@@ -1026,18 +1051,34 @@ const CatalogCard = defineComponent({
   props: {
     active: { type: Boolean, required: true },
     entry: { type: Object as () => FrontendCatalogEntry, required: true },
+    compatibility: { type: Object as () => FrontendCompatibilityEntry | null, default: null },
     icon: { type: String, default: 'ri-cpu-line' },
   },
   emits: ['select'],
   setup(props, { emit }) {
     const capability = () => capabilityLabel(props.entry.integration_level)
     const hasBuiltInFilelist = () => typeof props.entry.cpu_filelist === 'string' && props.entry.cpu_filelist.length > 0
+    const comboClass = () => {
+      if (!props.compatibility) return 'bg-(--bg-primary) text-(--text-secondary)'
+      if (props.compatibility.support_level === 'supported') return 'bg-emerald-500/10 text-emerald-400'
+      if (props.compatibility.support_level === 'experimental') return 'bg-amber-500/10 text-amber-400'
+      return 'bg-red-500/10 text-red-400'
+    }
+    const comboLabel = () => {
+      if (!props.compatibility) return ''
+      if (props.compatibility.support_level === 'supported') return 'Ready'
+      if (props.compatibility.support_level === 'experimental') return 'Experimental'
+      if (props.compatibility.status === 'needs_cpu_adapter') return 'Needs CPU Adapter'
+      if (props.compatibility.status === 'needs_soc_adapter') return 'Needs SoC Adapter'
+      return 'Blocked'
+    }
     return () => h('button', {
       class: [
         'group cursor-pointer rounded-xl border bg-(--bg-secondary)/30 p-4 text-left transition-colors hover:bg-(--bg-secondary)/70',
         props.active ? 'border-(--accent-color) ring-2 ring-(--accent-color)/20' : 'border-(--border-color) hover:border-(--text-secondary)',
       ],
       type: 'button',
+      title: props.compatibility?.summary || props.entry.description,
       onClick: () => emit('select'),
     }, [
       h('div', { class: 'flex items-center justify-between gap-3' }, [
@@ -1070,6 +1111,12 @@ const CatalogCard = defineComponent({
         }, capability()),
         ...(hasBuiltInFilelist()
           ? [h('span', { class: 'rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-400' }, 'Built-in filelist')]
+          : []),
+        ...(props.compatibility
+          ? [h('span', { class: ['rounded px-1.5 py-0.5 text-[10px] font-semibold', comboClass()] }, comboLabel())]
+          : []),
+        ...(props.compatibility?.supported_test_suites?.length
+          ? [h('span', { class: 'rounded bg-(--bg-primary)/70 px-1.5 py-0.5 text-[10px] text-(--text-secondary)' }, props.compatibility.supported_test_suites.join('/'))]
           : []),
         ...(Array.isArray(props.entry.isa) ? props.entry.isa.slice(0, 3) : []).map((isa) =>
           h('span', { class: 'rounded bg-(--bg-primary)/70 px-1.5 py-0.5 text-[10px] text-(--text-secondary)' }, String(isa)),

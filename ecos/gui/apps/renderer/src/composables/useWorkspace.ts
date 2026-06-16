@@ -600,7 +600,7 @@ export function useWorkspace() {
           ...frontendParams,
           Design: designName,
           'Design Tool': 'frontend',
-          'Top module': frontendParams.top_module || frontendParams['Top module'] || 'ysyxSoCTop',
+          'Top module': frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
           Clock: frontendParams.clock || frontendParams.Clock || 'clk',
           'Frequency max [MHz]': frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
         }
@@ -618,6 +618,7 @@ export function useWorkspace() {
           sim_ldflags: Array.isArray(frontendParams.sim_ldflags) ? frontendParams.sim_ldflags as string[] : [],
           sim_program_names: Array.isArray(frontendParams.sim_program_names) ? frontendParams.sim_program_names as string[] : [],
           sim_program_sources: Array.isArray(frontendParams.sim_program_sources) ? frontendParams.sim_program_sources as string[] : [],
+          sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
           sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
           sim_run_args: Array.isArray(frontendParams.sim_run_args) ? frontendParams.sim_run_args as string[] : [],
           sim_soc_root: String(frontendParams.sim_soc_root || ''),

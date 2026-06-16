@@ -25,6 +25,22 @@ export interface FrontendCatalogPayload {
   soc_harnesses: FrontendCatalogEntry[]
   toolchains: FrontendCatalogEntry[]
   test_suites: FrontendCatalogEntry[]
+  compatibility?: FrontendCompatibilityEntry[]
+}
+
+export interface FrontendCompatibilityEntry {
+  core_id: string
+  soc_harness_id: string
+  can_create_workspace: boolean
+  support_level: 'supported' | 'experimental' | 'unsupported'
+  status: string
+  summary: string
+  supported_test_suites: string[]
+  issues: Array<{
+    code: string
+    message: string
+  }>
+  requires_cpu_filelist: boolean
 }
 
 export interface FrontendValidationIssue {
@@ -52,6 +68,7 @@ export interface FrontendValidationResult {
     cpu_wrapper_top?: string
     cpu_supports_difftest?: boolean
     core_supported_test_suites?: string[]
+    core_sim_program_link_base?: string
     soc_harness_capability?: string
     soc_wrapper_contract?: string
     soc_wrapper_top?: string
@@ -59,6 +76,9 @@ export interface FrontendValidationResult {
     soc_supports_difftest?: boolean
     soc_supported_test_suites?: string[]
     required_capability?: string
+    compatibility_status?: string
+    compatibility_summary?: string
+    compatible_test_suites?: string[]
   }
   issues: FrontendValidationIssue[]
 }
