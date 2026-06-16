@@ -528,8 +528,8 @@ const fallbackCatalog: FrontendCatalogPayload = {
     },
     {
       id: 'minimal-riscv-soc',
-      name: 'Minimal RISC-V SoC Harness',
-      description: 'Small memory/UART harness for lightweight open-source RISC-V core demos.',
+      name: 'ECOS Minimal CPU Test Harness',
+      description: 'Local Verilog CPU-test harness with DPI memory, UART, and trap MMIO; not a full SoC.',
       status: 'experimental',
       integration_level: 'sim_ready',
       variant: 'minimal-riscv',
@@ -538,8 +538,8 @@ const fallbackCatalog: FrontendCatalogPayload = {
     },
     {
       id: 'corev-mini-soc',
-      name: 'CORE-V Mini SoC Harness',
-      description: 'Small simulator harness for CORE-V style open-source RISC-V CPU wrappers.',
+      name: 'ECOS CORE-V CPU Test Harness',
+      description: 'Local Verilog CPU-test harness profile for CORE-V style CPU wrappers; not a full CORE-V SoC.',
       status: 'experimental',
       integration_level: 'sim_ready',
       variant: 'corev-mini',
@@ -548,8 +548,8 @@ const fallbackCatalog: FrontendCatalogPayload = {
     },
     {
       id: 'femtorv-mini-soc',
-      name: 'FemtoRV Mini SoC Harness',
-      description: 'Small simulator harness profile for FemtoRV and other compact educational RISC-V cores.',
+      name: 'ECOS FemtoRV CPU Test Harness',
+      description: 'Local Verilog CPU-test harness profile for FemtoRV and compact educational CPU wrappers; not a full SoC.',
       status: 'experimental',
       integration_level: 'sim_ready',
       variant: 'femtorv-mini',
