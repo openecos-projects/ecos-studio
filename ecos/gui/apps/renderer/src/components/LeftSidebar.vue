@@ -529,6 +529,7 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
 const handleRunFlow = async () => {
   closeMenu()
   if (flowRunControlBusy.value) return
+  const rerun = runMode.value === 'rerun'
 
   if (!(await ensureApiReady())) {
     await refreshFlowStages()
@@ -537,11 +538,11 @@ const handleRunFlow = async () => {
 
   if (currentStage.value === 'home') {
     setFirstRunStepOngoing()
-    await runAllFlow()
+    await runAllFlow({ rerun })
     await refreshFlowStages()
   } else {
     setRunStepOngoingByPath(currentStage.value)
-    await runFlow()
+    await runFlow({ rerun })
     await Promise.all([
       refreshCurrentSubflow(),
       refreshFlowStages()

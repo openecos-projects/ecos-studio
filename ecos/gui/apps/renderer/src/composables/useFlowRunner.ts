@@ -111,7 +111,7 @@ export function useFlowRunner() {
   /**
    * 运行当前步骤
    */
-  async function runFlow(): Promise<RunStepResponse | null> {
+  async function runFlow(options: { rerun?: boolean } = {}): Promise<RunStepResponse | null> {
     // 从动态路由参数获取当前步骤
     const step = getCurrentStep()
 
@@ -151,7 +151,7 @@ export function useFlowRunner() {
     state.value = StateEnum.Ongoing
     error.value = null
     try {
-      console.log('handleRunFlow', step)
+      console.log('handleRunFlow', step, { rerun: Boolean(options.rerun) })
       const versionsBeforeRunStep = { ...resourceVersions.value }
       const runSessionId = workspaceSession.value.sessionId
 
@@ -161,7 +161,7 @@ export function useFlowRunner() {
           designTool: currentProject.value?.designTool,
           directory,
           step,
-          rerun: false
+          rerun: Boolean(options.rerun)
         }
       })
       console.log('run step result', result)
@@ -177,7 +177,7 @@ export function useFlowRunner() {
         showToast({
           severity: 'success',
           summary: 'Step Completed',
-          detail: `${step} finished successfully`,
+          detail: `${step} ${options.rerun ? 'reran' : 'finished'} successfully`,
           life: 4000
         })
       } else {
@@ -212,7 +212,7 @@ export function useFlowRunner() {
    * 执行过程中，Electron runtime 转发 CLI lifecycle events，
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
-  async function runAllFlow(): Promise<any | null> {
+  async function runAllFlow(options: { rerun?: boolean } = {}): Promise<any | null> {
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
       console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
@@ -247,14 +247,14 @@ export function useFlowRunner() {
     try {
       const isFrontendProject = currentProject.value?.designTool === 'frontend'
       const flowLabel = isFrontendProject ? 'Frontend Flow' : 'RTL2GDS'
-      console.log(`Starting ${flowLabel} flow...`)
+      console.log(`Starting ${flowLabel} flow...`, { rerun: Boolean(options.rerun) })
 
       const result = await rtl2gdsApi({
         cmd: CMDEnum.rtl2gds,
         data: {
           designTool: currentProject.value?.designTool,
           directory,
-          rerun: false
+          rerun: Boolean(options.rerun)
         }
       })
       console.log(`${flowLabel} result:`, result)

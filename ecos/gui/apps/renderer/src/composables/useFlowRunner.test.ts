@@ -163,6 +163,27 @@ describe('useFlowRunner desktop-only guard', () => {
     })
   })
 
+  it('passes rerun through when rerunning the full flow', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: true },
+      message: ['done'],
+    })
+
+    const { runAllFlow } = useFlowRunner()
+
+    await expect(runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
+    expect(rtl2gdsApi).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      data: {
+        directory: '/work/demo',
+        rerun: true,
+      },
+    })
+  })
+
   it('does not mark the full flow running when the runtime bridge is unavailable', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     ensureApiReady.mockResolvedValue(false)
@@ -194,6 +215,29 @@ describe('useFlowRunner desktop-only guard', () => {
       data: {
         directory: '/work/demo',
         rerun: false,
+        step: StepEnum.FLOORPLAN,
+      },
+    })
+  })
+
+  it('passes rerun through when rerunning a single step', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    runStepApi.mockResolvedValue({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+
+    const { runFlow } = useFlowRunner()
+
+    await runFlow({ rerun: true })
+
+    expect(runStepApi).toHaveBeenCalledWith({
+      cmd: 'run_step',
+      data: {
+        directory: '/work/demo',
+        rerun: true,
         step: StepEnum.FLOORPLAN,
       },
     })
