@@ -273,6 +273,19 @@
                         FPGA
                       </button>
                     </div>
+                    <div v-if="reviewStructuralProbe" class="review-structural" :class="reviewStructuralTone">
+                      <div>
+                        <span>Yosys Precheck</span>
+                        <strong>{{ reviewStructuralStatus }}</strong>
+                      </div>
+                      <p v-if="reviewStructuralReason">{{ reviewStructuralReason }}</p>
+                      <p v-else>{{ reviewStructuralQualityLabel }}</p>
+                      <div class="review-structural-grid">
+                        <span>Cells <strong>{{ numberLabel(reviewStructuralMetrics.cells) }}</strong></span>
+                        <span>Wires <strong>{{ numberLabel(reviewStructuralMetrics.wires) }}</strong></span>
+                        <span>Diag <strong>{{ numberLabel(reviewStructuralDiagnostics) }}</strong></span>
+                      </div>
+                    </div>
                     <div class="review-metrics">
                       <div v-for="metric in reviewMetricRows" :key="metric.label">
                         <span>{{ metric.label }}</span>
@@ -715,6 +728,8 @@ interface RtlReviewReport {
   metrics?: Record<string, unknown>
   issues?: RtlReviewIssue[]
   source_files?: Array<{ path: string; label?: string; lines?: number }>
+  structural_probe?: Record<string, unknown>
+  yosys_precheck?: Record<string, unknown>
   profiles?: string[]
   next_analyzers?: string[]
 }
@@ -972,6 +987,37 @@ const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.is
 const filteredReviewIssues = computed(() => reviewIssues.value.filter((issue) =>
   reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
 ))
+const reviewStructuralProbe = computed(() => {
+  const probe = reviewReport.value?.yosys_precheck || reviewReport.value?.structural_probe
+  return probe && Object.keys(probe).length ? probe : null
+})
+const reviewStructuralMetrics = computed(() => {
+  const metrics = reviewStructuralProbe.value?.metrics
+  return metrics && typeof metrics === 'object' ? metrics as Record<string, unknown> : {}
+})
+const reviewStructuralQuality = computed(() => {
+  const quality = reviewStructuralProbe.value?.quality
+  return quality && typeof quality === 'object' ? quality as Record<string, unknown> : {}
+})
+const reviewStructuralStatus = computed(() => titleCase(String(reviewStructuralProbe.value?.status || 'not run')))
+const reviewStructuralReason = computed(() => String(reviewStructuralProbe.value?.reason || '').trim())
+const reviewStructuralDiagnostics = computed(() => {
+  const diagnostics = reviewStructuralProbe.value?.diagnostics
+  return Array.isArray(diagnostics) ? diagnostics.length : 0
+})
+const reviewStructuralQualityLabel = computed(() => {
+  const gate = String(reviewStructuralQuality.value.gate || '').trim()
+  const complexity = String(reviewStructuralQuality.value.complexity || '').trim()
+  if (!gate && !complexity) return 'CPU RTL parsed by Yosys precheck.'
+  return `Gate: ${titleCase(gate || '--')} · Complexity: ${titleCase(complexity || '--')}`
+})
+const reviewStructuralTone = computed(() => {
+  const status = String(reviewStructuralProbe.value?.status || '').toLowerCase()
+  if (status === 'success') return 'ok'
+  if (status === 'unavailable' || status === 'skipped') return 'muted'
+  if (status === 'failed' || status === 'timeout') return 'warning'
+  return 'muted'
+})
 const reviewSummaryTiles = computed(() => {
   const summary = reviewReport.value?.summary || {}
   return [
@@ -1732,6 +1778,14 @@ function reviewIssueKey(issue: RtlReviewIssue): string {
 
 function reviewScopeLabel(scope: unknown): string {
   return String(scope || '').toLowerCase() === 'cpu' ? 'CPU RTL' : '--'
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || '--'
 }
 
 function openReviewIssue(issue: RtlReviewIssue): void {
@@ -2829,6 +2883,77 @@ button:disabled {
 .review-profile-switch button.active {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
   color: var(--accent-color);
+}
+
+.review-structural {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.review-structural.ok {
+  border-left-color: #10b981;
+}
+
+.review-structural.warning {
+  border-left-color: #f59e0b;
+}
+
+.review-structural.muted {
+  border-left-color: var(--text-secondary);
+}
+
+.review-structural > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.review-structural span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.review-structural strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.review-structural p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.review-structural-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.review-structural-grid span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  text-transform: none;
+}
+
+.review-structural-grid strong {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
 }
 
 .review-metrics {
