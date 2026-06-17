@@ -286,6 +286,25 @@
                         <span>Diag <strong>{{ numberLabel(reviewStructuralDiagnostics) }}</strong></span>
                       </div>
                     </div>
+                    <div v-if="reviewRiskyModules.length" class="review-risk-list">
+                      <div class="review-side-heading">
+                        <span>Risky Modules</span>
+                        <strong>{{ reviewRiskyModules.length }}</strong>
+                      </div>
+                      <button
+                        v-for="module in reviewRiskyModules"
+                        :key="String(module.module)"
+                        type="button"
+                        class="review-risk-module"
+                        :class="String(module.risk || 'low')"
+                      >
+                        <div>
+                          <strong>{{ module.module }}</strong>
+                          <span>{{ moduleRiskReason(module) }}</span>
+                        </div>
+                        <em>{{ numberLabel(module.score) }}</em>
+                      </button>
+                    </div>
                     <div class="review-metrics">
                       <div v-for="metric in reviewMetricRows" :key="metric.label">
                         <span>{{ metric.label }}</span>
@@ -294,32 +313,115 @@
                     </div>
                   </aside>
 
-                  <div class="review-issues">
-                    <button
-                      v-for="issue in filteredReviewIssues"
-                      :key="reviewIssueKey(issue)"
-                      type="button"
-                      class="review-issue"
-                      :class="issue.severity"
-                      @click="openReviewIssue(issue)"
-                    >
-                      <div class="review-issue-icon">
-                        <i :class="problemIcon(issue.severity)"></i>
-                      </div>
-                      <div class="review-issue-body">
-                        <div class="review-issue-title">
-                          <strong>{{ issue.title }}</strong>
-                          <span>{{ reviewIssueProfiles(issue) }}</span>
+                  <div class="review-layers">
+                    <section class="review-layer">
+                      <header class="review-layer-head">
+                        <div>
+                          <span>Source Scan</span>
+                          <strong>RTL source rules</strong>
                         </div>
-                        <p>{{ issue.detail }}</p>
-                        <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
-                        <em v-if="issue.source">{{ shortPath(issue.source) }}{{ issue.line ? `:${issue.line}` : '' }}</em>
+                        <em>{{ filteredSourceScanIssues.length }}</em>
+                      </header>
+                      <div class="review-issues">
+                        <button
+                          v-for="issue in filteredSourceScanIssues"
+                          :key="reviewIssueKey(issue)"
+                          type="button"
+                          class="review-issue"
+                          :class="issue.severity"
+                          @click="openReviewIssue(issue)"
+                        >
+                          <div class="review-issue-icon">
+                            <i :class="problemIcon(issue.severity)"></i>
+                          </div>
+                          <div class="review-issue-body">
+                            <div class="review-issue-title">
+                              <strong>{{ issue.title }}</strong>
+                              <span>{{ reviewIssueProfiles(issue) }}</span>
+                            </div>
+                            <p>{{ issue.detail }}</p>
+                            <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
+                            <em v-if="issue.source">{{ shortPath(issue.source) }}{{ issue.line ? `:${issue.line}` : '' }}</em>
+                          </div>
+                        </button>
+                        <div v-if="filteredSourceScanIssues.length === 0" class="empty-panel">
+                          <i class="ri-checkbox-circle-line"></i>
+                          <span>No source scan issues for this profile.</span>
+                        </div>
                       </div>
-                    </button>
-                    <div v-if="filteredReviewIssues.length === 0" class="empty-panel">
-                      <i class="ri-checkbox-circle-line"></i>
-                      <span>No issues for this profile.</span>
-                    </div>
+                    </section>
+
+                    <section class="review-layer">
+                      <header class="review-layer-head">
+                        <div>
+                          <span>Yosys Precheck</span>
+                          <strong>Pre-synthesis structure</strong>
+                        </div>
+                        <em>{{ reviewYosysDiagnostics.length + reviewRiskyModules.length }}</em>
+                      </header>
+                      <div class="review-yosys-grid">
+                        <div class="review-yosys-column">
+                          <div class="review-column-head">
+                            <span>Diagnostics</span>
+                            <strong>{{ reviewYosysDiagnostics.length }}</strong>
+                          </div>
+                          <button
+                            v-for="diagnostic in reviewYosysDiagnostics"
+                            :key="yosysDiagnosticKey(diagnostic)"
+                            type="button"
+                            class="review-issue yosys"
+                            :class="diagnostic.severity || 'info'"
+                            @click="openYosysDiagnostic(diagnostic)"
+                          >
+                            <div class="review-issue-icon">
+                              <i :class="problemIcon(diagnostic.severity || 'info')"></i>
+                            </div>
+                            <div class="review-issue-body">
+                              <div class="review-issue-title">
+                                <strong>{{ titleCase(String(diagnostic.category || 'diagnostic')) }}</strong>
+                                <span>Yosys</span>
+                              </div>
+                              <p>{{ diagnostic.message || 'Yosys diagnostic' }}</p>
+                              <em v-if="diagnostic.source">{{ shortPath(String(diagnostic.source)) }}{{ diagnostic.line ? `:${diagnostic.line}` : '' }}</em>
+                            </div>
+                          </button>
+                          <div v-if="reviewYosysDiagnostics.length === 0" class="empty-panel compact">
+                            <i class="ri-checkbox-circle-line"></i>
+                            <span>No Yosys diagnostics.</span>
+                          </div>
+                        </div>
+
+                        <div class="review-yosys-column">
+                          <div class="review-column-head">
+                            <span>Risky Modules</span>
+                            <strong>{{ reviewRiskyModules.length }}</strong>
+                          </div>
+                          <button
+                            v-for="module in reviewRiskyModules"
+                            :key="String(module.module)"
+                            type="button"
+                            class="review-module-card"
+                            :class="String(module.risk || 'low')"
+                          >
+                            <div class="review-module-title">
+                              <strong>{{ module.module }}</strong>
+                              <em>{{ titleCase(String(module.risk || 'low')) }}</em>
+                            </div>
+                            <p>{{ moduleRiskReason(module) }}</p>
+                            <div class="review-module-metrics">
+                              <span>Cells <strong>{{ numberLabel(module.cells) }}</strong></span>
+                              <span>Mux <strong>{{ numberLabel(module.mux_cells) }}</strong></span>
+                              <span>Arith <strong>{{ numberLabel(module.arithmetic_cells) }}</strong></span>
+                              <span>Mem <strong>{{ numberLabel(module.memory_cells) }}</strong></span>
+                            </div>
+                          </button>
+                          <div v-if="reviewRiskyModules.length === 0" class="empty-panel compact">
+                            <i class="ri-checkbox-circle-line"></i>
+                            <span>No risky modules reported.</span>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
                   </div>
                 </section>
               </template>
@@ -734,6 +836,29 @@ interface RtlReviewReport {
   next_analyzers?: string[]
 }
 
+interface YosysDiagnostic {
+  severity?: 'error' | 'warning' | 'info'
+  message?: string
+  category?: string
+  source?: string
+  line?: number
+  column?: number
+}
+
+interface ModuleRisk {
+  module?: string
+  score?: number
+  risk?: string
+  cells?: number
+  wires?: number
+  ports?: number
+  processes?: number
+  mux_cells?: number
+  arithmetic_cells?: number
+  memory_cells?: number
+  reasons?: string[]
+}
+
 const route = useRoute()
 const {
   currentProject,
@@ -987,6 +1112,10 @@ const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.is
 const filteredReviewIssues = computed(() => reviewIssues.value.filter((issue) =>
   reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
 ))
+const sourceScanIssues = computed(() => reviewIssues.value.filter((issue) => !isYosysIssue(issue)))
+const filteredSourceScanIssues = computed(() => sourceScanIssues.value.filter((issue) =>
+  reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
+))
 const reviewStructuralProbe = computed(() => {
   const probe = reviewReport.value?.yosys_precheck || reviewReport.value?.structural_probe
   return probe && Object.keys(probe).length ? probe : null
@@ -1004,6 +1133,18 @@ const reviewStructuralReason = computed(() => String(reviewStructuralProbe.value
 const reviewStructuralDiagnostics = computed(() => {
   const diagnostics = reviewStructuralProbe.value?.diagnostics
   return Array.isArray(diagnostics) ? diagnostics.length : 0
+})
+const reviewYosysDiagnostics = computed<YosysDiagnostic[]>(() => {
+  const diagnostics = reviewStructuralProbe.value?.diagnostics
+  return Array.isArray(diagnostics)
+    ? diagnostics.filter((item): item is YosysDiagnostic => Boolean(item && typeof item === 'object'))
+    : []
+})
+const reviewRiskyModules = computed<ModuleRisk[]>(() => {
+  const risks = reviewStructuralProbe.value?.module_risks
+  return Array.isArray(risks)
+    ? risks.filter((item): item is ModuleRisk => Boolean(item && typeof item === 'object')).slice(0, 8)
+    : []
 })
 const reviewStructuralQualityLabel = computed(() => {
   const gate = String(reviewStructuralQuality.value.gate || '').trim()
@@ -1071,6 +1212,9 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
   }
   for (const issue of reviewIssues.value.slice(0, 30)) {
     problems.push(reviewIssueToProblem(issue))
+  }
+  for (const diagnostic of reviewYosysDiagnostics.value.slice(0, 30)) {
+    problems.push(yosysDiagnosticToProblem(diagnostic))
   }
   for (const testCase of cases.value.filter((item) => !item.ok)) {
     problems.push({
@@ -1758,6 +1902,50 @@ function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
   }
 }
 
+function isYosysIssue(issue: RtlReviewIssue): boolean {
+  const category = String(issue.category || '').toLowerCase()
+  return /yosys|precheck/i.test(issue.title)
+    || category === 'syntax'
+    || category === 'hierarchy'
+    || (category === 'structural' && !issue.source)
+}
+
+function yosysDiagnosticToProblem(diagnostic: YosysDiagnostic): ConsoleProblem {
+  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+    ? diagnostic.severity
+    : 'info'
+  const message = String(diagnostic.message || 'Yosys diagnostic')
+  return {
+    severity,
+    title: `Yosys Precheck · ${titleCase(String(diagnostic.category || 'diagnostic'))}`,
+    detail: message,
+    sourcePath: String(diagnostic.source || ''),
+    line: Number(diagnostic.line || 1),
+    column: Number(diagnostic.column || 1),
+  }
+}
+
+function openYosysDiagnostic(diagnostic: YosysDiagnostic): void {
+  const source = String(diagnostic.source || '')
+  if (source) {
+    openSourceAt(source, Number(diagnostic.line || 1), Number(diagnostic.column || 1))
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
+}
+
+function yosysDiagnosticKey(diagnostic: YosysDiagnostic): string {
+  return [
+    diagnostic.severity || '',
+    diagnostic.category || '',
+    diagnostic.source || '',
+    diagnostic.line || '',
+    diagnostic.column || '',
+    diagnostic.message || '',
+  ].join(':')
+}
+
 function reviewIssueProfiles(issue: RtlReviewIssue): string {
   return [
     issue.category,
@@ -1778,6 +1966,14 @@ function reviewIssueKey(issue: RtlReviewIssue): string {
 
 function reviewScopeLabel(scope: unknown): string {
   return String(scope || '').toLowerCase() === 'cpu' ? 'CPU RTL' : '--'
+}
+
+function moduleRiskReason(module: ModuleRisk): string {
+  const reasons = Array.isArray(module.reasons) ? module.reasons.filter(Boolean) : []
+  if (reasons.length) return reasons.slice(0, 2).join(' · ')
+  const cells = numberLabel(module.cells)
+  const wires = numberLabel(module.wires)
+  return `cells ${cells} · wires ${wires}`
 }
 
 function titleCase(value: string): string {
@@ -2845,7 +3041,7 @@ button:disabled {
 }
 
 .review-sidebar,
-.review-issues {
+.review-layer {
   min-height: 0;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -2858,6 +3054,102 @@ button:disabled {
   gap: 10px;
   padding: 10px;
   overflow: auto;
+}
+
+.review-layers {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1.12fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.review-layer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.review-layer-head,
+.review-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.review-layer-head div {
+  min-width: 0;
+}
+
+.review-layer-head span,
+.review-column-head span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.review-layer-head strong,
+.review-column-head strong {
+  display: block;
+  min-width: 0;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-layer-head em {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+
+.review-issues {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.review-yosys-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  padding: 10px;
+}
+
+.review-yosys-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.review-yosys-column .review-issue,
+.review-module-card {
+  margin: 8px 8px 0;
+}
+
+.review-yosys-column .empty-panel {
+  margin: 8px;
 }
 
 .review-profile-switch {
@@ -2956,6 +3248,85 @@ button:disabled {
   font-size: 11px;
 }
 
+.review-risk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-side-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.review-side-heading strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.review-risk-module {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.review-risk-module.high {
+  border-left-color: #ef4444;
+}
+
+.review-risk-module.medium {
+  border-left-color: #f59e0b;
+}
+
+.review-risk-module.low {
+  border-left-color: #10b981;
+}
+
+.review-risk-module div {
+  min-width: 0;
+}
+
+.review-risk-module strong,
+.review-risk-module span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-risk-module strong {
+  font-size: 11px;
+}
+
+.review-risk-module span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.review-risk-module em {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-style: normal;
+}
+
 .review-metrics {
   display: flex;
   flex-direction: column;
@@ -2981,14 +3352,6 @@ button:disabled {
 .review-metrics strong {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 12px;
-}
-
-.review-issues {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow: auto;
-  padding: 10px;
 }
 
 .review-issue {
@@ -3041,6 +3404,86 @@ button:disabled {
 
 .review-issue.info .review-issue-icon {
   color: var(--accent-color);
+}
+
+.review-module-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-secondary);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.review-module-card.high {
+  border-left-color: #ef4444;
+}
+
+.review-module-card.medium {
+  border-left-color: #f59e0b;
+}
+
+.review-module-card.low {
+  border-left-color: #10b981;
+}
+
+.review-module-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-module-title strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-module-title em {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.review-module-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.review-module-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.review-module-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.review-module-metrics strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
 }
 
 .review-issue-body {
@@ -3655,7 +4098,8 @@ button:disabled {
   .frontend-grid,
   .source-layout,
   .artifact-groups,
-  .review-main {
+  .review-main,
+  .review-yosys-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3697,6 +4141,14 @@ button:disabled {
   }
 
   .review-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-layers {
+    grid-template-rows: none;
+  }
+
+  .review-module-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
