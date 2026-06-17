@@ -52,6 +52,7 @@ export enum StepEnum {
 
 export enum FrontendStepEnum {
   PREPARE = "prepare",
+  REVIEW = "review",
   ELAB = "elab",
   LINT = "lint",
   SIM = "sim",
@@ -98,6 +99,7 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
   [StepEnum.MERGE.toLowerCase()]: { label: 'Merge', icon: 'ri-merge-cells-horizontal', path: StepEnum.MERGE, showInSidebar: false, group: 'run' },
 
   [FrontendStepEnum.PREPARE]: { label: 'Prepare', icon: 'ri-file-list-3-line', path: FrontendStepEnum.PREPARE, showInSidebar: true, group: 'run' },
+  [FrontendStepEnum.REVIEW]: { label: 'RTL Review', icon: 'ri-search-eye-line', path: FrontendStepEnum.REVIEW, showInSidebar: true, group: 'run' },
   [FrontendStepEnum.ELAB]: { label: 'Elab', icon: 'ri-node-tree', path: FrontendStepEnum.ELAB, showInSidebar: true, group: 'run' },
   [FrontendStepEnum.LINT]: { label: 'Lint', icon: 'ri-bug-line', path: FrontendStepEnum.LINT, showInSidebar: true, group: 'run' },
   [FrontendStepEnum.SIM]: { label: 'Sim', icon: 'ri-play-circle-line', path: FrontendStepEnum.SIM, showInSidebar: true, group: 'run' },

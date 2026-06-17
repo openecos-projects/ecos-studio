@@ -230,6 +230,88 @@
               <pre>{{ formattedSummary }}</pre>
             </section>
 
+            <section v-else-if="activeTab === 'review'" class="review-panel">
+              <div v-if="!reviewReport" class="empty-panel">
+                <i class="ri-search-eye-line"></i>
+                <span>No RTL review report yet. Run RTL Review first.</span>
+              </div>
+              <template v-else>
+                <section class="review-overview">
+                  <div
+                    v-for="tile in reviewSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+
+                <section class="review-main">
+                  <aside class="review-sidebar">
+                    <div class="review-profile-switch">
+                      <button
+                        type="button"
+                        :class="{ active: reviewProfile === 'all' }"
+                        @click="reviewProfile = 'all'"
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ active: reviewProfile === 'IC' }"
+                        @click="reviewProfile = 'IC'"
+                      >
+                        IC
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ active: reviewProfile === 'FPGA' }"
+                        @click="reviewProfile = 'FPGA'"
+                      >
+                        FPGA
+                      </button>
+                    </div>
+                    <div class="review-metrics">
+                      <div v-for="metric in reviewMetricRows" :key="metric.label">
+                        <span>{{ metric.label }}</span>
+                        <strong>{{ metric.value }}</strong>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div class="review-issues">
+                    <button
+                      v-for="issue in filteredReviewIssues"
+                      :key="reviewIssueKey(issue)"
+                      type="button"
+                      class="review-issue"
+                      :class="issue.severity"
+                      @click="openReviewIssue(issue)"
+                    >
+                      <div class="review-issue-icon">
+                        <i :class="problemIcon(issue.severity)"></i>
+                      </div>
+                      <div class="review-issue-body">
+                        <div class="review-issue-title">
+                          <strong>{{ issue.title }}</strong>
+                          <span>{{ reviewIssueProfiles(issue) }}</span>
+                        </div>
+                        <p>{{ issue.detail }}</p>
+                        <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
+                        <em v-if="issue.source">{{ shortPath(issue.source) }}{{ issue.line ? `:${issue.line}` : '' }}</em>
+                      </div>
+                    </button>
+                    <div v-if="filteredReviewIssues.length === 0" class="empty-panel">
+                      <i class="ri-checkbox-circle-line"></i>
+                      <span>No issues for this profile.</span>
+                    </div>
+                  </div>
+                </section>
+              </template>
+            </section>
+
             <section v-else-if="activeTab === 'cases'" class="cases-panel">
               <div v-if="simResultIsStale" class="sim-stale-banner">
                 <i class="ri-time-line"></i>
@@ -550,6 +632,7 @@ interface FrontendStepDetail {
   peak_memory_mb?: number
   summary: Record<string, unknown>
   cases?: SimCase[]
+  review?: RtlReviewReport
   logs: PathItem[]
   reports: PathItem[]
   artifacts: PathItem[]
@@ -574,9 +657,10 @@ interface FrontendConfigItem {
 }
 
 type ArtifactKind = 'source' | 'wave' | 'log' | 'report' | 'image' | 'other'
-type TabId = 'summary' | 'cases' | 'log' | 'reports' | 'artifacts' | 'src' | 'wave'
+type TabId = 'summary' | 'review' | 'cases' | 'log' | 'reports' | 'artifacts' | 'src' | 'wave'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
+type ReviewProfile = 'all' | 'IC' | 'FPGA'
 
 interface ArtifactGroup {
   id: ArtifactKind
@@ -611,6 +695,30 @@ interface SimRunContext {
   cases: string[]
 }
 
+interface RtlReviewIssue {
+  severity: 'error' | 'warning' | 'info'
+  profiles: string[]
+  category: string
+  title: string
+  detail: string
+  source?: string
+  line?: number
+  column?: number
+  evidence?: Record<string, unknown>
+  recommendation?: string
+}
+
+interface RtlReviewReport {
+  path?: string
+  scope?: string
+  summary?: Record<string, unknown>
+  metrics?: Record<string, unknown>
+  issues?: RtlReviewIssue[]
+  source_files?: Array<{ path: string; label?: string; lines?: number }>
+  profiles?: string[]
+  next_analyzers?: string[]
+}
+
 const route = useRoute()
 const {
   currentProject,
@@ -643,6 +751,7 @@ const consoleCollapsed = ref(false)
 const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
 const consoleResizing = ref(false)
 const consoleTab = ref<ConsoleTabId>('problems')
+const reviewProfile = ref<ReviewProfile>('all')
 const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
 let sourceFocusToken = 0
 const simSuite = ref<'cpu_tests' | 'rtthread'>('cpu_tests')
@@ -668,6 +777,7 @@ const currentStep = computed(() =>
   steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
 )
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
+const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
 const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
 const nextPendingStep = computed(() =>
   steps.value.find((step) => step.state !== 'Success') ?? null,
@@ -790,7 +900,19 @@ const allArtifacts = computed(() => {
   ]).filter(Boolean) as PathItem[]
   return uniquePathItems([...(detail.value?.artifacts || []), ...fromCases])
 })
-const sourceArtifacts = computed(() => allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)))
+const reviewSourceArtifacts = computed<PathItem[]>(() => {
+  const sources = reviewReport.value?.source_files || []
+  return sources
+    .map((source) => ({
+      label: source.label || fileName(source.path),
+      path: source.path,
+    }))
+    .filter((item) => item.path)
+})
+const sourceArtifacts = computed(() => uniquePathItems([
+  ...allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)),
+  ...reviewSourceArtifacts.value,
+]))
 const logDiagnostics = computed(() => parseVerilatorDiagnostics(logContent.value))
 const sourceDiagnosticCounts = computed(() => {
   const counts = new Map<string, DiagnosticCount>()
@@ -840,6 +962,41 @@ const availableLogs = computed(() => {
   return uniquePathItems([...caseLogs, ...logs])
 })
 const formattedSummary = computed(() => JSON.stringify(detail.value?.summary || {}, null, 2))
+const reviewReport = computed<RtlReviewReport | null>(() => {
+  const review = detail.value?.review
+  if (!review) return null
+  if (review.path || review.issues?.length || review.source_files?.length) return review
+  return null
+})
+const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.issues || []))
+const filteredReviewIssues = computed(() => reviewIssues.value.filter((issue) =>
+  reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
+))
+const reviewSummaryTiles = computed(() => {
+  const summary = reviewReport.value?.summary || {}
+  return [
+    { label: 'Scope', value: reviewScopeLabel(reviewReport.value?.scope), tone: 'neutral' },
+    { label: 'Errors', value: numberLabel(summary.errors), tone: numberValue(summary.errors) > 0 ? 'error' : 'ok' },
+    { label: 'Warnings', value: numberLabel(summary.warnings), tone: numberValue(summary.warnings) > 0 ? 'warning' : 'ok' },
+    { label: 'IC Issues', value: numberLabel(readNested(summary, ['profile_counts', 'IC'])), tone: 'ic' },
+    { label: 'FPGA Issues', value: numberLabel(readNested(summary, ['profile_counts', 'FPGA'])), tone: 'fpga' },
+    { label: 'Sources', value: numberLabel(summary.source_files), tone: 'neutral' },
+    { label: 'Modules', value: numberLabel(summary.modules), tone: 'neutral' },
+  ]
+})
+const reviewMetricRows = computed(() => {
+  const metrics = reviewReport.value?.metrics || {}
+  return [
+    { label: 'Total Lines', value: numberLabel(metrics.total_lines) },
+    { label: 'Always Blocks', value: numberLabel(metrics.always_blocks) },
+    { label: 'Sequential', value: numberLabel(metrics.sequential_blocks) },
+    { label: 'Combinational', value: numberLabel(metrics.combinational_blocks) },
+    { label: 'Assigns', value: numberLabel(metrics.continuous_assigns) },
+    { label: 'Case Statements', value: numberLabel(metrics.case_statements) },
+    { label: 'Clock Refs', value: numberLabel(metrics.clock_references) },
+    { label: 'Reset Refs', value: numberLabel(metrics.reset_references) },
+  ]
+})
 const consoleStyle = computed(() => ({
   '--console-height': `${consoleHeight.value}px`,
 }))
@@ -865,6 +1022,9 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
       title: 'Simulation results out of date',
       detail: `${simContextLabel(resultSimRunContext.value || currentSimRunContext.value)} is displayed, but ${simContextLabel(currentSimRunContext.value)} is selected.`,
     })
+  }
+  for (const issue of reviewIssues.value.slice(0, 30)) {
+    problems.push(reviewIssueToProblem(issue))
   }
   for (const testCase of cases.value.filter((item) => !item.ok)) {
     problems.push({
@@ -893,6 +1053,7 @@ const consoleProblemCount = computed(() =>
 )
 const visibleTabs = computed(() => [
   { id: 'summary' as const, label: 'Summary', icon: 'ri-dashboard-3-line' },
+  ...(isReviewStep.value ? [{ id: 'review' as const, label: 'Review', icon: 'ri-search-eye-line' }] : []),
   ...(isSimStep.value ? [{ id: 'cases' as const, label: 'Cases', icon: 'ri-list-check-3' }] : []),
   { id: 'log' as const, label: 'Log', icon: 'ri-terminal-box-line' },
   { id: 'reports' as const, label: 'Reports', icon: 'ri-file-chart-line' },
@@ -948,6 +1109,9 @@ async function loadDetail(): Promise<void> {
     selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
     if (isSimStep.value && activeTab.value === 'summary') {
       activeTab.value = 'cases'
+    }
+    if (isReviewStep.value && activeTab.value === 'summary') {
+      activeTab.value = 'review'
     }
     selectedLogPath.value = preferredLogPath()
     syncDefaultCpuSelection()
@@ -1518,6 +1682,85 @@ function openProblem(problem: ConsoleProblem): void {
   }
 }
 
+function normalizeReviewIssues(items: RtlReviewIssue[]): RtlReviewIssue[] {
+  return items
+    .filter((item) => item && item.title)
+    .map((item) => ({
+      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      profiles: Array.isArray(item.profiles) && item.profiles.length
+        ? item.profiles.map(String)
+        : ['IC', 'FPGA'],
+      category: String(item.category || 'review'),
+      title: String(item.title || 'RTL review issue'),
+      detail: String(item.detail || ''),
+      source: String(item.source || ''),
+      line: Number(item.line || 0),
+      column: Number(item.column || 1),
+      evidence: item.evidence || {},
+      recommendation: String(item.recommendation || ''),
+    }))
+}
+
+function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
+  return {
+    severity: issue.severity,
+    title: `RTL Review · ${issue.title}`,
+    detail: issue.recommendation || issue.detail,
+    sourcePath: issue.source,
+    line: issue.line || 1,
+    column: issue.column || 1,
+  }
+}
+
+function reviewIssueProfiles(issue: RtlReviewIssue): string {
+  return [
+    issue.category,
+    ...issue.profiles.filter((profile) => profile === 'IC' || profile === 'FPGA'),
+  ].join(' · ')
+}
+
+function reviewIssueKey(issue: RtlReviewIssue): string {
+  return [
+    issue.severity,
+    issue.category,
+    issue.title,
+    issue.source || '',
+    issue.line || '',
+    issue.profiles.join(','),
+  ].join(':')
+}
+
+function reviewScopeLabel(scope: unknown): string {
+  return String(scope || '').toLowerCase() === 'cpu' ? 'CPU RTL' : '--'
+}
+
+function openReviewIssue(issue: RtlReviewIssue): void {
+  if (issue.source) {
+    openSourceAt(issue.source, issue.line || 1, issue.column || 1)
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
+}
+
+function numberValue(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function numberLabel(value: unknown): string {
+  return `${numberValue(value)}`
+}
+
+function readNested(source: Record<string, unknown>, path: string[]): unknown {
+  let current: unknown = source
+  for (const key of path) {
+    if (!current || typeof current !== 'object') return 0
+    current = (current as Record<string, unknown>)[key]
+  }
+  return current
+}
+
 function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string): ConsoleProblem {
   return {
     severity: diagnostic.severity,
@@ -1694,7 +1937,11 @@ watch(currentStepName, () => {
   logContent.value = ''
   selectedCase.value = null
   selectedLogPath.value = ''
-  activeTab.value = currentStepName.value.toLowerCase() === 'sim' ? 'cases' : 'summary'
+  activeTab.value = currentStepName.value.toLowerCase() === 'sim'
+    ? 'cases'
+    : currentStepName.value.toLowerCase() === 'review'
+      ? 'review'
+      : 'summary'
   activeSource.value = null
   if (!isHomeView.value) {
     void loadDetail()
@@ -2326,6 +2573,7 @@ button:disabled {
 .text-panel,
 .log-panel,
 .files-panel,
+.review-panel,
 .cases-panel,
 .source-layout,
 .wave-panel {
@@ -2470,6 +2718,258 @@ button:disabled {
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 10px;
+}
+
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.review-overview {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.review-tile {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.review-tile span,
+.review-tile strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-tile span {
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.review-tile strong {
+  font-size: 17px;
+}
+
+.review-tile.error strong {
+  color: #ef4444;
+}
+
+.review-tile.warning strong {
+  color: #f59e0b;
+}
+
+.review-tile.ok strong {
+  color: #10b981;
+}
+
+.review-tile.ic strong {
+  color: #3b82f6;
+}
+
+.review-tile.fpga strong {
+  color: #8b5cf6;
+}
+
+.review-main {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
+.review-sidebar,
+.review-issues {
+  min-height: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.review-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+}
+
+.review-profile-switch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.review-profile-switch button {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.review-profile-switch button.active {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+  color: var(--accent-color);
+}
+
+.review-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.review-metrics div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.review-metrics span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.review-metrics strong {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.review-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.review-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.review-issue:hover {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.07);
+}
+
+.review-issue.error {
+  border-left: 3px solid #ef4444;
+}
+
+.review-issue.warning {
+  border-left: 3px solid #f59e0b;
+}
+
+.review-issue.info {
+  border-left: 3px solid var(--accent-color);
+}
+
+.review-issue-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--bg-primary);
+}
+
+.review-issue.error .review-issue-icon {
+  color: #ef4444;
+}
+
+.review-issue.warning .review-issue-icon {
+  color: #f59e0b;
+}
+
+.review-issue.info .review-issue-icon {
+  color: var(--accent-color);
+}
+
+.review-issue-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.review-issue-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.review-issue-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.review-issue-title span {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.review-issue p,
+.review-issue small,
+.review-issue em {
+  display: block;
+  margin: 4px 0 0;
+}
+
+.review-issue p {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.review-issue small {
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.review-issue em {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-style: normal;
 }
 
 .source-layout {
@@ -3029,11 +3529,13 @@ button:disabled {
 @media (max-width: 1180px) {
   .frontend-grid,
   .source-layout,
-  .artifact-groups {
+  .artifact-groups,
+  .review-main {
     grid-template-columns: 1fr;
   }
 
-  .frontend-config-grid {
+  .frontend-config-grid,
+  .review-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3067,6 +3569,16 @@ button:disabled {
 
   .frontend-config-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .review-issue-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .frontend-config-item.wide {
