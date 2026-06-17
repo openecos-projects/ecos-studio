@@ -442,6 +442,12 @@ afterEach(() => {
 })
 
 describe('SoCTemplatePreviewCanvas', () => {
+  it('sizes the die from the panel width instead of viewport height', () => {
+    expect(source).toContain('container-type: inline-size')
+    expect(source).toContain('width: min(100%, 760px)')
+    expect(source).not.toContain('calc(100vh - 250px)')
+  })
+
   it('renders only valid selectable core buttons and marks the selected core', async () => {
     const { app, container } = await mountPreviewCanvas({
       template: createTemplate([

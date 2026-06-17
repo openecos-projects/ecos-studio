@@ -9,5 +9,7 @@ describe('SoCTemplateDetail', () => {
     expect(source).toContain('SoCTemplateInspector')
     expect(source).toContain('data-soc-core-chip')
     expect(source).toContain("props.template.sourceLabel.startsWith('remote:')")
+    expect(source).toContain('soc-detail__workbench')
+    expect(source).toContain('soc-detail__canvas-panel')
   })
 })

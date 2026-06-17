@@ -272,14 +272,15 @@ function selectCore(coreId: number): void {
 .soc-template-preview-canvas {
   width: 100%;
   height: 100%;
-  min-height: 360px;
-  padding: 12px;
+  min-height: 560px;
+  padding: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: center;
   justify-items: center;
-  gap: 10px;
+  gap: 12px;
   color: var(--text-primary);
+  container-type: inline-size;
 }
 
 .soc-template-preview-canvas__toolbar,
@@ -292,13 +293,12 @@ function selectCore(coreId: number): void {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--bg-primary));
+  background: color-mix(in srgb, var(--bg-secondary) 84%, var(--bg-primary));
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 72%, transparent),
-    0 16px 36px -32px color-mix(in srgb, var(--text-primary) 35%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 72%, transparent);
 }
 
 .soc-template-preview-canvas__identity {
@@ -403,19 +403,20 @@ function selectCore(coreId: number): void {
 }
 
 .soc-template-preview-canvas__stage {
-  width: min(100%, 820px);
+  width: 100%;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 2px 0;
 }
 
 .soc-preview-die {
   position: relative;
-  width: min(100%, 760px, calc(100vh - 250px));
+  width: min(100%, 760px);
   min-width: min(100%, 280px);
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
   background:
     linear-gradient(color-mix(in srgb, var(--border-color) 18%, transparent) 1px, transparent 1px),
@@ -426,8 +427,7 @@ function selectCore(coreId: number): void {
   box-shadow:
     0 1px 0 color-mix(in srgb, var(--border-color) 64%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 70%, transparent),
-    inset 0 0 0 10px color-mix(in srgb, var(--bg-primary) 30%, transparent),
-    0 30px 54px -40px color-mix(in srgb, var(--text-primary) 36%, transparent);
+    0 24px 44px -38px color-mix(in srgb, var(--text-primary) 34%, transparent);
   overflow: hidden;
   box-sizing: border-box;
   isolation: isolate;
@@ -739,11 +739,11 @@ function selectCore(coreId: number): void {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
-  padding: 8px 10px 8px 12px;
+  min-height: 42px;
+  padding: 7px 9px 7px 11px;
   border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
+  background: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 72%, transparent);
 }
 
@@ -810,7 +810,6 @@ function selectCore(coreId: number): void {
 @media (max-width: 680px) {
   .soc-template-preview-canvas {
     min-height: 420px;
-    padding: 10px;
   }
 
   .soc-template-preview-canvas__toolbar,
