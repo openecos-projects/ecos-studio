@@ -6,6 +6,8 @@ describe('SoCTemplateDetailView', () => {
     expect(source).toContain('templateId: string')
     expect(source).toContain('loadSocTemplateDetail')
     expect(source).toContain('getDefaultSocCoreId')
+    expect(source).toContain('selectSocTemplateCore')
+    expect(source).toContain('async function handleSelectCore')
     expect(source).toContain('<SoCTemplateDetail')
   })
 })

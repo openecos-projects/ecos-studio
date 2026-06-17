@@ -13,7 +13,7 @@ const template = {
   die: { llx: 0, lly: 0, urx: 300, ury: 300, width: 300, height: 300 },
   coreArea: { llx: 50, lly: 20, urx: 250, ury: 220, width: 200, height: 200 },
   cores: [
-    { id: 1, name: 'u_GEN/u_GEN_1/core1', info: 'No info provided', align: 'left', orient: 'N', boundingBox: { llx: 70, lly: 140, urx: 110, ury: 180, width: 40, height: 40 } },
+    { id: 1, name: 'u_GEN/u_GEN_1/core1', info: 'No info provided', align: 'left', orient: 'N', selected: 0, boundingBox: { llx: 70, lly: 140, urx: 110, ury: 180, width: 40, height: 40 } },
   ],
   ioPins: [],
 } satisfies SocTemplateDetail

@@ -375,7 +375,7 @@ describe('ECOSView SoC entry card', () => {
     restoreDomGlobals()
   })
 
-  it('marks the SoC entry as coming soon without navigating', async () => {
+  it('opens the SoC template gallery from the SoC entry card', async () => {
     const vue = await loadVueRuntime()
     const ECOSView = loadECOSViewComponent(vue)
     const container = document.createElement('div')
@@ -385,16 +385,16 @@ describe('ECOSView SoC entry card', () => {
     app.mount(container as never)
     await vue.nextTick()
 
-    const socCard = Array.from(container.querySelectorAll('div')).find((element) => {
-      return element.textContent === 'SoCRetroSoCComing Soon'
+    const socCard = Array.from(container.querySelectorAll('button')).find((element) => {
+      return element.textContent === 'SoCRemote template catalog'
     })
 
     expect(socCard).toBeTruthy()
-    expect(socCard?.classList.contains('cursor-default')).toBe(true)
-    expect(socCard?.classList.contains('opacity-50')).toBe(true)
+    expect(socCard?.classList.contains('cursor-pointer')).toBe(true)
+    expect(socCard?.classList.contains('opacity-50')).toBe(false)
     socCard?.click()
 
-    expect(push).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith('/soc')
 
     app.unmount()
   })

@@ -451,6 +451,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'alpha',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 10, lly: 50, urx: 40, ury: 80 }),
         },
         {
@@ -459,6 +460,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'invalid',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 42, lly: 50, urx: 58, ury: 80 }),
         },
         {
@@ -467,6 +469,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'invalid',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 60, lly: 50, urx: 70, ury: 80 }),
         },
         {
@@ -475,6 +478,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'beta',
           align: 'S',
           orient: 'R0',
+          selected: 1,
           boundingBox: createRect({ llx: 20, lly: 20, urx: 70, ury: 45 }),
         },
       ]),
@@ -501,6 +505,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'alpha',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 10, lly: 50, urx: 40, ury: 80 }),
         },
         {
@@ -509,6 +514,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'invalid',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 42, lly: 50, urx: 58, ury: 80 }),
         },
       ]),
@@ -538,6 +544,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'invalid',
           align: 'N',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 12, lly: 52, urx: 32, ury: 78 }),
         },
         {
@@ -546,6 +553,7 @@ describe('SoCTemplatePreviewCanvas', () => {
           info: 'invalid',
           align: 'S',
           orient: 'R0',
+          selected: 0,
           boundingBox: createRect({ llx: 36, lly: 24, urx: 66, ury: 44 }),
         },
       ]),

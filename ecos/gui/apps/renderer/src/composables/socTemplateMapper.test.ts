@@ -24,7 +24,105 @@ describe('socTemplateMapper', () => {
     expect(detail.ioPinsCount).toBe(58)
     expect(detail.ioPins).toEqual([])
     expect(detail.coreCount).toBe(2)
-    expect(detail.cores[0]).toMatchObject({ id: 4, align: 'left', orient: 'FN', info: 'No info provided' })
+    expect(detail.cores[0]).toMatchObject({ id: 4, align: 'left', orient: 'FN', info: 'No info provided', selected: 0 })
+  })
+
+  it('normalizes per-core selected flags from soc template JSON', () => {
+    const detail = normalizeSocTemplateDetail(
+      {
+        ...raw,
+        cores: {
+          number: 2,
+          list: [
+            { ...raw.cores.list[0], selected: 0 },
+            { ...raw.cores.list[1], selected: 1 },
+          ],
+        },
+      },
+      'Fixed JSON',
+    )
+
+    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+      { id: 4, selected: 0 },
+      { id: 5, selected: 1 },
+    ])
+  })
+
+  it('supports selected core ids stored on the cores object', () => {
+    const detail = normalizeSocTemplateDetail(
+      {
+        ...raw,
+        cores: {
+          ...raw.cores,
+          selected: 5,
+        },
+      },
+      'Fixed JSON',
+    )
+
+    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+      { id: 4, selected: 0 },
+      { id: 5, selected: 1 },
+    ])
+  })
+
+  it('uses cores.selected_core_id to mark the selected core', () => {
+    const detail = normalizeSocTemplateDetail(
+      {
+        ...raw,
+        cores: {
+          ...raw.cores,
+          selected_core_id: 5,
+        },
+      },
+      'Fixed JSON',
+    )
+
+    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+      { id: 4, selected: 0 },
+      { id: 5, selected: 1 },
+    ])
+  })
+
+  it('prefers selected_core_id over older selected flags', () => {
+    const detail = normalizeSocTemplateDetail(
+      {
+        ...raw,
+        cores: {
+          ...raw.cores,
+          selected: 4,
+          selected_core_id: 5,
+          list: [
+            { ...raw.cores.list[0], selected: 1 },
+            { ...raw.cores.list[1], selected: 0 },
+          ],
+        },
+      },
+      'Fixed JSON',
+    )
+
+    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+      { id: 4, selected: 0 },
+      { id: 5, selected: 1 },
+    ])
+  })
+
+  it('ignores misspelled selected fields on the cores object', () => {
+    const detail = normalizeSocTemplateDetail(
+      {
+        ...raw,
+        cores: {
+          ...raw.cores,
+          seleted: 5,
+        },
+      },
+      'Fixed JSON',
+    )
+
+    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+      { id: 4, selected: 0 },
+      { id: 5, selected: 0 },
+    ])
   })
 
   it('projects a gallery summary from the normalized detail', () => {

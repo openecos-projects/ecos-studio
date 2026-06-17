@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SoCTemplateDetail from '@/components/SoCTemplateDetail.vue'
-import { loadSocTemplateDetail } from '@/composables/socTemplateCatalog'
+import { loadSocTemplateDetail, selectSocTemplateCore } from '@/composables/socTemplateCatalog'
 import type { SocTemplateDetail as SocTemplateDetailModel } from '@/composables/socTemplateMapper'
 import { getDefaultSocCoreId } from '@/composables/socTemplatePreviewSelection'
 
@@ -28,6 +28,18 @@ async function loadDetail(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Unable to load SoC template data'
   } finally {
     loading.value = false
+  }
+}
+
+async function handleSelectCore(coreId: number): Promise<void> {
+  selectedCoreId.value = coreId
+
+  try {
+    const detail = await selectSocTemplateCore(props.templateId, coreId)
+    template.value = detail
+    selectedCoreId.value = getDefaultSocCoreId(detail)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Unable to update selected core'
   }
 }
 
@@ -81,7 +93,7 @@ watch(() => props.templateId, loadDetail, { immediate: true })
             v-if="error.includes('Unknown SoC template')"
             class="mt-4 rounded-xl border border-(--border-color) bg-(--bg-primary)/90 px-4 py-3 text-sm leading-relaxed text-(--text-secondary)"
           >
-            Templates will load from the workspace runtime when it is connected. Right now only IDs you have imported in this browser exist; open the SoC gallery and import a JSON file, or pick a template from the list.
+            This template is not in the remote SoC catalog. Open the gallery, refresh the catalog, or pick a template from the list.
           </p>
         </div>
         <button
@@ -98,7 +110,7 @@ watch(() => props.templateId, loadDetail, { immediate: true })
         :template="template"
         :selected-core-id="selectedCoreId"
         @back="router.push('/soc')"
-        @select-core="selectedCoreId = $event"
+        @select-core="handleSelectCore"
       />
     </div>
   </div>

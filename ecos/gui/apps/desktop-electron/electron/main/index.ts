@@ -15,6 +15,7 @@ import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
+import { RemoteContentService } from '../services/remoteContentService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
@@ -28,6 +29,7 @@ let services:
   | {
       appInfoService: AppInfoService
       desktopRuntimeManager: DesktopRuntimeManager
+      remoteContentService: RemoteContentService
       settingsStore: SettingsStore
       resourceManagerService: ResourceManagerService
       shellService: ShellPtyService
@@ -88,6 +90,7 @@ function getDesktopServices() {
     appVersionProvider: () => app.getVersion(),
     env: runtimeEnv,
   })
+  const remoteContentService = new RemoteContentService()
   const workspaceResourceService = new WorkspaceResourceService({
     projectScopeProvider: projectScopeService,
   })
@@ -117,6 +120,7 @@ function getDesktopServices() {
   services = {
     appInfoService,
     desktopRuntimeManager,
+    remoteContentService,
     resourceManagerService,
     settingsStore,
     shellService,
@@ -135,6 +139,7 @@ async function launchMainWindow(): Promise<void> {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
       desktopRuntimeManager: desktopServices.desktopRuntimeManager,
+      remoteContentService: desktopServices.remoteContentService,
       resourceManagerService: desktopServices.resourceManagerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,

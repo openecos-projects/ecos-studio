@@ -22,7 +22,11 @@ const selectedCoreLabel = computed(() =>
   selectedCore.value ? getSocDisplayCoreLabel(selectedCore.value.id, selectedCore.value.name) : 'None',
 )
 
-const originBadge = computed(() => ({ label: 'Local', accent: false }))
+const originBadge = computed(() =>
+  props.template.sourceLabel.startsWith('remote:')
+    ? { label: 'Remote', accent: true }
+    : { label: 'Local', accent: false },
+)
 </script>
 
 <template>
@@ -107,7 +111,7 @@ const originBadge = computed(() => ({ label: 'Local', accent: false }))
           class="relative flex min-h-[min(70vh,880px)] flex-col overflow-hidden rounded-b-2xl border border-(--border-color) bg-(--bg-secondary)/80 shadow-[inset_0_1px_0_0_color-mix(in_srgb,var(--border-color)_70%,transparent)]"
         >
           <div class="soc-detail__viewport-frame pointer-events-none absolute inset-3 rounded-lg border border-(--accent-color)/15 sm:inset-4" aria-hidden="true" />
-          <DrawingAreaShell class="relative z-10 min-h-[min(56vh,640px)] flex-1">
+          <DrawingAreaShell frameless class="relative z-10 min-h-[min(56vh,640px)] flex-1">
             <SoCTemplatePreviewCanvas
               :template="template"
               :selected-core-id="selectedCoreId"

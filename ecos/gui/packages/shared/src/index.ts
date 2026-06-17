@@ -38,6 +38,14 @@ export type {
   ResourceType,
 } from './contracts/resources.ts';
 export type {
+  RemoteContentApi,
+  RemoteContentFile,
+  RemoteContentListFilesRequest,
+  RemoteContentReadJsonFileRequest,
+  RemoteContentReadTextFileRequest,
+  RemoteContentSourceId,
+} from './contracts/remoteContent.ts';
+export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSession,

@@ -14,6 +14,7 @@ export type SocTemplateCore = {
   info: string
   align: string
   orient: string
+  selected: number
   boundingBox: SocTemplateRect
 }
 
@@ -95,6 +96,10 @@ function normalizeInfo(value: unknown): string {
   return typeof value === 'string' && value.trim().length > 0 ? value : FALLBACK_INFO
 }
 
+function normalizeSelected(value: unknown): number {
+  return toNumber(value) === 1 ? 1 : 0
+}
+
 function normalizeRect(value: unknown): SocTemplateRect {
   const rect = toRecord(value)
 
@@ -113,16 +118,22 @@ export function normalizeSocTemplateDetail(raw: any, sourceLabel: string): SocTe
   const rawRecord = toRecord(raw)
   const rawCores = toRecord(rawRecord.cores)
   const coreList = Array.isArray(rawCores.list) ? rawCores.list : []
+  const hasSelectedCoreId = 'selected_core_id' in rawCores
+  const selectedCoreId = hasSelectedCoreId
+    ? toNumber(rawCores.selected_core_id, -1)
+    : toNumber(rawCores.selected, -1)
 
   const cores = coreList.map((core): SocTemplateCore => {
     const coreRecord = toRecord(core)
+    const id = toNumber(coreRecord.core_id, -1)
 
     return {
-      id: toNumber(coreRecord.core_id, -1),
+      id,
       name: toText(coreRecord.name, FALLBACK_CORE_NAME),
       info: normalizeInfo(coreRecord.info),
       align: toText(coreRecord.io_align, FALLBACK_TEXT),
       orient: toText(coreRecord.orient, FALLBACK_TEXT),
+      selected: selectedCoreId === id ? 1 : hasSelectedCoreId ? 0 : normalizeSelected(coreRecord.selected),
       boundingBox: normalizeRect(coreRecord.bounding_box),
     }
   })

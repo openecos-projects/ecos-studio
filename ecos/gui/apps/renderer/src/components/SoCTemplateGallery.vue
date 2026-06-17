@@ -42,7 +42,7 @@ async function onImportFileChange(event: Event): Promise<void> {
   try {
     const text = await file.text()
     const label = file.name.replace(/\.json$/i, '') || file.name
-    importSocTemplateFromJsonText(text, label)
+    await importSocTemplateFromJsonText(text, label)
     emit('catalog-changed')
   } catch (err) {
     importError.value = err instanceof Error ? err.message : 'Import failed.'
@@ -54,6 +54,16 @@ async function onImportFileChange(event: Event): Promise<void> {
 function onRemoveImported(templateId: string): void {
   removeImportedSocTemplate(templateId)
   emit('catalog-changed')
+}
+
+function sourceBadgeLabel(sourceLabel: string): string {
+  return sourceLabel.startsWith('remote:') ? 'Remote' : 'Local'
+}
+
+function sourceBadgeTitle(sourceLabel: string): string {
+  return sourceLabel.startsWith('remote:')
+    ? 'Loaded from the remote SoC template catalog'
+    : 'Stored from an imported file on this browser'
 }
 </script>
 
@@ -85,16 +95,14 @@ function onRemoveImported(templateId: string): void {
               Templates
             </h1>
             <p class="mt-3 max-w-lg text-sm leading-relaxed text-(--text-secondary) sm:text-[15px]">
-              Inspect floorplans and core bounding boxes from workspace templates (soc-style JSON). Runtime-backed listings will arrive later; for now use
-              <strong class="font-semibold text-(--text-primary)"> Import JSON </strong>
-              below.
+              Inspect floorplans and core bounding boxes from the remote SoC catalog, with local JSON imports available for private drafts.
             </p>
             <p
               class="mt-4 max-w-2xl rounded-xl border border-(--accent-color)/22 bg-(--accent-color)/[0.06] px-4 py-3 text-xs leading-relaxed text-(--text-secondary)"
               role="note"
             >
-              <span class="font-semibold text-(--text-primary)">Coming soon:</span>
-              templates loaded from the ECOS runtime instead of only this browser. Imported files stay on this device until sync exists.
+              <span class="font-semibold text-(--text-primary)">Catalog-backed:</span>
+              remote entries are cached by the desktop app, while imported files stay on this device.
             </p>
           </div>
         </div>
@@ -150,7 +158,7 @@ function onRemoveImported(templateId: string): void {
         </div>
         <div class="soc-gallery__bone h-36 rounded-xl" />
         <div class="soc-gallery__bone h-24 rounded-xl opacity-80" />
-        <p class="text-center text-sm font-medium text-(--text-secondary)">Loading template catalog…</p>
+        <p class="text-center text-sm font-medium text-(--text-secondary)">Loading templates…</p>
       </div>
     </div>
 
@@ -190,9 +198,9 @@ function onRemoveImported(templateId: string): void {
       >
         ∅
       </div>
-      <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">No templates in this workspace yet</h2>
+      <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">No templates yet</h2>
       <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-(--text-secondary)">
-        The catalog will be filled from the ECOS runtime when that integration ships. Until then, import a <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style file; it will appear here for inspection on this machine.
+        Refresh the catalog or import a <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style file to inspect floorplans on this machine.
       </p>
     </div>
 
@@ -267,9 +275,9 @@ function onRemoveImported(templateId: string): void {
                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   <span
                     class="rounded-md bg-(--text-secondary)/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--text-secondary)"
-                    title="Stored from an imported file on this browser"
+                    :title="sourceBadgeTitle(item.sourceLabel)"
                   >
-                    Local
+                    {{ sourceBadgeLabel(item.sourceLabel) }}
                   </span>
                   <span
                     class="inline-flex items-baseline gap-1 rounded-lg border border-(--border-color)/85 bg-(--bg-primary) px-2 py-0.5 shadow-[inset_0_1px_0_0_color-mix(in_srgb,var(--border-color)_35%,transparent)]"
@@ -291,7 +299,7 @@ function onRemoveImported(templateId: string): void {
                 @click="onRemoveImported(item.id)"
               >
                 <i class="ri-delete-bin-line text-base" aria-hidden="true"></i>
-                Remove
+                Hide
               </button>
               <button
                 type="button"
