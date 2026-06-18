@@ -34,6 +34,7 @@ export interface FlowStage {
   state: string
   runtime: string
   'peak memory (mb)': number
+  virtual?: boolean
 }
 
 // ============ 常量配置 ============

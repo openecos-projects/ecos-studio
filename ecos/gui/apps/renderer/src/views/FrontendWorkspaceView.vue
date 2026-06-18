@@ -1,5 +1,50 @@
 <template>
-  <div class="frontend-workspace">
+  <div v-if="isGlobalSrcView" class="frontend-workspace src-workspace-clean">
+    <section class="source-layout source-layout-clean">
+      <aside class="source-list">
+        <div class="source-list-body">
+          <button
+            v-for="item in sourceItems"
+            :key="item.path"
+            type="button"
+            class="source-row"
+            :class="{
+              active: activeSource?.path === item.path,
+              diagnostic: Boolean(item.diagnostics?.total),
+              error: Boolean(item.diagnostics?.errors),
+            }"
+            :title="item.path"
+            @click="openSource(item)"
+          >
+            <i :class="fileIcon(item.path)"></i>
+            <span>
+              <strong>{{ sourceDisplayName(item) }}</strong>
+              <small>{{ shortPath(item.path) }}</small>
+            </span>
+            <em
+              v-if="item.diagnostics?.total"
+              class="source-diagnostic-badge"
+              :class="{ error: Boolean(item.diagnostics?.errors) }"
+            >
+              {{ item.diagnostics ? sourceDiagnosticLabel(item.diagnostics) : '' }}
+            </em>
+          </button>
+          <div v-if="sourceArtifacts.length === 0" class="empty-panel compact">
+            <i class="ri-code-s-slash-line"></i>
+            <span>No source files discovered.</span>
+          </div>
+        </div>
+      </aside>
+      <FrontendSourceEditor
+        :source="activeSource"
+        :focus-target="sourceFocusTarget"
+        @saved="refresh"
+        @linted="refresh"
+      />
+    </section>
+  </div>
+
+  <div v-else class="frontend-workspace">
     <div class="frontend-header">
       <div>
         <p class="frontend-kicker">{{ isHomeView ? 'Frontend Workspace' : 'Frontend Flow' }}</p>
@@ -7,7 +52,7 @@
       </div>
       <div v-if="!isHomeView" class="header-actions">
         <button
-          v-if="!isSimStep"
+          v-if="!isSimStep && !isGlobalSrcView"
           type="button"
           class="run-btn"
           :class="{ danger: runBusy }"
@@ -30,8 +75,8 @@
     <div v-else class="frontend-grid">
       <section class="panel detail-panel detail-panel-full">
         <div class="panel-header">
-          <h2>{{ isHomeView ? 'Workspace Summary' : 'Step Detail' }}</h2>
-          <span>{{ isHomeView ? 'frontend' : currentStep?.tool || '--' }}</span>
+          <h2>{{ isHomeView ? 'Workspace Summary' : isGlobalSrcView ? 'Source Workspace' : 'Step Detail' }}</h2>
+          <span>{{ isHomeView ? 'frontend' : isGlobalSrcView ? 'CPU RTL' : currentStep?.tool || '--' }}</span>
         </div>
 
         <div v-if="isHomeView" class="detail-content">
@@ -83,7 +128,7 @@
           <section class="workspace-home-card">
             <div class="workspace-home-card__head">
               <strong>Workspace Home</strong>
-              <span>Choose a step from the left sidebar to inspect logs, artifacts, source, and waveforms.</span>
+              <span>Choose a step from the left sidebar to inspect logs, reports, source, and waveforms.</span>
             </div>
             <div class="workspace-home-card__body">
               <div class="workspace-home-metric">
@@ -116,29 +161,38 @@
           </section>
         </div>
 
-        <div v-else-if="!currentStep" class="state-panel">
+        <div v-else-if="!currentStep && !isGlobalSrcView" class="state-panel">
           <i class="ri-file-list-3-line"></i>
           <span>No flow step selected.</span>
         </div>
 
         <div v-else class="detail-content">
-          <section class="summary-grid">
-            <div class="summary-tile status" :class="stateClass(currentStepDisplayState)">
+          <section v-if="!isGlobalSrcView" class="step-compact-meta">
+            <div>
               <span>Status</span>
-              <strong>{{ currentStepDisplayState }}</strong>
+              <strong :class="stateClass(currentStepDisplayState)">{{ currentStepDisplayState }}</strong>
             </div>
-            <div class="summary-tile">
+            <div>
               <span>Runtime</span>
               <strong>{{ currentStepRuntime }}</strong>
             </div>
-            <div class="summary-tile">
+            <div>
               <span>Tool</span>
               <strong>{{ detail?.tool || currentStep.tool || 'frontend' }}</strong>
             </div>
-            <div v-if="isSimStep" class="summary-tile">
+            <div v-if="isSimStep">
               <span>Cases</span>
               <strong>{{ passedCases }}/{{ totalCases }}</strong>
             </div>
+            <button
+              v-if="hasStepLogs"
+              type="button"
+              class="step-meta-action"
+              @click="openStepLog"
+            >
+              <i class="ri-terminal-box-line"></i>
+              Log
+            </button>
           </section>
 
           <section v-if="isSimStep" class="sim-run-card">
@@ -211,7 +265,7 @@
             </div>
           </section>
 
-          <div class="frontend-step-tabs">
+          <div v-if="shouldShowStepTabs" class="frontend-step-tabs">
             <button
               v-for="tab in visibleTabs"
               :key="tab.id"
@@ -226,8 +280,177 @@
           </div>
 
           <main class="tab-content">
-            <section v-if="activeTab === 'summary'" class="text-panel">
-              <pre>{{ formattedSummary }}</pre>
+            <section v-if="activeTab === 'summary'" class="summary-panel">
+              <template v-if="isReviewStep && reviewReport">
+                <section class="review-overview">
+                  <div
+                    v-for="tile in reviewSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+                <section class="summary-grid">
+                  <div class="summary-card">
+                    <header>
+                      <span>Yosys Precheck</span>
+                      <strong>{{ reviewStructuralStatus }}</strong>
+                    </header>
+                    <p>{{ reviewStructuralReason || reviewStructuralQualityLabel }}</p>
+                    <div class="summary-metrics">
+                      <span>Cells <strong>{{ numberLabel(reviewStructuralMetrics.cells) }}</strong></span>
+                      <span>Fanout <strong>{{ numberLabel(reviewStructuralMetrics.max_fanout) }}</strong></span>
+                      <span>Fanin <strong>{{ numberLabel(reviewStructuralMetrics.max_fanin) }}</strong></span>
+                      <span>Depth <strong>{{ numberLabel(reviewStructuralMetrics.max_comb_depth) }}</strong></span>
+                    </div>
+                  </div>
+                  <div class="summary-card">
+                    <header>
+                      <span>Next Action</span>
+                      <strong>{{ reviewNextAction.title }}</strong>
+                    </header>
+                    <p>{{ reviewNextAction.detail }}</p>
+                    <button type="button" class="text-action" @click="reviewMode = reviewNextAction.mode; activeTab = 'review'">
+                      <i class="ri-arrow-right-line"></i>
+                      Open {{ reviewNextAction.label }}
+                    </button>
+                  </div>
+                </section>
+                <section class="summary-card grow">
+                  <header>
+                    <span>Top Problems</span>
+                    <strong>{{ reviewTopIssues.length }}</strong>
+                  </header>
+                  <div class="summary-issue-list">
+                    <button
+                      v-for="issue in reviewTopIssues"
+                      :key="reviewIssueKey(issue)"
+                      type="button"
+                      class="review-issue"
+                      :class="issue.severity"
+                      @click="openReviewIssue(issue)"
+                    >
+                      <div class="review-issue-icon">
+                        <i :class="problemIcon(issue.severity)"></i>
+                      </div>
+                      <div class="review-issue-body">
+                        <div class="review-issue-title">
+                          <strong>{{ issue.title }}</strong>
+                          <span>{{ titleCase(issue.category) }}</span>
+                        </div>
+                        <p>{{ issue.detail }}</p>
+                        <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
+                        <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
+                        <em v-else-if="reviewEvidenceLabel(issue)">{{ reviewEvidenceLabel(issue) }}</em>
+                      </div>
+                    </button>
+                    <div v-if="reviewTopIssues.length === 0" class="empty-panel compact">
+                      <i class="ri-checkbox-circle-line"></i>
+                      <span>No review problems reported.</span>
+                    </div>
+                  </div>
+                </section>
+              </template>
+              <template v-else-if="isElabStep && elabReport">
+                <section class="review-overview">
+                  <div
+                    v-for="tile in elabSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+                <section class="summary-grid">
+                  <div class="summary-card">
+                    <header>
+                      <span>Design Universe</span>
+                      <strong>{{ elabTopModuleName }}</strong>
+                    </header>
+                    <p>
+                      Slang checks whether the configured top and RTL file universe can be parsed and elaborated.
+                    </p>
+                    <div class="summary-metrics">
+                      <span>Files <strong>{{ numberLabel(elabSummary.rtl_files) }}</strong></span>
+                      <span>Modules <strong>{{ numberLabel(elabSummary.modules) }}</strong></span>
+                      <span>Refs <strong>{{ numberLabel(elabSummary.referenced_modules) }}</strong></span>
+                      <span>Missing <strong>{{ numberLabel(elabSummary.unresolved_modules) }}</strong></span>
+                    </div>
+                  </div>
+                  <div class="summary-card">
+                    <header>
+                      <span>Next Action</span>
+                      <strong>{{ elabDiagnostics.length || elabUnresolvedModules.length ? 'Fix Elab' : 'Inspect Modules' }}</strong>
+                    </header>
+                    <p v-if="elabDiagnostics.length">
+                      Open the ELAB diagnostics and jump to the source line reported by Slang.
+                    </p>
+                    <p v-else-if="elabUnresolvedModules.length">
+                      Check unresolved module names against the CPU filelist and include directories.
+                    </p>
+                    <p v-else>
+                      The RTL universe is structurally readable. Inspect the module inventory or continue to RTL Review.
+                    </p>
+                    <button type="button" class="text-action" @click="activeTab = 'elab'">
+                      <i class="ri-arrow-right-line"></i>
+                      Open Elab
+                    </button>
+                  </div>
+                </section>
+              </template>
+              <template v-else>
+                <section class="review-overview">
+                  <div
+                    v-for="tile in humanSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+                <section class="summary-grid">
+                  <div class="summary-card">
+                    <header>
+                      <span>Result Overview</span>
+                      <strong>{{ humanStepTitle }}</strong>
+                    </header>
+                    <p>{{ humanSummaryText }}</p>
+                    <div class="summary-metrics">
+                      <span
+                        v-for="metric in humanSummaryMetrics"
+                        :key="metric.label"
+                      >
+                        {{ metric.label }}
+                        <strong>{{ metric.value }}</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="summary-card">
+                    <header>
+                      <span>Next Action</span>
+                      <strong>{{ humanNextAction.title }}</strong>
+                    </header>
+                    <p>{{ humanNextAction.detail }}</p>
+                    <button
+                      v-if="humanNextAction.tab"
+                      type="button"
+                      class="text-action"
+                      :disabled="!visibleTabs.some((tab) => tab.id === humanNextAction.tab)"
+                      @click="activeTab = humanNextAction.tab"
+                    >
+                      <i class="ri-arrow-right-line"></i>
+                      Open {{ humanNextAction.label }}
+                    </button>
+                  </div>
+                </section>
+              </template>
             </section>
 
             <section v-else-if="activeTab === 'review'" class="review-panel">
@@ -250,27 +473,20 @@
 
                 <section class="review-main">
                   <aside class="review-sidebar">
-                    <div class="review-profile-switch">
+                    <div class="review-mode-list">
                       <button
+                        v-for="mode in reviewModeItems"
+                        :key="mode.id"
                         type="button"
-                        :class="{ active: reviewProfile === 'all' }"
-                        @click="reviewProfile = 'all'"
+                        class="review-mode-button"
+                        :class="{ active: reviewMode === mode.id }"
+                        @click="reviewMode = mode.id"
                       >
-                        All
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ active: reviewProfile === 'IC' }"
-                        @click="reviewProfile = 'IC'"
-                      >
-                        IC
-                      </button>
-                      <button
-                        type="button"
-                        :class="{ active: reviewProfile === 'FPGA' }"
-                        @click="reviewProfile = 'FPGA'"
-                      >
-                        FPGA
+                        <i :class="mode.icon"></i>
+                        <span>
+                          <strong>{{ mode.label }}</strong>
+                          <em>{{ mode.count }}</em>
+                        </span>
                       </button>
                     </div>
                     <div v-if="reviewStructuralProbe" class="review-structural" :class="reviewStructuralTone">
@@ -284,47 +500,37 @@
                         <span>Cells <strong>{{ numberLabel(reviewStructuralMetrics.cells) }}</strong></span>
                         <span>Wires <strong>{{ numberLabel(reviewStructuralMetrics.wires) }}</strong></span>
                         <span>Diag <strong>{{ numberLabel(reviewStructuralDiagnostics) }}</strong></span>
+                        <span>Fanout <strong>{{ numberLabel(reviewStructuralMetrics.max_fanout) }}</strong></span>
+                        <span>Fanin <strong>{{ numberLabel(reviewStructuralMetrics.max_fanin) }}</strong></span>
+                        <span>Depth <strong>{{ numberLabel(reviewStructuralMetrics.max_comb_depth) }}</strong></span>
                       </div>
                     </div>
-                    <div v-if="reviewRiskyModules.length" class="review-risk-list">
-                      <div class="review-side-heading">
-                        <span>Risky Modules</span>
-                        <strong>{{ reviewRiskyModules.length }}</strong>
-                      </div>
-                      <button
-                        v-for="module in reviewRiskyModules"
-                        :key="String(module.module)"
-                        type="button"
-                        class="review-risk-module"
-                        :class="String(module.risk || 'low')"
-                      >
-                        <div>
-                          <strong>{{ module.module }}</strong>
-                          <span>{{ moduleRiskReason(module) }}</span>
-                        </div>
-                        <em>{{ numberLabel(module.score) }}</em>
-                      </button>
-                    </div>
-                    <div class="review-metrics">
+                    <div v-if="reviewMode === 'source'" class="review-metrics">
                       <div v-for="metric in reviewMetricRows" :key="metric.label">
+                        <span>{{ metric.label }}</span>
+                        <strong>{{ metric.value }}</strong>
+                      </div>
+                    </div>
+                    <div v-else class="review-metrics">
+                      <div v-for="metric in reviewStructuralMetricRows" :key="metric.label">
                         <span>{{ metric.label }}</span>
                         <strong>{{ metric.value }}</strong>
                       </div>
                     </div>
                   </aside>
 
-                  <div class="review-layers">
-                    <section class="review-layer">
+                  <div class="review-stage">
+                    <section v-if="reviewMode === 'source'" class="review-layer">
                       <header class="review-layer-head">
                         <div>
                           <span>Source Scan</span>
                           <strong>RTL source rules</strong>
                         </div>
-                        <em>{{ filteredSourceScanIssues.length }}</em>
+                        <em>{{ sourceScanIssues.length }}</em>
                       </header>
                       <div class="review-issues">
                         <button
-                          v-for="issue in filteredSourceScanIssues"
+                          v-for="issue in sourceScanIssues"
                           :key="reviewIssueKey(issue)"
                           type="button"
                           class="review-issue"
@@ -337,88 +543,148 @@
                           <div class="review-issue-body">
                             <div class="review-issue-title">
                               <strong>{{ issue.title }}</strong>
-                              <span>{{ reviewIssueProfiles(issue) }}</span>
+                              <span>{{ titleCase(issue.category) }}</span>
                             </div>
                             <p>{{ issue.detail }}</p>
                             <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
-                            <em v-if="issue.source">{{ shortPath(issue.source) }}{{ issue.line ? `:${issue.line}` : '' }}</em>
+                            <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
                           </div>
                         </button>
-                        <div v-if="filteredSourceScanIssues.length === 0" class="empty-panel">
+                        <div v-if="sourceScanIssues.length === 0" class="empty-panel">
                           <i class="ri-checkbox-circle-line"></i>
-                          <span>No source scan issues for this profile.</span>
+                          <span>No source scan issues.</span>
                         </div>
                       </div>
                     </section>
 
-                    <section class="review-layer">
+                    <section v-else-if="reviewMode === 'yosys'" class="review-layer">
                       <header class="review-layer-head">
                         <div>
                           <span>Yosys Precheck</span>
-                          <strong>Pre-synthesis structure</strong>
+                          <strong>Diagnostics and structural timing candidates</strong>
                         </div>
-                        <em>{{ reviewYosysDiagnostics.length + reviewRiskyModules.length }}</em>
+                        <em>{{ reviewYosysDiagnostics.length + reviewYosysIssues.length + reviewStructuralHotspots.length }}</em>
                       </header>
                       <div class="review-yosys-grid">
                         <div class="review-yosys-column">
                           <div class="review-column-head">
                             <span>Diagnostics</span>
-                            <strong>{{ reviewYosysDiagnostics.length }}</strong>
+                            <strong>{{ reviewYosysDiagnostics.length + reviewYosysIssues.length }}</strong>
                           </div>
-                          <button
-                            v-for="diagnostic in reviewYosysDiagnostics"
-                            :key="yosysDiagnosticKey(diagnostic)"
-                            type="button"
-                            class="review-issue yosys"
-                            :class="diagnostic.severity || 'info'"
-                            @click="openYosysDiagnostic(diagnostic)"
-                          >
-                            <div class="review-issue-icon">
-                              <i :class="problemIcon(diagnostic.severity || 'info')"></i>
-                            </div>
-                            <div class="review-issue-body">
-                              <div class="review-issue-title">
-                                <strong>{{ titleCase(String(diagnostic.category || 'diagnostic')) }}</strong>
-                                <span>Yosys</span>
+                          <div class="review-yosys-list">
+                            <button
+                              v-for="issue in reviewYosysIssues"
+                              :key="reviewIssueKey(issue)"
+                              type="button"
+                              class="review-issue"
+                              :class="issue.severity"
+                              @click="openReviewIssue(issue)"
+                            >
+                              <div class="review-issue-icon">
+                                <i :class="problemIcon(issue.severity)"></i>
                               </div>
-                              <p>{{ diagnostic.message || 'Yosys diagnostic' }}</p>
-                              <em v-if="diagnostic.source">{{ shortPath(String(diagnostic.source)) }}{{ diagnostic.line ? `:${diagnostic.line}` : '' }}</em>
+                              <div class="review-issue-body">
+                                <div class="review-issue-title">
+                                  <strong>{{ issue.title }}</strong>
+                                  <span>{{ titleCase(issue.category) }}</span>
+                                </div>
+                                <p>{{ issue.detail }}</p>
+                                <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
+                                <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
+                                <em v-if="reviewEvidenceLabel(issue)">{{ reviewEvidenceLabel(issue) }}</em>
+                              </div>
+                            </button>
+                            <button
+                              v-for="diagnostic in reviewYosysDiagnostics"
+                              :key="yosysDiagnosticKey(diagnostic)"
+                              type="button"
+                              class="review-issue yosys"
+                              :class="diagnostic.severity || 'info'"
+                              @click="openYosysDiagnostic(diagnostic)"
+                            >
+                              <div class="review-issue-icon">
+                                <i :class="problemIcon(diagnostic.severity || 'info')"></i>
+                              </div>
+                              <div class="review-issue-body">
+                                <div class="review-issue-title">
+                                  <strong>{{ titleCase(String(diagnostic.category || 'diagnostic')) }}</strong>
+                                  <span>Yosys</span>
+                                </div>
+                                <p>{{ diagnostic.message || 'Yosys diagnostic' }}</p>
+                                <em v-if="yosysDiagnosticSource(diagnostic)">{{ yosysDiagnosticLocationLabel(diagnostic) }}</em>
+                              </div>
+                            </button>
+                            <div v-if="reviewYosysDiagnostics.length === 0 && reviewYosysIssues.length === 0" class="empty-panel compact">
+                              <i class="ri-checkbox-circle-line"></i>
+                              <span>No Yosys diagnostics.</span>
                             </div>
-                          </button>
-                          <div v-if="reviewYosysDiagnostics.length === 0" class="empty-panel compact">
-                            <i class="ri-checkbox-circle-line"></i>
-                            <span>No Yosys diagnostics.</span>
                           </div>
                         </div>
 
                         <div class="review-yosys-column">
                           <div class="review-column-head">
-                            <span>Risky Modules</span>
-                            <strong>{{ reviewRiskyModules.length }}</strong>
+                            <span>Hotspots</span>
+                            <strong>{{ reviewStructuralHotspots.length }}</strong>
                           </div>
-                          <button
-                            v-for="module in reviewRiskyModules"
-                            :key="String(module.module)"
-                            type="button"
-                            class="review-module-card"
-                            :class="String(module.risk || 'low')"
+                          <div
+                            v-for="hotspot in reviewStructuralHotspots"
+                            :key="hotspotKey(hotspot)"
+                            role="button"
+                            tabindex="0"
+                            class="review-hotspot-card"
+                            :class="hotspot.tone"
+                            @click="openReviewHotspot(hotspot)"
+                            @keydown.enter.prevent="openReviewHotspot(hotspot)"
                           >
-                            <div class="review-module-title">
-                              <strong>{{ module.module }}</strong>
-                              <em>{{ titleCase(String(module.risk || 'low')) }}</em>
+                            <div class="review-hotspot-title">
+                              <strong>{{ hotspot.title }}</strong>
+                              <em>{{ hotspot.value }}</em>
                             </div>
-                            <p>{{ moduleRiskReason(module) }}</p>
-                            <div class="review-module-metrics">
-                              <span>Cells <strong>{{ numberLabel(module.cells) }}</strong></span>
-                              <span>Mux <strong>{{ numberLabel(module.mux_cells) }}</strong></span>
-                              <span>Arith <strong>{{ numberLabel(module.arithmetic_cells) }}</strong></span>
-                              <span>Mem <strong>{{ numberLabel(module.memory_cells) }}</strong></span>
-                            </div>
-                          </button>
-                          <div v-if="reviewRiskyModules.length === 0" class="empty-panel compact">
-                            <i class="ri-checkbox-circle-line"></i>
-                            <span>No risky modules reported.</span>
+                            <p>{{ hotspot.detail }}</p>
                           </div>
+                          <div v-if="reviewStructuralHotspots.length === 0" class="empty-panel compact">
+                            <i class="ri-checkbox-circle-line"></i>
+                            <span>No fanout, fanin, or depth hotspot above threshold.</span>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section v-else class="review-layer">
+                      <header class="review-layer-head">
+                        <div>
+                          <span>Modules</span>
+                          <strong>Yosys module risk ranking</strong>
+                        </div>
+                        <em>{{ reviewRiskyModules.length }}</em>
+                      </header>
+                      <div class="review-module-grid">
+                        <button
+                          v-for="module in reviewRiskyModules"
+                          :key="String(module.module)"
+                          type="button"
+                          class="review-module-card"
+                          :class="String(module.risk || 'low')"
+                        >
+                          <div class="review-module-title">
+                            <strong>{{ module.module }}</strong>
+                            <em>{{ titleCase(String(module.risk || 'low')) }}</em>
+                          </div>
+                          <p>{{ moduleRiskReason(module) }}</p>
+                          <div class="review-module-metrics">
+                            <span>Cells <strong>{{ numberLabel(module.cells) }}</strong></span>
+                            <span>Mux <strong>{{ numberLabel(module.mux_cells) }}</strong></span>
+                            <span>Arith <strong>{{ numberLabel(module.arithmetic_cells) }}</strong></span>
+                            <span>Mem <strong>{{ numberLabel(module.memory_cells) }}</strong></span>
+                            <span>Fanout <strong>{{ numberLabel(module.max_fanout) }}</strong></span>
+                            <span>Fanin <strong>{{ numberLabel(module.max_fanin) }}</strong></span>
+                            <span>Depth <strong>{{ numberLabel(module.max_comb_depth) }}</strong></span>
+                            <span>Score <strong>{{ numberLabel(module.score) }}</strong></span>
+                          </div>
+                        </button>
+                        <div v-if="reviewRiskyModules.length === 0" class="empty-panel compact">
+                          <i class="ri-checkbox-circle-line"></i>
+                          <span>No risky modules reported.</span>
                         </div>
                       </div>
                     </section>
@@ -427,7 +693,112 @@
               </template>
             </section>
 
-            <section v-else-if="activeTab === 'cases'" class="cases-panel">
+            <section v-else-if="activeTab === 'elab'" class="elab-panel">
+              <div v-if="!elabReport" class="empty-panel">
+                <i class="ri-node-tree"></i>
+                <span>No ELAB summary yet. Run ELAB first.</span>
+              </div>
+              <template v-else>
+                <section class="review-overview">
+                  <div
+                    v-for="tile in elabSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+
+                <section class="elab-main">
+                  <div class="elab-column">
+                    <header class="review-layer-head">
+                      <div>
+                        <span>Diagnostics</span>
+                        <strong>Slang parse and hierarchy messages</strong>
+                      </div>
+                      <em>{{ elabDiagnostics.length + elabUnresolvedModules.length }}</em>
+                    </header>
+                    <div class="elab-list">
+                      <button
+                        v-for="diagnostic in elabDiagnostics"
+                        :key="elabDiagnosticKey(diagnostic)"
+                        type="button"
+                        class="review-issue"
+                        :class="diagnostic.severity || 'info'"
+                        @click="openElabDiagnostic(diagnostic)"
+                      >
+                        <div class="review-issue-icon">
+                          <i :class="problemIcon(diagnostic.severity || 'info')"></i>
+                        </div>
+                        <div class="review-issue-body">
+                          <div class="review-issue-title">
+                            <strong>{{ titleCase(diagnostic.severity || 'info') }}</strong>
+                            <span>Slang</span>
+                          </div>
+                          <p>{{ diagnostic.message || 'Slang diagnostic' }}</p>
+                          <em v-if="diagnostic.source">{{ elabDiagnosticLocationLabel(diagnostic) }}</em>
+                        </div>
+                      </button>
+                      <div
+                        v-for="moduleName in elabUnresolvedModules"
+                        :key="moduleName"
+                        class="elab-unresolved"
+                      >
+                        <i class="ri-question-line"></i>
+                        <span>
+                          <strong>{{ moduleName }}</strong>
+                          <small>Referenced by RTL but not found in the current file universe.</small>
+                        </span>
+                      </div>
+                      <div v-if="elabDiagnostics.length === 0 && elabUnresolvedModules.length === 0" class="empty-panel compact">
+                        <i class="ri-checkbox-circle-line"></i>
+                        <span>No ELAB diagnostics or unresolved module candidates.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="elab-column">
+                    <header class="review-layer-head">
+                      <div>
+                        <span>Module Inventory</span>
+                        <strong>Definitions and instance references</strong>
+                      </div>
+                      <em>{{ elabModules.length }}</em>
+                    </header>
+                    <div class="elab-module-list">
+                      <button
+                        v-for="moduleItem in elabModules"
+                        :key="`${moduleItem.module}:${moduleItem.path}`"
+                        type="button"
+                        class="elab-module-row"
+                        :class="{ top: moduleItem.module === elabTopModuleName }"
+                        @click="openElabModule(moduleItem)"
+                      >
+                        <span>
+                          <strong>{{ moduleItem.module }}</strong>
+                          <small>{{ shortPath(moduleItem.path || '') }}:{{ moduleItem.line || 1 }}</small>
+                        </span>
+                        <em>{{ moduleItem.module === elabTopModuleName ? 'TOP' : `${numberLabel(moduleItem.instances)} inst` }}</em>
+                        <div class="elab-module-meta">
+                          <span>Ports <strong>{{ numberLabel(moduleItem.ports) }}</strong></span>
+                          <span>Params <strong>{{ numberLabel(moduleItem.parameters) }}</strong></span>
+                          <span>Refs <strong>{{ numberLabel(moduleItem.instantiates?.length) }}</strong></span>
+                        </div>
+                      </button>
+                      <div v-if="elabModules.length === 0" class="empty-panel compact">
+                        <i class="ri-node-tree"></i>
+                        <span>No module inventory was generated.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </section>
+              </template>
+            </section>
+
+            <section v-else-if="activeTab === 'cases'" class="cases-panel" :class="{ 'with-wave': Boolean(activeWaveform) }">
               <div v-if="simResultIsStale" class="sim-stale-banner">
                 <i class="ri-time-line"></i>
                 <span>{{ simResultFreshness.message }} Run again to refresh these case results.</span>
@@ -493,119 +864,44 @@
                   </tbody>
                 </table>
               </div>
-            </section>
 
-            <section v-else-if="activeTab === 'log'" class="log-panel">
-              <div class="panel-tools">
-                <select v-model="selectedLogPath" class="log-select" @change="loadSelectedLog">
-                  <option v-for="log in availableLogs" :key="log.path" :value="log.path">
-                    {{ log.label }}
-                  </option>
-                </select>
-                <button type="button" class="icon-action" :disabled="logLoading || !selectedLogPath" @click="loadSelectedLog">
-                  <i :class="logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
-                </button>
-              </div>
-              <pre class="log-viewer">{{ logContent || 'No log content.' }}</pre>
-            </section>
-
-            <section v-else-if="activeTab === 'reports'" class="files-panel">
-              <ResourceFileList :items="reports" empty-label="No reports yet." @select="selectTextFile" />
-            </section>
-
-            <section v-else-if="activeTab === 'artifacts'" class="files-panel">
-              <ArtifactGroupList
-                :groups="artifactGroups"
-                empty-label="No artifacts yet."
-                @select="handleArtifactClick"
-              />
-            </section>
-
-            <section v-else-if="activeTab === 'src'" class="source-layout">
-              <aside class="source-list">
-                <div class="source-list-head">
-                  <strong>Source</strong>
-                  <span>{{ sourceArtifacts.length }} files</span>
-                </div>
-                <button
-                  v-for="item in sourceItems"
-                  :key="item.path"
-                  type="button"
-                  class="source-row"
-                  :class="{
-                    active: activeSource?.path === item.path,
-                    diagnostic: Boolean(item.diagnostics?.total),
-                    error: Boolean(item.diagnostics?.errors),
-                  }"
-                  :title="item.path"
-                  @click="openSource(item)"
-                >
-                  <i :class="fileIcon(item.path)"></i>
-                  <span>
-                    <strong>{{ sourceDisplayName(item) }}</strong>
-                    <small>{{ shortPath(item.path) }}</small>
-                  </span>
-                  <em
-                    v-if="item.diagnostics?.total"
-                    class="source-diagnostic-badge"
-                    :class="{ error: Boolean(item.diagnostics?.errors) }"
+              <section v-if="activeWaveform" class="wave-panel sim-wave-panel">
+                <div class="wave-header">
+                  <div class="wave-title">
+                    <i class="ri-pulse-line"></i>
+                    <div>
+                      <strong>{{ activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform' }}</strong>
+                      <span :title="activeWaveform.path">{{ activeWaveform.path }}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="text-action"
+                    @click="openWaveExternal(activeWaveform.path)"
                   >
-                    {{ item.diagnostics ? sourceDiagnosticLabel(item.diagnostics) : '' }}
-                  </em>
-                </button>
-                <div v-if="sourceArtifacts.length === 0" class="empty-panel compact">
-                  <i class="ri-code-s-slash-line"></i>
-                  <span>No source files discovered.</span>
+                    <i class="ri-external-link-line"></i>
+                    Open
+                  </button>
                 </div>
-              </aside>
-              <FrontendSourceEditor
-                :source="activeSource"
-                :focus-target="sourceFocusTarget"
-                @saved="refresh"
-                @linted="refresh"
-              />
-            </section>
-
-            <section v-else-if="activeTab === 'wave'" class="wave-panel">
-              <div class="wave-header">
-                <div class="wave-title">
-                  <i class="ri-pulse-line"></i>
-                  <div>
-                    <strong>{{ activeWaveform?.caseName || fileName(activeWaveform?.path || '') || 'Waveform' }}</strong>
-                    <span :title="activeWaveform?.path || ''">{{ activeWaveform?.path || 'Select a VCD/FST/GHW artifact.' }}</span>
+                <div class="surfer-shell">
+                  <iframe
+                    ref="surferFrame"
+                    class="surfer-frame"
+                    title="Surfer waveform viewer"
+                    :src="surferViewerUrl"
+                    @load="handleSurferFrameLoad"
+                  ></iframe>
+                  <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
+                    <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
+                    <span>{{ waveStatusMessage }}</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  class="text-action"
-                  :disabled="!activeWaveform"
-                  @click="activeWaveform && openWaveExternal(activeWaveform.path)"
-                >
-                  <i class="ri-external-link-line"></i>
-                  Open
-                </button>
-              </div>
-              <div v-if="!activeWaveform" class="empty-panel">
-                <i class="ri-pulse-line"></i>
-                <span>Select a VCD/FST/GHW artifact.</span>
-              </div>
-              <div v-else class="surfer-shell">
-                <iframe
-                  ref="surferFrame"
-                  class="surfer-frame"
-                  title="Surfer waveform viewer"
-                  :src="surferViewerUrl"
-                  @load="handleSurferFrameLoad"
-                ></iframe>
-                <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
-                  <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
-                  <span>{{ waveStatusMessage }}</span>
-                </div>
-              </div>
+              </section>
             </section>
+
           </main>
 
-          <section class="frontend-console" :class="{ collapsed: consoleCollapsed, resizing: consoleResizing }" :style="consoleStyle">
+          <section v-if="shouldShowStepConsole" class="frontend-console" :class="{ collapsed: consoleCollapsed, resizing: consoleResizing }" :style="consoleStyle">
             <div
               v-if="!consoleCollapsed"
               class="console-resizer"
@@ -679,7 +975,7 @@
               <section v-else class="console-log-panel">
                 <div class="console-log-tools">
                   <select v-model="selectedLogPath" class="log-select compact" @change="loadSelectedLog">
-                    <option v-for="log in availableLogs" :key="log.path" :value="log.path">
+                    <option v-for="log in textViewFiles" :key="log.path" :value="log.path">
                       {{ log.label }}
                     </option>
                   </select>
@@ -698,8 +994,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
 import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
@@ -748,6 +1044,7 @@ interface FrontendStepDetail {
   summary: Record<string, unknown>
   cases?: SimCase[]
   review?: RtlReviewReport
+  elab?: ElabReport
   logs: PathItem[]
   reports: PathItem[]
   artifacts: PathItem[]
@@ -771,18 +1068,10 @@ interface FrontendConfigItem {
   wide?: boolean
 }
 
-type ArtifactKind = 'source' | 'wave' | 'log' | 'report' | 'image' | 'other'
-type TabId = 'summary' | 'review' | 'cases' | 'log' | 'reports' | 'artifacts' | 'src' | 'wave'
+type TabId = 'summary' | 'review' | 'elab' | 'cases' | 'src'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
-type ReviewProfile = 'all' | 'IC' | 'FPGA'
-
-interface ArtifactGroup {
-  id: ArtifactKind
-  label: string
-  icon: string
-  items: PathItem[]
-}
+type ReviewMode = 'source' | 'yosys' | 'modules'
 
 interface ConsoleProblem {
   severity: 'error' | 'warning' | 'info'
@@ -812,7 +1101,6 @@ interface SimRunContext {
 
 interface RtlReviewIssue {
   severity: 'error' | 'warning' | 'info'
-  profiles: string[]
   category: string
   title: string
   detail: string
@@ -832,8 +1120,45 @@ interface RtlReviewReport {
   source_files?: Array<{ path: string; label?: string; lines?: number }>
   structural_probe?: Record<string, unknown>
   yosys_precheck?: Record<string, unknown>
-  profiles?: string[]
   next_analyzers?: string[]
+}
+
+interface ElabDiagnostic {
+  severity?: 'error' | 'warning' | 'info'
+  message?: string
+  source?: string
+  line?: number
+  column?: number
+}
+
+interface ElabModule {
+  module?: string
+  path?: string
+  line?: number
+  ports?: number
+  parameters?: number
+  instances?: number
+  instantiates?: string[]
+}
+
+interface ElabReport {
+  path?: string
+  tool?: string
+  status?: string
+  returncode?: number
+  top_module?: string
+  summary?: Record<string, unknown>
+  diagnostics?: ElabDiagnostic[]
+  modules?: ElabModule[]
+  unresolved_modules?: string[]
+  referenced_modules?: string[]
+  inputs?: {
+    rtl_files?: string[]
+    rtl_file_count?: number
+    incdirs?: string[]
+    defines?: string[]
+  }
+  reports?: Record<string, unknown>
 }
 
 interface YosysDiagnostic {
@@ -856,10 +1181,24 @@ interface ModuleRisk {
   mux_cells?: number
   arithmetic_cells?: number
   memory_cells?: number
+  max_fanout?: number
+  max_fanin?: number
+  max_comb_depth?: number
   reasons?: string[]
 }
 
+interface ReviewHotspot {
+  title: string
+  value: string
+  detail: string
+  tone: 'warning' | 'error' | 'info'
+  source?: string
+  line?: number
+  column?: number
+}
+
 const route = useRoute()
+const router = useRouter()
 const {
   currentProject,
   resourceVersions,
@@ -887,11 +1226,11 @@ const selectedLogPath = ref('')
 const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
 const activeWaveform = ref<WaveSelection | null>(null)
-const consoleCollapsed = ref(false)
+const consoleCollapsed = ref(true)
 const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
 const consoleResizing = ref(false)
 const consoleTab = ref<ConsoleTabId>('problems')
-const reviewProfile = ref<ReviewProfile>('all')
+const reviewMode = ref<ReviewMode>('source')
 const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
 let sourceFocusToken = 0
 const simSuite = ref<'cpu_tests' | 'rtthread'>('cpu_tests')
@@ -909,15 +1248,18 @@ let consoleResizeStartHeight = 0
 let runClockTimer: ReturnType<typeof window.setInterval> | null = null
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
+const isGlobalSrcView = computed(() => String(route.params.step || '').toLowerCase() === 'src')
 const currentStepName = computed(() => {
   const param = String(route.params.step || '')
-  return param && param !== 'home' ? param : ''
+  return param && param !== 'home' && param.toLowerCase() !== 'src' ? param : ''
 })
 const currentStep = computed(() =>
   steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
 )
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
+const isElabStep = computed(() => currentStepName.value.toLowerCase() === 'elab')
+const detailRequestStepName = computed(() => isGlobalSrcView.value ? 'prepare' : currentStepName.value)
 const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
 const nextPendingStep = computed(() =>
   steps.value.find((step) => step.state !== 'Success') ?? null,
@@ -926,6 +1268,7 @@ const stepTitle = computed(() => {
   if (isHomeView.value) {
     return currentProject.value?.name || 'Frontend Workspace'
   }
+  if (isGlobalSrcView.value) return 'Source Workspace'
   return labelForStep(currentStepName.value || 'Step')
 })
 const currentOverallState = computed(() => {
@@ -1049,9 +1392,22 @@ const reviewSourceArtifacts = computed<PathItem[]>(() => {
     }))
     .filter((item) => item.path)
 })
+const elabReport = computed<ElabReport | null>(() => {
+  const elab = detail.value?.elab
+  if (!elab) return null
+  if (elab.path || elab.summary || elab.modules?.length || elab.diagnostics?.length) return elab
+  return null
+})
+const elabSourceArtifacts = computed<PathItem[]>(() => {
+  const files = elabReport.value?.inputs?.rtl_files || []
+  return files
+    .map((path) => ({ label: fileName(path), path }))
+    .filter((item) => item.path)
+})
 const sourceArtifacts = computed(() => uniquePathItems([
   ...allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)),
   ...reviewSourceArtifacts.value,
+  ...elabSourceArtifacts.value,
 ]))
 const logDiagnostics = computed(() => parseVerilatorDiagnostics(logContent.value))
 const sourceDiagnosticCounts = computed(() => {
@@ -1074,22 +1430,6 @@ const sourceItems = computed<SourcePathItem[]>(() =>
     diagnostics: sourceDiagnosticCounts.value.get(item.path),
   })),
 )
-const artifactGroups = computed<ArtifactGroup[]>(() => {
-  const specs: Array<Omit<ArtifactGroup, 'items'>> = [
-    { id: 'source', label: 'Source', icon: 'ri-code-s-slash-line' },
-    { id: 'wave', label: 'Waves', icon: 'ri-pulse-line' },
-    { id: 'log', label: 'Logs', icon: 'ri-terminal-box-line' },
-    { id: 'report', label: 'Reports', icon: 'ri-file-chart-line' },
-    { id: 'image', label: 'Images', icon: 'ri-cpu-line' },
-    { id: 'other', label: 'Other', icon: 'ri-folder-3-line' },
-  ]
-  return specs
-    .map((spec) => ({
-      ...spec,
-      items: allArtifacts.value.filter((item) => artifactKind(item) === spec.id),
-    }))
-    .filter((group) => group.items.length > 0)
-})
 const availableLogs = computed(() => {
   const logs = [...(detail.value?.logs || [])]
   const selected = selectedCase.value
@@ -1101,7 +1441,116 @@ const availableLogs = computed(() => {
   ].filter(Boolean) as PathItem[]
   return uniquePathItems([...caseLogs, ...logs])
 })
-const formattedSummary = computed(() => JSON.stringify(detail.value?.summary || {}, null, 2))
+const readableReports = computed(() =>
+  reports.value.filter((item) => isReadableReportPath(item.path)),
+)
+const textViewFiles = computed(() => uniquePathItems([...availableLogs.value, ...readableReports.value]))
+const hasStepLogs = computed(() => textViewFiles.value.length > 0)
+const shouldShowStepTabs = computed(() => visibleTabs.value.length > 1)
+const shouldShowStepConsole = computed(() =>
+  consoleProblemCount.value > 0 || (!consoleCollapsed.value && hasStepLogs.value),
+)
+const humanStepTitle = computed(() => labelForStep(currentStepName.value || 'Step'))
+const humanSummaryStateTone = computed(() => {
+  const state = currentStepDisplayState.value
+  if (state === StateEnum.Success || state === 'Success') return 'ok'
+  if (state === StateEnum.Incomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') return 'error'
+  if (state === StateEnum.Ongoing || state === 'Ongoing' || runBusy.value) return 'warning'
+  return 'neutral'
+})
+const humanSummaryTiles = computed(() => [
+  { label: 'Step', value: humanStepTitle.value, tone: 'neutral' },
+  { label: 'Status', value: currentStepDisplayState.value || '--', tone: humanSummaryStateTone.value },
+  { label: 'Runtime', value: currentStepRuntime.value || '--', tone: 'neutral' },
+  { label: 'Tool', value: detail.value?.tool || currentStep.value?.tool || '--', tone: 'neutral' },
+  { label: 'Problems', value: numberLabel(consoleProblemCount.value), tone: consoleProblemCount.value ? 'warning' : 'ok' },
+  { label: 'Logs', value: numberLabel(availableLogs.value.length), tone: availableLogs.value.length ? 'neutral' : 'ok' },
+])
+const humanSummaryMetrics = computed(() => {
+  if (isSimStep.value) {
+    return [
+      { label: 'Cases', value: numberLabel(totalCases.value) },
+      { label: 'Passed', value: numberLabel(passedCases.value) },
+      { label: 'Failed', value: numberLabel(Math.max(0, totalCases.value - passedCases.value)) },
+      { label: 'Suite', value: simSuiteLabel.value },
+    ]
+  }
+  if (isElabStep.value && elabReport.value) {
+    return [
+      { label: 'Files', value: numberLabel(elabSummary.value.rtl_files) },
+      { label: 'Modules', value: numberLabel(elabSummary.value.modules) },
+      { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length) },
+      { label: 'Missing', value: numberLabel(elabUnresolvedModules.value.length) },
+    ]
+  }
+  if (isReviewStep.value && reviewReport.value) {
+    return [
+      { label: 'Issues', value: numberLabel(reviewIssues.value.length) },
+      { label: 'Warnings', value: numberLabel(reviewReport.value.summary?.warnings) },
+      { label: 'Sources', value: numberLabel(reviewReport.value.summary?.source_files) },
+      { label: 'Modules', value: numberLabel(reviewReport.value.summary?.modules) },
+    ]
+  }
+  return [
+    { label: 'Logs', value: numberLabel(availableLogs.value.length) },
+    { label: 'Sources', value: numberLabel(sourceArtifacts.value.length) },
+    { label: 'Problems', value: numberLabel(consoleProblemCount.value) },
+  ]
+})
+const humanSummaryText = computed(() => {
+  const state = currentStepDisplayState.value
+  if (isSimStep.value) return simRunSubtitle.value
+  if (isElabStep.value && elabReport.value) {
+    if (elabDiagnostics.value.length) return 'ELAB reported diagnostics. Open Elab or Problems to jump to the source line.'
+    if (elabUnresolvedModules.value.length) return 'ELAB found module references that are not present in the current RTL file universe.'
+    return 'ELAB completed the configured design universe check and generated a module inventory.'
+  }
+  if (isReviewStep.value && reviewReport.value) return reviewNextAction.value.detail
+  if (state === StateEnum.Success || state === 'Success') {
+    return `${humanStepTitle.value} completed. Keep going unless Problems reports something actionable.`
+  }
+  if (state === StateEnum.Incomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') {
+    return `${humanStepTitle.value} needs attention. Start from Problems; source diagnostics jump to SRC when a location is available.`
+  }
+  return `${humanStepTitle.value} has not produced a specialized result view yet. Run the step to generate a readable result.`
+})
+const humanNextAction = computed<{ title: string; detail: string; label: string; tab?: TabId }>(() => {
+  if (consoleProblemCount.value) {
+    return {
+      title: 'Inspect Problems',
+      detail: 'Start from the bottom Problems console; clickable diagnostics will open source when a location is available.',
+      label: 'Problems',
+    }
+  }
+  if (isElabStep.value && elabReport.value) {
+    return {
+      title: 'Inspect Elab',
+      detail: 'Review the module inventory and unresolved module candidates before moving to RTL Review.',
+      label: 'Elab',
+      tab: 'elab',
+    }
+  }
+  if (isSimStep.value) {
+    return {
+      title: 'Inspect Cases',
+      detail: 'Open case results to check pass/fail status, logs, and waveforms when available.',
+      label: 'Cases',
+      tab: 'cases',
+    }
+  }
+  if (hasStepLogs.value) {
+    return {
+      title: 'Check Log',
+      detail: 'Use the bottom Log console only when the result overview is not enough.',
+      label: 'Log',
+    }
+  }
+  return {
+    title: 'Run Step',
+    detail: 'Run this step to generate a result overview, logs, and reports.',
+    label: '',
+  }
+})
 const reviewReport = computed<RtlReviewReport | null>(() => {
   const review = detail.value?.review
   if (!review) return null
@@ -1109,13 +1558,8 @@ const reviewReport = computed<RtlReviewReport | null>(() => {
   return null
 })
 const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.issues || []))
-const filteredReviewIssues = computed(() => reviewIssues.value.filter((issue) =>
-  reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
-))
 const sourceScanIssues = computed(() => reviewIssues.value.filter((issue) => !isYosysIssue(issue)))
-const filteredSourceScanIssues = computed(() => sourceScanIssues.value.filter((issue) =>
-  reviewProfile.value === 'all' || issue.profiles.includes(reviewProfile.value),
-))
+const reviewYosysIssues = computed(() => reviewIssues.value.filter((issue) => isYosysIssue(issue)))
 const reviewStructuralProbe = computed(() => {
   const probe = reviewReport.value?.yosys_precheck || reviewReport.value?.structural_probe
   return probe && Object.keys(probe).length ? probe : null
@@ -1146,6 +1590,106 @@ const reviewRiskyModules = computed<ModuleRisk[]>(() => {
     ? risks.filter((item): item is ModuleRisk => Boolean(item && typeof item === 'object')).slice(0, 8)
     : []
 })
+const reviewStructuralHotspots = computed<ReviewHotspot[]>(() => {
+  const metrics = reviewStructuralMetrics.value
+  const hotspots: ReviewHotspot[] = []
+  for (const item of readRecordList(metrics.high_fanout_nets).slice(0, 4)) {
+    hotspots.push({
+      title: `High fanout · ${String(item.module || '--')}`,
+      value: numberLabel(item.fanout),
+      detail: `${String(item.net || 'net')} drives ${numberLabel(item.fanout)} consumers.`,
+      tone: 'warning',
+      source: String(item.source || ''),
+      line: numberValue(item.line),
+      column: numberValue(item.column) || 1,
+    })
+  }
+  for (const item of readRecordList(metrics.high_fanin_cells).slice(0, 4)) {
+    hotspots.push({
+      title: `Wide fanin · ${String(item.module || '--')}`,
+      value: numberLabel(item.fanin),
+      detail: `${String(item.cell || 'cell')} reads ${numberLabel(item.fanin)} input bits.`,
+      tone: 'warning',
+      source: String(item.source || ''),
+      line: numberValue(item.line),
+      column: numberValue(item.column) || 1,
+    })
+  }
+  for (const item of readRecordList(metrics.deep_comb_paths).slice(0, 4)) {
+    hotspots.push({
+      title: `Comb depth · ${String(item.module || '--')}`,
+      value: numberLabel(item.depth),
+      detail: `${String(item.endpoint || 'endpoint')} is the current deepest structural endpoint.`,
+      tone: 'warning',
+      source: String(item.source || ''),
+      line: numberValue(item.line),
+      column: numberValue(item.column) || 1,
+    })
+  }
+  const cycles = Array.isArray(metrics.comb_cycle_modules) ? metrics.comb_cycle_modules.map(String).filter(Boolean) : []
+  for (const moduleName of cycles.slice(0, 4)) {
+    hotspots.push({
+      title: `Comb cycle · ${moduleName}`,
+      value: 'cycle',
+      detail: 'The structural graph could not be fully topologically ordered.',
+      tone: 'error',
+    })
+  }
+  return hotspots.slice(0, 12)
+})
+const reviewModeItems = computed(() => [
+  {
+    id: 'source' as const,
+    label: 'Source Scan',
+    icon: 'ri-code-s-slash-line',
+    count: sourceScanIssues.value.length,
+  },
+  {
+    id: 'yosys' as const,
+    label: 'Yosys',
+    icon: 'ri-cpu-line',
+    count: reviewYosysDiagnostics.value.length + reviewYosysIssues.value.length + reviewStructuralHotspots.value.length,
+  },
+  {
+    id: 'modules' as const,
+    label: 'Modules',
+    icon: 'ri-node-tree',
+    count: reviewRiskyModules.value.length,
+  },
+])
+const reviewTopIssues = computed(() => reviewIssues.value.slice(0, 6))
+const reviewNextAction = computed<{ title: string; detail: string; label: string; mode: ReviewMode }>(() => {
+  if (reviewYosysIssues.value.length || reviewYosysDiagnostics.value.length || reviewStructuralHotspots.value.length) {
+    return {
+      title: 'Inspect Yosys',
+      detail: 'Open Yosys diagnostics and hotspots first. These issues usually block or distort structural quality analysis.',
+      label: 'Yosys',
+      mode: 'yosys',
+    }
+  }
+  if (sourceScanIssues.value.length) {
+    return {
+      title: 'Fix Source',
+      detail: 'Open source scan issues and clean the RTL coding/style risks before running simulation again.',
+      label: 'Source Scan',
+      mode: 'source',
+    }
+  }
+  if (reviewRiskyModules.value.length) {
+    return {
+      title: 'Review Modules',
+      detail: 'Open module ranking to inspect large mux, arithmetic, memory, fanout, fanin, and depth hotspots.',
+      label: 'Modules',
+      mode: 'modules',
+    }
+  }
+  return {
+    title: 'Looks Clean',
+    detail: 'No Review issue is currently reported. Continue with simulation or inspect source files.',
+    label: 'Source Scan',
+    mode: 'source',
+  }
+})
 const reviewStructuralQualityLabel = computed(() => {
   const gate = String(reviewStructuralQuality.value.gate || '').trim()
   const complexity = String(reviewStructuralQuality.value.complexity || '').trim()
@@ -1165,12 +1709,74 @@ const reviewSummaryTiles = computed(() => {
     { label: 'Scope', value: reviewScopeLabel(reviewReport.value?.scope), tone: 'neutral' },
     { label: 'Errors', value: numberLabel(summary.errors), tone: numberValue(summary.errors) > 0 ? 'error' : 'ok' },
     { label: 'Warnings', value: numberLabel(summary.warnings), tone: numberValue(summary.warnings) > 0 ? 'warning' : 'ok' },
-    { label: 'IC Issues', value: numberLabel(readNested(summary, ['profile_counts', 'IC'])), tone: 'ic' },
-    { label: 'FPGA Issues', value: numberLabel(readNested(summary, ['profile_counts', 'FPGA'])), tone: 'fpga' },
+    { label: 'Review Issues', value: numberLabel(reviewIssues.value.length), tone: reviewIssues.value.length ? 'warning' : 'ok' },
     { label: 'Sources', value: numberLabel(summary.source_files), tone: 'neutral' },
     { label: 'Modules', value: numberLabel(summary.modules), tone: 'neutral' },
   ]
 })
+const elabSummary = computed(() => elabReport.value?.summary || {})
+const elabDiagnostics = computed<ElabDiagnostic[]>(() => {
+  const diagnostics = elabReport.value?.diagnostics
+  if (!Array.isArray(diagnostics)) return []
+  return diagnostics
+    .filter((item): item is ElabDiagnostic => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      message: String(item.message || 'Slang diagnostic'),
+      source: String(item.source || ''),
+      line: numberValue(item.line),
+      column: numberValue(item.column) || 1,
+    }))
+})
+const elabModules = computed<ElabModule[]>(() => {
+  const modules = elabReport.value?.modules
+  if (!Array.isArray(modules)) return []
+  const top = String(elabSummary.value.top_module || elabReport.value?.top_module || '')
+  return modules
+    .filter((item): item is ElabModule => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      module: String(item.module || ''),
+      path: String(item.path || ''),
+      line: numberValue(item.line) || 1,
+      ports: numberValue(item.ports),
+      parameters: numberValue(item.parameters),
+      instances: numberValue(item.instances),
+      instantiates: Array.isArray(item.instantiates) ? item.instantiates.map(String).filter(Boolean) : [],
+    }))
+    .sort((a, b) => {
+      if (a.module === top) return -1
+      if (b.module === top) return 1
+      return numberValue(b.instances) - numberValue(a.instances) || String(a.module).localeCompare(String(b.module))
+    })
+})
+const elabUnresolvedModules = computed(() =>
+  Array.isArray(elabReport.value?.unresolved_modules)
+    ? elabReport.value.unresolved_modules.map(String).filter(Boolean)
+    : [],
+)
+const elabTopModuleName = computed(() =>
+  String(elabSummary.value.top_module || elabReport.value?.top_module || '--'),
+)
+const elabStatusLabel = computed(() =>
+  titleCase(String(elabSummary.value.status || elabReport.value?.status || 'not run')),
+)
+const elabTopFound = computed(() => Boolean(elabSummary.value.top_found))
+const elabSummaryTiles = computed(() => [
+  {
+    label: 'Status',
+    value: elabStatusLabel.value,
+    tone: String(elabStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
+  },
+  {
+    label: 'Top',
+    value: elabTopModuleName.value,
+    tone: elabTopFound.value ? 'ok' : 'warning',
+  },
+  { label: 'RTL Files', value: numberLabel(elabSummary.value.rtl_files || elabReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
+  { label: 'Modules', value: numberLabel(elabSummary.value.modules), tone: 'neutral' },
+  { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length), tone: elabDiagnostics.value.length ? 'warning' : 'ok' },
+  { label: 'Unresolved', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
+])
 const reviewMetricRows = computed(() => {
   const metrics = reviewReport.value?.metrics || {}
   return [
@@ -1184,10 +1790,24 @@ const reviewMetricRows = computed(() => {
     { label: 'Reset Refs', value: numberLabel(metrics.reset_references) },
   ]
 })
+const reviewStructuralMetricRows = computed(() => {
+  const metrics = reviewStructuralMetrics.value
+  return [
+    { label: 'Cells', value: numberLabel(metrics.cells) },
+    { label: 'Wires', value: numberLabel(metrics.wires) },
+    { label: 'Mux Cells', value: numberLabel(metrics.mux_cells) },
+    { label: 'Arithmetic', value: numberLabel(metrics.arithmetic_cells) },
+    { label: 'Memory', value: numberLabel(metrics.memory_cells) },
+    { label: 'Max Fanout', value: numberLabel(metrics.max_fanout) },
+    { label: 'Max Fanin', value: numberLabel(metrics.max_fanin) },
+    { label: 'Max Depth', value: numberLabel(metrics.max_comb_depth) },
+  ]
+})
 const consoleStyle = computed(() => ({
   '--console-height': `${consoleHeight.value}px`,
 }))
 const consoleContext = computed(() => {
+  if (isGlobalSrcView.value) return 'Source Workspace'
   if (selectedCase.value) return `${labelForStep(currentStepName.value)} · ${selectedCase.value.name}`
   return labelForStep(currentStepName.value || 'Workspace')
 })
@@ -1216,6 +1836,16 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
   for (const diagnostic of reviewYosysDiagnostics.value.slice(0, 30)) {
     problems.push(yosysDiagnosticToProblem(diagnostic))
   }
+  for (const diagnostic of elabDiagnostics.value.slice(0, 30)) {
+    problems.push(elabDiagnosticToProblem(diagnostic))
+  }
+  for (const moduleName of elabUnresolvedModules.value.slice(0, 10)) {
+    problems.push({
+      severity: 'warning',
+      title: `ELAB · unresolved ${moduleName}`,
+      detail: 'This module is referenced by the RTL inventory but was not found in the current file universe.',
+    })
+  }
   for (const testCase of cases.value.filter((item) => !item.ok)) {
     problems.push({
       severity: 'error',
@@ -1241,16 +1871,17 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
 const consoleProblemCount = computed(() =>
   consoleProblems.value.filter((problem) => problem.severity !== 'info').length,
 )
-const visibleTabs = computed(() => [
-  { id: 'summary' as const, label: 'Summary', icon: 'ri-dashboard-3-line' },
-  ...(isReviewStep.value ? [{ id: 'review' as const, label: 'Review', icon: 'ri-search-eye-line' }] : []),
-  ...(isSimStep.value ? [{ id: 'cases' as const, label: 'Cases', icon: 'ri-list-check-3' }] : []),
-  { id: 'log' as const, label: 'Log', icon: 'ri-terminal-box-line' },
-  { id: 'reports' as const, label: 'Reports', icon: 'ri-file-chart-line' },
-  { id: 'artifacts' as const, label: 'Artifacts', icon: 'ri-folder-3-line' },
-  { id: 'src' as const, label: 'Src', icon: 'ri-code-s-slash-line' },
-  { id: 'wave' as const, label: 'Wave', icon: 'ri-pulse-line' },
-])
+const visibleTabs = computed(() => {
+  if (isGlobalSrcView.value) {
+    return [{ id: 'src' as TabId, label: 'Src', icon: 'ri-code-s-slash-line' }]
+  }
+  const tabs: Array<{ id: TabId; label: string; icon: string }> = []
+  if (isReviewStep.value) tabs.push({ id: 'review', label: 'Review', icon: 'ri-search-eye-line' })
+  else if (isElabStep.value) tabs.push({ id: 'elab', label: 'Elab', icon: 'ri-node-tree' })
+  else if (isSimStep.value) tabs.push({ id: 'cases', label: 'Cases', icon: 'ri-list-check-3' })
+  else tabs.push({ id: 'summary', label: 'Summary', icon: 'ri-dashboard-3-line' })
+  return tabs
+})
 const surferViewerUrl = 'ecos-surfer://viewer/'
 const waveStatusMessage = computed(() => {
   if (waveformError.value) return waveformError.value
@@ -1280,14 +1911,14 @@ async function refresh(): Promise<void> {
 }
 
 async function loadDetail(): Promise<void> {
-  if (!currentStepName.value) return
+  if (!detailRequestStepName.value) return
   try {
     const response = await getInfoApi({
       cmd: CMDEnum.get_info,
       data: {
         designTool: 'frontend',
         directory: currentProject.value?.path,
-        step: currentStepName.value,
+        step: detailRequestStepName.value,
         id: InfoEnum.frontend_detail,
       },
     })
@@ -1297,12 +1928,19 @@ async function loadDetail(): Promise<void> {
     detail.value = response.data.info as FrontendStepDetail
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
+    if (isGlobalSrcView.value) {
+      activeTab.value = 'src'
+    }
     if (isSimStep.value && activeTab.value === 'summary') {
       activeTab.value = 'cases'
     }
     if (isReviewStep.value && activeTab.value === 'summary') {
       activeTab.value = 'review'
     }
+    if (isElabStep.value && activeTab.value === 'summary') {
+      activeTab.value = 'elab'
+    }
+    ensureActiveTabVisible()
     selectedLogPath.value = preferredLogPath()
     syncDefaultCpuSelection()
     if (!activeSource.value && sourceArtifacts.value.length) {
@@ -1553,11 +2191,11 @@ function displayCatalogId(value: string): string {
 
 function preferredLogPath(): string {
   if (isSimStep.value && detail.value?.state !== StateEnum.Success) {
-    const preferred = availableLogs.value.find((log) => log.label === 'Build programs log')
-      || availableLogs.value.find((log) => log.label === 'Tool log')
+    const preferred = textViewFiles.value.find((log) => log.label === 'Build programs log')
+      || textViewFiles.value.find((log) => log.label === 'Tool log')
     if (preferred) return preferred.path
   }
-  return availableLogs.value[0]?.path || ''
+  return textViewFiles.value[0]?.path || ''
 }
 
 function runFailureDetail(messages: string[] | undefined, step: string): string {
@@ -1585,27 +2223,28 @@ function selectCase(testCase: SimCase): void {
   void loadSelectedLog()
 }
 
-function selectTextFile(item: PathItem): void {
-  selectedLogPath.value = item.path
-  activeTab.value = 'log'
+function openStepLog(): void {
+  consoleTab.value = 'log'
+  consoleCollapsed.value = false
+  if (!selectedLogPath.value) {
+    selectedLogPath.value = preferredLogPath()
+  }
   void loadSelectedLog()
 }
 
-function handleArtifactClick(item: PathItem): void {
-  if (isWaveformPath(item.path)) {
-    openWaveform(item.path, caseNameFromArtifactLabel(item.label))
-    return
-  }
-  if (isSourceArtifactPath(item.path)) {
-    openSource(item)
-    return
-  }
-  selectTextFile(item)
+function normalizeArtifactLabel(item: PathItem): string {
+  const label = String(item.label || '').trim()
+  if (!label) return fileName(item.path)
+  return label.replace(/^CPU RTL · /, '')
 }
 
-function openSource(item: PathItem): void {
+function isReadableReportPath(path: string): boolean {
+  return /\.(log|txt|rpt|md|csv|html?)$/i.test(path)
+}
+
+async function openSource(item: PathItem): Promise<void> {
   activeSource.value = toSourceSelection(item)
-  activeTab.value = 'src'
+  await openGlobalSrcView()
 }
 
 function toSourceSelection(item: PathItem): FrontendSourceSelection {
@@ -1617,7 +2256,7 @@ function toSourceSelection(item: PathItem): FrontendSourceSelection {
 
 function openWaveform(path: string, caseName?: string): void {
   activeWaveform.value = { path, caseName }
-  activeTab.value = 'wave'
+  activeTab.value = 'cases'
   waveformError.value = ''
   void loadCurrentWaveform()
 }
@@ -1751,9 +2390,14 @@ function shortPath(path: string): string {
   return path.split('/').filter(Boolean).slice(-4).join('/')
 }
 
+function parentPath(path: string): string {
+  const parts = path.split('/').filter(Boolean)
+  if (parts.length <= 1) return ''
+  return parts.slice(0, -1).join('/')
+}
+
 function sourceDisplayName(item: PathItem): string {
-  const label = item.label || fileName(item.path)
-  return label.startsWith('CPU RTL · ') ? label.slice('CPU RTL · '.length) : label
+  return normalizeArtifactLabel(item)
 }
 
 function sourceDiagnosticLabel(count: DiagnosticCount): string {
@@ -1776,37 +2420,6 @@ function fileIcon(path: string): string {
 
 function isSourceArtifactPath(path: string): boolean {
   return /\.(v|sv|vh|svh|c|cc|cpp|h|hpp|f|fl|filelist|py|sh|tcl|s|asm)$/i.test(path)
-}
-
-function isWaveformPath(path: string): boolean {
-  return /\.(vcd|fst|ghw)$/i.test(path)
-}
-
-function isLogArtifactPath(path: string): boolean {
-  return /\.(log|txt|out)$/i.test(path)
-}
-
-function isReportArtifactPath(path: string): boolean {
-  return /\.(rpt|json|yaml|yml)$/i.test(path)
-}
-
-function isImageArtifactPath(path: string): boolean {
-  return /\.(bin|elf|hex|mem|img)$/i.test(path)
-}
-
-function artifactKind(item: PathItem): ArtifactKind {
-  const path = item.path
-  const label = item.label.toLowerCase()
-  if (isSourceArtifactPath(path)) return 'source'
-  if (isWaveformPath(path)) return 'wave'
-  if (isLogArtifactPath(path) || label.includes(' log')) return 'log'
-  if (isReportArtifactPath(path) || label.includes('report')) return 'report'
-  if (isImageArtifactPath(path) || label.includes('image')) return 'image'
-  return 'other'
-}
-
-function caseNameFromArtifactLabel(label: string): string | undefined {
-  return label.endsWith(' wave') ? label.slice(0, -5) : undefined
 }
 
 function problemLinesFromLog(content: string): string[] {
@@ -1877,36 +2490,39 @@ function normalizeReviewIssues(items: RtlReviewIssue[]): RtlReviewIssue[] {
     .filter((item) => item && item.title)
     .map((item) => ({
       severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
-      profiles: Array.isArray(item.profiles) && item.profiles.length
-        ? item.profiles.map(String)
-        : ['IC', 'FPGA'],
       category: String(item.category || 'review'),
       title: String(item.title || 'RTL review issue'),
       detail: String(item.detail || ''),
-      source: String(item.source || ''),
-      line: Number(item.line || 0),
-      column: Number(item.column || 1),
+      source: reviewIssueSource(item),
+      line: reviewIssueLine(item),
+      column: reviewIssueColumn(item),
       evidence: item.evidence || {},
       recommendation: String(item.recommendation || ''),
     }))
 }
 
 function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
+  const source = reviewIssueSource(issue)
   return {
     severity: issue.severity,
     title: `RTL Review · ${issue.title}`,
     detail: issue.recommendation || issue.detail,
-    sourcePath: issue.source,
-    line: issue.line || 1,
-    column: issue.column || 1,
+    sourcePath: source ? resolveDiagnosticSourcePath(source) : '',
+    line: reviewIssueLine(issue) || 1,
+    column: reviewIssueColumn(issue) || 1,
   }
 }
 
 function isYosysIssue(issue: RtlReviewIssue): boolean {
   const category = String(issue.category || '').toLowerCase()
-  return /yosys|precheck/i.test(issue.title)
+  const text = `${issue.title} ${issue.detail}`
+  return /yosys|precheck|high fanout net candidate|wide fanin cell candidate|deep combinational path candidate|combinational cycle candidate/i.test(text)
     || category === 'syntax'
     || category === 'hierarchy'
+    || category === 'fanout'
+    || category === 'fanin'
+    || (category === 'timing' && /fanout|fanin|yosys|structural/i.test(text))
+    || (category === 'combinational' && /yosys|structural graph|cycle/i.test(text))
     || (category === 'structural' && !issue.source)
 }
 
@@ -1915,20 +2531,36 @@ function yosysDiagnosticToProblem(diagnostic: YosysDiagnostic): ConsoleProblem {
     ? diagnostic.severity
     : 'info'
   const message = String(diagnostic.message || 'Yosys diagnostic')
+  const resolvedSource = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
   return {
     severity,
     title: `Yosys Precheck · ${titleCase(String(diagnostic.category || 'diagnostic'))}`,
     detail: message,
-    sourcePath: String(diagnostic.source || ''),
-    line: Number(diagnostic.line || 1),
-    column: Number(diagnostic.column || 1),
+    sourcePath: resolvedSource,
+    line: yosysDiagnosticLine(diagnostic),
+    column: yosysDiagnosticColumn(diagnostic),
+  }
+}
+
+function elabDiagnosticToProblem(diagnostic: ElabDiagnostic): ConsoleProblem {
+  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+    ? diagnostic.severity
+    : 'info'
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  return {
+    severity,
+    title: `ELAB · ${titleCase(severity)}`,
+    detail: String(diagnostic.message || 'Slang diagnostic'),
+    sourcePath: source,
+    line: numberValue(diagnostic.line) || 1,
+    column: numberValue(diagnostic.column) || 1,
   }
 }
 
 function openYosysDiagnostic(diagnostic: YosysDiagnostic): void {
-  const source = String(diagnostic.source || '')
+  const source = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
   if (source) {
-    openSourceAt(source, Number(diagnostic.line || 1), Number(diagnostic.column || 1))
+    openSourceAt(source, yosysDiagnosticLine(diagnostic), yosysDiagnosticColumn(diagnostic))
     return
   }
   consoleTab.value = 'problems'
@@ -1946,11 +2578,14 @@ function yosysDiagnosticKey(diagnostic: YosysDiagnostic): string {
   ].join(':')
 }
 
-function reviewIssueProfiles(issue: RtlReviewIssue): string {
+function elabDiagnosticKey(diagnostic: ElabDiagnostic): string {
   return [
-    issue.category,
-    ...issue.profiles.filter((profile) => profile === 'IC' || profile === 'FPGA'),
-  ].join(' · ')
+    diagnostic.severity || '',
+    diagnostic.source || '',
+    diagnostic.line || '',
+    diagnostic.column || '',
+    diagnostic.message || '',
+  ].join(':')
 }
 
 function reviewIssueKey(issue: RtlReviewIssue): string {
@@ -1958,9 +2593,8 @@ function reviewIssueKey(issue: RtlReviewIssue): string {
     issue.severity,
     issue.category,
     issue.title,
-    issue.source || '',
-    issue.line || '',
-    issue.profiles.join(','),
+    reviewIssueSource(issue),
+    reviewIssueLine(issue),
   ].join(':')
 }
 
@@ -1976,6 +2610,34 @@ function moduleRiskReason(module: ModuleRisk): string {
   return `cells ${cells} · wires ${wires}`
 }
 
+function reviewEvidenceLabel(issue: RtlReviewIssue): string {
+  const evidence = issue.evidence || {}
+  const parts = [
+    evidence.module ? `module ${evidence.module}` : '',
+    evidence.net ? `net ${evidence.net}` : '',
+    evidence.cell ? `cell ${evidence.cell}` : '',
+    evidence.endpoint ? `endpoint ${evidence.endpoint}` : '',
+    evidence.fanout ? `fanout ${evidence.fanout}` : '',
+    evidence.fanin ? `fanin ${evidence.fanin}` : '',
+    evidence.depth ? `depth ${evidence.depth}` : '',
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
+function hotspotKey(hotspot: ReviewHotspot): string {
+  return [hotspot.title, hotspot.value, hotspot.detail, hotspot.source || '', hotspot.line || ''].join(':')
+}
+
+function openReviewHotspot(hotspot: ReviewHotspot): void {
+  const source = resolveDiagnosticSourcePath(hotspot.source || '')
+  if (source) {
+    openSourceAt(source, hotspot.line || 1, hotspot.column || 1)
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
+}
+
 function titleCase(value: string): string {
   return value
     .split(/[_\s-]+/)
@@ -1985,12 +2647,124 @@ function titleCase(value: string): string {
 }
 
 function openReviewIssue(issue: RtlReviewIssue): void {
-  if (issue.source) {
-    openSourceAt(issue.source, issue.line || 1, issue.column || 1)
+  const source = resolveDiagnosticSourcePath(reviewIssueSource(issue))
+  if (source) {
+    openSourceAt(source, reviewIssueLine(issue) || 1, reviewIssueColumn(issue) || 1)
     return
   }
   consoleTab.value = 'problems'
   consoleCollapsed.value = false
+}
+
+function reviewIssueLocationLabel(issue: RtlReviewIssue): string {
+  const source = resolveDiagnosticSourcePath(reviewIssueSource(issue))
+  const line = reviewIssueLine(issue)
+  return `${shortPath(source || reviewIssueSource(issue))}${line ? `:${line}` : ''}`
+}
+
+function yosysDiagnosticLocationLabel(diagnostic: YosysDiagnostic): string {
+  const source = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
+  const line = yosysDiagnosticLine(diagnostic)
+  return `${shortPath(source || yosysDiagnosticSource(diagnostic))}${line ? `:${line}` : ''}`
+}
+
+function elabDiagnosticLocationLabel(diagnostic: ElabDiagnostic): string {
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  const line = numberValue(diagnostic.line)
+  return `${shortPath(source || diagnostic.source || '')}${line ? `:${line}` : ''}`
+}
+
+function openElabDiagnostic(diagnostic: ElabDiagnostic): void {
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  if (source) {
+    openSourceAt(source, numberValue(diagnostic.line) || 1, numberValue(diagnostic.column) || 1)
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
+}
+
+function openElabModule(moduleItem: ElabModule): void {
+  const source = resolveDiagnosticSourcePath(String(moduleItem.path || ''))
+  if (source) {
+    openSourceAt(source, numberValue(moduleItem.line) || 1, 1)
+    return
+  }
+  void openGlobalSrcView()
+}
+
+function reviewIssueSource(issue: Partial<RtlReviewIssue>): string {
+  const evidence = issue.evidence || {}
+  return firstText(
+    issue.source,
+    evidence.source,
+    evidence.src,
+    evidence.path,
+    sourceFromText(issue.detail),
+    sourceFromText(issue.recommendation),
+  )
+}
+
+function reviewIssueLine(issue: Partial<RtlReviewIssue>): number {
+  const evidence = issue.evidence || {}
+  return firstPositiveNumber(issue.line, evidence.line, lineFromText(issue.detail), lineFromText(issue.recommendation)) || 1
+}
+
+function reviewIssueColumn(issue: Partial<RtlReviewIssue>): number {
+  const evidence = issue.evidence || {}
+  return firstPositiveNumber(issue.column, evidence.column, columnFromText(issue.detail), columnFromText(issue.recommendation)) || 1
+}
+
+function yosysDiagnosticSource(diagnostic: YosysDiagnostic): string {
+  return firstText(diagnostic.source, sourceFromText(diagnostic.message))
+}
+
+function yosysDiagnosticLine(diagnostic: YosysDiagnostic): number {
+  return firstPositiveNumber(diagnostic.line, lineFromText(diagnostic.message)) || 1
+}
+
+function yosysDiagnosticColumn(diagnostic: YosysDiagnostic): number {
+  return firstPositiveNumber(diagnostic.column, columnFromText(diagnostic.message)) || 1
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value || '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function firstPositiveNumber(...values: unknown[]): number {
+  for (const value of values) {
+    const next = Number(value)
+    if (Number.isFinite(next) && next > 0) return Math.floor(next)
+  }
+  return 0
+}
+
+function sourceFromText(text: unknown): string {
+  return parseSourceLocation(text).source
+}
+
+function lineFromText(text: unknown): number {
+  return parseSourceLocation(text).line
+}
+
+function columnFromText(text: unknown): number {
+  return parseSourceLocation(text).column
+}
+
+function parseSourceLocation(text: unknown): { source: string; line: number; column: number } {
+  const value = String(text || '')
+  if (!value) return { source: '', line: 0, column: 0 }
+  const match = value.match(/(?<source>(?:\/|\.{1,2}\/)?[^\s:'"]+?\.(?:sv|svh|v|vh)):(?<line>\d+)(?::(?<column>\d+)|\.(?<dotColumn>\d+))?/i)
+  if (!match?.groups) return { source: '', line: 0, column: 0 }
+  return {
+    source: match.groups.source || '',
+    line: numberValue(match.groups.line),
+    column: numberValue(match.groups.column || match.groups.dotColumn) || 1,
+  }
 }
 
 function numberValue(value: unknown): number {
@@ -2011,6 +2785,12 @@ function readNested(source: Record<string, unknown>, path: string[]): unknown {
   return current
 }
 
+function readRecordList(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    : []
+}
+
 function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string): ConsoleProblem {
   return {
     severity: diagnostic.severity,
@@ -2024,16 +2804,64 @@ function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string)
 }
 
 function openSourceAt(path: string, line: number, column: number): void {
-  const source = sourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
-  const targetPath = source?.path || path
-  activeSource.value = source ? toSourceSelection(source) : { label: fileName(targetPath), path: targetPath }
+  const targetPath = resolveDiagnosticSourcePath(path)
+  const source = sourceArtifacts.value.find((item) => diagnosticMatchesPath(targetPath, item.path))
+    || sourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
+    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(targetPath, item.path))
+    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
+  const resolvedTarget = normalizeWorkspacePath(source?.path || targetPath)
+  activeSource.value = source ? toSourceSelection(source) : { label: fileName(resolvedTarget), path: resolvedTarget }
   sourceFocusTarget.value = {
-    path: targetPath,
+    path: resolvedTarget,
     line,
     column,
     token: ++sourceFocusToken,
   }
+  void openGlobalSrcView()
+}
+
+async function openGlobalSrcView(): Promise<void> {
+  if (!isGlobalSrcView.value) {
+    await router.push('/workspace/src')
+  }
   activeTab.value = 'src'
+}
+
+function ensureActiveTabVisible(): void {
+  if (visibleTabs.value.some((tab) => tab.id === activeTab.value)) return
+  activeTab.value = defaultTabForCurrentStep()
+}
+
+function defaultTabForCurrentStep(): TabId {
+  if (isGlobalSrcView.value) return 'src'
+  if (isSimStep.value && visibleTabs.value.some((tab) => tab.id === 'cases')) return 'cases'
+  if (isReviewStep.value && visibleTabs.value.some((tab) => tab.id === 'review')) return 'review'
+  if (isElabStep.value && visibleTabs.value.some((tab) => tab.id === 'elab')) return 'elab'
+  return 'summary'
+}
+
+function resolveDiagnosticSourcePath(path: string): string {
+  const trimmed = String(path || '').trim()
+  if (!trimmed) return ''
+  const normalized = normalizeWorkspacePath(trimmed)
+  const projectPath = currentProject.value?.path
+  if (normalized.startsWith('/')) return normalized
+
+  const directMatch = sourceArtifacts.value.find((item) => diagnosticMatchesPath(normalized, item.path))
+    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(normalized, item.path))
+  if (directMatch) return normalizeWorkspacePath(directMatch.path)
+
+  const cpuFilelist = normalizeWorkspacePath(config.frontend.cpuFilelist || config.frontend.inputFilelist || '')
+  if (cpuFilelist.includes('/')) {
+    const cpuRoot = cpuFilelist.slice(0, cpuFilelist.lastIndexOf('/'))
+    const fromCpuRoot = `${cpuRoot}/${normalized}`.replace(/\/+/g, '/')
+    const cpuRootMatch = sourceArtifacts.value.find((item) => diagnosticMatchesPath(fromCpuRoot, item.path))
+      || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(fromCpuRoot, item.path))
+    if (cpuRootMatch) return normalizeWorkspacePath(cpuRootMatch.path)
+  }
+
+  if (!projectPath) return normalized
+  return `${normalizeWorkspacePath(projectPath)}/${normalized}`.replace(/\/+/g, '/')
 }
 
 function startConsoleResize(event: PointerEvent): void {
@@ -2083,78 +2911,6 @@ function uniquePathItems(items: PathItem[]): PathItem[] {
   return result
 }
 
-const ResourceFileList = defineComponent({
-  props: {
-    items: { type: Array as () => PathItem[], required: true },
-    emptyLabel: { type: String, required: true },
-  },
-  emits: ['select'],
-  setup(props, { emit }) {
-    return () => props.items.length
-      ? h('div', { class: 'file-list' }, props.items.map((item) =>
-          h('button', {
-            class: 'file-row',
-            title: item.path,
-            type: 'button',
-            onClick: () => emit('select', item),
-          }, [
-            h('i', { class: fileIcon(item.path) }),
-            h('span', { class: 'file-row-main' }, [
-              h('strong', item.label || fileName(item.path)),
-              h('small', shortPath(item.path)),
-            ]),
-            h('i', { class: 'ri-arrow-right-s-line' }),
-          ]),
-        ))
-      : h('div', { class: 'empty-panel' }, [
-          h('i', { class: 'ri-folder-open-line' }),
-          h('span', props.emptyLabel),
-        ])
-  },
-})
-
-const ArtifactGroupList = defineComponent({
-  props: {
-    groups: { type: Array as () => ArtifactGroup[], required: true },
-    emptyLabel: { type: String, required: true },
-  },
-  emits: ['select'],
-  setup(props, { emit }) {
-    return () => props.groups.length
-      ? h('div', { class: 'artifact-groups' }, props.groups.map((group) =>
-          h('section', { key: group.id, class: 'artifact-group' }, [
-            h('div', { class: 'artifact-group-head' }, [
-              h('span', [
-                h('i', { class: group.icon }),
-                h('strong', group.label),
-              ]),
-              h('em', `${group.items.length}`),
-            ]),
-            h('div', { class: 'artifact-group-list' }, group.items.map((item) =>
-              h('button', {
-                key: item.path,
-                class: 'file-row',
-                title: item.path,
-                type: 'button',
-                onClick: () => emit('select', item),
-              }, [
-                h('i', { class: fileIcon(item.path) }),
-                h('span', { class: 'file-row-main' }, [
-                  h('strong', item.label || fileName(item.path)),
-                  h('small', shortPath(item.path)),
-                ]),
-                h('i', { class: artifactKind(item) === 'wave' ? 'ri-pulse-line' : 'ri-arrow-right-s-line' }),
-              ]),
-            )),
-          ]),
-        ))
-      : h('div', { class: 'empty-panel' }, [
-          h('i', { class: 'ri-folder-open-line' }),
-          h('span', props.emptyLabel),
-        ])
-  },
-})
-
 onMounted(refresh)
 onMounted(() => {
   unsubscribeCliEvents = getDesktopApi().cli.onEvent(handleCliEvent)
@@ -2182,26 +2938,22 @@ watch(
   },
 )
 
-watch(currentStepName, () => {
+watch(() => String(route.params.step || ''), () => {
   detail.value = null
   logContent.value = ''
   selectedCase.value = null
   selectedLogPath.value = ''
-  activeTab.value = currentStepName.value.toLowerCase() === 'sim'
-    ? 'cases'
-    : currentStepName.value.toLowerCase() === 'review'
-      ? 'review'
-      : 'summary'
-  activeSource.value = null
+  activeTab.value = defaultTabForCurrentStep()
+  if (!isGlobalSrcView.value) {
+    activeSource.value = null
+  }
   if (!isHomeView.value) {
     void loadDetail()
   }
 })
 
-watch(activeTab, (tab) => {
-  if (tab === 'wave') {
-    void loadCurrentWaveform()
-  }
+watch(visibleTabs, () => {
+  ensureActiveTabVisible()
 })
 </script>
 
@@ -2229,8 +2981,6 @@ watch(activeTab, (tab) => {
 .sim-run-head,
 .suite-row,
 .frontend-step-tabs,
-.panel-tools,
-.file-row,
 .source-row,
 .wave-header,
 .wave-title,
@@ -2241,9 +2991,7 @@ watch(activeTab, (tab) => {
 .console-tab,
 .console-actions,
 .console-log-tools,
-.problem-row,
-.artifact-group-head,
-.artifact-group-head span {
+.problem-row {
   display: flex;
   min-width: 0;
 }
@@ -2299,7 +3047,6 @@ h2 {
 .frontend-step-tab,
 .console-tab,
 .case-chip,
-.file-row,
 .source-row,
 .problem-row,
 .text-action {
@@ -2420,8 +3167,6 @@ button:disabled {
 }
 
 .step-title span:first-child,
-.file-row-main strong,
-.file-row-main small,
 .source-row strong,
 .source-row small,
 .wave-title span {
@@ -2431,8 +3176,6 @@ button:disabled {
 }
 
 .tool,
-.log-viewer,
-.text-panel pre,
 .console-log {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
 }
@@ -2468,6 +3211,66 @@ button:disabled {
   margin-bottom: 4px;
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.step-compact-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.step-compact-meta div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.step-compact-meta span {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.step-compact-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-meta-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.step-meta-action:hover {
+  color: var(--accent-color);
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.28);
 }
 
 .frontend-config-card {
@@ -2820,10 +3623,9 @@ button:disabled {
   overflow: hidden;
 }
 
-.text-panel,
-.log-panel,
-.files-panel,
+.summary-panel,
 .review-panel,
+.elab-panel,
 .cases-panel,
 .source-layout,
 .wave-panel {
@@ -2831,24 +3633,97 @@ button:disabled {
   min-height: 0;
 }
 
-.text-panel pre,
-.log-viewer {
-  height: 100%;
-  margin: 0;
+.summary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+}
+
+.summary-card {
+  min-width: 0;
   padding: 12px;
-  overflow: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 11px;
-  line-height: 1.5;
 }
 
-.panel-tools {
+.summary-card.grow {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.summary-card header {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 8px;
+}
+
+.summary-card header span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.summary-card header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-card p {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.summary-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.summary-metrics strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.summary-issue-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .log-select {
@@ -2861,118 +3736,21 @@ button:disabled {
   color: var(--text-primary);
 }
 
-.log-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.log-viewer {
-  flex: 1;
-}
-
-.file-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  height: 100%;
-  overflow: auto;
-}
-
-.artifact-groups {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  height: 100%;
-  min-height: 0;
-  overflow: auto;
-}
-
-.artifact-group {
-  display: flex;
-  flex-direction: column;
-  min-height: 160px;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.artifact-group-head {
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
-}
-
-.artifact-group-head span {
-  align-items: center;
-  gap: 7px;
-}
-
-.artifact-group-head i {
-  color: var(--accent-color);
-}
-
-.artifact-group-head strong {
-  font-size: 12px;
-}
-
-.artifact-group-head em {
-  min-width: 22px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-style: normal;
-  text-align: center;
-}
-
-.artifact-group-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-height: 0;
-  overflow: auto;
-  padding: 8px;
-}
-
-.file-row {
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  text-align: left;
-}
-
-.file-row:hover,
 .source-row:hover,
 .source-row.active {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
 }
 
-.file-row-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.file-row-main small,
 .source-row small {
   color: var(--text-secondary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .review-panel {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   gap: 10px;
   overflow: hidden;
 }
@@ -3024,19 +3802,12 @@ button:disabled {
   color: #10b981;
 }
 
-.review-tile.ic strong {
-  color: #3b82f6;
-}
-
-.review-tile.fpga strong {
-  color: #8b5cf6;
-}
-
 .review-main {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
+  height: 100%;
   flex: 1;
 }
 
@@ -3056,16 +3827,78 @@ button:disabled {
   overflow: auto;
 }
 
-.review-layers {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1.12fr);
-  gap: 10px;
+.review-stage {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
+}
+
+.review-mode-list {
+  display: grid;
+  gap: 6px;
+}
+
+.review-mode-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.review-mode-button.active {
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.5);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+}
+
+.review-mode-button i {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  font-size: 16px;
+}
+
+.review-mode-button span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.review-mode-button strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-mode-button em {
+  flex-shrink: 0;
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
 }
 
 .review-layer {
   display: flex;
   flex-direction: column;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -3129,6 +3962,7 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 10px;
+  flex: 1;
   min-height: 0;
   padding: 10px;
 }
@@ -3143,38 +3977,24 @@ button:disabled {
   background: var(--bg-secondary);
 }
 
+.review-yosys-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 8px;
+}
+
 .review-yosys-column .review-issue,
-.review-module-card {
+.review-module-card,
+.review-hotspot-card {
   margin: 8px 8px 0;
 }
 
 .review-yosys-column .empty-panel {
   margin: 8px;
-}
-
-.review-profile-switch {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-}
-
-.review-profile-switch button {
-  height: 28px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.review-profile-switch button.active {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
-  color: var(--accent-color);
 }
 
 .review-structural {
@@ -3246,85 +4066,6 @@ button:disabled {
 .review-structural-grid strong {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 11px;
-}
-
-.review-risk-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.review-side-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.review-side-heading strong {
-  color: var(--text-primary);
-  font-size: 11px;
-}
-
-.review-risk-module {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--text-secondary);
-  border-radius: 7px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  text-align: left;
-}
-
-.review-risk-module.high {
-  border-left-color: #ef4444;
-}
-
-.review-risk-module.medium {
-  border-left-color: #f59e0b;
-}
-
-.review-risk-module.low {
-  border-left-color: #10b981;
-}
-
-.review-risk-module div {
-  min-width: 0;
-}
-
-.review-risk-module strong,
-.review-risk-module span {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.review-risk-module strong {
-  font-size: 11px;
-}
-
-.review-risk-module span {
-  margin-top: 2px;
-  color: var(--text-secondary);
-  font-size: 10px;
-}
-
-.review-risk-module em {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-  font-size: 10px;
-  font-style: normal;
 }
 
 .review-metrics {
@@ -3419,6 +4160,19 @@ button:disabled {
   text-align: left;
 }
 
+.review-module-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.review-module-grid .review-module-card {
+  margin: 0;
+}
+
 .review-module-card.high {
   border-left-color: #ef4444;
 }
@@ -3455,6 +4209,56 @@ button:disabled {
 }
 
 .review-module-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.review-hotspot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.review-hotspot-card.warning {
+  border-left-color: #f59e0b;
+}
+
+.review-hotspot-card.error {
+  border-left-color: #ef4444;
+}
+
+.review-hotspot-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-hotspot-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-hotspot-title em {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.review-hotspot-card p {
   margin: 0;
   color: var(--text-secondary);
   font-size: 11px;
@@ -3540,15 +4344,179 @@ button:disabled {
   font-style: normal;
 }
 
+.elab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.elab-main {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.45fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.elab-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.elab-list,
+.elab-module-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.elab-unresolved,
+.elab-module-row {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.elab-unresolved {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border-left: 3px solid #f59e0b;
+}
+
+.elab-unresolved i {
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.elab-unresolved span,
+.elab-module-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.elab-unresolved strong,
+.elab-module-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elab-unresolved small,
+.elab-module-row small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elab-module-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  width: 100%;
+  padding: 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.elab-module-row:hover {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.07);
+}
+
+.elab-module-row.top {
+  border-left: 3px solid #10b981;
+}
+
+.elab-module-row em {
+  align-self: start;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.elab-module-meta {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.elab-module-meta span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.elab-module-meta strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
 .source-layout {
   display: grid;
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
   gap: 10px;
 }
 
+.src-workspace-clean {
+  gap: 0;
+  padding: 0;
+}
+
+.source-layout-clean {
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.source-layout-clean .source-list {
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
 .source-list {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border-color);
@@ -3561,20 +4529,33 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 10px;
+  flex-shrink: 0;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-color);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.04);
+}
+
+.source-list-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
 }
 
 .source-row {
   align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 7px 9px;
+  border-left: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
+  color: var(--text-primary);
   text-align: left;
 }
 
 .source-row.diagnostic {
-  border-left: 2px solid rgba(245, 158, 11, 0.75);
+  border-left-color: rgba(245, 158, 11, 0.75);
 }
 
 .source-row.diagnostic.error {
@@ -3586,6 +4567,20 @@ button:disabled {
   flex-direction: column;
   min-width: 0;
   flex: 1;
+}
+
+.source-row > i {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.source-row.active > i,
+.source-row:hover > i {
+  color: var(--accent-color);
+}
+
+.source-row strong {
+  font-size: 11px;
 }
 
 .source-diagnostic-badge {
@@ -3607,7 +4602,8 @@ button:disabled {
 }
 
 .cases-table-wrap {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -3618,6 +4614,15 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.cases-panel.with-wave .cases-table-wrap {
+  flex: 0 0 min(45%, 280px);
+}
+
+.sim-wave-panel {
+  flex: 1;
+  min-height: 260px;
 }
 
 .sim-stale-banner {
@@ -4097,9 +5102,10 @@ button:disabled {
 @media (max-width: 1180px) {
   .frontend-grid,
   .source-layout,
-  .artifact-groups,
   .review-main,
-  .review-yosys-grid {
+  .review-yosys-grid,
+  .review-module-grid,
+  .elab-main {
     grid-template-columns: 1fr;
   }
 
@@ -4128,6 +5134,7 @@ button:disabled {
   .sim-run-action {
     width: 100%;
   }
+
 }
 
 @media (max-width: 720px) {
@@ -4144,10 +5151,6 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .review-layers {
-    grid-template-rows: none;
-  }
-
   .review-module-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4161,5 +5164,6 @@ button:disabled {
   .frontend-config-item.wide {
     grid-column: auto;
   }
+
 }
 </style>

@@ -18,15 +18,15 @@
             <i :class="stage.icon" class="text-xl mb-1.5 inline-block"></i>
 
             <!-- 状态指示点 -->
-            <i v-if="stage.state === 'Success'"
+            <i v-if="!stage.virtual && stage.state === 'Success'"
               class="ri-checkbox-circle-fill absolute -top-1 -right-1 text-[10px] text-green-500 bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="stage.state === 'Ongoing'"
+            <i v-else-if="!stage.virtual && stage.state === 'Ongoing'"
               class="ri-loader-4-line absolute -top-1 -right-1 text-[10px] text-blue-400 bg-(--bg-sidebar) rounded-full animate-spin"></i>
-            <i v-else-if="stage.state === 'Pending'"
+            <i v-else-if="!stage.virtual && stage.state === 'Pending'"
               class="ri-time-line absolute -top-1 -right-1 text-[10px] text-(--text-secondary) bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="stage.state === 'Invalid'"
+            <i v-else-if="!stage.virtual && stage.state === 'Invalid'"
               class="ri-error-warning-fill absolute -top-1 -right-1 text-[10px] text-red-500 bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="stage.state === 'Incomplete'"
+            <i v-else-if="!stage.virtual && stage.state === 'Incomplete'"
               class="ri-indeterminate-circle-fill absolute -top-1 -right-1 text-[10px] text-amber-500 bg-(--bg-sidebar) rounded-full"></i>
           </div>
 
@@ -38,7 +38,7 @@
     </div>
 
     <!-- 第二栏：流程进度面板 (Configure 页面不显示) -->
-    <div v-if="showProgressPanel"
+    <div v-if="shouldShowProgressPanel"
       class="w-[240px] min-w-[200px] max-w-[300px] bg-(--bg-primary) border-r border-(--border-color) flex flex-col overflow-hidden shrink-0">
 
       <!-- ========== Home 概览面板 ========== -->
@@ -278,7 +278,7 @@
       </template>
 
       <!-- ========== 子流程面板 ========== -->
-      <template v-else-if="showSubflowPanel">
+      <template v-else-if="showSubflowPanel && hasSubflowContent">
         <!-- 顶部标题栏 -->
         <div class="px-4 py-4 border-b border-(--border-color)">
           <div class="flex items-center gap-3">
@@ -319,15 +319,6 @@
             <div class="text-center">
               <i class="ri-loader-4-line text-2xl text-(--accent-color) animate-spin"></i>
               <p class="text-[11px] text-(--text-secondary) mt-2">Loading subflow...</p>
-            </div>
-          </div>
-
-          <!-- 空状态 -->
-          <div v-else-if="subflowSteps.length === 0" class="flex items-center justify-center h-full">
-            <div class="text-center px-4">
-              <i class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"></i>
-              <p class="text-[11px] text-(--text-secondary) mt-2">No subflow data available</p>
-              <p class="text-[10px] text-(--text-secondary) opacity-70 mt-1">Run the step to generate subflow</p>
             </div>
           </div>
 
@@ -473,7 +464,24 @@ const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
 const runStages = computed(() => flowStages.value.filter(s => s.group === 'run'))
 const sidebarStages = computed(() => {
   if (!isFrontendProject.value) return flowStages.value
-  return flowStages.value.filter((stage) => stage.path !== 'configure')
+  const stages = flowStages.value.filter((stage) => stage.path !== 'configure')
+  const srcStage = {
+    label: 'Src',
+    path: 'src',
+    icon: 'ri-code-s-slash-line',
+    group: 'run' as const,
+    state: '',
+    runtime: '',
+    'peak memory (mb)': 0,
+    virtual: true,
+  }
+  const prepareIndex = stages.findIndex((stage) => stage.path.toLowerCase() === 'prepare')
+  if (prepareIndex < 0) return stages
+  return [
+    ...stages.slice(0, prepareIndex + 1),
+    srcStage,
+    ...stages.slice(prepareIndex + 1),
+  ]
 })
 
 const flowStats = computed(() => {
@@ -513,6 +521,10 @@ const isFrontendProject = computed(() => currentProject.value?.designTool === 'f
 const flowSubtitle = computed(() => isFrontendProject.value ? 'Frontend Verification Flow' : 'RTL to GDS Pipeline')
 const nextFrontendStage = computed(() =>
   runStages.value.find((stage) => stage.state !== 'Success') ?? null,
+)
+const hasSubflowContent = computed(() => isLoadingSubflow.value || subflowSteps.value.length > 0)
+const shouldShowProgressPanel = computed(() =>
+  showProgressPanel.value && (showOverviewPanel.value || !showSubflowPanel.value || hasSubflowContent.value),
 )
 
 const runModes = computed<Record<string, { label: string; icon: string; shortcut?: string }>>(() => ({
