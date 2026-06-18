@@ -475,12 +475,29 @@ const sidebarStages = computed(() => {
     'peak memory (mb)': 0,
     virtual: true,
   }
+  const waveStage = {
+    label: 'Wave',
+    path: 'wave',
+    icon: 'ri-pulse-line',
+    group: 'run' as const,
+    state: '',
+    runtime: '',
+    'peak memory (mb)': 0,
+    virtual: true,
+  }
   const prepareIndex = stages.findIndex((stage) => stage.path.toLowerCase() === 'prepare')
   if (prepareIndex < 0) return stages
-  return [
+  const withSrc = [
     ...stages.slice(0, prepareIndex + 1),
     srcStage,
     ...stages.slice(prepareIndex + 1),
+  ]
+  const simIndex = withSrc.findIndex((stage) => stage.path.toLowerCase() === 'sim')
+  if (simIndex < 0) return [...withSrc, waveStage]
+  return [
+    ...withSrc.slice(0, simIndex + 1),
+    waveStage,
+    ...withSrc.slice(simIndex + 1),
   ]
 })
 

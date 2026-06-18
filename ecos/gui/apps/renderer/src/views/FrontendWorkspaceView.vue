@@ -44,6 +44,69 @@
     </section>
   </div>
 
+  <div v-else-if="isGlobalWaveView" class="frontend-workspace wave-workspace-clean">
+    <section class="wave-workspace-layout">
+      <aside class="wave-list">
+        <button
+          v-for="item in waveItems"
+          :key="item.path"
+          type="button"
+          class="wave-row"
+          :class="{ active: activeWaveform?.path === item.path }"
+          :title="item.path"
+          @click="selectWaveform(item)"
+        >
+          <i class="ri-pulse-line"></i>
+          <span>
+            <strong>{{ item.caseName || fileName(item.path) }}</strong>
+            <small>{{ shortPath(item.path) }}</small>
+          </span>
+        </button>
+        <div v-if="waveItems.length === 0" class="empty-panel compact">
+          <i class="ri-pulse-line"></i>
+          <span>No waveform files found.</span>
+        </div>
+      </aside>
+
+      <section class="wave-viewer-panel">
+        <div v-if="activeWaveform" class="wave-header">
+          <div class="wave-title">
+            <i class="ri-pulse-line"></i>
+            <div>
+              <strong>{{ activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform' }}</strong>
+              <span :title="activeWaveform.path">{{ activeWaveform.path }}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="text-action"
+            @click="openWaveExternal(activeWaveform.path)"
+          >
+            <i class="ri-external-link-line"></i>
+            Open
+          </button>
+        </div>
+        <div v-if="activeWaveform" class="surfer-shell wave-surfer-shell">
+          <iframe
+            ref="surferFrame"
+            class="surfer-frame"
+            title="Surfer waveform viewer"
+            :src="surferViewerUrl"
+            @load="handleSurferFrameLoad"
+          ></iframe>
+          <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
+            <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
+            <span>{{ waveStatusMessage }}</span>
+          </div>
+        </div>
+        <div v-else class="empty-panel wave-empty">
+          <i class="ri-pulse-line"></i>
+          <span>Select a waveform from Wave.</span>
+        </div>
+      </section>
+    </section>
+  </div>
+
   <div v-else class="frontend-workspace">
     <div class="frontend-header">
       <div>
@@ -161,13 +224,13 @@
           </section>
         </div>
 
-        <div v-else-if="!currentStep && !isGlobalSrcView" class="state-panel">
+        <div v-else-if="!currentStep && !isGlobalSrcView && !isGlobalWaveView" class="state-panel">
           <i class="ri-file-list-3-line"></i>
           <span>No flow step selected.</span>
         </div>
 
         <div v-else class="detail-content">
-          <section v-if="!isGlobalSrcView" class="step-compact-meta">
+          <section v-if="!isGlobalSrcView && !isGlobalWaveView" class="step-compact-meta">
             <div>
               <span>Status</span>
               <strong :class="stateClass(currentStepDisplayState)">{{ currentStepDisplayState }}</strong>
@@ -913,7 +976,7 @@
               </template>
             </section>
 
-            <section v-else-if="activeTab === 'cases'" class="cases-panel" :class="{ 'with-wave': Boolean(activeWaveform) }">
+            <section v-else-if="activeTab === 'cases'" class="cases-panel">
               <div v-if="simResultIsStale" class="sim-stale-banner">
                 <i class="ri-time-line"></i>
                 <span>{{ simResultFreshness.message }} Run again to refresh these case results.</span>
@@ -980,38 +1043,6 @@
                 </table>
               </div>
 
-              <section v-if="activeWaveform" class="wave-panel sim-wave-panel">
-                <div class="wave-header">
-                  <div class="wave-title">
-                    <i class="ri-pulse-line"></i>
-                    <div>
-                      <strong>{{ activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform' }}</strong>
-                      <span :title="activeWaveform.path">{{ activeWaveform.path }}</span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="text-action"
-                    @click="openWaveExternal(activeWaveform.path)"
-                  >
-                    <i class="ri-external-link-line"></i>
-                    Open
-                  </button>
-                </div>
-                <div class="surfer-shell">
-                  <iframe
-                    ref="surferFrame"
-                    class="surfer-frame"
-                    title="Surfer waveform viewer"
-                    :src="surferViewerUrl"
-                    @load="handleSurferFrameLoad"
-                  ></iframe>
-                  <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
-                    <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
-                    <span>{{ waveStatusMessage }}</span>
-                  </div>
-                </div>
-              </section>
             </section>
 
           </main>
@@ -1413,9 +1444,10 @@ let runClockTimer: ReturnType<typeof window.setInterval> | null = null
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
 const isGlobalSrcView = computed(() => String(route.params.step || '').toLowerCase() === 'src')
+const isGlobalWaveView = computed(() => String(route.params.step || '').toLowerCase() === 'wave')
 const currentStepName = computed(() => {
   const param = String(route.params.step || '')
-  return param && param !== 'home' && param.toLowerCase() !== 'src' ? param : ''
+  return param && param !== 'home' && !['src', 'wave'].includes(param.toLowerCase()) ? param : ''
 })
 const currentStep = computed(() =>
   steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
@@ -1424,7 +1456,11 @@ const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
 const isElabStep = computed(() => currentStepName.value.toLowerCase() === 'elab')
 const isLintStep = computed(() => currentStepName.value.toLowerCase() === 'lint')
-const detailRequestStepName = computed(() => isGlobalSrcView.value ? 'prepare' : currentStepName.value)
+const detailRequestStepName = computed(() => {
+  if (isGlobalSrcView.value) return 'prepare'
+  if (isGlobalWaveView.value) return 'sim'
+  return currentStepName.value
+})
 const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
 const nextPendingStep = computed(() =>
   steps.value.find((step) => step.state !== 'Success') ?? null,
@@ -1434,6 +1470,7 @@ const stepTitle = computed(() => {
     return currentProject.value?.name || 'Frontend Workspace'
   }
   if (isGlobalSrcView.value) return 'Source Workspace'
+  if (isGlobalWaveView.value) return 'Waveform Workspace'
   return labelForStep(currentStepName.value || 'Step')
 })
 const currentOverallState = computed(() => {
@@ -1458,6 +1495,16 @@ const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.val
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
+const waveItems = computed<WaveSelection[]>(() =>
+  uniqueWaveItems(
+    cases.value
+      .filter((testCase) => Boolean(testCase.wave))
+      .map((testCase) => ({
+        path: String(testCase.wave || ''),
+        caseName: testCase.name,
+      })),
+  ),
+)
 const selectedCpuRunCases = computed(() => cpuRunCasesForSelection())
 const currentSimRunContext = computed<SimRunContext>(() => ({
   suite: simSuite.value,
@@ -2076,6 +2123,7 @@ const consoleStyle = computed(() => ({
 }))
 const consoleContext = computed(() => {
   if (isGlobalSrcView.value) return 'Source Workspace'
+  if (isGlobalWaveView.value) return 'Waveform Workspace'
   if (selectedCase.value) return `${labelForStep(currentStepName.value)} · ${selectedCase.value.name}`
   return labelForStep(currentStepName.value || 'Workspace')
 })
@@ -2146,6 +2194,9 @@ const visibleTabs = computed(() => {
   if (isGlobalSrcView.value) {
     return [{ id: 'src' as TabId, label: 'Src', icon: 'ri-code-s-slash-line' }]
   }
+  if (isGlobalWaveView.value) {
+    return [{ id: 'summary' as TabId, label: 'Wave', icon: 'ri-pulse-line' }]
+  }
   const tabs: Array<{ id: TabId; label: string; icon: string }> = []
   if (isReviewStep.value) tabs.push({ id: 'review', label: 'Review', icon: 'ri-search-eye-line' })
   else if (isElabStep.value) tabs.push({ id: 'elab', label: 'Elab', icon: 'ri-node-tree' })
@@ -2200,8 +2251,12 @@ async function loadDetail(): Promise<void> {
     detail.value = response.data.info as FrontendStepDetail
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
+    syncWaveSelectionFromRoute()
     if (isGlobalSrcView.value) {
       activeTab.value = 'src'
+    }
+    if (isGlobalWaveView.value) {
+      void loadCurrentWaveform()
     }
     if (isSimStep.value && activeTab.value === 'summary') {
       activeTab.value = 'cases'
@@ -2444,6 +2499,39 @@ function syncDefaultCpuSelection(): void {
   selectedCpuCases.value = defaults
 }
 
+function syncWaveSelectionFromRoute(): void {
+  if (!isGlobalWaveView.value) return
+  const requestedPath = firstQueryValue(route.query.path).trim()
+  const requestedCase = firstQueryValue(route.query.case).trim()
+  const matched = requestedPath
+    ? waveItems.value.find((item) => normalizeWorkspacePath(item.path) === normalizeWorkspacePath(requestedPath))
+    : null
+  const next = matched
+    || (requestedPath ? { path: requestedPath, caseName: requestedCase || fileName(requestedPath) } : null)
+    || activeWaveform.value
+    || waveItems.value[0]
+    || null
+  activeWaveform.value = next ? { path: next.path, caseName: next.caseName } : null
+  waveformError.value = ''
+}
+
+function firstQueryValue(value: unknown): string {
+  if (Array.isArray(value)) return String(value[0] || '')
+  return String(value || '')
+}
+
+function uniqueWaveItems(items: WaveSelection[]): WaveSelection[] {
+  const seen = new Set<string>()
+  const result: WaveSelection[] = []
+  for (const item of items) {
+    const path = String(item.path || '').trim()
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    result.push({ path, caseName: item.caseName })
+  }
+  return result
+}
+
 function toggleCpuCase(name: string): void {
   if (runBusy.value) return
   selectedCpuCases.value = selectedCpuCases.value.includes(name)
@@ -2529,11 +2617,37 @@ function toSourceSelection(item: PathItem): FrontendSourceSelection {
   }
 }
 
-function openWaveform(path: string, caseName?: string): void {
+async function openWaveform(path: string, caseName?: string): Promise<void> {
   activeWaveform.value = { path, caseName }
-  activeTab.value = 'cases'
   waveformError.value = ''
+  await openGlobalWaveView(path, caseName)
+}
+
+async function selectWaveform(item: WaveSelection): Promise<void> {
+  activeWaveform.value = { path: item.path, caseName: item.caseName }
+  waveformError.value = ''
+  await router.replace({
+    path: '/workspace/wave',
+    query: waveRouteQuery(item.path, item.caseName),
+  })
   void loadCurrentWaveform()
+}
+
+async function openGlobalWaveView(path?: string, caseName?: string): Promise<void> {
+  const query = path ? waveRouteQuery(path, caseName) : route.query
+  if (!isGlobalWaveView.value) {
+    await router.push({ path: '/workspace/wave', query })
+  } else if (path) {
+    await router.replace({ path: '/workspace/wave', query })
+  }
+  activeTab.value = 'summary'
+}
+
+function waveRouteQuery(path: string, caseName?: string): Record<string, string> {
+  return {
+    path,
+    ...(caseName ? { case: caseName } : {}),
+  }
 }
 
 async function openWaveExternal(path: string): Promise<void> {
@@ -3151,6 +3265,7 @@ function ensureActiveTabVisible(): void {
 
 function defaultTabForCurrentStep(): TabId {
   if (isGlobalSrcView.value) return 'src'
+  if (isGlobalWaveView.value) return 'summary'
   if (isSimStep.value && visibleTabs.value.some((tab) => tab.id === 'cases')) return 'cases'
   if (isReviewStep.value && visibleTabs.value.some((tab) => tab.id === 'review')) return 'review'
   if (isElabStep.value && visibleTabs.value.some((tab) => tab.id === 'elab')) return 'elab'
@@ -3269,6 +3384,15 @@ watch(() => String(route.params.step || ''), () => {
     void loadDetail()
   }
 })
+
+watch(
+  () => [route.query.path, route.query.case, waveItems.value.length],
+  () => {
+    if (!isGlobalWaveView.value) return
+    syncWaveSelectionFromRoute()
+    void loadCurrentWaveform()
+  },
+)
 
 watch(visibleTabs, () => {
   ensureActiveTabVisible()
@@ -3946,8 +4070,7 @@ button:disabled {
 .elab-panel,
 .lint-panel,
 .cases-panel,
-.source-layout,
-.wave-panel {
+.source-layout {
   height: 100%;
   min-height: 0;
 }
@@ -4948,6 +5071,11 @@ button:disabled {
   padding: 0;
 }
 
+.wave-workspace-clean {
+  gap: 0;
+  padding: 0;
+}
+
 .source-layout-clean {
   grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
   gap: 0;
@@ -4960,6 +5088,96 @@ button:disabled {
   border-top: 0;
   border-bottom: 0;
   border-left: 0;
+  border-radius: 0;
+}
+
+.wave-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.wave-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.wave-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wave-row:hover,
+.wave-row.active {
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.3);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+}
+
+.wave-row i {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  font-size: 16px;
+}
+
+.wave-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wave-row strong,
+.wave-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wave-row strong {
+  font-size: 12px;
+}
+
+.wave-row small {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.wave-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.wave-surfer-shell {
+  min-height: 0;
+}
+
+.wave-empty {
+  height: 100%;
+  border: 0;
   border-radius: 0;
 }
 
@@ -5064,15 +5282,6 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.cases-panel.with-wave .cases-table-wrap {
-  flex: 0 0 min(45%, 280px);
-}
-
-.sim-wave-panel {
-  flex: 1;
-  min-height: 260px;
 }
 
 .sim-stale-banner {
@@ -5187,15 +5396,6 @@ button:disabled {
   border-radius: 999px;
   background: var(--bg-secondary);
   color: var(--accent-color);
-}
-
-.wave-panel {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
 }
 
 .wave-header {
