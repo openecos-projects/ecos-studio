@@ -798,6 +798,121 @@
               </template>
             </section>
 
+            <section v-else-if="activeTab === 'lint'" class="lint-panel">
+              <div v-if="!lintReport" class="empty-panel">
+                <i class="ri-bug-line"></i>
+                <span>No lint summary yet. Run Lint first.</span>
+              </div>
+              <template v-else>
+                <section class="review-overview">
+                  <div
+                    v-for="tile in lintSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+
+                <section class="lint-main">
+                  <div class="lint-column lint-diagnostics">
+                    <header class="review-layer-head">
+                      <div>
+                        <span>Diagnostics</span>
+                        <strong>Verilator source-level lint messages</strong>
+                      </div>
+                      <em>{{ lintDiagnostics.length }}</em>
+                    </header>
+                    <div class="lint-list">
+                      <button
+                        v-for="diagnostic in lintDiagnostics"
+                        :key="lintDiagnosticKey(diagnostic)"
+                        type="button"
+                        class="review-issue"
+                        :class="diagnostic.severity || 'info'"
+                        @click="openLintDiagnostic(diagnostic)"
+                      >
+                        <div class="review-issue-icon">
+                          <i :class="problemIcon(diagnostic.severity || 'info')"></i>
+                        </div>
+                        <div class="review-issue-body">
+                          <div class="review-issue-title">
+                            <strong>{{ diagnostic.code || titleCase(diagnostic.category || 'lint') }}</strong>
+                            <span>{{ titleCase(diagnostic.category || 'lint') }}</span>
+                          </div>
+                          <p>{{ diagnostic.message || 'Verilator lint diagnostic' }}</p>
+                          <em v-if="diagnostic.source">{{ lintDiagnosticLocationLabel(diagnostic) }}</em>
+                        </div>
+                      </button>
+                      <div v-if="lintDiagnostics.length === 0" class="empty-panel compact">
+                        <i class="ri-checkbox-circle-line"></i>
+                        <span>No Verilator lint diagnostics.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="lint-column">
+                    <header class="review-layer-head">
+                      <div>
+                        <span>Rule Breakdown</span>
+                        <strong>Which lint rules are firing</strong>
+                      </div>
+                      <em>{{ lintRules.length }}</em>
+                    </header>
+                    <div class="lint-side-list">
+                      <div
+                        v-for="rule in lintRules"
+                        :key="String(rule.code)"
+                        class="lint-rule-row"
+                        :class="{ error: numberValue(rule.errors) > 0 }"
+                      >
+                        <div>
+                          <strong>{{ rule.code }}</strong>
+                          <span>{{ titleCase(String(rule.category || 'lint')) }}</span>
+                        </div>
+                        <em>{{ numberLabel(rule.errors) }}E / {{ numberLabel(rule.warnings) }}W</em>
+                        <small v-if="rule.example">{{ rule.example }}</small>
+                      </div>
+                      <div v-if="lintRules.length === 0" class="empty-panel compact">
+                        <i class="ri-checkbox-circle-line"></i>
+                        <span>No lint rule hit.</span>
+                      </div>
+                    </div>
+
+                    <header class="review-layer-head secondary">
+                      <div>
+                        <span>File Hotspots</span>
+                        <strong>Where diagnostics concentrate</strong>
+                      </div>
+                      <em>{{ lintFiles.length }}</em>
+                    </header>
+                    <div class="lint-side-list compact">
+                      <button
+                        v-for="file in lintFiles"
+                        :key="String(file.path)"
+                        type="button"
+                        class="lint-file-row"
+                        :class="{ error: numberValue(file.errors) > 0 }"
+                        @click="openSourceAt(String(file.path || ''), 1, 1)"
+                      >
+                        <span>
+                          <strong>{{ file.label || fileName(String(file.path || '')) }}</strong>
+                          <small>{{ shortPath(String(file.path || '')) }}</small>
+                        </span>
+                        <em>{{ numberLabel(file.errors) }}E / {{ numberLabel(file.warnings) }}W</em>
+                      </button>
+                      <div v-if="lintFiles.length === 0" class="empty-panel compact">
+                        <i class="ri-file-search-line"></i>
+                        <span>No file hotspot reported.</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </template>
+            </section>
+
             <section v-else-if="activeTab === 'cases'" class="cases-panel" :class="{ 'with-wave': Boolean(activeWaveform) }">
               <div v-if="simResultIsStale" class="sim-stale-banner">
                 <i class="ri-time-line"></i>
@@ -1045,6 +1160,7 @@ interface FrontendStepDetail {
   cases?: SimCase[]
   review?: RtlReviewReport
   elab?: ElabReport
+  lint?: LintReport
   logs: PathItem[]
   reports: PathItem[]
   artifacts: PathItem[]
@@ -1068,7 +1184,7 @@ interface FrontendConfigItem {
   wide?: boolean
 }
 
-type TabId = 'summary' | 'review' | 'elab' | 'cases' | 'src'
+type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'src'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
 type ReviewMode = 'source' | 'yosys' | 'modules'
@@ -1152,6 +1268,54 @@ interface ElabReport {
   modules?: ElabModule[]
   unresolved_modules?: string[]
   referenced_modules?: string[]
+  inputs?: {
+    rtl_files?: string[]
+    rtl_file_count?: number
+    incdirs?: string[]
+    defines?: string[]
+  }
+  reports?: Record<string, unknown>
+}
+
+interface LintDiagnostic {
+  severity?: 'error' | 'warning' | 'info'
+  code?: string
+  category?: string
+  message?: string
+  source?: string
+  line?: number
+  column?: number
+  raw?: string
+}
+
+interface LintRule {
+  code?: string
+  category?: string
+  errors?: number
+  warnings?: number
+  total?: number
+  example?: string
+}
+
+interface LintFile {
+  path?: string
+  label?: string
+  errors?: number
+  warnings?: number
+  total?: number
+  rules?: string[]
+}
+
+interface LintReport {
+  path?: string
+  tool?: string
+  status?: string
+  returncode?: number
+  top_module?: string
+  summary?: Record<string, unknown>
+  diagnostics?: LintDiagnostic[]
+  rules?: LintRule[]
+  files?: LintFile[]
   inputs?: {
     rtl_files?: string[]
     rtl_file_count?: number
@@ -1259,6 +1423,7 @@ const currentStep = computed(() =>
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
 const isElabStep = computed(() => currentStepName.value.toLowerCase() === 'elab')
+const isLintStep = computed(() => currentStepName.value.toLowerCase() === 'lint')
 const detailRequestStepName = computed(() => isGlobalSrcView.value ? 'prepare' : currentStepName.value)
 const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
 const nextPendingStep = computed(() =>
@@ -1404,10 +1569,23 @@ const elabSourceArtifacts = computed<PathItem[]>(() => {
     .map((path) => ({ label: fileName(path), path }))
     .filter((item) => item.path)
 })
+const lintReport = computed<LintReport | null>(() => {
+  const lint = detail.value?.lint
+  if (!lint) return null
+  if (lint.path || lint.summary || lint.diagnostics?.length || lint.rules?.length || lint.files?.length) return lint
+  return null
+})
+const lintSourceArtifacts = computed<PathItem[]>(() => {
+  const files = lintReport.value?.inputs?.rtl_files || []
+  return files
+    .map((path) => ({ label: fileName(path), path }))
+    .filter((item) => item.path)
+})
 const sourceArtifacts = computed(() => uniquePathItems([
   ...allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)),
   ...reviewSourceArtifacts.value,
   ...elabSourceArtifacts.value,
+  ...lintSourceArtifacts.value,
 ]))
 const logDiagnostics = computed(() => parseVerilatorDiagnostics(logContent.value))
 const sourceDiagnosticCounts = computed(() => {
@@ -1416,6 +1594,12 @@ const sourceDiagnosticCounts = computed(() => {
     const next: DiagnosticCount = { errors: 0, warnings: 0, total: 0 }
     for (const diagnostic of logDiagnostics.value) {
       if (!diagnosticMatchesPath(diagnostic.file, source.path)) continue
+      if (diagnostic.severity === 'error') next.errors += 1
+      if (diagnostic.severity === 'warning') next.warnings += 1
+      next.total += 1
+    }
+    for (const diagnostic of lintDiagnostics.value) {
+      if (!diagnosticMatchesPath(String(diagnostic.source || ''), source.path)) continue
       if (diagnostic.severity === 'error') next.errors += 1
       if (diagnostic.severity === 'warning') next.warnings += 1
       next.total += 1
@@ -1483,6 +1667,14 @@ const humanSummaryMetrics = computed(() => {
       { label: 'Missing', value: numberLabel(elabUnresolvedModules.value.length) },
     ]
   }
+  if (isLintStep.value && lintReport.value) {
+    return [
+      { label: 'Errors', value: numberLabel(lintSummary.value.errors) },
+      { label: 'Warnings', value: numberLabel(lintSummary.value.warnings) },
+      { label: 'Rules', value: numberLabel(lintRules.value.length) },
+      { label: 'Files', value: numberLabel(lintFiles.value.length) },
+    ]
+  }
   if (isReviewStep.value && reviewReport.value) {
     return [
       { label: 'Issues', value: numberLabel(reviewIssues.value.length) },
@@ -1504,6 +1696,10 @@ const humanSummaryText = computed(() => {
     if (elabDiagnostics.value.length) return 'ELAB reported diagnostics. Open Elab or Problems to jump to the source line.'
     if (elabUnresolvedModules.value.length) return 'ELAB found module references that are not present in the current RTL file universe.'
     return 'ELAB completed the configured design universe check and generated a module inventory.'
+  }
+  if (isLintStep.value && lintReport.value) {
+    if (lintDiagnostics.value.length) return 'Lint found Verilator diagnostics. Open Lint to inspect rules, files, and source locations.'
+    return 'Lint completed without Verilator diagnostics in the current CPU RTL file universe.'
   }
   if (isReviewStep.value && reviewReport.value) return reviewNextAction.value.detail
   if (state === StateEnum.Success || state === 'Success') {
@@ -1528,6 +1724,16 @@ const humanNextAction = computed<{ title: string; detail: string; label: string;
       detail: 'Review the module inventory and unresolved module candidates before moving to RTL Review.',
       label: 'Elab',
       tab: 'elab',
+    }
+  }
+  if (isLintStep.value && lintReport.value) {
+    return {
+      title: lintDiagnostics.value.length ? 'Inspect Lint' : 'Lint Clean',
+      detail: lintDiagnostics.value.length
+        ? 'Open Verilator diagnostics, rule breakdown, and file hotspots before running simulation.'
+        : 'No lint diagnostics are reported. Continue to simulation or inspect source if needed.',
+      label: 'Lint',
+      tab: 'lint',
     }
   }
   if (isSimStep.value) {
@@ -1777,6 +1983,68 @@ const elabSummaryTiles = computed(() => [
   { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length), tone: elabDiagnostics.value.length ? 'warning' : 'ok' },
   { label: 'Unresolved', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
 ])
+const lintSummary = computed(() => lintReport.value?.summary || {})
+const lintDiagnostics = computed<LintDiagnostic[]>(() => {
+  const diagnostics = lintReport.value?.diagnostics
+  if (!Array.isArray(diagnostics)) return []
+  return diagnostics
+    .filter((item): item is LintDiagnostic => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      code: String(item.code || item.severity || 'LINT'),
+      category: String(item.category || 'lint'),
+      message: String(item.message || item.raw || 'Verilator lint diagnostic'),
+      source: String(item.source || ''),
+      line: numberValue(item.line) || 1,
+      column: numberValue(item.column) || 1,
+      raw: String(item.raw || ''),
+    }))
+})
+const lintRules = computed<LintRule[]>(() => {
+  const rules = lintReport.value?.rules
+  if (!Array.isArray(rules)) return []
+  return rules
+    .filter((item): item is LintRule => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      code: String(item.code || 'LINT'),
+      category: String(item.category || 'lint'),
+      errors: numberValue(item.errors),
+      warnings: numberValue(item.warnings),
+      total: numberValue(item.total),
+      example: String(item.example || ''),
+    }))
+    .sort((a, b) => numberValue(b.errors) - numberValue(a.errors) || numberValue(b.warnings) - numberValue(a.warnings))
+})
+const lintFiles = computed<LintFile[]>(() => {
+  const files = lintReport.value?.files
+  if (!Array.isArray(files)) return []
+  return files
+    .filter((item): item is LintFile => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      path: String(item.path || ''),
+      label: String(item.label || fileName(String(item.path || ''))),
+      errors: numberValue(item.errors),
+      warnings: numberValue(item.warnings),
+      total: numberValue(item.total),
+      rules: Array.isArray(item.rules) ? item.rules.map(String).filter(Boolean) : [],
+    }))
+    .filter((item) => item.path)
+})
+const lintStatusLabel = computed(() =>
+  titleCase(String(lintSummary.value.status || lintReport.value?.status || 'not run')),
+)
+const lintSummaryTiles = computed(() => [
+  {
+    label: 'Status',
+    value: lintStatusLabel.value,
+    tone: String(lintStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
+  },
+  { label: 'Errors', value: numberLabel(lintSummary.value.errors), tone: numberValue(lintSummary.value.errors) ? 'error' : 'ok' },
+  { label: 'Warnings', value: numberLabel(lintSummary.value.warnings), tone: numberValue(lintSummary.value.warnings) ? 'warning' : 'ok' },
+  { label: 'Rules', value: numberLabel(lintSummary.value.rules || lintRules.value.length), tone: lintRules.value.length ? 'warning' : 'ok' },
+  { label: 'Files', value: numberLabel(lintSummary.value.files || lintFiles.value.length), tone: lintFiles.value.length ? 'warning' : 'ok' },
+  { label: 'RTL Files', value: numberLabel(lintSummary.value.rtl_files || lintReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
+])
 const reviewMetricRows = computed(() => {
   const metrics = reviewReport.value?.metrics || {}
   return [
@@ -1839,6 +2107,9 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
   for (const diagnostic of elabDiagnostics.value.slice(0, 30)) {
     problems.push(elabDiagnosticToProblem(diagnostic))
   }
+  for (const diagnostic of lintDiagnostics.value.slice(0, 30)) {
+    problems.push(lintDiagnosticToProblem(diagnostic))
+  }
   for (const moduleName of elabUnresolvedModules.value.slice(0, 10)) {
     problems.push({
       severity: 'warning',
@@ -1878,6 +2149,7 @@ const visibleTabs = computed(() => {
   const tabs: Array<{ id: TabId; label: string; icon: string }> = []
   if (isReviewStep.value) tabs.push({ id: 'review', label: 'Review', icon: 'ri-search-eye-line' })
   else if (isElabStep.value) tabs.push({ id: 'elab', label: 'Elab', icon: 'ri-node-tree' })
+  else if (isLintStep.value) tabs.push({ id: 'lint', label: 'Lint', icon: 'ri-bug-line' })
   else if (isSimStep.value) tabs.push({ id: 'cases', label: 'Cases', icon: 'ri-list-check-3' })
   else tabs.push({ id: 'summary', label: 'Summary', icon: 'ri-dashboard-3-line' })
   return tabs
@@ -1939,6 +2211,9 @@ async function loadDetail(): Promise<void> {
     }
     if (isElabStep.value && activeTab.value === 'summary') {
       activeTab.value = 'elab'
+    }
+    if (isLintStep.value && activeTab.value === 'summary') {
+      activeTab.value = 'lint'
     }
     ensureActiveTabVisible()
     selectedLogPath.value = preferredLogPath()
@@ -2557,6 +2832,21 @@ function elabDiagnosticToProblem(diagnostic: ElabDiagnostic): ConsoleProblem {
   }
 }
 
+function lintDiagnosticToProblem(diagnostic: LintDiagnostic): ConsoleProblem {
+  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+    ? diagnostic.severity
+    : 'info'
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  return {
+    severity,
+    title: `Lint · ${String(diagnostic.code || titleCase(String(diagnostic.category || 'diagnostic')))}`,
+    detail: String(diagnostic.message || diagnostic.raw || 'Verilator lint diagnostic'),
+    sourcePath: source,
+    line: numberValue(diagnostic.line) || 1,
+    column: numberValue(diagnostic.column) || 1,
+  }
+}
+
 function openYosysDiagnostic(diagnostic: YosysDiagnostic): void {
   const source = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
   if (source) {
@@ -2581,6 +2871,17 @@ function yosysDiagnosticKey(diagnostic: YosysDiagnostic): string {
 function elabDiagnosticKey(diagnostic: ElabDiagnostic): string {
   return [
     diagnostic.severity || '',
+    diagnostic.source || '',
+    diagnostic.line || '',
+    diagnostic.column || '',
+    diagnostic.message || '',
+  ].join(':')
+}
+
+function lintDiagnosticKey(diagnostic: LintDiagnostic): string {
+  return [
+    diagnostic.severity || '',
+    diagnostic.code || '',
     diagnostic.source || '',
     diagnostic.line || '',
     diagnostic.column || '',
@@ -2674,6 +2975,12 @@ function elabDiagnosticLocationLabel(diagnostic: ElabDiagnostic): string {
   return `${shortPath(source || diagnostic.source || '')}${line ? `:${line}` : ''}`
 }
 
+function lintDiagnosticLocationLabel(diagnostic: LintDiagnostic): string {
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  const line = numberValue(diagnostic.line)
+  return `${shortPath(source || diagnostic.source || '')}${line ? `:${line}` : ''}`
+}
+
 function openElabDiagnostic(diagnostic: ElabDiagnostic): void {
   const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
   if (source) {
@@ -2691,6 +2998,16 @@ function openElabModule(moduleItem: ElabModule): void {
     return
   }
   void openGlobalSrcView()
+}
+
+function openLintDiagnostic(diagnostic: LintDiagnostic): void {
+  const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
+  if (source) {
+    openSourceAt(source, numberValue(diagnostic.line) || 1, numberValue(diagnostic.column) || 1)
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
 }
 
 function reviewIssueSource(issue: Partial<RtlReviewIssue>): string {
@@ -2837,6 +3154,7 @@ function defaultTabForCurrentStep(): TabId {
   if (isSimStep.value && visibleTabs.value.some((tab) => tab.id === 'cases')) return 'cases'
   if (isReviewStep.value && visibleTabs.value.some((tab) => tab.id === 'review')) return 'review'
   if (isElabStep.value && visibleTabs.value.some((tab) => tab.id === 'elab')) return 'elab'
+  if (isLintStep.value && visibleTabs.value.some((tab) => tab.id === 'lint')) return 'lint'
   return 'summary'
 }
 
@@ -3626,6 +3944,7 @@ button:disabled {
 .summary-panel,
 .review-panel,
 .elab-panel,
+.lint-panel,
 .cases-panel,
 .source-layout,
 .wave-panel {
@@ -4350,6 +4669,137 @@ button:disabled {
   gap: 10px;
   min-height: 0;
   overflow: hidden;
+}
+
+.lint-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lint-main {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.25fr) minmax(320px, 0.85fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.lint-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.lint-list,
+.lint-side-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.lint-side-list.compact {
+  flex: 0 1 45%;
+}
+
+.review-layer-head.secondary {
+  border-top: 1px solid var(--border-color);
+}
+
+.lint-rule-row,
+.lint-file-row {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.lint-rule-row.error,
+.lint-file-row.error {
+  border-left-color: #ef4444;
+}
+
+.lint-rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+}
+
+.lint-rule-row div,
+.lint-file-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lint-rule-row strong,
+.lint-file-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lint-rule-row span,
+.lint-rule-row small,
+.lint-file-row small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lint-rule-row small {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.lint-rule-row em,
+.lint-file-row em {
+  align-self: start;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.lint-file-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.lint-file-row:hover {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.07);
 }
 
 .elab-main {
