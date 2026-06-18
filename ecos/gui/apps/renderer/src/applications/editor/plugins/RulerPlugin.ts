@@ -19,8 +19,17 @@ const DEFAULT_OPTIONS: Required<RulerOptions> = {
 /** 1-2-5 序列乘数，用于在任意数量级上选择合适的刻度间隔 */
 const NICE_MULTIPLIERS = [1, 2, 5]
 
+function isValidRulerViewportTransform(transform: ViewportTransform): boolean {
+  return Number.isFinite(transform.x)
+    && Number.isFinite(transform.y)
+    && Number.isFinite(transform.scale)
+    && transform.scale > 0
+}
+
 export class RulerPlugin implements IPlugin {
   readonly name = 'ruler'
+
+  private static readonly VIEWPORT_REDRAW_MIN_INTERVAL_MS = 33
 
   private editor: Editor | null = null
   private options: Required<RulerOptions>
@@ -37,6 +46,10 @@ export class RulerPlugin implements IPlugin {
   private vTicks: Graphics | null = null
   private hLabels: Container | null = null
   private vLabels: Container | null = null
+  private redrawRaf = 0
+  private redrawThrottleTimer: ReturnType<typeof setTimeout> | null = null
+  private lastViewportRedrawAt = 0
+  private pendingTransform: ViewportTransform | null = null
 
   private textStyle: TextStyle
 
@@ -117,6 +130,16 @@ export class RulerPlugin implements IPlugin {
   }
 
   uninstall(): void {
+    if (this.redrawRaf) {
+      cancelAnimationFrame(this.redrawRaf)
+      this.redrawRaf = 0
+    }
+    if (this.redrawThrottleTimer) {
+      clearTimeout(this.redrawThrottleTimer)
+      this.redrawThrottleTimer = null
+    }
+    this.pendingTransform = null
+
     if (this.container && this.editor?.overlay) {
       this.editor.overlay.removeChild(this.container)
       this.container.destroy({ children: true })
@@ -137,8 +160,8 @@ export class RulerPlugin implements IPlugin {
 
   onViewportChange(transform: ViewportTransform): void {
     if (!this.editor || !this._enabled) return
-    const { width, height } = this.editor.size
-    this.drawRulers(width, height, transform)
+    if (!isValidRulerViewportTransform(transform)) return
+    this.scheduleDrawRulers(transform)
   }
 
   onResize(width: number, height: number): void {
@@ -153,6 +176,30 @@ export class RulerPlugin implements IPlugin {
       const { width, height } = this.editor.size
       this.drawRulers(width, height, this.editor.getTransform())
     }
+  }
+
+  private scheduleDrawRulers(transform: ViewportTransform): void {
+    this.pendingTransform = transform
+    if (this.redrawRaf || this.redrawThrottleTimer) return
+
+    const elapsedMs = performance.now() - this.lastViewportRedrawAt
+    if (elapsedMs < RulerPlugin.VIEWPORT_REDRAW_MIN_INTERVAL_MS) {
+      this.redrawThrottleTimer = setTimeout(() => {
+        this.redrawThrottleTimer = null
+        this.scheduleDrawRulers(this.pendingTransform ?? transform)
+      }, RulerPlugin.VIEWPORT_REDRAW_MIN_INTERVAL_MS - elapsedMs)
+      return
+    }
+
+    this.redrawRaf = requestAnimationFrame(() => {
+      this.redrawRaf = 0
+      if (!this.editor || !this._enabled || !this.pendingTransform) return
+      const { width, height } = this.editor.size
+      const pendingTransform = this.pendingTransform
+      this.pendingTransform = null
+      this.lastViewportRedrawAt = performance.now()
+      this.drawRulers(width, height, pendingTransform)
+    })
   }
 
   /** 根据缩放计算合适的刻度间隔（支持任意数量级） */
@@ -175,6 +222,7 @@ export class RulerPlugin implements IPlugin {
     transform: ViewportTransform
   ): void {
     if (!this.editor || !this._enabled) return
+    if (!isValidRulerViewportTransform(transform)) return
 
     const { thickness } = this.options
     const theme = this.editor.theme
@@ -364,3 +412,6 @@ export class RulerPlugin implements IPlugin {
   }
 }
 
+export const __rulerPluginInternals = {
+  isValidRulerViewportTransform
+}

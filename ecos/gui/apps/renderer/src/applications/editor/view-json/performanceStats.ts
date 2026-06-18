@@ -1,7 +1,11 @@
 import type { ViewJsonLoadStats, ViewJsonRenderMode } from './overviewData'
 
+export type ViewJsonFrameThrottleMode = 'active' | 'idle'
+
 export interface ViewJsonRendererStats {
   renderMode: ViewJsonRenderMode
+  frameThrottle: ViewJsonFrameThrottleMode
+  frameThrottleFps: number
   visibleInstanceCount: number
   visibleChunkCount: number
   activeRasterTileCount: number
@@ -16,8 +20,15 @@ export interface ViewJsonRendererStats {
   rasterTileFallbackRate: number
   lastRasterTileWorkerMs: number
   gpuChunkBufferCacheSize: number
+  interactiveSnapshotMs: number
+  interactiveSnapshotSkippedCount: number
   scale: number
   rebuildMs: number
+  buildModelMs?: number
+  buildSpatialIndexMs?: number
+  queryMs?: number
+  lazyMaterializeMs?: number
+  drawMs?: number
 }
 
 export interface ViewJsonPerformanceHudState extends ViewJsonRendererStats {
@@ -79,6 +90,8 @@ export class ViewJsonPerformanceCounters {
 
     return {
       renderMode: this.renderMode,
+      frameThrottle: 'active',
+      frameThrottleFps: 60,
       visibleInstanceCount: this.visibleInstanceCount,
       visibleChunkCount: this.visibleChunkCount,
       activeRasterTileCount: this.activeRasterTileCount,
@@ -97,6 +110,8 @@ export class ViewJsonPerformanceCounters {
         : 0,
       lastRasterTileWorkerMs: this.lastRasterTileWorkerMs,
       gpuChunkBufferCacheSize: options.gpuChunkBufferCacheSize,
+      interactiveSnapshotMs: 0,
+      interactiveSnapshotSkippedCount: 0,
       scale: options.scale,
       rebuildMs: this.rebuildMs,
     }
@@ -108,6 +123,8 @@ export function createViewJsonPerformanceHudState(): ViewJsonPerformanceHudState
     fps: 0,
     frameMs: 0,
     renderMode: 'idle',
+    frameThrottle: 'active',
+    frameThrottleFps: 60,
     visibleInstanceCount: 0,
     visibleChunkCount: 0,
     activeRasterTileCount: 0,
@@ -122,8 +139,15 @@ export function createViewJsonPerformanceHudState(): ViewJsonPerformanceHudState
     rasterTileFallbackRate: 0,
     lastRasterTileWorkerMs: 0,
     gpuChunkBufferCacheSize: 0,
+    interactiveSnapshotMs: 0,
+    interactiveSnapshotSkippedCount: 0,
     scale: 1,
     rebuildMs: 0,
+    buildModelMs: 0,
+    buildSpatialIndexMs: 0,
+    queryMs: 0,
+    lazyMaterializeMs: 0,
+    drawMs: 0,
     loadStats: null,
   }
 }
@@ -135,6 +159,8 @@ export function mergeViewJsonRendererStatsIntoHudState(
   return {
     ...state,
     renderMode: stats.renderMode,
+    frameThrottle: stats.frameThrottle,
+    frameThrottleFps: stats.frameThrottleFps,
     visibleInstanceCount: stats.visibleInstanceCount,
     visibleChunkCount: stats.visibleChunkCount,
     activeRasterTileCount: stats.activeRasterTileCount,
@@ -149,7 +175,14 @@ export function mergeViewJsonRendererStatsIntoHudState(
     rasterTileFallbackRate: stats.rasterTileFallbackRate,
     lastRasterTileWorkerMs: stats.lastRasterTileWorkerMs,
     gpuChunkBufferCacheSize: stats.gpuChunkBufferCacheSize,
+    interactiveSnapshotMs: stats.interactiveSnapshotMs,
+    interactiveSnapshotSkippedCount: stats.interactiveSnapshotSkippedCount,
     scale: stats.scale,
     rebuildMs: stats.rebuildMs,
+    buildModelMs: stats.buildModelMs,
+    buildSpatialIndexMs: stats.buildSpatialIndexMs,
+    queryMs: stats.queryMs,
+    lazyMaterializeMs: stats.lazyMaterializeMs,
+    drawMs: stats.drawMs,
   }
 }

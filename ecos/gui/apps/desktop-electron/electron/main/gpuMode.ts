@@ -42,7 +42,28 @@ function shouldUseSoftwareGpu(options: Omit<ConfigureGpuModeOptions, 'app'>): bo
   return isVirtualizedHost(options.hostProductName, options.hostVendor)
 }
 
+function shouldUseSoftwareWebGl(options: Omit<ConfigureGpuModeOptions, 'app'>): boolean {
+  if (isEnabled(options.env.ECOS_ELECTRON_ENABLE_GPU)) {
+    return false
+  }
+
+  return isEnabled(options.env.ECOS_ELECTRON_SOFTWARE_WEBGL)
+}
+
+function enableSoftwareWebGl(options: ConfigureGpuModeOptions): void {
+  options.app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  options.app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+  options.app.commandLine.appendSwitch('use-angle', 'swiftshader')
+  options.app.commandLine.appendSwitch('use-gl', 'swiftshader')
+  options.env.LIBGL_ALWAYS_SOFTWARE ??= '1'
+}
+
 export function configureGpuMode(options: ConfigureGpuModeOptions): void {
+  if (shouldUseSoftwareWebGl(options)) {
+    enableSoftwareWebGl(options)
+    return
+  }
+
   if (!shouldUseSoftwareGpu(options)) {
     return
   }

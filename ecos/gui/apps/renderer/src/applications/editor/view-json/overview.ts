@@ -99,6 +99,7 @@ export {
 } from './performanceStats'
 
 export const VIEW_JSON_RASTER_TILE_CACHE_LIMIT = 160
+export const VIEW_JSON_RASTER_TILE_MEMORY_BUDGET_BYTES = 32 * 1024 * 1024
 export const VIEW_JSON_RASTER_TILE_BUILD_FRAME_BUDGET_MS = 4
 export const VIEW_JSON_RASTER_TILE_MAX_IN_FLIGHT_BUILDS = 2
 export const VIEW_JSON_USE_GPU_INSTANCE_MESH = true
@@ -111,6 +112,14 @@ export const VIEW_JSON_ADAPTIVE_DETAIL_INSTANCE_LIMIT = 5000
 
 export interface ViewJsonAdaptiveRenderState {
   lowFpsSampleCount: number
+}
+
+export function getViewJsonRasterTileMemoryBudgetLimit(
+  memoryBudgetBytes = VIEW_JSON_RASTER_TILE_MEMORY_BUDGET_BYTES,
+  pixelSize = VIEW_JSON_RASTER_TILE_PIXEL_SIZE,
+): number {
+  const bytesPerTile = Math.max(1, pixelSize * pixelSize * 4)
+  return Math.max(1, Math.floor(memoryBudgetBytes / bytesPerTile))
 }
 
 export function updateViewJsonAdaptiveRenderState(
@@ -494,10 +503,23 @@ export class ViewJsonOverviewRenderer {
     this.gpuInstanceRenderer.destroy()
     this.clearActiveChunks()
     this.clearRasterTiles()
+    this.releaseDataReferences()
     if (this.container.parent === this.viewport) {
       this.viewport.removeChild(this.container)
     }
     this.container.destroy({ children: true })
+  }
+
+  private releaseDataReferences(): void {
+    this.currentData = null
+    this.chunks = new Map()
+    this.rasterTileBuckets = new Map()
+    this.visibleRasterTileKeys.clear()
+    this.pendingRasterTileKeys.clear()
+    this.buildingRasterTileKeys.clear()
+    this.rasterTileBuildQueue = []
+    this.lastChunkRenderSignature = ''
+    this.lastHatchVisible = null
   }
 
   private bindViewportEvents(): void {
@@ -959,12 +981,16 @@ export class ViewJsonOverviewRenderer {
   }
 
   private pruneRasterTileCache(): void {
-    if (this.activeRasterTiles.size <= VIEW_JSON_RASTER_TILE_CACHE_LIMIT) return
+    const tileLimit = Math.min(
+      VIEW_JSON_RASTER_TILE_CACHE_LIMIT,
+      getViewJsonRasterTileMemoryBudgetLimit(),
+    )
+    if (this.activeRasterTiles.size <= tileLimit) return
 
     const candidates = [...this.activeRasterTiles.values()]
       .filter(tile => !tile.sprite.visible)
       .sort((a, b) => a.lastUsedAt - b.lastUsedAt)
-    const removeCount = this.activeRasterTiles.size - VIEW_JSON_RASTER_TILE_CACHE_LIMIT
+    const removeCount = this.activeRasterTiles.size - tileLimit
 
     for (const tile of candidates.slice(0, removeCount)) {
       this.destroyRasterTile(tile)

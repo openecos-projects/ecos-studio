@@ -4,6 +4,8 @@ import type { LayoutDataStore } from '@/applications/editor/layout/LayoutDataSto
 import type { LayerStyleSnapshot } from '@/applications/editor/layout/LayerStyleManager'
 import type { LayerManagerPlugin } from '@/applications/editor/plugins/LayerManagerPlugin'
 import type { SelectionInfo } from '@/applications/editor/tile'
+import type { ViewJsonDisplayPreset, ViewJsonObjectDisplayMode } from '@/applications/editor/view-json/displayPolicy'
+import type { ViewJsonObjectKind, ViewJsonVisibilityState } from '@/applications/editor/view-json/types'
 import type { DrcViolation } from '@/composables/drcStepParser'
 
 export interface TileActions {
@@ -35,6 +37,27 @@ export interface TileLayerActions {
   hideAll: () => void
 }
 
+export interface TileObjectKindItem {
+  kind: ViewJsonObjectKind
+  label: string
+  color: string
+  userVisible: boolean
+  presetVisible: boolean
+  visible: boolean
+  count: number
+  displayMode: ViewJsonObjectDisplayMode
+}
+
+export interface TileObjectKindActions {
+  toggleObjectKind: (kind: ViewJsonObjectKind) => void
+  showAll: () => void
+  hideAll: () => void
+}
+
+export interface ViewJsonDisplayPresetActions {
+  setPreset: (preset: ViewJsonDisplayPreset) => void
+}
+
 export interface LayoutState {
   selectedGroups: ShallowRef<LayoutGroup[]>
   dataStore: ShallowRef<LayoutDataStore | null>
@@ -55,6 +78,16 @@ export interface LayoutState {
   tileLayers: ShallowRef<TileLayerItem[]>
   /** Tile 图层操作（由 DrawingArea 注册） */
   tileLayerActions: ShallowRef<TileLayerActions | null>
+  /** View JSON 对象类型列表（instances / pins / vias / wires 等） */
+  tileObjectKinds: ShallowRef<TileObjectKindItem[]>
+  /** View JSON 对象类型操作（由 DrawingArea 注册） */
+  tileObjectKindActions: ShallowRef<TileObjectKindActions | null>
+  /** View JSON 当前显示状态 */
+  viewJsonVisibility: ShallowRef<ViewJsonVisibilityState | null>
+  /** View JSON 当前工程显示 preset */
+  viewJsonDisplayPreset: Ref<ViewJsonDisplayPreset>
+  /** View JSON 工程显示 preset 操作 */
+  viewJsonDisplayPresetActions: ShallowRef<ViewJsonDisplayPresetActions | null>
   /** Tile 编辑操作 */
   tileEditActions: ShallowRef<TileEditActions | null>
   /** 是否有未保存的编辑 */
@@ -89,6 +122,11 @@ export function useLayoutState(): LayoutState {
       tileActions: shallowRef(null),
       tileLayers: shallowRef([]),
       tileLayerActions: shallowRef(null),
+      tileObjectKinds: shallowRef([]),
+      tileObjectKindActions: shallowRef(null),
+      viewJsonVisibility: shallowRef(null),
+      viewJsonDisplayPreset: ref('engineering'),
+      viewJsonDisplayPresetActions: shallowRef(null),
       tileEditActions: shallowRef(null),
       hasUnsavedEdits: ref(false),
       isPlacementMode: ref(false),

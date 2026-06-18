@@ -1,4 +1,4 @@
-import { Application, Container, Sprite, Assets, Texture } from 'pixi.js'
+import { Application, Container, Sprite, Assets, Texture, type ContainerChild } from 'pixi.js'
 import { Viewport } from 'pixi-viewport'
 import type { IPlugin, ViewportTransform } from '../plugins/IPlugin'
 import { themes, darkTheme, type EditorTheme, type ThemeName } from './Theme'
@@ -19,6 +19,23 @@ export interface FitToWorldOptions {
   worldCenter?: { x: number; y: number }
 }
 
+export interface EditorRenderThrottleState {
+  mode: 'active' | 'idle'
+  maxFPS: number
+}
+
+interface BackgroundTextureLoadResult {
+  texture: Texture
+  ownedTexture: boolean
+}
+
+function isValidViewportTransform(transform: ViewportTransform): boolean {
+  return Number.isFinite(transform.x)
+    && Number.isFinite(transform.y)
+    && Number.isFinite(transform.scale)
+    && transform.scale > 0
+}
+
 const DEFAULT_OPTIONS: Required<EditorOptions> = {
   worldWidth: 4000,
   worldHeight: 4000,
@@ -33,6 +50,8 @@ export class Editor {
   private options: Required<EditorOptions>
   private resizeObserver: ResizeObserver | null = null
   private resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  private renderIdleTimer: ReturnType<typeof setTimeout> | null = null
+  private renderThrottleState: EditorRenderThrottleState = { mode: 'active', maxFPS: 60 }
   private _initialized = false
   private _theme: EditorTheme
   private transformListeners = new Set<(t: ViewportTransform) => void>()
@@ -46,6 +65,12 @@ export class Editor {
   /** 当前背景图的 blob URL，用于清理 */
   private currentBlobUrl: string | null = null
 
+  /** 背景图加载请求序号，用于忽略异步返回的旧请求 */
+  private backgroundImageRequestId = 0
+
+  /** 由本编辑器手动创建的背景 sprite，释放时需要连带释放纹理 */
+  private ownedBackgroundSprites = new WeakSet<Sprite>()
+
   /** 上次 resize 时的屏幕尺寸，用于在窗口尺寸变化时平移视口以保持世界坐标一致 */
   private _screenSizeForResize: { w: number; h: number } | null = null
 
@@ -57,6 +82,9 @@ export class Editor {
 
   /** 防抖延迟时间 (ms) */
   private static readonly RESIZE_DEBOUNCE_DELAY = 16 // ~60fps
+  private static readonly ACTIVE_RENDER_MAX_FPS = 60
+  private static readonly IDLE_RENDER_MAX_FPS = 8
+  private static readonly RENDER_IDLE_DELAY_MS = 500
 
   constructor(options: EditorOptions = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
@@ -132,16 +160,19 @@ export class Editor {
 
     // 创建 Pixi Application (v8+ 异步初始化)
     this.app = new Application()
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
     await this.app.init({
       background: this._theme.backgroundColor,
       width,
       height,
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      antialias: false,
+      resolution: pixelRatio,
       autoDensity: true,
-      // 不指定 preference，让 PixiJS 自动选择最佳渲染器
-      // desktop runtime 生产环境的 WebView 可能不支持 WebGPU
+      // Pixi v8 does not implement CanvasRenderer; force WebGL instead of an
+      // automatic fallback that can leave the editor stuck at "Loading".
+      preference: 'webgl',
     })
+    this.app.ticker.maxFPS = Editor.ACTIVE_RENDER_MAX_FPS
 
     // 添加 canvas 到容器
     container.appendChild(this.app.canvas as HTMLCanvasElement)
@@ -257,6 +288,7 @@ export class Editor {
     if (plugin && typeof plugin.setEnabled === 'function') {
       plugin.setEnabled(enabled)
     }
+    this.markRenderActive()
     return this
   }
 
@@ -316,6 +348,7 @@ export class Editor {
    */
   public setWorldBounds(worldWidth: number, worldHeight: number): this {
     if (!this.viewport) return this
+    this.markRenderActive()
     this.options.worldWidth = worldWidth
     this.options.worldHeight = worldHeight
     this.viewport.worldWidth = worldWidth
@@ -338,6 +371,7 @@ export class Editor {
     const w = Math.max(1, Math.round(r.width))
     const h = Math.max(1, Math.round(r.height))
     if (w !== this.viewport.screenWidth || h !== this.viewport.screenHeight) {
+      this.markRenderActive()
       this.app.renderer.resize(w, h)
       this.viewport.resize(w, h)
     }
@@ -445,6 +479,7 @@ export class Editor {
       return this
     }
 
+    this.markRenderActive()
     this._theme = newTheme
 
     // 更新背景颜色
@@ -464,56 +499,19 @@ export class Editor {
    */
   public async setBackgroundImage(url: string): Promise<void> {
     if (!this.backgroundContainer) return
+    const requestId = ++this.backgroundImageRequestId
+
     try {
-      // 1. 释放旧的 blob URL
-      if (this.currentBlobUrl && this.currentBlobUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(this.currentBlobUrl)
-        console.log('Revoked old blob URL:', this.currentBlobUrl)
-      }
+      this.markRenderActive()
 
-      // 2. 清除旧背景
-      this.backgroundContainer.removeChildren().forEach(child => child.destroy())
-      console.log('Removed old background children');
+      const textureLoad = await this.loadBackgroundTexture(url)
+      const { texture } = textureLoad
 
-      // 3. 加载新纹理
-      let texture: Texture
-      if (url.startsWith('blob:')) {
-        // 对于 blob URL，手动加载图片并创建纹理
-        console.log('Loading blob URL...');
-        const img = new Image()
-
-        // 等待图片加载完成
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => {
-            console.log('Image loaded, dimensions:', img.width, 'x', img.height);
-            resolve()
-          }
-          img.onerror = (err) => {
-            console.error('Image load error:', err);
-            reject(new Error('Failed to load image from blob URL'))
-          }
-          img.src = url
-        })
-
-        // 从 Image 元素创建纹理
-        texture = Texture.from(img)
-        // 配置纹理采样模式：
-        // - minFilter: linear + mipmap，缩小时平滑混合，避免细节丢失
-        // - magFilter: nearest，放大时保持像素锐利，不模糊
-        texture.source.autoGenerateMipmaps = true
-        texture.source.style.minFilter = 'linear'
-        texture.source.style.mipmapFilter = 'linear'
-        texture.source.style.magFilter = 'nearest'
-      } else {
-        // 对于其他 URL，使用 Assets.load
-        texture = await Assets.load(url)
-        // 配置纹理采样模式：
-        // - minFilter: linear + mipmap，缩小时平滑混合，避免细节丢失
-        // - magFilter: nearest，放大时保持像素锐利，不模糊
-        texture.source.autoGenerateMipmaps = true
-        texture.source.style.minFilter = 'linear'
-        texture.source.style.mipmapFilter = 'linear'
-        texture.source.style.magFilter = 'nearest'
+      if (requestId !== this.backgroundImageRequestId || !this.backgroundContainer) {
+        if (textureLoad.ownedTexture) {
+          texture.destroy(true)
+        }
+        return
       }
 
       const imgW = texture.width
@@ -529,21 +527,17 @@ export class Editor {
       const sprite = new Sprite(texture)
       sprite.position.set(0, 0)
 
-      // 5. 添加到容器
-      this.backgroundContainer.addChild(sprite)
-
-      // 6. 保存当前 blob URL
-      if (url.startsWith('blob:')) {
-        this.currentBlobUrl = url
-      } else {
-        this.currentBlobUrl = null
+      if (textureLoad.ownedTexture) {
+        this.ownedBackgroundSprites.add(sprite)
       }
+      this.replaceBackgroundSprite(sprite, url, textureLoad.ownedTexture)
 
-
-      // 7. 等待下一帧，确保 sprite 已经完全渲染
+      // 等待下一帧，确保 sprite 已经进入 Pixi 的渲染列表
       await new Promise(resolve => requestAnimationFrame(resolve))
 
-      // 8. 与工具栏「适应全图」一致：标尺内居中（避免仅用 alignViewportToRulerOrigin 导致靠左）
+      if (requestId !== this.backgroundImageRequestId) return
+
+      // 与工具栏「适应全图」一致：标尺内居中（避免仅用 alignViewportToRulerOrigin 导致靠左）
       this.fitToWorld(10)
     } catch (error) {
       console.error('Failed to set background image:', error)
@@ -553,16 +547,89 @@ export class Editor {
 
   /** 清除背景图 */
   public clearBackground(): void {
+    ++this.backgroundImageRequestId
+    this.markRenderActive()
     if (this.backgroundContainer) {
-      this.backgroundContainer.removeChildren().forEach(child => child.destroy())
+      const oldChildren = this.backgroundContainer.removeChildren()
+      this.releaseBackgroundChildrenAfterRender(oldChildren)
     }
 
-    // 释放 blob URL
-    if (this.currentBlobUrl && this.currentBlobUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(this.currentBlobUrl)
-      console.log('Revoked blob URL on clear:', this.currentBlobUrl)
-      this.currentBlobUrl = null
+    const previousBlobUrl = this.currentBlobUrl
+    this.currentBlobUrl = null
+    this.releaseBackgroundBlobUrlAfterRender(previousBlobUrl)
+  }
+
+  private async loadBackgroundTexture(url: string): Promise<BackgroundTextureLoadResult> {
+    let texture: Texture
+
+    if (url.startsWith('blob:')) {
+      const img = new Image()
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('Failed to load image from blob URL'))
+        img.src = url
+      })
+
+      texture = Texture.from(img)
+      this.configureBackgroundTexture(texture)
+      return { texture, ownedTexture: true }
+    } else {
+      texture = await Assets.load(url)
+      this.configureBackgroundTexture(texture)
+      return { texture, ownedTexture: false }
     }
+  }
+
+  private configureBackgroundTexture(texture: Texture): void {
+    // 缩小时平滑混合，放大时保持 EDA 图片像素边界清晰。
+    texture.source.autoGenerateMipmaps = true
+    texture.source.style.minFilter = 'linear'
+    texture.source.style.mipmapFilter = 'linear'
+    texture.source.style.magFilter = 'nearest'
+  }
+
+  private replaceBackgroundSprite(sprite: Sprite, url: string, ownedTexture: boolean): void {
+    if (!this.backgroundContainer) {
+      sprite.destroy(ownedTexture ? { texture: true, textureSource: true } : undefined)
+      return
+    }
+
+    const oldChildren = this.backgroundContainer.removeChildren()
+    const previousBlobUrl = this.currentBlobUrl
+
+    this.backgroundContainer.addChild(sprite)
+    this.currentBlobUrl = url.startsWith('blob:') ? url : null
+
+    this.releaseBackgroundChildrenAfterRender(oldChildren)
+    this.releaseBackgroundBlobUrlAfterRender(previousBlobUrl)
+  }
+
+  private releaseBackgroundChildrenAfterRender(children: ContainerChild[]): void {
+    if (children.length === 0) return
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        for (const child of children) {
+          if (child.destroyed) continue
+          if (child instanceof Sprite && this.ownedBackgroundSprites.has(child)) {
+            child.destroy({ texture: true, textureSource: true })
+          } else {
+            child.destroy()
+          }
+        }
+      })
+    })
+  }
+
+  private releaseBackgroundBlobUrlAfterRender(blobUrl: string | null): void {
+    if (!blobUrl?.startsWith('blob:')) return
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        URL.revokeObjectURL(blobUrl)
+      })
+    })
   }
 
   /** 销毁编辑器 */
@@ -577,6 +644,10 @@ export class Editor {
     if (this.resizeDebounceTimer) {
       clearTimeout(this.resizeDebounceTimer)
       this.resizeDebounceTimer = null
+    }
+    if (this.renderIdleTimer) {
+      clearTimeout(this.renderIdleTimer)
+      this.renderIdleTimer = null
     }
 
     // 停止监听尺寸变化
@@ -613,6 +684,37 @@ export class Editor {
     this._screenSizeForResize = null
   }
 
+  public requestRenderActive(): void {
+    this.markRenderActive()
+  }
+
+  public getRenderThrottleState(): EditorRenderThrottleState {
+    return this.renderThrottleState
+  }
+
+  private markRenderActive(): void {
+    if (!this.app) return
+    this.renderThrottleState = {
+      mode: 'active',
+      maxFPS: Editor.ACTIVE_RENDER_MAX_FPS
+    }
+    this.app.ticker.maxFPS = Editor.ACTIVE_RENDER_MAX_FPS
+    this.app.ticker.start()
+    if (this.renderIdleTimer) {
+      clearTimeout(this.renderIdleTimer)
+    }
+    this.renderIdleTimer = setTimeout(() => {
+      this.renderIdleTimer = null
+      if (!this.app) return
+      this.renderThrottleState = {
+        mode: 'idle',
+        maxFPS: Editor.IDLE_RENDER_MAX_FPS
+      }
+      this.app.ticker.maxFPS = Editor.IDLE_RENDER_MAX_FPS
+      this.app.ticker.stop()
+    }, Editor.RENDER_IDLE_DELAY_MS)
+  }
+
   /**
    * 将视口对齐为：绘图区左下角（世界 x=0、世界 y=worldHeight）落在标尺与画布交界处，
    * 使标尺左下角 X 与 Y 读数均为 0（与 RulerPlugin 的 worldHeight - worldY 一致）。
@@ -640,6 +742,7 @@ export class Editor {
   private handleResize(width: number, height: number): void {
     if (!this.app || !this.viewport) return
 
+    this.markRenderActive()
     this.app.renderer.resize(width, height)
     this.viewport.resize(width, height)
 
@@ -675,7 +778,9 @@ export class Editor {
 
   /** 通知插件 viewport 变化 */
   private notifyViewportChange(): void {
+    this.markRenderActive()
     const transform = this.getTransform()
+    if (!isValidViewportTransform(transform)) return
     // 通知插件
     for (const plugin of this.plugins) {
       plugin.onViewportChange?.(transform)
@@ -688,6 +793,7 @@ export class Editor {
 
   /** 通知插件主题变化 */
   private notifyThemeChange(): void {
+    this.markRenderActive()
     for (const plugin of this.plugins) {
       plugin.onThemeChange?.(this._theme)
     }
@@ -695,3 +801,6 @@ export class Editor {
 
 }
 
+export const __editorInternals = {
+  isValidViewportTransform
+}

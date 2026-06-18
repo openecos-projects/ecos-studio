@@ -7,6 +7,7 @@ export const GPU_FIXED_INSTANCE_ALPHA = 1
 export const GPU_INSTANCE_OUTLINE_ALPHA = 0.78
 
 const GPU_OUTLINE_QUADS_PER_INSTANCE = 4
+export const GPU_INSTANCE_CHUNK_BUFFER_CACHE_LIMIT = 160
 export const GPU_OUTLINE_WIDTH_CACHE_STEP = 0.25
 
 export interface GpuInstanceMeshBuffers {
@@ -32,13 +33,26 @@ interface CachedGpuInstanceChunkBuffers {
   signature: string
   fill: GpuInstanceMeshBufferGroups
   outlines: Map<number, GpuInstanceMeshBufferGroups>
+  lastUsedAt: number
 }
 
 export class GpuInstanceChunkBufferCache {
   private readonly chunks = new Map<string, CachedGpuInstanceChunkBuffers>()
+  private readonly limit: number
+  private accessSequence = 0
+
+  constructor(limit = GPU_INSTANCE_CHUNK_BUFFER_CACHE_LIMIT) {
+    this.limit = Number.isFinite(limit) && limit > 0
+      ? Math.floor(limit)
+      : GPU_INSTANCE_CHUNK_BUFFER_CACHE_LIMIT
+  }
 
   get size(): number {
     return this.chunks.size
+  }
+
+  has(key: string): boolean {
+    return this.chunks.has(key)
   }
 
   getFillBuffers(chunk: ViewJsonInstanceChunk): GpuInstanceMeshBufferGroups {
@@ -66,15 +80,39 @@ export class GpuInstanceChunkBufferCache {
   private getOrCreateCachedChunk(chunk: ViewJsonInstanceChunk): CachedGpuInstanceChunkBuffers {
     const signature = getGpuInstanceChunkBufferSignature(chunk)
     const existing = this.chunks.get(chunk.key)
-    if (existing?.signature === signature) return existing
+    if (existing?.signature === signature) {
+      return this.touchCachedChunk(existing)
+    }
 
     const cached = {
       signature,
       fill: buildGpuInstanceMeshBufferGroupsFromChunks([chunk]),
       outlines: new Map<number, GpuInstanceMeshBufferGroups>(),
+      lastUsedAt: this.nextAccess(),
     }
     this.chunks.set(chunk.key, cached)
+    this.prune()
     return cached
+  }
+
+  private touchCachedChunk(cached: CachedGpuInstanceChunkBuffers): CachedGpuInstanceChunkBuffers {
+    cached.lastUsedAt = this.nextAccess()
+    return cached
+  }
+
+  private nextAccess(): number {
+    this.accessSequence += 1
+    return this.accessSequence
+  }
+
+  private prune(): void {
+    if (this.chunks.size <= this.limit) return
+    const oldest = [...this.chunks.entries()]
+      .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)
+    for (const [key] of oldest) {
+      if (this.chunks.size <= this.limit) return
+      this.chunks.delete(key)
+    }
   }
 }
 

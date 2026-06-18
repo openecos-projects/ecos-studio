@@ -133,16 +133,16 @@ describe('Integration: Layer style and visibility', () => {
     styles.buildFromLayerDefs(store.header!.layerList)
 
     const met1 = styles.getStyle(7)!
-    expect(met1.fillColor).toBe(0x4444ff)
+    expect(met1.fillColor).toBe(0x4f73c8)
     expect(met1.visible).toBe(true)
     expect(met1.fillMode).toBe('solid')
     expect(met1.texturePattern).toBe('diagonal')
 
     const via1 = styles.getStyle(8)!
-    expect(via1.fillColor).toBe(0xaaaaaa)
+    expect(via1.fillColor).toBe(0x7b8290)
 
     const overlap = styles.getStyle(0)!
-    expect(overlap.fillColor).toBe(0x888888)
+    expect(overlap.fillColor).toBe(0x6b7280)
   })
 
   it('toggles layer visibility', () => {

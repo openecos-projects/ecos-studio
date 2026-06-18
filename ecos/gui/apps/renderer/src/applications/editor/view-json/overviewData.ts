@@ -45,7 +45,7 @@ export interface ViewJsonLoadStats {
   totalMs: number
 }
 
-export type ViewJsonRenderMode = 'idle' | 'preview' | 'raster' | 'gpu' | 'vector'
+export type ViewJsonRenderMode = 'idle' | 'preview' | 'raster' | 'gpu' | 'vector' | 'overview' | 'hybrid' | 'detail' | 'tiled-detail' | 'snapshot'
 
 export interface ViewJsonInstanceChunk {
   key: string

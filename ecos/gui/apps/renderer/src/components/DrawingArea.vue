@@ -26,15 +26,46 @@ import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
 import {
   createViewJsonPerformanceHudState,
-  loadViewJsonOverview,
   mergeViewJsonRendererStatsIntoHudState,
   type ViewJsonPerformanceHudState,
-  type ViewJsonOverviewData,
   type ViewJsonRendererStats,
-  ViewJsonOverviewRenderer,
 } from '@/applications/editor/view-json/overview'
-import { createViewJsonOverviewWorker } from '@/applications/editor/view-json/overviewWorker'
-import { createViewJsonRasterTileWorker } from '@/applications/editor/view-json/rasterTileWorker'
+import {
+  VIEW_JSON_DEFAULT_DISPLAY_PRESET,
+  getViewJsonEffectiveObjectDisplayMode,
+  isViewJsonDisplayModeVisible,
+  type ViewJsonDisplayPreset,
+} from '@/applications/editor/view-json/displayPolicy'
+import { ViewJsonFullRenderer } from '@/applications/editor/view-json/fullRenderer'
+import { ViewJsonGeometryTileStore } from '@/applications/editor/view-json/geometryTileStore'
+import {
+  loadViewJsonPackageData,
+  loadViewJsonRoutingDetail,
+} from '@/applications/editor/view-json/packageData'
+import { createViewJsonPackageDataWorker } from '@/applications/editor/view-json/packageDataWorker'
+import { createViewJsonSemanticOverviewWorker } from '@/applications/editor/view-json/semanticOverviewWorker'
+import {
+  VIEW_JSON_OBJECT_KIND_LABELS,
+  VIEW_JSON_OBJECT_KINDS,
+  createViewJsonVisibilityState,
+  hideAllViewJsonLayers,
+  hideAllViewJsonObjectKinds,
+  showAllViewJsonLayers,
+  showAllViewJsonObjectKinds,
+  toggleViewJsonLayer,
+  toggleViewJsonObjectKind,
+} from '@/applications/editor/view-json/visibility'
+import {
+  getEdaLayerColorCss,
+  getEdaObjectKindColorCss,
+} from '@/applications/editor/layout/layerPalette'
+import type {
+  ViewJsonLayer,
+  ViewJsonObjectKind,
+  ViewJsonPackageData,
+  ViewJsonRenderModel,
+  ViewJsonVisibilityState,
+} from '@/applications/editor/view-json/types'
 
 const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
@@ -43,6 +74,7 @@ const layoutState = useLayoutState()
 
 const editor = shallowRef<Editor | null>(null)
 const PERFORMANCE_HUD_UPDATE_INTERVAL_MS = 250
+const PERFORMANCE_PANEL_REFRESH_INTERVAL_MS = 1000
 
 /** Resource resolver 返回的布局 JSON 相对路径，供工具栏生成瓦片 */
 const layoutJsonRelativePath = ref<string | null>(null)
@@ -218,16 +250,15 @@ function dispatchRedoChord(): void {
 
 let viewportAnimator: ViewportAnimator | null = null
 let drcViolationOverlay: DrcViolationOverlay | null = null
-let viewJsonOverviewRenderer: ViewJsonOverviewRenderer | null = null
-let performanceHudRaf = 0
-let performanceHudLastFrameAt = 0
-let performanceHudFrameCount = 0
-let performanceHudAccumulatedMs = 0
-let performanceHudFrameRunning = false
-let performanceHudLastUiUpdateAt = 0
+let viewJsonFullRenderer: ViewJsonFullRenderer | null = null
+let currentViewJsonRenderModel: ViewJsonRenderModel | null = null
+let currentViewJsonPackageData: ViewJsonPackageData | null = null
+let performanceHudTimer: ReturnType<typeof setTimeout> | null = null
+let performancePanelRefreshTimer: ReturnType<typeof setTimeout> | null = null
+let lastViewJsonObjectKindPanelSignature = ''
 
 const viewJsonPerformanceHud = ref<ViewJsonPerformanceHudState>(createViewJsonPerformanceHudState())
-const currentViewJsonOverview = shallowRef<ViewJsonOverviewData | null>(null)
+const currentViewJsonPackage = shallowRef<ViewJsonPackageData | null>(null)
 const currentViewJsonPackageRoot = ref<string | null>(null)
 const previewImageRelativePath = ref<string | null>(null)
 const previewImageUrl = ref<string | null>(null)
@@ -267,6 +298,18 @@ function formatPerformancePercent(value: number): string {
   return Number.isFinite(value) ? `${Math.round(value * 100)}%` : '0%'
 }
 
+function formatPerformanceFps(state: ViewJsonPerformanceHudState): string {
+  const fps = formatPerformanceNumber(state.fps, 0)
+  if (state.frameThrottle === 'idle') {
+    return `Parked (${formatPerformanceNumber(state.frameThrottleFps, 0)} cap)`
+  }
+  return fps
+}
+
+function isViewJsonTileHudMode(mode: string): boolean {
+  return mode === 'raster' || mode === 'tiled-detail'
+}
+
 function applyRendererStatsToHud(stats: ViewJsonRendererStats | null): void {
   if (!stats) return
   viewJsonPerformanceHud.value = mergeViewJsonRendererStatsIntoHudState(
@@ -275,68 +318,104 @@ function applyRendererStatsToHud(stats: ViewJsonRendererStats | null): void {
   )
 }
 
-function stopPerformanceHudSampling(): void {
-  if (performanceHudRaf) {
-    cancelAnimationFrame(performanceHudRaf)
-    performanceHudRaf = 0
-  }
-  performanceHudLastFrameAt = 0
-  performanceHudFrameCount = 0
-  performanceHudAccumulatedMs = 0
-  performanceHudLastUiUpdateAt = 0
+function getViewJsonObjectKindPanelSignature(
+  model: ViewJsonRenderModel,
+  visibility: ViewJsonVisibilityState,
+): string {
+  const scale = viewJsonFullRenderer?.getPerformanceStats().scale ?? 1
+  const scaleBucket = Number.isFinite(scale) && scale > 0
+    ? Math.floor(Math.log2(scale))
+    : 'invalid'
+  const kindState = VIEW_JSON_OBJECT_KINDS
+    .map(kind => `${kind}:${model.countsByObjectKind[kind]}:${visibility.objectKinds[kind] ? 1 : 0}`)
+    .join('|')
+  const routingDetailDeferred = currentViewJsonPackageData?.routingDetailAvailable ? 1 : 0
+  return `${layoutState.viewJsonDisplayPreset.value}:${scaleBucket}:${routingDetailDeferred}:${kindState}`
 }
 
-function samplePerformanceHudFrame(now: number): void {
-  if (performanceHudFrameRunning) {
+function refreshViewJsonObjectKindPanelIfNeeded(
+  model: ViewJsonRenderModel | null,
+  visibility: ViewJsonVisibilityState | null,
+  force = false,
+): void {
+  if (!model || !visibility) return
+  const signature = getViewJsonObjectKindPanelSignature(model, visibility)
+  if (!force && signature === lastViewJsonObjectKindPanelSignature) return
+  lastViewJsonObjectKindPanelSignature = signature
+  layoutState.tileObjectKinds.value = buildViewJsonObjectKindItems(model, visibility)
+}
+
+function stopPerformanceHudSampling(): void {
+  if (performanceHudTimer) {
+    clearTimeout(performanceHudTimer)
+    performanceHudTimer = null
+  }
+}
+
+function stopViewJsonPanelRefresh(): void {
+  if (performancePanelRefreshTimer) {
+    clearTimeout(performancePanelRefreshTimer)
+    performancePanelRefreshTimer = null
+  }
+  lastViewJsonObjectKindPanelSignature = ''
+}
+
+function refreshViewJsonPanelFrame(): void {
+  performancePanelRefreshTimer = null
+  if (layoutState.renderMode.value !== 'layout' || !viewJsonFullRenderer) {
+    stopViewJsonPanelRefresh()
     return
   }
-  performanceHudFrameRunning = true
-  try {
-    if (layoutState.renderMode.value !== 'layout' || !viewJsonOverviewRenderer) {
-      stopPerformanceHudSampling()
-      return
-    }
 
-    const shouldUpdateHud = now - performanceHudLastUiUpdateAt >= PERFORMANCE_HUD_UPDATE_INTERVAL_MS
+  const current = layoutState.viewJsonVisibility.value
+  const model = currentViewJsonRenderModel
+  refreshViewJsonObjectKindPanelIfNeeded(model, current)
+  performancePanelRefreshTimer = setTimeout(refreshViewJsonPanelFrame, PERFORMANCE_PANEL_REFRESH_INTERVAL_MS)
+}
 
-    if (performanceHudLastFrameAt > 0) {
-      const delta = now - performanceHudLastFrameAt
-      performanceHudFrameCount += 1
-      performanceHudAccumulatedMs += delta
-      if (shouldUpdateHud && performanceHudAccumulatedMs > 0) {
-        const fps = performanceHudFrameCount * 1000 / performanceHudAccumulatedMs
-        viewJsonOverviewRenderer?.updateAdaptiveFrameRate(fps)
-        if (showViewJsonPerformanceHud.value) {
-          viewJsonPerformanceHud.value = {
-            ...viewJsonPerformanceHud.value,
-            fps,
-            frameMs: performanceHudAccumulatedMs / performanceHudFrameCount,
-          }
-        }
-        performanceHudFrameCount = 0
-        performanceHudAccumulatedMs = 0
-      }
-    }
-    performanceHudLastFrameAt = now
+function startViewJsonPanelRefresh(): void {
+  stopViewJsonPanelRefresh()
+  refreshViewJsonPanelFrame()
+}
 
-    if (shouldUpdateHud) {
-      if (showViewJsonPerformanceHud.value) {
-        applyRendererStatsToHud(viewJsonOverviewRenderer?.getPerformanceStats() ?? null)
-      }
-      performanceHudLastUiUpdateAt = now
-    }
-    performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
-  } finally {
-    performanceHudFrameRunning = false
+function samplePerformanceHudFrame(): void {
+  performanceHudTimer = null
+  if (layoutState.renderMode.value !== 'layout' || !viewJsonFullRenderer) {
+    stopPerformanceHudSampling()
+    return
   }
+
+  if (!showViewJsonPerformanceHud.value) {
+    stopPerformanceHudSampling()
+    startViewJsonPanelRefresh()
+    return
+  }
+
+  const stats = viewJsonFullRenderer.getPerformanceStats()
+  applyRendererStatsToHud(stats)
+  const cappedFps = Math.max(1, stats.frameThrottleFps)
+  const hudFps = stats.frameThrottle === 'idle' ? 0 : cappedFps
+  viewJsonFullRenderer.updateAdaptiveFrameRate(cappedFps)
+  viewJsonPerformanceHud.value = {
+    ...viewJsonPerformanceHud.value,
+    fps: hudFps,
+    frameMs: hudFps > 0 ? 1000 / hudFps : 0,
+  }
+
+  performanceHudTimer = setTimeout(samplePerformanceHudFrame, PERFORMANCE_HUD_UPDATE_INTERVAL_MS)
 }
 
 function startPerformanceHudSampling(): void {
   stopPerformanceHudSampling()
-  performanceHudRaf = requestAnimationFrame(samplePerformanceHudFrame)
+  samplePerformanceHudFrame()
 }
 
 function startViewJsonPerformanceSampling(): void {
+  startViewJsonPanelRefresh()
+  if (!showViewJsonPerformanceHud.value) {
+    stopPerformanceHudSampling()
+    return
+  }
   startPerformanceHudSampling()
 }
 
@@ -364,11 +443,14 @@ const onEditorReady = (editorInstance: Editor) => {
 
 function cleanupLayout(): void {
   stopPerformanceHudSampling()
+  stopViewJsonPanelRefresh()
   viewportAnimator?.destroy()
-  viewJsonOverviewRenderer?.destroy()
+  viewJsonFullRenderer?.destroy()
 
   viewportAnimator = null
-  viewJsonOverviewRenderer = null
+  viewJsonFullRenderer = null
+  currentViewJsonRenderModel = null
+  currentViewJsonPackageData = null
 
   drcViolationOverlay?.destroy()
   drcViolationOverlay = null
@@ -384,6 +466,11 @@ function cleanupLayout(): void {
   layoutState.tileActions.value = null
   layoutState.tileLayers.value = []
   layoutState.tileLayerActions.value = null
+  layoutState.tileObjectKinds.value = []
+  layoutState.tileObjectKindActions.value = null
+  layoutState.viewJsonVisibility.value = null
+  layoutState.viewJsonDisplayPreset.value = VIEW_JSON_DEFAULT_DISPLAY_PRESET
+  layoutState.viewJsonDisplayPresetActions.value = null
   layoutState.tileEditActions.value = null
   layoutState.hasUnsavedEdits.value = false
   layoutState.isPlacementMode.value = false
@@ -392,33 +479,156 @@ function cleanupLayout(): void {
 }
 
 function clearCurrentViewJsonOverview(): void {
-  currentViewJsonOverview.value = null
+  currentViewJsonPackage.value = null
   currentViewJsonPackageRoot.value = null
   previewImageRelativePath.value = null
   previewImageUrl.value = null
 }
 
-function worldCenterForViewJson(overview: ViewJsonOverviewData): { x: number; y: number } {
+function releaseCurrentViewJsonPackageCache(): void {
+  currentViewJsonPackage.value = null
+}
+
+function worldCenterForViewJson(pkg: ViewJsonPackageData): { x: number; y: number } {
   return {
-    x: overview.dieWorld.x + overview.dieWorld.w / 2,
-    y: overview.dieWorld.y + overview.dieWorld.h / 2,
+    x: pkg.worldWidth / 2,
+    y: pkg.worldHeight / 2,
   }
 }
 
-function setupViewJsonLayoutActions(ed: Editor, overview: ViewJsonOverviewData): void {
+function colorForViewJsonLayer(layer: ViewJsonLayer, index: number): string {
+  return getEdaLayerColorCss(layer.name, index)
+}
+
+function buildViewJsonLayerItems(
+  layers: ViewJsonLayer[],
+  visibility: ViewJsonVisibilityState,
+) {
+  return [...layers]
+    .sort((a, b) => (a.order ?? a.id) - (b.order ?? b.id))
+    .map((layer, index) => ({
+      id: layer.id,
+      name: layer.name,
+      color: colorForViewJsonLayer(layer, index),
+      alpha: 0.9,
+      zOrder: layer.order ?? layer.id,
+      visible: visibility.layers.get(layer.id) ?? true,
+    }))
+}
+
+function buildViewJsonObjectKindItems(
+  model: ViewJsonRenderModel,
+  visibility: ViewJsonVisibilityState,
+) {
+  const routingDetailDeferred = currentViewJsonPackageData?.routingDetailAvailable ?? false
+  return VIEW_JSON_OBJECT_KINDS
+    .filter(kind => model.countsByObjectKind[kind] > 0)
+    .map(kind => {
+      const displayMode = getViewJsonEffectiveObjectDisplayMode(
+        kind,
+        viewJsonFullRenderer?.getPerformanceStats().scale ?? 1,
+        layoutState.viewJsonDisplayPreset.value,
+        routingDetailDeferred,
+      )
+      const userVisible = visibility.objectKinds[kind]
+      const presetVisible = isViewJsonDisplayModeVisible(displayMode)
+      return {
+        kind,
+        label: VIEW_JSON_OBJECT_KIND_LABELS[kind],
+        color: getEdaObjectKindColorCss(kind),
+        userVisible,
+        presetVisible,
+        visible: userVisible && presetVisible,
+        count: model.countsByObjectKind[kind],
+        displayMode,
+      }
+    })
+}
+
+function handleViewJsonRenderModelReady(model: ViewJsonRenderModel): void {
+  currentViewJsonRenderModel = model
+  const visibility = layoutState.viewJsonVisibility.value
+  if (!visibility) return
+  layoutState.tileLayers.value = buildViewJsonLayerItems(model.layers, visibility)
+  refreshViewJsonObjectKindPanelIfNeeded(model, visibility, true)
+  if (showViewJsonPerformanceHud.value) {
+    applyRendererStatsToHud(viewJsonFullRenderer?.getPerformanceStats() ?? null)
+  }
+}
+
+function applyViewJsonVisibility(visibility: ViewJsonVisibilityState): void {
+  const model = currentViewJsonRenderModel
+  if (!model) return
+  layoutState.viewJsonVisibility.value = visibility
+  layoutState.tileLayers.value = buildViewJsonLayerItems(model.layers, visibility)
+  refreshViewJsonObjectKindPanelIfNeeded(model, visibility, true)
+  viewJsonFullRenderer?.applyVisibility(visibility)
+}
+
+function setupViewJsonVisibilityControls(model: ViewJsonRenderModel): void {
+  const initialVisibility = createViewJsonVisibilityState(model.layers)
+  layoutState.viewJsonDisplayPreset.value = VIEW_JSON_DEFAULT_DISPLAY_PRESET
+  applyViewJsonVisibility(initialVisibility)
+
+  layoutState.viewJsonDisplayPresetActions.value = {
+    setPreset: (preset: ViewJsonDisplayPreset) => {
+      layoutState.viewJsonDisplayPreset.value = preset
+      viewJsonFullRenderer?.setDisplayPreset(preset)
+      refreshViewJsonObjectKindPanelIfNeeded(currentViewJsonRenderModel, layoutState.viewJsonVisibility.value, true)
+    },
+  }
+
+  layoutState.tileLayerActions.value = {
+    toggleLayer: (id: number) => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(toggleViewJsonLayer(current, id))
+    },
+    showAll: () => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(showAllViewJsonLayers(current))
+    },
+    hideAll: () => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(hideAllViewJsonLayers(current))
+    },
+  }
+
+  layoutState.tileObjectKindActions.value = {
+    toggleObjectKind: (kind: ViewJsonObjectKind) => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(toggleViewJsonObjectKind(current, kind))
+    },
+    showAll: () => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(showAllViewJsonObjectKinds(current))
+    },
+    hideAll: () => {
+      const current = layoutState.viewJsonVisibility.value
+      if (!current) return
+      applyViewJsonVisibility(hideAllViewJsonObjectKinds(current))
+    },
+  }
+}
+
+function setupViewJsonLayoutActions(ed: Editor, pkg: ViewJsonPackageData): void {
   const view = ed.view
   if (!view) return
 
   viewportAnimator = markRaw(new ViewportAnimator(view))
   viewportAnimator.setManifest({
     version: 1,
-    designName: 'view-json-overview',
-    dbuPerMicron: overview.dbuPerMicron,
+    designName: pkg.manifest.design_name ?? 'view-json-layout',
+    dbuPerMicron: pkg.dbuPerMicron,
     dieArea: {
-      x: overview.dieWorld.x,
-      y: overview.dieWorld.y,
-      w: overview.dieWorld.w,
-      h: overview.dieWorld.h,
+      x: 0,
+      y: 0,
+      w: pkg.worldWidth,
+      h: pkg.worldHeight,
     },
     tileConfig: {
       tilePixelSize: 0,
@@ -432,7 +642,7 @@ function setupViewJsonLayoutActions(ed: Editor, overview: ViewJsonOverviewData):
     cellsFile: { path: '', size: 0, hash: '' },
     globalFile: { path: '', size: 0, hash: '' },
     stats: {
-      totalInstances: overview.totalInstanceCount,
+      totalInstances: pkg.instances.length,
       generatedAt: '',
     },
   })
@@ -448,14 +658,14 @@ function setupViewJsonLayoutActions(ed: Editor, overview: ViewJsonOverviewData):
   drcViolationOverlay.bindViewportEvents()
   view.addChild(drcViolationOverlay)
 
-  layoutState.tileDbuPerMicron.value = overview.dbuPerMicron
-  layoutState.tileDieWorldH.value = overview.worldHeight
+  layoutState.tileDbuPerMicron.value = pkg.dbuPerMicron
+  layoutState.tileDieWorldH.value = pkg.worldHeight
   layoutState.tileActions.value = {
     clearSelection: () => {
       layoutState.tileSelection.value = null
     },
     fitToView: () => {
-      ed.fitToWorld(40, { worldCenter: worldCenterForViewJson(overview) })
+      ed.fitToWorld(40, { worldCenter: worldCenterForViewJson(pkg) })
     },
   }
 }
@@ -491,34 +701,61 @@ async function loadStepImagePreview(
 }
 
 function showViewJsonLayout(
-  overview: ViewJsonOverviewData,
+  pkg: ViewJsonPackageData,
   guard: DrawingAsyncGuard,
 ): void {
   const ed = editor.value
   if (!ed?.view || !guard.isCurrent()) return
 
   cleanupLayout()
+  currentViewJsonPackageData = pkg
   ed.clearBackground()
   previewImageUrl.value = null
-  ed.setWorldBounds(overview.worldWidth, overview.worldHeight)
-  viewJsonOverviewRenderer = markRaw(new ViewJsonOverviewRenderer(ed.view, {
-    rasterTileWorkerFactory: createViewJsonRasterTileWorker,
+  ed.setWorldBounds(pkg.worldWidth, pkg.worldHeight)
+  const worldCenter = worldCenterForViewJson(pkg)
+  ed.fitToWorld(40, { worldCenter })
+
+  viewJsonFullRenderer = markRaw(new ViewJsonFullRenderer(ed.view, ed.application?.renderer ?? null, {
+    onModelReady: handleViewJsonRenderModelReady,
+    requestRenderActive: () => ed.requestRenderActive(),
+    getFrameThrottleState: () => ed.getRenderThrottleState(),
+    loadRoutingDetail: async (_data, options) => {
+      const packageRoot = currentViewJsonPackageRoot.value
+      const projectPath = currentProject.value?.path
+      if (!packageRoot || !projectPath || !guard.isCurrent()) return null
+      return loadViewJsonRoutingDetail(packageRoot, {
+        projectPath,
+        workerFactory: createViewJsonPackageDataWorker,
+        shouldCancel: () => !guard.isCurrent() || (options?.shouldCancel?.() ?? false),
+      })
+    },
+    semanticOverviewWorkerFactory: createViewJsonSemanticOverviewWorker,
+    tileStoreFactory: (data) => {
+      const packageRoot = data.packageRoot ?? currentViewJsonPackageRoot.value
+      const projectPath = currentProject.value?.path
+      if (!packageRoot || !projectPath || !data.geometryTileIndex) return null
+      return new ViewJsonGeometryTileStore(packageRoot, data.geometryTileIndex, {
+        projectPath,
+        worldHeight: data.worldHeight,
+      })
+    },
   }))
-  viewJsonOverviewRenderer.render(overview)
-  setupViewJsonLayoutActions(ed, overview)
-  void loadDrcViolationOverlayAfterTiles(ed, overview.worldHeight, guard)
+  const model = viewJsonFullRenderer.render(pkg)
+  currentViewJsonRenderModel = model
+  setupViewJsonVisibilityControls(model)
+  setupViewJsonLayoutActions(ed, pkg)
+  void loadDrcViolationOverlayAfterTiles(ed, pkg.worldHeight, guard)
 
   layoutState.renderMode.value = 'layout'
   layoutState.loadingState.value = 'ready'
   layoutState.loadingMessage.value = ''
   viewJsonPerformanceHud.value = {
     ...viewJsonPerformanceHud.value,
-    loadStats: overview.loadStats,
+    loadStats: pkg.loadStats,
   }
-  applyRendererStatsToHud(viewJsonOverviewRenderer.getPerformanceStats())
+  applyRendererStatsToHud(viewJsonFullRenderer.getPerformanceStats())
   startViewJsonPerformanceSampling()
 
-  const worldCenter = worldCenterForViewJson(overview)
   void nextTick(() => {
     editor.value?.fitToWorld(40, { worldCenter })
     requestAnimationFrame(() => editor.value?.fitToWorld(40, { worldCenter }))
@@ -565,42 +802,43 @@ async function loadDrcViolationOverlayAfterTiles(
 async function loadStepViewJsonOverview(
   viewJsonPackageRoot: string,
   guard: DrawingAsyncGuard = createDrawingAsyncGuard(currentStepKey.value),
-): Promise<ViewJsonOverviewData | null> {
+): Promise<ViewJsonPackageData | null> {
   const ed = editor.value
   if (!ed?.view || !guard.isCurrent()) return null
 
-  if (currentViewJsonOverview.value && currentViewJsonPackageRoot.value === viewJsonPackageRoot) {
-    return currentViewJsonOverview.value
+  if (currentViewJsonPackage.value && currentViewJsonPackageRoot.value === viewJsonPackageRoot) {
+    return currentViewJsonPackage.value
   }
 
-  currentViewJsonOverview.value = null
+  currentViewJsonPackage.value = null
   layoutState.loadingMessage.value = 'Loading view JSON layout...'
 
   try {
     const projectPath = currentProject.value?.path
     if (!projectPath) {
-      throw new Error('Project path is required to load view JSON overview.')
+      throw new Error('Project path is required to load view JSON layout.')
     }
-    const overview = await loadViewJsonOverview(viewJsonPackageRoot, {
+    const pkg = await loadViewJsonPackageData(viewJsonPackageRoot, {
       projectPath,
+      workerFactory: createViewJsonPackageDataWorker,
+      deferRoutingDetail: true,
       shouldCancel: () => !guard.isCurrent(),
-      workerFactory: createViewJsonOverviewWorker,
     })
     if (!guard.isCurrent() || editor.value !== ed) {
       return null
     }
 
-    currentViewJsonOverview.value = overview
-    return overview
+    currentViewJsonPackage.value = pkg
+    return pkg
   } catch (err) {
     if (isViewJsonLoadCancelled(err) && !guard.isCurrent()) {
       return null
     }
-    console.error('Failed to load view JSON overview:', err)
+    console.error('Failed to load view JSON layout:', err)
     layoutState.loadingState.value = 'error'
     layoutState.loadingMessage.value = String(err)
     cleanupLayout()
-    currentViewJsonOverview.value = null
+    currentViewJsonPackage.value = null
     return null
   }
 }
@@ -621,6 +859,7 @@ async function onPreviewModeChange(mode: 'layout' | 'image'): Promise<void> {
         if (guard.isCurrent()) resetLoadingState()
         return
       }
+      releaseCurrentViewJsonPackageCache()
       await loadStepImagePreview(imagePath, guard)
     } else {
       const packageRoot = currentViewJsonPackageRoot.value
@@ -752,7 +991,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   detachCanvasPointerListeners?.()
-  stopPerformanceHudSampling()
+  cleanupLayout()
   window.removeEventListener('keydown', onWindowKeyDownForLayoutFit)
 })
 </script>
@@ -895,7 +1134,7 @@ onUnmounted(() => {
         >
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">FPS</span>
-            <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.fps, 0) }}</span>
+            <span>{{ formatPerformanceFps(viewJsonPerformanceHud) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Frame</span>
@@ -932,40 +1171,66 @@ onUnmounted(() => {
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Tile Q/B/C</span>
             <span>
-              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.pendingRasterTileCount)) }}
+              {{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformanceInteger(viewJsonPerformanceHud.pendingRasterTileCount)) }}
               /
-              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.buildingRasterTileCount)) }}
+              {{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformanceInteger(viewJsonPerformanceHud.buildingRasterTileCount)) }}
               /
-              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.activeRasterTileCount)) }}
+              {{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformanceInteger(viewJsonPerformanceHud.activeRasterTileCount)) }}
             </span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Hit/Miss</span>
             <span>
-              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheHitCount)) }}
+              {{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheHitCount)) }}
               /
-              {{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheMissCount)) }}
+              {{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformanceInteger(viewJsonPerformanceHud.rasterTileCacheMissCount)) }}
             </span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Hit%</span>
-            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformancePercent(viewJsonPerformanceHud.rasterTileCacheHitRate)) }}</span>
+            <span>{{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformancePercent(viewJsonPerformanceHud.rasterTileCacheHitRate)) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Fallback%</span>
-            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', formatPerformancePercent(viewJsonPerformanceHud.rasterTileFallbackRate)) }}</span>
+            <span>{{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), formatPerformancePercent(viewJsonPerformanceHud.rasterTileFallbackRate)) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Worker</span>
-            <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'raster', `${formatPerformanceNumber(viewJsonPerformanceHud.lastRasterTileWorkerMs)}ms`) }}</span>
+            <span>{{ formatPerformanceMetric(isViewJsonTileHudMode(viewJsonPerformanceHud.renderMode), `${formatPerformanceNumber(viewJsonPerformanceHud.lastRasterTileWorkerMs)}ms`) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">GPU Cache</span>
             <span>{{ formatPerformanceMetric(viewJsonPerformanceHud.renderMode === 'gpu', formatPerformanceInteger(viewJsonPerformanceHud.gpuChunkBufferCacheSize)) }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Snap</span>
+            <span>
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.interactiveSnapshotMs) }}ms
+              /
+              {{ formatPerformanceInteger(viewJsonPerformanceHud.interactiveSnapshotSkippedCount) }}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
             <span class="text-(--text-secondary)">Rebuild</span>
             <span>{{ formatPerformanceNumber(viewJsonPerformanceHud.rebuildMs) }}ms</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Model/Idx/Q</span>
+            <span>
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.buildModelMs ?? 0) }}
+              /
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.buildSpatialIndexMs ?? 0) }}
+              /
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.queryMs ?? 0) }}ms
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-(--text-secondary)">Lazy/Draw</span>
+            <span>
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.lazyMaterializeMs ?? 0) }}
+              /
+              {{ formatPerformanceNumber(viewJsonPerformanceHud.drawMs ?? 0) }}ms
+            </span>
           </div>
           <div
             v-if="viewJsonPerformanceHud.loadStats"

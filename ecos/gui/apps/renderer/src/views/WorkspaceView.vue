@@ -17,6 +17,7 @@ const route = useRoute()
 
 const hasLayoutInspectorContent = computed(() =>
   layoutState.tileLayers.value.length > 0
+  || layoutState.tileObjectKinds.value.length > 0
   || layoutState.tileSelection.value != null,
 )
 

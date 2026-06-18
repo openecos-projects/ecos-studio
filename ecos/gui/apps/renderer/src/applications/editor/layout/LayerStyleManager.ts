@@ -1,4 +1,5 @@
 import type { LayerDef } from './types'
+import { getEdaLayerColor } from './layerPalette'
 
 export type LayerFillMode = 'solid' | 'texture'
 export type LayerTexturePattern = 'diagonal' | 'cross' | 'dot' | 'grid'
@@ -16,38 +17,15 @@ export interface LayerStyle {
   textureAngle: number
 }
 
-const DEFAULT_COLORS: Record<string, number> = {
-  OVERLAP: 0x888888,
-  ACT: 0xcc8844,
-  NP: 0x88cc44,
-  PP: 0x44cc88,
-  NW1: 0x44cccc,
-  POLY: 0xff8844,
-  CT: 0x999999,
-  MET1: 0x4444ff,
-  VIA1: 0xaaaaaa,
-  MET2: 0xff4444,
-  VIA2: 0xbbbbbb,
-  MET3: 0x44ff44,
-  VIA3: 0xcccccc,
-  MET4: 0xffff44,
-  VIA4: 0xdddddd,
-  MET5: 0xff44ff,
-  T4V2: 0x777777,
-  T4M2: 0x998877,
-  RV: 0x666666,
-  RDL: 0x559988,
-}
-
-const DEFAULT_FILL_ALPHA = 0.35
-const DEFAULT_STROKE_ALPHA = 0.8
+const DEFAULT_FILL_ALPHA = 0.3
+const DEFAULT_STROKE_ALPHA = 0.72
 const DEFAULT_STROKE_WIDTH = 1
 const DEFAULT_TEXTURE_PATTERN: LayerTexturePattern = 'diagonal'
 const DEFAULT_TEXTURE_SCALE = 1
 const DEFAULT_TEXTURE_ANGLE = 0
 
 function colorForLayer(layername: string): number {
-  return DEFAULT_COLORS[layername] ?? 0x888888
+  return getEdaLayerColor(layername)
 }
 
 function clampAlpha(alpha: number): number {
