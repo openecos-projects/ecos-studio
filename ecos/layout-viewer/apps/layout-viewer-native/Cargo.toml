@@ -1,0 +1,13 @@
+[package]
+name = "layout-viewer-native"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+layoutpkg-format = { path = "../../crates/layoutpkg-format" }
+layoutpkg-reader = { path = "../../crates/layoutpkg-reader" }

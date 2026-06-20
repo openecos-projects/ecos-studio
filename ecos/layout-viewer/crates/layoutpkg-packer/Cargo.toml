@@ -1,0 +1,16 @@
+[package]
+name = "layoutpkg-packer"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+layoutpkg-format = { path = "../layoutpkg-format" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+viewjson-importer = { path = "../viewjson-importer" }
+
+[dev-dependencies]
+tempfile.workspace = true

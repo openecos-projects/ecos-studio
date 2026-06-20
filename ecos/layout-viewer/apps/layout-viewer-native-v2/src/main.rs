@@ -1,0 +1,2746 @@
+mod plane_cache;
+mod raster_plane;
+mod render_surface;
+
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::mpsc::{self, Receiver, Sender},
+};
+
+use anyhow::Result;
+use clap::Parser;
+use eframe::egui;
+use layout_display::{Color, DisplayModel, LayerStyle, Pattern, ResolvedDisplayLayer};
+use layout_render::{
+    classify_lod, DrawItem, LodHysteresisState, LodLevel, LodStats, PickHit, PickHitTarget,
+    PickRequest, RenderPlan, RenderPlanSource, RenderPlane, RenderPlanner, RenderSettings,
+    Viewport,
+};
+use layoutdb::{
+    CellViewState, HierarchyPolicy, HierarchyTreeRow, InstancePath, LayoutSession,
+    PackageLayoutSource, Rect, ShapeKind, ViewportLoadBatch,
+};
+
+const TARGET_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+const MAX_FPS_SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+#[derive(Debug, Parser)]
+#[command(name = "layout-viewer-native-v2")]
+struct Args {
+    package_root: PathBuf,
+
+    #[arg(long, default_value_t = 128)]
+    cache_capacity: usize,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let app = LayoutViewerV2App::open(args)?;
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 860.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "ECOS Layout Viewer V2",
+        native_options,
+        Box::new(move |_cc| Ok(Box::new(app))),
+    )
+    .map_err(|err| anyhow::anyhow!("{err}"))?;
+    Ok(())
+}
+
+struct LayoutViewerV2App {
+    session: LayoutSession,
+    display: DisplayModel,
+    view: Option<V2ViewState>,
+    cell_view: CellViewState,
+    hierarchy_policy: HierarchyPolicy,
+    lod_tuning: LodTuningState,
+    frame_timing: FrameTimingState,
+    frame_rate: FrameRateState,
+    last_interaction_at: Option<std::time::Instant>,
+    interaction_settle_ms: u64,
+    async_load: AsyncLoadState,
+    background_load: BackgroundLoadHandle,
+    render_surface: render_surface::RenderSurface,
+    render_surface_texture: Option<egui::TextureHandle>,
+    render_surface_texture_key: Option<plane_cache::PlaneKey>,
+    load_generation: u64,
+    last_render_plan: Option<layout_render::RenderPlan>,
+    last_render_plan_revision: u64,
+    last_render_plan_interaction_coarse: bool,
+    lod_hysteresis: LodHysteresisState,
+    selected: Option<PickHit>,
+    last_error: Option<String>,
+    last_plan_batches: usize,
+    last_plan_items: usize,
+    last_plan_truncated: bool,
+    last_plan_reused: bool,
+    last_candidates_checked: usize,
+    last_total_shapes: usize,
+    last_hierarchy_candidates_checked: usize,
+    last_total_hierarchy_instances: usize,
+    last_display_cache_hits: usize,
+    last_display_cache_misses: usize,
+    last_plane_cache_hits: usize,
+    last_plane_cache_misses: usize,
+    last_used_plane_renderer: bool,
+    last_paint_ops: usize,
+    last_lod_stats: LodStats,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FrameTimingState {
+    load_ms: f32,
+    plan_ms: f32,
+    paint_ms: f32,
+    update_ms: f32,
+}
+
+impl FrameTimingState {
+    fn record_load(&mut self, duration: std::time::Duration) {
+        self.load_ms = duration.as_secs_f32() * 1_000.0;
+    }
+
+    fn record_plan(&mut self, duration: std::time::Duration) {
+        self.plan_ms = duration.as_secs_f32() * 1_000.0;
+    }
+
+    fn record_paint(&mut self, duration: std::time::Duration) {
+        self.paint_ms = duration.as_secs_f32() * 1_000.0;
+    }
+
+    fn record_update(&mut self, duration: std::time::Duration) {
+        self.update_ms = duration.as_secs_f32() * 1_000.0;
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FrameRateState {
+    last_frame_at: Option<std::time::Instant>,
+    fps: f32,
+}
+
+impl FrameRateState {
+    fn record_frame_delta(&mut self, duration: std::time::Duration) {
+        let seconds = duration.as_secs_f32();
+        if seconds <= f32::EPSILON {
+            return;
+        }
+        let instant_fps = 1.0 / seconds;
+        self.fps = if self.fps <= f32::EPSILON {
+            instant_fps
+        } else {
+            self.fps * 0.85 + instant_fps * 0.15
+        };
+    }
+
+    fn record_frame_at(&mut self, now: std::time::Instant) {
+        if let Some(previous) = self.last_frame_at.replace(now) {
+            let duration = now.saturating_duration_since(previous);
+            if duration <= MAX_FPS_SAMPLE_INTERVAL {
+                self.record_frame_delta(duration);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoadRequest {
+    viewport: Rect,
+    generation: u64,
+}
+
+#[derive(Debug)]
+struct LoadResult {
+    request: LoadRequest,
+    result: Result<ViewportLoadBatch, String>,
+}
+
+struct BackgroundLoadHandle {
+    requests: Sender<LoadRequest>,
+    results: Receiver<LoadResult>,
+}
+
+impl BackgroundLoadHandle {
+    fn spawn(package_root: PathBuf, cache_capacity: usize) -> Self {
+        let (request_tx, request_rx) = mpsc::channel::<LoadRequest>();
+        let (result_tx, result_rx) = mpsc::channel::<LoadResult>();
+        std::thread::spawn(move || {
+            let mut source = match PackageLayoutSource::open(package_root, cache_capacity) {
+                Ok(source) => source,
+                Err(error) => {
+                    let _ = result_tx.send(LoadResult {
+                        request: LoadRequest {
+                            viewport: Rect::new(0, 0, 0, 0),
+                            generation: 0,
+                        },
+                        result: Err(error.to_string()),
+                    });
+                    return;
+                }
+            };
+            while let Ok(mut request) = request_rx.recv() {
+                while let Ok(newer) = request_rx.try_recv() {
+                    request = newer;
+                }
+                let result = source
+                    .load_viewport_batch(request.viewport)
+                    .map_err(|error| error.to_string());
+                if result_tx.send(LoadResult { request, result }).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            requests: request_tx,
+            results: result_rx,
+        }
+    }
+
+    fn request(&self, request: LoadRequest) {
+        let _ = self.requests.send(request);
+    }
+
+    fn try_recv(&self) -> Option<LoadResult> {
+        let mut latest = None;
+        while let Ok(result) = self.results.try_recv() {
+            latest = Some(result);
+        }
+        latest
+    }
+}
+
+#[derive(Debug, Default)]
+struct AsyncLoadState {
+    pending: Option<LoadRequest>,
+    in_flight: Option<LoadRequest>,
+    completed: Option<LoadRequest>,
+    completed_generation: u64,
+}
+
+impl AsyncLoadState {
+    fn request(&mut self, viewport: Rect, generation: u64) {
+        self.pending = Some(LoadRequest {
+            viewport,
+            generation,
+        });
+    }
+
+    #[cfg(test)]
+    fn pending_request(&self) -> Option<LoadRequest> {
+        self.pending
+    }
+
+    fn take_pending(&mut self) -> Option<LoadRequest> {
+        let request = self.pending.take();
+        if let Some(request) = request {
+            self.in_flight = Some(request);
+        }
+        request
+    }
+
+    fn clear_pending(&mut self) {
+        self.pending = None;
+    }
+
+    fn has_pending_work(&self) -> bool {
+        self.pending.is_some() || self.in_flight.is_some()
+    }
+
+    fn needs_request(&self, viewport: Rect) -> bool {
+        ![self.pending, self.in_flight, self.completed]
+            .into_iter()
+            .flatten()
+            .any(|request| request.viewport == viewport)
+    }
+
+    fn mark_completed(&mut self, request: LoadRequest) {
+        self.completed_generation = self.completed_generation.max(request.generation);
+        self.completed = Some(request);
+        if self
+            .in_flight
+            .map(|in_flight| in_flight.generation <= request.generation)
+            .unwrap_or(false)
+        {
+            self.in_flight = None;
+        }
+    }
+
+    fn should_apply_result(&self, request: LoadRequest) -> bool {
+        request.generation >= self.completed_generation
+            && self
+                .pending
+                .map(|pending| request.generation >= pending.generation)
+                .unwrap_or(true)
+    }
+}
+
+fn should_reuse_render_plan(
+    cache_key_matches: bool,
+    previous_source: RenderPlanSource,
+    expected_source: RenderPlanSource,
+) -> bool {
+    cache_key_matches && previous_source == expected_source
+}
+
+fn plan_source_for_units_per_pixel(
+    units_per_pixel: f32,
+    settings: RenderSettings,
+    hysteresis_state: &mut LodHysteresisState,
+    hierarchy_exists: bool,
+    overview_available: bool,
+    has_visible_layers: bool,
+) -> RenderPlanSource {
+    if !has_visible_layers {
+        return RenderPlanSource::FlatDetail;
+    }
+    let lod = classify_lod(units_per_pixel, settings, hysteresis_state);
+    match lod {
+        LodLevel::Far if hierarchy_exists => RenderPlanSource::HierarchyFar,
+        LodLevel::Mid if hierarchy_exists => RenderPlanSource::HierarchyMid,
+        LodLevel::Near if hierarchy_exists => RenderPlanSource::HierarchyNear,
+        LodLevel::Far | LodLevel::Mid if overview_available => RenderPlanSource::OverviewDensity,
+        _ => RenderPlanSource::FlatDetail,
+    }
+}
+
+fn overview_error_is_unavailable(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("overview pyramid is not available")
+        || message.contains("overview pyramid has no levels")
+}
+
+fn should_request_smooth_repaint(interaction_active: bool, async_load: &AsyncLoadState) -> bool {
+    interaction_active || async_load.has_pending_work()
+}
+
+fn should_request_detail_tiles(source: RenderPlanSource) -> bool {
+    matches!(
+        source,
+        RenderPlanSource::FlatDetail | RenderPlanSource::HierarchyNear
+    )
+}
+
+fn use_plane_renderer(source: RenderPlanSource) -> bool {
+    matches!(
+        source,
+        RenderPlanSource::HierarchyFar
+            | RenderPlanSource::HierarchyMid
+            | RenderPlanSource::OverviewDensity
+    )
+}
+
+fn current_cell_has_instances(db: &layoutdb::LayoutDb, cell_view: &CellViewState) -> bool {
+    db.cell(cell_view.target_cell())
+        .map(|cell| !cell.instances().is_empty())
+        .unwrap_or(false)
+}
+
+fn is_top_cell_view(db: &layoutdb::LayoutDb, cell_view: &CellViewState) -> bool {
+    cell_view.context_cell() == db.top_cell()
+        && cell_view.target_cell() == db.top_cell()
+        && cell_view.specific_path().is_empty()
+}
+
+fn hierarchy_policy_from_tuning(tuning: LodTuningState) -> HierarchyPolicy {
+    let mut policy = HierarchyPolicy::default();
+    policy.max_depth = tuning.hierarchy_expand_depth.max(1);
+    policy
+}
+
+fn sync_hierarchy_policy_from_tuning(policy: &mut HierarchyPolicy, tuning: LodTuningState) {
+    policy.max_depth = tuning.hierarchy_expand_depth.max(1);
+}
+
+fn cell_label(db: &layoutdb::LayoutDb, cell_id: layoutdb::CellId) -> String {
+    let name = db
+        .cell(cell_id)
+        .map(|cell| cell.name().to_owned())
+        .unwrap_or_else(|| "<missing>".to_owned());
+    format!("{name} ({})", cell_id.raw())
+}
+
+fn hierarchy_summary_text(
+    db: &layoutdb::LayoutDb,
+    cell_view: &CellViewState,
+    policy: &HierarchyPolicy,
+) -> String {
+    format!(
+        "context: {}\ntarget: {}\npath depth: {}\npolicy depth: {}..{}\nexpand arrays: {}",
+        cell_label(db, cell_view.context_cell()),
+        cell_label(db, cell_view.target_cell()),
+        cell_view.specific_path().depth(),
+        policy.min_depth,
+        policy.max_depth,
+        policy.expand_arrays
+    )
+}
+
+fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
+    if hit.instance_path.is_empty() {
+        return None;
+    }
+    match hit.target {
+        PickHitTarget::Shape | PickHitTarget::Instance { .. } => Some(hit.instance_path.clone()),
+    }
+}
+
+fn selection_summary_text(hit: &PickHit) -> String {
+    let target = match hit.target {
+        PickHitTarget::Shape => "shape".to_owned(),
+        PickHitTarget::Instance {
+            parent_cell,
+            child_cell,
+            instance_id,
+            array_column,
+            array_row,
+        } => format!(
+            "instance id={} parent={} child={} array={},{}",
+            instance_id,
+            parent_cell.raw(),
+            child_cell.raw(),
+            array_column,
+            array_row
+        ),
+    };
+    format!(
+        "target: {target}\ndepth: {}\ncell: {}\nsource: {}\nlayer: {}\nbbox: {}, {}, {}, {}",
+        hit.depth,
+        hit.cell.raw(),
+        hit.source_id,
+        hit.layer_id,
+        hit.bbox.x1,
+        hit.bbox.y1,
+        hit.bbox.x2,
+        hit.bbox.y2
+    )
+}
+
+fn hierarchy_row_label(db: &layoutdb::LayoutDb, row: &HierarchyTreeRow) -> String {
+    if row.instance_id.is_none() {
+        return row.cell_name.clone();
+    }
+    let cell_name = db
+        .cell(row.cell)
+        .map(|cell| cell.name())
+        .unwrap_or(row.cell_name.as_str());
+    let instance_name = if row.name.is_empty() {
+        "<unnamed>"
+    } else {
+        row.name.as_str()
+    };
+    format!(
+        "{}inst {}  {} -> {}",
+        "  ".repeat(row.depth),
+        row.instance_id.unwrap_or_default(),
+        instance_name,
+        cell_name
+    )
+}
+
+fn focus_view_on_cell_bbox(
+    view: &mut Option<V2ViewState>,
+    db: &layoutdb::LayoutDb,
+    cell_view: &CellViewState,
+) {
+    let Some(target) = db.cell(cell_view.target_cell()) else {
+        return;
+    };
+    let bbox = target.bbox();
+    if let Some(current_view) = view.as_mut() {
+        *current_view =
+            V2ViewState::fit(bbox, current_view.screen_width, current_view.screen_height);
+    } else {
+        *view = Some(V2ViewState::fit(bbox, 1.0, 1.0));
+    }
+}
+
+fn ascended_cell_view(cell_view: &CellViewState) -> CellViewState {
+    cell_view.ascend()
+}
+
+fn overview_density_usable(
+    db: &layoutdb::LayoutDb,
+    display: &DisplayModel,
+    viewport: Viewport,
+) -> bool {
+    let layers = display.resolved_layers();
+    if layers.is_empty() {
+        return false;
+    }
+    db.overview_bins(viewport.world).any(|bin| {
+        layers
+            .iter()
+            .any(|layer| layer_matches_overview_bin(layer, bin))
+    })
+}
+
+fn layer_matches_overview_bin(
+    layer: &ResolvedDisplayLayer,
+    bin: &layoutdb::OverviewDensityBin,
+) -> bool {
+    match layer.source {
+        layout_display::SourceSelector::PhysicalLayer(layer_id) => {
+            bin.layer_id == layer_id && overview_kind_matches_physical_layer(bin.kind)
+        }
+        layout_display::SourceSelector::ShapeKind(kind) => bin.kind == kind,
+        layout_display::SourceSelector::CellFrame
+        | layout_display::SourceSelector::SelectionOverlay => false,
+    }
+}
+
+fn overview_kind_matches_physical_layer(kind: ShapeKind) -> bool {
+    matches!(
+        kind,
+        ShapeKind::RegularWire
+            | ShapeKind::SpecialWire
+            | ShapeKind::Via
+            | ShapeKind::IoPin
+            | ShapeKind::Blockage
+            | ShapeKind::Fill
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LodTuningState {
+    small_shape_px: f32,
+    frame_only_px: f32,
+    fill_px: f32,
+    fill_units_per_pixel: f32,
+    long_shape_px: f32,
+    occupancy_bin_px: f32,
+    max_low_priority_quads_per_bin: usize,
+    max_frames_per_bin: usize,
+    max_markers_per_bin: usize,
+    hierarchy_bbox_units_per_pixel: f32,
+    hierarchy_coarse_units_per_pixel: f32,
+    array_bbox_units_per_pixel: f32,
+    array_grid_units_per_pixel: f32,
+    hierarchy_expand_depth: usize,
+}
+
+impl Default for LodTuningState {
+    fn default() -> Self {
+        Self::from_settings(RenderSettings::default())
+    }
+}
+
+impl LodTuningState {
+    fn from_settings(settings: RenderSettings) -> Self {
+        Self {
+            small_shape_px: settings.small_shape_px,
+            frame_only_px: settings.frame_only_px,
+            fill_px: settings.fill_px,
+            fill_units_per_pixel: settings.fill_units_per_pixel,
+            long_shape_px: settings.long_shape_px,
+            occupancy_bin_px: settings.occupancy_bin_px,
+            max_low_priority_quads_per_bin: settings.max_low_priority_quads_per_bin,
+            max_frames_per_bin: settings.max_frames_per_bin,
+            max_markers_per_bin: settings.max_markers_per_bin,
+            hierarchy_bbox_units_per_pixel: settings.hierarchy_bbox_units_per_pixel,
+            hierarchy_coarse_units_per_pixel: settings.hierarchy_coarse_units_per_pixel,
+            array_bbox_units_per_pixel: settings.array_bbox_units_per_pixel,
+            array_grid_units_per_pixel: settings.array_grid_units_per_pixel,
+            hierarchy_expand_depth: settings.hierarchy_expand_depth.min(64),
+        }
+    }
+
+    fn render_settings(self, force_interaction_coarse: bool) -> RenderSettings {
+        let frame_only_px = self.frame_only_px.max(self.small_shape_px);
+        let mut settings = RenderSettings {
+            small_shape_px: self.small_shape_px,
+            frame_only_px,
+            fill_px: self.fill_px.max(frame_only_px),
+            fill_units_per_pixel: self.fill_units_per_pixel.max(0.01),
+            long_shape_px: self.long_shape_px,
+            occupancy_bin_px: self.occupancy_bin_px,
+            max_low_priority_quads_per_bin: self.max_low_priority_quads_per_bin.max(1),
+            max_frames_per_bin: self.max_frames_per_bin.max(1),
+            max_markers_per_bin: self.max_markers_per_bin.max(1),
+            hierarchy_bbox_units_per_pixel: self.hierarchy_bbox_units_per_pixel.max(1.0),
+            hierarchy_coarse_units_per_pixel: self.hierarchy_coarse_units_per_pixel.max(1.0),
+            array_bbox_units_per_pixel: self.array_bbox_units_per_pixel.max(1.0),
+            array_grid_units_per_pixel: self.array_grid_units_per_pixel.max(1.0),
+            hierarchy_expand_depth: self.hierarchy_expand_depth.max(1),
+            ..Default::default()
+        };
+        settings.force_interaction_coarse = force_interaction_coarse;
+        if force_interaction_coarse {
+            settings.max_low_priority_quads_per_bin =
+                settings.max_low_priority_quads_per_bin.min(8);
+            settings.max_frames_per_bin = settings.max_frames_per_bin.min(6);
+            settings.max_markers_per_bin = settings.max_markers_per_bin.min(1);
+        }
+        settings
+    }
+}
+
+impl LayoutViewerV2App {
+    fn open(args: Args) -> Result<Self> {
+        let source = PackageLayoutSource::open(&args.package_root, args.cache_capacity)?;
+        let session = LayoutSession::from_source(source)?;
+        let display = DisplayModel::from_layout_layers(session.db().layers());
+        let cell_view = CellViewState::top(session.db());
+        let background_load =
+            BackgroundLoadHandle::spawn(args.package_root.clone(), args.cache_capacity);
+        Ok(Self {
+            session,
+            display,
+            view: None,
+            cell_view,
+            hierarchy_policy: hierarchy_policy_from_tuning(LodTuningState::default()),
+            lod_tuning: LodTuningState::default(),
+            frame_timing: FrameTimingState::default(),
+            frame_rate: FrameRateState::default(),
+            last_interaction_at: None,
+            interaction_settle_ms: 120,
+            async_load: AsyncLoadState::default(),
+            background_load,
+            render_surface: render_surface::RenderSurface::new(32),
+            render_surface_texture: None,
+            render_surface_texture_key: None,
+            load_generation: 0,
+            last_render_plan: None,
+            last_render_plan_revision: 0,
+            last_render_plan_interaction_coarse: false,
+            lod_hysteresis: LodHysteresisState::default(),
+            selected: None,
+            last_error: None,
+            last_plan_batches: 0,
+            last_plan_items: 0,
+            last_plan_truncated: false,
+            last_plan_reused: false,
+            last_candidates_checked: 0,
+            last_total_shapes: 0,
+            last_hierarchy_candidates_checked: 0,
+            last_total_hierarchy_instances: 0,
+            last_display_cache_hits: 0,
+            last_display_cache_misses: 0,
+            last_plane_cache_hits: 0,
+            last_plane_cache_misses: 0,
+            last_used_plane_renderer: false,
+            last_paint_ops: 0,
+            last_lod_stats: LodStats::default(),
+        })
+    }
+
+    fn ensure_view(&mut self, size: egui::Vec2) {
+        if self.view.is_none() && size.x > 0.0 && size.y > 0.0 {
+            self.view = Some(V2ViewState::fit(
+                self.session.db().world_bbox(),
+                size.x,
+                size.y,
+            ));
+        }
+    }
+
+    fn interaction_active(&self) -> bool {
+        self.last_interaction_at
+            .map(|instant| instant.elapsed().as_millis() < u128::from(self.interaction_settle_ms))
+            .unwrap_or(false)
+    }
+
+    fn draw_canvas(&mut self, ui: &mut egui::Ui, rect: egui::Rect, response: &egui::Response) {
+        self.ensure_view(rect.size());
+        let Some(mut view) = self.view else {
+            return;
+        };
+        view = view.with_screen_size(rect.width(), rect.height());
+
+        if response.dragged() {
+            let delta = ui.input(|input| input.pointer.delta());
+            view.pan_pixels(delta.x, delta.y);
+            self.last_interaction_at = Some(std::time::Instant::now());
+            ui.ctx().request_repaint();
+        }
+
+        if response.hovered() {
+            let scroll = ui.input(|input| input.raw_scroll_delta.y);
+            if scroll.abs() > 0.0 {
+                let cursor = ui
+                    .input(|input| input.pointer.hover_pos())
+                    .unwrap_or(rect.center());
+                view.zoom_at_screen(
+                    scroll_zoom_factor(scroll),
+                    cursor.x - rect.left(),
+                    cursor.y - rect.top(),
+                    rect.width(),
+                    rect.height(),
+                );
+                self.last_interaction_at = Some(std::time::Instant::now());
+                ui.ctx().request_repaint();
+            }
+        }
+
+        if response.clicked_by(egui::PointerButton::Primary) {
+            if let Some(cursor) = response.interact_pointer_pos() {
+                let (world_x, world_y) = view.screen_to_world(
+                    cursor.x - rect.left(),
+                    cursor.y - rect.top(),
+                    rect.width(),
+                    rect.height(),
+                );
+                let tolerance = (view.units_per_pixel * 4.0).ceil().max(1.0) as i32;
+                self.selected = RenderPlanner::new(self.lod_tuning.render_settings(false))
+                    .pick_for_cell_view(
+                        self.session.db(),
+                        &self.display,
+                        PickRequest::new(world_x.round() as i32, world_y.round() as i32, tolerance),
+                        &self.cell_view,
+                        &self.hierarchy_policy,
+                    );
+            }
+        }
+
+        self.view = Some(view);
+
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(18, 24, 32));
+
+        let viewport = Viewport::new(
+            view.viewport_rect(rect.width(), rect.height()),
+            rect.width(),
+            rect.height(),
+        );
+        let interaction_active = self.interaction_active();
+        let render_settings = self.lod_tuning.render_settings(interaction_active);
+        let max_units_per_pixel = viewport
+            .units_per_pixel_x()
+            .max(viewport.units_per_pixel_y());
+        if max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel {
+            match self
+                .session
+                .ensure_overview_for_units_per_pixel(max_units_per_pixel)
+            {
+                Ok(true) => {
+                    ui.ctx().request_repaint();
+                    self.last_error = None;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    if !overview_error_is_unavailable(&error) {
+                        self.last_error = Some(error.to_string());
+                    }
+                }
+            }
+        }
+        let planner = RenderPlanner::new(render_settings);
+        sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
+        let mut preview_lod_hysteresis = self.lod_hysteresis;
+        let hierarchy_exists = current_cell_has_instances(self.session.db(), &self.cell_view);
+        let has_visible_layers = !self.display.resolved_layers().is_empty();
+        let overview_available = is_top_cell_view(self.session.db(), &self.cell_view)
+            && max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel
+            && overview_density_usable(self.session.db(), &self.display, viewport);
+        let expected_source = plan_source_for_units_per_pixel(
+            max_units_per_pixel,
+            render_settings,
+            &mut preview_lod_hysteresis,
+            hierarchy_exists,
+            overview_available,
+            has_visible_layers,
+        );
+        let load_started = std::time::Instant::now();
+        if let Some(result) = self.background_load.try_recv() {
+            if self.async_load.should_apply_result(result.request) {
+                match result.result {
+                    Ok(batch) => {
+                        self.session.apply_viewport_batch(batch);
+                        self.async_load.mark_completed(result.request);
+                        self.last_error = None;
+                        ui.ctx().request_repaint();
+                    }
+                    Err(error) => {
+                        self.last_error = Some(error);
+                    }
+                }
+            }
+        }
+        if should_request_detail_tiles(expected_source) {
+            if interaction_active {
+                self.load_generation += 1;
+                self.async_load
+                    .request(viewport.world, self.load_generation);
+                self.last_error = None;
+            } else {
+                if self.async_load.needs_request(viewport.world) {
+                    self.load_generation += 1;
+                    self.async_load
+                        .request(viewport.world, self.load_generation);
+                }
+                if let Some(request) = self.async_load.take_pending() {
+                    self.background_load.request(request);
+                }
+            }
+        } else {
+            self.async_load.clear_pending();
+        }
+        self.frame_timing.record_load(load_started.elapsed());
+
+        let plan_started = std::time::Instant::now();
+        let expected_cache_key = planner.cache_key_for_cell_view(
+            &self.display,
+            viewport,
+            expected_source,
+            &self.cell_view,
+            &self.hierarchy_policy,
+        );
+        let current_revision = self.session.revision();
+        let cache_key_matches = self
+            .last_render_plan
+            .as_ref()
+            .map(|plan| plan.cache_key == expected_cache_key)
+            .unwrap_or(false)
+            && self.last_render_plan_revision == current_revision;
+        let last_source = self
+            .last_render_plan
+            .as_ref()
+            .map(|plan| plan.source)
+            .unwrap_or_default();
+        let skip_planning =
+            should_reuse_render_plan(cache_key_matches, last_source, expected_source);
+        if skip_planning {
+            self.lod_hysteresis = preview_lod_hysteresis;
+            self.frame_timing
+                .record_plan(std::time::Duration::from_secs(0));
+        } else {
+            let plan = planner.plan_for_cell_view(
+                self.session.db(),
+                &self.display,
+                viewport,
+                &self.cell_view,
+                &self.hierarchy_policy,
+                &mut self.lod_hysteresis,
+            );
+            self.frame_timing.record_plan(plan_started.elapsed());
+            self.last_render_plan = Some(plan);
+            self.last_render_plan_revision = current_revision;
+            self.last_render_plan_interaction_coarse = interaction_active;
+        }
+        let paint_plan = self.last_render_plan.as_ref().unwrap();
+        let plan_truncated = paint_plan.truncated;
+        let reuse_last_plan = skip_planning;
+
+        self.last_plan_batches = paint_plan.batches.len();
+        self.last_plan_items = render_plan_item_count(&paint_plan);
+        self.last_plan_truncated = plan_truncated;
+        self.last_plan_reused = reuse_last_plan;
+        self.last_candidates_checked = paint_plan.query_stats.candidates_checked;
+        self.last_total_shapes = paint_plan.query_stats.total_shapes_in_cell;
+        self.last_hierarchy_candidates_checked =
+            paint_plan.query_stats.hierarchy_instance_candidates_checked;
+        self.last_total_hierarchy_instances = paint_plan.query_stats.total_hierarchy_instances;
+        self.last_display_cache_hits = paint_plan.query_stats.display_cache_hits;
+        self.last_display_cache_misses = paint_plan.query_stats.display_cache_misses;
+        self.last_lod_stats = paint_plan.lod_stats;
+
+        let paint_started = std::time::Instant::now();
+        let mut paint_ops = 1;
+        self.last_used_plane_renderer = use_plane_renderer(paint_plan.source);
+        if self.last_used_plane_renderer {
+            let before = self.render_surface.cache.stats();
+            paint_ops += draw_cached_plane(
+                &mut self.render_surface,
+                &mut self.render_surface_texture,
+                &mut self.render_surface_texture_key,
+                ui.ctx(),
+                &painter,
+                rect,
+                view,
+                paint_plan,
+                viewport.world,
+                interaction_active,
+                current_revision,
+            );
+            let after = self.render_surface.cache.stats();
+            self.last_plane_cache_hits = after.hits.saturating_sub(before.hits);
+            self.last_plane_cache_misses = after.misses.saturating_sub(before.misses);
+        } else {
+            self.last_plane_cache_hits = 0;
+            self.last_plane_cache_misses = 0;
+            paint_ops += draw_plan_vectors(&painter, rect, view, paint_plan, interaction_active);
+        }
+        self.last_paint_ops = paint_ops;
+        self.frame_timing.record_paint(paint_started.elapsed());
+
+        if let Some(selected) = &self.selected {
+            let selected_rect = world_rect_to_screen(selected.bbox, view, rect);
+            if selected_rect.intersects(rect) {
+                painter.rect_stroke(
+                    selected_rect.expand(2.0),
+                    0.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 228, 94)),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        }
+
+        self.draw_hud(ui, rect, view);
+    }
+
+    fn draw_hud(&self, ui: &mut egui::Ui, screen: egui::Rect, view: V2ViewState) {
+        let db = self.session.db();
+        let text = hud_summary_text(
+            db.design_name(),
+            view.units_per_pixel,
+            self.frame_rate.fps,
+            self.last_plan_truncated,
+            self.last_plan_reused,
+            self.last_error.as_deref(),
+        );
+        let hud_rect = egui::Rect::from_min_size(
+            screen.left_top() + egui::vec2(18.0, 18.0),
+            egui::vec2(260.0, 72.0),
+        );
+        ui.painter().rect_filled(
+            hud_rect,
+            6.0,
+            egui::Color32::from_rgba_unmultiplied(7, 12, 18, 238),
+        );
+        ui.painter().text(
+            hud_rect.left_top() + egui::vec2(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            text,
+            egui::FontId::monospace(12.0),
+            egui::Color32::from_rgb(238, 243, 248),
+        );
+    }
+
+    fn draw_sidebar(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::right("v2-display-panel")
+            .resizable(true)
+            .default_width(240.0)
+            .min_width(190.0)
+            .show(ctx, |ui| {
+                ui.heading("Display V2");
+                ui.separator();
+                self.draw_hierarchy_panel(ui);
+                ui.separator();
+                self.draw_lod_panel(ui);
+                ui.separator();
+                self.draw_stats_panel(ui);
+                ui.separator();
+                ui.label("Layers");
+                let layer_counts = loaded_physical_layer_counts(self.session.db());
+                egui::ScrollArea::vertical()
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        for layer in self.display.layers_mut() {
+                            let count = match layer.source {
+                                layout_display::SourceSelector::PhysicalLayer(layer_id) => {
+                                    layer_counts.get(&layer_id).copied().unwrap_or(0)
+                                }
+                                _ => 0,
+                            };
+                            let label = format!("{} ({count})", layer.name);
+                            ui.checkbox(&mut layer.visible, label);
+                        }
+                    });
+                ui.separator();
+                ui.label("Selection");
+                if let Some(hit) = self.selected.clone() {
+                    ui.monospace(selection_summary_text(&hit));
+                    let enter_path = enter_path_for_hit(&hit);
+                    if ui
+                        .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
+                        .clicked()
+                    {
+                        if let Some(path) = enter_path {
+                            self.enter_instance_path(path);
+                        }
+                    }
+                } else {
+                    ui.label("No object selected");
+                }
+            });
+    }
+
+    fn draw_hierarchy_panel(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("Hierarchy")
+            .default_open(true)
+            .show(ui, |ui| {
+                sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
+                ui.horizontal(|ui| {
+                    if ui.button("Top").clicked() {
+                        self.cell_view = CellViewState::reset_to_top(self.session.db());
+                        self.selected = None;
+                        self.clear_render_history();
+                        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+                    }
+                    let can_ascend = !self.cell_view.specific_path().is_empty();
+                    if ui
+                        .add_enabled(can_ascend, egui::Button::new("Up"))
+                        .clicked()
+                    {
+                        self.cell_view = ascended_cell_view(&self.cell_view);
+                        self.selected = None;
+                        self.clear_render_history();
+                        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+                    }
+                    let enter_path = self.selected.as_ref().and_then(enter_path_for_hit);
+                    if ui
+                        .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
+                        .clicked()
+                    {
+                        if let Some(path) = enter_path {
+                            self.enter_instance_path(path);
+                        }
+                    }
+                });
+                ui.monospace(hierarchy_summary_text(
+                    self.session.db(),
+                    &self.cell_view,
+                    &self.hierarchy_policy,
+                ));
+                let rows = self
+                    .session
+                    .db()
+                    .hierarchy_tree_rows(self.cell_view.clone(), 8, 512);
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for row in &rows.rows {
+                            ui.horizontal(|ui| {
+                                let label = hierarchy_row_label(self.session.db(), row);
+                                ui.monospace(label);
+                                if ui.button("Focus").clicked() {
+                                    self.focus_instance_path(row.instance_path.clone());
+                                }
+                            });
+                        }
+                    });
+                if rows.truncated {
+                    ui.label("Hierarchy rows truncated");
+                }
+            });
+    }
+
+    fn draw_lod_panel(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("LOD tuning")
+            .default_open(true)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.small_shape_px, 0.25..=12.0)
+                        .text("tiny px"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.frame_only_px, 1.0..=40.0)
+                        .text("frame px"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.fill_px, 4.0..=120.0).text("fill px"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.fill_units_per_pixel, 1.0..=500.0)
+                        .logarithmic(true)
+                        .text("fill upp"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.lod_tuning.hierarchy_bbox_units_per_pixel,
+                        8.0..=2000.0,
+                    )
+                    .logarithmic(true)
+                    .text("cell bbox upp"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.lod_tuning.hierarchy_coarse_units_per_pixel,
+                        1.0..=1000.0,
+                    )
+                    .logarithmic(true)
+                    .text("coarse upp"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.lod_tuning.array_bbox_units_per_pixel,
+                        8.0..=2000.0,
+                    )
+                    .logarithmic(true)
+                    .text("array bbox upp"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.lod_tuning.array_grid_units_per_pixel,
+                        1.0..=1000.0,
+                    )
+                    .logarithmic(true)
+                    .text("array grid upp"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.long_shape_px, 2.0..=120.0)
+                        .text("long px"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.lod_tuning.occupancy_bin_px, 2.0..=32.0)
+                        .text("bin px"),
+                );
+                ui.horizontal(|ui| {
+                    ui.label("hier depth");
+                    ui.add(
+                        egui::DragValue::new(&mut self.lod_tuning.hierarchy_expand_depth)
+                            .range(1..=64)
+                            .speed(1.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("quad/bin");
+                    ui.add(
+                        egui::DragValue::new(&mut self.lod_tuning.max_low_priority_quads_per_bin)
+                            .range(1..=512)
+                            .speed(1.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("frames/bin");
+                    ui.add(
+                        egui::DragValue::new(&mut self.lod_tuning.max_frames_per_bin)
+                            .range(1..=256)
+                            .speed(1.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("markers/bin");
+                    ui.add(
+                        egui::DragValue::new(&mut self.lod_tuning.max_markers_per_bin)
+                            .range(1..=128)
+                            .speed(1.0),
+                    );
+                });
+                if ui.button("Reset LOD").clicked() {
+                    self.lod_tuning = LodTuningState::default();
+                    sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
+                    self.clear_render_history();
+                }
+                ui.separator();
+                ui.monospace(format!(
+                    "exact={} frame={} marker={} hier={} abox={} agrid={} coarse={} suppress={}",
+                    self.last_lod_stats.exact,
+                    self.last_lod_stats.frame_only,
+                    self.last_lod_stats.marker,
+                    self.last_lod_stats.hierarchy_bbox,
+                    self.last_lod_stats.array_bbox,
+                    self.last_lod_stats.array_grid,
+                    self.last_lod_stats.coarse,
+                    self.last_lod_stats.suppress
+                ));
+            });
+    }
+
+    fn clear_render_history(&mut self) {
+        self.last_render_plan = None;
+        self.lod_hysteresis = LodHysteresisState::default();
+        self.last_render_plan_revision = 0;
+        self.last_render_plan_interaction_coarse = false;
+        self.last_plan_reused = false;
+    }
+
+    fn enter_instance_path(&mut self, path: InstancePath) {
+        self.cell_view = CellViewState::from_path(self.cell_view.context_cell(), path);
+        self.selected = None;
+        self.clear_render_history();
+        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+    }
+
+    fn focus_instance_path(&mut self, path: InstancePath) {
+        self.cell_view = CellViewState::from_path(self.cell_view.context_cell(), path);
+        self.selected = None;
+        self.clear_render_history();
+        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+    }
+
+    fn draw_stats_panel(&self, ui: &mut egui::Ui) {
+        let shape_count = self
+            .session
+            .db()
+            .cell(self.session.db().top_cell())
+            .map(|cell| cell.shapes().len())
+            .unwrap_or(0);
+        egui::CollapsingHeader::new("Render Stats")
+            .default_open(true)
+            .show(ui, |ui| {
+                for (label, value) in stats_panel_rows(
+                    self.session.last_load_stats(),
+                    shape_count,
+                    self.last_plan_batches,
+                    self.last_plan_items,
+                    self.last_plan_truncated,
+                    self.last_plan_reused,
+                    self.last_candidates_checked,
+                    self.last_hierarchy_candidates_checked,
+                    self.last_total_hierarchy_instances,
+                    self.last_display_cache_hits,
+                    self.last_display_cache_misses,
+                    self.last_plane_cache_hits,
+                    self.last_plane_cache_misses,
+                    self.last_paint_ops,
+                    self.frame_timing,
+                    self.frame_rate.fps,
+                    self.last_lod_stats,
+                ) {
+                    ui.label(label);
+                    ui.monospace(value);
+                    ui.add_space(4.0);
+                }
+                ui.label("Selection");
+                ui.monospace(
+                    self.selected
+                        .as_ref()
+                        .map(|hit| hit.source_id.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                );
+            });
+    }
+}
+
+impl eframe::App for LayoutViewerV2App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let update_started = std::time::Instant::now();
+        self.frame_rate.record_frame_at(std::time::Instant::now());
+        self.draw_sidebar(ctx);
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let available = ui.available_size();
+            let (rect, response) = ui.allocate_exact_size(available, egui::Sense::drag());
+            self.draw_canvas(ui, rect, &response);
+        });
+        if should_request_smooth_repaint(self.interaction_active(), &self.async_load) {
+            ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
+        }
+        self.frame_timing.record_update(update_started.elapsed());
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct V2ViewState {
+    center_x: f32,
+    center_y: f32,
+    units_per_pixel: f32,
+    screen_width: f32,
+    screen_height: f32,
+}
+
+impl V2ViewState {
+    fn fit(world: Rect, screen_width: f32, screen_height: f32) -> Self {
+        let width_upp = world.width().max(1) as f32 / screen_width.max(1.0);
+        let height_upp = world.height().max(1) as f32 / screen_height.max(1.0);
+        Self {
+            center_x: (world.x1 as f32 + world.x2 as f32) * 0.5,
+            center_y: (world.y1 as f32 + world.y2 as f32) * 0.5,
+            units_per_pixel: width_upp.max(height_upp),
+            screen_width: screen_width.max(1.0),
+            screen_height: screen_height.max(1.0),
+        }
+    }
+
+    fn with_screen_size(mut self, screen_width: f32, screen_height: f32) -> Self {
+        self.screen_width = screen_width.max(1.0);
+        self.screen_height = screen_height.max(1.0);
+        self
+    }
+
+    fn viewport_rect(&self, screen_width: f32, screen_height: f32) -> Rect {
+        let half_w = self.units_per_pixel * screen_width * 0.5;
+        let half_h = self.units_per_pixel * screen_height * 0.5;
+        Rect::new(
+            (self.center_x - half_w).floor() as i32,
+            (self.center_y - half_h).floor() as i32,
+            (self.center_x + half_w).ceil() as i32,
+            (self.center_y + half_h).ceil() as i32,
+        )
+    }
+
+    fn pan_pixels(&mut self, dx: f32, dy: f32) {
+        self.center_x -= dx * self.units_per_pixel;
+        self.center_y -= dy * self.units_per_pixel;
+    }
+
+    fn zoom_at_screen(
+        &mut self,
+        factor: f32,
+        sx: f32,
+        sy: f32,
+        screen_width: f32,
+        screen_height: f32,
+    ) {
+        let before = self.screen_to_world(sx, sy, screen_width, screen_height);
+        self.units_per_pixel = (self.units_per_pixel / factor).max(0.01);
+        let after = self.screen_to_world(sx, sy, screen_width, screen_height);
+        self.center_x += before.0 - after.0;
+        self.center_y += before.1 - after.1;
+    }
+
+    fn screen_to_world(
+        &self,
+        sx: f32,
+        sy: f32,
+        screen_width: f32,
+        screen_height: f32,
+    ) -> (f32, f32) {
+        let world_x = self.center_x + (sx - screen_width * 0.5) * self.units_per_pixel;
+        let world_y = self.center_y + (sy - screen_height * 0.5) * self.units_per_pixel;
+        (world_x, world_y)
+    }
+
+    fn world_to_screen(&self, x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
+        (
+            (x - self.center_x) / self.units_per_pixel + screen_width * 0.5,
+            (y - self.center_y) / self.units_per_pixel + screen_height * 0.5,
+        )
+    }
+}
+
+fn world_rect_to_screen(world: Rect, view: V2ViewState, screen: egui::Rect) -> egui::Rect {
+    let (x1, y1) = view.world_to_screen(
+        world.x1 as f32,
+        world.y1 as f32,
+        screen.width(),
+        screen.height(),
+    );
+    let (x2, y2) = view.world_to_screen(
+        world.x2 as f32,
+        world.y2 as f32,
+        screen.width(),
+        screen.height(),
+    );
+    egui::Rect::from_min_max(
+        egui::pos2(screen.left() + x1.min(x2), screen.top() + y1.min(y2)),
+        egui::pos2(screen.left() + x1.max(x2), screen.top() + y1.max(y2)),
+    )
+}
+
+fn world_rect_to_canvas_pixels(
+    world: Rect,
+    view: V2ViewState,
+    screen_width: f32,
+    screen_height: f32,
+) -> [i32; 4] {
+    let (x1, y1) = view.world_to_screen(
+        world.x1 as f32,
+        world.y1 as f32,
+        screen_width,
+        screen_height,
+    );
+    let (x2, y2) = view.world_to_screen(
+        world.x2 as f32,
+        world.y2 as f32,
+        screen_width,
+        screen_height,
+    );
+    [
+        x1.min(x2).floor() as i32,
+        y1.min(y2).floor() as i32,
+        x1.max(x2).ceil() as i32,
+        y1.max(y2).ceil() as i32,
+    ]
+}
+
+fn world_point_to_screen(world: (i32, i32), view: V2ViewState, screen: egui::Rect) -> egui::Pos2 {
+    let (x, y) = view.world_to_screen(
+        world.0 as f32,
+        world.1 as f32,
+        screen.width(),
+        screen.height(),
+    );
+    egui::pos2(screen.left() + x, screen.top() + y)
+}
+
+fn draw_plan_vectors(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    view: V2ViewState,
+    paint_plan: &RenderPlan,
+    interaction_active: bool,
+) -> usize {
+    let mut paint_ops = 0;
+    for batch in &paint_plan.batches {
+        for item in &batch.items {
+            match (batch.plane, item) {
+                (RenderPlane::Fill, DrawItem::Rect(item)) => {
+                    let draw_rect = world_rect_to_screen(item.world, view, rect);
+                    if draw_rect.intersects(rect) {
+                        paint_ops +=
+                            draw_fill_rect(painter, draw_rect, &batch.style, interaction_active);
+                    }
+                }
+                (RenderPlane::Hierarchy, DrawItem::Rect(item)) => {
+                    let draw_rect = world_rect_to_screen(item.world, view, rect);
+                    if draw_rect.intersects(rect) {
+                        painter.rect_stroke(
+                            draw_rect,
+                            0.0,
+                            egui::Stroke::new(1.0, color_to_egui(item.color, 190)),
+                            egui::StrokeKind::Inside,
+                        );
+                        paint_ops += 1;
+                    }
+                }
+                (RenderPlane::Hierarchy, DrawItem::Line(item)) => {
+                    let from = world_point_to_screen(item.from, view, rect);
+                    let to = world_point_to_screen(item.to, view, rect);
+                    painter.line_segment(
+                        [from, to],
+                        egui::Stroke::new(1.0, color_to_egui(item.color, 150)),
+                    );
+                    paint_ops += 1;
+                }
+                (RenderPlane::Frame, DrawItem::Rect(item)) => {
+                    let draw_rect = world_rect_to_screen(item.world, view, rect);
+                    if draw_rect.intersects(rect) {
+                        painter.rect_stroke(
+                            draw_rect,
+                            0.0,
+                            egui::Stroke::new(
+                                f32::from(batch.style.line_width_px.max(1)),
+                                color_to_egui(item.color, batch.style.frame_alpha),
+                            ),
+                            egui::StrokeKind::Inside,
+                        );
+                        paint_ops += 1;
+                    }
+                }
+                (RenderPlane::Marker, DrawItem::Marker(item)) => {
+                    let draw_rect = world_rect_to_screen(item.world, view, rect);
+                    if draw_rect.intersects(rect) {
+                        let marker = egui::Rect::from_center_size(
+                            draw_rect.center(),
+                            egui::vec2(draw_rect.width().max(3.0), draw_rect.height().max(3.0)),
+                        );
+                        painter.rect_filled(
+                            marker,
+                            0.0,
+                            color_to_egui(item.color, batch.style.marker_alpha),
+                        );
+                        paint_ops += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    paint_ops
+}
+
+fn draw_cached_plane(
+    render_surface: &mut render_surface::RenderSurface,
+    texture: &mut Option<egui::TextureHandle>,
+    texture_key: &mut Option<plane_cache::PlaneKey>,
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    screen_rect: egui::Rect,
+    view: V2ViewState,
+    plan: &RenderPlan,
+    viewport: Rect,
+    interaction_active: bool,
+    current_revision: u64,
+) -> usize {
+    let width = screen_rect.width().ceil().max(1.0) as usize;
+    let height = screen_rect.height().ceil().max(1.0) as usize;
+    let bucket_units = (view.units_per_pixel * 256.0).ceil().max(1.0) as i32;
+    let mode = if interaction_active {
+        "interaction"
+    } else {
+        "steady"
+    };
+    let key = render_surface::build_plan_plane_key(
+        [viewport.x1, viewport.y1, viewport.x2, viewport.y2],
+        bucket_units,
+        mode,
+        plan,
+        current_revision,
+        &format!("RenderSurface:{width}x{height}"),
+    );
+    let has_cached_texture = texture.is_some();
+    if cached_plane_texture_action(texture_key.as_ref(), &key, has_cached_texture)
+        == CachedPlaneTextureAction::UploadTexture
+    {
+        let cached = if let Some(cached) = render_surface.cache.get(&key) {
+            cached.clone()
+        } else {
+            let rasterized = render_surface::rasterize_plan(plan, width, height, |world| {
+                world_rect_to_canvas_pixels(world, view, width as f32, height as f32)
+            });
+            render_surface.cache.insert(key.clone(), rasterized.clone());
+            rasterized
+        };
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([cached.width, cached.height], &cached.pixels);
+        if let Some(texture) = texture {
+            texture.set(image, egui::TextureOptions::NEAREST);
+        } else {
+            *texture = Some(ctx.load_texture(
+                "layout-viewer-render-surface",
+                image,
+                egui::TextureOptions::NEAREST,
+            ));
+        }
+        *texture_key = Some(key);
+    } else {
+        let _ = render_surface.cache.get(&key);
+    }
+    if let Some(texture) = texture {
+        painter.image(
+            texture.id(),
+            screen_rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+        1
+    } else {
+        0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CachedPlaneTextureAction {
+    UploadTexture,
+    ReuseTexture,
+}
+
+fn cached_plane_texture_action(
+    texture_key: Option<&plane_cache::PlaneKey>,
+    current_key: &plane_cache::PlaneKey,
+    has_texture: bool,
+) -> CachedPlaneTextureAction {
+    if has_texture && texture_key == Some(current_key) {
+        CachedPlaneTextureAction::ReuseTexture
+    } else {
+        CachedPlaneTextureAction::UploadTexture
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillDrawMode {
+    None,
+    Solid,
+    SparseDots,
+    DiagonalHatch,
+    CrossHatch,
+}
+
+fn fill_draw_mode(pattern: Pattern, interaction_active: bool) -> FillDrawMode {
+    match pattern {
+        Pattern::Hollow => FillDrawMode::None,
+        Pattern::Solid => FillDrawMode::Solid,
+        Pattern::SparseDots | Pattern::DiagonalHatch | Pattern::CrossHatch
+            if interaction_active =>
+        {
+            FillDrawMode::Solid
+        }
+        Pattern::SparseDots => FillDrawMode::SparseDots,
+        Pattern::DiagonalHatch => FillDrawMode::DiagonalHatch,
+        Pattern::CrossHatch => FillDrawMode::CrossHatch,
+    }
+}
+
+fn draw_fill_rect(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    style: &LayerStyle,
+    interaction_active: bool,
+) -> usize {
+    match fill_draw_mode(style.fill_pattern, interaction_active) {
+        FillDrawMode::None => 0,
+        FillDrawMode::Solid => {
+            painter.rect_filled(rect, 0.0, color_to_egui(style.fill_color, style.fill_alpha));
+            1
+        }
+        FillDrawMode::SparseDots => draw_sparse_dots(painter, rect, style),
+        FillDrawMode::DiagonalHatch => draw_diagonal_hatch(painter, rect, style, false),
+        FillDrawMode::CrossHatch => draw_diagonal_hatch(painter, rect, style, true),
+    }
+}
+
+fn draw_sparse_dots(painter: &egui::Painter, rect: egui::Rect, style: &LayerStyle) -> usize {
+    let color = color_to_egui(style.fill_color, style.fill_alpha);
+    let spacing = 9.0;
+    let mut ops = 0;
+    let mut y = snap_to_grid(rect.top(), spacing);
+    while y <= rect.bottom() {
+        let mut x = snap_to_grid(rect.left(), spacing);
+        while x <= rect.right() {
+            painter.rect_filled(
+                egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(1.2, 1.2)),
+                0.0,
+                color,
+            );
+            ops += 1;
+            x += spacing;
+        }
+        y += spacing;
+    }
+    ops
+}
+
+fn draw_diagonal_hatch(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    style: &LayerStyle,
+    cross: bool,
+) -> usize {
+    let color = color_to_egui(style.fill_color, style.fill_alpha);
+    let stroke = egui::Stroke::new(1.0, color);
+    let mut ops = 0;
+    for segment in hatch_segments(rect, cross) {
+        painter.line_segment(segment, stroke);
+        ops += 1;
+    }
+    ops
+}
+
+fn hatch_segments(rect: egui::Rect, cross: bool) -> Vec<[egui::Pos2; 2]> {
+    let tile = 10.0;
+    let inset = 2.0;
+    let mut segments = Vec::new();
+    let mut y = snap_to_grid(rect.top(), tile);
+    while y <= rect.bottom() {
+        let mut x = snap_to_grid(rect.left(), tile);
+        while x <= rect.right() {
+            let left = x.max(rect.left());
+            let top = y.max(rect.top());
+            let right = (x + tile).min(rect.right());
+            let bottom = (y + tile).min(rect.bottom());
+            if right - left >= 3.0 && bottom - top >= 3.0 {
+                segments.push([
+                    egui::pos2(left + inset, bottom - inset),
+                    egui::pos2(right - inset, top + inset),
+                ]);
+                if cross {
+                    segments.push([
+                        egui::pos2(left + inset, top + inset),
+                        egui::pos2(right - inset, bottom - inset),
+                    ]);
+                }
+            }
+            x += tile;
+        }
+        y += tile;
+    }
+    segments
+}
+
+fn snap_to_grid(value: f32, spacing: f32) -> f32 {
+    (value / spacing).floor() * spacing
+}
+
+fn color_to_egui(color: Color, alpha: u8) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, alpha)
+}
+
+fn loaded_physical_layer_counts(db: &layoutdb::LayoutDb) -> BTreeMap<u16, usize> {
+    let mut counts = BTreeMap::new();
+    if let Some(cell) = db.cell(db.top_cell()) {
+        for shape in cell.shapes() {
+            *counts.entry(shape.layer_id).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn render_plan_item_count(plan: &layout_render::RenderPlan) -> usize {
+    plan.batches.iter().map(|batch| batch.items.len()).sum()
+}
+
+fn hud_summary_text(
+    design_name: &str,
+    units_per_pixel: f32,
+    fps: f32,
+    plan_truncated: bool,
+    plan_reused: bool,
+    error: Option<&str>,
+) -> String {
+    if let Some(error) = error {
+        return format!("{design_name}\n{error}");
+    }
+    format!(
+        "{design_name}\nmode=v2  upp={units_per_pixel:.2}  fps={fps:.1}\ntruncated={plan_truncated}  reuse={plan_reused}"
+    )
+}
+
+fn stats_panel_rows(
+    load: &layoutdb::ViewportLoadStats,
+    shape_count: usize,
+    plan_batches: usize,
+    plan_items: usize,
+    plan_truncated: bool,
+    plan_reused: bool,
+    candidates_checked: usize,
+    hierarchy_candidates_checked: usize,
+    total_hierarchy_instances: usize,
+    display_cache_hits: usize,
+    display_cache_misses: usize,
+    plane_cache_hits: usize,
+    plane_cache_misses: usize,
+    paint_ops: usize,
+    timing: FrameTimingState,
+    fps: f32,
+    lod: LodStats,
+) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "Tiles",
+            format!(
+                "viewport={} loaded={} hits={} misses={}",
+                load.tile_count, load.loaded_detail_tile_count, load.cache_hits, load.cache_misses
+            ),
+        ),
+        ("Shapes", format!("new={} total={shape_count}", load.new_shapes)),
+        (
+            "Query",
+            format!(
+                "candidates={} hier={} total={}",
+                candidates_checked, hierarchy_candidates_checked, total_hierarchy_instances
+            ),
+        ),
+        (
+            "Display Cache",
+            format!("hits={} misses={}", display_cache_hits, display_cache_misses),
+        ),
+        (
+            "Plane Cache Frame",
+            format!("hits={plane_cache_hits} misses={plane_cache_misses}"),
+        ),
+        (
+            "Render Plan",
+            format!(
+                "batches={plan_batches} items={plan_items} ops={paint_ops} truncated={plan_truncated} reuse={plan_reused}"
+            ),
+        ),
+        (
+            "Timing",
+            format!(
+                "load={:.2}ms plan={:.2}ms paint={:.2}ms update={:.2}ms",
+                timing.load_ms, timing.plan_ms, timing.paint_ms, timing.update_ms
+            ),
+        ),
+        ("FPS", format!("{fps:.1}")),
+        (
+            "LOD",
+            format!(
+                "exact={} frame={} marker={} hier={} abox={} agrid={} coarse={} suppress={}",
+                lod.exact,
+                lod.frame_only,
+                lod.marker,
+                lod.hierarchy_bbox,
+                lod.array_bbox,
+                lod.array_grid,
+                lod.coarse,
+                lod.suppress
+            ),
+        ),
+    ]
+}
+
+fn scroll_zoom_factor(scroll: f32) -> f32 {
+    if scroll > 0.0 {
+        1.15
+    } else {
+        1.0 / 1.15
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        cached_plane_texture_action, fill_draw_mode, hud_summary_text, overview_density_usable,
+        overview_error_is_unavailable, plan_source_for_units_per_pixel, scroll_zoom_factor,
+        should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
+        stats_panel_rows, use_plane_renderer, AsyncLoadState, CachedPlaneTextureAction,
+        FillDrawMode, FrameRateState, FrameTimingState, LoadRequest, LodTuningState,
+    };
+    use crate::plane_cache::PlaneKey;
+    use layout_display::{DisplayLayer, DisplayModel, LayerStyle, Pattern};
+    use layout_render::{
+        LodHysteresisState, LodStats, PickHit, PickHitTarget, RenderPlanSource, RenderSettings,
+    };
+    use layoutdb::{
+        CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo, LayoutDb,
+        ObjectPath, ObjectPathTarget, OverviewDensityBin, Rect, ShapeId, ShapeKind, ShapeRecord,
+    };
+    use std::{
+        fs,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static HIERARCHY_TEST_PACKAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn frame_timing_state_tracks_named_stages() {
+        let mut timing = FrameTimingState::default();
+
+        timing.record_load(std::time::Duration::from_micros(1_500));
+        timing.record_plan(std::time::Duration::from_micros(2_000));
+        timing.record_paint(std::time::Duration::from_micros(3_250));
+        timing.record_update(std::time::Duration::from_micros(12_000));
+
+        assert_eq!(timing.load_ms, 1.5);
+        assert_eq!(timing.plan_ms, 2.0);
+        assert_eq!(timing.paint_ms, 3.25);
+        assert_eq!(timing.update_ms, 12.0);
+    }
+
+    #[test]
+    fn frame_rate_state_tracks_smoothed_fps() {
+        let mut frame_rate = FrameRateState::default();
+
+        frame_rate.record_frame_delta(std::time::Duration::from_micros(16_667));
+        assert!((frame_rate.fps - 60.0).abs() < 0.1);
+
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(100));
+        assert!(frame_rate.fps < 60.0);
+        assert!(frame_rate.fps > 10.0);
+    }
+
+    #[test]
+    fn frame_rate_state_ignores_idle_gaps() {
+        let mut frame_rate = FrameRateState::default();
+        let t0 = std::time::Instant::now();
+
+        frame_rate.record_frame_at(t0);
+        frame_rate.record_frame_at(t0 + std::time::Duration::from_micros(16_667));
+        let active_fps = frame_rate.fps;
+        frame_rate.record_frame_at(t0 + std::time::Duration::from_secs(2));
+
+        assert!((active_fps - 60.0).abs() < 0.1);
+        assert!((frame_rate.fps - active_fps).abs() < 0.1);
+    }
+
+    #[test]
+    fn hud_summary_stays_short_and_leaves_detail_for_panel() {
+        let text = hud_summary_text("ysyx210340", 13.35, 58.7, true, false, None);
+
+        assert!(text.contains("mode=v2"));
+        assert!(text.contains("upp=13.35"));
+        assert!(text.contains("fps=58.7"));
+        assert!(!text.contains("tiles viewport"));
+        assert!(!text.contains("query candidates"));
+        assert!(text.lines().count() <= 3);
+    }
+
+    #[test]
+    fn stats_panel_rows_split_render_counters_into_readable_groups() {
+        let rows = stats_panel_rows(
+            &layoutdb::ViewportLoadStats {
+                tile_count: 12,
+                loaded_detail_tile_count: 42,
+                cache_hits: 10,
+                cache_misses: 2,
+                new_shapes: 7,
+                ..Default::default()
+            },
+            1024,
+            6,
+            2431,
+            true,
+            false,
+            87,
+            12,
+            45,
+            3,
+            1,
+            11,
+            13,
+            99,
+            FrameTimingState {
+                load_ms: 1.0,
+                plan_ms: 2.0,
+                paint_ms: 3.0,
+                update_ms: 4.0,
+            },
+            58.7,
+            LodStats {
+                exact: 1,
+                frame_only: 2,
+                marker: 3,
+                hierarchy_bbox: 4,
+                array_bbox: 5,
+                array_grid: 6,
+                coarse: 7,
+                suppress: 8,
+            },
+        );
+
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Tiles" && value.contains("viewport=12") && value.contains("loaded=42")
+        }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "Render Plan" && value.contains("items=2431") }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "Timing" && value.contains("paint=3.00ms") }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "Timing" && value.contains("update=4.00ms") }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "Render Plan" && value.contains("ops=99") }));
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Plane Cache Frame"
+                && value.contains("hits=11")
+                && value.contains("misses=13")
+                && !value.contains("reuse=")
+        }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "FPS" && value.contains("58.7") }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| { *label == "LOD" && value.contains("coarse=7") }));
+    }
+
+    #[test]
+    fn async_load_state_keeps_only_latest_pending_request() {
+        let mut state = AsyncLoadState::default();
+        state.request(Rect::new(0, 0, 10, 10), 1);
+        state.request(Rect::new(10, 10, 20, 20), 2);
+
+        assert_eq!(state.pending_request().unwrap().generation, 2);
+        assert_eq!(
+            state.pending_request().unwrap().viewport,
+            Rect::new(10, 10, 20, 20)
+        );
+    }
+
+    #[test]
+    fn async_load_state_rejects_stale_completed_results() {
+        let mut state = AsyncLoadState::default();
+        state.request(Rect::new(0, 0, 10, 10), 1);
+        state.request(Rect::new(10, 10, 20, 20), 2);
+
+        assert!(!state.should_apply_result(LoadRequest {
+            viewport: Rect::new(0, 0, 10, 10),
+            generation: 1,
+        }));
+        let latest = LoadRequest {
+            viewport: Rect::new(10, 10, 20, 20),
+            generation: 2,
+        };
+        assert!(state.should_apply_result(latest));
+
+        state.mark_completed(latest);
+        assert!(!state.should_apply_result(LoadRequest {
+            viewport: Rect::new(0, 0, 10, 10),
+            generation: 1,
+        }));
+    }
+
+    #[test]
+    fn async_load_state_does_not_request_loaded_or_in_flight_viewports() {
+        let mut state = AsyncLoadState::default();
+        let viewport = Rect::new(0, 0, 10, 10);
+        state.request(viewport, 1);
+
+        assert!(!state.needs_request(viewport));
+        let request = state.take_pending().unwrap();
+        assert!(!state.needs_request(viewport));
+
+        state.mark_completed(request);
+        assert!(!state.needs_request(viewport));
+        assert!(state.needs_request(Rect::new(10, 10, 20, 20)));
+    }
+
+    #[test]
+    fn async_load_state_reports_pending_work() {
+        let mut state = AsyncLoadState::default();
+        assert!(!state.has_pending_work());
+
+        state.request(Rect::new(0, 0, 10, 10), 1);
+        assert!(state.has_pending_work());
+
+        let request = state.take_pending().unwrap();
+        assert!(state.has_pending_work());
+
+        state.mark_completed(request);
+        assert!(!state.has_pending_work());
+    }
+
+    #[test]
+    fn async_load_state_can_drop_pending_detail_request_when_lod_does_not_need_detail() {
+        let mut state = AsyncLoadState::default();
+        state.request(Rect::new(0, 0, 10, 10), 1);
+
+        state.clear_pending();
+
+        assert!(state.pending_request().is_none());
+        assert!(!state.has_pending_work());
+    }
+
+    #[test]
+    fn smooth_repaint_is_requested_during_interaction_or_loading() {
+        let mut state = AsyncLoadState::default();
+        assert!(!should_request_smooth_repaint(false, &state));
+        assert!(should_request_smooth_repaint(true, &state));
+
+        state.request(Rect::new(0, 0, 10, 10), 1);
+        assert!(should_request_smooth_repaint(false, &state));
+    }
+
+    #[test]
+    fn render_plan_is_reused_only_for_matching_cache_keys() {
+        assert!(should_reuse_render_plan(
+            true,
+            RenderPlanSource::HierarchyFar,
+            RenderPlanSource::HierarchyFar
+        ));
+        assert!(!should_reuse_render_plan(
+            false,
+            RenderPlanSource::HierarchyFar,
+            RenderPlanSource::HierarchyFar
+        ));
+        assert!(!should_reuse_render_plan(
+            true,
+            RenderPlanSource::HierarchyFar,
+            RenderPlanSource::HierarchyMid
+        ));
+    }
+
+    #[test]
+    fn plane_renderer_is_only_used_for_cached_lod_sources() {
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyFar));
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyMid));
+        assert!(use_plane_renderer(RenderPlanSource::OverviewDensity));
+        assert!(!use_plane_renderer(RenderPlanSource::HierarchyNear));
+        assert!(!use_plane_renderer(RenderPlanSource::FlatDetail));
+    }
+
+    #[test]
+    fn detail_tiles_are_requested_only_for_detail_backed_plan_sources() {
+        assert!(!should_request_detail_tiles(RenderPlanSource::HierarchyFar));
+        assert!(!should_request_detail_tiles(RenderPlanSource::HierarchyMid));
+        assert!(!should_request_detail_tiles(
+            RenderPlanSource::OverviewDensity
+        ));
+        assert!(should_request_detail_tiles(RenderPlanSource::HierarchyNear));
+        assert!(should_request_detail_tiles(RenderPlanSource::FlatDetail));
+    }
+
+    #[test]
+    fn hierarchy_policy_from_tuning_sets_max_depth_and_expands_arrays() {
+        let tuning = LodTuningState {
+            hierarchy_expand_depth: 0,
+            ..Default::default()
+        };
+
+        let policy = super::hierarchy_policy_from_tuning(tuning);
+
+        assert_eq!(policy.min_depth, 0);
+        assert_eq!(policy.max_depth, 1);
+        assert!(policy.expand_arrays);
+    }
+
+    #[test]
+    fn current_cell_has_instances_uses_target_cell_not_top() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+
+        assert!(!super::current_cell_has_instances(&db, &leaf_view));
+        assert!(super::current_cell_has_instances(
+            &db,
+            &CellViewState::top(&db)
+        ));
+    }
+
+    #[test]
+    fn top_cell_view_helper_rejects_focused_child_views() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+
+        assert!(super::is_top_cell_view(&db, &CellViewState::top(&db)));
+        assert!(!super::is_top_cell_view(&db, &leaf_view));
+    }
+
+    #[test]
+    fn focused_cell_view_pick_uses_child_local_coordinates() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut model = DisplayModel::new();
+        model.add_layer(DisplayLayer::physical_layer(
+            1,
+            "M1",
+            LayerStyle::default_for_index(0),
+        ));
+
+        let hit = layout_render::RenderPlanner::new(RenderSettings::default())
+            .pick_for_cell_view(
+                &db,
+                &model,
+                layout_render::PickRequest::new(4, 4, 1),
+                &leaf_view,
+                &HierarchyPolicy::default(),
+            )
+            .expect("focused leaf-local shape should be pickable");
+
+        assert_eq!(hit.source_id, 9);
+        assert_eq!(hit.bbox, Rect::new(2, 2, 8, 8));
+    }
+
+    #[test]
+    fn hierarchy_summary_text_includes_target_and_depth() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut policy = super::hierarchy_policy_from_tuning(LodTuningState {
+            hierarchy_expand_depth: 3,
+            ..Default::default()
+        });
+        policy.expand_arrays = false;
+
+        let text = super::hierarchy_summary_text(&db, &leaf_view, &policy);
+
+        assert!(text.contains("context: top"));
+        assert!(text.contains("target: leaf"));
+        assert!(text.contains("path depth: 2"));
+        assert!(text.contains("policy depth: 0..3"));
+        assert!(text.contains("expand arrays: false"));
+    }
+
+    #[test]
+    fn enter_path_for_shape_hit_uses_shape_instance_path() {
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+
+        let enter_path = super::enter_path_for_hit(&hit).expect("shape path should be enterable");
+
+        assert_eq!(enter_path, leaf_view.specific_path().clone());
+    }
+
+    #[test]
+    fn selection_summary_includes_target_and_path_depth() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+
+        let text = super::selection_summary_text(&hit);
+
+        assert!(text.contains("target: shape"));
+        assert!(text.contains("depth: 2"));
+        assert!(text.contains(&format!("cell: {}", db.cell_by_name("leaf").unwrap().raw())));
+        assert!(text.contains("layer: 1"));
+        assert!(text.contains("bbox: 2, 2, 8, 8"));
+    }
+
+    #[test]
+    fn hierarchy_row_label_includes_instance_and_cell_name() {
+        let (db, _leaf_view) = hierarchy_test_db_and_leaf_view();
+        let rows = db.hierarchy_tree_rows(CellViewState::top(&db), 8, 16);
+        let root = &rows.rows[0];
+        let mid = rows
+            .rows
+            .iter()
+            .find(|row| row.name == "mid0")
+            .expect("fixture should include mid0 instance row");
+
+        let root_label = super::hierarchy_row_label(&db, root);
+        let mid_label = super::hierarchy_row_label(&db, mid);
+
+        assert!(root_label.contains("top"));
+        assert!(!root_label.contains("inst"));
+        assert!(mid_label.contains("mid0"));
+        assert!(mid_label.contains("inst 10"));
+        assert!(mid_label.contains("mid"));
+    }
+
+    #[test]
+    fn focus_view_on_cell_bbox_uses_existing_canvas_size() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut view = Some(super::V2ViewState::fit(
+            Rect::new(0, 0, 1000, 1000),
+            500.0,
+            250.0,
+        ));
+
+        super::focus_view_on_cell_bbox(&mut view, &db, &leaf_view);
+
+        let focused = view.expect("focus should keep a view");
+        assert_eq!(focused.center_x, 10.0);
+        assert_eq!(focused.center_y, 10.0);
+        assert!((focused.units_per_pixel - 0.08).abs() < 0.001);
+    }
+
+    #[test]
+    fn hierarchy_up_button_helper_ascends_until_top_path() {
+        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
+
+        let mid_view = super::ascended_cell_view(&leaf_view);
+        assert_eq!(mid_view.target_cell(), db.cell_by_name("mid").unwrap());
+        assert_eq!(mid_view.specific_path().depth(), 1);
+
+        let top_view = super::ascended_cell_view(&mid_view);
+        assert_eq!(top_view.target_cell(), db.top_cell());
+        assert!(top_view.specific_path().is_empty());
+    }
+
+    #[test]
+    fn native_lod_hysteresis_helper_preserves_state_between_plans() {
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            ..Default::default()
+        };
+        let mut state = LodHysteresisState::default();
+
+        assert_eq!(
+            plan_source_for_units_per_pixel(170.0, settings, &mut state, true, false, true),
+            RenderPlanSource::HierarchyFar
+        );
+        assert_eq!(
+            plan_source_for_units_per_pixel(155.0, settings, &mut state, true, false, true),
+            RenderPlanSource::HierarchyFar
+        );
+        assert_eq!(
+            plan_source_for_units_per_pixel(120.0, settings, &mut state, true, false, true),
+            RenderPlanSource::HierarchyMid
+        );
+    }
+
+    #[test]
+    fn native_lod_prediction_uses_overview_density_when_bins_are_available() {
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            ..Default::default()
+        };
+        let mut state = LodHysteresisState::default();
+
+        assert_eq!(
+            plan_source_for_units_per_pixel(170.0, settings, &mut state, true, true, true),
+            RenderPlanSource::HierarchyFar
+        );
+
+        let mut flat_state = LodHysteresisState::default();
+        assert_eq!(
+            plan_source_for_units_per_pixel(170.0, settings, &mut flat_state, false, true, true),
+            RenderPlanSource::OverviewDensity
+        );
+
+        let mut near_state = LodHysteresisState::default();
+        assert_eq!(
+            plan_source_for_units_per_pixel(8.0, settings, &mut near_state, true, true, true),
+            RenderPlanSource::HierarchyNear
+        );
+
+        let mut unavailable_state = LodHysteresisState::default();
+        assert_eq!(
+            plan_source_for_units_per_pixel(
+                170.0,
+                settings,
+                &mut unavailable_state,
+                true,
+                false,
+                true,
+            ),
+            RenderPlanSource::HierarchyFar
+        );
+    }
+
+    #[test]
+    fn native_lod_prediction_prefers_hierarchy_when_hierarchy_and_overview_are_available() {
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            ..Default::default()
+        };
+        let mut state = LodHysteresisState::default();
+
+        assert_eq!(
+            plan_source_for_units_per_pixel(170.0, settings, &mut state, true, true, true),
+            RenderPlanSource::HierarchyFar
+        );
+    }
+
+    #[test]
+    fn native_interaction_settings_do_not_shift_lod_thresholds() {
+        let tuning = LodTuningState::default();
+
+        let steady = tuning.render_settings(false);
+        let interactive = tuning.render_settings(true);
+
+        assert_eq!(
+            interactive.hierarchy_bbox_units_per_pixel,
+            steady.hierarchy_bbox_units_per_pixel
+        );
+        assert_eq!(
+            interactive.hierarchy_coarse_units_per_pixel,
+            steady.hierarchy_coarse_units_per_pixel
+        );
+        assert_eq!(
+            interactive.array_bbox_units_per_pixel,
+            steady.array_bbox_units_per_pixel
+        );
+        assert_eq!(
+            interactive.array_grid_units_per_pixel,
+            steady.array_grid_units_per_pixel
+        );
+        assert!(interactive.force_interaction_coarse);
+        assert_eq!(interactive.max_render_items, steady.max_render_items);
+    }
+
+    #[test]
+    fn native_lod_prediction_keeps_detail_source_during_interaction_at_same_zoom() {
+        let tuning = LodTuningState::default();
+        let steady_settings = tuning.render_settings(false);
+        let interactive_settings = tuning.render_settings(true);
+        let mut steady_state = LodHysteresisState::default();
+        let mut interactive_state = LodHysteresisState::default();
+
+        let steady_source = plan_source_for_units_per_pixel(
+            30.0,
+            steady_settings,
+            &mut steady_state,
+            true,
+            true,
+            true,
+        );
+        let interactive_source = plan_source_for_units_per_pixel(
+            30.0,
+            interactive_settings,
+            &mut interactive_state,
+            true,
+            true,
+            true,
+        );
+
+        assert_eq!(steady_source, RenderPlanSource::HierarchyNear);
+        assert_eq!(interactive_source, steady_source);
+    }
+
+    #[test]
+    fn native_interaction_settings_do_not_cap_global_render_items() {
+        let tuning = LodTuningState::default();
+
+        let steady = tuning.render_settings(false);
+        let interactive = tuning.render_settings(true);
+
+        assert_eq!(interactive.max_render_items, steady.max_render_items);
+    }
+
+    #[test]
+    fn native_lod_prediction_returns_flat_when_no_layers_are_visible() {
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            ..Default::default()
+        };
+        let mut state = LodHysteresisState::default();
+
+        assert_eq!(
+            plan_source_for_units_per_pixel(170.0, settings, &mut state, true, true, false),
+            RenderPlanSource::FlatDetail
+        );
+    }
+
+    #[test]
+    fn native_lod_prediction_ignores_unusable_overview_bins() {
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            ..Default::default()
+        };
+        let viewport = layout_render::Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0);
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.set_overview_bins(vec![OverviewDensityBin {
+            bbox: Rect::new(0, 0, 10_000, 10_000),
+            layer_id: 1,
+            kind: ShapeKind::RegularWire,
+            count: 100,
+            coverage_area: 1_000_000,
+        }]);
+        let mut hidden_model = DisplayModel::new();
+        hidden_model.add_layer(
+            DisplayLayer::physical_layer(1, "M1", LayerStyle::default_for_index(0)).hidden(),
+        );
+        let mut unmatched_model = DisplayModel::new();
+        unmatched_model.add_layer(DisplayLayer::physical_layer(
+            2,
+            "M2",
+            LayerStyle::default_for_index(1),
+        ));
+
+        let mut hidden_state = LodHysteresisState::default();
+        assert_eq!(
+            plan_source_for_units_per_pixel(
+                170.0,
+                settings,
+                &mut hidden_state,
+                true,
+                overview_density_usable(&db, &hidden_model, viewport),
+                true,
+            ),
+            RenderPlanSource::HierarchyFar
+        );
+
+        let mut unmatched_state = LodHysteresisState::default();
+        assert_eq!(
+            plan_source_for_units_per_pixel(
+                170.0,
+                settings,
+                &mut unmatched_state,
+                false,
+                overview_density_usable(&db, &unmatched_model, viewport),
+                true,
+            ),
+            RenderPlanSource::FlatDetail
+        );
+    }
+
+    #[test]
+    fn native_overview_unavailable_errors_are_non_fatal() {
+        let missing = anyhow::anyhow!("overview pyramid is not available");
+        let empty = anyhow::anyhow!("overview pyramid has no levels");
+        let corrupt = anyhow::anyhow!("failed to parse overview/pyramid.json");
+
+        assert!(overview_error_is_unavailable(&missing));
+        assert!(overview_error_is_unavailable(&empty));
+        assert!(!overview_error_is_unavailable(&corrupt));
+    }
+
+    #[test]
+    fn native_overview_usability_matches_physical_and_shape_kind_sources() {
+        let viewport = layout_render::Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0);
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.set_overview_bins(vec![OverviewDensityBin {
+            bbox: Rect::new(0, 0, 10_000, 10_000),
+            layer_id: 1,
+            kind: ShapeKind::RegularWire,
+            count: 100,
+            coverage_area: 1_000_000,
+        }]);
+        let mut physical_model = DisplayModel::new();
+        physical_model.add_layer(DisplayLayer::physical_layer(
+            1,
+            "M1",
+            LayerStyle::default_for_index(0),
+        ));
+        let mut kind_model = DisplayModel::new();
+        kind_model.add_layer(DisplayLayer::shape_kind(
+            ShapeKind::RegularWire,
+            "regular wires",
+            LayerStyle::default_for_index(1),
+        ));
+
+        assert!(overview_density_usable(&db, &physical_model, viewport));
+        assert!(overview_density_usable(&db, &kind_model, viewport));
+    }
+
+    #[test]
+    fn native_overview_usability_ignores_semantic_bins_for_physical_layers() {
+        let viewport = layout_render::Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0);
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.set_overview_bins(vec![OverviewDensityBin {
+            bbox: Rect::new(0, 0, 10_000, 10_000),
+            layer_id: 0,
+            kind: ShapeKind::Instance,
+            count: 100,
+            coverage_area: 1_000_000,
+        }]);
+        let mut physical_model = DisplayModel::new();
+        physical_model.add_layer(DisplayLayer::physical_layer(
+            0,
+            "OVERLAP",
+            LayerStyle::default_for_index(0),
+        ));
+
+        assert!(!overview_density_usable(&db, &physical_model, viewport));
+    }
+
+    #[test]
+    fn lod_tuning_state_clamps_frame_threshold_to_tiny_threshold() {
+        let tuning = LodTuningState {
+            small_shape_px: 12.0,
+            frame_only_px: 4.0,
+            fill_px: 6.0,
+            ..Default::default()
+        };
+
+        let settings = tuning.render_settings(false);
+
+        assert_eq!(settings.small_shape_px, 12.0);
+        assert_eq!(settings.frame_only_px, 12.0);
+        assert_eq!(settings.fill_px, 12.0);
+    }
+
+    #[test]
+    fn lod_tuning_uses_aggressive_interaction_settings() {
+        let tuning = LodTuningState::default();
+
+        let steady = tuning.render_settings(false);
+        let interactive = tuning.render_settings(true);
+
+        assert!(interactive.force_interaction_coarse);
+        assert_eq!(
+            interactive.hierarchy_bbox_units_per_pixel,
+            steady.hierarchy_bbox_units_per_pixel
+        );
+        assert_eq!(
+            interactive.hierarchy_coarse_units_per_pixel,
+            steady.hierarchy_coarse_units_per_pixel
+        );
+        assert_eq!(
+            interactive.array_bbox_units_per_pixel,
+            steady.array_bbox_units_per_pixel
+        );
+        assert_eq!(
+            interactive.array_grid_units_per_pixel,
+            steady.array_grid_units_per_pixel
+        );
+        assert_eq!(interactive.max_render_items, steady.max_render_items);
+        assert!(interactive.max_frames_per_bin < steady.max_frames_per_bin);
+        assert!(interactive.max_markers_per_bin < steady.max_markers_per_bin);
+    }
+
+    #[test]
+    fn scroll_zoom_factor_keeps_directional_zoom() {
+        assert!(scroll_zoom_factor(1.0) > 1.0);
+        assert!(scroll_zoom_factor(-1.0) < 1.0);
+    }
+
+    #[test]
+    fn hatch_pattern_uses_short_screen_tile_segments() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
+
+        let segments = super::hatch_segments(rect, true);
+
+        assert!(!segments.is_empty());
+        assert!(segments.iter().all(|segment| {
+            let dx = (segment[1].x - segment[0].x).abs();
+            let dy = (segment[1].y - segment[0].y).abs();
+            dx <= 8.0 && dy <= 8.0
+        }));
+    }
+
+    #[test]
+    fn patterned_fills_degrade_to_single_solid_operation_during_interaction() {
+        assert_eq!(
+            fill_draw_mode(Pattern::SparseDots, true),
+            FillDrawMode::Solid
+        );
+        assert_eq!(
+            fill_draw_mode(Pattern::DiagonalHatch, true),
+            FillDrawMode::Solid
+        );
+        assert_eq!(
+            fill_draw_mode(Pattern::CrossHatch, true),
+            FillDrawMode::Solid
+        );
+        assert_eq!(fill_draw_mode(Pattern::Hollow, true), FillDrawMode::None);
+
+        assert_eq!(
+            fill_draw_mode(Pattern::DiagonalHatch, false),
+            FillDrawMode::DiagonalHatch
+        );
+    }
+
+    #[test]
+    fn loaded_physical_layer_counts_report_current_db_shapes() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 100, 100));
+        db.add_layer(LayerInfo::new(1, "ACT"));
+        db.add_layer(LayerInfo::new(2, "VIA1"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(10, 10, 20, 20), 1, ShapeKind::RegularWire, 1),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(30, 30, 40, 40), 1, ShapeKind::RegularWire, 2),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(50, 50, 60, 60), 2, ShapeKind::Via, 3),
+        );
+
+        let counts = super::loaded_physical_layer_counts(&db);
+
+        assert_eq!(counts.get(&1), Some(&2));
+        assert_eq!(counts.get(&2), Some(&1));
+        assert_eq!(counts.get(&3), None);
+    }
+
+    #[test]
+    fn cached_plane_texture_upload_is_skipped_when_key_and_texture_are_current() {
+        let key = PlaneKey::for_test("hierarchy");
+        let other_key = PlaneKey::for_test("other");
+
+        assert_eq!(
+            cached_plane_texture_action(Some(&key), &key, true),
+            CachedPlaneTextureAction::ReuseTexture
+        );
+        assert_eq!(
+            cached_plane_texture_action(None, &key, true),
+            CachedPlaneTextureAction::UploadTexture
+        );
+        assert_eq!(
+            cached_plane_texture_action(Some(&key), &key, false),
+            CachedPlaneTextureAction::UploadTexture
+        );
+        assert_eq!(
+            cached_plane_texture_action(Some(&other_key), &key, true),
+            CachedPlaneTextureAction::UploadTexture
+        );
+    }
+
+    fn hierarchy_test_db_and_leaf_view() -> (LayoutDb, CellViewState) {
+        let package_root = std::env::temp_dir().join(format!(
+            "layout_viewer_native_v2_hierarchy_test_{}_{}",
+            std::process::id(),
+            HIERARCHY_TEST_PACKAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&package_root);
+        fs::create_dir_all(package_root.join("detail")).unwrap();
+        fs::create_dir_all(package_root.join("hierarchy")).unwrap();
+        fs::write(
+            &package_root.join("manifest.json"),
+            r#"{
+                "schema": "ecos.layoutpkg.v1",
+                "design_name": "unit",
+                "world_bbox": [0, 0, 1000, 1000],
+                "tilesets": { "detail": "detail/index.json" },
+                "hierarchy": { "cells": "hierarchy/cells.json" }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            &package_root.join("detail/index.json"),
+            r#"{ "tiles": [] }"#,
+        )
+        .unwrap();
+        fs::write(
+            &package_root.join("hierarchy/cells.json"),
+            r#"{
+                "schema": "ecos.layoutpkg.hierarchy.v2",
+                "version": 2,
+                "top_cell": 1,
+                "cells": [
+                    {
+                        "id": 1,
+                        "name": "top",
+                        "bbox": [0, 0, 1000, 1000],
+                        "instances": [
+                            {
+                                "id": 10,
+                                "name": "mid0",
+                                "child_cell": 2,
+                                "transform": { "dx": 100, "dy": 200, "orient": "R0" },
+                                "array": { "columns": 1, "rows": 1, "step_x": 0, "step_y": 0 },
+                                "bbox": [100, 200, 300, 400],
+                                "source_id": 10
+                            }
+                        ],
+                        "hierarchy_summary": {
+                            "direct_instance_count": 1,
+                            "direct_array_count": 0,
+                            "expanded_array_element_count": 1
+                        }
+                    },
+                    {
+                        "id": 2,
+                        "name": "mid",
+                        "bbox": [0, 0, 200, 200],
+                        "instances": [
+                            {
+                                "id": 20,
+                                "name": "leaf0",
+                                "child_cell": 3,
+                                "transform": { "dx": 5, "dy": 7, "orient": "R0" },
+                                "array": { "columns": 1, "rows": 1, "step_x": 0, "step_y": 0 },
+                                "bbox": [5, 7, 25, 27],
+                                "source_id": 20
+                            }
+                        ],
+                        "hierarchy_summary": {
+                            "direct_instance_count": 1,
+                            "direct_array_count": 0,
+                            "expanded_array_element_count": 1
+                        }
+                    },
+                    {
+                        "id": 3,
+                        "name": "leaf",
+                        "bbox": [0, 0, 20, 20]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let mut package = layoutpkg_reader::LayoutPackage::open(&package_root).unwrap();
+        let hierarchy = package.load_hierarchy().unwrap().unwrap();
+        let _ = fs::remove_dir_all(&package_root);
+        let mut db =
+            LayoutDb::from_hierarchy_document("unit", Rect::new(0, 0, 1_000, 1_000), hierarchy);
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let mid = db.cell_by_name("mid").unwrap();
+        let leaf = db.cell_by_name("leaf").unwrap();
+        db.add_shape(
+            leaf,
+            ShapeRecord::new(Rect::new(2, 2, 8, 8), 1, ShapeKind::RegularWire, 9),
+        );
+
+        let view = CellViewState::from_path(
+            db.top_cell(),
+            InstancePath::from_elements(vec![
+                InstancePathElement {
+                    parent_cell: db.top_cell(),
+                    instance_id: 10,
+                    source_id: 10,
+                    child_cell: mid,
+                    array_column: 0,
+                    array_row: 0,
+                    bbox: Rect::new(100, 200, 300, 400),
+                },
+                InstancePathElement {
+                    parent_cell: mid,
+                    instance_id: 20,
+                    source_id: 20,
+                    child_cell: leaf,
+                    array_column: 0,
+                    array_row: 0,
+                    bbox: Rect::new(5, 7, 25, 27),
+                },
+            ]),
+        );
+
+        (db, view)
+    }
+
+    fn sample_pick_hit(target: PickHitTarget, instance_path: InstancePath) -> PickHit {
+        let leaf = instance_path
+            .target_cell()
+            .expect("sample pick hit requires a non-empty instance path");
+        let object_path = match target {
+            PickHitTarget::Shape => ObjectPath {
+                instance_path: instance_path.clone(),
+                target: ObjectPathTarget::Shape(ShapeId {
+                    cell: leaf,
+                    shape_index: 0,
+                    source_id: 9,
+                }),
+            },
+            PickHitTarget::Instance {
+                parent_cell,
+                child_cell,
+                instance_id,
+                array_column,
+                array_row,
+            } => ObjectPath {
+                instance_path: instance_path.clone(),
+                target: ObjectPathTarget::Instance {
+                    parent_cell,
+                    instance_id,
+                    source_id: instance_id,
+                    child_cell,
+                    array_column,
+                    array_row,
+                },
+            },
+        };
+        PickHit {
+            display_layer_id: "M1".to_string(),
+            source_id: 9,
+            layer_id: 1,
+            kind: ShapeKind::RegularWire,
+            bbox: Rect::new(2, 2, 8, 8),
+            cell: leaf,
+            depth: instance_path.depth(),
+            instance_path,
+            object_path,
+            target,
+        }
+    }
+}

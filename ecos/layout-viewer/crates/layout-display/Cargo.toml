@@ -1,0 +1,8 @@
+[package]
+name = "layout-display"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+layoutdb = { path = "../layoutdb" }

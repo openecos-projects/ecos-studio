@@ -1,0 +1,15 @@
+[package]
+name = "layoutpkg-reader"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+layoutpkg-format = { path = "../layoutpkg-format" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+layoutpkg-packer = { path = "../layoutpkg-packer" }
+tempfile.workspace = true
