@@ -186,6 +186,9 @@ pub struct RenderQueryStats {
     pub display_cache_hits: usize,
     pub display_cache_misses: usize,
     pub cached_template_items: usize,
+    pub proxy_density_bins: usize,
+    pub proxy_representative_shapes: usize,
+    pub proxy_child_summaries: usize,
     pub compact_array_elements_checked: u64,
 }
 
@@ -456,31 +459,18 @@ impl RenderPlanner {
         match self.hierarchy_lod_mode_for_cell_view(db, cell_view, viewport, hysteresis_state) {
             HierarchyLodMode::FarBBox => {
                 plan.source = RenderPlanSource::HierarchyFar;
-                self.push_hierarchy_bboxes(db, &mut plan, viewport, cell_view, policy, 1);
-                self.push_top_level_context(
+                self.push_hierarchy_bboxes(
                     db,
-                    &layers,
                     &mut plan,
                     viewport,
-                    &mut occupancy,
                     cell_view,
                     policy,
-                    true,
+                    max_depth_for_query(self.settings, policy),
                 );
             }
             HierarchyLodMode::MidCoarse => {
                 plan.source = RenderPlanSource::HierarchyMid;
                 self.push_coarse_hierarchy(db, &mut plan, viewport, cell_view, policy);
-                self.push_top_level_context(
-                    db,
-                    &layers,
-                    &mut plan,
-                    viewport,
-                    &mut occupancy,
-                    cell_view,
-                    policy,
-                    true,
-                );
             }
             HierarchyLodMode::NearExpand => {
                 if cell_has_instances(db, cell_view.target_cell()) {
@@ -710,26 +700,52 @@ impl RenderPlanner {
         let entries = far_hierarchy_entries(query.instances, viewport, &mut rendered_arrays, self);
         let item_budget = far_hierarchy_coalesce_budget(viewport, self.settings);
         if entries.len() > item_budget {
-            self.push_coalesced_hierarchy_bboxes(plan, viewport, entries, item_budget);
+            self.push_thinned_hierarchy_bboxes(plan, viewport, entries, item_budget);
             return;
         }
         for entry in entries {
             if plan.truncated {
                 break;
             }
-            let item = DrawItem::Rect(DrawRect {
-                world: entry.bbox,
-                color: Color::rgb(168, 190, 210),
-                source_id: entry.source_id,
-                layer_id: 0,
-                composition: CompositionMode::MaskPattern,
-            });
-            let layer = hierarchy_display_layer();
+            self.push_far_hierarchy_entry(plan, entry);
+        }
+    }
+
+    fn push_thinned_hierarchy_bboxes(
+        &self,
+        plan: &mut RenderPlan,
+        viewport: Viewport,
+        entries: Vec<FarHierarchyEntry>,
+        item_budget: usize,
+    ) {
+        let original_len = entries.len();
+        let emitted_before =
+            plan.lod_stats.hierarchy_bbox + plan.lod_stats.array_bbox + plan.lod_stats.array_grid;
+        let thinned = thin_hierarchy_entries(viewport, self.settings, item_budget, entries);
+        for entry in thinned {
+            self.push_far_hierarchy_entry(plan, entry);
+        }
+        let emitted_after =
+            plan.lod_stats.hierarchy_bbox + plan.lod_stats.array_bbox + plan.lod_stats.array_grid;
+        let emitted = emitted_after.saturating_sub(emitted_before);
+        plan.query_stats.proxy_child_summaries += emitted;
+        plan.lod_stats.suppress += original_len.saturating_sub(emitted);
+    }
+
+    fn push_far_hierarchy_entry(&self, plan: &mut RenderPlan, entry: FarHierarchyEntry) {
+        let layer = hierarchy_display_layer();
+        let (width_px, height_px) = entry.projected_size_px;
+        if width_px.max(height_px) < self.settings.frame_only_px {
             push_item(
                 plan,
                 RenderPlane::Hierarchy,
                 &layer,
-                item,
+                DrawItem::Marker(DrawMarker {
+                    world: entry.bbox,
+                    color: Color::rgb(198, 224, 242),
+                    source_id: entry.source_id,
+                    layer_id: 0,
+                }),
                 self.settings.max_render_items,
             );
             plan.lod_stats.record(match entry.decision {
@@ -737,33 +753,27 @@ impl RenderPlanner {
                 ArrayLodDecision::Grid => LodDecision::ArrayGrid,
                 ArrayLodDecision::ViewportElements => LodDecision::HierarchyBBox,
             });
+            return;
         }
-    }
-
-    fn push_coalesced_hierarchy_bboxes(
-        &self,
-        plan: &mut RenderPlan,
-        viewport: Viewport,
-        entries: Vec<FarHierarchyEntry>,
-        item_budget: usize,
-    ) {
-        let layer = hierarchy_display_layer();
-        for entry in coalesce_hierarchy_entries(viewport, self.settings, item_budget, entries) {
-            push_item(
-                plan,
-                RenderPlane::Hierarchy,
-                &layer,
-                DrawItem::Rect(DrawRect {
-                    world: entry.bbox,
-                    color: Color::rgb(168, 190, 210),
-                    source_id: entry.source_id,
-                    layer_id: 0,
-                    composition: CompositionMode::MaskPattern,
-                }),
-                self.settings.max_render_items,
-            );
-            plan.lod_stats.record(LodDecision::Coarse);
-        }
+        let item = DrawItem::Rect(DrawRect {
+            world: entry.bbox,
+            color: Color::rgb(168, 190, 210),
+            source_id: entry.source_id,
+            layer_id: 0,
+            composition: CompositionMode::MaskPattern,
+        });
+        push_item(
+            plan,
+            RenderPlane::Hierarchy,
+            &layer,
+            item,
+            self.settings.max_render_items,
+        );
+        plan.lod_stats.record(match entry.decision {
+            ArrayLodDecision::BBox => LodDecision::ArrayBBox,
+            ArrayLodDecision::Grid => LodDecision::ArrayGrid,
+            ArrayLodDecision::ViewportElements => LodDecision::HierarchyBBox,
+        });
     }
 
     fn push_coarse_hierarchy(
@@ -785,7 +795,7 @@ impl RenderPlanner {
         plan.query_stats.hierarchy_instance_candidates_checked = query.candidates_checked;
         plan.query_stats.total_hierarchy_instances = query.total_instances;
         plan.query_stats.compact_array_elements_checked = query.compact_array_elements_checked;
-        let mut cell_cache = CellTemplateCache::default();
+        let mut cell_cache = CellDisplayProxyCache::default();
         let mut rendered_arrays = HashSet::new();
         for instance in query.instances {
             if plan.truncated {
@@ -813,14 +823,21 @@ impl RenderPlanner {
                     plan.lod_stats.record(LodDecision::ArrayGrid);
                 }
                 ArrayLodDecision::ViewportElements => {
+                    let mut display_proxy = None;
                     if self.settings.enable_cell_template_cache {
-                        let (template, hit) = cell_cache.template_for(db, instance.child_cell);
+                        let (proxy, hit) = cell_cache.proxy_for(db, instance.child_cell);
                         if hit {
                             plan.query_stats.display_cache_hits += 1;
                         } else {
                             plan.query_stats.display_cache_misses += 1;
                         }
-                        plan.query_stats.cached_template_items += template.shapes.len();
+                        plan.query_stats.cached_template_items += proxy.representative_shapes.len();
+                        plan.query_stats.proxy_density_bins += proxy.layer_density_bins.len();
+                        plan.query_stats.proxy_representative_shapes +=
+                            proxy.representative_shapes.len();
+                        plan.query_stats.proxy_child_summaries +=
+                            proxy.child_instance_summaries.len();
+                        display_proxy = Some(proxy);
                     }
                     push_hierarchy_rect(
                         plan,
@@ -828,9 +845,123 @@ impl RenderPlanner {
                         instance.bbox,
                         self.settings.max_render_items,
                     );
+                    if let Some(proxy) = display_proxy {
+                        self.push_cell_display_proxy(plan, viewport, &instance, proxy);
+                    }
                     plan.lod_stats.record(LodDecision::Coarse);
                 }
             }
+        }
+    }
+
+    fn push_cell_display_proxy(
+        &self,
+        plan: &mut RenderPlan,
+        viewport: Viewport,
+        instance: &CellViewInstanceRecord,
+        proxy: &CellDisplayProxy,
+    ) {
+        let layer = hierarchy_display_layer();
+        for density in &proxy.layer_density_bins {
+            if plan.truncated {
+                break;
+            }
+            let proxy_bbox = map_template_rect_to_instance(density.bbox, proxy.bbox, instance.bbox);
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                &layer,
+                DrawItem::Rect(DrawRect {
+                    world: proxy_bbox,
+                    color: density_color(density.layer_id, density.shape_count),
+                    source_id: 0,
+                    layer_id: density.layer_id,
+                    composition: CompositionMode::MaskPattern,
+                }),
+                self.settings.max_render_items,
+            );
+        }
+        for shape in &proxy.representative_shapes {
+            self.push_proxy_shape(plan, viewport, &layer, instance, proxy.bbox, shape);
+        }
+        for child in &proxy.child_instance_summaries {
+            if plan.truncated {
+                break;
+            }
+            let proxy_bbox = map_template_rect_to_instance(child.bbox, proxy.bbox, instance.bbox);
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                &layer,
+                DrawItem::Rect(DrawRect {
+                    world: proxy_bbox,
+                    color: Color::rgb(154, 188, 214),
+                    source_id: child.source_id,
+                    layer_id: 0,
+                    composition: CompositionMode::MaskPattern,
+                }),
+                self.settings.max_render_items,
+            );
+        }
+        if let Some(array) = proxy.array_summary {
+            let proxy_bbox = map_template_rect_to_instance(array.bbox, proxy.bbox, instance.bbox);
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                &layer,
+                DrawItem::Rect(DrawRect {
+                    world: proxy_bbox,
+                    color: Color::rgb(118, 148, 176),
+                    source_id: 0,
+                    layer_id: 0,
+                    composition: CompositionMode::MaskPattern,
+                }),
+                self.settings.max_render_items,
+            );
+        }
+    }
+
+    fn push_proxy_shape(
+        &self,
+        plan: &mut RenderPlan,
+        viewport: Viewport,
+        layer: &ResolvedDisplayLayer,
+        instance: &CellViewInstanceRecord,
+        proxy_bbox: Rect,
+        shape: &RepresentativeShape,
+    ) {
+        if plan.truncated {
+            return;
+        }
+        let mapped_bbox = map_template_rect_to_instance(shape.bbox, proxy_bbox, instance.bbox);
+        let (width_px, height_px) = viewport.projected_size_px(mapped_bbox);
+        if width_px.max(height_px) < self.settings.small_shape_px {
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                layer,
+                DrawItem::Marker(DrawMarker {
+                    world: mapped_bbox,
+                    color: Color::rgb(188, 216, 236),
+                    source_id: shape.source_id,
+                    layer_id: shape.layer_id,
+                }),
+                self.settings.max_render_items,
+            );
+        } else {
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                layer,
+                DrawItem::Rect(DrawRect {
+                    world: mapped_bbox,
+                    color: Color::rgb(136, 170, 198),
+                    source_id: shape.source_id,
+                    layer_id: shape.layer_id,
+                    composition: CompositionMode::MaskPattern,
+                }),
+                self.settings.max_render_items,
+            );
         }
     }
 
@@ -1074,7 +1205,9 @@ fn far_hierarchy_coalesce_budget(viewport: Viewport, settings: RenderSettings) -
     let bin_px = (settings.occupancy_bin_px * 2.0).max(settings.frame_only_px.max(1.0));
     let cols = (viewport.screen_width.max(1.0) / bin_px).ceil().max(1.0) as usize;
     let rows = (viewport.screen_height.max(1.0) / bin_px).ceil().max(1.0) as usize;
+    let per_bin = settings.max_markers_per_bin.max(1);
     cols.saturating_mul(rows)
+        .saturating_mul(per_bin)
         .max(1)
         .min(settings.max_render_items)
 }
@@ -1111,37 +1244,213 @@ pub enum ArrayLodDecision {
     ViewportElements,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct FarHierarchyEntry {
     bbox: Rect,
     source_id: u32,
+    depth: usize,
+    projected_size_px: (f32, f32),
     decision: ArrayLodDecision,
 }
 
 #[derive(Default)]
-struct CellTemplateCache {
-    templates: HashMap<CellId, CellTemplate>,
+struct CellDisplayProxyCache {
+    proxies: HashMap<CellId, CellDisplayProxy>,
 }
 
-#[derive(Default)]
-struct CellTemplate {
-    shapes: Vec<ShapeRecord>,
+#[derive(Debug, Clone)]
+struct CellDisplayProxy {
+    bbox: Rect,
+    layer_density_bins: Vec<LayerDensityBin>,
+    representative_shapes: Vec<RepresentativeShape>,
+    child_instance_summaries: Vec<ChildInstanceSummary>,
+    array_summary: Option<ArraySummary>,
 }
 
-impl CellTemplateCache {
-    fn template_for(&mut self, db: &LayoutDb, cell: CellId) -> (&CellTemplate, bool) {
-        let hit = self.templates.contains_key(&cell);
-        if !hit {
-            let template = db
-                .cell(cell)
-                .map(|cell| CellTemplate {
-                    shapes: cell.shapes().to_vec(),
-                })
-                .unwrap_or_default();
-            self.templates.insert(cell, template);
+#[derive(Debug, Clone, Copy)]
+struct LayerDensityBin {
+    layer_id: u16,
+    bbox: Rect,
+    shape_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RepresentativeShape {
+    bbox: Rect,
+    source_id: u32,
+    layer_id: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ChildInstanceSummary {
+    bbox: Rect,
+    source_id: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ArraySummary {
+    bbox: Rect,
+    columns: u32,
+    rows: u32,
+}
+
+impl CellDisplayProxy {
+    fn empty() -> Self {
+        Self {
+            bbox: Rect::new(0, 0, 0, 0),
+            layer_density_bins: Vec::new(),
+            representative_shapes: Vec::new(),
+            child_instance_summaries: Vec::new(),
+            array_summary: None,
         }
-        (self.templates.get(&cell).expect("template inserted"), hit)
     }
+}
+
+impl CellDisplayProxyCache {
+    fn proxy_for(&mut self, db: &LayoutDb, cell: CellId) -> (&CellDisplayProxy, bool) {
+        let hit = self.proxies.contains_key(&cell);
+        if !hit {
+            let proxy = build_cell_display_proxy(db, cell);
+            self.proxies.insert(cell, proxy);
+        }
+        (self.proxies.get(&cell).expect("proxy inserted"), hit)
+    }
+}
+
+fn build_cell_display_proxy(db: &LayoutDb, cell_id: CellId) -> CellDisplayProxy {
+    let Some(cell) = db.cell(cell_id) else {
+        return CellDisplayProxy::empty();
+    };
+    let bbox = cell.bbox();
+    let mut density_by_layer: HashMap<u16, LayerDensityBin> = HashMap::new();
+    for shape in cell.shapes() {
+        density_by_layer
+            .entry(shape.layer_id)
+            .and_modify(|bin| {
+                bin.bbox = union_rect(bin.bbox, shape.bbox);
+                bin.shape_count += 1;
+            })
+            .or_insert(LayerDensityBin {
+                layer_id: shape.layer_id,
+                bbox: shape.bbox,
+                shape_count: 1,
+            });
+    }
+    let mut layer_density_bins = density_by_layer.into_values().collect::<Vec<_>>();
+    layer_density_bins.sort_by_key(|bin| (bin.layer_id, bin.bbox.y1, bin.bbox.x1));
+
+    let representative_shapes =
+        select_representative_shapes(cell.shapes(), layer_density_bins.len().max(1) * 4);
+
+    let mut child_instance_summaries = cell
+        .instances()
+        .iter()
+        .map(|instance| ChildInstanceSummary {
+            bbox: instance.bbox,
+            source_id: instance.source_id,
+        })
+        .collect::<Vec<_>>();
+    child_instance_summaries.sort_by_key(|summary| {
+        (
+            summary.bbox.y1,
+            summary.bbox.x1,
+            summary.bbox.height(),
+            summary.bbox.width(),
+            summary.source_id,
+        )
+    });
+
+    let array_summary = summarize_arrays(cell.instances());
+
+    CellDisplayProxy {
+        bbox,
+        layer_density_bins,
+        representative_shapes,
+        child_instance_summaries,
+        array_summary,
+    }
+}
+
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    Rect::new(
+        a.x1.min(b.x1),
+        a.y1.min(b.y1),
+        a.x2.max(b.x2),
+        a.y2.max(b.y2),
+    )
+}
+
+fn density_color(layer_id: u16, shape_count: usize) -> Color {
+    let base = match layer_id % 4 {
+        0 => Color::rgb(116, 154, 255),
+        1 => Color::rgb(84, 211, 154),
+        2 => Color::rgb(255, 132, 92),
+        _ => Color::rgb(255, 228, 138),
+    };
+    let boost = (shape_count as f32).ln_1p().min(4.0) / 12.0;
+    base.shift_brightness(boost)
+}
+
+fn select_representative_shapes(
+    shapes: &[ShapeRecord],
+    max_shapes: usize,
+) -> Vec<RepresentativeShape> {
+    if max_shapes == 0 || shapes.is_empty() {
+        return Vec::new();
+    }
+    let mut ranked = shapes
+        .iter()
+        .map(|shape| {
+            (
+                representative_shape_rank(shape),
+                RepresentativeShape {
+                    bbox: shape.bbox,
+                    source_id: shape.source_id,
+                    layer_id: shape.layer_id,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(rank, _)| *rank);
+    ranked
+        .into_iter()
+        .take(max_shapes)
+        .map(|(_, shape)| shape)
+        .collect()
+}
+
+fn representative_shape_rank(shape: &ShapeRecord) -> (u16, i64, i32, i32, u32) {
+    (
+        shape.layer_id,
+        -hierarchy_entry_area(shape.bbox),
+        shape.bbox.y1,
+        shape.bbox.x1,
+        shape.source_id,
+    )
+}
+
+fn summarize_arrays(instances: &[layoutdb::CellInstance]) -> Option<ArraySummary> {
+    let mut summary: Option<ArraySummary> = None;
+    for instance in instances {
+        let columns = instance.array.columns.max(1);
+        let rows = instance.array.rows.max(1);
+        if columns == 1 && rows == 1 {
+            continue;
+        }
+        summary = Some(match summary {
+            Some(existing) => ArraySummary {
+                bbox: union_rect(existing.bbox, instance.bbox),
+                columns: existing.columns.saturating_add(columns),
+                rows: existing.rows.max(rows),
+            },
+            None => ArraySummary {
+                bbox: instance.bbox,
+                columns,
+                rows,
+            },
+        });
+    }
+    summary
 }
 
 fn cell_has_instances(db: &LayoutDb, cell: CellId) -> bool {
@@ -1250,66 +1559,114 @@ fn far_hierarchy_entries(
             Some(FarHierarchyEntry {
                 bbox: hierarchy_bbox_for_decision(instance_ref, decision),
                 source_id: instance_ref.source_id(),
+                depth: instance.depth,
+                projected_size_px: viewport
+                    .projected_size_px(hierarchy_bbox_for_decision(instance_ref, decision)),
                 decision,
             })
         })
         .collect()
 }
 
-fn coalesce_hierarchy_entries(
+fn thin_hierarchy_entries(
     viewport: Viewport,
     settings: RenderSettings,
     max_items: usize,
     entries: Vec<FarHierarchyEntry>,
 ) -> Vec<FarHierarchyEntry> {
-    if max_items == 0 {
+    if max_items == 0 || entries.is_empty() {
         return Vec::new();
     }
-    let mut bin_px = settings.occupancy_bin_px.max(1.0);
+    if entries.len() <= max_items {
+        return entries;
+    }
+    let mut bin_units = proxy_bin_units(viewport, settings);
     loop {
-        let coalesced = coalesce_hierarchy_entries_once(viewport, bin_px, &entries);
-        if coalesced.len() <= max_items || coalesced.len() <= 1 {
-            return coalesced;
+        let thinned =
+            thin_hierarchy_entries_once(bin_units, settings.max_markers_per_bin.max(1), &entries);
+        if thinned.len() <= max_items {
+            return thinned;
         }
-        bin_px *= 2.0;
+        if bin_units > viewport.world.width().max(viewport.world.height()).max(1) * 2 {
+            return sample_hierarchy_entries(&entries, max_items);
+        }
+        bin_units = bin_units.saturating_mul(2).max(bin_units + 1);
     }
 }
 
-fn coalesce_hierarchy_entries_once(
-    viewport: Viewport,
-    bin_px: f32,
+fn thin_hierarchy_entries_once(
+    bin_units: i32,
+    per_bin: usize,
     entries: &[FarHierarchyEntry],
 ) -> Vec<FarHierarchyEntry> {
-    let mut bins: HashMap<(i32, i32), FarHierarchyEntry> = HashMap::new();
+    let mut bins: HashMap<(usize, i32, i32), Vec<FarHierarchyEntry>> = HashMap::new();
     for entry in entries.iter().copied() {
-        let key = hierarchy_bin_key(viewport, bin_px, entry.bbox);
-        bins.entry(key)
-            .and_modify(|existing| {
-                existing.bbox = union_rect(existing.bbox, entry.bbox);
-            })
-            .or_insert(FarHierarchyEntry {
-                decision: ArrayLodDecision::ViewportElements,
-                ..entry
-            });
+        let key = hierarchy_world_bin_key(bin_units, entry);
+        let bucket = bins.entry(key).or_default();
+        bucket.push(entry);
+        bucket.sort_by_key(hierarchy_entry_priority_key);
+        bucket.truncate(per_bin);
     }
-    bins.into_values().collect()
+    let mut values = bins.into_values().flatten().collect::<Vec<_>>();
+    values.sort_by_key(hierarchy_entry_sort_key);
+    values
 }
 
-fn hierarchy_bin_key(viewport: Viewport, bin_px: f32, bbox: Rect) -> (i32, i32) {
+fn proxy_bin_units(viewport: Viewport, settings: RenderSettings) -> i32 {
+    let units = viewport
+        .units_per_pixel_x()
+        .max(viewport.units_per_pixel_y())
+        * settings.occupancy_bin_px.max(1.0);
+    units.round().max(1.0) as i32
+}
+
+fn hierarchy_world_bin_key(bin_units: i32, entry: FarHierarchyEntry) -> (usize, i32, i32) {
+    let bin_units = bin_units.max(1);
+    let bbox = entry.bbox;
     let cx = (bbox.x1 as f32 + bbox.x2 as f32) * 0.5;
     let cy = (bbox.y1 as f32 + bbox.y2 as f32) * 0.5;
-    let sx = (cx - viewport.world.x1 as f32) / viewport.units_per_pixel_x();
-    let sy = (cy - viewport.world.y1 as f32) / viewport.units_per_pixel_y();
-    ((sx / bin_px).floor() as i32, (sy / bin_px).floor() as i32)
+    (
+        entry.depth,
+        (cx as i32).div_euclid(bin_units),
+        (cy as i32).div_euclid(bin_units),
+    )
 }
 
-fn union_rect(a: Rect, b: Rect) -> Rect {
-    Rect::new(
-        a.x1.min(b.x1),
-        a.y1.min(b.y1),
-        a.x2.max(b.x2),
-        a.y2.max(b.y2),
+fn sample_hierarchy_entries(
+    entries: &[FarHierarchyEntry],
+    max_items: usize,
+) -> Vec<FarHierarchyEntry> {
+    if max_items == 0 || entries.is_empty() {
+        return Vec::new();
+    }
+    if entries.len() <= max_items {
+        return entries.to_vec();
+    }
+    let step = entries.len() as f64 / max_items as f64;
+    let mut sampled = Vec::with_capacity(max_items);
+    for index in 0..max_items {
+        let source_index = (index as f64 * step).floor() as usize;
+        sampled.push(entries[source_index.min(entries.len() - 1)]);
+    }
+    sampled
+}
+
+fn hierarchy_entry_area(bbox: Rect) -> i64 {
+    i64::from(bbox.width().max(1)) * i64::from(bbox.height().max(1))
+}
+
+fn hierarchy_entry_priority_key(entry: &FarHierarchyEntry) -> (usize, i64, i32, i32, u32) {
+    (
+        usize::MAX - entry.depth,
+        hierarchy_entry_area(entry.bbox),
+        entry.bbox.y1,
+        entry.bbox.x1,
+        entry.source_id,
     )
+}
+
+fn hierarchy_entry_sort_key(entry: &FarHierarchyEntry) -> (usize, i32, i32, u32) {
+    (entry.depth, entry.bbox.y1, entry.bbox.x1, entry.source_id)
 }
 
 fn hierarchy_bbox_for_decision(
@@ -1320,6 +1677,29 @@ fn hierarchy_bbox_for_decision(
         ArrayLodDecision::BBox | ArrayLodDecision::Grid => instance.array_bbox(),
         ArrayLodDecision::ViewportElements => instance.bbox(),
     }
+}
+
+fn map_template_rect_to_instance(rect: Rect, template_bbox: Rect, instance_bbox: Rect) -> Rect {
+    let template_width = i64::from(template_bbox.width().max(1));
+    let template_height = i64::from(template_bbox.height().max(1));
+    let instance_width = i64::from(instance_bbox.width().max(1));
+    let instance_height = i64::from(instance_bbox.height().max(1));
+    let map_x = |x: i32| {
+        let local = i64::from(x - template_bbox.x1);
+        (i64::from(instance_bbox.x1) + local * instance_width / template_width)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    };
+    let map_y = |y: i32| {
+        let local = i64::from(y - template_bbox.y1);
+        (i64::from(instance_bbox.y1) + local * instance_height / template_height)
+            .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    };
+    Rect::new(
+        map_x(rect.x1),
+        map_y(rect.y1),
+        map_x(rect.x2),
+        map_y(rect.y2),
+    )
 }
 
 fn push_hierarchy_rect(
@@ -1593,6 +1973,9 @@ fn append_plan(plan: &mut RenderPlan, other: RenderPlan, max_items: usize) {
     plan.query_stats.display_cache_hits += other.query_stats.display_cache_hits;
     plan.query_stats.display_cache_misses += other.query_stats.display_cache_misses;
     plan.query_stats.cached_template_items += other.query_stats.cached_template_items;
+    plan.query_stats.proxy_density_bins += other.query_stats.proxy_density_bins;
+    plan.query_stats.proxy_representative_shapes += other.query_stats.proxy_representative_shapes;
+    plan.query_stats.proxy_child_summaries += other.query_stats.proxy_child_summaries;
     plan.query_stats.compact_array_elements_checked +=
         other.query_stats.compact_array_elements_checked;
     plan.lod_stats.exact += other.lod_stats.exact;
@@ -2199,6 +2582,66 @@ mod tests {
         db
     }
 
+    fn proxy_rich_hierarchy_db() -> LayoutDb {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        db.add_layer(LayerInfo::new(2, "M2"));
+        let child = db.add_cell("macro", Rect::new(0, 0, 200, 160));
+        for i in 0..10 {
+            db.add_shape(
+                child,
+                ShapeRecord::new(
+                    Rect::new(10 + i * 12, 10, 18 + i * 12, 50),
+                    1,
+                    ShapeKind::RegularWire,
+                    100 + i as u32,
+                ),
+            );
+        }
+        db.add_shape(
+            child,
+            ShapeRecord::new(Rect::new(20, 90, 180, 110), 2, ShapeKind::RegularWire, 220),
+        );
+        let grandchild = db.add_cell("leaf", Rect::new(0, 0, 20, 20));
+        db.add_shape(
+            grandchild,
+            ShapeRecord::new(Rect::new(2, 2, 8, 8), 1, ShapeKind::IoPin, 301),
+        );
+        db.add_instance(
+            child,
+            CellInstance {
+                id: 33,
+                name: "leaf0".to_string(),
+                child_cell: grandchild,
+                transform: Transform {
+                    dx: 150,
+                    dy: 120,
+                    orient: Orientation::R0,
+                },
+                array: CellArray::default(),
+                bbox: Rect::new(150, 120, 170, 140),
+                source_id: 330,
+            },
+        );
+        db.add_instance(
+            db.top_cell(),
+            CellInstance {
+                id: 77,
+                name: "macro0".to_string(),
+                child_cell: child,
+                transform: Transform {
+                    dx: 1_000,
+                    dy: 2_000,
+                    orient: Orientation::R0,
+                },
+                array: CellArray::default(),
+                bbox: Rect::new(1_000, 2_000, 1_200, 2_160),
+                source_id: 77,
+            },
+        );
+        db
+    }
+
     fn empty_instance_hierarchy_db() -> LayoutDb {
         let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
         db.add_layer(LayerInfo::new(1, "M1"));
@@ -2278,6 +2721,67 @@ mod tests {
             );
         }
         db
+    }
+
+    fn repeated_cell_grid_hierarchy_db(columns: usize, rows: usize) -> LayoutDb {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 1_200_000, 900_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let child = db.add_cell("leaf", Rect::new(0, 0, 100, 100));
+        db.add_shape(
+            child,
+            ShapeRecord::new(Rect::new(0, 0, 100, 100), 1, ShapeKind::RegularWire, 9),
+        );
+        let mut id = 0_u32;
+        for row in 0..rows {
+            for column in 0..columns {
+                let x = column as i32 * 12_000;
+                let y = row as i32 * 12_000;
+                db.add_instance(
+                    db.top_cell(),
+                    CellInstance {
+                        id,
+                        name: format!("u{row}_{column}"),
+                        child_cell: child,
+                        transform: Transform {
+                            dx: x,
+                            dy: y,
+                            orient: Orientation::R0,
+                        },
+                        array: CellArray::default(),
+                        bbox: Rect::new(x, y, x + 100, y + 100),
+                        source_id: id,
+                    },
+                );
+                id += 1;
+            }
+        }
+        db
+    }
+
+    fn hierarchy_item_bboxes(plan: &crate::RenderPlan) -> Vec<(Rect, u32)> {
+        plan.batches
+            .iter()
+            .filter(|batch| batch.plane == RenderPlane::Hierarchy)
+            .flat_map(|batch| batch.items.iter())
+            .filter_map(|item| match item {
+                DrawItem::Rect(rect) => Some((rect.world, rect.source_id)),
+                DrawItem::Marker(marker) => Some((marker.world, marker.source_id)),
+                DrawItem::Line(_) => None,
+            })
+            .collect()
+    }
+
+    fn hierarchy_item_bboxes_with_layers(plan: &crate::RenderPlan) -> Vec<(Rect, u32, u16)> {
+        plan.batches
+            .iter()
+            .filter(|batch| batch.plane == RenderPlane::Hierarchy)
+            .flat_map(|batch| batch.items.iter())
+            .filter_map(|item| match item {
+                DrawItem::Rect(rect) => Some((rect.world, rect.source_id, rect.layer_id)),
+                DrawItem::Marker(marker) => Some((marker.world, marker.source_id, marker.layer_id)),
+                DrawItem::Line(_) => None,
+            })
+            .collect()
     }
 
     #[test]
@@ -2366,13 +2870,9 @@ mod tests {
 
         assert_eq!(plan.lod_stats.hierarchy_bbox, 1);
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
-        assert!(plan.batches.iter().any(|batch| {
-            batch.plane == RenderPlane::Hierarchy
-                && batch
-                    .items
-                    .iter()
-                    .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 77))
-        }));
+        assert!(hierarchy_item_bboxes(&plan)
+            .iter()
+            .any(|(_, source_id)| *source_id == 77));
         assert!(!plan.batches.iter().any(|batch| {
             matches!(
                 batch.plane,
@@ -2382,6 +2882,36 @@ mod tests {
                 .iter()
                 .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 42))
         }));
+    }
+
+    #[test]
+    fn far_view_uses_deep_hierarchy_bbox_cloud_when_depth_allows_it() {
+        let db = nested_hierarchy_db();
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            hierarchy_expand_depth: 64,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        let hierarchy_rects = hierarchy_item_bboxes(&plan)
+            .into_iter()
+            .map(|(bbox, _)| bbox)
+            .collect::<Vec<_>>();
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(hierarchy_rects.contains(&Rect::new(100, 200, 300, 400)));
+        assert!(hierarchy_rects.contains(&Rect::new(110, 220, 210, 320)));
+        assert!(plan
+            .batches
+            .iter()
+            .all(|batch| batch.plane == RenderPlane::Hierarchy));
     }
 
     #[test]
@@ -2429,7 +2959,7 @@ mod tests {
     }
 
     #[test]
-    fn mid_view_draws_cell_bbox_but_does_not_expand_child_shapes() {
+    fn mid_view_draws_cell_proxy_without_detail_layer_expansion() {
         let db = hierarchy_db();
         let model = one_layer_display_model();
 
@@ -2445,13 +2975,13 @@ mod tests {
         );
 
         assert_eq!(plan.lod_stats.coarse, 1);
-        assert!(!plan.batches.iter().any(|batch| {
-            batch.display_layer_id == "layer:1"
-                && batch
-                    .items
-                    .iter()
-                    .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 9))
-        }));
+        assert!(hierarchy_item_bboxes(&plan)
+            .iter()
+            .any(|(_, source_id)| *source_id == 9));
+        assert!(!plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "layer:1"));
     }
 
     #[test]
@@ -2662,7 +3192,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_far_uses_overview_density_as_top_level_context_when_instances_exist() {
+    fn hierarchy_far_does_not_use_overview_density_as_top_level_context_when_instances_exist() {
         let mut db = hierarchy_db();
         db.set_overview_bins(vec![OverviewDensityBin {
             bbox: Rect::new(0, 0, 10_000, 10_000),
@@ -2685,14 +3215,10 @@ mod tests {
         );
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
-        assert!(plan.batches.iter().any(|batch| {
-            batch.plane == RenderPlane::Hierarchy
-                && batch
-                    .items
-                    .iter()
-                    .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 77))
-        }));
-        assert!(plan.batches.iter().any(|batch| {
+        assert!(hierarchy_item_bboxes(&plan)
+            .iter()
+            .any(|(_, source_id)| *source_id == 77));
+        assert!(!plan.batches.iter().any(|batch| {
             batch.plane == RenderPlane::Fill
                 && batch.display_layer_id == "layer:1"
                 && batch.items.iter().any(|item| {
@@ -2919,6 +3445,139 @@ mod tests {
     }
 
     #[test]
+    fn repeated_cell_display_proxies_include_density_shapes_and_child_summaries() {
+        let db = proxy_rich_hierarchy_db();
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 1_000.0,
+            hierarchy_coarse_units_per_pixel: 10.0,
+            enable_cell_template_cache: true,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(900, 1_900, 1_300, 2_300), 20.0, 20.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
+        assert_eq!(plan.query_stats.display_cache_misses, 2);
+        assert!(plan.query_stats.proxy_density_bins >= 2);
+        assert!(plan.query_stats.proxy_representative_shapes > 0);
+        assert_eq!(plan.query_stats.proxy_child_summaries, 1);
+    }
+
+    #[test]
+    fn mid_view_renders_layer_density_and_representative_shapes_from_cell_proxy() {
+        let db = proxy_rich_hierarchy_db();
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 1_000.0,
+            hierarchy_coarse_units_per_pixel: 10.0,
+            max_frames_per_bin: 4,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(900, 1_900, 1_300, 2_300), 20.0, 20.0),
+        );
+
+        let hierarchy_items = hierarchy_item_bboxes_with_layers(&plan);
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
+        assert!(hierarchy_items
+            .iter()
+            .any(|(bbox, _, layer_id)| *layer_id == 1
+                && *bbox == Rect::new(1_010, 2_010, 1_126, 2_050)));
+        assert!(hierarchy_items
+            .iter()
+            .any(|(bbox, _, layer_id)| *layer_id == 2
+                && *bbox == Rect::new(1_020, 2_090, 1_180, 2_110)));
+        assert!(hierarchy_items
+            .iter()
+            .any(|(bbox, source_id, layer_id)| *source_id == 330
+                && *layer_id == 0
+                && *bbox == Rect::new(1_150, 2_120, 1_170, 2_140)));
+        assert!(!plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "layer:1"));
+    }
+
+    #[test]
+    fn far_proxy_thinning_reports_stable_world_tile_proxy_suppression() {
+        let db = many_repeated_cell_hierarchy_db(12_500);
+        let model = one_layer_display_model();
+        let planner = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            max_render_items: 1_000,
+            occupancy_bin_px: 8.0,
+            ..Default::default()
+        });
+
+        let first = planner.plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 1_600_000, 2_000), 1_600.0, 2.0),
+        );
+        let panned = planner.plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(500, 0, 1_600_500, 2_000), 1_600.0, 2.0),
+        );
+
+        assert_eq!(first.source, RenderPlanSource::HierarchyFar);
+        assert_eq!(panned.source, RenderPlanSource::HierarchyFar);
+        assert_eq!(
+            first.query_stats.proxy_child_summaries,
+            plan_item_count(&first)
+        );
+        assert_eq!(
+            panned.query_stats.proxy_child_summaries,
+            plan_item_count(&panned)
+        );
+        assert!(first.query_stats.proxy_child_summaries > 0);
+        assert_eq!(
+            first.query_stats.proxy_child_summaries,
+            panned.query_stats.proxy_child_summaries
+        );
+        assert!(first.lod_stats.suppress > 0);
+        assert!(panned.lod_stats.suppress > 0);
+    }
+
+    #[test]
+    fn far_lod_preserves_visible_hierarchy_density_for_large_viewport() {
+        let db = repeated_cell_grid_hierarchy_db(80, 80);
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            occupancy_bin_px: 8.0,
+            max_markers_per_bin: 3,
+            max_render_items: 80_000,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 1_060_000, 795_000), 1_200.0, 900.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(!plan.truncated);
+        assert!(
+            plan_item_count(&plan) >= 1_000,
+            "far LOD should preserve visible hierarchy density, got {}",
+            plan_item_count(&plan)
+        );
+    }
+
+    #[test]
     fn interaction_mode_preserves_near_detail_when_below_coarse_threshold() {
         let db = hierarchy_db();
         let model = one_layer_display_model();
@@ -2997,7 +3656,7 @@ mod tests {
     }
 
     #[test]
-    fn far_view_coalesces_dense_hierarchy_under_global_budget() {
+    fn far_view_thins_dense_hierarchy_under_screen_budget_without_large_unions() {
         let db = many_repeated_cell_hierarchy_db(12_500);
         let model = one_layer_display_model();
 
@@ -3016,13 +3675,14 @@ mod tests {
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
         assert!(!plan.truncated);
-        assert!(plan.lod_stats.coarse > 0);
-        assert_eq!(plan.lod_stats.hierarchy_bbox, 0);
+        assert!(plan.lod_stats.hierarchy_bbox > 0);
+        assert_eq!(plan.lod_stats.coarse, 0);
+        assert!(plan.lod_stats.suppress > 0);
         assert!(plan_item_count(&plan) < 12_500);
     }
 
     #[test]
-    fn far_view_coalesces_hierarchy_when_bbox_count_exceeds_global_budget() {
+    fn far_view_thins_hierarchy_when_bbox_count_exceeds_budget() {
         let db = many_repeated_cell_hierarchy_db(12_500);
         let model = one_layer_display_model();
 
@@ -3041,13 +3701,14 @@ mod tests {
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
         assert!(!plan.truncated);
-        assert!(plan.lod_stats.coarse > 0);
-        assert_eq!(plan.lod_stats.hierarchy_bbox, 0);
+        assert!(plan.lod_stats.hierarchy_bbox > 0);
+        assert_eq!(plan.lod_stats.coarse, 0);
+        assert!(plan.lod_stats.suppress > 0);
         assert!(plan_item_count(&plan) <= 1_000);
     }
 
     #[test]
-    fn far_view_increases_coalescing_granularity_until_it_fits_budget() {
+    fn far_view_increases_thinning_granularity_until_it_fits_budget() {
         let db = many_repeated_cell_hierarchy_db(12_500);
         let model = one_layer_display_model();
 
@@ -3066,7 +3727,9 @@ mod tests {
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
         assert!(!plan.truncated);
-        assert!(plan.lod_stats.coarse > 0);
+        assert!(plan.lod_stats.hierarchy_bbox > 0);
+        assert_eq!(plan.lod_stats.coarse, 0);
+        assert!(plan.lod_stats.suppress > 0);
         assert!(plan_item_count(&plan) <= 100);
     }
 
@@ -3569,7 +4232,7 @@ mod tests {
     }
 
     #[test]
-    fn far_top_view_keeps_top_level_overview_when_hierarchy_exists() {
+    fn far_top_view_keeps_only_hierarchy_outline_when_hierarchy_exists() {
         let mut db = hierarchy_db();
         db.set_overview_bins(vec![OverviewDensityBin {
             bbox: Rect::new(0, 0, 10_000, 10_000),
@@ -3589,7 +4252,7 @@ mod tests {
         .plan(&db, &model, viewport);
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
-        assert!(plan.batches.iter().any(|batch| {
+        assert!(!plan.batches.iter().any(|batch| {
             batch.plane == RenderPlane::Fill
                 && batch.items.iter().any(|item| {
                     matches!(item, DrawItem::Rect(rect)
@@ -3597,11 +4260,15 @@ mod tests {
                             && rect.layer_id == 1)
                 })
         }));
+        assert!(plan
+            .batches
+            .iter()
+            .all(|batch| batch.plane == RenderPlane::Hierarchy));
         assert!(plan.lod_stats.hierarchy_bbox > 0);
     }
 
     #[test]
-    fn mid_top_view_keeps_top_level_overview_when_hierarchy_exists() {
+    fn mid_top_view_keeps_only_hierarchy_coarse_when_hierarchy_exists() {
         let mut db = hierarchy_db();
         db.set_overview_bins(vec![OverviewDensityBin {
             bbox: Rect::new(0, 0, 10_000, 10_000),
@@ -3621,7 +4288,7 @@ mod tests {
         .plan(&db, &model, viewport);
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
-        assert!(plan.batches.iter().any(|batch| {
+        assert!(!plan.batches.iter().any(|batch| {
             batch.plane == RenderPlane::Fill
                 && batch.items.iter().any(|item| {
                     matches!(item, DrawItem::Rect(rect)
@@ -3629,6 +4296,10 @@ mod tests {
                             && rect.layer_id == 1)
                 })
         }));
+        assert!(plan
+            .batches
+            .iter()
+            .all(|batch| batch.plane == RenderPlane::Hierarchy));
         assert!(plan.lod_stats.coarse > 0);
     }
 

@@ -72,6 +72,15 @@ pub fn rasterize_plan(
                 (RenderPlane::Hierarchy, DrawItem::Line(line)) => {
                     rasterize_line(&mut plane, line, batch.style.frame_alpha, &world_to_screen);
                 }
+                (RenderPlane::Hierarchy, DrawItem::Marker(marker)) => {
+                    let [x0, y0, x1, y1] = world_to_screen(marker.world);
+                    let cx = (x0 + x1) / 2;
+                    let cy = (y0 + y1) / 2;
+                    plane.fill_rect(
+                        [cx - 1, cy - 1, cx + 2, cy + 2],
+                        rgba(marker.color, batch.style.marker_alpha),
+                    );
+                }
                 _ => {
                     // Initial raster path intentionally ignores markers and non-hierarchy lines.
                 }
@@ -439,6 +448,34 @@ mod tests {
         assert_eq!(pixel(&plane, 0, 0), [77, 88, 99, 180]);
         assert_eq!(pixel(&plane, 3, 3), [77, 88, 99, 180]);
         assert_eq!(pixel(&plane, 5, 5), [77, 88, 99, 180]);
+    }
+
+    #[test]
+    fn rasterize_plan_draws_hierarchy_markers() {
+        let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
+        style.marker_alpha = 190;
+        let plan = RenderPlan {
+            batches: vec![DrawBatch {
+                plane: RenderPlane::Hierarchy,
+                display_layer_id: "cell".to_owned(),
+                style,
+                items: vec![DrawItem::Marker(DrawMarker {
+                    world: Rect::new(2, 2, 3, 3),
+                    color: Color::rgb(77, 88, 99),
+                    source_id: 1,
+                    layer_id: 1,
+                })],
+            }],
+            source: RenderPlanSource::HierarchyFar,
+            ..Default::default()
+        };
+
+        let plane = rasterize_plan(&plan, 6, 6, rect_to_screen);
+
+        assert_eq!(pixel(&plane, 1, 1), [77, 88, 99, 190]);
+        assert_eq!(pixel(&plane, 2, 2), [77, 88, 99, 190]);
+        assert_eq!(pixel(&plane, 3, 3), [77, 88, 99, 190]);
+        assert_eq!(pixel(&plane, 4, 4), [0, 0, 0, 0]);
     }
 
     #[test]
