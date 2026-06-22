@@ -156,6 +156,12 @@
                   <span>Loading catalog</span>
                 </div>
 
+                <div v-else-if="catalogUnavailable" class="state-panel failed">
+                  <i class="ri-error-warning-line"></i>
+                  <span>{{ catalogError || 'Frontend catalog is unavailable.' }}</span>
+                  <button type="button" class="text-action" @click="loadCatalog">Retry</button>
+                </div>
+
                 <div v-else class="space-y-8">
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
@@ -395,257 +401,21 @@ interface Emits {
 
 const emit = defineEmits<Emits>()
 
-const fallbackCatalog: FrontendCatalogPayload = {
-  version: 1,
-  defaults: {
-    core_id: 'custom-filelist',
-    soc_harness_id: 'ysyx-am-soc',
-    toolchain_id: 'riscv32-unknown-elf',
-    test_suite_id: 'cpu-tests',
-  },
-  cores: [
-    {
-      id: 'custom-filelist',
-      name: 'My CPU Filelist',
-      description: 'Use an existing CPU RTL filelist.',
-      status: 'stable',
-      integration_level: 'sim_ready',
-      requires_filelist: true,
+function createEmptyCatalog(): FrontendCatalogPayload {
+  return {
+    version: 1,
+    defaults: {
+      core_id: '',
+      soc_harness_id: '',
+      toolchain_id: '',
+      test_suite_id: '',
     },
-    {
-      id: 'picorv32',
-      name: 'PicoRV32',
-      description: 'Small RV32IM Verilog core with an ECOS CPU wrapper for CPU tests.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'scr1',
-      name: 'SCR1',
-      description: 'MCU-class open-source RISC-V core with an experimental ECOS CPU wrapper.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'ibex',
-      name: 'Ibex',
-      description: 'lowRISC 32-bit RISC-V core with an experimental ECOS CPU wrapper.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'cv32e40p',
-      name: 'CV32E40P',
-      description: 'OpenHW CORE-V 32-bit RISC-V core with an experimental ECOS CPU wrapper.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'serv',
-      name: 'SERV',
-      description: 'Small bit-serial RISC-V core with an experimental ECOS CPU wrapper.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'femtorv32',
-      name: 'FemtoRV32 Electron',
-      description: 'Compact RV32IM educational core with an experimental ECOS CPU wrapper.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'darkriscv',
-      name: 'DarkRISCV',
-      description: 'Small BSD-licensed RISC-V core with an experimental ECOS CPU wrapper. Start with one basic CPU test such as add.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      requires_filelist: false,
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'vexriscv',
-      name: 'VexRiscv',
-      description: 'Configurable SpinalHDL RISC-V core; ECOS adapter planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      requires_filelist: false,
-      supports_difftest: false,
-    },
-    {
-      id: 'cva6',
-      name: 'CVA6',
-      description: 'OpenHW application-class RISC-V core; ECOS adapter planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      requires_filelist: false,
-      supports_difftest: false,
-    },
-  ],
-  soc_harnesses: [
-    {
-      id: 'ysyx-am-soc',
-      name: 'YSYX AM SoC Harness',
-      description: 'Current SoC harness for CPU tests and RT-Thread.',
-      status: 'stable',
-      integration_level: 'sim_ready',
-      variant: 'soc1',
-    },
-    {
-      id: 'ysyx-am-soc-alt',
-      name: 'YSYX AM SoC Harness Alt',
-      description: 'Alternative copy of the current YSYX AM SoC harness kept for compatibility experiments.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      variant: 'soc2',
-    },
-    {
-      id: 'ysyx-am-soc-extended',
-      name: 'YSYX AM SoC Harness Extended',
-      description: 'Extended compatibility copy of the current YSYX AM SoC harness.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      variant: 'soc3',
-    },
-    {
-      id: 'minimal-riscv-soc',
-      name: 'ECOS Minimal CPU Test Harness',
-      description: 'Local Verilog CPU-test harness with DPI memory, UART, and trap MMIO; not a full SoC.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      variant: 'minimal-riscv',
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'corev-mini-soc',
-      name: 'ECOS CORE-V CPU Test Harness',
-      description: 'Local Verilog CPU-test harness profile for CORE-V style CPU wrappers; not a full CORE-V SoC.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      variant: 'corev-mini',
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'femtorv-mini-soc',
-      name: 'ECOS FemtoRV CPU Test Harness',
-      description: 'Local Verilog CPU-test harness profile for FemtoRV and compact educational CPU wrappers; not a full SoC.',
-      status: 'experimental',
-      integration_level: 'sim_ready',
-      variant: 'femtorv-mini',
-      supports_difftest: false,
-      supported_test_suites: ['cpu-tests', 'smoke'],
-    },
-    {
-      id: 'ibex-demo-system',
-      name: 'Ibex Demo System',
-      description: 'lowRISC Ibex demo SoC; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'ibex-demo',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-    {
-      id: 'litex-vexriscv-soc',
-      name: 'LiteX VexRiscv SoC',
-      description: 'LiteX-generated VexRiscv SoC candidate; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'litex-vexriscv',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-    {
-      id: 'neorv32-soc',
-      name: 'NEORV32 SoC',
-      description: 'NEORV32 processor/SoC candidate; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'neorv32',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-    {
-      id: 'opentitan-earlgrey',
-      name: 'OpenTitan Earl Grey',
-      description: 'OpenTitan Earl Grey candidate; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'earlgrey',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-    {
-      id: 'swervolf',
-      name: 'SweRVolf SoC',
-      description: 'CHIPS Alliance SweRVolf SoC candidate; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'swervolf',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-    {
-      id: 'darksocv',
-      name: 'DarkSoCV',
-      description: 'DarkRISCV companion SoC candidate; ECOS harness planned.',
-      status: 'planned',
-      integration_level: 'metadata_only',
-      variant: 'darksocv',
-      supports_difftest: false,
-      supported_test_suites: [],
-    },
-  ],
-  toolchains: [
-    {
-      id: 'riscv32-unknown-elf',
-      name: 'RISC-V 32-bit ELF',
-      description: 'Bare-metal RISC-V 32-bit profile.',
-      status: 'stable',
-    },
-  ],
-  test_suites: [
-    {
-      id: 'smoke',
-      name: 'Smoke Tests',
-      description: 'Fast default sanity set for frontend simulation.',
-      status: 'stable',
-    },
-    {
-      id: 'cpu-tests',
-      name: 'CPU Tests',
-      description: 'Selectable SoC CPU test programs.',
-      status: 'stable',
-    },
-    {
-      id: 'rtthread',
-      name: 'RT-Thread',
-      description: 'RT-Thread boot smoke case.',
-      status: 'stable',
-    },
-  ],
-  compatibility: [],
+    cores: [],
+    soc_harnesses: [],
+    toolchains: [],
+    test_suites: [],
+    compatibility: [],
+  }
 }
 
 const currentStep = ref(1)
@@ -668,7 +438,7 @@ const steps = [
   { id: 3, title: 'Review & Create' },
 ]
 
-const catalog = ref<FrontendCatalogPayload>({ ...fallbackCatalog })
+const catalog = ref<FrontendCatalogPayload>(createEmptyCatalog())
 
 const config = ref<FrontendWorkspaceConfig>({
   directory: '',
@@ -727,10 +497,15 @@ const visibleToolchains = computed(() =>
 const visibleTestSuites = computed(() =>
   sortedCatalogEntries(catalog.value.test_suites),
 )
+const catalogUnavailable = computed(() =>
+  Boolean(catalogError.value)
+  && visibleCores.value.length === 0
+  && visibleSocHarnesses.value.length === 0,
+)
 
 const validationIssues = computed(() => [
   ...(catalogError.value ? [{
-    severity: 'warning' as const,
+    severity: catalogUnavailable.value ? 'error' as const : 'warning' as const,
     code: 'catalog_load_failed',
     field: 'catalog',
     message: catalogError.value,
@@ -799,10 +574,7 @@ const canProceed = computed(() => {
   }
 })
 
-onMounted(async () => {
-  applyCatalogDefaults(catalog.value)
-  await loadCatalog()
-})
+onMounted(loadCatalog)
 
 watch(
   [
@@ -821,6 +593,8 @@ watch(
 async function loadCatalog(): Promise<void> {
   catalogLoading.value = true
   catalogError.value = ''
+  validation.value = null
+  validationFallbackIssues.value = []
   try {
     const response = await listFrontendCatalogApi()
     if (response.response === 'success' && response.data) {
@@ -829,8 +603,10 @@ async function loadCatalog(): Promise<void> {
       return
     }
     catalogError.value = response.message?.join(', ') || 'Failed to load frontend catalog.'
+    resetCatalogSelection()
   } catch (err) {
     catalogError.value = err instanceof Error ? err.message : String(err)
+    resetCatalogSelection()
   } finally {
     catalogLoading.value = false
     await refreshValidation()
@@ -883,6 +659,15 @@ function applyCatalogDefaults(nextCatalog: FrontendCatalogPayload): void {
   selectedSocHarnessId.value = selectedSocHarnessId.value || nextCatalog.defaults.soc_harness_id || nextCatalog.soc_harnesses[0]?.id || ''
   selectedToolchainId.value = selectedToolchainId.value || nextCatalog.defaults.toolchain_id || nextCatalog.toolchains[0]?.id || ''
   selectedTestSuiteId.value = selectedTestSuiteId.value || nextCatalog.defaults.test_suite_id || nextCatalog.test_suites[0]?.id || ''
+  syncParameters()
+}
+
+function resetCatalogSelection(): void {
+  catalog.value = createEmptyCatalog()
+  selectedCoreId.value = ''
+  selectedSocHarnessId.value = ''
+  selectedToolchainId.value = ''
+  selectedTestSuiteId.value = ''
   syncParameters()
 }
 
@@ -1268,6 +1053,27 @@ const ReviewItem = defineComponent({
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
   color: var(--text-secondary);
   padding: 1rem;
+}
+
+.state-panel.failed {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--border-color));
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+}
+
+.state-panel .text-action {
+  margin-left: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.35rem 0.7rem;
+}
+
+.state-panel .text-action:hover {
+  border-color: var(--accent-color);
 }
 
 .option-row {

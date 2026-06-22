@@ -445,7 +445,6 @@ export function useParameters() {
         () => resolveProjectPathAccess(parametersPath),
       )
       if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
-      console.log('Loading parameters from:', resolvedPath ?? parametersPath)
       if (!resolvedPath) {
         resetParametersState()
         return
@@ -459,18 +458,13 @@ export function useParameters() {
       if (fileContent === undefined) return
       const parametersData = parseParametersData(fileContent)
 
-      console.log('Loaded parameters data:', parametersData)
-
       if (loadResourceToken !== parametersResourceToken) return
       resolvedParametersPath = resolvedPath
 
       const transformedConfig = transformParametersToConfig(parametersData)
       Object.assign(config, transformedConfig)
-      console.log('Loaded config:', config)
       originalConfig = JSON.stringify(config)
       hasChanges.value = false
-
-      console.log('Parameters loaded:', config)
     } catch (err) {
       if (!workspaceLifecycle.isCurrentSession(sessionId)) return
       console.error('Failed to load parameters:', err)
@@ -520,7 +514,6 @@ export function useParameters() {
         })) {
           return
         }
-        console.log('Saving parameters to:', saveParametersPath)
         const resolvedPath = await resolveProjectPathAccess(saveParametersPath)
         if (!resolvedPath) {
           return
@@ -552,7 +545,6 @@ export function useParameters() {
       }
       invalidateWorkspaceResources(['parameters', 'home'], { sessionId: saveSessionId })
 
-      console.log('Parameters saved successfully')
       return true
     } catch (err) {
       if (!isSaveContextCurrent({

@@ -62,6 +62,7 @@ export interface FrontendValidationResult {
     test_suite_id: string
     cpu_filelist: string
     core_cpu_filelist?: string
+    cpu_adapter_filelist?: string
     core_capability?: string
     cpu_wrapper_contract?: string
     cpu_socket_contract?: string

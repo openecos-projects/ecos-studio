@@ -151,7 +151,6 @@ export function useFlowRunner() {
     state.value = StateEnum.Ongoing
     error.value = null
     try {
-      console.log('handleRunFlow', step, { rerun: Boolean(options.rerun) })
       const versionsBeforeRunStep = { ...resourceVersions.value }
       const runSessionId = workspaceSession.value.sessionId
 
@@ -164,8 +163,6 @@ export function useFlowRunner() {
           rerun: Boolean(options.rerun)
         }
       })
-      console.log('run step result', result)
-
       const homeAndParametersAlreadyInvalidated = RUN_STEP_FALLBACK_SCOPES.every(
         (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
       )
@@ -247,8 +244,6 @@ export function useFlowRunner() {
     try {
       const isFrontendProject = currentProject.value?.designTool === 'frontend'
       const flowLabel = isFrontendProject ? 'Frontend Flow' : 'RTL2GDS'
-      console.log(`Starting ${flowLabel} flow...`, { rerun: Boolean(options.rerun) })
-
       const result = await rtl2gdsApi({
         cmd: CMDEnum.rtl2gds,
         data: {
@@ -257,8 +252,6 @@ export function useFlowRunner() {
           rerun: Boolean(options.rerun)
         }
       })
-      console.log(`${flowLabel} result:`, result)
-
       if (result.response === 'success') {
         state.value = StateEnum.Success
         showToast({

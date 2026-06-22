@@ -57,7 +57,6 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
  */
 function transformFlowData(flowData: FlowData): FlowStage[] {
   const stages: FlowStage[] = []
-  console.log('flowData.steps:', flowData.steps)
   for (const step of flowData.steps) {
     const metadata = getStepMetadata(step.name)
     stages.push({
@@ -154,7 +153,6 @@ export function useFlowStages() {
         () => resolveProjectPathAccess(localPath),
       )
       if (!isCurrent()) return
-      console.log('Loading flow.json from path:', resolvedPath ?? localPath)
       if (!resolvedPath) return
 
       const fileContent = await workspaceLifecycle.runForSession(
@@ -164,10 +162,7 @@ export function useFlowStages() {
       if (!isCurrent() || fileContent === undefined) return
       const flowData: FlowData = JSON.parse(fileContent)
 
-      console.log('Loaded flow data from path:', flowData)
-
       dynamicFlowStages.value = transformFlowData(flowData)
-      console.log('Flow stages loaded from path:', dynamicFlowStages.value)
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load flow.json from path:', flowJsonPath, err)
@@ -208,11 +203,7 @@ export function useFlowStages() {
         return
       }
 
-      console.log('Loaded flow data:', flowData)
-
       dynamicFlowStages.value = transformFlowData(flowData)
-      console.log('Flow stages loaded:', dynamicFlowStages.value)
-
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load flow stages:', err)
