@@ -38,5 +38,6 @@ skills-lock.json
 
 # Electron packaging outputs and locally prepared bundle resources
 apps/desktop-electron/release/
-apps/desktop-electron/resources/binaries/
+apps/desktop-electron/resources/binaries/*
+!apps/desktop-electron/resources/binaries/.gitkeep
 apps/desktop-electron/resources/oss-cad-suite/
