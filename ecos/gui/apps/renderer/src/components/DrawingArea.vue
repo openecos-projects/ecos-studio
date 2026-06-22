@@ -21,6 +21,7 @@ import {
 import { parseDrcStepJson, violationToFitRect } from '@/composables/drcStepParser'
 import { requestProjectPathAccess } from '@/utils/projectFs'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { getDesktopApi } from '@/platform/desktop'
 import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
@@ -43,6 +44,7 @@ const layoutState = useLayoutState()
 
 const editor = shallowRef<Editor | null>(null)
 const PERFORMANCE_HUD_UPDATE_INTERVAL_MS = 250
+const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'
 
 /** Resource resolver 返回的布局 JSON 相对路径，供工具栏生成瓦片 */
 const layoutJsonRelativePath = ref<string | null>(null)
@@ -232,10 +234,19 @@ const currentViewJsonPackageRoot = ref<string | null>(null)
 const previewImageRelativePath = ref<string | null>(null)
 const previewImageUrl = ref<string | null>(null)
 const previewModeSwitchBusy = ref(false)
+const nativeLayoutViewerBusy = ref(false)
+const isPreparingNativeLayoutViewer = computed(() =>
+  nativeLayoutViewerBusy.value && layoutState.loadingState.value === 'loading',
+)
 const showPreviewModeToggle = computed(() =>
   previewImageRelativePath.value != null && currentViewJsonPackageRoot.value != null,
 )
 const canSwitchToLayoutMode = computed(() => currentViewJsonPackageRoot.value != null)
+const showNativeLayoutViewer = computed(() =>
+  isDesktopRuntime()
+  && currentProject.value?.path != null
+  && currentViewJsonPackageRoot.value != null,
+)
 const showViewJsonPerformanceHud = computed(() =>
   import.meta.env.DEV && layoutState.renderMode.value === 'layout',
 )
@@ -642,6 +653,36 @@ async function onPreviewModeChange(mode: 'layout' | 'image'): Promise<void> {
   }
 }
 
+async function onOpenNativeLayoutViewer(): Promise<void> {
+  if (nativeLayoutViewerBusy.value) return
+  const projectPath = currentProject.value?.path
+  const viewJsonPackageRoot = currentViewJsonPackageRoot.value
+  if (!projectPath || !viewJsonPackageRoot || !isDesktopRuntime()) return
+
+  nativeLayoutViewerBusy.value = true
+  layoutState.loadingState.value = 'loading'
+  layoutState.loadingMessage.value = NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.layoutViewer.open({
+      projectPath,
+      viewJsonPackageRoot,
+    })
+  } catch (err) {
+    console.error('Failed to open native layout viewer:', err)
+    layoutState.loadingState.value = 'error'
+    layoutState.loadingMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    nativeLayoutViewerBusy.value = false
+    if (
+      layoutState.loadingState.value === 'loading'
+      && layoutState.loadingMessage.value === NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
+    ) {
+      resetLoadingState()
+    }
+  }
+}
+
 const handleStageChange = async (stage: string) => {
   if (!editor.value || !stage) return
   const guard = createDrawingAsyncGuard(stage)
@@ -767,8 +808,11 @@ onUnmounted(() => {
       :can-switch-to-layout-mode="canSwitchToLayoutMode"
       :tile-generate-confirm-reset-key="route.path"
       :preview-mode-switch-busy="previewModeSwitchBusy"
+      :show-native-layout-viewer="showNativeLayoutViewer"
+      :native-layout-viewer-busy="nativeLayoutViewerBusy"
       @toolChange="onToolChange"
       @previewModeChange="onPreviewModeChange"
+      @openNativeLayoutViewer="onOpenNativeLayoutViewer"
     />
 
     <div class="relative flex-1 overflow-hidden">
@@ -777,11 +821,25 @@ onUnmounted(() => {
       <!-- Loading overlay -->
       <div
         v-if="layoutState.loadingState.value === 'loading'"
-        class="absolute inset-0 flex items-center justify-center bg-black/40 z-10"
+        :data-testid="isPreparingNativeLayoutViewer ? 'native-layout-viewer-loading' : undefined"
+        class="absolute inset-0 flex items-center justify-center bg-black/40 z-10 transition-opacity duration-200"
       >
-        <div class="flex flex-col items-center gap-2 text-white/80 text-sm">
-          <div class="w-6 h-6 border-2 border-white/30 border-t-white/80 rounded-full animate-spin"></div>
-          <span>{{ layoutState.loadingMessage.value || 'Loading...' }}</span>
+        <div
+          class="flex min-w-64 flex-col items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-5 py-4 text-center text-sm text-white/80 shadow-2xl backdrop-blur-sm"
+          :class="{ 'gap-3': isPreparingNativeLayoutViewer }"
+        >
+          <div
+            class="w-6 h-6 border-2 border-white/30 border-t-white/80 rounded-full animate-spin"
+            :class="{ 'w-8 h-8': isPreparingNativeLayoutViewer }"
+          ></div>
+          <span class="font-medium">{{ layoutState.loadingMessage.value || 'Loading...' }}</span>
+          <span
+            v-if="isPreparingNativeLayoutViewer"
+            data-testid="native-layout-viewer-loading"
+            class="max-w-72 text-xs leading-5 text-white/55"
+          >
+            Preparing Native Layout Viewer package before opening the window.
+          </span>
         </div>
       </div>
 

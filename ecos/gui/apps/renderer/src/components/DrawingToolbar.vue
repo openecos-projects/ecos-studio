@@ -23,6 +23,10 @@ interface Props {
   tileGenerateConfirmResetKey?: string
   /** 矢量 ↔ 预览图切换中 */
   previewModeSwitchBusy?: boolean
+  /** 是否显示「打开 Native Layout Viewer」工具 */
+  showNativeLayoutViewer?: boolean
+  /** Native viewer 拉起中 */
+  nativeLayoutViewerBusy?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -35,12 +39,15 @@ const props = withDefaults(defineProps<Props>(), {
   tileCacheReady: false,
   tileGenerateConfirmResetKey: '',
   previewModeSwitchBusy: false,
+  showNativeLayoutViewer: false,
+  nativeLayoutViewerBusy: false,
 })
 
 const emit = defineEmits<{
   toolChange: [toolId: string]
   generateTiles: []
   previewModeChange: [mode: 'layout' | 'image']
+  openNativeLayoutViewer: []
 }>()
 
 const toolbarTileBusy = computed(() => props.tileGenBusy || props.previewModeSwitchBusy)
@@ -308,6 +315,26 @@ watch(
           </div>
         </div>
       </div>
+
+      <div v-if="showNativeLayoutViewer" class="w-px h-6 bg-(--border-color) mx-0.5" />
+
+      <button
+        v-if="showNativeLayoutViewer"
+        type="button"
+        :disabled="nativeLayoutViewerBusy"
+        class="w-9 h-9 flex items-center justify-center rounded transition-all shrink-0 text-base disabled:opacity-50 disabled:cursor-wait disabled:text-(--text-secondary)"
+        :class="nativeLayoutViewerBusy
+          ? 'text-(--text-secondary)'
+          : 'text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-hover)'"
+        title="打开 Native Layout Viewer"
+        aria-label="打开 Native Layout Viewer"
+        @click="emit('openNativeLayoutViewer')"
+      >
+        <i
+          class="ri-window-line text-base"
+          :class="{ 'animate-pulse': nativeLayoutViewerBusy }"
+        ></i>
+      </button>
     </div>
 
     <div class="w-px h-6 bg-(--border-color)"></div>

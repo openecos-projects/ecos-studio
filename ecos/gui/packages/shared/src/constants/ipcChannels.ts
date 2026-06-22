@@ -48,6 +48,7 @@ export const desktopApiIpcChannels = {
   resourcesRefreshRegistry: 'resources:refresh-registry',
   tilesGenerate: 'tiles:generate',
   tilesStatus: 'tiles:status',
+  layoutViewerOpen: 'layout-viewer:open',
   cliExecute: 'cli:execute',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',

@@ -9,6 +9,7 @@ import type {
   DesktopCliCommandRequest,
   DesktopDirectoryDialogOptions,
   DesktopFileDialogOptions,
+  LayoutViewerOpenRequest,
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
@@ -228,6 +229,10 @@ const desktopApi: DesktopApi = {
         throw error
       }
     },
+  },
+  layoutViewer: {
+    open: (request: LayoutViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.layoutViewerOpen, request),
   },
   workspaceResources: {
     getIndex: () =>

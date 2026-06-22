@@ -103,6 +103,9 @@ function registerHandlers() {
       resize: vi.fn(),
       write: vi.fn(),
     },
+    layoutViewerService: {
+      open: vi.fn(),
+    },
   }
 
   registerIpc({
@@ -188,6 +191,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesRefreshRegistry,
       desktopApiIpcChannels.tilesGenerate,
       desktopApiIpcChannels.tilesStatus,
+      desktopApiIpcChannels.layoutViewerOpen,
       desktopApiIpcChannels.systemOpenExternal,
       desktopApiIpcChannels.cliExecute,
       desktopApiIpcChannels.shellCreateSession,
@@ -710,6 +714,30 @@ describe('registerIpc', () => {
 
     expect(services.tileService.getStatus).toHaveBeenCalledWith(request)
     expect(services.tileService.generate).not.toHaveBeenCalled()
+  })
+
+  it('delegates native layout viewer launches to the layout viewer service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = {
+      projectPath: '/tmp/project/home.json',
+      viewJsonPackageRoot: 'output/gcd_route_view',
+    }
+    services.layoutViewerService.open.mockResolvedValue({
+      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
+      packageRoot: '/tmp/project/output/gcd_route_view',
+      spawned: true,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.layoutViewerOpen)?.(event, request),
+    ).resolves.toEqual({
+      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
+      packageRoot: '/tmp/project/output/gcd_route_view',
+      spawned: true,
+    })
+
+    expect(services.layoutViewerService.open).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

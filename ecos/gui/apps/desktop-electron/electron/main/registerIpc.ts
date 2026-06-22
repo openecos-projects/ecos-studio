@@ -19,6 +19,8 @@ import {
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
+  type LayoutViewerOpenRequest,
+  type LayoutViewerOpenResult,
   type RemoteContentFile,
   type RemoteContentListFilesRequest,
   type RemoteContentReadJsonFileRequest,
@@ -114,6 +116,9 @@ export interface DesktopBridgeServices {
   tileService: {
     generate(request: TileGenerationRequest): Promise<TileGenerationResult>
     getStatus(request: TileGenerationRequest): Promise<TileGenerationResult>
+  }
+  layoutViewerService: {
+    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -634,6 +639,13 @@ export function registerIpc(
     desktopApiIpcChannels.tilesStatus,
     async (_event, request) => {
       return await services.tileService.getStatus(request as TileGenerationRequest)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.layoutViewerOpen,
+    async (_event, request) => {
+      return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
     },
   )
 

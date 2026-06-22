@@ -666,6 +666,19 @@ function compileDrawingArea(vue: VueRuntime) {
         isDesktopRuntime: () => true,
       }
     }
+    if (id === '@/platform/desktop') {
+      return {
+        getDesktopApi: () => ({
+          layoutViewer: {
+            open: vi.fn(async () => ({
+              layoutPackagePath: '/workspace/demo/output/gcd_route_view/.layoutpkg',
+              packageRoot: '/workspace/demo/output/gcd_route_view',
+              spawned: true,
+            })),
+          },
+        }),
+      }
+    }
     if (id === '@/composables/useLayoutTileGen') {
       return {
         deriveDrcStepPathFromLayoutJsonRelative: (path: string) => `${path}.drc.step.json`,

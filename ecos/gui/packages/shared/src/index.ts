@@ -13,6 +13,8 @@ export type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
+  LayoutViewerOpenRequest,
+  LayoutViewerOpenResult,
   PdkDetectedFiles,
   ScannedPdkDirectory,
   VersionInfo,

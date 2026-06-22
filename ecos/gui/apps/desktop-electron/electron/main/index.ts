@@ -12,6 +12,7 @@ import {
 } from '../services/desktopLogPaths'
 import { EccCliAdapter } from '../services/eccCliAdapter'
 import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
+import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
@@ -32,6 +33,7 @@ let services:
       remoteContentService: RemoteContentService
       settingsStore: SettingsStore
       resourceManagerService: ResourceManagerService
+      layoutViewerService: LayoutViewerService
       shellService: ShellPtyService
       tileService: TileService
       workspaceResourceService: WorkspaceResourceService
@@ -117,12 +119,21 @@ function getDesktopServices() {
   const tileService = new TileService({
     projectRootProvider: projectScopeService,
   })
+  const layoutViewerService = new LayoutViewerService({
+    appPath: app.getAppPath(),
+    cwd: process.cwd(),
+    env: runtimeEnv,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+  })
 
   services = {
     appInfoService,
     desktopRuntimeManager,
     remoteContentService,
     resourceManagerService,
+    layoutViewerService,
     settingsStore,
     shellService,
     tileService,
@@ -142,6 +153,7 @@ async function launchMainWindow(): Promise<void> {
       desktopRuntimeManager: desktopServices.desktopRuntimeManager,
       remoteContentService: desktopServices.remoteContentService,
       resourceManagerService: desktopServices.resourceManagerService,
+      layoutViewerService: desktopServices.layoutViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
       tileService: desktopServices.tileService,

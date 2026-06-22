@@ -99,6 +99,18 @@ export interface DesktopProjectLogTailSubscriptionOptions {
   pollIntervalMs?: number
 }
 
+export interface LayoutViewerOpenRequest {
+  projectPath: string
+  viewJsonPackageRoot: string
+  rebuildPackage?: boolean
+}
+
+export interface LayoutViewerOpenResult {
+  packageRoot: string
+  layoutPackagePath: string
+  spawned: boolean
+}
+
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
@@ -163,6 +175,9 @@ export interface DesktopApi {
   tiles: {
     generate(request: TileGenerationRequest): Promise<TileGenerationResult>
     getStatus(request: TileGenerationRequest): Promise<TileGenerationResult>
+  }
+  layoutViewer: {
+    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
   workspaceResources: {
     getIndex(): Promise<WorkspaceResourceIndex>
