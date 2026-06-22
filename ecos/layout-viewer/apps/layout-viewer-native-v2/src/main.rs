@@ -28,6 +28,10 @@ const PLANE_CACHE_TILE_PX: f32 = 256.0;
 const PLANE_CACHE_MARGIN_TILES: i32 = 1;
 const HIERARCHY_ROWS_STEADY_LIMIT: usize = 512;
 const HIERARCHY_ROWS_INTERACTION_LIMIT: usize = 64;
+const MAX_PATTERN_OPS_PER_RECT: usize = 512;
+const MAX_HATCH_OPS_PER_RECT: usize = 256;
+const PATTERN_TILE_PX: f32 = 10.0;
+const SPARSE_DOT_SPACING_PX: f32 = 9.0;
 
 #[derive(Debug, Parser)]
 #[command(name = "layout-viewer-native-v2")]
@@ -214,7 +218,8 @@ struct FrameRateState {
 
 impl FrameRateState {
     fn record_frame_delta(&mut self, duration: std::time::Duration) {
-        let seconds = duration.as_secs_f32();
+        let sample_duration = duration.max(TARGET_REPAINT_INTERVAL);
+        let seconds = sample_duration.as_secs_f32();
         if seconds <= f32::EPSILON {
             return;
         }
@@ -387,6 +392,13 @@ fn plan_source_for_units_per_pixel(
         return RenderPlanSource::FlatDetail;
     }
     let lod = classify_lod(units_per_pixel, settings, hysteresis_state);
+    if matches!(lod, LodLevel::Mid)
+        && hierarchy_exists
+        && !settings.force_interaction_coarse
+        && units_per_pixel <= settings.idle_detail_units_per_pixel
+    {
+        return RenderPlanSource::HierarchyNear;
+    }
     match lod {
         LodLevel::Far if hierarchy_exists => RenderPlanSource::HierarchyFar,
         LodLevel::Mid if hierarchy_exists => RenderPlanSource::HierarchyMid,
@@ -542,7 +554,16 @@ fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
     }
 }
 
+#[cfg(test)]
 fn selection_summary_text(hit: &PickHit) -> String {
+    selection_inspector_rows(hit)
+        .into_iter()
+        .map(|(label, value)| format!("{}: {value}", label.to_ascii_lowercase()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn selection_inspector_rows(hit: &PickHit) -> Vec<(&'static str, String)> {
     let target = match hit.target {
         PickHitTarget::Shape => "shape".to_owned(),
         PickHitTarget::Instance {
@@ -560,17 +581,119 @@ fn selection_summary_text(hit: &PickHit) -> String {
             array_row
         ),
     };
-    format!(
-        "target: {target}\ndepth: {}\ncell: {}\nsource: {}\nlayer: {}\nbbox: {}, {}, {}, {}",
-        hit.depth,
-        hit.cell.raw(),
-        hit.source_id,
-        hit.layer_id,
-        hit.bbox.x1,
-        hit.bbox.y1,
-        hit.bbox.x2,
-        hit.bbox.y2
-    )
+    let (source_kind, source_file) = source_trace_for_hit(hit);
+    vec![
+        ("Target", target),
+        ("Source Kind", source_kind.to_owned()),
+        ("Source File", source_file.to_owned()),
+        ("Source ID", hit.source_id.to_string()),
+        ("Display Layer", hit.display_layer_id.clone()),
+        ("Layer", hit.layer_id.to_string()),
+        ("Shape Kind", shape_kind_label(hit.kind).to_owned()),
+        ("Cell", hit.cell.raw().to_string()),
+        ("Depth", hit.depth.to_string()),
+        (
+            "BBox",
+            format!(
+                "{}, {}, {}, {}",
+                hit.bbox.x1, hit.bbox.y1, hit.bbox.x2, hit.bbox.y2
+            ),
+        ),
+        ("Instance Path", instance_path_summary(&hit.instance_path)),
+        ("Object Path", object_path_summary(&hit.object_path)),
+    ]
+}
+
+fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
+    match hit.kind {
+        ShapeKind::Die => ("die", "design/die.json"),
+        ShapeKind::Core => ("core", "design/die.json"),
+        ShapeKind::Instance => ("instance", "design/instances.json"),
+        ShapeKind::RegularWire => ("regular_wire", "design/regular_wires.json"),
+        ShapeKind::SpecialWire => ("special_wire", "design/special_wires.json"),
+        ShapeKind::Via => (
+            "via",
+            "design/regular_wires.json | design/special_wires.json | design/io_pins.json",
+        ),
+        ShapeKind::IoPin => ("io_pin", "design/io_pins.json"),
+        ShapeKind::Blockage => ("blockage", "design/blockages.json"),
+        ShapeKind::Fill => ("fill", "design/fills.json"),
+        ShapeKind::Region => ("region", "design/regions.json"),
+        ShapeKind::Row => ("row", "design/rows.json"),
+        ShapeKind::Track => ("track", "design/tracks.json"),
+        ShapeKind::GCellGrid => ("gcell_grid", "design/gcell_grids.json"),
+    }
+}
+
+fn shape_kind_label(kind: ShapeKind) -> &'static str {
+    match kind {
+        ShapeKind::Die => "die",
+        ShapeKind::Core => "core",
+        ShapeKind::Instance => "instance",
+        ShapeKind::RegularWire => "regular_wire",
+        ShapeKind::SpecialWire => "special_wire",
+        ShapeKind::Via => "via",
+        ShapeKind::IoPin => "io_pin",
+        ShapeKind::Blockage => "blockage",
+        ShapeKind::Fill => "fill",
+        ShapeKind::Region => "region",
+        ShapeKind::Row => "row",
+        ShapeKind::Track => "track",
+        ShapeKind::GCellGrid => "gcell_grid",
+    }
+}
+
+fn instance_path_summary(path: &InstancePath) -> String {
+    if path.is_empty() {
+        return "top".to_owned();
+    }
+    path.elements()
+        .iter()
+        .map(|element| {
+            format!(
+                "{}:{}->{}[{},{}]",
+                element.instance_id,
+                element.parent_cell.raw(),
+                element.child_cell.raw(),
+                element.array_column,
+                element.array_row
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+fn object_path_summary(path: &layoutdb::ObjectPath) -> String {
+    match &path.target {
+        layoutdb::ObjectPathTarget::Shape(shape) => {
+            format!(
+                "shape cell={} index={} source={}",
+                shape.cell.raw(),
+                shape.shape_index,
+                shape.source_id
+            )
+        }
+        layoutdb::ObjectPathTarget::Instance {
+            parent_cell,
+            instance_id,
+            source_id,
+            child_cell,
+            array_column,
+            array_row,
+        } => format!(
+            "instance id={} source={} parent={} child={} array={},{}",
+            instance_id,
+            source_id,
+            parent_cell.raw(),
+            child_cell.raw(),
+            array_column,
+            array_row
+        ),
+    }
+}
+
+fn canvas_interaction_sense() -> egui::Sense {
+    egui::Sense::click_and_drag()
 }
 
 fn hierarchy_row_label(db: &layoutdb::LayoutDb, row: &HierarchyTreeRow) -> String {
@@ -671,6 +794,7 @@ struct LodTuningState {
     max_markers_per_bin: usize,
     hierarchy_bbox_units_per_pixel: f32,
     hierarchy_coarse_units_per_pixel: f32,
+    idle_detail_units_per_pixel: f32,
     array_bbox_units_per_pixel: f32,
     array_grid_units_per_pixel: f32,
     hierarchy_expand_depth: usize,
@@ -696,6 +820,7 @@ impl LodTuningState {
             max_markers_per_bin: settings.max_markers_per_bin,
             hierarchy_bbox_units_per_pixel: settings.hierarchy_bbox_units_per_pixel,
             hierarchy_coarse_units_per_pixel: settings.hierarchy_coarse_units_per_pixel,
+            idle_detail_units_per_pixel: settings.idle_detail_units_per_pixel,
             array_bbox_units_per_pixel: settings.array_bbox_units_per_pixel,
             array_grid_units_per_pixel: settings.array_grid_units_per_pixel,
             hierarchy_expand_depth: settings.hierarchy_expand_depth.min(64),
@@ -716,6 +841,7 @@ impl LodTuningState {
             max_markers_per_bin: self.max_markers_per_bin.max(1),
             hierarchy_bbox_units_per_pixel: self.hierarchy_bbox_units_per_pixel.max(1.0),
             hierarchy_coarse_units_per_pixel: self.hierarchy_coarse_units_per_pixel.max(1.0),
+            idle_detail_units_per_pixel: self.idle_detail_units_per_pixel.max(1.0),
             array_bbox_units_per_pixel: self.array_bbox_units_per_pixel.max(1.0),
             array_grid_units_per_pixel: self.array_grid_units_per_pixel.max(1.0),
             hierarchy_expand_depth: self.hierarchy_expand_depth.max(1),
@@ -1113,7 +1239,16 @@ impl LayoutViewerV2App {
                 ui.separator();
                 ui.label("Selection");
                 if let Some(hit) = self.selected.clone() {
-                    ui.monospace(selection_summary_text(&hit));
+                    egui::Grid::new("selection-inspector-grid")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (label, value) in selection_inspector_rows(&hit) {
+                                ui.label(label);
+                                ui.monospace(value);
+                                ui.end_row();
+                            }
+                        });
                     let enter_path = enter_path_for_hit(&hit);
                     if ui
                         .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
@@ -1232,6 +1367,14 @@ impl LayoutViewerV2App {
                     )
                     .logarithmic(true)
                     .text("coarse upp"),
+                );
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.lod_tuning.idle_detail_units_per_pixel,
+                        1.0..=1000.0,
+                    )
+                    .logarithmic(true)
+                    .text("idle detail upp"),
                 );
                 ui.add(
                     egui::Slider::new(
@@ -1384,7 +1527,7 @@ impl eframe::App for LayoutViewerV2App {
         let canvas_started = std::time::Instant::now();
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
-            let (rect, response) = ui.allocate_exact_size(available, egui::Sense::drag());
+            let (rect, response) = ui.allocate_exact_size(available, canvas_interaction_sense());
             self.draw_canvas(ui, rect, &response);
         });
         self.frame_timing.record_canvas(canvas_started.elapsed());
@@ -1545,9 +1688,9 @@ fn draw_plan_vectors(
             match (batch.plane, item) {
                 (RenderPlane::Fill, DrawItem::Rect(item)) => {
                     let draw_rect = world_rect_to_screen(item.world, view, rect);
-                    if draw_rect.intersects(rect) {
+                    if let Some(fill_rect) = clipped_screen_rect(draw_rect, rect) {
                         paint_ops +=
-                            draw_fill_rect(painter, draw_rect, &batch.style, interaction_active);
+                            draw_fill_rect(painter, fill_rect, &batch.style, interaction_active);
                     }
                 }
                 (RenderPlane::Hierarchy, DrawItem::Rect(item)) => {
@@ -1585,6 +1728,14 @@ fn draw_plan_vectors(
                 (RenderPlane::Frame, DrawItem::Rect(item)) => {
                     let draw_rect = world_rect_to_screen(item.world, view, rect);
                     if draw_rect.intersects(rect) {
+                        if let Some(fill_rect) = clipped_screen_rect(draw_rect, rect) {
+                            paint_ops += draw_fill_rect(
+                                painter,
+                                fill_rect,
+                                &batch.style,
+                                interaction_active,
+                            );
+                        }
                         painter.rect_stroke(
                             draw_rect,
                             0.0,
@@ -1617,6 +1768,20 @@ fn draw_plan_vectors(
         }
     }
     paint_ops
+}
+
+fn clipped_screen_rect(draw_rect: egui::Rect, clip_rect: egui::Rect) -> Option<egui::Rect> {
+    let clipped = egui::Rect::from_min_max(
+        egui::pos2(
+            draw_rect.left().max(clip_rect.left()),
+            draw_rect.top().max(clip_rect.top()),
+        ),
+        egui::pos2(
+            draw_rect.right().min(clip_rect.right()),
+            draw_rect.bottom().min(clip_rect.bottom()),
+        ),
+    );
+    (clipped.width() > 0.0 && clipped.height() > 0.0).then_some(clipped)
 }
 
 fn draw_cached_plane(
@@ -1781,7 +1946,18 @@ fn draw_fill_rect(
     match fill_draw_mode(style.fill_pattern, interaction_active) {
         FillDrawMode::None => 0,
         FillDrawMode::Solid => {
-            painter.rect_filled(rect, 0.0, color_to_egui(style.fill_color, style.fill_alpha));
+            painter.rect_filled(
+                rect,
+                0.0,
+                color_to_egui(
+                    style.fill_color,
+                    interaction_fill_alpha(
+                        style.fill_pattern,
+                        style.fill_alpha,
+                        interaction_active,
+                    ),
+                ),
+            );
             1
         }
         FillDrawMode::SparseDots => draw_sparse_dots(painter, rect, style),
@@ -1790,14 +1966,25 @@ fn draw_fill_rect(
     }
 }
 
+fn interaction_fill_alpha(pattern: Pattern, alpha: u8, interaction_active: bool) -> u8 {
+    if interaction_active && !matches!(pattern, Pattern::Solid | Pattern::Hollow) {
+        alpha.min(40)
+    } else {
+        alpha
+    }
+}
+
 fn draw_sparse_dots(painter: &egui::Painter, rect: egui::Rect, style: &LayerStyle) -> usize {
     let color = color_to_egui(style.fill_color, style.fill_alpha);
-    let spacing = 9.0;
+    let spacing = dot_spacing_for_rect(rect, SPARSE_DOT_SPACING_PX);
     let mut ops = 0;
     let mut y = snap_to_grid(rect.top(), spacing);
     while y <= rect.bottom() {
         let mut x = snap_to_grid(rect.left(), spacing);
         while x <= rect.right() {
+            if ops >= MAX_PATTERN_OPS_PER_RECT {
+                return ops;
+            }
             painter.rect_filled(
                 egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(1.2, 1.2)),
                 0.0,
@@ -1828,34 +2015,141 @@ fn draw_diagonal_hatch(
 }
 
 fn hatch_segments(rect: egui::Rect, cross: bool) -> Vec<[egui::Pos2; 2]> {
-    let tile = 10.0;
-    let inset = 2.0;
+    let rect = rect.shrink(2.0);
+    if rect.width() < 3.0 || rect.height() < 3.0 {
+        return Vec::new();
+    }
+    let spacing = hatch_spacing_for_rect(rect, PATTERN_TILE_PX, cross);
     let mut segments = Vec::new();
-    let mut y = snap_to_grid(rect.top(), tile);
-    while y <= rect.bottom() {
-        let mut x = snap_to_grid(rect.left(), tile);
-        while x <= rect.right() {
-            let left = x.max(rect.left());
-            let top = y.max(rect.top());
-            let right = (x + tile).min(rect.right());
-            let bottom = (y + tile).min(rect.bottom());
-            if right - left >= 3.0 && bottom - top >= 3.0 {
-                segments.push([
-                    egui::pos2(left + inset, bottom - inset),
-                    egui::pos2(right - inset, top + inset),
-                ]);
-                if cross {
-                    segments.push([
-                        egui::pos2(left + inset, top + inset),
-                        egui::pos2(right - inset, bottom - inset),
-                    ]);
-                }
-            }
-            x += tile;
-        }
-        y += tile;
+    append_hatch_segments(&mut segments, rect, spacing, false);
+    if cross {
+        append_hatch_segments(&mut segments, rect, spacing, true);
     }
     segments
+}
+
+fn append_hatch_segments(
+    segments: &mut Vec<[egui::Pos2; 2]>,
+    rect: egui::Rect,
+    spacing: f32,
+    backslash: bool,
+) {
+    let (min_c, max_c) = if backslash {
+        (rect.top() - rect.right(), rect.bottom() - rect.left())
+    } else {
+        (rect.left() + rect.top(), rect.right() + rect.bottom())
+    };
+    let mut c = snap_to_grid(min_c, spacing);
+    while c <= max_c {
+        if segments.len() >= MAX_HATCH_OPS_PER_RECT {
+            return;
+        }
+        let segment = if backslash {
+            backslash_hatch_segment(rect, c)
+        } else {
+            slash_hatch_segment(rect, c)
+        };
+        if let Some(segment) = segment {
+            segments.push(segment);
+        }
+        c += spacing;
+    }
+}
+
+fn slash_hatch_segment(rect: egui::Rect, c: f32) -> Option<[egui::Pos2; 2]> {
+    let mut points = Vec::with_capacity(4);
+    push_unique_point_if_inside(&mut points, rect, egui::pos2(rect.left(), c - rect.left()));
+    push_unique_point_if_inside(
+        &mut points,
+        rect,
+        egui::pos2(rect.right(), c - rect.right()),
+    );
+    push_unique_point_if_inside(&mut points, rect, egui::pos2(c - rect.top(), rect.top()));
+    push_unique_point_if_inside(
+        &mut points,
+        rect,
+        egui::pos2(c - rect.bottom(), rect.bottom()),
+    );
+    longest_segment(points)
+}
+
+fn backslash_hatch_segment(rect: egui::Rect, c: f32) -> Option<[egui::Pos2; 2]> {
+    let mut points = Vec::with_capacity(4);
+    push_unique_point_if_inside(&mut points, rect, egui::pos2(rect.left(), c + rect.left()));
+    push_unique_point_if_inside(
+        &mut points,
+        rect,
+        egui::pos2(rect.right(), c + rect.right()),
+    );
+    push_unique_point_if_inside(&mut points, rect, egui::pos2(rect.top() - c, rect.top()));
+    push_unique_point_if_inside(
+        &mut points,
+        rect,
+        egui::pos2(rect.bottom() - c, rect.bottom()),
+    );
+    longest_segment(points)
+}
+
+fn push_unique_point_if_inside(points: &mut Vec<egui::Pos2>, rect: egui::Rect, point: egui::Pos2) {
+    let epsilon = 0.05;
+    if point.x < rect.left() - epsilon
+        || point.x > rect.right() + epsilon
+        || point.y < rect.top() - epsilon
+        || point.y > rect.bottom() + epsilon
+    {
+        return;
+    }
+    let point = egui::pos2(
+        point.x.clamp(rect.left(), rect.right()),
+        point.y.clamp(rect.top(), rect.bottom()),
+    );
+    if points.iter().any(|existing| {
+        (existing.x - point.x).abs() < epsilon && (existing.y - point.y).abs() < epsilon
+    }) {
+        return;
+    }
+    points.push(point);
+}
+
+fn longest_segment(points: Vec<egui::Pos2>) -> Option<[egui::Pos2; 2]> {
+    if points.len() < 2 {
+        return None;
+    }
+    let mut best = [points[0], points[1]];
+    let mut best_distance = points[0].distance_sq(points[1]);
+    for (index, first) in points.iter().enumerate() {
+        for second in points.iter().skip(index + 1) {
+            let distance = first.distance_sq(*second);
+            if distance > best_distance {
+                best = [*first, *second];
+                best_distance = distance;
+            }
+        }
+    }
+    (best_distance >= 9.0).then_some(best)
+}
+
+fn hatch_spacing_for_rect(rect: egui::Rect, base_spacing: f32, cross: bool) -> f32 {
+    let perimeter_span = rect.width().max(1.0) + rect.height().max(1.0);
+    let multiplier = if cross { 2.0 } else { 1.0 };
+    let estimated_ops = perimeter_span / base_spacing * multiplier;
+    if estimated_ops <= MAX_HATCH_OPS_PER_RECT as f32 {
+        base_spacing
+    } else {
+        let spacing = perimeter_span * multiplier / MAX_HATCH_OPS_PER_RECT as f32;
+        spacing.ceil().max(base_spacing)
+    }
+}
+
+fn dot_spacing_for_rect(rect: egui::Rect, base_spacing: f32) -> f32 {
+    let area = rect.width().max(1.0) * rect.height().max(1.0);
+    let estimated_ops = area / (base_spacing * base_spacing);
+    if estimated_ops <= MAX_PATTERN_OPS_PER_RECT as f32 {
+        base_spacing
+    } else {
+        let scale = (estimated_ops / MAX_PATTERN_OPS_PER_RECT as f32).sqrt();
+        (base_spacing * scale).ceil().max(base_spacing)
+    }
 }
 
 fn snap_to_grid(value: f32, spacing: f32) -> f32 {
@@ -1992,10 +2286,11 @@ mod tests {
     use super::{
         cached_plane_texture_action, fill_draw_mode, hud_summary_text, overview_density_usable,
         overview_error_is_unavailable, plan_source_for_units_per_pixel, plane_cache_world_rect,
-        scroll_zoom_factor, should_check_overview_density, should_request_detail_tiles,
-        should_request_smooth_repaint, should_reuse_render_plan, stats_panel_rows,
-        use_plane_renderer, viewport_for_world_rect, AsyncLoadState, CachedPlaneTextureAction,
-        FillDrawMode, FrameRateState, FrameTimingState, LoadRequest, LodTuningState,
+        scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
+        should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
+        stats_panel_rows, use_plane_renderer, viewport_for_world_rect, AsyncLoadState,
+        CachedPlaneTextureAction, FillDrawMode, FrameRateState, FrameTimingState, LoadRequest,
+        LodTuningState,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{DisplayLayer, DisplayModel, LayerStyle, Pattern};
@@ -2012,6 +2307,62 @@ mod tests {
     };
 
     static HIERARCHY_TEST_PACKAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn canvas_interaction_sense_supports_click_selection_and_drag_pan() {
+        let sense = super::canvas_interaction_sense();
+
+        assert!(sense.senses_click());
+        assert!(sense.senses_drag());
+    }
+
+    #[test]
+    fn selection_inspector_rows_expose_json_trace_metadata() {
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+
+        let rows = selection_inspector_rows(&hit);
+
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Source Kind" && value == "regular_wire"));
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Source File" && value == "design/regular_wires.json"
+        }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Source ID" && value == "9"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer" && value == "1"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "BBox" && value == "2, 2, 8, 8"));
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Instance Path" && value.contains("10") && value.contains("20")
+        }));
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Object Path" && value.contains("shape") && value.contains("source=9")
+        }));
+    }
+
+    #[test]
+    fn selection_inspector_marks_via_source_as_ambiguous() {
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+        hit.kind = ShapeKind::Via;
+
+        let rows = selection_inspector_rows(&hit);
+
+        let source_file = rows
+            .iter()
+            .find(|(label, _value)| *label == "Source File")
+            .map(|(_label, value)| value.as_str())
+            .expect("source file row should exist");
+        assert!(source_file.contains("design/regular_wires.json"));
+        assert!(source_file.contains("design/special_wires.json"));
+        assert!(source_file.contains("design/io_pins.json"));
+    }
 
     #[test]
     fn frame_timing_state_tracks_named_stages() {
@@ -2042,6 +2393,17 @@ mod tests {
         frame_rate.record_frame_delta(std::time::Duration::from_millis(100));
         assert!(frame_rate.fps < 60.0);
         assert!(frame_rate.fps > 10.0);
+    }
+
+    #[test]
+    fn frame_rate_state_caps_repaint_bursts_to_viewer_cadence() {
+        let mut frame_rate = FrameRateState::default();
+
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(4));
+        assert!(frame_rate.fps <= 63.0);
+
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(4));
+        assert!(frame_rate.fps <= 63.0);
     }
 
     #[test]
@@ -2677,6 +3039,10 @@ mod tests {
             steady.hierarchy_coarse_units_per_pixel
         );
         assert_eq!(
+            interactive.idle_detail_units_per_pixel,
+            steady.idle_detail_units_per_pixel
+        );
+        assert_eq!(
             interactive.array_bbox_units_per_pixel,
             steady.array_bbox_units_per_pixel
         );
@@ -2715,6 +3081,35 @@ mod tests {
 
         assert_eq!(steady_source, RenderPlanSource::HierarchyNear);
         assert_eq!(interactive_source, steady_source);
+    }
+
+    #[test]
+    fn native_lod_prediction_uses_idle_detail_boost_only_when_steady() {
+        let tuning = LodTuningState::default();
+        let steady_settings = tuning.render_settings(false);
+        let interactive_settings = tuning.render_settings(true);
+        let mut steady_state = LodHysteresisState::default();
+        let mut interactive_state = LodHysteresisState::default();
+
+        let steady_source = plan_source_for_units_per_pixel(
+            71.0,
+            steady_settings,
+            &mut steady_state,
+            true,
+            true,
+            true,
+        );
+        let interactive_source = plan_source_for_units_per_pixel(
+            71.0,
+            interactive_settings,
+            &mut interactive_state,
+            true,
+            true,
+            true,
+        );
+
+        assert_eq!(steady_source, RenderPlanSource::HierarchyNear);
+        assert_eq!(interactive_source, RenderPlanSource::HierarchyMid);
     }
 
     #[test]
@@ -2908,21 +3303,49 @@ mod tests {
     }
 
     #[test]
-    fn hatch_pattern_uses_short_screen_tile_segments() {
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
+    fn hatch_pattern_uses_continuous_visible_segments() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 90.0));
 
         let segments = super::hatch_segments(rect, true);
 
         assert!(!segments.is_empty());
-        assert!(segments.iter().all(|segment| {
+        assert!(segments.iter().any(|segment| {
             let dx = (segment[1].x - segment[0].x).abs();
             let dy = (segment[1].y - segment[0].y).abs();
-            dx <= 8.0 && dy <= 8.0
+            dx >= 40.0 && dy >= 40.0
         }));
     }
 
     #[test]
-    fn patterned_fills_degrade_to_single_solid_operation_during_interaction() {
+    fn hatch_pattern_segments_scale_with_perimeter_not_area() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
+
+        let segments = super::hatch_segments(rect, true);
+
+        assert!(segments.len() <= 180);
+    }
+
+    #[test]
+    fn hatch_pattern_keeps_viewport_sized_rects_under_budget() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 1000.0));
+
+        let segments = super::hatch_segments(rect, true);
+
+        assert!(segments.len() <= 300);
+    }
+
+    #[test]
+    fn hatch_pattern_caps_large_screen_rect_segments() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2400.0, 1600.0));
+
+        let segments = super::hatch_segments(rect, true);
+
+        assert!(segments.len() <= 512);
+        assert!(!segments.is_empty());
+    }
+
+    #[test]
+    fn patterned_fills_degrade_to_solid_during_interaction() {
         assert_eq!(
             fill_draw_mode(Pattern::SparseDots, true),
             FillDrawMode::Solid
@@ -2940,6 +3363,23 @@ mod tests {
         assert_eq!(
             fill_draw_mode(Pattern::DiagonalHatch, false),
             FillDrawMode::DiagonalHatch
+        );
+    }
+
+    #[test]
+    fn patterned_interaction_fill_uses_low_alpha_placeholder() {
+        assert_eq!(
+            super::interaction_fill_alpha(Pattern::SparseDots, 90, true),
+            40
+        );
+        assert_eq!(
+            super::interaction_fill_alpha(Pattern::DiagonalHatch, 76, true),
+            40
+        );
+        assert_eq!(super::interaction_fill_alpha(Pattern::Solid, 90, true), 90);
+        assert_eq!(
+            super::interaction_fill_alpha(Pattern::SparseDots, 90, false),
+            90
         );
     }
 

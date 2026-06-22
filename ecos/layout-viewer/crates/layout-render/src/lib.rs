@@ -55,6 +55,7 @@ pub struct RenderSettings {
     pub max_markers_per_bin: usize,
     pub hierarchy_bbox_units_per_pixel: f32,
     pub hierarchy_coarse_units_per_pixel: f32,
+    pub idle_detail_units_per_pixel: f32,
     pub array_bbox_units_per_pixel: f32,
     pub array_grid_units_per_pixel: f32,
     pub hierarchy_expand_depth: usize,
@@ -77,6 +78,7 @@ impl Default for RenderSettings {
             max_markers_per_bin: 3,
             hierarchy_bbox_units_per_pixel: 160.0,
             hierarchy_coarse_units_per_pixel: 32.0,
+            idle_detail_units_per_pixel: 96.0,
             array_bbox_units_per_pixel: 160.0,
             array_grid_units_per_pixel: 32.0,
             hierarchy_expand_depth: usize::MAX,
@@ -669,6 +671,15 @@ impl RenderPlanner {
             return HierarchyLodMode::NearExpand;
         }
         let level = self.classify_viewport_lod(viewport, hysteresis_state);
+        let units_per_pixel = viewport
+            .units_per_pixel_x()
+            .max(viewport.units_per_pixel_y());
+        if matches!(level, LodLevel::Mid)
+            && !self.settings.force_interaction_coarse
+            && units_per_pixel <= self.settings.idle_detail_units_per_pixel
+        {
+            return HierarchyLodMode::NearExpand;
+        }
         match level {
             LodLevel::Far => HierarchyLodMode::FarBBox,
             LodLevel::Mid => HierarchyLodMode::MidCoarse,
@@ -2045,6 +2056,7 @@ fn render_cache_key(
     hash.write_usize(settings.max_markers_per_bin);
     hash.write_u32(settings.hierarchy_bbox_units_per_pixel.to_bits());
     hash.write_u32(settings.hierarchy_coarse_units_per_pixel.to_bits());
+    hash.write_u32(settings.idle_detail_units_per_pixel.to_bits());
     hash.write_u32(settings.array_bbox_units_per_pixel.to_bits());
     hash.write_u32(settings.array_grid_units_per_pixel.to_bits());
     hash.write_usize(settings.hierarchy_expand_depth);
@@ -2966,6 +2978,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 100.0,
             hierarchy_coarse_units_per_pixel: 5.0,
+            idle_detail_units_per_pixel: 1.0,
             ..Default::default()
         })
         .plan(
@@ -3112,6 +3125,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 1_000.0,
             hierarchy_coarse_units_per_pixel: 10.0,
+            idle_detail_units_per_pixel: 1.0,
             ..Default::default()
         })
         .plan(
@@ -3410,6 +3424,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 1_000.0,
             hierarchy_coarse_units_per_pixel: 10.0,
+            idle_detail_units_per_pixel: 1.0,
             ..Default::default()
         })
         .plan(
@@ -3430,6 +3445,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 1_000.0,
             hierarchy_coarse_units_per_pixel: 10.0,
+            idle_detail_units_per_pixel: 1.0,
             enable_cell_template_cache: true,
             ..Default::default()
         })
@@ -3452,6 +3468,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 1_000.0,
             hierarchy_coarse_units_per_pixel: 10.0,
+            idle_detail_units_per_pixel: 1.0,
             enable_cell_template_cache: true,
             ..Default::default()
         })
@@ -3476,6 +3493,7 @@ mod tests {
         let plan = RenderPlanner::new(RenderSettings {
             hierarchy_bbox_units_per_pixel: 1_000.0,
             hierarchy_coarse_units_per_pixel: 10.0,
+            idle_detail_units_per_pixel: 1.0,
             max_frames_per_bin: 4,
             ..Default::default()
         })
@@ -3604,6 +3622,54 @@ mod tests {
                             && rect.world == Rect::new(1010, 2010, 1020, 2020))
                 })
         }));
+    }
+
+    #[test]
+    fn idle_detail_boost_expands_hierarchy_before_coarse_threshold() {
+        let db = hierarchy_db();
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            idle_detail_units_per_pixel: 96.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 7_100, 7_100), 100.0, 100.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyNear);
+        assert_eq!(plan.lod_stats.coarse, 0);
+        assert!(plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker > 0);
+    }
+
+    #[test]
+    fn interaction_mode_keeps_idle_detail_boost_as_coarse_proxy() {
+        let db = hierarchy_db();
+        let model = one_layer_display_model();
+
+        let plan = RenderPlanner::new(RenderSettings {
+            force_interaction_coarse: true,
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            idle_detail_units_per_pixel: 96.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 7_100, 7_100), 100.0, 100.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
+        assert!(plan.lod_stats.coarse > 0);
+        assert_eq!(
+            plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker,
+            0
+        );
     }
 
     #[test]
@@ -4528,6 +4594,46 @@ mod tests {
 
         assert!(has_die_frame);
         assert_eq!(frame_count, 3);
+    }
+
+    #[test]
+    fn default_display_model_renders_die_and_core_context_shapes() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(0, 0, 10_000, 10_000), 0, ShapeKind::Die, 10),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(1_000, 1_000, 9_000, 9_000),
+                0,
+                ShapeKind::Core,
+                11,
+            ),
+        );
+        let model = DisplayModel::from_layout_layers(db.layers());
+        let plan = RenderPlanner::new(RenderSettings::default()).plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        let context_source_ids = plan
+            .batches
+            .iter()
+            .filter(|batch| batch.plane == RenderPlane::Frame)
+            .flat_map(|batch| batch.items.iter())
+            .filter_map(|item| match item {
+                DrawItem::Rect(rect) => Some(rect.source_id),
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(context_source_ids.contains(&10));
+        assert!(context_source_ids.contains(&11));
     }
 
     #[test]

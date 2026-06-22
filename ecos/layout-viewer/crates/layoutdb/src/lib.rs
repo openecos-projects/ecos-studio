@@ -2580,6 +2580,7 @@ pub struct LayoutSession {
     source: PackageLayoutSource,
     db: LayoutDb,
     loaded_detail_tiles: HashSet<String>,
+    large_objects_loaded: bool,
     detail_scopes: HashMap<u32, DetailDestination>,
     overview_loaded: bool,
     applied_overview_units_per_bin: Option<i32>,
@@ -2614,6 +2615,7 @@ impl LayoutSession {
             source,
             db,
             loaded_detail_tiles: HashSet::new(),
+            large_objects_loaded: false,
             detail_scopes,
             overview_loaded: false,
             applied_overview_units_per_bin: None,
@@ -2647,6 +2649,28 @@ impl LayoutSession {
         let mut new_shapes = 0;
         let mut scoped_shapes = 0;
         let mut scope_fallback_shapes = 0;
+        if !self.large_objects_loaded {
+            for record in batch.large_objects.records.iter() {
+                let destination = self.detail_destination_for_record(record);
+                match destination {
+                    DetailDestination::Cell(cell) => {
+                        self.db.add_shape(cell, ShapeRecord::from(record));
+                        scoped_shapes += 1;
+                    }
+                    DetailDestination::Top => {
+                        self.db
+                            .add_shape(self.db.top_cell(), ShapeRecord::from(record));
+                    }
+                    DetailDestination::FallbackTop => {
+                        self.db
+                            .add_shape(self.db.top_cell(), ShapeRecord::from(record));
+                        scope_fallback_shapes += 1;
+                    }
+                }
+                new_shapes += 1;
+            }
+            self.large_objects_loaded = true;
+        }
         for tile in &batch.tiles {
             if !self.loaded_detail_tiles.insert(tile.id.clone()) {
                 continue;
@@ -4423,10 +4447,18 @@ mod tests {
 
         assert_eq!(first.tile_count, 1);
         assert!(first.loaded_shapes > 0);
-        assert!(session
+        let distant_shapes = session
             .db()
-            .query_shapes(session.db().top_cell(), Rect::new(700, 700, 800, 800))
-            .is_empty());
+            .query_shapes(session.db().top_cell(), Rect::new(700, 700, 800, 800));
+        assert!(distant_shapes
+            .iter()
+            .any(|shape| shape.kind == ShapeKind::Die));
+        assert!(distant_shapes
+            .iter()
+            .any(|shape| shape.kind == ShapeKind::Core));
+        assert!(!distant_shapes
+            .iter()
+            .any(|shape| shape.kind == ShapeKind::RegularWire && shape.source_id == 2));
     }
 
     #[test]
@@ -4465,6 +4497,12 @@ mod tests {
             .db()
             .query_shapes(session.db().top_cell(), session.db().world_bbox())
             .len();
+        let kinds_after_first = session
+            .db()
+            .query_shapes(session.db().top_cell(), session.db().world_bbox())
+            .into_iter()
+            .map(|shape| shape.kind)
+            .collect::<std::collections::HashSet<_>>();
         let second = session.apply_viewport_batch(batch);
         let shapes_after_second = session
             .db()
@@ -4473,6 +4511,8 @@ mod tests {
 
         assert_eq!(first.tile_count, 1);
         assert!(first.new_shapes > 0);
+        assert!(kinds_after_first.contains(&ShapeKind::Die));
+        assert!(kinds_after_first.contains(&ShapeKind::Core));
         assert_eq!(first.loaded_detail_tile_count, 1);
         assert!(loaded_revision > initial_revision);
         assert_eq!(second.new_shapes, 0);

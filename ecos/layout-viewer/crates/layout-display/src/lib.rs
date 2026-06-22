@@ -206,35 +206,48 @@ impl LayerStyle {
             LayerRole::Well => {
                 layer_style(Color::rgb(80, 188, 177), 38, 178, 205, Pattern::SparseDots)
             }
-            LayerRole::Poly => layer_style(Color::rgb(255, 132, 92), 36, 245, 252, Pattern::Hollow),
+            LayerRole::Poly => layer_style(
+                Color::rgb(255, 132, 92),
+                42,
+                245,
+                252,
+                Pattern::DiagonalHatch,
+            ),
             LayerRole::Contact => {
-                layer_style(Color::rgb(255, 228, 138), 108, 248, 255, Pattern::Solid)
+                layer_style(Color::rgb(255, 228, 138), 84, 248, 255, Pattern::SparseDots)
             }
             LayerRole::Metal { level } => {
-                layer_style(metal_color(level), 72, 242, 250, Pattern::Hollow)
+                layer_style(metal_color(level), 76, 242, 250, routing_pattern(level))
             }
             LayerRole::Via { level } => {
-                layer_style(via_color(level), 116, 248, 255, Pattern::Solid)
+                layer_style(via_color(level), 86, 248, 255, Pattern::SparseDots)
             }
             LayerRole::TopMetal { level } => {
-                let mut style = layer_style(top_metal_color(level), 76, 255, 255, Pattern::Hollow);
+                let mut style =
+                    layer_style(top_metal_color(level), 84, 255, 255, Pattern::CrossHatch);
                 style.line_width_px = 2;
                 style
             }
             LayerRole::TopVia { level } => {
-                let mut style = layer_style(top_via_color(level), 132, 255, 255, Pattern::Solid);
+                let mut style =
+                    layer_style(top_via_color(level), 90, 255, 255, Pattern::SparseDots);
                 style.line_width_px = 2;
                 style
             }
             LayerRole::RedistributionVia => {
                 let mut style =
-                    layer_style(Color::rgb(255, 240, 166), 132, 255, 255, Pattern::Solid);
+                    layer_style(Color::rgb(255, 240, 166), 90, 255, 255, Pattern::SparseDots);
                 style.line_width_px = 2;
                 style
             }
             LayerRole::Rdl => {
-                let mut style =
-                    layer_style(Color::rgb(255, 214, 118), 70, 255, 255, Pattern::Hollow);
+                let mut style = layer_style(
+                    Color::rgb(255, 214, 118),
+                    76,
+                    255,
+                    255,
+                    Pattern::DiagonalHatch,
+                );
                 style.line_width_px = 2;
                 style
             }
@@ -360,6 +373,14 @@ fn color_from_level(level: u8, colors: &[Color]) -> Color {
     colors[index]
 }
 
+fn routing_pattern(level: u8) -> Pattern {
+    if level % 2 == 0 {
+        Pattern::CrossHatch
+    } else {
+        Pattern::DiagonalHatch
+    }
+}
+
 fn fill_style(index: usize) -> LayerStyle {
     let fill = ECOS_PALETTE[index % ECOS_PALETTE.len()].shift_brightness(-0.25);
     let mut style = layer_style(fill, 48, 170, 205, Pattern::SparseDots);
@@ -374,6 +395,18 @@ fn row_style() -> LayerStyle {
 
 fn blockage_style() -> LayerStyle {
     layer_style(Color::rgb(184, 92, 112), 58, 205, 220, Pattern::CrossHatch)
+}
+
+fn die_style() -> LayerStyle {
+    let mut style = layer_style(Color::rgb(132, 168, 190), 0, 190, 205, Pattern::Hollow);
+    style.line_width_px = 2;
+    style
+}
+
+fn core_style() -> LayerStyle {
+    let mut style = layer_style(Color::rgb(180, 214, 218), 0, 215, 225, Pattern::Hollow);
+    style.line_width_px = 1;
+    style
 }
 
 fn fallback_style(index: usize) -> LayerStyle {
@@ -465,6 +498,12 @@ impl DisplayModel {
                 LayerStyle::default_for_layer(layer.id, &layer.name, index),
             ));
         }
+        model.add_layer(DisplayLayer::shape_kind(ShapeKind::Die, "Die", die_style()));
+        model.add_layer(DisplayLayer::shape_kind(
+            ShapeKind::Core,
+            "Core",
+            core_style(),
+        ));
         model
     }
 
@@ -501,7 +540,7 @@ impl DisplayModel {
 
 #[cfg(test)]
 mod tests {
-    use layoutdb::LayerInfo;
+    use layoutdb::{LayerInfo, ShapeKind};
 
     use crate::{
         Color, DisplayLayer, DisplayModel, LayerRole, LayerStyle, Pattern, SourceSelector,
@@ -553,7 +592,7 @@ mod tests {
         assert!(style.frame_luma() > style.fill_luma());
         assert!(style.fill_alpha < style.frame_alpha);
         assert!(style.marker_alpha >= style.frame_alpha);
-        assert_eq!(style.fill_pattern, Pattern::Hollow);
+        assert_eq!(style.fill_pattern, Pattern::DiagonalHatch);
     }
 
     #[test]
@@ -576,10 +615,39 @@ mod tests {
 
         let layers = model.layers();
 
-        assert_eq!(layers[0].style.fill_pattern, Pattern::Hollow);
-        assert_eq!(layers[1].style.fill_pattern, Pattern::Hollow);
+        assert_eq!(layers[0].style.fill_pattern, Pattern::DiagonalHatch);
+        assert_eq!(layers[1].style.fill_pattern, Pattern::CrossHatch);
         assert!(layers[2].style.fill_alpha < layers[0].style.fill_alpha);
         assert_eq!(layers[2].style.fill_pattern, Pattern::SparseDots);
+    }
+
+    #[test]
+    fn routing_layers_use_klayout_like_hatch_patterns() {
+        let metal1 = LayerStyle::default_for_layer(8, "MET1", 0);
+        let metal2 = LayerStyle::default_for_layer(9, "MET2", 1);
+        let poly = LayerStyle::default_for_layer(6, "POLY", 2);
+        let via = LayerStyle::default_for_layer(10, "VIA2", 3);
+
+        assert_eq!(metal1.fill_pattern, Pattern::DiagonalHatch);
+        assert_eq!(metal2.fill_pattern, Pattern::CrossHatch);
+        assert_eq!(poly.fill_pattern, Pattern::DiagonalHatch);
+        assert_eq!(via.fill_pattern, Pattern::SparseDots);
+        assert!(via.fill_alpha <= 90);
+    }
+
+    #[test]
+    fn display_model_includes_die_and_core_context_layers() {
+        let model = DisplayModel::from_layout_layers(&[LayerInfo::new(1, "M1")]);
+        let layers = model.layers();
+
+        assert!(layers.iter().any(|layer| layer.source
+            == SourceSelector::ShapeKind(ShapeKind::Die)
+            && layer.visible
+            && layer.name == "Die"));
+        assert!(layers.iter().any(|layer| layer.source
+            == SourceSelector::ShapeKind(ShapeKind::Core)
+            && layer.visible
+            && layer.name == "Core"));
     }
 
     #[test]
@@ -615,14 +683,15 @@ mod tests {
     }
 
     #[test]
-    fn icsprout55_role_styles_keep_routing_hollow_and_vias_solid() {
+    fn icsprout55_role_styles_keep_routing_textured_and_vias_sparse() {
         let metal = LayerStyle::default_for_layer(8, "MET2", 7);
         let via = LayerStyle::default_for_layer(9, "VIA2", 8);
         let active = LayerStyle::default_for_layer(2, "ACT", 1);
 
-        assert_eq!(metal.fill_pattern, Pattern::Hollow);
+        assert_eq!(metal.fill_pattern, Pattern::CrossHatch);
         assert!(metal.frame_alpha >= 235);
-        assert_eq!(via.fill_pattern, Pattern::Solid);
+        assert_eq!(via.fill_pattern, Pattern::SparseDots);
+        assert!(via.fill_alpha <= 90);
         assert!(via.marker_alpha >= 250);
         assert_eq!(active.fill_pattern, Pattern::SparseDots);
         assert!(active.fill_alpha < metal.frame_alpha);
