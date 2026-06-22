@@ -1,111 +1,32 @@
 <template>
-  <div v-if="isGlobalSrcView" class="frontend-workspace src-workspace-clean">
-    <section class="source-layout source-layout-clean">
-      <aside class="source-list">
-        <div class="source-list-body">
-          <button
-            v-for="item in sourceItems"
-            :key="item.path"
-            type="button"
-            class="source-row"
-            :class="{
-              active: activeSource?.path === item.path,
-              diagnostic: Boolean(item.diagnostics?.total),
-              error: Boolean(item.diagnostics?.errors),
-            }"
-            :title="item.path"
-            @click="openSource(item)"
-          >
-            <i :class="fileIcon(item.path)"></i>
-            <span>
-              <strong>{{ sourceDisplayName(item) }}</strong>
-              <small>{{ shortPath(item.path) }}</small>
-            </span>
-            <em
-              v-if="item.diagnostics?.total"
-              class="source-diagnostic-badge"
-              :class="{ error: Boolean(item.diagnostics?.errors) }"
-            >
-              {{ item.diagnostics ? sourceDiagnosticLabel(item.diagnostics) : '' }}
-            </em>
-          </button>
-          <div v-if="sourceArtifacts.length === 0" class="empty-panel compact">
-            <i class="ri-code-s-slash-line"></i>
-            <span>No source files discovered.</span>
-          </div>
-        </div>
-      </aside>
-      <FrontendSourceEditor
-        :source="activeSource"
-        :focus-target="sourceFocusTarget"
-        @saved="refresh"
-        @linted="refresh"
-      />
-    </section>
-  </div>
+  <FrontendSrcWorkspace
+    v-if="isGlobalSrcView"
+    :active-source="activeSource"
+    :file-icon="fileIcon"
+    :short-path="shortPath"
+    :source-artifacts="sourceArtifacts"
+    :source-diagnostic-label="sourceDiagnosticLabel"
+    :source-display-name="sourceDisplayName"
+    :source-focus-target="sourceFocusTarget"
+    :source-items="sourceItems"
+    @open-source="openSource"
+    @refresh="refresh"
+  />
 
-  <div v-else-if="isGlobalWaveView" class="frontend-workspace wave-workspace-clean">
-    <section class="wave-workspace-layout">
-      <aside class="wave-list">
-        <button
-          v-for="item in waveItems"
-          :key="item.path"
-          type="button"
-          class="wave-row"
-          :class="{ active: activeWaveform?.path === item.path }"
-          :title="item.path"
-          @click="selectWaveform(item)"
-        >
-          <i class="ri-pulse-line"></i>
-          <span>
-            <strong>{{ item.caseName || fileName(item.path) }}</strong>
-            <small>{{ shortPath(item.path) }}</small>
-          </span>
-        </button>
-        <div v-if="waveItems.length === 0" class="empty-panel compact">
-          <i class="ri-pulse-line"></i>
-          <span>No waveform files found.</span>
-        </div>
-      </aside>
-
-      <section class="wave-viewer-panel">
-        <div v-if="activeWaveform" class="wave-header">
-          <div class="wave-title">
-            <i class="ri-pulse-line"></i>
-            <div>
-              <strong>{{ activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform' }}</strong>
-              <span :title="activeWaveform.path">{{ activeWaveform.path }}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="text-action"
-            @click="openWaveExternal(activeWaveform.path)"
-          >
-            <i class="ri-external-link-line"></i>
-            Open
-          </button>
-        </div>
-        <div v-if="activeWaveform" class="surfer-shell wave-surfer-shell">
-          <iframe
-            ref="surferFrame"
-            class="surfer-frame"
-            title="Surfer waveform viewer"
-            :src="surferViewerUrl"
-            @load="handleSurferFrameLoad"
-          ></iframe>
-          <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
-            <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
-            <span>{{ waveStatusMessage }}</span>
-          </div>
-        </div>
-        <div v-else class="empty-panel wave-empty">
-          <i class="ri-pulse-line"></i>
-          <span>Select a waveform from Wave.</span>
-        </div>
-      </section>
-    </section>
-  </div>
+  <FrontendWaveWorkspace
+    v-else-if="isGlobalWaveView"
+    :active-waveform="activeWaveform"
+    :file-name="fileName"
+    :short-path="shortPath"
+    :surfer-viewer-url="surferViewerUrl"
+    :wave-items="waveItems"
+    :wave-status-message="waveStatusMessage"
+    :waveform-error="waveformError"
+    @frame-change="surferFrame = $event"
+    @frame-load="handleSurferFrameLoad"
+    @open-wave-external="openWaveExternal"
+    @select-waveform="selectWaveform"
+  />
 
   <div v-else class="frontend-workspace">
     <div class="frontend-header">
@@ -1150,7 +1071,8 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import { getDesktopApi } from '@/platform/desktop'
-import FrontendSourceEditor from '@/components/FrontendSourceEditor.vue'
+import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
+import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
 import {
   diagnosticMatchesPath,
   fileName as diagnosticFileName,
