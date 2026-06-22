@@ -253,62 +253,37 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
   return '(not found)'
 }
 
-function socDefaults(frontendRoot: string, variant: string): Record<string, unknown> {
-  const directoryByVariant: Record<string, string> = {
-    soc1: 'SoC',
-    soc2: 'SoC2',
-    soc3: 'SoC3',
-  }
-  const dirName = directoryByVariant[variant] ?? directoryByVariant.soc1
-  const root = join(frontendRoot, 'fecompiler', 'thirdparty', dirName)
-  return {
-    sim_build_test_script: join(root, 'scripts', 'build_test.sh'),
-    sim_cflags: [`-I${root}`],
-    sim_cpp_sources: [
-      join(root, 'driver', 'dpi_mem.cpp'),
-      join(root, 'driver', 'difftest.cpp'),
-    ],
-    sim_ldflags: ['-ldl'],
-    sim_programs_dir: join(root, 'tests', 'programs'),
-    sim_soc_root: root,
-    soc_filelist: join(root, 'filelist.soc.f'),
-    testbench: join(root, 'driver', 'main.cpp'),
-  }
-}
-
-function normalizeCreateData(
-  data: Record<string, unknown>,
-  frontendRoot: string,
-): Record<string, unknown> {
+function normalizeCreateData(data: Record<string, unknown>): Record<string, unknown> {
   const parameters = readRecord(data.parameters)
-  const variant = readString(data.soc_variant) || readString(data.socVariant) || 'soc1'
-  const defaults = socDefaults(frontendRoot, variant)
+  const variant = readString(data.soc_variant)
+    || readString(data.socVariant)
+    || readString(parameters.soc_variant)
   return {
     ...data,
     cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist),
     designTool: 'frontend',
     sim_all_tests: data.sim_all_tests ?? data.simAllTests ?? false,
     sim_build_all_programs: data.sim_build_all_programs ?? data.simBuildAllPrograms ?? false,
-    sim_build_test_script: readString(data.sim_build_test_script) || readString(data.simBuildTestScript) || defaults.sim_build_test_script,
-    sim_cflags: readOptionalStringList(data.sim_cflags ?? data.simCflags) ?? defaults.sim_cflags,
-    sim_cpp_sources: readOptionalStringList(data.sim_cpp_sources ?? data.simCppSources) ?? defaults.sim_cpp_sources,
+    sim_build_test_script: readString(data.sim_build_test_script) || readString(data.simBuildTestScript),
+    sim_cflags: readOptionalStringList(data.sim_cflags ?? data.simCflags) ?? [],
+    sim_cpp_sources: readOptionalStringList(data.sim_cpp_sources ?? data.simCppSources) ?? [],
     sim_images: data.sim_images ?? data.simImages ?? [],
-    sim_ldflags: readOptionalStringList(data.sim_ldflags ?? data.simLdflags) ?? defaults.sim_ldflags,
+    sim_ldflags: readOptionalStringList(data.sim_ldflags ?? data.simLdflags) ?? [],
     sim_program_names: data.sim_program_names ?? data.simProgramNames ?? [],
     sim_program_sources: data.sim_program_sources ?? data.simProgramSources ?? [],
-    sim_programs_dir: readString(data.sim_programs_dir) || readString(data.simProgramsDir) || readString(defaults.sim_programs_dir),
+    sim_programs_dir: readString(data.sim_programs_dir) || readString(data.simProgramsDir),
     sim_run_args: data.sim_run_args ?? data.simRunArgs ?? [],
-    sim_soc_root: readString(data.sim_soc_root) || readString(data.simSocRoot) || readString(defaults.sim_soc_root),
+    sim_soc_root: readString(data.sim_soc_root) || readString(data.simSocRoot),
     sim_test_suite: readString(data.sim_test_suite) || readString(data.simTestSuite),
     sim_tests_dir: readString(data.sim_tests_dir) || readString(data.simTestsDir),
     sim_tests_out_dir: readString(data.sim_tests_out_dir) || readString(data.simTestsOutDir),
-    soc_filelist: readString(data.soc_filelist) || readString(data.socFilelist) || readString(defaults.soc_filelist),
+    soc_filelist: readString(data.soc_filelist) || readString(data.socFilelist),
     soc_variant: variant,
     parameters: {
       ...parameters,
       'Design Tool': readString(parameters['Design Tool']) || 'frontend',
     },
-    testbench: readString(data.testbench) || readString(defaults.testbench),
+    testbench: readString(data.testbench),
   }
 }
 
@@ -414,7 +389,7 @@ export class FrontendCliAdapter {
       case 'create_workspace': {
         mkdirSync(this.tempDir, { recursive: true })
         const inputJson = join(this.tempDir, `fe-create-workspace-${randomUUID()}.json`)
-        writeFileSync(inputJson, JSON.stringify(normalizeCreateData(request.data, this.frontendRoot)), 'utf8')
+        writeFileSync(inputJson, JSON.stringify(normalizeCreateData(request.data)), 'utf8')
         return {
           args: [...this.moduleArgs, 'workspace', 'create', '--input-json', inputJson, '--json'],
           cleanup: () => {
