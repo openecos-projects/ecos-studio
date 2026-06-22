@@ -70,7 +70,7 @@ pub fn rasterize_plan(
                 (RenderPlane::Hierarchy, DrawItem::Line(line)) => {
                     rasterize_line(&mut plane, line, batch.style.frame_alpha, &world_to_screen);
                 }
-                (RenderPlane::Hierarchy, DrawItem::Marker(marker)) => {
+                (RenderPlane::Hierarchy | RenderPlane::Marker, DrawItem::Marker(marker)) => {
                     let [x0, y0, x1, y1] = world_to_screen(marker.world);
                     let cx = (x0 + x1) / 2;
                     let cy = (y0 + y1) / 2;
@@ -717,9 +717,9 @@ mod tests {
     }
 
     #[test]
-    fn rasterize_plan_ignores_markers_without_crashing() {
+    fn rasterize_plan_draws_marker_plane_markers() {
         let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
-        style.frame_alpha = 180;
+        style.marker_alpha = 180;
         let plan = RenderPlan {
             batches: vec![DrawBatch {
                 plane: RenderPlane::Marker,
@@ -738,10 +738,10 @@ mod tests {
 
         let plane = rasterize_plan(&plan, 6, 6, rect_to_screen);
 
-        assert!(plane
-            .pixels
-            .chunks_exact(4)
-            .all(|pixel| pixel == [0, 0, 0, 0]));
+        assert_eq!(pixel(&plane, 1, 1), [111, 122, 133, 180]);
+        assert_eq!(pixel(&plane, 2, 2), [111, 122, 133, 180]);
+        assert_eq!(pixel(&plane, 3, 3), [111, 122, 133, 180]);
+        assert_eq!(pixel(&plane, 4, 4), [0, 0, 0, 0]);
     }
 
     fn rect_to_screen(rect: Rect) -> [i32; 4] {

@@ -409,6 +409,18 @@ fn core_style() -> LayerStyle {
     style
 }
 
+fn instance_style() -> LayerStyle {
+    let mut style = layer_style(
+        Color::rgb(176, 155, 255),
+        34,
+        205,
+        220,
+        Pattern::DiagonalHatch,
+    );
+    style.line_width_px = 1;
+    style
+}
+
 fn fallback_style(index: usize) -> LayerStyle {
     layer_style(
         ECOS_PALETTE[index % ECOS_PALETTE.len()],
@@ -503,6 +515,11 @@ impl DisplayModel {
             ShapeKind::Core,
             "Core",
             core_style(),
+        ));
+        model.add_layer(DisplayLayer::shape_kind(
+            ShapeKind::Instance,
+            "Instance",
+            instance_style(),
         ));
         model
     }
@@ -636,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn display_model_includes_die_and_core_context_layers() {
+    fn display_model_includes_semantic_context_layers() {
         let model = DisplayModel::from_layout_layers(&[LayerInfo::new(1, "M1")]);
         let layers = model.layers();
 
@@ -648,6 +665,12 @@ mod tests {
             == SourceSelector::ShapeKind(ShapeKind::Core)
             && layer.visible
             && layer.name == "Core"));
+        assert!(layers.iter().any(|layer| layer.source
+            == SourceSelector::ShapeKind(ShapeKind::Instance)
+            && layer.visible
+            && layer.name == "Instance"
+            && layer.style.fill_pattern != Pattern::Hollow
+            && layer.style.fill_alpha > 0));
     }
 
     #[test]

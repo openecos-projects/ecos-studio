@@ -469,10 +469,32 @@ impl RenderPlanner {
                     policy,
                     max_depth_for_query(self.settings, policy),
                 );
+                self.push_top_level_context(
+                    db,
+                    &layers,
+                    &mut plan,
+                    viewport,
+                    &mut occupancy,
+                    cell_view,
+                    policy,
+                    false,
+                    TopLevelContextMode::ContextShapesOnly,
+                );
             }
             HierarchyLodMode::MidCoarse => {
                 plan.source = RenderPlanSource::HierarchyMid;
                 self.push_coarse_hierarchy(db, &mut plan, viewport, cell_view, policy);
+                self.push_top_level_context(
+                    db,
+                    &layers,
+                    &mut plan,
+                    viewport,
+                    &mut occupancy,
+                    cell_view,
+                    policy,
+                    false,
+                    TopLevelContextMode::ContextShapesOnly,
+                );
             }
             HierarchyLodMode::NearExpand => {
                 if cell_has_instances(db, cell_view.target_cell()) {
@@ -501,6 +523,7 @@ impl RenderPlanner {
                     cell_view,
                     policy,
                     false,
+                    TopLevelContextMode::AllVisibleShapes,
                 );
             }
         }
@@ -525,6 +548,7 @@ impl RenderPlanner {
         cell_view: &CellViewState,
         policy: &HierarchyPolicy,
         prefer_overview: bool,
+        mode: TopLevelContextMode,
     ) {
         if !is_top_cell_view(db, cell_view)
             || policy.hidden_cells.contains(&db.top_cell())
@@ -544,10 +568,15 @@ impl RenderPlanner {
             return;
         }
         let query = db.query_shapes_indexed(db.top_cell(), None, viewport.world);
-        plan.query_stats.viewport_queries = 1;
-        plan.query_stats.candidates_checked = query.candidates_checked;
-        plan.query_stats.total_shapes_in_cell = query.total_shapes_in_cell;
+        if mode == TopLevelContextMode::AllVisibleShapes {
+            plan.query_stats.viewport_queries = 1;
+            plan.query_stats.candidates_checked = query.candidates_checked;
+            plan.query_stats.total_shapes_in_cell = query.total_shapes_in_cell;
+        }
         for shape in query.shapes {
+            if mode == TopLevelContextMode::ContextShapesOnly && !is_context_shape(shape.kind) {
+                continue;
+            }
             self.push_shape_lod(layers, plan, viewport, occupancy, shape);
         }
     }
@@ -679,6 +708,9 @@ impl RenderPlanner {
             && units_per_pixel <= self.settings.idle_detail_units_per_pixel
         {
             return HierarchyLodMode::NearExpand;
+        }
+        if self.settings.force_interaction_coarse && matches!(level, LodLevel::Near) {
+            return HierarchyLodMode::MidCoarse;
         }
         match level {
             LodLevel::Far => HierarchyLodMode::FarBBox,
@@ -1243,6 +1275,12 @@ enum HierarchyLodMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TopLevelContextMode {
+    AllVisibleShapes,
+    ContextShapesOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CacheKeyMode {
     LegacySource,
     CellViewAware,
@@ -1737,7 +1775,9 @@ fn push_hierarchy_rect(
 
 fn layer_matches_shape(layer: &ResolvedDisplayLayer, shape: &ShapeRecord) -> bool {
     match layer.source {
-        SourceSelector::PhysicalLayer(layer_id) => shape.layer_id == layer_id,
+        SourceSelector::PhysicalLayer(layer_id) => {
+            shape.layer_id == layer_id && !is_context_shape(shape.kind)
+        }
         SourceSelector::ShapeKind(kind) => shape.kind == kind,
         SourceSelector::CellFrame | SourceSelector::SelectionOverlay => false,
     }
@@ -2356,7 +2396,7 @@ impl Fnv64 {
 
 #[cfg(test)]
 mod tests {
-    use layout_display::{DisplayLayer, DisplayModel, LayerStyle};
+    use layout_display::{DisplayLayer, DisplayModel, LayerStyle, Pattern};
     use layoutdb::{
         CellInstance, CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo,
         LayoutDb, ObjectPathTarget, OverviewDensityBin, Rect, ShapeKind, ShapeRecord,
@@ -2452,6 +2492,25 @@ mod tests {
                 bbox: Rect::new(1000, 2000, 1100, 2080),
                 source_id: 77,
             },
+        );
+        db
+    }
+
+    fn hierarchy_db_with_context_shapes() -> LayoutDb {
+        let mut db = hierarchy_db();
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(0, 0, 10_000, 10_000), 0, ShapeKind::Die, 10),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(1_000, 1_000, 9_000, 9_000),
+                0,
+                ShapeKind::Core,
+                11,
+            ),
         );
         db
     }
@@ -2796,6 +2855,18 @@ mod tests {
             .collect()
     }
 
+    fn frame_rect_source_ids(plan: &crate::RenderPlan) -> std::collections::HashSet<u32> {
+        plan.batches
+            .iter()
+            .filter(|batch| batch.plane == RenderPlane::Frame)
+            .flat_map(|batch| batch.items.iter())
+            .filter_map(|item| match item {
+                DrawItem::Rect(rect) => Some(rect.source_id),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn lod_classifier_uses_hysteresis_to_prevent_threshold_flicker() {
         let settings = RenderSettings {
@@ -2897,6 +2968,29 @@ mod tests {
     }
 
     #[test]
+    fn far_top_view_preserves_die_and_core_context_frames() {
+        let db = hierarchy_db_with_context_shapes();
+        let model = DisplayModel::from_layout_layers(db.layers());
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        let frame_source_ids = frame_rect_source_ids(&plan);
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(frame_source_ids.contains(&10));
+        assert!(frame_source_ids.contains(&11));
+        assert!(!frame_source_ids.contains(&42));
+    }
+
+    #[test]
     fn far_view_uses_deep_hierarchy_bbox_cloud_when_depth_allows_it() {
         let db = nested_hierarchy_db();
         let model = one_layer_display_model();
@@ -2995,6 +3089,32 @@ mod tests {
             .batches
             .iter()
             .any(|batch| batch.display_layer_id == "layer:1"));
+    }
+
+    #[test]
+    fn interaction_mid_view_preserves_die_and_core_context_frames() {
+        let db = hierarchy_db_with_context_shapes();
+        let model = DisplayModel::from_layout_layers(db.layers());
+
+        let plan = RenderPlanner::new(RenderSettings {
+            force_interaction_coarse: true,
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            idle_detail_units_per_pixel: 96.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 7_100, 7_100), 100.0, 100.0),
+        );
+
+        let frame_source_ids = frame_rect_source_ids(&plan);
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
+        assert!(frame_source_ids.contains(&10));
+        assert!(frame_source_ids.contains(&11));
+        assert!(!frame_source_ids.contains(&42));
     }
 
     #[test]
@@ -3596,7 +3716,7 @@ mod tests {
     }
 
     #[test]
-    fn interaction_mode_preserves_near_detail_when_below_coarse_threshold() {
+    fn interaction_mode_forces_near_view_to_mid_coarse_without_detail_expansion() {
         let db = hierarchy_db();
         let model = one_layer_display_model();
 
@@ -3612,16 +3732,16 @@ mod tests {
             Viewport::new(Rect::new(990, 1990, 1120, 2100), 400.0, 400.0),
         );
 
-        assert_eq!(plan.lod_stats.coarse, 0);
-        assert!(plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker > 0);
-        assert!(plan.batches.iter().any(|batch| {
-            batch.display_layer_id == "layer:1"
-                && batch.items.iter().any(|item| {
-                    matches!(item, DrawItem::Rect(rect)
-                        if rect.source_id == 9
-                            && rect.world == Rect::new(1010, 2010, 1020, 2020))
-                })
-        }));
+        assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
+        assert!(plan.lod_stats.coarse + plan.lod_stats.array_grid + plan.lod_stats.array_bbox > 0);
+        assert_eq!(
+            plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker,
+            0
+        );
+        assert!(!plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "layer:1"));
     }
 
     #[test]
@@ -4634,6 +4754,40 @@ mod tests {
 
         assert!(context_source_ids.contains(&10));
         assert!(context_source_ids.contains(&11));
+    }
+
+    #[test]
+    fn default_display_model_renders_instance_shapes_with_semantic_texture_layer() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(0, "OVERLAP"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(1_000, 1_000, 9_000, 9_000),
+                0,
+                ShapeKind::Instance,
+                302,
+            ),
+        );
+        let model = DisplayModel::from_layout_layers(db.layers());
+
+        let plan = RenderPlanner::new(RenderSettings::default()).plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 400.0, 400.0),
+        );
+
+        let instance_fill = plan.batches.iter().find(|batch| {
+            batch.plane == RenderPlane::Fill && batch.display_layer_id == "kind:Instance"
+        });
+
+        assert!(instance_fill.is_some());
+        assert_ne!(instance_fill.unwrap().style.fill_pattern, Pattern::Hollow);
+        assert!(!plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "layer:0"));
     }
 
     #[test]

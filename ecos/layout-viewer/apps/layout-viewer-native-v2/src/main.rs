@@ -32,6 +32,7 @@ const MAX_PATTERN_OPS_PER_RECT: usize = 512;
 const MAX_HATCH_OPS_PER_RECT: usize = 256;
 const PATTERN_TILE_PX: f32 = 10.0;
 const SPARSE_DOT_SPACING_PX: f32 = 9.0;
+const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
 
 #[derive(Debug, Parser)]
 #[command(name = "layout-viewer-native-v2")]
@@ -124,7 +125,7 @@ impl HierarchyRowsCache {
         cell_view: &CellViewState,
         max_depth: usize,
         max_rows: usize,
-    ) -> layoutdb::HierarchyTreeRows {
+    ) -> &layoutdb::HierarchyTreeRows {
         let key = HierarchyRowsCacheKey {
             revision,
             cell_view: cell_view.clone(),
@@ -133,13 +134,12 @@ impl HierarchyRowsCache {
         };
         if self.key.as_ref() == Some(&key) {
             self.hits += 1;
-            return self.rows.clone();
+            return &self.rows;
         }
         self.misses += 1;
-        let rows = db.hierarchy_tree_rows(cell_view.clone(), max_depth, max_rows);
         self.key = Some(key);
-        self.rows = rows.clone();
-        rows
+        self.rows = db.hierarchy_tree_rows(cell_view.clone(), max_depth, max_rows);
+        &self.rows
     }
 
     fn clear(&mut self) {
@@ -436,13 +436,17 @@ fn should_check_overview_density(
         && max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel
 }
 
-fn use_plane_renderer(source: RenderPlanSource) -> bool {
+fn use_plane_renderer(source: RenderPlanSource, item_count: usize) -> bool {
     matches!(
         source,
         RenderPlanSource::HierarchyFar
             | RenderPlanSource::HierarchyMid
             | RenderPlanSource::OverviewDensity
-    )
+    ) || (item_count >= NEAR_RASTER_ITEM_THRESHOLD
+        && matches!(
+            source,
+            RenderPlanSource::HierarchyNear | RenderPlanSource::FlatDetail
+        ))
 }
 
 fn use_expanded_plane_cache_viewport(source: RenderPlanSource) -> bool {
@@ -716,6 +720,41 @@ fn hierarchy_row_label(db: &layoutdb::LayoutDb, row: &HierarchyTreeRow) -> Strin
         instance_name,
         cell_name
     )
+}
+
+fn visible_hierarchy_row_slice(
+    rows: &[HierarchyTreeRow],
+    visible_range: std::ops::Range<usize>,
+) -> &[HierarchyTreeRow] {
+    if visible_range.start >= visible_range.end {
+        return &[];
+    }
+    let start = visible_range.start.min(rows.len());
+    let end = visible_range.end.min(rows.len());
+    if start >= end {
+        &[]
+    } else {
+        &rows[start..end]
+    }
+}
+
+fn render_visible_hierarchy_rows(
+    ui: &mut egui::Ui,
+    db: &layoutdb::LayoutDb,
+    rows: &[HierarchyTreeRow],
+    visible_range: std::ops::Range<usize>,
+) -> Option<InstancePath> {
+    let mut focused_path = None;
+    for row in visible_hierarchy_row_slice(rows, visible_range) {
+        ui.horizontal(|ui| {
+            let label = hierarchy_row_label(db, row);
+            ui.monospace(label);
+            if ui.button("Focus").clicked() {
+                focused_path = Some(row.instance_path.clone());
+            }
+        });
+    }
+    focused_path
 }
 
 fn focus_view_on_cell_bbox(
@@ -1130,7 +1169,7 @@ impl LayoutViewerV2App {
 
         let paint_started = std::time::Instant::now();
         let mut paint_ops = 1;
-        self.last_used_plane_renderer = use_plane_renderer(paint_plan.source);
+        self.last_used_plane_renderer = use_plane_renderer(paint_plan.source, self.last_plan_items);
         if self.last_used_plane_renderer {
             let before = self.render_surface.cache.stats();
             paint_ops += draw_cached_plane(
@@ -1179,6 +1218,12 @@ impl LayoutViewerV2App {
             db.design_name(),
             view.units_per_pixel,
             self.frame_rate.fps,
+            self.last_render_plan
+                .as_ref()
+                .map(|plan| plan.source)
+                .unwrap_or_default(),
+            self.last_plan_items,
+            self.last_paint_ops,
             self.last_plan_truncated,
             self.last_plan_reused,
             self.last_plane_cache_hits,
@@ -1188,7 +1233,7 @@ impl LayoutViewerV2App {
         );
         let hud_rect = egui::Rect::from_min_size(
             screen.left_top() + egui::vec2(18.0, 18.0),
-            egui::vec2(330.0, 88.0),
+            egui::vec2(390.0, 104.0),
         );
         ui.painter().rect_filled(
             hud_rect,
@@ -1313,20 +1358,23 @@ impl LayoutViewerV2App {
                     8,
                     max_rows,
                 );
-                egui::ScrollArea::vertical()
+                let rows_truncated = rows.truncated;
+                let row_height = ui.spacing().interact_size.y;
+                let focused_path = egui::ScrollArea::vertical()
                     .max_height(260.0)
-                    .show(ui, |ui| {
-                        for row in &rows.rows {
-                            ui.horizontal(|ui| {
-                                let label = hierarchy_row_label(self.session.db(), row);
-                                ui.monospace(label);
-                                if ui.button("Focus").clicked() {
-                                    self.focus_instance_path(row.instance_path.clone());
-                                }
-                            });
-                        }
-                    });
-                if rows.truncated {
+                    .show_rows(ui, row_height, rows.rows.len(), |ui, visible_range| {
+                        render_visible_hierarchy_rows(
+                            ui,
+                            self.session.db(),
+                            &rows.rows,
+                            visible_range,
+                        )
+                    })
+                    .inner;
+                if let Some(path) = focused_path {
+                    self.focus_instance_path(path);
+                }
+                if rows_truncated {
                     ui.label("Hierarchy rows truncated");
                 }
             });
@@ -1784,6 +1832,25 @@ fn clipped_screen_rect(draw_rect: egui::Rect, clip_rect: egui::Rect) -> Option<e
     (clipped.width() > 0.0 && clipped.height() > 0.0).then_some(clipped)
 }
 
+fn plane_cache_key_for_render_surface(
+    viewport: [i32; 4],
+    tile_units: i32,
+    plan: &RenderPlan,
+    current_revision: u64,
+    cache_width: usize,
+    cache_height: usize,
+    _interaction_active: bool,
+) -> plane_cache::PlaneKey {
+    render_surface::build_plan_plane_key(
+        viewport,
+        tile_units,
+        "surface",
+        plan,
+        current_revision,
+        &format!("RenderSurface:{cache_width}x{cache_height}"),
+    )
+}
+
 fn draw_cached_plane(
     render_surface: &mut render_surface::RenderSurface,
     texture: &mut Option<egui::TextureHandle>,
@@ -1806,12 +1873,7 @@ fn draw_cached_plane(
         .max(1.0) as usize;
     let cache_view = V2ViewState::fit(cache_world, cache_width as f32, cache_height as f32);
     let tile_units = plane_cache_tile_units(view);
-    let mode = if interaction_active {
-        "interaction"
-    } else {
-        "steady"
-    };
-    let key = render_surface::build_plan_plane_key(
+    let key = plane_cache_key_for_render_surface(
         [
             cache_world.x1,
             cache_world.y1,
@@ -1819,10 +1881,11 @@ fn draw_cached_plane(
             cache_world.y2,
         ],
         tile_units,
-        mode,
         plan,
         current_revision,
-        &format!("RenderSurface:{cache_width}x{cache_height}"),
+        cache_width,
+        cache_height,
+        interaction_active,
     );
     let has_cached_texture = texture.is_some();
     if cached_plane_texture_action(texture_key.as_ref(), &key, has_cached_texture)
@@ -2178,6 +2241,9 @@ fn hud_summary_text(
     design_name: &str,
     units_per_pixel: f32,
     fps: f32,
+    plan_source: RenderPlanSource,
+    plan_items: usize,
+    paint_ops: usize,
     plan_truncated: bool,
     plan_reused: bool,
     plane_cache_hits: usize,
@@ -2189,7 +2255,7 @@ fn hud_summary_text(
         return format!("{design_name}\n{error}");
     }
     format!(
-        "{design_name}\nmode=v2  upp={units_per_pixel:.2}  fps={fps:.1}\ntruncated={plan_truncated}  reuse={plan_reused}\nplane hit/miss={plane_cache_hits}/{plane_cache_misses}  paint={:.1}ms\ncanvas={:.1}ms sidebar={:.1}ms update={:.1}ms",
+        "{design_name}\nmode=v2  upp={units_per_pixel:.2}  fps={fps:.1}  source={plan_source:?}\nitems={plan_items} ops={paint_ops} truncated={plan_truncated} reuse={plan_reused}\nplane hit/miss={plane_cache_hits}/{plane_cache_misses}  paint={:.1}ms\ncanvas={:.1}ms sidebar={:.1}ms update={:.1}ms",
         timing.paint_ms, timing.canvas_ms, timing.sidebar_ms, timing.update_ms
     )
 }
@@ -2288,9 +2354,9 @@ mod tests {
         overview_error_is_unavailable, plan_source_for_units_per_pixel, plane_cache_world_rect,
         scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
-        stats_panel_rows, use_plane_renderer, viewport_for_world_rect, AsyncLoadState,
-        CachedPlaneTextureAction, FillDrawMode, FrameRateState, FrameTimingState, LoadRequest,
-        LodTuningState,
+        stats_panel_rows, use_plane_renderer, viewport_for_world_rect, visible_hierarchy_row_slice,
+        AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState, FrameTimingState,
+        LoadRequest, LodTuningState,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{DisplayLayer, DisplayModel, LayerStyle, Pattern};
@@ -2426,6 +2492,9 @@ mod tests {
             "ysyx210340",
             13.35,
             58.7,
+            RenderPlanSource::HierarchyNear,
+            12_345,
+            67,
             true,
             false,
             3,
@@ -2443,6 +2512,9 @@ mod tests {
         assert!(text.contains("mode=v2"));
         assert!(text.contains("upp=13.35"));
         assert!(text.contains("fps=58.7"));
+        assert!(text.contains("source=HierarchyNear"));
+        assert!(text.contains("items=12345"));
+        assert!(text.contains("ops=67"));
         assert!(text.contains("plane hit/miss=3/1"));
         assert!(text.contains("paint=4.2ms"));
         assert!(text.contains("canvas=2.5ms"));
@@ -2640,12 +2712,14 @@ mod tests {
     }
 
     #[test]
-    fn plane_renderer_is_only_used_for_cached_lod_sources() {
-        assert!(use_plane_renderer(RenderPlanSource::HierarchyFar));
-        assert!(use_plane_renderer(RenderPlanSource::HierarchyMid));
-        assert!(use_plane_renderer(RenderPlanSource::OverviewDensity));
-        assert!(!use_plane_renderer(RenderPlanSource::HierarchyNear));
-        assert!(!use_plane_renderer(RenderPlanSource::FlatDetail));
+    fn plane_renderer_is_used_for_cached_lod_sources_and_dense_detail_plans() {
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyFar, 0));
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyMid, 0));
+        assert!(use_plane_renderer(RenderPlanSource::OverviewDensity, 0));
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyNear, 20_000));
+        assert!(use_plane_renderer(RenderPlanSource::FlatDetail, 20_000));
+        assert!(!use_plane_renderer(RenderPlanSource::HierarchyNear, 128));
+        assert!(!use_plane_renderer(RenderPlanSource::FlatDetail, 128));
     }
 
     #[test]
@@ -2654,9 +2728,9 @@ mod tests {
         let mut cache = super::HierarchyRowsCache::default();
         let cell_view = CellViewState::top(&db);
 
-        let first = cache.get_or_build(&db, 1, &cell_view, 8, 16);
-        let second = cache.get_or_build(&db, 1, &cell_view, 8, 16);
-        let third = cache.get_or_build(&db, 2, &cell_view, 8, 16);
+        let first = cache.get_or_build(&db, 1, &cell_view, 8, 16).clone();
+        let second = cache.get_or_build(&db, 1, &cell_view, 8, 16).clone();
+        let third = cache.get_or_build(&db, 2, &cell_view, 8, 16).clone();
 
         assert_eq!(first, second);
         assert_eq!(cache.hits, 1);
@@ -2688,6 +2762,26 @@ mod tests {
     #[test]
     fn hierarchy_rows_interaction_limit_is_smaller_than_steady_limit() {
         assert!(super::HIERARCHY_ROWS_INTERACTION_LIMIT < super::HIERARCHY_ROWS_STEADY_LIMIT);
+    }
+
+    #[test]
+    fn visible_hierarchy_row_slice_clamps_to_visible_range_only() {
+        let db = LayoutDb::new("unit", Rect::new(0, 0, 100, 100));
+        let cell = db.top_cell();
+        let rows = (0..512)
+            .map(|index| sample_hierarchy_row(index, cell, &format!("cell_{index}")))
+            .collect::<Vec<_>>();
+
+        let visible = visible_hierarchy_row_slice(&rows, 10..24);
+        let over_scrolled = visible_hierarchy_row_slice(&rows, 500..540);
+        let reversed = visible_hierarchy_row_slice(&rows, 42..12);
+
+        assert_eq!(visible.len(), 14);
+        assert_eq!(visible[0].cell_name, "cell_10");
+        assert_eq!(visible[13].cell_name, "cell_23");
+        assert_eq!(over_scrolled.len(), 12);
+        assert_eq!(over_scrolled[0].cell_name, "cell_500");
+        assert!(reversed.is_empty());
     }
 
     #[test]
@@ -2767,6 +2861,23 @@ mod tests {
                 &policy
             )
         );
+    }
+
+    #[test]
+    fn plane_cache_key_is_stable_across_interaction_state_for_same_plan_pixels() {
+        let plan = layout_render::RenderPlan {
+            source: RenderPlanSource::HierarchyFar,
+            cache_key: layout_render::RenderCacheKey::default(),
+            ..Default::default()
+        };
+        let viewport = [0, 0, 2048, 2048];
+
+        let interaction =
+            super::plane_cache_key_for_render_surface(viewport, 1024, &plan, 1, 768, 768, true);
+        let steady =
+            super::plane_cache_key_for_render_surface(viewport, 1024, &plan, 1, 768, 768, false);
+
+        assert_eq!(interaction, steady);
     }
 
     #[test]
@@ -3598,6 +3709,26 @@ mod tests {
             instance_path,
             object_path,
             target,
+        }
+    }
+
+    fn sample_hierarchy_row(
+        index: usize,
+        cell: layoutdb::CellId,
+        cell_name: &str,
+    ) -> layoutdb::HierarchyTreeRow {
+        layoutdb::HierarchyTreeRow {
+            depth: index % 4,
+            cell,
+            parent_cell: None,
+            instance_id: Some(index as u32),
+            source_id: Some(index as u32),
+            name: format!("inst_{index}"),
+            cell_name: cell_name.to_owned(),
+            bbox: Rect::new(0, 0, 10, 10),
+            instance_path: InstancePath::new(),
+            child_instance_count: 0,
+            shape_count: 0,
         }
     }
 }
