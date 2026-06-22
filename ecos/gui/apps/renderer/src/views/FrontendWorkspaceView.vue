@@ -265,7 +265,103 @@
 
           <main class="tab-content">
             <section v-if="activeTab === 'summary'" class="summary-panel">
-              <template v-if="isReviewStep && reviewReport">
+              <template v-if="isPrepareStep && prepareReport">
+                <section class="review-overview">
+                  <div
+                    v-for="tile in prepareSummaryTiles"
+                    :key="tile.label"
+                    class="review-tile"
+                    :class="tile.tone"
+                  >
+                    <span>{{ tile.label }}</span>
+                    <strong>{{ tile.value }}</strong>
+                  </div>
+                </section>
+                <section class="summary-grid prepare-grid">
+                  <div class="summary-card prepare-card">
+                    <header>
+                      <span>Configuration</span>
+                      <strong>{{ prepareReadiness.status || 'Pending' }}</strong>
+                    </header>
+                    <div class="prepare-kv-list">
+                      <div
+                        v-for="item in prepareConfiguration"
+                        :key="item.label"
+                        class="prepare-kv"
+                        :class="{ mono: item.mono }"
+                      >
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.value || '--' }}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="summary-card prepare-card">
+                    <header>
+                      <span>Inputs</span>
+                      <strong>{{ numberLabel(prepareInputs.total_rtl_files) }} RTL</strong>
+                    </header>
+                    <div class="summary-metrics prepare-metrics">
+                      <span>CPU RTL <strong>{{ numberLabel(prepareInputs.cpu_rtl_files) }}</strong></span>
+                      <span>Total RTL <strong>{{ numberLabel(prepareInputs.total_rtl_files) }}</strong></span>
+                      <span>Includes <strong>{{ numberLabel(prepareInputs.incdirs) }}</strong></span>
+                      <span>Defines <strong>{{ numberLabel(prepareInputs.defines) }}</strong></span>
+                    </div>
+                    <div class="prepare-source-list">
+                      <div
+                        v-for="source in prepareInputSources"
+                        :key="`${source.label}:${source.path || source.skipped}`"
+                        class="prepare-source-row"
+                      >
+                        <span>
+                          <strong>{{ source.label }}</strong>
+                          <small>{{ source.path ? shortPath(source.path) : source.skipped }}</small>
+                        </span>
+                        <em>{{ numberLabel(source.rtl_files) }} files</em>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="summary-card prepare-card">
+                    <header>
+                      <span>Contracts</span>
+                      <strong>{{ prepareContractSummary }}</strong>
+                    </header>
+                    <div class="prepare-contract-list">
+                      <div
+                        v-for="contract in prepareContracts"
+                        :key="contract.label"
+                        class="prepare-contract-row"
+                        :class="prepareStatusTone(contract.status)"
+                      >
+                        <i :class="prepareStatusIcon(contract.status)"></i>
+                        <span>
+                          <strong>{{ contract.label }}</strong>
+                          <small>{{ contract.detail }}</small>
+                        </span>
+                        <em>{{ contract.status }}</em>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="summary-card prepare-card">
+                    <header>
+                      <span>Runtime Plan</span>
+                      <strong>{{ prepareReadiness.message ? 'Ready Check' : 'Pending' }}</strong>
+                    </header>
+                    <p>{{ prepareReadiness.message || humanSummaryText }}</p>
+                    <div class="prepare-kv-list">
+                      <div
+                        v-for="item in prepareRuntimePlan"
+                        :key="item.label"
+                        class="prepare-kv"
+                        :class="{ mono: item.mono }"
+                      >
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.value || '--' }}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </template>
+              <template v-else-if="isReviewStep && reviewReport">
                 <section class="review-overview">
                   <div
                     v-for="tile in reviewSummaryTiles"
@@ -1110,6 +1206,7 @@ interface FrontendStepDetail {
   runtime: string
   peak_memory_mb?: number
   summary: Record<string, unknown>
+  prepare?: PrepareReport
   cases?: SimCase[]
   review?: RtlReviewReport
   elab?: ElabReport
@@ -1135,6 +1232,49 @@ interface FrontendConfigItem {
   mono?: boolean
   highlight?: boolean
   wide?: boolean
+}
+
+interface PrepareInfoItem {
+  label: string
+  value: string
+  mono?: boolean
+}
+
+interface PrepareInputSource {
+  label: string
+  path?: string
+  rtl_files?: number
+  filtered_rtl_files?: number
+  skipped?: string
+}
+
+interface PrepareContract {
+  label: string
+  status: string
+  detail: string
+}
+
+interface PrepareReport {
+  readiness?: {
+    status?: string
+    message?: string
+    rtl_files?: number
+    incdirs?: number
+    defines?: number
+  }
+  configuration?: PrepareInfoItem[]
+  inputs?: {
+    cpu_rtl_files?: number
+    total_rtl_files?: number
+    incdirs?: number
+    defines?: number
+    sources?: PrepareInputSource[]
+    manifest?: string
+    merged_filelist?: string
+  }
+  contracts?: PrepareContract[]
+  runtime?: PrepareInfoItem[]
+  reports?: Record<string, unknown>
 }
 
 type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'src'
@@ -1375,6 +1515,7 @@ const currentStep = computed(() =>
   steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
 )
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
+const isPrepareStep = computed(() => currentStepName.value.toLowerCase() === 'prepare')
 const isReviewStep = computed(() => currentStepName.value.toLowerCase() === 'review')
 const isElabStep = computed(() => currentStepName.value.toLowerCase() === 'elab')
 const isLintStep = computed(() => currentStepName.value.toLowerCase() === 'lint')
@@ -1509,6 +1650,34 @@ const defaultCpuTests = computed(() => {
   return Array.isArray(raw) ? raw.map((item) => String(item)).filter(Boolean) : []
 })
 const reports = computed(() => detail.value?.reports || [])
+const prepareReport = computed<PrepareReport | null>(() => {
+  const prepare = detail.value?.prepare
+  if (!prepare) return null
+  if (prepare.readiness || prepare.configuration?.length || prepare.contracts?.length) return prepare
+  return null
+})
+const prepareReadiness = computed(() => prepareReport.value?.readiness || {})
+const prepareConfiguration = computed(() => prepareReport.value?.configuration || [])
+const prepareInputs = computed(() => prepareReport.value?.inputs || {})
+const prepareInputSources = computed(() => prepareInputs.value.sources || [])
+const prepareContracts = computed(() => prepareReport.value?.contracts || [])
+const prepareRuntimePlan = computed(() => prepareReport.value?.runtime || [])
+const prepareSummaryTone = computed(() => prepareStatusTone(String(prepareReadiness.value.status || currentStepDisplayState.value)))
+const prepareSummaryTiles = computed(() => [
+  { label: 'Readiness', value: String(prepareReadiness.value.status || currentStepDisplayState.value || 'Pending'), tone: prepareSummaryTone.value },
+  { label: 'CPU RTL', value: numberLabel(prepareInputs.value.cpu_rtl_files), tone: 'neutral' },
+  { label: 'Total RTL', value: numberLabel(prepareInputs.value.total_rtl_files), tone: 'neutral' },
+  { label: 'Contracts', value: prepareContractSummary.value, tone: prepareContracts.value.some((item) => prepareStatusTone(item.status) === 'error') ? 'error' : 'ok' },
+  { label: 'Includes', value: numberLabel(prepareInputs.value.incdirs), tone: 'neutral' },
+  { label: 'Defines', value: numberLabel(prepareInputs.value.defines), tone: 'neutral' },
+])
+const prepareContractSummary = computed(() => {
+  const failed = prepareContracts.value.filter((item) => prepareStatusTone(item.status) === 'error').length
+  const warnings = prepareContracts.value.filter((item) => prepareStatusTone(item.status) === 'warning').length
+  if (failed) return `${failed} failed`
+  if (warnings) return `${warnings} warning`
+  return `${prepareContracts.value.length} OK`
+})
 const allArtifacts = computed(() => {
   const fromCases = cases.value.flatMap((testCase) => [
     testCase.wave ? { label: `${testCase.name} wave`, path: testCase.wave } : null,
@@ -1652,6 +1821,14 @@ const humanSummaryMetrics = computed(() => {
       { label: 'Modules', value: numberLabel(reviewReport.value.summary?.modules) },
     ]
   }
+  if (isPrepareStep.value && prepareReport.value) {
+    return [
+      { label: 'CPU RTL', value: numberLabel(prepareInputs.value.cpu_rtl_files) },
+      { label: 'Total RTL', value: numberLabel(prepareInputs.value.total_rtl_files) },
+      { label: 'Contracts', value: prepareContractSummary.value },
+      { label: 'Includes', value: numberLabel(prepareInputs.value.incdirs) },
+    ]
+  }
   return [
     { label: 'Logs', value: numberLabel(availableLogs.value.length) },
     { label: 'Sources', value: numberLabel(sourceArtifacts.value.length) },
@@ -1669,6 +1846,9 @@ const humanSummaryText = computed(() => {
   if (isLintStep.value && lintReport.value) {
     if (lintDiagnostics.value.length) return 'Lint found Verilator diagnostics. Open Lint to inspect rules, files, and source locations.'
     return 'Lint completed without Verilator diagnostics in the current CPU RTL file universe.'
+  }
+  if (isPrepareStep.value && prepareReport.value) {
+    return String(prepareReadiness.value.message || 'Prepare normalized the project inputs and generated the runtime plan.')
   }
   if (isReviewStep.value && reviewReport.value) return reviewNextAction.value.detail
   if (state === StateEnum.Success || state === 'Success') {
@@ -3129,6 +3309,22 @@ function numberLabel(value: unknown): string {
   return `${numberValue(value)}`
 }
 
+function prepareStatusTone(status: unknown): 'ok' | 'warning' | 'error' | 'neutral' {
+  const value = String(status || '').toLowerCase()
+  if (['ready', 'success', 'ok', 'enabled'].includes(value)) return 'ok'
+  if (['failed', 'error', 'missing', 'invalid'].includes(value)) return 'error'
+  if (['warning', 'stub', 'disabled', 'pending'].includes(value)) return 'warning'
+  return 'neutral'
+}
+
+function prepareStatusIcon(status: unknown): string {
+  const tone = prepareStatusTone(status)
+  if (tone === 'ok') return 'ri-checkbox-circle-line'
+  if (tone === 'error') return 'ri-close-circle-line'
+  if (tone === 'warning') return 'ri-error-warning-line'
+  return 'ri-information-line'
+}
+
 function readNested(source: Record<string, unknown>, path: string[]): unknown {
   let current: unknown = source
   for (const key of path) {
@@ -4079,6 +4275,102 @@ button:disabled {
   color: var(--text-primary);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 12px;
+}
+
+.prepare-grid {
+  flex: 1;
+  overflow: auto;
+}
+
+.prepare-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.prepare-kv-list,
+.prepare-contract-list,
+.prepare-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 0;
+}
+
+.prepare-kv,
+.prepare-source-row,
+.prepare-contract-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.prepare-kv span,
+.prepare-source-row small,
+.prepare-contract-row small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.prepare-kv strong,
+.prepare-source-row strong,
+.prepare-contract-row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prepare-kv.mono strong {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.prepare-source-row span,
+.prepare-contract-row span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prepare-source-row em,
+.prepare-contract-row em {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.prepare-contract-row i {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+
+.prepare-contract-row.ok i {
+  color: var(--success-color);
+}
+
+.prepare-contract-row.warning i {
+  color: var(--warning-color);
+}
+
+.prepare-contract-row.error i {
+  color: var(--danger-color);
+}
+
+.prepare-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .summary-issue-list {
