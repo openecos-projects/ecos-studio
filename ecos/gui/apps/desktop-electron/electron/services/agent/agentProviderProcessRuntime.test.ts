@@ -1,0 +1,142 @@
+import { EventEmitter } from 'node:events'
+import type { spawn as spawnChild } from 'node:child_process'
+import { describe, expect, it, vi } from 'vitest'
+import { AgentRuntimeManager } from './agentRuntimeManager'
+import {
+  AgentProviderProcessRuntime,
+  type AgentProviderProtocolRequest,
+} from './agentProviderProcessRuntime'
+import { supportedAgentProviderProtocolVersion } from './agentProviderPlugin'
+
+class FakeChild extends EventEmitter {
+  readonly stdout = new EventEmitter()
+  readonly stderr = new EventEmitter()
+  readonly stdin = {
+    write: vi.fn(),
+  }
+  readonly kill = vi.fn()
+}
+
+function createSpawnHarness() {
+  const children: FakeChild[] = []
+  const spawn = vi.fn((command: string, args: string[], options: unknown) => {
+    const child = new FakeChild()
+    children.push(child)
+    return child as never
+  })
+
+  return {
+    children,
+    spawn: spawn as unknown as typeof spawnChild,
+  }
+}
+
+function readProtocolRequest(child: FakeChild, callIndex = 0): AgentProviderProtocolRequest {
+  const raw = String(child.stdin.write.mock.calls[callIndex][0]).trim()
+  return JSON.parse(raw) as AgentProviderProtocolRequest
+}
+
+describe('AgentProviderProcessRuntime', () => {
+  it('uses stdio JSON-RPC requests and resolves provider responses', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        args: ['--stdio'],
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.startSession({
+      directory: '/work/demo',
+      providerId: 'codex',
+    })
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+
+    expect(harness.spawn).toHaveBeenCalledWith('codex-provider', ['--stdio'], {
+      cwd: '/plugins/codex',
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    expect(request).toEqual({
+      id: expect.any(String),
+      method: 'startSession',
+      params: {
+        directory: '/work/demo',
+        providerId: 'codex',
+      },
+    })
+
+    child.stdout.emit('data', `${JSON.stringify({
+      id: request.id,
+      result: { sessionId: 'session-1' },
+    })}\n`)
+
+    await expect(response).resolves.toEqual({
+      sessionId: 'session-1',
+    })
+  })
+
+  it('forwards provider events from process stdout through AgentRuntimeManager', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const manager = new AgentRuntimeManager({
+      providers: [
+        { providerId: 'local', runtime },
+      ],
+    })
+    const listener = vi.fn()
+    manager.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    const child = harness.children[0]
+    child.stdout.emit('data', `${JSON.stringify({
+      event: {
+        text: 'working',
+        type: 'message',
+      },
+      type: 'event',
+    })}\n`)
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      text: 'working',
+      type: 'message',
+    })
+  })
+
+  it('rejects pending requests when the provider process exits', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    harness.children[0].emit('close', 1, null)
+
+    await expect(response).rejects.toThrow(
+      'Agent provider codex exited with code 1',
+    )
+  })
+})
