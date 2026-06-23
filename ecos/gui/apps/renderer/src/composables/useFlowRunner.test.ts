@@ -11,6 +11,9 @@ const {
   runStepApi,
   rtl2gdsApi,
   currentProject,
+  requestHomeRunArtifactReset,
+  markHomeRunArtifactResetAwaitingBackendStart,
+  clearHomeRunArtifactResetAwaitingBackendStart,
 } = vi.hoisted(() => ({
   ensureDesktopRuntime: vi.fn(() => false),
   ensureApiReady: vi.fn(() => Promise.resolve(true)),
@@ -36,7 +39,10 @@ const {
   },
   runStepApi: vi.fn(),
   rtl2gdsApi: vi.fn(),
-  currentProject: { value: null as { path: string } | null },
+  currentProject: { value: null as { path: string; designTool?: string } | null },
+  requestHomeRunArtifactReset: vi.fn(),
+  markHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
+  clearHomeRunArtifactResetAwaitingBackendStart: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -70,6 +76,12 @@ vi.mock('@/api/flow', () => ({
   rtl2gdsApi,
 }))
 
+vi.mock('./homeRunArtifacts', () => ({
+  requestHomeRunArtifactReset,
+  markHomeRunArtifactResetAwaitingBackendStart,
+  clearHomeRunArtifactResetAwaitingBackendStart,
+}))
+
 import {
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
@@ -101,6 +113,9 @@ describe('useFlowRunner desktop-only guard', () => {
     }
     runStepApi.mockReset()
     rtl2gdsApi.mockReset()
+    requestHomeRunArtifactReset.mockReset()
+    markHomeRunArtifactResetAwaitingBackendStart.mockReset()
+    clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
     flowExecutionActive.value = false
     currentProject.value = null
   })
@@ -161,9 +176,10 @@ describe('useFlowRunner desktop-only guard', () => {
         rerun: false,
       },
     })
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
   })
 
-  it('passes rerun through when rerunning the full flow', async () => {
+  it('passes rerun=true to the full flow API when requested', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     rtl2gdsApi.mockResolvedValue({
@@ -175,6 +191,7 @@ describe('useFlowRunner desktop-only guard', () => {
     const { runAllFlow } = useFlowRunner()
 
     await expect(runAllFlow({ rerun: true })).resolves.toEqual({ rerun: true })
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
     expect(rtl2gdsApi).toHaveBeenCalledWith({
       cmd: 'rtl2gds',
       data: {
@@ -220,7 +237,7 @@ describe('useFlowRunner desktop-only guard', () => {
     })
   })
 
-  it('passes rerun through when rerunning a single step', async () => {
+  it('passes rerun=true to the single step API when requested', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
     runStepApi.mockResolvedValue({
@@ -233,10 +250,49 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow({ rerun: true })
 
+    expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
     expect(runStepApi).toHaveBeenCalledWith({
       cmd: 'run_step',
       data: {
         directory: '/work/demo',
+        rerun: true,
+        step: StepEnum.FLOORPLAN,
+      },
+    })
+  })
+
+  it('passes frontend designTool to flow APIs when running a frontend workspace', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+    rtl2gdsApi.mockResolvedValue({
+      response: 'success',
+      data: { rerun: false },
+      message: ['done'],
+    })
+    runStepApi.mockResolvedValue({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+
+    const { runAllFlow, runFlow } = useFlowRunner()
+
+    await runAllFlow()
+    await runFlow({ rerun: true })
+
+    expect(rtl2gdsApi).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      data: {
+        designTool: 'frontend',
+        directory: '/work/frontend-demo',
+        rerun: false,
+      },
+    })
+    expect(runStepApi).toHaveBeenCalledWith({
+      cmd: 'run_step',
+      data: {
+        designTool: 'frontend',
+        directory: '/work/frontend-demo',
         rerun: true,
         step: StepEnum.FLOORPLAN,
       },

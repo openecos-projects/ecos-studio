@@ -34,25 +34,34 @@ are not supported by `make build` yet.
 ### Development
 
 ```bash
-# From repo root — one-time setup (submodules, PDK, DreamPlace .so, ECC-Tools)
+# From repo root, initialize the repo and required resources first.
 make setup
 
-# Install dev dependencies and create symlinks
-make dev
+# Prepare ECC. If Nix is available, enter the dev shell before syncing.
+cd ecc
+nix develop
+uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package ecc-tools-bin --verbose
 
-# Run GUI in dev mode
-cd ecos/gui && pnpm dev
+# Install GUI dependencies and run GUI in dev mode.
+cd ../ecos/gui
+pnpm install
+pnpm run dev
 ```
+
+`ecc` is installed in editable mode. Source edits are picked up on the next
+import, and editable native extensions rebuild automatically when needed.
+If Nix is not available, skip `nix develop` and run the `uv sync` command in the
+normal shell.
 
 Electron host logs default to warnings and errors. Use `ECOS_ELECTRON_LOG_LEVEL`
 when you need more detail while debugging the desktop shell:
 
 ```bash
 # GUI lifecycle diagnostics
-cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=info pnpm dev
+cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=info pnpm run dev
 
 # More detailed desktop runtime diagnostics
-cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm dev
+cd ecos/gui && ECOS_ELECTRON_LOG_LEVEL=debug pnpm run dev
 ```
 
 Available levels: `debug`, `info`, `warning` (default), `error`, `critical`.
@@ -66,16 +75,6 @@ the CLI command response. Runtime events are reserved for flow lifecycle changes
 from `run_step` and `rtl2gds`; stdout and stderr log streams are shown as logs
 and do not trigger workspace data reloads.
 
-### DreamPlace Development
-
-DreamPlace C++ operators are compiled by Bazel and installed as `.so` files into the source tree for venv-based development:
-
-```bash
-cd ecc
-bazel run //bazel/scripts:install_dreamplace    # Build + install .so files
-bazel run //bazel/scripts:clean_dreamplace      # Remove installed artifacts (manifest-based)
-```
-
 ### Release Build
 
 `make build` runs the full pipeline:
@@ -87,10 +86,10 @@ ECC CLI packaging environment → ECC CLI runtime resources → Electron build �
 ```bash
 # Full release build (from repo root)
 make build
-
-# Launch the built AppImage
-make gui
 ```
+
+The build output is copied to the repository root `build/` directory. By
+default, the Linux release artifacts include an AppImage and deb package.
 
 ## Documentation
 

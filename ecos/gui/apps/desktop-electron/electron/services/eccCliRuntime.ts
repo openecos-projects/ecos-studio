@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
 
@@ -38,6 +38,19 @@ function resolvePackagedRuntimeBin(options: EccCliRuntimeEnvOptions): string | n
   const executableName = options.platform === 'win32' ? 'ecc.cmd' : 'ecc'
 
   return existsSync(join(binariesPath, executableName)) ? binariesPath : null
+}
+
+function findRepoRootFromAppPath(appPath: string): string | null {
+  let current = appPath
+  for (let i = 0; i < 8; i += 1) {
+    if (existsSync(join(current, 'ecc', 'pyproject.toml'))) {
+      return current
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return null
 }
 
 function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string {

@@ -35,7 +35,6 @@ jobs:
         with:
           filters: |
             version:
-              - 'MODULE.bazel'
               - 'ecos/gui/default.nix'
               - 'ecos/gui/package.json'
               - 'ecos/gui/apps/*/package.json'
@@ -48,12 +47,7 @@ jobs:
               - 'ecos/gui/pnpm-workspace.yaml'
               - 'ecos/gui/tailwind.config.ts'
             build:
-              - '.bazelrc'
-              - 'BUILD.bazel'
-              - 'MODULE.bazel'
-              - 'MODULE.bazel.lock'
               - 'Makefile'
-              - 'ecos/BUILD.bazel'
               - 'ecos/scripts/**'
             ci:
               - '.github/**'
@@ -143,47 +137,27 @@ jobs:
           version: 0.11.12
           enable-cache: true
 
-      - name: Setup Bazel
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL https://github.com/bazelbuild/bazel/releases/download/8.5.0/bazel-8.5.0-linux-x86_64 \
-            -o "$HOME/.local/bin/bazel"
-          chmod +x "$HOME/.local/bin/bazel"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Sync ECC CLI packaging environment
-        working-directory: ecc
-        run: uv sync --frozen --all-groups --python 3.11
+      - name: Prepare repository
+        run: make setup
 
       - name: Build Electron release bundle
         env:
-          ENABLE_OSS_CAD_SUITE: "true"
-          ECOS_ELECTRON_LINUX_TARGETS: AppImage
-          PYTHON_INTERPRETER: ${{ github.workspace }}/ecc/.venv/bin/python
-        run: bazel build //:ecos_studio_bundle
+          GH_TOKEN: ${{ github.token }}
+        run: make build
 
       - name: Verify AppImage artifact
         run: |
-          BUNDLE_TAR="bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar"
-          rm -rf dist/ci-appimage
-          mkdir -p dist/ci-appimage
-
-          tar -tf "$BUNDLE_TAR" | grep -E '(^|/)[^/]+\.AppImage$' > /tmp/ecos-appimage-files.txt || true
+          find -L build -type f -name '*.AppImage' | sort > /tmp/ecos-appimage-files.txt
 
           if [ ! -s /tmp/ecos-appimage-files.txt ]; then
-            echo "ERROR: AppImage artifact not found in $BUNDLE_TAR" >&2
-            echo "Bundle contents:" >&2
-            tar -tf "$BUNDLE_TAR" | sed -n '1,200p' >&2
+            echo "ERROR: AppImage artifact not found in build/" >&2
+            echo "Build contents:" >&2
+            find -L build -maxdepth 4 -mindepth 1 -print | sed -n '1,200p' >&2
             exit 1
           fi
 
           echo "Found AppImage artifact:"
           cat /tmp/ecos-appimage-files.txt
-
-          tar -xf "$BUNDLE_TAR" -C dist/ci-appimage -T /tmp/ecos-appimage-files.txt
-
-          echo "Prepared CI AppImage artifact:"
-          find dist/ci-appimage -type f -name '*.AppImage' | sort
 
       - name: Upload CI AppImage artifact
         uses: actions/upload-artifact@v4
@@ -192,5 +166,4 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist/ci-appimage/**/*.AppImage
-
+            build/**/*.AppImage

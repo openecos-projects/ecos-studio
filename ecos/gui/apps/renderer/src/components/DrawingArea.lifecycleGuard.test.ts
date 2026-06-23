@@ -18,9 +18,11 @@ describe('DrawingArea lifecycle guards', () => {
     expect(source).toContain('if (!guard.isCurrent() || drcViolationOverlay !== overlay) return')
   })
 
-  it('prevents stale tile-generation completions from loading into a newer workspace session', () => {
+  it('prevents stale view JSON overview loads from mutating a newer workspace session', () => {
     expect(source).toMatch(
-      /async function onGenerateTilesFromToolbar\(\): Promise<void> \{[\s\S]*?const guard = createDrawingAsyncGuard\(currentStepKey\.value\)[\s\S]*?const \{ baseUrl, outDir, fromCache \} = await runLayoutTileGenerationSingleFlight\([\s\S]*?if \(!guard\.isCurrent\(\)\) return[\s\S]*?await loadTileLayout\(baseUrl, outDir, guard\)/,
+      /async function loadStepViewJsonOverview\([\s\S]*?viewJsonPackageRoot: string[\s\S]*?const overview = await loadViewJsonOverview\(viewJsonPackageRoot, \{[\s\S]*?projectPath,[\s\S]*?shouldCancel: \(\) => !guard\.isCurrent\(\),[\s\S]*?workerFactory: createViewJsonOverviewWorker,[\s\S]*?\}\)[\s\S]*?if \(!guard\.isCurrent\(\) \|\| editor\.value !== ed\) \{[\s\S]*?return null[\s\S]*?\}/,
     )
+    expect(source).toContain('isViewJsonLoadCancelled')
+    expect(source).toMatch(/if \(isViewJsonLoadCancelled\(err\) && !guard\.isCurrent\(\)\) \{[\s\S]*?return null/)
   })
 })

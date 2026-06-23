@@ -1,5 +1,5 @@
 name: Check ECOS Studio Version Consistency
-description: Verify release version fields across MODULE.bazel and ecos-studio. Optionally verify an expected git tag.
+description: Verify release version fields across ecos-studio package metadata. Optionally verify an expected git tag.
 
 inputs:
   expected_tag:
@@ -9,7 +9,7 @@ inputs:
 
 outputs:
   version:
-    description: The repository release version detected from MODULE.bazel.
+    description: The repository release version detected from ecos/gui/package.json.
     value: ${{ steps.verify.outputs.version }}
   tag:
     description: The git tag corresponding to the detected version.

@@ -28,18 +28,27 @@ The main tools are:
 
 - Node.js LTS and pnpm for `ecos/gui`.
 - Python 3.11 and uv for ECC CLI packaging inputs.
-- Bazel 8.5.0 for release packaging.
+- Nix is optional, but recommended for entering a development shell before ECC
+  dependency sync.
 - Git submodules for `ecc`, `ip/retroSoC`, and `pdk/icsprout55-pdk`.
 
 From the repository root:
 
 ```bash
 make setup
-make dev
+cd ecc
+nix develop
+uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package ecc-tools-bin --verbose
+cd ../ecos/gui
+pnpm install
+pnpm run dev
 ```
 
-`make setup` initializes submodules and checks for the core tools. `make dev`
-installs the GUI dependencies after setup.
+`make setup` initializes submodules and required resources. If Nix is not
+available, skip `nix develop` and run the `uv sync` command in the normal shell.
+ECC is installed in editable mode through the uv workspace; source edits are
+picked up on the next import, and editable native extensions rebuild
+automatically when needed.
 
 ## Working With Submodules
 
@@ -126,43 +135,36 @@ The normal ECOS Studio build is a monorepo-style flow: the desktop package build
 the ECC CLI from the `ecc` submodule and includes that CLI runtime in the
 packaged AppImage.
 
-For Bazel-based debugging, choose the ECC source deliberately in the root
-`MODULE.bazel`:
-
-- Use `git_override(...)` when you want to lock `ecc` or `ecc-dreamplace` to a
-  specific online repository commit.
-- Use `local_path_override(...)` when you want the root build to use local source
-  code from `ecc` or `ecc/chipcompiler/thirdparty/ecc-dreamplace`.
-
 Do not use the `ecos-studio` PR checklist to require ECC's own Ruff, pytest, or
 CLI smoke commands. If the change needs ECC source work, validate that work in
 the ECC repository and use the `ecos-studio` PR to verify the integration path.
 
-Be careful when debugging `ecc-tools` or `ecc-dreamplace`: `ecc/pyproject.toml`
-pins those Python packages to exact versions and resolves them from GitHub
-Release wheel URLs. Changing the nested local source tree is not enough if the
-runtime still installs the pinned release wheel. For dependency-level debugging,
-build or publish the local wheel first, update the ECC dependency source or
-installation inputs to point at that wheel, then reinstall/sync the ECC
-environment before testing.
+When debugging `ecc-tools` or `ecc-dreamplace`, resync ECC with the workspace
+sources before testing:
+
+```bash
+cd ecc
+nix develop
+uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package ecc-tools-bin --verbose
+```
+
+If Nix is not available, skip `nix develop`. The nested `ecc-dreamplace` and
+`ecc-tools` packages are editable workspace packages, so source changes are used
+on the next import and native editable builds are rebuilt automatically when
+needed.
 
 ### Release Build
 
-For changes that affect Bazel, packaging scripts, ECC runtime resources, version
+For changes that affect packaging scripts, ECC runtime resources, version
 metadata, Electron release configuration, or native assets:
 
 ```bash
 make build
 ```
 
-To launch the built AppImage after a successful build:
-
-```bash
-make gui
-```
-
-The Bazel release target is `//:ecos_studio_bundle`. CI builds an AppImage from
-that target and checks that the artifact exists in the produced bundle.
+`make build` writes release artifacts to the repository root `build/`
+directory. By default, the Linux release artifacts include an AppImage and deb
+package. CI checks that the expected artifacts exist in that output directory.
 
 ### CLI Demos
 
@@ -189,8 +191,8 @@ blast radius is larger.
   and a manual `pnpm run dev` smoke check when possible.
 - Build, release, version, or packaging changes: run `make build` or explain why
   it could not be run locally.
-- ECC CLI or ECC runtime changes: state whether Bazel used `git_override` or
-  `local_path_override`, and verify the actual CLI/runtime version being tested.
+- ECC CLI or ECC runtime changes: state the ECC sync command used and verify the
+  actual CLI/runtime version being tested.
 - Resource download, archive extraction, or installer changes: cover checksums,
   path traversal, symlinks, and failed-download behavior with tests.
 - Submodule updates: state the new submodule commit, why it is needed, and which
@@ -245,7 +247,6 @@ Dependency updates must include the corresponding lockfile updates:
 
 - `ecos/gui/pnpm-lock.yaml` for pnpm dependency changes.
 - `ecc/uv.lock` for ECC uv dependency changes.
-- `MODULE.bazel.lock` for Bazel module resolution changes.
 - `flake.lock` for Nix input changes.
 
 Do not hand-edit lockfiles. Regenerate them with the appropriate package

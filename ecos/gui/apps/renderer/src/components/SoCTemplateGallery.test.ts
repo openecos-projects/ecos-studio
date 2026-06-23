@@ -292,6 +292,10 @@ function restoreDomGlobals() {
 
 const require = createRequire(import.meta.url)
 let vueRuntime: VueRuntime | null = null
+const catalogModule = {
+  importSocTemplateFromJsonText: vi.fn(),
+  removeImportedSocTemplate: vi.fn(),
+}
 
 async function loadVueRuntime() {
   vueRuntime ??= await import('vue')
@@ -325,12 +329,7 @@ function loadGalleryComponent(vue: VueRuntime) {
   const moduleExports: { default?: unknown } = {}
   const customRequire = (id: string) => {
     if (id === 'vue') return vue
-    if (id === '@/composables/socTemplateCatalog') {
-      return {
-        importSocTemplateFromJsonText: vi.fn(),
-        removeImportedSocTemplate: vi.fn(),
-      }
-    }
+    if (id === '@/composables/socTemplateCatalog') return catalogModule
     return require(id)
   }
 
@@ -368,6 +367,8 @@ describe('SoCTemplateGallery', () => {
   beforeEach(() => {
     ensureDom()
     document.body.innerHTML = ''
+    catalogModule.importSocTemplateFromJsonText.mockReset()
+    catalogModule.removeImportedSocTemplate.mockReset()
   })
 
   afterEach(() => {
@@ -381,7 +382,7 @@ describe('SoCTemplateGallery', () => {
       error: null,
     })
 
-    expect(container.textContent).toContain('Loading template catalog…')
+    expect(container.textContent).toContain('Loading templates…')
 
     app.unmount()
   })
@@ -413,7 +414,7 @@ describe('SoCTemplateGallery', () => {
       error: null,
     })
 
-    expect(container.textContent).toContain('No templates in this workspace yet')
+    expect(container.textContent).toContain('No templates yet')
 
     app.unmount()
   })
@@ -429,7 +430,7 @@ describe('SoCTemplateGallery', () => {
           info: 'Reference template',
           ioPinsCount: 12,
           coreCount: 2,
-          sourceLabel: 'Fixed JSON',
+          sourceLabel: 'remote:socTemplateCatalog/templates/demo.json',
           thumbnail: {
             coreSlotLeftPct: 10,
             coreSlotTopPct: 10,
@@ -450,20 +451,25 @@ describe('SoCTemplateGallery', () => {
 
     expect(container.textContent).toContain('Demo SoC')
     expect(container.textContent).toContain('Reference template')
+    expect(container.textContent).toContain('Remote')
     expect(container.textContent?.toLowerCase()).toContain('cores')
     expect(container.textContent).toContain('2')
     expect(container.querySelectorAll('.soc-gallery__thumb-core')).toHaveLength(2)
     const backButton = findButton(container, 'Back')
     const openButton = findButton(container, 'Open Details')
+    const hideButton = findButton(container, 'Hide')
 
     expect(backButton).toBeTruthy()
     expect(openButton).toBeTruthy()
+    expect(hideButton).toBeTruthy()
 
     backButton?.click()
     openButton?.click()
+    hideButton?.click()
 
     expect(onBack).toHaveBeenCalledTimes(1)
     expect(onOpen).toHaveBeenCalledWith('demoSoC001')
+    expect(catalogModule.removeImportedSocTemplate).toHaveBeenCalledWith('demoSoC001')
 
     app.unmount()
   })

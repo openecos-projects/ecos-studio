@@ -52,14 +52,36 @@ chmod +x <latest-release-file>.AppImage
 ## Quick Start (For Developers)
 
 ```bash
+# Initialize the repo and required resources first.
 make setup
-make dev
-make build
-make gui
+
+# Prepare ECC. If Nix is available, enter the dev shell before syncing.
+cd ecc
+nix develop
+uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package ecc-tools-bin --verbose
+
+# Install GUI dependencies and start the desktop app.
+cd ../ecos/gui
+pnpm install
+pnpm run dev
 ```
 
-Release builds currently require Linux x86_64 with glibc 2.34 or newer. For
-development, validation, branch, and submodule guidelines, see
+`ecc` is installed in editable mode through the uv workspace. After changing ECC
+Python code or the native workspace packages, importing the package again uses
+the updated sources and rebuilds editable native extensions when needed.
+If Nix is not available, skip `nix develop` and run the `uv sync` command in the
+normal shell.
+
+Release builds currently require Linux x86_64 with glibc 2.34 or newer:
+
+```bash
+make build
+```
+
+`make build` writes the release artifacts to the repository root `build/`
+directory. By default this includes the Linux AppImage and deb package.
+
+For development, validation, branch, and submodule guidelines, see
 [CONTRIBUTING.md](CONTRIBUTING.md). For GUI and release build details, see
 [ecos/README.md](ecos/README.md).
 

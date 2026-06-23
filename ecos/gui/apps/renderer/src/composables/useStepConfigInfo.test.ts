@@ -6,6 +6,7 @@ const testState = vi.hoisted(() => ({
   route: {
     path: '/workspace/floorplan',
   },
+  syncConfigApi: vi.fn(),
   writeProjectTextFile: vi.fn(),
 }))
 
@@ -45,7 +46,15 @@ vi.mock('@/utils/projectFs', () => ({
   resolveProjectPathAccess: testState.resolveProjectPathAccess,
 }))
 
+vi.mock('@/api/flow', () => ({
+  syncConfigApi: testState.syncConfigApi,
+}))
+
 import { useStepConfigInfo } from './useStepConfigInfo'
+import {
+  clearFlowExecutionActiveForWorkspace,
+  markFlowExecutionActiveForWorkspace,
+} from './useFlowRunner'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 describe('useStepConfigInfo', () => {
@@ -65,7 +74,20 @@ describe('useStepConfigInfo', () => {
     testState.readProjectTextFile.mockReset()
     testState.resolveProjectPathAccess.mockClear()
     testState.resolveWorkspaceStepInfoApi.mockReset()
+    testState.syncConfigApi.mockReset()
+    testState.syncConfigApi.mockResolvedValue({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/workspace/demo/config/fp_default_config.json',
+        directory: '/workspace/demo',
+        parameters_changed: false,
+        refreshed: false,
+      },
+      message: ['synced'],
+      response: 'success',
+    })
     testState.writeProjectTextFile.mockReset()
+    clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
   afterEach(() => {
@@ -326,11 +348,129 @@ describe('useStepConfigInfo', () => {
       '/workspace/demo/config/fp_default_config.json',
       '{\n    "density": 0.6\n}',
     )
+    expect(testState.syncConfigApi).toHaveBeenCalledWith({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/workspace/demo/config/fp_default_config.json',
+        directory: '/workspace/demo',
+      },
+    })
     expect(lifecycle.resourceVersions.value['step-config']).toBe(stepConfigVersionBeforeSave + 1)
     await vi.waitFor(() => {
       expect(result.stepConfigRaw.value).toBe('{\n    "density": 0.6\n}')
       expect(result.hasStepConfigChanges.value).toBe(false)
     })
+  })
+
+  it('rejects step config saves while the workspace flow is running', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        config: '/workspace/demo/config/fp_default_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Floorplan',
+    })
+    testState.readProjectTextFile.mockResolvedValue('{"density":0.5}')
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigDraft.value).toEqual({ density: 0.5 })
+    })
+
+    result.stepConfigDraft.value = { density: 0.7 }
+    markFlowExecutionActiveForWorkspace('/workspace/demo')
+
+    await expect(result.saveStepConfig()).resolves.toBe(false)
+
+    expect(testState.writeProjectTextFile).not.toHaveBeenCalled()
+    expect(result.stepConfigSaveError.value).toContain('Flow is running')
+  })
+
+  it('invalidates parameters and home when step config sync changes parameters', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        config: '/workspace/demo/config/rt_default_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'route',
+    })
+    testState.readProjectTextFile
+      .mockResolvedValueOnce('{"RT":{"-bottom_routing_layer":"MET2"}}')
+      .mockResolvedValue('{\n    "RT": {\n        "-bottom_routing_layer": "MET4"\n    }\n}')
+    testState.syncConfigApi.mockResolvedValue({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/workspace/demo/config/rt_default_config.json',
+        directory: '/workspace/demo',
+        parameters_changed: true,
+        refreshed: true,
+      },
+      message: ['synced'],
+      response: 'success',
+    })
+
+    testState.route.path = '/workspace/route'
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigDraft.value).toEqual({ RT: { '-bottom_routing_layer': 'MET2' } })
+    })
+
+    const lifecycle = useWorkspaceLifecycle()
+    const initialVersions = { ...lifecycle.resourceVersions.value }
+    result.stepConfigDraft.value = { RT: { '-bottom_routing_layer': 'MET4' } }
+
+    await expect(result.saveStepConfig()).resolves.toBe(true)
+
+    expect(lifecycle.resourceVersions.value['step-config']).toBe(initialVersions['step-config'] + 1)
+    expect(lifecycle.resourceVersions.value.parameters).toBe(initialVersions.parameters + 1)
+    expect(lifecycle.resourceVersions.value.home).toBe(initialVersions.home + 1)
+  })
+
+  it('keeps written step config as the baseline when sync config fails after save', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        config: '/workspace/demo/config/fp_default_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'Floorplan',
+    })
+    testState.readProjectTextFile.mockResolvedValue('{"density":0.5}')
+    testState.syncConfigApi.mockResolvedValue({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/workspace/demo/config/fp_default_config.json',
+        directory: '/workspace/demo',
+        parameters_changed: false,
+        refreshed: false,
+      },
+      message: ['sync failed'],
+      response: 'error',
+    })
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigDraft.value).toEqual({ density: 0.5 })
+    })
+
+    result.stepConfigDraft.value = { density: 0.9 }
+
+    await expect(result.saveStepConfig()).resolves.toBe(false)
+
+    expect(testState.writeProjectTextFile).toHaveBeenCalled()
+    expect(result.hasStepConfigChanges.value).toBe(false)
+    expect(result.stepConfigSaveError.value).toBe('sync failed')
   })
 
   it('ignores stale step config save completions after the workspace session changes', async () => {

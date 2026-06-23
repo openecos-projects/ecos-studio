@@ -70,44 +70,26 @@ jobs:
           version: 0.11.12
           enable-cache: true
 
-      - name: Setup Bazel
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL https://github.com/bazelbuild/bazel/releases/download/8.5.0/bazel-8.5.0-linux-x86_64 \
-            -o "$HOME/.local/bin/bazel"
-          chmod +x "$HOME/.local/bin/bazel"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Sync ECC CLI packaging environment
-        working-directory: ecc
-        run: uv sync --frozen --all-groups --python 3.11
+      - name: Prepare repository
+        run: make setup
 
       - name: Build Electron release bundle
         env:
-          ENABLE_OSS_CAD_SUITE: "true"
-          ECOS_ELECTRON_LINUX_TARGETS: AppImage
-          PYTHON_INTERPRETER: ${{ github.workspace }}/ecc/.venv/bin/python
-        run: bazel build //:ecos_studio_bundle
+          GH_TOKEN: ${{ github.token }}
+        run: make build
 
-      - name: Extract AppImage
+      - name: Verify AppImage artifact
         run: |
-          BUNDLE_TAR="bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar"
-
-          rm -rf dist/release
-          mkdir -p dist/release
-
-          tar -tf "$BUNDLE_TAR" | grep -E '(^|/)[^/]+\.AppImage$' > /tmp/ecos-release-files.txt || true
+          find -L build -type f -name '*.AppImage' | sort > /tmp/ecos-release-files.txt
           if [ ! -s /tmp/ecos-release-files.txt ]; then
-            echo "ERROR: AppImage artifact not found in $BUNDLE_TAR" >&2
-            echo "Bundle contents:" >&2
-            tar -tf "$BUNDLE_TAR" | sed -n '1,200p' >&2
+            echo "ERROR: AppImage artifact not found in build/" >&2
+            echo "Build contents:" >&2
+            find -L build -maxdepth 4 -mindepth 1 -print | sed -n '1,200p' >&2
             exit 1
           fi
 
-          tar -xf "$BUNDLE_TAR" -C dist/release -T /tmp/ecos-release-files.txt
-
           echo "Built AppImage artifact:"
-          find dist/release -type f -name '*.AppImage' | sort
+          cat /tmp/ecos-release-files.txt
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
@@ -115,7 +97,7 @@ jobs:
           name: ecos-studio-release
           if-no-files-found: error
           path: |
-            dist/release/**/*.AppImage
+            build/**/*.AppImage
 
   release:
     name: Create Release
@@ -132,7 +114,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ecos-studio-release
-          path: dist/release
+          path: build/release
 
       - name: Determine tag version
         id: version
@@ -169,7 +151,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mapfile -t ASSETS < <(find dist/release -type f -name '*.AppImage' | sort)
+          mapfile -t ASSETS < <(find build/release -type f -name '*.AppImage' | sort)
           gh release create "${{ steps.version.outputs.full_tag }}" \
             --title "ECOS Studio ${{ steps.version.outputs.full_tag }}" \
             --notes-file release-notes.md \

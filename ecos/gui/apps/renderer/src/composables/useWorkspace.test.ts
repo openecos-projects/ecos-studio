@@ -15,6 +15,8 @@ const {
   toastAddMock,
   waitForRuntimeReadyMock,
   waitForDesktopApiMock,
+  requestHomeRunArtifactResetMock,
+  clearHomeRunArtifactResetAwaitingBackendStartMock,
 } = vi.hoisted(() => ({
   createRuntimeEventClientMock: vi.fn(),
   createWorkspaceApiMock: vi.fn(),
@@ -28,6 +30,8 @@ const {
   toastAddMock: vi.fn(),
   waitForRuntimeReadyMock: vi.fn(),
   waitForDesktopApiMock: vi.fn(),
+  requestHomeRunArtifactResetMock: vi.fn(),
+  clearHomeRunArtifactResetAwaitingBackendStartMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -71,6 +75,11 @@ vi.mock('@/stores/messageStore', () => ({
   useMessageStore: () => ({
     clearMessages: clearMessagesMock,
   }),
+}))
+
+vi.mock('./homeRunArtifacts', () => ({
+  requestHomeRunArtifactReset: requestHomeRunArtifactResetMock,
+  clearHomeRunArtifactResetAwaitingBackendStart: clearHomeRunArtifactResetAwaitingBackendStartMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -170,6 +179,7 @@ describe('useWorkspace openProject', () => {
     toastAddMock.mockReset()
     waitForRuntimeReadyMock.mockReset()
     waitForDesktopApiMock.mockReset()
+    requestHomeRunArtifactResetMock.mockReset()
     settingsData.clear()
 
     desktopApi = createDesktopApiMock()
@@ -1636,6 +1646,25 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
     expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
     expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
+  })
+
+  it('requests Home artifact reset when backend reports rerun start', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'message',
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+        rerun: true,
+      },
+      message: ['Started rtl2gds'],
+      response: 'success',
+    })
+
+    expect(workspace.runtimeEvents.value).toHaveLength(1)
+    expect(requestHomeRunArtifactResetMock).toHaveBeenCalledWith('/work/demo')
   })
 
   it('keeps the workspace loading overlay visible while a new workspace is being created', async () => {

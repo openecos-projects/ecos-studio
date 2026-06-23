@@ -7,13 +7,30 @@ Desktop chip-design frontend built with **Electron + Vue 3 + TypeScript**. The E
 - **Node.js** (LTS recommended)
 - **pnpm** (this repo uses pnpm for dependencies)
 
-For a fuller end-to-end setup (Python, `uv`, Bazel, etc.), see the [ECOS package README](../README.md) and the [repository root README](../../README.md).
+For a fuller end-to-end setup, including ECC's Python environment and optional
+Nix development shell, see the [ECOS package README](../README.md) and the
+[repository root README](../../README.md).
 
 ## Quick start
 
 ### Install dependencies
 
+Prepare ECC first from the repository root:
+
 ```bash
+make setup
+cd ecc
+nix develop
+uv sync --no-build-isolation-package ecc-dreamplace --no-build-isolation-package ecc-tools-bin --verbose
+```
+
+`make setup` initializes submodules and required resources. If Nix is not
+available, skip `nix develop` and run the `uv sync` command in the normal shell.
+
+Then install GUI dependencies:
+
+```bash
+cd ../ecos/gui
 pnpm install
 ```
 

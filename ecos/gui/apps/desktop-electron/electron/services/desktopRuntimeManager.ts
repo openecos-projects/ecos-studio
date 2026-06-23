@@ -39,6 +39,8 @@ const supportedCommands = new Set<DesktopCliCommandName>([
   'rtl2gds',
   'get_info',
   'home_page',
+  'refresh_config',
+  'sync_config',
 ])
 
 const longRunningCommands = new Set<DesktopCliCommandName>([
@@ -46,6 +48,8 @@ const longRunningCommands = new Set<DesktopCliCommandName>([
   'load_workspace',
   'run_step',
   'rtl2gds',
+  'refresh_config',
+  'sync_config',
 ])
 
 function isSupportedCommand(cmd: string): cmd is DesktopCliCommandName {
@@ -207,6 +211,24 @@ export class DesktopRuntimeManager {
     }
   }
 
+  async isWorkspaceRuntimeActive(directory: string): Promise<boolean> {
+    const scope = normalizeDirectoryScope(directory)
+    if (!scope) return false
+
+    if (this.activeLongRunningJobsByScope.has(scope)) return true
+
+    const lockDirectory = path.join(this.runtimeLockRoot, `${runtimeLockName(scope)}.lock`)
+    const owner = await readRuntimeLockOwner(lockDirectory)
+    if (!owner) return false
+
+    if (!isProcessAlive(owner.pid)) {
+      await rm(lockDirectory, { force: true, recursive: true })
+      return false
+    }
+
+    return true
+  }
+
   private emit(event: DesktopCliCommandEvent, listener?: DesktopRuntimeEventListener): void {
     listener?.(event)
     for (const registeredListener of this.listeners) {
@@ -303,6 +325,7 @@ export class DesktopRuntimeManager {
 
     this.emit({
       cmd: request.cmd,
+      data: { ...request.data },
       jobId,
       ...eventWorkspace,
       stream: 'system',

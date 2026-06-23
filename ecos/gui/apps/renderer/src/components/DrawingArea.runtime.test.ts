@@ -367,17 +367,14 @@ async function loadVueRuntime(): Promise<VueRuntime> {
   return vueRuntime
 }
 
-const tileManagerConstructed = vi.fn()
+const viewJsonRendererConstructed = vi.fn()
 const resolveWorkspaceStepInfoApi = vi.fn()
+const loadViewJsonOverview = vi.fn()
 const getResourceUrl = vi.fn()
-const getLayoutTileGenerationStatus = vi.fn()
-const runLayoutTileGenerationSingleFlight = vi.fn()
 const requestProjectPathAccess = vi.fn()
 const readOptionalProjectTextFile = vi.fn()
-const setProject = vi.fn()
-const notifyNavigatedStep = vi.fn()
-const invalidateStep = vi.fn()
-const clearDeferredPrefetchQueue = vi.fn()
+const createViewJsonOverviewWorker = vi.fn()
+const createViewJsonRasterTileWorker = vi.fn()
 
 const mountedApps: Array<{ unmount: () => void }> = []
 
@@ -454,81 +451,16 @@ function createFakeEditor() {
     view,
     getPlugin: vi.fn(() => null),
     clearBackground: vi.fn(),
-    setBackgroundImage: vi.fn(async () => undefined),
     fitToWorld: vi.fn(),
     worldToDisplay: vi.fn((x: number, y: number) => ({ x, y })),
     setWorldBounds: vi.fn(),
+    setBackgroundImage: vi.fn(async () => undefined),
     setPluginEnabled: vi.fn(),
     zoomIn: vi.fn(),
     zoomOut: vi.fn(),
     getScale: vi.fn(() => 1),
     onTransformChange: vi.fn(() => () => undefined),
   }
-}
-
-class MockTileManager {
-  readonly cellStore = {
-    ready: Promise.resolve(),
-    getAllCellIds: () => [] as number[],
-    getCellDef: () => null,
-  }
-
-  readonly globalStore = {
-    ready: Promise.resolve(),
-    shapes: [] as Array<{ layerIdx: number }>,
-  }
-
-  readonly manifest = {
-    dieArea: { x: 0, y: 0, w: 120, h: 80 },
-    dbuPerMicron: 1000,
-    layers: [] as Array<{ id: number; name: string; color: string; alpha: number; zOrder: number }>,
-  }
-
-  constructor(
-    _view: unknown,
-    _baseUrl: string,
-    _localRoot?: string,
-  ) {
-    tileManagerConstructed()
-  }
-
-  async init(): Promise<void> {}
-
-  setEditDirtyGetter(): void {}
-
-  isLayerVisible(): boolean {
-    return true
-  }
-
-  setLayerVisible(): void {}
-
-  destroy(): void {}
-}
-
-class MockTileInteraction {
-  readonly ghostOverlay = {}
-
-  readonly highlightOverlay = { clear: vi.fn() }
-
-  readonly selectionOverlay = {}
-
-  currentSelection: unknown = null
-
-  setEditManager(): void {}
-
-  onSelectionChange(): void {}
-
-  onRequestPlacement(): void {}
-
-  enable(): void {}
-
-  disable(): void {}
-
-  clearSelection(): void {}
-
-  refreshSelectionStroke(): void {}
-
-  destroy(): void {}
 }
 
 class MockViewportAnimator {
@@ -541,52 +473,44 @@ class MockViewportAnimator {
   destroy(): void {}
 }
 
-class MockEditManager {
-  readonly editOverlay = {}
-
-  hasUnsavedChanges = false
-
-  constructor(
-    _tileManager: unknown,
-    _cellStore: unknown,
-  ) {}
-
-  onChange(): void {}
-
-  deleteInstance(): void {}
-
-  undo(): void {}
-
-  redo(): void {}
-
-  destroy(): void {}
-}
-
-class MockPlacementTool {
-  readonly ghostOverlay = {}
-
-  constructor(
-    _view: unknown,
-    _editManager: unknown,
-    _tileManager: unknown,
-    _cellStore: unknown,
-  ) {}
-
-  onDeactivate(): void {}
-
-  activate(): void {}
-
-  deactivate(): void {}
-
-  destroy(): void {}
-}
-
 class MockDrcViolationOverlay {
   constructor(_view: unknown) {}
 
   bindViewportEvents(): void {}
 
   setViolations(): void {}
+
+  destroy(): void {}
+}
+
+class MockViewJsonOverviewRenderer {
+  constructor(_view: unknown) {
+    viewJsonRendererConstructed()
+  }
+
+  render(): void {}
+
+  getPerformanceStats() {
+    return {
+      renderMode: 'gpu',
+      visibleInstanceCount: 1,
+      visibleChunkCount: 1,
+      activeRasterTileCount: 0,
+      activeVectorChunkCount: 0,
+      adaptiveDetailInstanceLimit: 0,
+      pendingRasterTileCount: 0,
+      buildingRasterTileCount: 0,
+      rasterTileCacheHitCount: 0,
+      rasterTileCacheMissCount: 0,
+      rasterTileCacheHitRate: 0,
+      rasterTileFallbackCount: 0,
+      rasterTileFallbackRate: 0,
+      lastRasterTileWorkerMs: 0,
+      gpuChunkBufferCacheSize: 0,
+      scale: 1,
+      rebuildMs: 0,
+    }
+  }
 
   destroy(): void {}
 }
@@ -643,23 +567,75 @@ function compileDrawingArea(vue: VueRuntime) {
     }
     if (id === '@/applications/editor/tile') {
       return {
-        TileManager: MockTileManager,
-        TileInteraction: MockTileInteraction,
         ViewportAnimator: MockViewportAnimator,
-        EditManager: MockEditManager,
-        PlacementTool: MockPlacementTool,
         DrcViolationOverlay: MockDrcViolationOverlay,
+      }
+    }
+    if (id === '@/applications/editor/view-json/overview') {
+      return {
+        createViewJsonPerformanceHudState: () => ({
+          fps: 0,
+          frameMs: 0,
+          renderMode: 'idle',
+          visibleInstanceCount: 0,
+          visibleChunkCount: 0,
+          activeRasterTileCount: 0,
+          activeVectorChunkCount: 0,
+          adaptiveDetailInstanceLimit: 0,
+          pendingRasterTileCount: 0,
+          buildingRasterTileCount: 0,
+          rasterTileCacheHitCount: 0,
+          rasterTileCacheMissCount: 0,
+          rasterTileCacheHitRate: 0,
+          rasterTileFallbackCount: 0,
+          rasterTileFallbackRate: 0,
+          lastRasterTileWorkerMs: 0,
+          gpuChunkBufferCacheSize: 0,
+          scale: 1,
+          rebuildMs: 0,
+          loadStats: null,
+        }),
+        loadViewJsonOverview,
+        mergeViewJsonRendererStatsIntoHudState: (state: Record<string, unknown>, stats: Record<string, unknown>) => ({
+          ...state,
+          ...stats,
+        }),
+        ViewJsonOverviewRenderer: MockViewJsonOverviewRenderer,
+      }
+    }
+    if (id === '@/applications/editor/view-json/overviewWorker') {
+      return {
+        createViewJsonOverviewWorker,
+      }
+    }
+    if (id === '@/applications/editor/view-json/rasterTileWorker') {
+      return {
+        createViewJsonRasterTileWorker,
       }
     }
     if (id === './DrawingToolbar.vue') {
       return vue.defineComponent({
-        emits: ['generateTiles', 'toolChange', 'previewModeChange'],
-        setup(_, { emit }) {
+        props: [
+          'showPreviewModeToggle',
+          'renderMode',
+          'canSwitchToLayoutMode',
+        ],
+        emits: ['toolChange', 'previewModeChange'],
+        setup(props, { emit }) {
           return () => vue.h('div', { class: 'drawing-toolbar-stub' }, [
             vue.h('button', {
-              class: 'generate-tiles',
-              onClick: () => emit('generateTiles'),
-            }, 'generate'),
+              class: 'select-tool',
+              onClick: () => emit('toolChange', 'select'),
+            }, 'select'),
+            props.showPreviewModeToggle && vue.h('button', {
+              class: 'to-layout-mode',
+              disabled: props.renderMode === 'image' && !props.canSwitchToLayoutMode,
+              onClick: () => emit('previewModeChange', 'layout'),
+            }, 'layout'),
+            props.showPreviewModeToggle && vue.h('button', {
+              class: 'to-image-mode',
+              onClick: () => emit('previewModeChange', 'image'),
+            }, 'image'),
           ])
         },
       })
@@ -673,16 +649,16 @@ function compileDrawingArea(vue: VueRuntime) {
         }),
       }
     }
+    if (id === '@/composables/useLayoutState') {
+      return {
+        useLayoutState: () => testState!.layoutState,
+      }
+    }
     if (id === '@/composables/useEDA') {
       return {
         useEDA: () => ({
           getResourceUrl,
         }),
-      }
-    }
-    if (id === '@/composables/useLayoutState') {
-      return {
-        useLayoutState: () => testState!.layoutState,
       }
     }
     if (id === '@/composables/useDesktopRuntime') {
@@ -693,7 +669,6 @@ function compileDrawingArea(vue: VueRuntime) {
     if (id === '@/composables/useLayoutTileGen') {
       return {
         deriveDrcStepPathFromLayoutJsonRelative: (path: string) => `${path}.drc.step.json`,
-        getLayoutTileGenerationStatus,
         pickDrcJsonPath: (info: Record<string, unknown>) =>
           typeof info.drcJson === 'string' ? info.drcJson : null,
         pickLayoutJsonPath: (info: Record<string, unknown>) =>
@@ -716,21 +691,6 @@ function compileDrawingArea(vue: VueRuntime) {
     if (id === '@/utils/projectFiles') {
       return {
         readOptionalProjectTextFile,
-      }
-    }
-    if (id === '@/composables/layoutTilePipeline') {
-      return {
-        runLayoutTileGenerationSingleFlight,
-      }
-    }
-    if (id === '@/stores/layoutTilePrefetchStore') {
-      return {
-        useLayoutTilePrefetchStore: () => ({
-          setProject,
-          notifyNavigatedStep,
-          invalidateStep,
-          clearDeferredPrefetchQueue,
-        }),
       }
     }
     if (id === '@/api/type') {
@@ -759,7 +719,8 @@ function compileDrawingArea(vue: VueRuntime) {
     return require(id)
   }
 
-  const evaluator = new Function('require', 'exports', 'module', transpiled.outputText)
+  const runnableOutput = transpiled.outputText.replace(/import\.meta\.env\.DEV/g, 'true')
+  const evaluator = new Function('require', 'exports', 'module', runnableOutput)
   evaluator(customRequire, moduleExports, { exports: moduleExports })
 
   return moduleExports.default
@@ -775,30 +736,45 @@ function resetTestState(vue: VueRuntime, routePath: string): void {
     fakeEditor: createFakeEditor(),
   }
 
-  tileManagerConstructed.mockClear()
+  viewJsonRendererConstructed.mockClear()
   resolveWorkspaceStepInfoApi.mockClear()
+  loadViewJsonOverview.mockClear()
   getResourceUrl.mockClear()
-  getLayoutTileGenerationStatus.mockClear()
-  runLayoutTileGenerationSingleFlight.mockClear()
   requestProjectPathAccess.mockClear()
   readOptionalProjectTextFile.mockClear()
-  setProject.mockReset()
-  notifyNavigatedStep.mockReset()
-  invalidateStep.mockReset()
-  clearDeferredPrefetchQueue.mockReset()
+  createViewJsonOverviewWorker.mockClear()
+  createViewJsonRasterTileWorker.mockClear()
 
-  if (!getLayoutTileGenerationStatus.getMockImplementation()) {
-    getLayoutTileGenerationStatus.mockResolvedValue({
-      baseUrl: 'file:///status',
-      outDir: '/status',
-      fromCache: false,
-    })
-  }
   if (!requestProjectPathAccess.getMockImplementation()) {
     requestProjectPathAccess.mockResolvedValue(true)
   }
   if (!readOptionalProjectTextFile.getMockImplementation()) {
     readOptionalProjectTextFile.mockResolvedValue(null)
+  }
+  if (!loadViewJsonOverview.getMockImplementation()) {
+    loadViewJsonOverview.mockResolvedValue({
+      dbuPerMicron: 1000,
+      dieArea: [0, 0, 120, 80],
+      coreArea: [10, 10, 110, 70],
+      dieWorld: { x: 0, y: 0, w: 120, h: 80 },
+      coreWorld: { x: 10, y: 10, w: 100, h: 60 },
+      worldWidth: 120,
+      worldHeight: 80,
+      chunks: new Map(),
+      rasterTileBuckets: new Map(),
+      totalInstanceCount: 0,
+      maxChunkInstanceCount: 1,
+      loadStats: {
+        readMs: 0,
+        parseMs: 0,
+        transformMs: 0,
+        chunkMs: 0,
+        totalMs: 0,
+      },
+    })
+  }
+  if (!getResourceUrl.getMockImplementation()) {
+    getResourceUrl.mockImplementation(async (path: string) => `blob:${path}`)
   }
 }
 
@@ -833,31 +809,153 @@ afterEach(() => {
     doc.body.innerHTML = ''
   }
 
-  tileManagerConstructed.mockReset()
+  viewJsonRendererConstructed.mockReset()
   resolveWorkspaceStepInfoApi.mockReset()
+  loadViewJsonOverview.mockReset()
   getResourceUrl.mockReset()
-  getLayoutTileGenerationStatus.mockReset()
-  runLayoutTileGenerationSingleFlight.mockReset()
   requestProjectPathAccess.mockReset()
   readOptionalProjectTextFile.mockReset()
-  setProject.mockReset()
-  notifyNavigatedStep.mockReset()
-  invalidateStep.mockReset()
-  clearDeferredPrefetchQueue.mockReset()
+  createViewJsonOverviewWorker.mockReset()
+  createViewJsonRasterTileWorker.mockReset()
 
   restoreDomGlobals()
 })
 
 describe('DrawingArea runtime guards', () => {
-  it('does not let a stale preview-image load from the previous route overwrite the current stage', async () => {
+  it('loads the old step image preview and switches to view JSON layout mode on demand', async () => {
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        image: 'route/output/gcd_route.png',
+        json: 'route/output/layout.json',
+        viewJson: 'route_ecc/output/gcd_route_view',
+      },
+    })
+    getResourceUrl
+      .mockResolvedValueOnce('blob:route-output-first')
+      .mockResolvedValueOnce('blob:route-output-second')
+
+    const { vue, container } = await mountDrawingArea('/workspace/route')
+
+    expect(getResourceUrl).toHaveBeenCalledWith(
+      'route/output/gcd_route.png',
+      '/workspace/demo',
+    )
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledWith('blob:route-output-first')
+    expect(loadViewJsonOverview).not.toHaveBeenCalled()
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+
+    ;(container.querySelector('.to-layout-mode') as FakeElement | null)?.click()
+    await flush(vue)
+
+    expect(loadViewJsonOverview).toHaveBeenCalledWith(
+      'route_ecc/output/gcd_route_view',
+      {
+        projectPath: '/workspace/demo',
+        shouldCancel: expect.any(Function),
+        workerFactory: createViewJsonOverviewWorker,
+      },
+    )
+    expect(testState!.fakeEditor.clearBackground).toHaveBeenCalled()
+    expect(viewJsonRendererConstructed).toHaveBeenCalledTimes(1)
+    expect(testState!.layoutState.renderMode.value).toBe('layout')
+
+    ;(container.querySelector('.to-image-mode') as FakeElement | null)?.click()
+    await flush(vue)
+
+    expect(getResourceUrl).toHaveBeenCalledTimes(2)
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledTimes(2)
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenLastCalledWith('blob:route-output-second')
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+  })
+
+  it('loads the old step image preview without exposing layout mode when view JSON is missing', async () => {
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'missing',
+      info: {
+        image: 'synth/output/gcd_synth.png',
+        json: 'synth/output/layout.json',
+      },
+      missing: ['synth/output/gcd_synth_view'],
+    })
+    getResourceUrl.mockResolvedValue('blob:synth-output')
+
+    const { container } = await mountDrawingArea('/workspace/Synthesis')
+
+    expect(getResourceUrl).toHaveBeenCalledWith(
+      'synth/output/gcd_synth.png',
+      '/workspace/demo',
+    )
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledWith('blob:synth-output')
+    expect(testState!.layoutState.loadingState.value).toBe('ready')
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+    expect(loadViewJsonOverview).not.toHaveBeenCalled()
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
+    expect(container.querySelector('.to-layout-mode')).toBeNull()
+  })
+
+  it('stops preview image loading when the image resource cannot be read', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        image: 'synth/output/missing.png',
+        json: 'synth/output/layout.json',
+      },
+    })
+    getResourceUrl.mockRejectedValue(new Error('ENOENT: missing preview image'))
+
+    try {
+      await mountDrawingArea('/workspace/Synthesis')
+
+      expect(getResourceUrl).toHaveBeenCalledWith(
+        'synth/output/missing.png',
+        '/workspace/demo',
+      )
+      expect(consoleError).toHaveBeenCalledWith(
+        'Failed to load stage results:',
+        expect.any(Error),
+      )
+      expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalled()
+      expect(testState!.fakeEditor.clearBackground).toHaveBeenCalled()
+      expect(testState!.layoutState.loadingState.value).toBe('idle')
+      expect(testState!.layoutState.loadingMessage.value).toBe('')
+      expect(testState!.layoutState.renderMode.value).toBe('image')
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it('does not enter preview image loading when the stage has no image path', async () => {
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'missing',
+      info: {
+        json: 'synth/output/layout.json',
+      },
+      missing: ['synth/output/gcd_synth.png'],
+    })
+
+    await mountDrawingArea('/workspace/Synthesis')
+
+    expect(getResourceUrl).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.clearBackground).toHaveBeenCalled()
+    expect(testState!.layoutState.loadingState.value).toBe('idle')
+    expect(testState!.layoutState.loadingMessage.value).toBe('')
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+  })
+
+  it('does not let a stale preview image load from the previous route overwrite the current stage', async () => {
     const staleImage = deferred<string>()
     resolveWorkspaceStepInfoApi.mockImplementation(async ({ step }: { step: string }) => {
       if (step === 'Synthesis') {
         return {
           response: 'available',
           info: {
-            image: 'preview-old.png',
+            image: 'synth/output/gcd_synth.png',
             json: 'synth/output/layout.json',
+            viewJson: 'Synthesis_yosys/output/gcd_Synthesis_view',
           },
         }
       }
@@ -865,13 +963,14 @@ describe('DrawingArea runtime guards', () => {
       return {
         response: 'available',
         info: {
-          image: 'preview-new.png',
+          image: 'drc/output/gcd_drc.png',
           json: 'drc/output/layout.json',
+          viewJson: 'drc_ecc/output/gcd_drc_view',
         },
       }
     })
     getResourceUrl.mockImplementation(async (path: string) => {
-      if (path === 'preview-old.png') return await staleImage.promise
+      if (path === 'synth/output/gcd_synth.png') return await staleImage.promise
       return `blob:${path}`
     })
 
@@ -880,50 +979,101 @@ describe('DrawingArea runtime guards', () => {
     testState!.route.path = '/workspace/drc'
     await flush(vue)
 
-    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledWith('blob:preview-new.png')
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledWith('blob:drc/output/gcd_drc.png')
+    expect(loadViewJsonOverview).not.toHaveBeenCalled()
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
+    expect(testState!.layoutState.renderMode.value).toBe('image')
 
-    staleImage.resolve('blob:preview-old.png')
+    staleImage.resolve('blob:synth/output/gcd_synth.png')
     await flush(vue)
 
-    expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalledWith('blob:preview-old.png')
+    expect(testState!.fakeEditor.setBackgroundImage).toHaveBeenCalledTimes(1)
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
     expect(testState!.layoutState.renderMode.value).toBe('image')
   })
 
-  it('ignores a stale tile-generation completion after the workspace session changes', async () => {
-    const tileGeneration = deferred<{
-      baseUrl: string
-      outDir: string
-      fromCache: boolean
-    }>()
+  it('ignores a stale preview image completion after the workspace session changes', async () => {
+    const imageLoad = deferred<string>()
     resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
       info: {
-        image: 'preview-route.png',
+        image: 'route/output/gcd_route.png',
         json: 'route/output/layout.json',
+        viewJson: 'route_ecc/output/gcd_route_view',
       },
     })
-    getResourceUrl.mockImplementation(async (path: string) => `blob:${path}`)
-    runLayoutTileGenerationSingleFlight.mockReturnValue(tileGeneration.promise)
+    getResourceUrl.mockReturnValue(imageLoad.promise)
 
-    const { vue, container } = await mountDrawingArea('/workspace/route')
-
-    ;(container.querySelector('.generate-tiles') as FakeElement | null)?.click()
-    await flush(vue)
-
-    expect(runLayoutTileGenerationSingleFlight).toHaveBeenCalledTimes(1)
+    const { vue } = await mountDrawingArea('/workspace/Synthesis')
 
     testState!.workspaceSession.value = {
       sessionId: 'session-2',
     }
 
-    tileGeneration.resolve({
-      baseUrl: 'file:///tiles',
-      outDir: '/tiles',
-      fromCache: false,
-    })
+    imageLoad.resolve('blob:route/output/gcd_route.png')
     await flush(vue)
 
-    expect(tileManagerConstructed).not.toHaveBeenCalled()
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.setWorldBounds).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.setBackgroundImage).not.toHaveBeenCalled()
+    expect(testState!.layoutState.renderMode.value).toBe('image')
+  })
+
+  it('cancels stale view JSON layout loading without surfacing an error', async () => {
+    resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        image: 'route/output/gcd_route.png',
+        json: 'route/output/layout.json',
+        viewJson: 'route_ecc/output/gcd_route_view',
+      },
+    })
+    loadViewJsonOverview.mockImplementation(async (_root: string, options: { shouldCancel?: () => boolean }) => {
+      await Promise.resolve()
+      if (options.shouldCancel?.()) {
+        throw new Error('View JSON load cancelled.')
+      }
+      return {
+        dbuPerMicron: 1000,
+        dieArea: [0, 0, 120, 80],
+        coreArea: null,
+        dieWorld: { x: 0, y: 0, w: 120, h: 80 },
+        coreWorld: null,
+        worldWidth: 120,
+        worldHeight: 80,
+        chunks: new Map(),
+        rasterTileBuckets: new Map(),
+        totalInstanceCount: 0,
+        maxChunkInstanceCount: 1,
+        loadStats: {
+          readMs: 0,
+          parseMs: 0,
+          transformMs: 0,
+          chunkMs: 0,
+          totalMs: 0,
+        },
+      }
+    })
+
+    const { vue, container } = await mountDrawingArea('/workspace/route')
+
+    ;(container.querySelector('.to-layout-mode') as FakeElement | null)?.click()
+    testState!.workspaceSession.value = {
+      sessionId: 'session-2',
+    }
+    await flush(vue)
+
+    expect(loadViewJsonOverview).toHaveBeenCalledWith(
+      'route_ecc/output/gcd_route_view',
+      {
+        projectPath: '/workspace/demo',
+        shouldCancel: expect.any(Function),
+        workerFactory: createViewJsonOverviewWorker,
+      },
+    )
+    expect(viewJsonRendererConstructed).not.toHaveBeenCalled()
+    expect(testState!.fakeEditor.setWorldBounds).not.toHaveBeenCalled()
+    expect(testState!.layoutState.loadingState.value).not.toBe('error')
     expect(testState!.layoutState.renderMode.value).toBe('image')
   })
 })

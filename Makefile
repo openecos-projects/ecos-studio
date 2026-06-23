@@ -1,8 +1,4 @@
-.PHONY: help setup check-setup check-platform build dev gui clean-gui demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
-
-BUNDLE_TAR := bazel-bin/ecos/ecos_studio_bundle/ecos_studio_bundle.tar
-BUNDLE_EXTRACT_DIR := /tmp/ecos-studio-bundle
-APPIMAGE_MARKER := $(BUNDLE_EXTRACT_DIR)/.extracted
+.PHONY: help setup check-setup check-platform build demo-gcd demo-soc demo-retrosoc docker-build docker-verify-all install-deps install-apt-deps install-tools
 
 PDK_ROOT ?= ./pdk/icsprout55-pdk
 ECC_CLI ?= ./eda/ecc\#cli
@@ -12,14 +8,11 @@ RETROSOC_WS ?= ./ws/retrosoc
 
 help:
 	@echo "Targets:"
-	@echo "  make install-deps - Install system dependencies and tools (Node.js, pnpm, Rust, Bazel, uv)"
+	@echo "  make install-deps - Install system dependencies and tools (Node.js, pnpm, Rust, uv)"
 	@echo "  make install-apt-deps - Install system build libraries only (apt packages, requires Ubuntu)"
-	@echo "  make install-tools    - Install CLI tools only (Node.js, pnpm, Rust, Bazel, uv)"
+	@echo "  make install-tools    - Install CLI tools only (Node.js, pnpm, Rust, uv)"
 	@echo "  make setup      - Init submodules and setup PDK"
-	@echo "  make build      - Build ECOS Studio bundle (Bazel)"
-	@echo "  make dev        - Setup development environment"
-	@echo "  make gui        - Launch GUI (release version)"
-	@echo "  make clean-gui  - Clean extracted GUI bundle"
+	@echo "  make build      - Build ECOS Studio bundle"
 	@echo "  make demo-gcd   - Run GCD demo"
 	@echo "  make demo-soc   - Run SoC demo"
 	@echo "  make demo-retrosoc - Run retroSoC demo"
@@ -62,10 +55,6 @@ install-tools:
 	npm install -g --prefix ~/.local pnpm
 	@echo "==> Installing Rust..."
 	curl https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path
-	@echo "==> Installing Bazel 8.5.0..."
-	mkdir -p ~/.local/bin
-	wget https://github.com/bazelbuild/bazel/releases/download/8.5.0/bazel-8.5.0-linux-x86_64 \
-	    -O ~/.local/bin/bazel && chmod +x ~/.local/bin/bazel
 	@echo "==> Installing uv..."
 	curl -LsSf https://astral.sh/uv/install.sh | env INSTALLER_NO_MODIFY_PATH=1 sh
 	@echo ""
@@ -75,10 +64,9 @@ install-tools:
 install-deps: install-apt-deps install-tools
 
 setup:
-	@if command -v bazel >/dev/null 2>&1 && \
-	    command -v uv >/dev/null 2>&1 && \
+	@if command -v uv >/dev/null 2>&1 && \
 	    command -v pnpm >/dev/null 2>&1; then \
-	    echo "bazel, uv, pnpm found on PATH -- skipping install-deps"; \
+	    echo "uv, pnpm found on PATH -- skipping install-deps"; \
 	    echo "Note: if build fails, run 'make install-apt-deps' for system libraries"; \
 	    DEPS_SKIPPED=true; \
 	else \
@@ -88,7 +76,6 @@ setup:
 	git submodule update --init --recursive && \
 	echo "timestamp=$$(date +%Y-%m-%dT%H:%M:%S%z)" > .setup-done && \
 	echo "deps_skipped=$$DEPS_SKIPPED" >> .setup-done && \
-	echo "bazel=$$(command -v bazel) ($$(bazel --version 2>/dev/null | head -1))" >> .setup-done && \
 	echo "uv=$$(command -v uv) ($$(uv --version 2>/dev/null))" >> .setup-done && \
 	echo "pnpm=$$(command -v pnpm) ($$(pnpm --version 2>/dev/null))" >> .setup-done
 
@@ -113,29 +100,16 @@ check-platform:
 		exit 1; \
 	fi
 
-dev: check-setup
-	@cd ecos/gui && pnpm install --frozen-lockfile
-
-$(BUNDLE_TAR): check-setup check-platform
-	@cd ecc && uv sync --frozen --all-groups --python 3.11
-	PYTHON_INTERPRETER="$(CURDIR)/ecc/.venv/bin/python" bazel build //:ecos_studio_bundle
-
-$(APPIMAGE_MARKER): $(BUNDLE_TAR)
-	@mkdir -p $(BUNDLE_EXTRACT_DIR)
-	@tar -xf $(BUNDLE_TAR) -C $(BUNDLE_EXTRACT_DIR)
-	@touch $(APPIMAGE_MARKER)
-
-build: $(BUNDLE_TAR)
-
-gui: $(APPIMAGE_MARKER)
-	@APPIMAGE=$$(find $(BUNDLE_EXTRACT_DIR) -name "*.AppImage" | head -1); \
-	chmod +x "$$APPIMAGE" && "$$APPIMAGE"
-
-clean-gui:
-	rm -rf $(BUNDLE_EXTRACT_DIR)
+build: check-setup check-platform
+	bash .github/scripts/build-ecc.sh
+	rm -rf ecos/gui/apps/desktop-electron/resources
+	mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
+	cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
+	@cd ecos/gui && pnpm run --filter @ecos-studio/desktop-electron package
+	ln -sf ecos/gui/apps/desktop-electron/release build
 
 clean:
-	bazel clean
+	rm -rf build ecc/build ecc/dist
 	@rm -f .setup-done
 
 demo-gcd: check-setup

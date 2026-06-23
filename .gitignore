@@ -1,5 +1,5 @@
 ws
-bazel-*
+build
 .pnpm-store
 .vscode
 .setup-done

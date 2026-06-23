@@ -71,6 +71,11 @@ const desktopBridge = {
     set: async () => undefined,
     delete: async () => undefined,
   },
+  remoteContent: {
+    listFiles: async () => [],
+    readTextFile: async () => '',
+    readJsonFile: async <T = unknown>() => null as T,
+  },
   dialog: {
     pickDirectory: async () => null,
     pickFiles: async () => null,

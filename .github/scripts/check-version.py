@@ -46,13 +46,6 @@ def iter_workspace_package_manifests() -> list[Path]:
 
 versions: list[tuple[str, str]] = []
 
-module_version = parse_regex(
-    "MODULE.bazel",
-    r'(?m)^\s*version\s*=\s*"([^"]+)"',
-    label="MODULE.bazel version",
-)
-versions.append(("MODULE.bazel", module_version))
-
 gui_package = read_json("ecos/gui/package.json")["version"]
 versions.append(("ecos/gui/package.json", gui_package))
 
@@ -74,24 +67,24 @@ print("Detected versions:")
 for name, value in versions:
     print(f"  {name}: {value}")
 
-normalized_module = normalize_version(module_version)
+normalized_release_version = normalize_version(gui_package)
 mismatches = [
     (name, value)
     for name, value in versions
-    if normalize_version(value) != normalized_module
+    if normalize_version(value) != normalized_release_version
 ]
 if mismatches:
     print("")
     print(
         "ERROR: version mismatch detected. "
-        f"Expected all files to match MODULE.bazel ({module_version}).",
+        f"Expected all files to match ecos/gui/package.json ({gui_package}).",
         file=sys.stderr,
     )
     for name, value in mismatches:
         print(f"  {name}: {value}", file=sys.stderr)
     sys.exit(1)
 
-tag = f"v{module_version}"
+tag = f"v{gui_package}"
 if expected_tag and expected_tag != tag:
     print(
         f"ERROR: tag mismatch. expected {tag} from version files, got {expected_tag}.",
@@ -102,8 +95,8 @@ if expected_tag and expected_tag != tag:
 github_output = os.environ.get("GITHUB_OUTPUT", "").strip()
 if github_output:
     with open(github_output, "a", encoding="utf-8") as fh:
-        fh.write(f"version={module_version}\n")
+        fh.write(f"version={gui_package}\n")
         fh.write(f"tag={tag}\n")
 
 print("")
-print(f"Version check passed: {module_version}")
+print(f"Version check passed: {gui_package}")

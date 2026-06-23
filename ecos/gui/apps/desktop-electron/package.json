@@ -11,11 +11,10 @@
   "type": "module",
   "main": "./dist/main/index.js",
   "scripts": {
-    "dev": "node ./scripts/dev.mjs",
+    "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package:prepare-resources": "./scripts/prepare-package-resources.sh",
-    "package": "rm -rf release && pnpm run package:prepare-resources && electron-builder --config electron-builder.yml",
+    "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

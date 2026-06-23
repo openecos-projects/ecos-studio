@@ -91,6 +91,36 @@ describe('DesktopRuntimeManager', () => {
     expect(new Set(jobIds).size).toBe(1)
   })
 
+  it('includes request data on started events so renderers can react to rerun startup', async () => {
+    const listener = vi.fn()
+    const manager = createManager({
+      adapter: {
+        execute: vi.fn(async () => result({
+          cmd: 'rtl2gds',
+          data: { rerun: true },
+          message: ['ok'],
+        })),
+      },
+    })
+
+    await manager.execute({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo', rerun: true },
+      source: 'button',
+    }, listener)
+
+    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      cmd: 'rtl2gds',
+      data: expect.objectContaining({
+        directory: '/work/demo',
+        rerun: true,
+      }),
+      directory: '/work/demo',
+      stream: 'system',
+      type: 'started',
+    }))
+  })
+
   it('lets adapters emit normalized stdout and stderr events for the active job', async () => {
     const listener = vi.fn()
     const manager = createManager({
@@ -267,6 +297,97 @@ describe('DesktopRuntimeManager', () => {
     } finally {
       await rm(runtimeLockRoot, { force: true, recursive: true })
     }
+  })
+
+  it('reports workspace runtime activity while a long-running command holds the lock', async () => {
+    const runtimeLockRoot = await mkdtemp(path.join(tmpdir(), 'ecos-runtime-lock-test-'))
+    try {
+      let release!: () => void
+      const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
+        release = () => resolve(result({
+          cmd: request.cmd,
+          message: ['done'],
+        }))
+      }))
+      const manager = createManager({
+        adapter: { execute: adapterExecute },
+        runtimeLockRoot,
+      })
+      const observer = createManager({
+        adapter: { execute: vi.fn() },
+        runtimeLockRoot,
+      })
+
+      const running = manager.execute({
+        cmd: 'rtl2gds',
+        data: { directory: '/work/demo', rerun: false },
+        source: 'button',
+      })
+
+      await vi.waitFor(() => {
+        expect(adapterExecute).toHaveBeenCalledTimes(1)
+      })
+
+      await expect(manager.isWorkspaceRuntimeActive('/work/demo')).resolves.toBe(true)
+      await expect(observer.isWorkspaceRuntimeActive('/work/demo')).resolves.toBe(true)
+
+      release()
+      await expect(running).resolves.toMatchObject({ ok: true })
+      await expect(manager.isWorkspaceRuntimeActive('/work/demo')).resolves.toBe(false)
+    } finally {
+      await rm(runtimeLockRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('blocks config refresh and sync while the same workspace runtime is active', async () => {
+    let release!: () => void
+    const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
+      release = () => resolve(result({
+        cmd: request.cmd,
+        message: ['done'],
+      }))
+    }))
+    const manager = createManager({
+      adapter: {
+        execute: adapterExecute,
+      },
+    })
+
+    const running = manager.execute({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo', rerun: false },
+      source: 'button',
+    })
+
+    await vi.waitFor(() => {
+      expect(adapterExecute).toHaveBeenCalledTimes(1)
+    })
+
+    await expect(manager.execute({
+      cmd: 'refresh_config',
+      data: { directory: '/work/demo' },
+      source: 'button',
+    })).resolves.toMatchObject({
+      cmd: 'refresh_config',
+      ok: false,
+      response: 'warning',
+    })
+    await expect(manager.execute({
+      cmd: 'sync_config',
+      data: {
+        config_path: '/work/demo/config/rt_default_config.json',
+        directory: '/work/demo',
+      },
+      source: 'button',
+    })).resolves.toMatchObject({
+      cmd: 'sync_config',
+      ok: false,
+      response: 'warning',
+    })
+    expect(adapterExecute).toHaveBeenCalledTimes(1)
+
+    release()
+    await expect(running).resolves.toMatchObject({ ok: true })
   })
 
   it('emits workspace metadata on long-running command lifecycle events', async () => {

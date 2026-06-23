@@ -130,6 +130,11 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
     if (id) data.id = id
     if (step) data.step = step
     if (event.stream) data.stream = event.stream
+    for (const [key, value] of Object.entries(event.data ?? {})) {
+      if (!(key in data)) {
+        data[key] = value
+      }
+    }
     for (const [key, value] of Object.entries(result?.data ?? {})) {
       if (!(key in data)) {
         data[key] = value

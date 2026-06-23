@@ -22,38 +22,7 @@ function createRepoFixture(): { appPath: string; repoRoot: string; userDataPath:
 }
 
 describe('createEccCliRuntimeEnv', () => {
-  it('leaves development env unchanged so global ecc from PATH is used', () => {
-    const fixture = createRepoFixture()
-    mkdirSync(join(fixture.repoRoot, 'ecc'), { recursive: true })
-    const pyprojectPath = join(fixture.repoRoot, 'ecc', 'pyproject.toml')
-    writeFileSync(pyprojectPath, '[project]\nname = "ecc"\n')
-    const venvBin = join(fixture.repoRoot, 'ecc', '.venv', 'bin')
-    const venvEcc = join(venvBin, 'ecc')
-    mkdirSync(venvBin, { recursive: true })
-    writeFileSync(venvEcc, '#!/usr/bin/env bash\n')
-
-    const env = createEccCliRuntimeEnv({
-      appPath: fixture.appPath,
-      cwd: fixture.appPath,
-      env: {
-        HOME: '/home/ecos',
-        PATH: '/usr/bin',
-      },
-      isPackaged: false,
-      platform: 'linux',
-      userDataPath: fixture.userDataPath,
-    })
-
-    const wrapperPath = join(fixture.userDataPath, 'runtime-bin', 'ecc')
-
-    expect(env).toEqual({
-      HOME: '/home/ecos',
-      PATH: '/usr/bin',
-    })
-    expect(existsSync(wrapperPath)).toBe(false)
-  })
-
-  it('does not create a POSIX development wrapper when local ecc exists without a venv binary', () => {
+  it('does not create a POSIX development wrapper when local ecc exists', () => {
     const fixture = createRepoFixture()
     mkdirSync(join(fixture.repoRoot, 'ecc'), { recursive: true })
     const pyprojectPath = join(fixture.repoRoot, 'ecc', 'pyproject.toml')
@@ -83,32 +52,6 @@ describe('createEccCliRuntimeEnv', () => {
   it('leaves Windows development env unchanged', () => {
     const fixture = createRepoFixture()
     writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
-
-    const env = createEccCliRuntimeEnv({
-      appPath: fixture.appPath,
-      cwd: fixture.appPath,
-      env: {
-        PATH: 'C:\\Windows\\System32',
-      },
-      isPackaged: false,
-      platform: 'win32',
-      userDataPath: fixture.userDataPath,
-    })
-
-    const wrapperPath = join(fixture.userDataPath, 'runtime-bin', 'ecc.cmd')
-
-    expect(env).toEqual({
-      PATH: 'C:\\Windows\\System32',
-    })
-    expect(existsSync(wrapperPath)).toBe(false)
-  })
-
-  it('does not prepend Windows development venv binaries', () => {
-    const fixture = createRepoFixture()
-    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '')
-    const venvScripts = join(fixture.repoRoot, 'ecc', '.venv', 'Scripts')
-    mkdirSync(venvScripts, { recursive: true })
-    writeFileSync(join(venvScripts, 'ecc.exe'), '')
 
     const env = createEccCliRuntimeEnv({
       appPath: fixture.appPath,

@@ -15,8 +15,10 @@ import DrcViolationPanel from '../components/DrcViolationPanel.vue'
 const layoutState = useLayoutState()
 const route = useRoute()
 
-/** Image preview mode hides layer/property columns; avoid :key on the whole tree or DrawingArea remounts and resets the layout view */
-const showLayoutSidePanels = computed(() => layoutState.renderMode.value === 'layout')
+const hasLayoutInspectorContent = computed(() =>
+  layoutState.tileLayers.value.length > 0
+  || layoutState.tileSelection.value != null,
+)
 
 /** DRC route only: show violation panel (matches DrawingArea step) */
 const isDrcStep = computed(() => {
@@ -24,6 +26,14 @@ const isDrcStep = computed(() => {
   const stage = pathParts[pathParts.length - 1] || ''
   return stage.toLowerCase() === StepEnum.DRC.toLowerCase()
 })
+
+const hasDrcInspectorContent = computed(() => isDrcStep.value)
+
+/** Image preview mode hides layer/property columns; avoid :key on the whole tree or DrawingArea remounts and resets the layout view */
+const showLayoutSidePanels = computed(() =>
+  layoutState.renderMode.value === 'layout'
+  && (hasLayoutInspectorContent.value || hasDrcInspectorContent.value),
+)
 
 const mainSplitter = ref<InstanceType<typeof Splitter> | null>(null)
 
@@ -113,13 +123,14 @@ onUnmounted(() => {
         <Splitter layout="vertical" class="h-full border-none">
           <SplitterPanel
             v-if="isDrcStep"
-            :size="32"
+            :size="hasLayoutInspectorContent ? 32 : 100"
             :minSize="16"
             class="flex flex-col overflow-hidden min-h-0"
           >
             <DrcViolationPanel />
           </SplitterPanel>
           <SplitterPanel
+            v-if="hasLayoutInspectorContent"
             :size="isDrcStep ? 34 : 45"
             :minSize="14"
             class="flex flex-col overflow-hidden min-h-0"
@@ -127,6 +138,7 @@ onUnmounted(() => {
             <LayerPanel />
           </SplitterPanel>
           <SplitterPanel
+            v-if="hasLayoutInspectorContent"
             :size="isDrcStep ? 34 : 55"
             :minSize="18"
             class="flex flex-col overflow-hidden min-h-0"

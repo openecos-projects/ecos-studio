@@ -15,7 +15,7 @@ interface Props {
   showPreviewModeToggle?: boolean
   /** 当前画布表示：矢量版图或预览图 */
   renderMode?: 'image' | 'layout'
-  /** 是否可切回矢量（已存在可复用的瓦片包） */
+  /** 是否可切换到矢量版图 */
   canSwitchToLayoutMode?: boolean
   /** 当前布局瓦片已命中磁盘缓存，可直接加载 */
   tileCacheReady?: boolean
@@ -47,10 +47,8 @@ const toolbarTileBusy = computed(() => props.tileGenBusy || props.previewModeSwi
 const showTileGenerateConfirm = ref(false)
 
 /**
- * 有步骤预览图时：只保留一个图标，合并「首次生成瓦片」与「预览图 ↔ 矢量版图」。
- * - 预览图模式且无缓存：显示版图图标 → 点击生成瓦片
- * - 预览图模式且已有瓦片：显示版图图标 → 切到矢量
- * - 矢量模式：显示图片图标 → 切回预览图
+ * 有步骤预览图时：只保留一个图标切换「预览图 ↔ 矢量版图」。
+ * 旧的生成入口只在没有预览图切换时展示。
  */
 const unifiedTileIconClass = computed(() =>
   props.renderMode === 'image' ? 'ri-grid-fill' : 'ri-image-2-fill',
@@ -58,8 +56,8 @@ const unifiedTileIconClass = computed(() =>
 
 const unifiedTileTitle = computed(() => {
   if (props.renderMode === 'layout') return '切换到步骤预览图'
-  if (props.canSwitchToLayoutMode) return '切换到矢量瓦片版图'
-  return '从布局生成并加载矢量瓦片'
+  if (props.canSwitchToLayoutMode) return '切换到矢量版图'
+  return '从布局生成并加载矢量版图'
 })
 
 function onUnifiedTileClick(): void {
@@ -243,10 +241,10 @@ watch(
         <i :class="tool.icon" class="text-base"></i>
       </button>
 
-      <div v-if="showTileGenerate" class="w-px h-6 bg-(--border-color) mx-0.5" />
+      <div v-if="showPreviewModeToggle || showTileGenerate" class="w-px h-6 bg-(--border-color) mx-0.5" />
 
-      <!-- 有预览图：单键合并生成与模式切换；无预览图：仅「生成瓦片」 -->
-      <div v-if="showTileGenerate" class="relative shrink-0">
+      <!-- 有预览图：单键切换模式；无预览图：保留旧「生成瓦片」入口 -->
+      <div v-if="showPreviewModeToggle || showTileGenerate" class="relative shrink-0">
         <button
           v-if="showPreviewModeToggle"
           type="button"
@@ -276,8 +274,8 @@ watch(
               : 'text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-hover)',
             'w-9 h-9 flex items-center justify-center rounded transition-all shrink-0',
           ]"
-          title="从布局生成并加载矢量瓦片"
-          aria-label="从布局生成并加载矢量瓦片"
+          title="从布局生成并加载矢量版图"
+          aria-label="从布局生成并加载矢量版图"
         >
           <i class="ri-grid-fill text-base" :class="{ 'animate-pulse': tileGenBusy }"></i>
         </button>

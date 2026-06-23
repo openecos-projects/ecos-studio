@@ -7,6 +7,7 @@ import type {
   WorkspaceStepInfoRequest,
   WorkspaceStepInfoResult,
   WorkspaceStepResource,
+  WorkspaceTechResources,
 } from '@ecos-studio/shared'
 import type { ProjectScopeProvider } from './workspaceService'
 
@@ -149,6 +150,7 @@ export class WorkspaceResourceService {
     const flowSteps = await Promise.all(
       steps.map((step) => this.buildStepResource(root, design, topModule, step, statErrors)),
     )
+    const tech = await this.discoverTechResources(root, design, flowSteps, statErrors)
     const status = resolveIndexStatus({
       messages,
       statErrors,
@@ -173,6 +175,7 @@ export class WorkspaceResourceService {
         flow: {
           steps: flowSteps,
         },
+        ...(tech ? { tech } : {}),
         status,
         messages: [...messages, ...statErrors],
       },
@@ -215,6 +218,63 @@ export class WorkspaceResourceService {
       directory,
       info: step.info,
       resources,
+    }
+  }
+
+  private async discoverTechResources(
+    root: string,
+    design: string,
+    flowSteps: WorkspaceStepResource[],
+    errors: string[],
+  ): Promise<WorkspaceTechResources | undefined> {
+    if (!design) return undefined
+
+    const candidateRoots = uniqueStrings([
+      join(root, `${design}_view`),
+      ...flowSteps.map((step) => join(step.directory, 'output', `${design}_${step.name}_view`)),
+    ])
+
+    for (const packageRoot of candidateRoots) {
+      const tech = await this.describeTechPackage(packageRoot, errors)
+      if (tech) return tech
+    }
+
+    return undefined
+  }
+
+  private async describeTechPackage(
+    packageRoot: string,
+    errors: string[],
+  ): Promise<WorkspaceTechResources | undefined> {
+    const manifestPath = join(packageRoot, 'manifest.json')
+    const manifest = await this.describeFile(manifestPath, 'tech-json', errors)
+    if (!manifest.exists) return undefined
+
+    const manifestJson = await this.readJsonForIndex(manifestPath, errors)
+    const files = isRecord(manifestJson?.files) ? manifestJson.files : {}
+    const filePath = (key: string, fallback: string): string => {
+      const value = files[key]
+      return typeof value === 'string' && value.length > 0 ? value : fallback
+    }
+
+    const metaPath = filePath('meta', 'meta.json')
+    const meta = await this.describeFile(join(packageRoot, metaPath), 'tech-json', errors)
+    const [layers, sites, vias, cellMasters] = await Promise.all([
+      this.describeFile(join(packageRoot, filePath('layers', 'tech/layers.json')), 'tech-json', errors),
+      this.describeFile(join(packageRoot, filePath('sites', 'tech/sites.json')), 'tech-json', errors),
+      this.describeFile(join(packageRoot, filePath('vias', 'tech/vias.json')), 'tech-json', errors),
+      this.describeFile(join(packageRoot, filePath('cell_masters', 'tech/cell_masters.json')), 'tech-json', errors),
+    ])
+
+    return {
+      packageRoot,
+      source: 'view-package',
+      manifest,
+      ...(meta.exists ? { meta } : {}),
+      layers,
+      sites,
+      vias,
+      cellMasters,
     }
   }
 
@@ -287,6 +347,7 @@ export class WorkspaceResourceService {
         return stepInfo({
           image: step.resources.output.image?.path,
           json: step.resources.output.json?.path,
+          viewJson: step.resources.output.viewJson?.path,
         })
       case 'views':
         return stepInfo({
@@ -358,7 +419,11 @@ export class WorkspaceResourceService {
   ): WorkspaceResourceFile[] {
     switch (id) {
       case 'layout':
-        return existingResourceRefs([step.resources.output.image, step.resources.output.json])
+        return existingResourceRefs([
+          step.resources.output.image,
+          step.resources.output.json,
+          step.resources.output.viewJson,
+        ])
       case 'views':
         return existingResourceRefs([
           step.resources.output.image,
@@ -393,6 +458,10 @@ function createFile(path: string, kind: WorkspaceResourceFileKind): WorkspaceRes
   return { path, exists: false, kind }
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
 function createEmptyBuckets(): StepFileBuckets {
   return {
     output: {},
@@ -423,6 +492,7 @@ function addEccLikeResources(
   resources.output.db = createFile(join(directory, 'output', `${design}_${stepName}_db`), 'output')
   resources.output.image = createFile(join(directory, 'output', `${design}_${stepName}.png`), 'layout-image')
   resources.output.json = createFile(join(directory, 'output', `${design}_${stepName}.json`), 'layout-json')
+  resources.output.viewJson = createFile(join(directory, 'output', `${design}_${stepName}_view`), 'view-json')
   resources.output.lef = createFile(join(directory, 'output', `${design}_${stepName}.lef`), 'output')
   resources.output.lib = createFile(join(directory, 'output', `${design}_${stepName}.lib`), 'output')
   resources.data.dir = createFile(join(directory, 'data'), 'unknown')

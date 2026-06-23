@@ -162,7 +162,7 @@
             </div>
             <div>
               <span>Tool</span>
-              <strong>{{ detail?.tool || currentStep.tool || 'frontend' }}</strong>
+              <strong>{{ detail?.tool || currentStep?.tool || 'frontend' }}</strong>
             </div>
             <div v-if="isSimStep">
               <span>Cases</span>
@@ -1585,7 +1585,7 @@ let loadedWaveformKey = ''
 let unsubscribeCliEvents: (() => void) | null = null
 let consoleResizeStartY = 0
 let consoleResizeStartHeight = 0
-let runClockTimer: ReturnType<typeof window.setInterval> | null = null
+let runClockTimer: number | null = null
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
 const isGlobalSrcView = computed(() => String(route.params.step || '').toLowerCase() === 'src')
@@ -1625,7 +1625,10 @@ const currentOverallState = computed(() => {
   if (steps.value.length > 0 && steps.value.every((step) => step.state === 'Success')) return 'Complete'
   return 'Ready'
 })
-const latestActiveTool = computed(() => nextPendingStep.value?.tool || steps.value.at(-1)?.tool || 'frontend')
+const latestActiveTool = computed(() => {
+  const lastStep = steps.value.length > 0 ? steps.value[steps.value.length - 1] : null
+  return nextPendingStep.value?.tool || lastStep?.tool || 'frontend'
+})
 const simStepState = computed(() => {
   const simStep = steps.value.find((step) => step.name.toLowerCase() === 'sim')
   return simStep?.state || 'Unstart'
@@ -1863,7 +1866,7 @@ const humanStepTitle = computed(() => labelForStep(currentStepName.value || 'Ste
 const humanSummaryStateTone = computed(() => {
   const state = currentStepDisplayState.value
   if (state === StateEnum.Success || state === 'Success') return 'ok'
-  if (state === StateEnum.Incomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') return 'error'
+  if (state === StateEnum.Imcomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') return 'error'
   if (state === StateEnum.Ongoing || state === 'Ongoing' || runBusy.value) return 'warning'
   return 'neutral'
 })
@@ -1941,7 +1944,7 @@ const humanSummaryText = computed(() => {
   if (state === StateEnum.Success || state === 'Success') {
     return `${humanStepTitle.value} completed. Keep going unless Problems reports something actionable.`
   }
-  if (state === StateEnum.Incomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') {
+  if (state === StateEnum.Imcomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') {
     return `${humanStepTitle.value} needs attention. Start from Problems; source diagnostics jump to SRC when a location is available.`
   }
   return `${humanStepTitle.value} has not produced a specialized result view yet. Run the step to generate a readable result.`
@@ -3001,12 +3004,6 @@ function shortPath(path: string): string {
   return path.split('/').filter(Boolean).slice(-4).join('/')
 }
 
-function parentPath(path: string): string {
-  const parts = path.split('/').filter(Boolean)
-  if (parts.length <= 1) return ''
-  return parts.slice(0, -1).join('/')
-}
-
 function sourceDisplayName(item: PathItem): string {
   return normalizeArtifactLabel(item)
 }
@@ -3443,15 +3440,6 @@ function prepareStatusIcon(status: unknown): string {
   if (tone === 'error') return 'ri-close-circle-line'
   if (tone === 'warning') return 'ri-error-warning-line'
   return 'ri-information-line'
-}
-
-function readNested(source: Record<string, unknown>, path: string[]): unknown {
-  let current: unknown = source
-  for (const key of path) {
-    if (!current || typeof current !== 'object') return 0
-    current = (current as Record<string, unknown>)[key]
-  }
-  return current
 }
 
 function readRecordList(value: unknown): Array<Record<string, unknown>> {

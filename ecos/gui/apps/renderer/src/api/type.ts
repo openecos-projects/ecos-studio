@@ -6,7 +6,9 @@ export enum CMDEnum {
   rtl2gds = "rtl2gds",
   run_step = "run_step",
   get_info = "get_info",
-  home_page = "home_page"
+  home_page = "home_page",
+  refresh_config = "refresh_config",
+  sync_config = "sync_config"
 }
 
 // get_info command 的 id 枚举
@@ -76,6 +78,7 @@ export interface StepMetadata {
 export const STEP_METADATA: Record<string, StepMetadata> = {
   // 设置页面
   'home': { label: 'Home', icon: 'ri-home-4-line', path: 'home', showInSidebar: true, group: 'setup' },
+  'tech': { label: 'Tech', icon: 'ri-database-2-line', path: 'tech', showInSidebar: true, group: 'setup' },
   'configure': { label: 'Config', icon: 'ri-settings-3-line', path: 'configure', showInSidebar: true, group: 'setup' },
 
   // 运行步骤 (key 为 flow.json 中的 step.name 小写)

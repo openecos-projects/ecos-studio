@@ -94,6 +94,147 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('exposes workspace-level view package tech resources from the design view directory', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    await mkdir(join(root, 'gcd_view', 'tech'), { recursive: true })
+    await writeJson(join(root, 'gcd_view', 'manifest.json'), {
+      schema: 'ieda.view.v1',
+      format: 'layout_view_package',
+      files: {
+        meta: 'meta.json',
+        layers: 'tech/layers.json',
+        sites: 'tech/sites.json',
+        vias: 'tech/vias.json',
+        cell_masters: 'tech/cell_masters.json',
+      },
+    })
+    await writeJson(join(root, 'gcd_view', 'meta.json'), {})
+    await writeJson(join(root, 'gcd_view', 'tech', 'layers.json'), {})
+    await writeJson(join(root, 'gcd_view', 'tech', 'sites.json'), {})
+    await writeJson(join(root, 'gcd_view', 'tech', 'vias.json'), {})
+    await writeJson(join(root, 'gcd_view', 'tech', 'cell_masters.json'), {})
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.tech).toMatchObject({
+      packageRoot: join(root, 'gcd_view'),
+      source: 'view-package',
+      manifest: {
+        path: join(root, 'gcd_view', 'manifest.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      layers: {
+        path: join(root, 'gcd_view', 'tech', 'layers.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      sites: {
+        path: join(root, 'gcd_view', 'tech', 'sites.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      vias: {
+        path: join(root, 'gcd_view', 'tech', 'vias.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      cellMasters: {
+        path: join(root, 'gcd_view', 'tech', 'cell_masters.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+    })
+  })
+
+  it('discovers tech resources from a step output view package', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'dreamplace' }])
+    const packageRoot = join(root, 'place_dreamplace', 'output', 'gcd_place_view')
+    await mkdir(join(packageRoot, 'tech'), { recursive: true })
+    await writeJson(join(packageRoot, 'manifest.json'), {
+      schema: 'ieda.view.v1',
+      format: 'layout_view_package',
+      files: {
+        meta: 'meta.json',
+        layers: 'tech/layers.json',
+        sites: 'tech/sites.json',
+        vias: 'tech/vias.json',
+        cell_masters: 'tech/cell_masters.json',
+      },
+    })
+    await writeJson(join(packageRoot, 'meta.json'), {})
+    await writeJson(join(packageRoot, 'tech', 'layers.json'), {})
+    await writeJson(join(packageRoot, 'tech', 'sites.json'), {})
+    await writeJson(join(packageRoot, 'tech', 'vias.json'), {})
+    await writeJson(join(packageRoot, 'tech', 'cell_masters.json'), {})
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.tech).toMatchObject({
+      packageRoot,
+      source: 'view-package',
+      manifest: {
+        path: join(packageRoot, 'manifest.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      layers: {
+        path: join(packageRoot, 'tech', 'layers.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      sites: {
+        path: join(packageRoot, 'tech', 'sites.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      vias: {
+        path: join(packageRoot, 'tech', 'vias.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+      cellMasters: {
+        path: join(packageRoot, 'tech', 'cell_masters.json'),
+        exists: true,
+        kind: 'tech-json',
+      },
+    })
+  })
+
+  it('keeps the resource index available when a discovered tech package has missing tech files', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
+    await mkdir(join(root, 'gcd_view', 'tech'), { recursive: true })
+    await writeJson(join(root, 'gcd_view', 'manifest.json'), {
+      schema: 'ieda.view.v1',
+      format: 'layout_view_package',
+      files: {
+        layers: 'tech/layers.json',
+        sites: 'tech/sites.json',
+        vias: 'tech/vias.json',
+        cell_masters: 'tech/cell_masters.json',
+      },
+    })
+    await writeJson(join(root, 'gcd_view', 'tech', 'layers.json'), {})
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.status).toBe('available')
+    expect(index.tech?.layers.exists).toBe(true)
+    expect(index.tech?.sites).toMatchObject({
+      path: join(root, 'gcd_view', 'tech', 'sites.json'),
+      exists: false,
+      kind: 'tech-json',
+    })
+    expect(index.tech?.vias.exists).toBe(false)
+    expect(index.tech?.cellMasters.exists).toBe(false)
+  })
+
   it('returns resolveStepInfo(layout) with missing files instead of throwing', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })
@@ -123,6 +264,31 @@ describe('WorkspaceResourceService', () => {
       join(root, 'route_ecc', 'output', 'gcd_route.png'),
       join(root, 'route_ecc', 'output', 'gcd_route.json'),
     ]))
+  })
+
+  it('returns the step view JSON package from resolveStepInfo(layout)', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'place', tool: 'dreamplace' }])
+    await mkdir(join(root, 'place_dreamplace', 'output', 'gcd_place_view'), { recursive: true })
+    await writeFile(
+      join(root, 'place_dreamplace', 'output', 'gcd_place_view', 'manifest.json'),
+      '{}',
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({ step: 'place', id: 'layout' })
+
+    expect(result).toMatchObject({
+      step: 'place',
+      id: 'layout',
+      response: 'missing',
+      info: {
+        viewJson: join(root, 'place_dreamplace', 'output', 'gcd_place_view'),
+      },
+    })
+    expect(result.missing).toContain(join(root, 'place_dreamplace', 'output', 'gcd_place.json'))
+    expect(result.missing).not.toContain(join(root, 'place_dreamplace', 'output', 'gcd_place_view'))
   })
 
   it('maps yosys config to flow_config.json', async () => {

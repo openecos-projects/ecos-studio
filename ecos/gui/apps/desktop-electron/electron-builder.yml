@@ -3,6 +3,8 @@ productName: ECOS Studio
 afterPack: ./scripts/after-pack-linux-sandbox.mjs
 directories:
   output: release
+# Disable electron-builder's implicit CI/token publishing.
+publish: null
 files:
   - dist/**/*
   - package.json

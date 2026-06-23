@@ -87,6 +87,9 @@ vi.mock('./useFlowRunner', () => ({
   },
   flowExecutionActive: testState.flowExecutionActive,
   isFlowExecutionActiveForWorkspace: () => testState.flowExecutionActive?.value ?? false,
+  markFlowExecutionActiveForWorkspace: () => {
+    if (testState.flowExecutionActive) testState.flowExecutionActive.value = true
+  },
 }))
 
 vi.mock('@/api/workspaceResources', () => ({
@@ -129,6 +132,18 @@ function flowJsonFor(stepName: string) {
         name: stepName,
         tool: 'yosys',
         state: 'Ongoing',
+      },
+    ],
+  })
+}
+
+function flowJsonWithState(stepName: string, state: string) {
+  return JSON.stringify({
+    steps: [
+      {
+        name: stepName,
+        tool: 'yosys',
+        state,
       },
     ],
   })
@@ -301,6 +316,10 @@ describe('useHomeData live project file watchers', () => {
   })
 
   afterEach(() => {
+    for (const callback of testState.unmountCallbacks.splice(0)) {
+      callback()
+    }
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -911,6 +930,59 @@ describe('useHomeData live project file watchers', () => {
     secondScope.stop()
   })
 
+  it('clears stale Home artifacts on remount when a full-flow rerun reset was requested while unmounted', async () => {
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-old.png`,
+          metrics: {
+            'old chart': `${projectPath}/home/old-chart.png`,
+          },
+          monitor: {
+            step: ['Filler'],
+            frequency: [814.33],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Filler', 'Success')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    const { requestHomeRunArtifactReset } = await import('./homeRunArtifacts')
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const firstScope = effectScope()
+    const firstHome = firstScope.run(() => useHomeData())!
+    await vi.waitFor(() => {
+      expect(firstHome.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+    expect(firstHome.analysisCharts.value).toEqual([
+      { label: 'old chart', imageBlobUrl: 'blob:/workspace/a/home/old-chart.png' },
+    ])
+
+    firstScope.stop()
+    for (const callback of testState.unmountCallbacks.splice(0)) {
+      callback()
+    }
+
+    requestHomeRunArtifactReset('/workspace/a')
+
+    const secondScope = effectScope()
+    const remountedHome = secondScope.run(() => useHomeData())!
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(remountedHome.layoutBlobUrl.value).toBe('')
+    expect(remountedHome.analysisCharts.value).toEqual([])
+    expect(remountedHome.monitorData.value).toBeNull()
+
+    secondScope.stop()
+  })
+
   it('keeps the newest same-session home refresh when an older resource-version reload resolves last', async () => {
     let version = 1
     const delayedReads: Array<{
@@ -995,6 +1067,976 @@ describe('useHomeData live project file watchers', () => {
     expect(home.monitorData.value).toEqual({
       step: ['Synthesis'],
       frequency: [3],
+    })
+  })
+
+  it('clears stale Home run artifacts when a full-flow rerun has started', async () => {
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-old.png`,
+          metrics: {
+            'instances dist.': `${projectPath}/home/instances-old.png`,
+          },
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [50],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
+      if (path === '/workspace/a/home/checklist.json') {
+        return JSON.stringify({
+          checklist: [
+            {
+              step: 'Floorplan',
+              type: 'Area',
+              item: 'check DIE area',
+              state: 'Accepted',
+            },
+          ],
+        })
+      }
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'old synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'instances dist.', imageBlobUrl: 'blob:/workspace/a/home/instances-old.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Synthesis'],
+      frequency: [50],
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+    expect(home.analysisCharts.value).toEqual([])
+    expect(home.monitorData.value).toBeNull()
+    expect(home.checklistItems.value).toEqual([])
+    expect(home.flowLogSegments.value).toEqual([])
+    expect(home.flowLogContentByKey.value).toEqual({})
+  })
+
+  it('ignores stale Home reads that were already in flight when full-flow rerun starts', async () => {
+    const delayedHomeReads: Array<(content: string) => void> = []
+    let homeMode: 'empty' | 'delayed-old' = 'empty'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeMode === 'delayed-old') {
+          return await new Promise<string>((resolve) => {
+            delayedHomeReads.push(resolve)
+          })
+        }
+        return JSON.stringify(homeDataFor(projectPath))
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', 'Ongoing')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    homeMode = 'delayed-old'
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+    await vi.waitFor(() => {
+      expect(delayedHomeReads.length).toBeGreaterThan(0)
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    delayedHomeReads[0]!(JSON.stringify({
+      ...homeDataFor('/workspace/a'),
+      layout: '/workspace/a/home/layout-old.png',
+      metrics: {
+        'old chart': '/workspace/a/home/old-chart.png',
+      },
+      monitor: {
+        step: ['Filler'],
+        frequency: [814.33],
+      },
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(home.layoutBlobUrl.value).toBe('')
+    expect(home.analysisCharts.value).toEqual([])
+    expect(home.monitorData.value).toBeNull()
+  })
+
+  it('restarts live log watching when rerun starts after seeing old completed flow state', async () => {
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify(homeDataFor(projectPath))
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'old synthesis log'
+      return '{}'
+    })
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+    testState.flowExecutionActive!.value = true
+
+    await vi.waitFor(() => {
+      expect(testState.projectFileWatchers.some((entry) =>
+        entry.path === '/workspace/a/home/flow.json'
+      )).toBe(true)
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.flowLogSegments.value).toEqual([])
+    })
+    expect(home.flowLogContentByKey.value).toEqual({})
+    expect(home.currentWorkspaceFlowExecutionActive.value).toBe(true)
+
+    flowState = 'Ongoing'
+    const flowWatch = [...testState.projectFileWatchers].reverse().find((entry) =>
+      entry.path === '/workspace/a/home/flow.json'
+    )
+    expect(flowWatch).toBeDefined()
+    flowWatch!.listener({
+      subscriptionId: 'flow-watch-rerun',
+      path: '/workspace/a/home/flow.json',
+      eventType: 'change',
+    })
+
+    await vi.waitFor(() => {
+      expect(testState.subscribeProjectLogTail).toHaveBeenCalledWith(
+        '/workspace/a/Synthesis_yosys/log/Synthesis.log',
+        expect.any(Function),
+        expect.any(Object),
+      )
+    })
+
+    const liveTail = [...testState.logTailListeners].reverse().find((entry) =>
+      entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log'
+    )
+    expect(liveTail).toBeDefined()
+    liveTail!.listener({
+      subscriptionId: 'project-log-tail-rerun',
+      path: '/workspace/a/Synthesis_yosys/log/Synthesis.log',
+      eventType: 'snapshot',
+      content: 'new rerun synthesis log',
+      fromOffsetBytes: 0,
+      nextOffsetBytes: 23,
+      sizeBytes: 23,
+      reset: false,
+      truncated: false,
+    })
+
+    await vi.waitFor(() => {
+      expect(home.flowLogContentByKey.value[flowLogKey('Synthesis')]).toBe(
+        'new rerun synthesis log',
+      )
+    })
+  })
+
+  it('continues loading Home file updates after backend rerun reset is observed', async () => {
+    let homeVersion: 'old' | 'empty' | 'new' = 'old'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeVersion === 'empty') {
+          return JSON.stringify(homeDataFor(projectPath))
+        }
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${homeVersion}.png`,
+          metrics: {
+            [`${homeVersion} chart`]: `${projectPath}/home/${homeVersion}-chart.png`,
+          },
+          monitor: {
+            step: [homeVersion === 'old' ? 'Synthesis' : 'Floorplan'],
+            frequency: [homeVersion === 'old' ? 50 : 55],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(home.layoutBlobUrl.value).toBe('')
+
+    homeVersion = 'empty'
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(home.layoutBlobUrl.value).toBe('')
+
+    homeVersion = 'new'
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-new.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'new chart', imageBlobUrl: 'blob:/workspace/a/home/new-chart.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Floorplan'],
+      frequency: [55],
+    })
+  })
+
+  it('loads new Home artifacts while a full-flow rerun is still running', async () => {
+    let homeVersion: 'old' | 'new' = 'old'
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeVersion === 'old') {
+          return JSON.stringify({
+            ...homeDataFor(projectPath),
+            layout: `${projectPath}/home/layout-old.png`,
+            checklist: `${projectPath}/home/checklist-old.json`,
+            metrics: {
+              'instances dist.': `${projectPath}/home/instances-old.png`,
+            },
+            monitor: {
+              step: ['Synthesis'],
+              frequency: [50],
+            },
+          })
+        }
+
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-new.png`,
+          checklist: `${projectPath}/home/checklist-new.json`,
+          metrics: {
+            'pin dist.': `${projectPath}/home/pin-new.png`,
+          },
+          monitor: {
+            step: ['Floorplan'],
+            frequency: [55],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/checklist-old.json') {
+        return JSON.stringify({
+          path,
+          checklist: [{ step: 'Floorplan', type: 'Area', item: 'old check', state: 'Accepted' }],
+        })
+      }
+      if (path === '/workspace/a/home/checklist-new.json') {
+        return JSON.stringify({
+          path,
+          checklist: [{ step: 'Floorplan', type: 'Area', item: 'new check', state: 'Accepted' }],
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'new synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    homeVersion = 'new'
+    flowState = 'Ongoing'
+    const flowWatches = await vi.waitFor(() => {
+      const active = testState.projectFileWatchers.filter((entry) =>
+        entry.path === '/workspace/a/home/flow.json'
+      )
+      expect(active.length).toBeGreaterThan(0)
+      return active
+    })
+    for (const flowWatch of flowWatches) {
+      flowWatch.listener({
+        subscriptionId: 'flow-watch-rerun-new-artifacts',
+        path: '/workspace/a/home/flow.json',
+        eventType: 'change',
+      })
+    }
+
+    const homeWatches = await vi.waitFor(() => {
+      const active = testState.projectFileWatchers.filter((entry) =>
+        entry.path === '/workspace/a/home/home.json'
+      )
+      expect(active.length).toBeGreaterThan(0)
+      return active
+    })
+    for (const homeWatch of homeWatches) {
+      homeWatch.listener({
+        subscriptionId: 'home-watch-rerun-new-artifacts',
+        path: '/workspace/a/home/home.json',
+        eventType: 'change',
+      })
+    }
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-new.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'pin dist.', imageBlobUrl: 'blob:/workspace/a/home/pin-new.png' },
+    ])
+    expect(home.checklistItems.value).toEqual([
+      { step: 'Floorplan', type: 'Area', item: 'new check', state: 'Accepted' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Floorplan'],
+      frequency: [55],
+    })
+  })
+
+  it('polls home.json for new Home artifacts while a full-flow rerun is still running', async () => {
+    vi.useFakeTimers()
+    let homeVersion: 'old' | 'empty' | 'new' = 'old'
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeVersion === 'empty') {
+          return JSON.stringify(homeDataFor(projectPath))
+        }
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${homeVersion}.png`,
+          metrics: {
+            [`${homeVersion} chart`]: `${projectPath}/home/${homeVersion}-chart.png`,
+          },
+          monitor: {
+            step: [homeVersion === 'old' ? 'Synthesis' : 'Floorplan'],
+            frequency: [homeVersion === 'old' ? 50 : 55],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'new synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    homeVersion = 'empty'
+    flowState = 'Ongoing'
+    const flowWatches = await vi.waitFor(() => {
+      const active = testState.projectFileWatchers.filter((entry) =>
+        entry.path === '/workspace/a/home/flow.json'
+      )
+      expect(active.length).toBeGreaterThan(0)
+      return active
+    })
+    for (const flowWatch of flowWatches) {
+      flowWatch.listener({
+        subscriptionId: 'flow-watch-rerun-poll-home',
+        path: '/workspace/a/home/flow.json',
+        eventType: 'change',
+      })
+    }
+
+    await vi.waitFor(() => {
+      expect(home.flowLogSegments.value.some((segment) => segment.live)).toBe(true)
+    })
+    expect(home.layoutBlobUrl.value).toBe('')
+
+    homeVersion = 'new'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-new.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'new chart', imageBlobUrl: 'blob:/workspace/a/home/new-chart.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Floorplan'],
+      frequency: [55],
+    })
+  })
+
+  it('does not restore stale Home artifacts from home.json reads that race ahead of backend rerun reset', async () => {
+    vi.useFakeTimers()
+    let homeVersion: 'old' | 'empty' | 'new' = 'old'
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeVersion === 'empty') {
+          return JSON.stringify(homeDataFor(projectPath))
+        }
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-${homeVersion}.png`,
+          metrics: {
+            [`${homeVersion} chart`]: `${projectPath}/home/${homeVersion}-chart.png`,
+          },
+          monitor: {
+            step: [homeVersion === 'old' ? 'Filler' : 'Floorplan'],
+            frequency: [homeVersion === 'old' ? 814.3 : 55],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'old chart', imageBlobUrl: 'blob:/workspace/a/home/old-chart.png' },
+    ])
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+    expect(home.analysisCharts.value).toEqual([])
+
+    flowState = 'Ongoing'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    expect(home.layoutBlobUrl.value).toBe('')
+    expect(home.analysisCharts.value).toEqual([])
+    expect(home.monitorData.value).toBeNull()
+
+    homeVersion = 'empty'
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(home.layoutBlobUrl.value).toBe('')
+
+    homeVersion = 'new'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-new.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'new chart', imageBlobUrl: 'blob:/workspace/a/home/new-chart.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Floorplan'],
+      frequency: [55],
+    })
+  })
+
+  it('does not clear Home artifacts from an empty live home.json read before backend rerun start', async () => {
+    vi.useFakeTimers()
+    let homeVersion: 'old' | 'empty' = 'old'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        if (homeVersion === 'empty') {
+          return JSON.stringify(homeDataFor(projectPath))
+        }
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-old.png`,
+          metrics: {
+            'old chart': `${projectPath}/home/old-chart.png`,
+          },
+          monitor: {
+            step: ['Filler'],
+            frequency: [814.3],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', 'Ongoing')
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'old chart', imageBlobUrl: 'blob:/workspace/a/home/old-chart.png' },
+    ])
+
+    ;(await import('./homeRunArtifacts')).markHomeRunArtifactResetAwaitingBackendStart('/workspace/a')
+    testState.flowExecutionActive!.value = true
+    await vi.waitFor(() => {
+      expect(testState.projectFileWatchers.some((entry) =>
+        entry.path === '/workspace/a/home/home.json'
+      )).toBe(true)
+    })
+
+    homeVersion = 'empty'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'old chart', imageBlobUrl: 'blob:/workspace/a/home/old-chart.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Filler'],
+      frequency: [814.3],
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+    expect(home.analysisCharts.value).toEqual([])
+    expect(home.monitorData.value).toBeNull()
+  })
+
+  it('keeps suppressing stale Home artifacts when the backend rerun start is observed twice', async () => {
+    vi.useFakeTimers()
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-old.png`,
+          metrics: {
+            'old chart': `${projectPath}/home/old-chart.png`,
+          },
+          monitor: {
+            step: ['Filler'],
+            frequency: [814.3],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    const { requestHomeRunArtifactReset } = await import('./homeRunArtifacts')
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+
+    requestHomeRunArtifactReset('/workspace/a')
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+    flowState = 'Ongoing'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    expect(home.layoutBlobUrl.value).toBe('')
+    expect(home.analysisCharts.value).toEqual([])
+    expect(home.monitorData.value).toBeNull()
+  })
+
+  it('does not treat stale completed flow.json as terminal during rerun startup', async () => {
+    vi.useFakeTimers()
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-old.png`,
+          metrics: {
+            'old chart': `${projectPath}/home/old-chart.png`,
+          },
+          monitor: {
+            step: ['Filler'],
+            frequency: [814.3],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+    expect(testState.flowExecutionActive!.value).toBe(true)
+    const allBeforePoll = testState.resourceVersions!.value.all
+
+    await vi.advanceTimersByTimeAsync(1600)
+
+    expect(testState.flowExecutionActive!.value).toBe(true)
+    expect(testState.resourceVersions!.value.all).toBe(allBeforePoll)
+    expect(home.flowLogSegments.value).toEqual([])
+
+    flowState = 'Ongoing'
+    await vi.advanceTimersByTimeAsync(1600)
+
+    await vi.waitFor(() => {
+      expect(home.flowLogSegments.value.map((segment) => segment.state)).toEqual(['Ongoing'])
+    })
+    expect(testState.flowExecutionActive!.value).toBe(true)
+  })
+
+  it('does not reload unchanged Home artifacts on each live home.json poll', async () => {
+    vi.useFakeTimers()
+    let flowState = 'Success'
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-stable.png`,
+          metrics: {
+            'stable chart': `${projectPath}/home/stable-chart.png`,
+          },
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [50],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'stable synthesis log'
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-stable.png')
+    })
+    expect(testState.readProjectBlobUrl).toHaveBeenCalledTimes(2)
+
+    flowState = 'Ongoing'
+    testState.flowExecutionActive!.value = true
+    await vi.waitFor(() => {
+      expect(testState.projectFileWatchers.some((entry) =>
+        entry.path === '/workspace/a/home/home.json'
+      )).toBe(true)
+    })
+
+    testState.readProjectBlobUrl.mockClear()
+    await vi.advanceTimersByTimeAsync(1600)
+    await vi.advanceTimersByTimeAsync(1600)
+
+    expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-stable.png')
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'stable chart', imageBlobUrl: 'blob:/workspace/a/home/stable-chart.png' },
+    ])
+    expect(testState.readProjectBlobUrl).not.toHaveBeenCalled()
+  })
+
+  it('allows Home run artifacts to load again after the full-flow rerun finishes', async () => {
+    testState.readProjectTextFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/home/home.json')) {
+        const projectPath = path.replace(/\/home\/home\.json$/, '')
+        return JSON.stringify({
+          ...homeDataFor(projectPath),
+          layout: `${projectPath}/home/layout-final.png`,
+          metrics: {
+            'instances dist.': `${projectPath}/home/instances-final.png`,
+          },
+          monitor: {
+            step: ['Filler'],
+            frequency: [55],
+          },
+        })
+      }
+      if (path === '/workspace/a/home/flow.json') return flowJsonFor('Filler')
+      return '{}'
+    })
+    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+
+    const { useHomeData } = await importFreshHomeDataModule()
+    await startLifecycleSession('/workspace/a')
+    testState.currentProject!.value = { path: '/workspace/a' }
+
+    const home = useHomeData()
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-final.png')
+    })
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          rerun: true,
+          type: 'message',
+        },
+        message: ['Started rtl2gds'],
+        response: 'success',
+      },
+    ]
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('')
+    })
+
+    testState.runtimeEvents!.value = [
+      ...testState.runtimeEvents!.value,
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          type: 'task_complete',
+        },
+        message: ['done'],
+        response: 'success',
+      },
+    ]
+    testState.resourceVersions!.value = {
+      ...testState.resourceVersions!.value,
+      home: testState.resourceVersions!.value.home + 1,
+    }
+
+    await vi.waitFor(() => {
+      expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-final.png')
+    })
+    expect(home.analysisCharts.value).toEqual([
+      { label: 'instances dist.', imageBlobUrl: 'blob:/workspace/a/home/instances-final.png' },
+    ])
+    expect(home.monitorData.value).toEqual({
+      step: ['Filler'],
+      frequency: [55],
     })
   })
 

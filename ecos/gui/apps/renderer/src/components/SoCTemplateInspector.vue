@@ -25,36 +25,36 @@ const selectedArea = computed(() => {
 
 <template>
   <aside
-    class="soc-inspector flex max-h-[min(82vh,940px)] flex-col gap-5 overflow-y-auto rounded-2xl border border-(--border-color) bg-(--bg-secondary)/95 p-5 shadow-[0_2px_20px_-12px_rgba(0,0,0,0.08)] lg:sticky lg:top-6 dark:shadow-[0_2px_20px_-12px_rgba(0,0,0,0.45)]"
+    class="soc-inspector flex max-h-[min(78vh,900px)] flex-col overflow-y-auto bg-(--bg-secondary)/80 p-4"
     aria-label="Template inspector"
   >
-    <header class="flex items-start justify-between gap-3 border-b border-(--border-color) pb-5">
+    <header class="flex items-start justify-between gap-3 border-b border-(--border-color) pb-4">
       <div class="min-w-0">
         <p class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-[0.18em] text-(--text-secondary)">Inspector</p>
-        <h2 class="mt-2 break-words text-lg font-bold leading-snug tracking-tight text-(--text-primary)">{{ selectedName }}</h2>
+        <h2 class="mt-1.5 break-words text-base font-bold leading-snug tracking-tight text-(--text-primary)">{{ selectedName }}</h2>
       </div>
-      <span class="shrink-0 rounded-lg bg-(--accent-color)/12 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-(--accent-color)">
+      <span class="shrink-0 rounded-md bg-(--accent-color)/12 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-(--accent-color)">
         Live
       </span>
     </header>
 
-    <section class="space-y-3">
+    <section class="space-y-3 py-4">
       <h3 class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">Die summary</h3>
-      <div class="space-y-2.5">
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+      <div class="soc-inspector__stack">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">Design</span>
           <p class="mt-1.5 text-sm font-semibold text-(--text-primary)">{{ template.name }}</p>
         </div>
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">Info</span>
           <p class="mt-1.5 text-sm leading-relaxed text-(--text-primary)">{{ template.info }}</p>
         </div>
-        <div class="grid grid-cols-2 gap-2.5">
-          <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-(--border-color) bg-(--border-color)">
+          <div class="soc-inspector__field">
             <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">I/O Pins</span>
             <p class="soc-inspector__mono mt-1.5 text-lg font-bold tabular-nums text-(--text-primary)">{{ template.ioPinsCount }}</p>
           </div>
-          <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+          <div class="soc-inspector__field">
             <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">Core count</span>
             <p class="soc-inspector__mono mt-1.5 text-lg font-bold tabular-nums text-(--text-primary)">{{ template.coreCount }}</p>
           </div>
@@ -62,36 +62,36 @@ const selectedArea = computed(() => {
       </div>
     </section>
 
-    <section class="space-y-3 border-t border-(--border-color) pt-5">
+    <section class="space-y-3 border-t border-(--border-color) pt-4">
       <h3 class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">Selected core</h3>
-      <div v-if="selectedCore" class="space-y-2.5">
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+      <div v-if="selectedCore" class="soc-inspector__stack">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">id</span>
           <p class="soc-inspector__mono mt-1.5 text-sm font-semibold text-(--text-primary)">{{ selectedCore.id }}</p>
         </div>
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">name</span>
           <p class="mt-1.5 break-all text-sm font-medium leading-relaxed text-(--text-primary)">{{ selectedName }}</p>
         </div>
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">info</span>
           <p class="mt-1.5 text-sm leading-relaxed text-(--text-primary)">{{ selectedInfo }}</p>
         </div>
-        <div class="grid grid-cols-2 gap-2.5">
-          <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-(--border-color) bg-(--border-color)">
+          <div class="soc-inspector__field">
             <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">IO align</span>
             <p class="soc-inspector__mono mt-1.5 text-sm font-semibold text-(--text-primary)">{{ selectedCore.align }}</p>
           </div>
-          <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+          <div class="soc-inspector__field">
             <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">orient</span>
             <p class="soc-inspector__mono mt-1.5 text-sm font-semibold text-(--text-primary)">{{ selectedCore.orient }}</p>
           </div>
         </div>
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">bounding box</span>
           <p class="soc-inspector__mono mt-1.5 text-xs leading-relaxed text-(--text-primary)">{{ selectedBoundingBox }} μm</p>
         </div>
-        <div class="rounded-xl border border-(--border-color)/90 bg-(--bg-primary) px-3.5 py-3 shadow-inner">
+        <div class="soc-inspector__field">
           <span class="soc-inspector__mono text-[10px] font-semibold uppercase tracking-wide text-(--text-secondary)">area</span>
           <p class="soc-inspector__mono mt-1.5 text-xs leading-relaxed text-(--text-primary)">{{ selectedArea }} μm²</p>
         </div>
@@ -109,5 +109,24 @@ const selectedArea = computed(() => {
 <style scoped>
 .soc-inspector__mono {
   font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
+}
+
+.soc-inspector__stack {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--border-color);
+}
+
+.soc-inspector__field {
+  min-width: 0;
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+  padding: 12px 14px;
+}
+
+.soc-inspector {
+  scrollbar-gutter: stable;
 }
 </style>

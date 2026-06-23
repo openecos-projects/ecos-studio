@@ -9,6 +9,8 @@ export type DesktopCliCommandName =
   | 'rtl2gds'
   | 'get_info'
   | 'home_page'
+  | 'refresh_config'
+  | 'sync_config'
 
 export type DesktopCliCommandSource = 'button' | 'menu' | 'terminal' | 'test'
 
@@ -46,6 +48,7 @@ export interface DesktopCliCommandEvent {
   jobId: string
   cmd: DesktopCliCommandName
   type: DesktopCliCommandEventType
+  data?: Record<string, unknown>
   workspaceId?: string
   directory?: string
   stream?: 'stdout' | 'stderr' | 'system'

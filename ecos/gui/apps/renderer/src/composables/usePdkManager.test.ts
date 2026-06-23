@@ -97,6 +97,11 @@ const desktopBridge = {
     set: settingsSet,
     delete: settingsDelete,
   },
+  remoteContent: {
+    listFiles: async () => [],
+    readTextFile: async () => '',
+    readJsonFile: async <T = unknown>() => null as T,
+  },
   dialog: {
     pickDirectory,
     pickFiles: async () => null,

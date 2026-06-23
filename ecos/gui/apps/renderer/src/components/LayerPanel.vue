@@ -30,7 +30,7 @@ function hideAll(): void {
         <span class="header-en">Layers</span>
         <span v-if="layers.length" class="layer-count">{{ visibleCount }}/{{ layers.length }}</span>
       </div>
-      <div class="header-actions">
+      <div v-if="layers.length > 0" class="header-actions">
         <button @click="showAll" class="header-btn" title="Show All">
           <i class="ri-eye-line text-xs"></i>
         </button>
@@ -40,11 +40,7 @@ function hideAll(): void {
       </div>
     </div>
 
-    <div v-if="layers.length === 0" class="empty-state">
-      尚未加载工艺层：请生成版图瓦片后，此处可开关各层可见性。
-    </div>
-
-    <div v-else class="layer-list">
+    <div v-if="layers.length > 0" class="layer-list">
       <div
         v-for="layer in layers"
         :key="layer.id"

@@ -48,3 +48,18 @@ describe('router SoC welcome routes', () => {
     expect(existsSync(resolve(routerDir, detailImportPath))).toBe(true)
   })
 })
+
+describe('router workspace Tech Library route', () => {
+  it('resolves /workspace/tech as a fixed workspace page before the dynamic step route', () => {
+    const techRoute = router.resolve('/workspace/tech')
+
+    expect(techRoute.name).toBe('TechLibrary')
+    expect(techRoute.matched.map((record) => record.path)).toEqual(['/workspace', '/workspace/tech'])
+
+    const techRecord = router.getRoutes().find((record) => record.name === 'TechLibrary')
+    expect(techRecord?.components?.default).toBeTypeOf('function')
+    expect(routerSource).toContain(
+      `{ path: 'tech', name: 'TechLibrary', component: () => import('../views/TechLibraryView.vue') }`,
+    )
+  })
+})

@@ -1,4 +1,0 @@
-alias(
-    name = "ecos_studio_bundle",
-    actual = "//ecos:ecos_studio_bundle",
-)

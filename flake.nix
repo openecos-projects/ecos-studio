@@ -6,8 +6,7 @@
     parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
-    ecc.url = "github:openecos-projects/ecc";
-    ecc.inputs.nixpkgs.follows = "nixpkgs";
+    ecc.url = "git+https://github.com/openecos-projects/ecc.git";
   };
 
   outputs =
@@ -17,16 +16,6 @@
       ecc,
       ...
     }:
-    let
-      overlay = (
-        final: prev: {
-          chipcompiler-cli = final.cli;
-          ecos-studio = final.callPackage ./ecos/gui { };
-        }
-      );
-      eccOverlay = inputs.ecc.overlays.default;
-      infraOverlay = inputs.ecc.inputs.infra.overlays.default;
-    in
     parts.lib.mkFlake { inherit inputs; } {
       imports = [
         treefmt-nix.flakeModule
@@ -43,29 +32,20 @@
           ...
         }:
         {
-          _module.args.pkgs = import inputs.nixpkgs {
-            inherit system;
-            overlays = [
-              overlay
-              eccOverlay
-              infraOverlay
-            ];
+          packages.default = pkgs.callPackage ./ecos/gui {
+            chipcompiler-cli = ecc.packages.${system}.default;
+            inherit (ecc.inputs.infra.packages.${system}) yosysWithSlang;
           };
           devShells.default = pkgs.mkShell {
-            inputsFrom = [
-              pkgs.ecos-studio
-            ];
             ELECTRON_EXEC_PATH = "${pkgs.electron}/bin/electron";
+            CUSTOM_FPM_PATH = "${pkgs.fpm}/bin/fpm";
             nativeBuildInputs = with pkgs; [
-              chipcompiler-cli
-              yosysWithSlang
-              (python3.withPackages (_: chipcompiler-cli.dependencies))
+              ecc.inputs.infra.packages.${system}.yosysWithSlang
+              nodejs
+              pnpm
+              appimage-run
               nixfmt
               git
-              uv
-              cargo
-              rustc
-              clippy
             ];
           };
           treefmt = {
@@ -75,9 +55,6 @@
               nixfmt.package = pkgs.nixfmt;
             };
             flakeCheck = true;
-          };
-          packages = {
-            inherit (pkgs) ecos-studio;
           };
         };
     };

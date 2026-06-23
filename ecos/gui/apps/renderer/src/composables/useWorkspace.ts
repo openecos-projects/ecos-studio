@@ -19,6 +19,10 @@ import {
   readWorkspaceHomeResourceApi,
   readWorkspaceParametersResourceApi,
 } from '@/api/workspaceResources'
+import {
+  clearHomeRunArtifactResetAwaitingBackendStart,
+  requestHomeRunArtifactReset,
+} from './homeRunArtifacts'
 
 interface SerializedProject {
   id: string
@@ -892,6 +896,15 @@ export function useWorkspace() {
       // 过滤心跳消息，不记录到 messages
       if (response.data?.type !== 'heartbeat') {
         runtimeEvents.value.push(response)
+        if (isRtl2gdsRerunStartEvent(response)) {
+          const resetProjectPath = asString(response.data.workspaceId)
+            ?? asString(response.data.directory)
+            ?? currentProject.value?.path
+          if (resetProjectPath) {
+            clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
+            requestHomeRunArtifactReset(resetProjectPath)
+          }
+        }
         invalidateResourcesForRuntimeEvent(response, sessionId)
       }
     })
@@ -986,6 +999,13 @@ export function useWorkspace() {
     }
 
     return [...scopes]
+  }
+
+  function isRtl2gdsRerunStartEvent(response: RuntimeEventResponse): boolean {
+    const event = response.data
+    return event?.cmd === 'rtl2gds'
+      && event.type === 'message'
+      && event.rerun === true
   }
 
   function invalidateResourcesForRuntimeEvent(response: RuntimeEventResponse, sessionId: string): void {

@@ -73,13 +73,13 @@
                   Reload
                 </button>
                 <button type="button" class="btn-text"
-                  :disabled="!hasStepConfigChanges || loading || !!stepConfigReadError"
+                  :disabled="!hasStepConfigChanges || loading || !!stepConfigReadError || isMutationLocked"
                   @click="resetStepConfig">
                   <i class="ri-arrow-go-back-line"></i>
                   Reset
                 </button>
                 <button type="button" class="btn-primary"
-                  :disabled="!hasStepConfigChanges || isSavingStepConfig || !!stepConfigReadError"
+                  :disabled="!hasStepConfigChanges || isSavingStepConfig || !!stepConfigReadError || isMutationLocked"
                   @click="onSaveStepConfig">
                   <i :class="isSavingStepConfig ? 'ri-loader-4-line spin' : 'ri-save-line'"></i>
                   {{ isSavingStepConfig ? 'Saving…' : 'Save' }}
@@ -140,6 +140,7 @@ const {
   hasStepConfigChanges,
   isSavingStepConfig,
   stepConfigSaveError,
+  isMutationLocked,
   saveStepConfig,
   resetStepConfig,
   reloadStepConfigFiles,
