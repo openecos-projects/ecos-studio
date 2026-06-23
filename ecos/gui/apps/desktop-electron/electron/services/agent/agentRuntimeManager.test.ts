@@ -8,10 +8,10 @@ import type {
 import { AgentRuntimeManager } from './agentRuntimeManager'
 import type { AgentProviderRuntime } from './agentProviderContract'
 
-function createProvider(): AgentProviderRuntime {
+function createProvider(providerId = 'codex'): AgentProviderRuntime {
   let listener: ((event: DesktopAgentEvent) => void) | undefined
   const status: DesktopAgentStatus = {
-    providerId: 'codex',
+    providerId,
     state: 'ready',
   }
 
@@ -114,5 +114,103 @@ describe('AgentRuntimeManager', () => {
       type: 'status',
     })
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes provider-scoped lifecycle calls to the requested provider', async () => {
+    const codexProvider = createProvider('codex')
+    const localProvider = createProvider('local')
+    const manager = new AgentRuntimeManager({
+      defaultProviderId: 'codex',
+      providers: [
+        { providerId: 'codex', runtime: codexProvider },
+        { providerId: 'local', runtime: localProvider },
+      ],
+    })
+
+    await manager.startSession({
+      directory: '/work/demo',
+      providerId: 'local',
+    })
+    await manager.sendMessage({
+      message: 'inspect this step',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    await manager.interrupt({ providerId: 'local' })
+    await expect(manager.getStatus({ providerId: 'local' })).resolves.toEqual({
+      providerId: 'local',
+      state: 'ready',
+    })
+
+    expect(localProvider.startSession).toHaveBeenCalledWith({
+      directory: '/work/demo',
+      providerId: 'local',
+    })
+    expect(localProvider.interrupt).toHaveBeenCalledWith({ providerId: 'local' })
+    expect(codexProvider.sendMessage).toHaveBeenCalledWith({
+      message: 'inspect this step',
+      providerId: 'codex',
+      sessionId: 'session-1',
+    })
+    expect(codexProvider.startSession).not.toHaveBeenCalled()
+    expect(localProvider.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('adds provider identity to events emitted by each provider runtime', () => {
+    const codexProvider = createProvider('codex') as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const localProvider = createProvider('local') as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const manager = new AgentRuntimeManager({
+      defaultProviderId: 'codex',
+      providers: [
+        { providerId: 'codex', runtime: codexProvider },
+        { providerId: 'local', runtime: localProvider },
+      ],
+    })
+    const listener = vi.fn()
+    const unsubscribe = manager.onEvent(listener)
+
+    localProvider.emitForTest({
+      sessionId: 'local-session',
+      text: 'local response',
+      type: 'message',
+    })
+    codexProvider.emitForTest({
+      providerId: 'codex',
+      type: 'status',
+    })
+
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      providerId: 'local',
+      sessionId: 'local-session',
+      text: 'local response',
+      type: 'message',
+    })
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      providerId: 'codex',
+      type: 'status',
+    })
+
+    unsubscribe()
+    localProvider.emitForTest({
+      text: 'after unsubscribe',
+      type: 'message',
+    })
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects calls for unknown agent providers', async () => {
+    const manager = new AgentRuntimeManager({
+      providers: [
+        { providerId: 'codex', runtime: createProvider('codex') },
+      ],
+    })
+
+    await expect(manager.getStatus({ providerId: 'missing' })).rejects.toThrow(
+      'Unknown agent provider: missing',
+    )
   })
 })
