@@ -139,4 +139,93 @@ describe('AgentProviderProcessRuntime', () => {
       'Agent provider codex exited with code 1',
     )
   })
+
+  it('drains provider stderr so diagnostics cannot block the child process', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    void runtime.getStatus({ providerId: 'codex' })
+    expect(harness.children[0].stderr.listenerCount('data')).toBe(1)
+  })
+
+  it('rejects pending requests instead of throwing on malformed provider stdout', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    expect(() => {
+      harness.children[0].stdout.emit('data', 'not json\n')
+    }).not.toThrow()
+
+    await expect(response).rejects.toThrow(
+      'Invalid JSON from agent provider codex',
+    )
+  })
+
+  it('does not reject pending requests when a provider event listener throws', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const manager = new AgentRuntimeManager({
+      providers: [
+        { providerId: 'codex', runtime },
+      ],
+    })
+    manager.onEvent(() => {
+      throw new Error('listener failed')
+    })
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+
+    expect(() => {
+      child.stdout.emit('data', `${JSON.stringify({
+        event: {
+          text: 'working',
+          type: 'message',
+        },
+        type: 'event',
+      })}\n`)
+    }).toThrow('listener failed')
+
+    child.stdout.emit('data', `${JSON.stringify({
+      id: request.id,
+      result: {
+        providerId: 'codex',
+        state: 'ready',
+      },
+    })}\n`)
+
+    await expect(response).resolves.toEqual({
+      providerId: 'codex',
+      state: 'ready',
+    })
+  })
 })

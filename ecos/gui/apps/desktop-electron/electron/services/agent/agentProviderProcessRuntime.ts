@@ -141,6 +141,9 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     child.stdout?.on('data', (data: unknown) => {
       this.handleStdout(dataToString(data))
     })
+    child.stderr?.on('data', () => {
+      // Drain diagnostics so provider stderr cannot fill its pipe and block stdout responses.
+    })
     child.once('error', (error) => {
       this.rejectPending(error instanceof Error ? error : new Error(String(error)))
       this.child = null
@@ -162,14 +165,27 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.stdoutBuffer = lines.pop() ?? ''
 
     for (const line of lines) {
-      this.handleProtocolLine(line)
+      const record = this.readProtocolLine(line)
+      if (record) this.handleProtocolRecord(record)
     }
   }
 
-  private handleProtocolLine(line: string): void {
-    if (!line.trim()) return
+  private readProtocolLine(line: string): Record<string, unknown> | null {
+    if (!line.trim()) return null
 
-    const record = readRecord(JSON.parse(line))
+    try {
+      return readRecord(JSON.parse(line))
+    } catch (error) {
+      this.rejectPending(new Error(
+        `Invalid JSON from agent provider ${this.manifest.providerId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ))
+      return null
+    }
+  }
+
+  private handleProtocolRecord(record: Record<string, unknown>): void {
     if (record.type === 'event') {
       const event = readRecord(record.event) as Partial<DesktopAgentEvent>
       if (typeof event.type === 'string') {
