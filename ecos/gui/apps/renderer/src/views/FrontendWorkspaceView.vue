@@ -14,7 +14,7 @@
   />
 
   <FrontendWaveWorkspace
-    v-else-if="isGlobalWaveView"
+    v-show="isGlobalWaveView"
     :active-waveform="activeWaveform"
     :file-name="fileName"
     :short-path="shortPath"
@@ -28,7 +28,7 @@
     @select-waveform="selectWaveform"
   />
 
-  <div v-else class="frontend-workspace">
+  <div v-show="!isGlobalSrcView && !isGlobalWaveView" class="frontend-workspace">
     <div class="frontend-header">
       <div>
         <p class="frontend-kicker">{{ isHomeView ? 'Frontend Workspace' : 'Frontend Flow' }}</p>
@@ -1564,6 +1564,7 @@ const selectedLogPath = ref('')
 const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
 const activeWaveform = ref<WaveSelection | null>(null)
+const cachedWaveItems = ref<WaveSelection[]>([])
 const consoleCollapsed = ref(true)
 const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
 const consoleResizing = ref(false)
@@ -1580,6 +1581,7 @@ const surferReady = ref(false)
 const waveformLoading = ref(false)
 const waveformError = ref('')
 let waveformLoadToken = 0
+let loadedWaveformKey = ''
 let unsubscribeCliEvents: (() => void) | null = null
 let consoleResizeStartY = 0
 let consoleResizeStartHeight = 0
@@ -1639,7 +1641,7 @@ const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.val
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
-const waveItems = computed<WaveSelection[]>(() =>
+const detailWaveItems = computed<WaveSelection[]>(() =>
   uniqueWaveItems(
     cases.value
       .filter((testCase) => Boolean(testCase.wave))
@@ -1648,6 +1650,10 @@ const waveItems = computed<WaveSelection[]>(() =>
         caseName: testCase.name,
       })),
   ),
+)
+const detailIsSimStep = computed(() => String(detail.value?.step || '').toLowerCase() === 'sim')
+const waveItems = computed<WaveSelection[]>(() =>
+  detailIsSimStep.value ? detailWaveItems.value : cachedWaveItems.value,
 )
 const selectedCpuRunCases = computed(() => cpuRunCasesForSelection())
 const currentSimRunContext = computed<SimRunContext>(() => ({
@@ -2711,7 +2717,11 @@ function syncWaveSelectionFromRoute(): void {
     || activeWaveform.value
     || waveItems.value[0]
     || null
+  const previousPath = activeWaveform.value?.path || ''
   activeWaveform.value = next ? { path: next.path, caseName: next.caseName } : null
+  if (previousPath && activeWaveform.value?.path && normalizeWorkspacePath(previousPath) !== normalizeWorkspacePath(activeWaveform.value.path)) {
+    loadedWaveformKey = ''
+  }
   waveformError.value = ''
 }
 
@@ -2818,12 +2828,18 @@ function toSourceSelection(item: PathItem): FrontendSourceSelection {
 }
 
 async function openWaveform(path: string, caseName?: string): Promise<void> {
+  if (normalizeWorkspacePath(activeWaveform.value?.path || '') !== normalizeWorkspacePath(path)) {
+    loadedWaveformKey = ''
+  }
   activeWaveform.value = { path, caseName }
   waveformError.value = ''
   await openGlobalWaveView(path, caseName)
 }
 
 async function selectWaveform(item: WaveSelection): Promise<void> {
+  if (normalizeWorkspacePath(activeWaveform.value?.path || '') !== normalizeWorkspacePath(item.path)) {
+    loadedWaveformKey = ''
+  }
   activeWaveform.value = { path: item.path, caseName: item.caseName }
   waveformError.value = ''
   await router.replace({
@@ -2869,6 +2885,7 @@ function pathToFileUrl(path: string): string {
 }
 
 function handleSurferFrameLoad(): void {
+  loadedWaveformKey = ''
   waveformError.value = ''
   void loadCurrentWaveform()
 }
@@ -2886,6 +2903,7 @@ function handleSurferMessage(event: MessageEvent): void {
 
   if (data.command === 'SurferError') {
     waveformLoading.value = false
+    loadedWaveformKey = ''
     waveformError.value = data.message || 'Surfer viewer failed to initialize.'
   }
 }
@@ -2894,6 +2912,8 @@ async function loadCurrentWaveform(): Promise<void> {
   const wave = activeWaveform.value
   const frame = surferFrame.value
   if (!wave || !frame?.contentWindow) return
+  const waveKey = normalizeWorkspacePath(wave.path)
+  if (surferReady.value && loadedWaveformKey === waveKey) return
 
   const token = ++waveformLoadToken
   waveformLoading.value = true
@@ -2917,8 +2937,10 @@ async function loadCurrentWaveform(): Promise<void> {
       throw new Error(`Cannot load waveform: ${response.status} ${response.statusText}`)
     }
     frame.contentWindow.postMessage({ command: 'LoadUrl', url: waveformUrl }, '*')
+    loadedWaveformKey = waveKey
   } catch (err) {
     if (token === waveformLoadToken) {
+      loadedWaveformKey = ''
       waveformError.value = err instanceof Error ? err.message : String(err)
     }
   } finally {
@@ -3587,6 +3609,14 @@ watch(
   },
 )
 
+watch(() => currentProject.value?.path || '', () => {
+  activeWaveform.value = null
+  cachedWaveItems.value = []
+  waveformError.value = ''
+  waveformLoading.value = false
+  loadedWaveformKey = ''
+})
+
 watch(() => String(route.params.step || ''), () => {
   detail.value = null
   logContent.value = ''
@@ -3609,6 +3639,11 @@ watch(
     void loadCurrentWaveform()
   },
 )
+
+watch(detailWaveItems, (items) => {
+  if (String(detail.value?.step || '').toLowerCase() !== 'sim') return
+  cachedWaveItems.value = uniqueWaveItems(items)
+}, { immediate: true })
 
 watch(visibleTabs, () => {
   ensureActiveTabVisible()
