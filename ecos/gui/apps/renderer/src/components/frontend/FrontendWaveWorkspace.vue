@@ -99,3 +99,237 @@ onBeforeUnmount(() => {
   emit('frame-change', null)
 })
 </script>
+
+<style scoped>
+.frontend-workspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+.wave-workspace-clean {
+  gap: 0;
+  padding: 0;
+}
+
+.wave-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wave-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  border-right: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.wave-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wave-row:hover,
+.wave-row.active {
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.3);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+}
+
+.wave-row i {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  font-size: 16px;
+}
+
+.wave-row span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wave-row strong,
+.wave-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wave-row strong {
+  font-size: 12px;
+}
+
+.wave-row small {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.wave-viewer-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.wave-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.wave-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wave-title > i {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  font-size: 18px;
+}
+
+.wave-title div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wave-title strong,
+.wave-title span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wave-title strong {
+  font-size: 12px;
+}
+
+.wave-title span {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+  color: var(--accent-color);
+  cursor: pointer;
+}
+
+.surfer-shell {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: #111827;
+}
+
+.wave-surfer-shell {
+  min-height: 0;
+}
+
+.surfer-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #111827;
+}
+
+.wave-status {
+  position: absolute;
+  inset: 12px auto auto 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(520px, calc(100% - 24px));
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.wave-status.error {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.empty-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  padding: 20px;
+  color: var(--text-secondary);
+}
+
+.empty-panel.compact {
+  min-height: 80px;
+  font-size: 11px;
+}
+
+.wave-empty {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 1180px) {
+  .wave-workspace-layout {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
