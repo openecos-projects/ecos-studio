@@ -446,39 +446,88 @@
                     <strong>{{ tile.value }}</strong>
                   </div>
                 </section>
-                <section class="summary-grid">
+                <section class="summary-grid elab-summary-grid">
                   <div class="summary-card">
                     <header>
-                      <span>Design Universe</span>
-                      <strong>{{ elabTopModuleName }}</strong>
+                      <span>Top Readiness</span>
+                      <strong>{{ elabReadiness.status || elabStatusLabel }}</strong>
+                    </header>
+                    <p>{{ elabReadiness.message || humanSummaryText }}</p>
+                    <div class="summary-metrics elab-readiness-metrics">
+                      <span>Top <strong>{{ elabTopModuleName }}</strong></span>
+                      <span>Top Found <strong>{{ elabTopFound ? 'Yes' : 'No' }}</strong></span>
+                      <span>Errors <strong>{{ numberLabel(elabReadiness.errors || elabSummary.errors) }}</strong></span>
+                      <span>Warnings <strong>{{ numberLabel(elabReadiness.warnings || elabSummary.warnings) }}</strong></span>
+                    </div>
+                  </div>
+                  <div class="summary-card">
+                    <header>
+                      <span>Hierarchy Inventory</span>
+                      <strong>{{ numberLabel(elabReadiness.modules || elabSummary.modules) }} modules</strong>
                     </header>
                     <p>
-                      Slang checks whether the configured top and RTL file universe can be parsed and elaborated.
+                      {{ numberLabel(elabTopChildren.length) }} direct child module type(s) are referenced by {{ elabTopModuleName }}.
+                    </p>
+                    <div class="elab-chip-list">
+                      <span
+                        v-for="child in elabTopChildren.slice(0, 8)"
+                        :key="child"
+                        class="elab-chip"
+                      >
+                        {{ child }}
+                      </span>
+                      <span v-if="elabTopChildren.length === 0" class="elab-chip muted">No direct child detected</span>
+                    </div>
+                  </div>
+                  <div class="summary-card">
+                    <header>
+                      <span>Diagnostics</span>
+                      <strong>{{ numberLabel(elabDiagnostics.length + elabUnresolvedModules.length) }}</strong>
+                    </header>
+                    <p v-if="elabDiagnostics.length || elabUnresolvedModules.length">
+                      Open Elab to jump to Slang diagnostics or inspect unresolved module references.
+                    </p>
+                    <p v-else>
+                      No Slang diagnostics or unresolved module candidates were reported.
                     </p>
                     <div class="summary-metrics">
-                      <span>Files <strong>{{ numberLabel(elabSummary.rtl_files) }}</strong></span>
-                      <span>Modules <strong>{{ numberLabel(elabSummary.modules) }}</strong></span>
-                      <span>Refs <strong>{{ numberLabel(elabSummary.referenced_modules) }}</strong></span>
-                      <span>Missing <strong>{{ numberLabel(elabSummary.unresolved_modules) }}</strong></span>
+                      <span>Slang <strong>{{ numberLabel(elabDiagnostics.length) }}</strong></span>
+                      <span>Unresolved <strong>{{ numberLabel(elabUnresolvedModules.length) }}</strong></span>
+                      <span>Refs <strong>{{ numberLabel(elabReadiness.referenced_modules || elabSummary.referenced_modules) }}</strong></span>
+                      <span>Files <strong>{{ numberLabel(elabReadiness.rtl_files || elabSummary.rtl_files) }}</strong></span>
                     </div>
                   </div>
                   <div class="summary-card">
                     <header>
                       <span>Next Action</span>
-                      <strong>{{ elabDiagnostics.length || elabUnresolvedModules.length ? 'Fix Elab' : 'Inspect Modules' }}</strong>
+                      <strong>{{ elabNextAction.title || (elabDiagnostics.length || elabUnresolvedModules.length ? 'Fix Elab' : 'Continue') }}</strong>
                     </header>
-                    <p v-if="elabDiagnostics.length">
-                      Open the ELAB diagnostics and jump to the source line reported by Slang.
-                    </p>
-                    <p v-else-if="elabUnresolvedModules.length">
-                      Check unresolved module names against the CPU filelist and include directories.
-                    </p>
-                    <p v-else>
-                      The RTL universe is structurally readable. Inspect the module inventory or continue to RTL Review.
-                    </p>
+                    <p>{{ elabNextAction.detail || (elabDiagnostics.length ? 'Open diagnostics and jump to source.' : 'Inspect modules or continue to RTL Review.') }}</p>
                     <button type="button" class="text-action" @click="activeTab = 'elab'">
                       <i class="ri-arrow-right-line"></i>
                       Open Elab
+                    </button>
+                  </div>
+                </section>
+                <section class="summary-card grow">
+                  <header>
+                    <span>Largest Modules</span>
+                    <strong>{{ elabLargestModules.length }}</strong>
+                  </header>
+                  <div class="elab-largest-list">
+                    <button
+                      v-for="moduleItem in elabLargestModules"
+                      :key="`${moduleItem.module}:${moduleItem.path}`"
+                      type="button"
+                      class="elab-module-row compact"
+                      :class="{ top: moduleItem.module === elabTopModuleName }"
+                      @click="openElabModule(moduleItem)"
+                    >
+                      <span>
+                        <strong>{{ moduleItem.module }}</strong>
+                        <small>{{ shortPath(moduleItem.path || '') }}:{{ moduleItem.line || 1 }}</small>
+                      </span>
+                      <em>{{ moduleItem.module === elabTopModuleName ? 'TOP' : `${numberLabel(moduleItem.instances)} inst` }}</em>
                     </button>
                   </div>
                 </section>
@@ -1350,6 +1399,35 @@ interface ElabModule {
   instantiates?: string[]
 }
 
+interface ElabReadiness {
+  status?: string
+  message?: string
+  top_module?: string
+  top_found?: boolean
+  errors?: number
+  warnings?: number
+  diagnostics?: number
+  unresolved_modules?: number
+  rtl_files?: number
+  modules?: number
+  referenced_modules?: number
+}
+
+interface ElabHierarchy {
+  top_module?: string
+  top_children?: string[]
+  module_count?: number
+  referenced_count?: number
+  unresolved?: string[]
+  largest_modules?: ElabModule[]
+}
+
+interface ElabNextAction {
+  title?: string
+  detail?: string
+  target?: string
+}
+
 interface ElabReport {
   path?: string
   tool?: string
@@ -1361,6 +1439,9 @@ interface ElabReport {
   modules?: ElabModule[]
   unresolved_modules?: string[]
   referenced_modules?: string[]
+  readiness?: ElabReadiness
+  hierarchy?: ElabHierarchy
+  next_action?: ElabNextAction
   inputs?: {
     rtl_files?: string[]
     rtl_file_count?: number
@@ -2070,6 +2151,9 @@ const reviewSummaryTiles = computed(() => {
   ]
 })
 const elabSummary = computed(() => elabReport.value?.summary || {})
+const elabReadiness = computed<ElabReadiness>(() => elabReport.value?.readiness || {})
+const elabHierarchy = computed<ElabHierarchy>(() => elabReport.value?.hierarchy || {})
+const elabNextAction = computed<ElabNextAction>(() => elabReport.value?.next_action || {})
 const elabDiagnostics = computed<ElabDiagnostic[]>(() => {
   const diagnostics = elabReport.value?.diagnostics
   if (!Array.isArray(diagnostics)) return []
@@ -2105,30 +2189,44 @@ const elabModules = computed<ElabModule[]>(() => {
     })
 })
 const elabUnresolvedModules = computed(() =>
-  Array.isArray(elabReport.value?.unresolved_modules)
-    ? elabReport.value.unresolved_modules.map(String).filter(Boolean)
+  Array.isArray(elabHierarchy.value.unresolved)
+    ? elabHierarchy.value.unresolved.map(String).filter(Boolean)
+    : Array.isArray(elabReport.value?.unresolved_modules)
+      ? elabReport.value.unresolved_modules.map(String).filter(Boolean)
+      : [],
+)
+const elabTopChildren = computed(() =>
+  Array.isArray(elabHierarchy.value.top_children)
+    ? elabHierarchy.value.top_children.map(String).filter(Boolean)
     : [],
 )
 const elabTopModuleName = computed(() =>
-  String(elabSummary.value.top_module || elabReport.value?.top_module || '--'),
+  String(elabReadiness.value.top_module || elabHierarchy.value.top_module || elabSummary.value.top_module || elabReport.value?.top_module || '--'),
 )
 const elabStatusLabel = computed(() =>
-  titleCase(String(elabSummary.value.status || elabReport.value?.status || 'not run')),
+  titleCase(String(elabReadiness.value.status || elabSummary.value.status || elabReport.value?.status || 'not run')),
 )
-const elabTopFound = computed(() => Boolean(elabSummary.value.top_found))
+const elabTopFound = computed(() => Boolean(elabReadiness.value.top_found ?? elabSummary.value.top_found))
+const elabLargestModules = computed<ElabModule[]>(() => {
+  const modules = elabHierarchy.value.largest_modules
+  if (!Array.isArray(modules)) return elabModules.value.slice(0, 6)
+  return modules
+    .filter((item): item is ElabModule => Boolean(item && typeof item === 'object'))
+    .slice(0, 6)
+})
 const elabSummaryTiles = computed(() => [
   {
-    label: 'Status',
+    label: 'Readiness',
     value: elabStatusLabel.value,
-    tone: String(elabStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
+    tone: prepareStatusTone(elabStatusLabel.value),
   },
   {
     label: 'Top',
     value: elabTopModuleName.value,
     tone: elabTopFound.value ? 'ok' : 'warning',
   },
-  { label: 'RTL Files', value: numberLabel(elabSummary.value.rtl_files || elabReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
-  { label: 'Modules', value: numberLabel(elabSummary.value.modules), tone: 'neutral' },
+  { label: 'RTL Files', value: numberLabel(elabReadiness.value.rtl_files || elabSummary.value.rtl_files || elabReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
+  { label: 'Modules', value: numberLabel(elabReadiness.value.modules || elabSummary.value.modules), tone: 'neutral' },
   { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length), tone: elabDiagnostics.value.length ? 'warning' : 'ok' },
   { label: 'Unresolved', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
 ])
@@ -4377,6 +4475,47 @@ button:disabled {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.elab-summary-grid {
+  flex-shrink: 0;
+}
+
+.elab-readiness-metrics span:first-child {
+  grid-column: span 2;
+}
+
+.elab-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 0;
+}
+
+.elab-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elab-chip.muted {
+  color: var(--text-secondary);
+}
+
+.elab-largest-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   min-height: 0;
   overflow: auto;
