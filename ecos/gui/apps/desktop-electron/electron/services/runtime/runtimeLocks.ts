@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rm, stat } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface RuntimeLockHandle {
@@ -32,7 +34,8 @@ export function isProcessAlive(pid: number): boolean {
 
 export async function readRuntimeLockOwner(lockDirectory: string): Promise<RuntimeLockOwner | null> {
   try {
-    const raw = await readFile(path.join(lockDirectory, 'owner.json'), 'utf8')
+    const raw = await readLockOwnerText(lockDirectory)
+    if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<RuntimeLockOwner>
     if (
       typeof parsed.jobId === 'string'
@@ -51,41 +54,73 @@ export async function readRuntimeLockOwner(lockDirectory: string): Promise<Runti
   return null
 }
 
+async function readLockOwnerText(lockPath: string): Promise<string | null> {
+  try {
+    return await readFile(lockPath, 'utf8')
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'EISDIR') return null
+  }
+
+  try {
+    return await readFile(path.join(lockPath, 'owner.json'), 'utf8')
+  } catch {
+    return null
+  }
+}
+
 export async function acquireRuntimeLock(
   rootDirectory: string,
   scope: string,
   jobId: string,
 ): Promise<RuntimeLockHandle | null> {
   await mkdir(rootDirectory, { recursive: true })
-  const lockDirectory = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
+  const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
+  let lockFile: FileHandle
 
   try {
-    await mkdir(lockDirectory)
+    lockFile = await open(lockPath, 'wx')
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'EEXIST') throw error
 
-    const active = await isRuntimeLockDirectoryActive(lockDirectory, scope)
+    const active = await isRuntimeLockPathActive(lockPath, scope)
     if (!active) {
-      await rm(lockDirectory, { force: true, recursive: true })
+      await rm(lockPath, { force: true, recursive: true })
       return acquireRuntimeLock(rootDirectory, scope, jobId)
     }
     return null
   }
 
-  await writeFile(
-    path.join(lockDirectory, 'owner.json'),
-    JSON.stringify({
-      jobId,
-      pid: process.pid,
-      scope,
-    }, null, 2),
-  )
+  const owner: RuntimeLockOwner = {
+    jobId,
+    pid: process.pid,
+    scope,
+  }
+  let removeFailedLock = false
+  try {
+    await lockFile.writeFile(JSON.stringify(owner, null, 2))
+    const currentOwner = await readRuntimeLockOwner(lockPath)
+    if (!isSameRuntimeLockOwner(currentOwner, owner)) {
+      return null
+    }
+  } catch (error) {
+    removeFailedLock = await isSameFile(lockPath, lockFile)
+    throw error
+  } finally {
+    await lockFile.close()
+    if (removeFailedLock) {
+      await rm(lockPath, { force: true, recursive: true })
+    }
+  }
 
   return {
-    directory: lockDirectory,
+    directory: lockPath,
     release: async () => {
-      await rm(lockDirectory, { force: true, recursive: true })
+      const currentOwner = await readRuntimeLockOwner(lockPath)
+      if (isSameRuntimeLockOwner(currentOwner, owner)) {
+        await rm(lockPath, { force: true, recursive: true })
+      }
     },
   }
 }
@@ -94,22 +129,22 @@ export async function isRuntimeScopeActive(
   rootDirectory: string,
   scope: string,
 ): Promise<boolean> {
-  const lockDirectory = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
-  const active = await isRuntimeLockDirectoryActive(lockDirectory, scope)
+  const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
+  const active = await isRuntimeLockPathActive(lockPath, scope)
   if (!active) {
-    await rm(lockDirectory, { force: true, recursive: true })
+    await rm(lockPath, { force: true, recursive: true })
   }
   return active
 }
 
-async function isRuntimeLockDirectoryActive(
-  lockDirectory: string,
+async function isRuntimeLockPathActive(
+  lockPath: string,
   scope: string,
 ): Promise<boolean> {
-  const owner = await readRuntimeLockOwner(lockDirectory)
+  const owner = await readRuntimeLockOwner(lockPath)
   if (!owner) {
     try {
-      const stats = await stat(lockDirectory)
+      const stats = await stat(lockPath)
       return Date.now() - stats.mtimeMs < runtimeLockInitializationGraceMs
     } catch {
       return false
@@ -119,4 +154,29 @@ async function isRuntimeLockDirectoryActive(
     return false
   }
   return true
+}
+
+function isSameRuntimeLockOwner(
+  actual: RuntimeLockOwner | null,
+  expected: RuntimeLockOwner,
+): boolean {
+  return actual?.jobId === expected.jobId
+    && actual.pid === expected.pid
+    && actual.scope === expected.scope
+}
+
+async function isSameFile(lockPath: string, lockFile: FileHandle): Promise<boolean> {
+  try {
+    const [pathStats, fileStats] = await Promise.all([
+      stat(lockPath),
+      lockFile.stat(),
+    ])
+    return isSameStatsFile(pathStats, fileStats)
+  } catch {
+    return false
+  }
+}
+
+function isSameStatsFile(first: Stats, second: Stats): boolean {
+  return first.dev === second.dev && first.ino === second.ino
 }

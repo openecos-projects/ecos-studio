@@ -111,4 +111,29 @@ describe('runtimeLocks', () => {
       await rm(root, { force: true, recursive: true })
     }
   })
+
+  it('prevents reclaimed directory initializers from overwriting the new owner', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      const staleTime = new Date(Date.now() - runtimeLockInitializationGraceMs - 1_000)
+      await utimes(lockDirectory, staleTime, staleTime)
+
+      const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
+      expect(lock).not.toBeNull()
+
+      await expect(writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
+        jobId: 'stalled-job',
+        pid: process.pid,
+        scope: '/work/demo',
+      }))).rejects.toThrow()
+      await expect(readRuntimeLockOwner(lockDirectory)).resolves.toMatchObject({
+        jobId: 'job-1',
+      })
+      await lock?.release()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
 })
