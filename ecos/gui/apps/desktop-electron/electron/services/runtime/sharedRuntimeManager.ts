@@ -26,7 +26,7 @@ export interface SharedRuntimeAdapter<
   TRequest,
   TResult,
   TEvent,
-  TContext extends SharedRuntimeAdapterContext<TEvent> = SharedRuntimeAdapterContext<TEvent>,
+  TContext = SharedRuntimeAdapterContext<TEvent>,
 > {
   execute(
     request: TRequest,
@@ -38,7 +38,7 @@ export interface SharedRuntimeManagerOptions<
   TRequest,
   TResult,
   TEvent,
-  TContext extends SharedRuntimeAdapterContext<TEvent> = SharedRuntimeAdapterContext<TEvent>,
+  TContext = SharedRuntimeAdapterContext<TEvent>,
 > {
   adapter: SharedRuntimeAdapter<TRequest, TResult, TEvent, TContext>
   createAdapterContext?: (
@@ -47,6 +47,7 @@ export interface SharedRuntimeManagerOptions<
     jobId: string,
     scope: RuntimeScope,
   ) => TContext
+  createBlockedResult?(request: TRequest, message: string): TResult
   createFailedResult(request: TRequest, message: string): TResult
   getRequestLabel(request: TRequest): string
   isFailedResult?: (result: TResult) => boolean
@@ -69,7 +70,7 @@ export class SharedRuntimeManager<
   TRequest,
   TResult,
   TEvent,
-  TContext extends SharedRuntimeAdapterContext<TEvent> = SharedRuntimeAdapterContext<TEvent>,
+  TContext = SharedRuntimeAdapterContext<TEvent>,
 > {
   private readonly activeLongRunningJobsByScope = new Map<string, string>()
   private readonly eventFanout = new RuntimeEventFanout<TEvent>()
@@ -100,6 +101,7 @@ export class SharedRuntimeManager<
     const scope = this.options.resolveScope(request)
     const longRunning = this.options.isLongRunning(request)
     let runtimeLock: RuntimeLockHandle | null = null
+    let trackedActiveScope = false
 
     this.emit(this.options.toQueuedEvent(request, jobId, scope), listener)
 
@@ -108,11 +110,18 @@ export class SharedRuntimeManager<
     }
 
     if (longRunning) {
-      runtimeLock = await acquireRuntimeLock(this.runtimeLockRoot, scope.id, jobId)
+      this.activeLongRunningJobsByScope.set(scope.id, jobId)
+      trackedActiveScope = true
+      try {
+        runtimeLock = await acquireRuntimeLock(this.runtimeLockRoot, scope.id, jobId)
+      } catch (error) {
+        this.clearActiveScope(scope.id, jobId)
+        throw error
+      }
       if (!runtimeLock) {
+        this.clearActiveScope(scope.id, jobId)
         return this.failBlockedRequest(request, jobId, scope, listener)
       }
-      this.activeLongRunningJobsByScope.set(scope.id, jobId)
     }
 
     try {
@@ -140,8 +149,8 @@ export class SharedRuntimeManager<
       this.emit(this.options.toFailedEvent(request, jobId, scope, result), listener)
       return result
     } finally {
-      if (longRunning && this.activeLongRunningJobsByScope.get(scope.id) === jobId) {
-        this.activeLongRunningJobsByScope.delete(scope.id)
+      if (trackedActiveScope) {
+        this.clearActiveScope(scope.id, jobId)
       }
       await runtimeLock?.release()
     }
@@ -160,9 +169,16 @@ export class SharedRuntimeManager<
     const message = scope.directory
       ? `Another ${this.options.getRequestLabel(request)} is already running for ${scope.directory}. Wait for it to finish before starting a new one.`
       : `Another ${this.options.getRequestLabel(request)} is already running. Wait for it to finish before starting a new one.`
-    const result = this.options.createFailedResult(request, message)
+    const result = this.options.createBlockedResult?.(request, message)
+      ?? this.options.createFailedResult(request, message)
     this.emit(this.options.toFailedEvent(request, jobId, scope, result), listener)
     return result
+  }
+
+  private clearActiveScope(scopeId: string, jobId: string): void {
+    if (this.activeLongRunningJobsByScope.get(scopeId) === jobId) {
+      this.activeLongRunningJobsByScope.delete(scopeId)
+    }
   }
 
   private scopeIdForString(scope: string): string {
