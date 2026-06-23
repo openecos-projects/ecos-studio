@@ -13,6 +13,8 @@ export interface RuntimeLockOwner {
   scope: string
 }
 
+export const runtimeLockInitializationGraceMs = 5_000
+
 export function runtimeLockName(scope: string): string {
   return createHash('sha256').update(scope).digest('hex').slice(0, 24)
 }
@@ -63,8 +65,8 @@ export async function acquireRuntimeLock(
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'EEXIST') throw error
 
-    const owner = await readRuntimeLockOwner(lockDirectory)
-    if (owner && owner.scope === scope && !isProcessAlive(owner.pid)) {
+    const active = await isRuntimeLockDirectoryActive(lockDirectory, scope)
+    if (!active) {
       await rm(lockDirectory, { force: true, recursive: true })
       return acquireRuntimeLock(rootDirectory, scope, jobId)
     }
@@ -93,17 +95,27 @@ export async function isRuntimeScopeActive(
   scope: string,
 ): Promise<boolean> {
   const lockDirectory = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
+  const active = await isRuntimeLockDirectoryActive(lockDirectory, scope)
+  if (!active) {
+    await rm(lockDirectory, { force: true, recursive: true })
+  }
+  return active
+}
+
+async function isRuntimeLockDirectoryActive(
+  lockDirectory: string,
+  scope: string,
+): Promise<boolean> {
   const owner = await readRuntimeLockOwner(lockDirectory)
   if (!owner) {
     try {
-      await stat(lockDirectory)
-      return true
+      const stats = await stat(lockDirectory)
+      return Date.now() - stats.mtimeMs < runtimeLockInitializationGraceMs
     } catch {
       return false
     }
   }
   if (owner && owner.scope === scope && !isProcessAlive(owner.pid)) {
-    await rm(lockDirectory, { force: true, recursive: true })
     return false
   }
   return true

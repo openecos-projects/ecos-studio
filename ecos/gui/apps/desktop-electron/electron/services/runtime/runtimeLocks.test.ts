@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -8,6 +8,7 @@ import {
   isProcessAlive,
   isRuntimeScopeActive,
   readRuntimeLockOwner,
+  runtimeLockInitializationGraceMs,
   runtimeLockName,
 } from './runtimeLocks'
 
@@ -89,6 +90,23 @@ describe('runtimeLocks', () => {
 
       await expect(acquireRuntimeLock(root, '/work/demo', 'job-1')).resolves.toBeNull()
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(true)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('reclaims ownerless locks after initialization stalls', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      const staleTime = new Date(Date.now() - runtimeLockInitializationGraceMs - 1_000)
+      await utimes(lockDirectory, staleTime, staleTime)
+
+      await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
+      const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
+      expect(lock).not.toBeNull()
+      await lock?.release()
     } finally {
       await rm(root, { force: true, recursive: true })
     }
