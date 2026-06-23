@@ -26,3 +26,6 @@ resource-manifest.json
 resources/manifest.json
 tools/manifest.json
 manifest.json
+
+# Simulator disassembly traces
+trace_hart_*.dasm
