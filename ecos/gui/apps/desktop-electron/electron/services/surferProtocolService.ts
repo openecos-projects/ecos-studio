@@ -1,11 +1,10 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { basename, extname } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { basename, extname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
 
 const SURFER_SCHEME = 'ecos-surfer'
-const SURFER_APP_BASE = 'https://app.surfer-project.org'
-const SURFER_FETCH_TIMEOUT_MS = 8000
 const SURFER_ALLOWED_ASSETS = new Map([
   ['integration.js', 'application/javascript; charset=utf-8'],
   ['manifest.json', 'application/json; charset=utf-8'],
@@ -37,7 +36,11 @@ interface ProtocolRegistrar {
 }
 
 export interface SurferProtocolServiceOptions {
+  appPath?: string
+  isPackaged?: boolean
   projectScopeProvider: ProjectScopeProvider
+  resourcesPath?: string
+  surferAssetsPath?: string
 }
 
 let schemesRegistered = false
@@ -61,11 +64,13 @@ export function registerSurferProtocolSchemes(protocol: ProtocolRegistrar): void
 
 export class SurferProtocolService {
   private readonly projectScopeProvider: ProjectScopeProvider
+  private readonly surferAssetsPath: string
   private readonly assetCache = new Map<string, Buffer>()
   private registered = false
 
   constructor(options: SurferProtocolServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
+    this.surferAssetsPath = options.surferAssetsPath ?? resolveSurferAssetsPath(options)
   }
 
   register(protocol: ProtocolRegistrar): void {
@@ -92,7 +97,7 @@ export class SurferProtocolService {
         return this.textResponse(`Unknown Surfer asset: ${pathname}`, 404)
       }
 
-      return this.response(await this.fetchSurferAsset(pathname), assetType)
+      return this.response(await this.readSurferAsset(pathname), assetType)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return this.textResponse(message, 502)
@@ -104,8 +109,8 @@ export class SurferProtocolService {
     const cached = this.assetCache.get(htmlCacheKey)
     if (cached) return cached
 
-    let text = (await this.fetchSurferAsset('')).toString('utf8')
-    const integrationScript = (await this.fetchSurferAsset('integration.js')).toString('utf8')
+    let text = (await this.readSurferAsset('index.html')).toString('utf8')
+    const integrationScript = (await this.readSurferAsset('integration.js')).toString('utf8')
     const setupHooks = `
       try {
         ${integrationScript}
@@ -130,40 +135,42 @@ export class SurferProtocolService {
       }
     `
 
+    text = this.removeDefaultMessageListenerSetup(text)
+    text = this.disableSurferServiceWorker(text)
+
     if (text.includes('/*SURFER_SETUP_HOOKS*/')) {
       text = text.replace('/*SURFER_SETUP_HOOKS*/', setupHooks)
     } else {
       text = text.replace('</body>', `<script>${setupHooks}</script></body>`)
     }
-    text = text.replace(
-      "navigator.serviceWorker.register('sw.js');",
-      "console.debug('Surfer service worker disabled inside ECOS Studio');",
-    )
 
     const body = Buffer.from(text, 'utf8')
     this.assetCache.set(htmlCacheKey, body)
     return body
   }
 
-  private async fetchSurferAsset(asset: string): Promise<Buffer> {
-    const key = asset || '__index__'
+  private removeDefaultMessageListenerSetup(text: string): string {
+    return text.replace(
+      /<script\s+src="integration\.js"><\/script>\s*<script>\s*register_message_listener\(\)\s*<\/script>/,
+      '',
+    )
+  }
+
+  private disableSurferServiceWorker(text: string): string {
+    return text.replace(
+      "navigator.serviceWorker.register('sw.js');",
+      "console.debug('Surfer service worker disabled inside ECOS Studio');",
+    )
+  }
+
+  private async readSurferAsset(asset: string): Promise<Buffer> {
+    const key = asset || 'index.html'
     const cached = this.assetCache.get(key)
     if (cached) return cached
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), SURFER_FETCH_TIMEOUT_MS)
-    try {
-      const url = `${SURFER_APP_BASE}/${asset}`
-      const response = await fetch(url, { signal: controller.signal })
-      if (!response.ok) {
-        throw new Error(`failed to fetch Surfer asset ${asset || 'index'}: ${response.status}`)
-      }
-      const body = Buffer.from(await response.arrayBuffer())
-      this.assetCache.set(key, body)
-      return body
-    } finally {
-      clearTimeout(timer)
-    }
+    const body = await readFile(join(this.surferAssetsPath, key))
+    this.assetCache.set(key, body)
+    return body
   }
 
   private async waveformResponse(request: Request, url: URL): Promise<Response> {
@@ -196,7 +203,15 @@ export class SurferProtocolService {
   }
 
   private response(body: Buffer | string, contentType: string): Response {
-    return new Response(body, {
+    if (typeof body === 'string') {
+      return new Response(body, {
+        headers: this.headers(contentType),
+      })
+    }
+    const copy = new Uint8Array(body.byteLength)
+    copy.set(body)
+    const responseBody = new Blob([copy.buffer])
+    return new Response(responseBody, {
       headers: this.headers(contentType),
     })
   }
@@ -227,4 +242,18 @@ export function surferViewerUrl(): string {
 export function surferWaveformUrl(path: string): string {
   const name = encodeURIComponent(basename(path))
   return `${SURFER_SCHEME}://viewer/waveform/${name}?path=${encodeURIComponent(path)}`
+}
+
+export function resolveSurferAssetsPath(options: {
+  appPath?: string
+  isPackaged?: boolean
+  resourcesPath?: string
+} = {}): string {
+  if (options.isPackaged && options.resourcesPath) {
+    return join(options.resourcesPath, 'surfer')
+  }
+  if (options.appPath) {
+    return join(options.appPath, 'resources', 'surfer')
+  }
+  return fileURLToPath(new URL('../../resources/surfer', import.meta.url))
 }

@@ -124,7 +124,10 @@ function getDesktopServices() {
     envProvider: runtimeEnvProvider,
   })
   const surferProtocolService = new SurferProtocolService({
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
     projectScopeProvider: projectScopeService,
+    resourcesPath: process.resourcesPath,
   })
   surferProtocolService.register(protocol)
   const tileService = new TileService({

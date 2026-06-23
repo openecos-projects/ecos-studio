@@ -2923,7 +2923,7 @@ async function loadCurrentWaveform(): Promise<void> {
     window.setTimeout(() => {
       if (token === waveformLoadToken && !surferReady.value) {
         waveformLoading.value = false
-        waveformError.value = 'Surfer viewer is not ready. Check network access to app.surfer-project.org.'
+        waveformError.value = 'Surfer viewer is not ready. Check bundled Surfer assets and reload Wave.'
       }
     }, 12000)
     return

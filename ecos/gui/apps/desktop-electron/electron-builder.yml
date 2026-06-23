@@ -9,6 +9,8 @@ files:
 extraResources:
   - from: resources/binaries
     to: binaries
+  - from: resources/surfer
+    to: surfer
 linux:
   artifactName: ECOS-Studio_${version}_${arch}.${ext}
   executableName: ecos-studio
