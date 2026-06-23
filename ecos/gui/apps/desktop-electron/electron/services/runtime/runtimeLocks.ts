@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface RuntimeLockHandle {
@@ -64,7 +64,7 @@ export async function acquireRuntimeLock(
     if (code !== 'EEXIST') throw error
 
     const owner = await readRuntimeLockOwner(lockDirectory)
-    if (!owner || owner.scope !== scope || !isProcessAlive(owner.pid)) {
+    if (owner && owner.scope === scope && !isProcessAlive(owner.pid)) {
       await rm(lockDirectory, { force: true, recursive: true })
       return acquireRuntimeLock(rootDirectory, scope, jobId)
     }
@@ -94,7 +94,15 @@ export async function isRuntimeScopeActive(
 ): Promise<boolean> {
   const lockDirectory = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
   const owner = await readRuntimeLockOwner(lockDirectory)
-  if (!owner || owner.scope !== scope || !isProcessAlive(owner.pid)) {
+  if (!owner) {
+    try {
+      await stat(lockDirectory)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (owner && owner.scope === scope && !isProcessAlive(owner.pid)) {
     await rm(lockDirectory, { force: true, recursive: true })
     return false
   }

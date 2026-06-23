@@ -80,4 +80,17 @@ describe('runtimeLocks', () => {
       await rm(root, { force: true, recursive: true })
     }
   })
+
+  it('does not delete locks that are still being initialized', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+
+      await expect(acquireRuntimeLock(root, '/work/demo', 'job-1')).resolves.toBeNull()
+      await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(true)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
 })

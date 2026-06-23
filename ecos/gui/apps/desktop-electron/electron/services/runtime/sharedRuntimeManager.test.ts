@@ -151,13 +151,14 @@ describe('SharedRuntimeManager', () => {
 
   it('tracks active long-running scopes and clears them after execution', async () => {
     let release!: () => void
+    const adapterExecute = vi.fn(() => new Promise<RuntimeResult>((resolve) => {
+      release = () => resolve({
+        messages: ['done'],
+        ok: true,
+      })
+    }))
     const manager = createManager({
-      execute: vi.fn(() => new Promise<RuntimeResult>((resolve) => {
-        release = () => resolve({
-          messages: ['done'],
-          ok: true,
-        })
-      })),
+      execute: adapterExecute,
     })
 
     const pending = manager.execute({
@@ -167,6 +168,7 @@ describe('SharedRuntimeManager', () => {
     })
 
     await vi.waitFor(async () => {
+      expect(adapterExecute).toHaveBeenCalledTimes(1)
       await expect(manager.isScopeActive('/work/demo')).resolves.toBe(true)
     })
 
@@ -233,6 +235,33 @@ describe('SharedRuntimeManager', () => {
       messages: ['adapter unavailable'],
       ok: false,
     })
+    await expect(manager.isScopeActive('/work/demo')).resolves.toBe(false)
+  })
+
+  it('clears active long-running scopes when started event delivery fails', async () => {
+    const adapterExecute = vi.fn(async () => ({
+      messages: ['done'],
+      ok: true,
+    }))
+    const listener = vi.fn((event: RuntimeEvent) => {
+      if (event.type === 'started') {
+        throw new Error('listener unavailable')
+      }
+    })
+    const manager = createManager({
+      execute: adapterExecute,
+    })
+
+    await expect(manager.execute({
+      label: 'flow',
+      longRunning: true,
+      scopeDirectory: '/work/demo',
+    }, listener)).resolves.toEqual({
+      messages: ['listener unavailable'],
+      ok: false,
+    })
+
+    expect(adapterExecute).not.toHaveBeenCalled()
     await expect(manager.isScopeActive('/work/demo')).resolves.toBe(false)
   })
 })

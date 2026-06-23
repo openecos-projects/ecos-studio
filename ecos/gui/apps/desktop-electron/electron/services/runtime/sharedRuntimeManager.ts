@@ -115,17 +115,17 @@ export class SharedRuntimeManager<
       this.activeLongRunningJobsByScope.set(scope.id, jobId)
     }
 
-    this.emit(this.options.toStartedEvent(request, jobId, scope), listener)
-
-    const context: SharedRuntimeAdapterContext<TEvent> = {
-      emit: (event) => {
-        this.emit(this.options.withJobMetadata(event, request, jobId, scope), listener)
-      },
-    }
-    const adapterContext = this.options.createAdapterContext?.(context, request, jobId, scope)
-      ?? (context as TContext)
-
     try {
+      this.emit(this.options.toStartedEvent(request, jobId, scope), listener)
+
+      const context: SharedRuntimeAdapterContext<TEvent> = {
+        emit: (event) => {
+          this.emit(this.options.withJobMetadata(event, request, jobId, scope), listener)
+        },
+      }
+      const adapterContext = this.options.createAdapterContext?.(context, request, jobId, scope)
+        ?? (context as TContext)
+
       const result = await this.options.adapter.execute(request, adapterContext)
       const event = this.options.isFailedResult?.(result) === true
         ? this.options.toFailedEvent(request, jobId, scope, result)
