@@ -478,7 +478,7 @@ impl RenderPlanner {
                     cell_view,
                     policy,
                     false,
-                    TopLevelContextMode::ContextShapesOnly,
+                    TopLevelContextMode::StableContextOnly,
                 );
             }
             HierarchyLodMode::MidCoarse => {
@@ -493,7 +493,7 @@ impl RenderPlanner {
                     cell_view,
                     policy,
                     false,
-                    TopLevelContextMode::ContextShapesOnly,
+                    TopLevelContextMode::StableContextOnly,
                 );
             }
             HierarchyLodMode::NearExpand => {
@@ -574,8 +574,13 @@ impl RenderPlanner {
             plan.query_stats.total_shapes_in_cell = query.total_shapes_in_cell;
         }
         for shape in query.shapes {
-            if mode == TopLevelContextMode::ContextShapesOnly && !is_context_shape(shape.kind) {
-                continue;
+            match mode {
+                TopLevelContextMode::AllVisibleShapes => {}
+                TopLevelContextMode::StableContextOnly => {
+                    if !is_stable_far_context_shape(shape.kind) {
+                        continue;
+                    }
+                }
             }
             self.push_shape_lod(layers, plan, viewport, occupancy, shape);
         }
@@ -1277,7 +1282,7 @@ enum HierarchyLodMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TopLevelContextMode {
     AllVisibleShapes,
-    ContextShapesOnly,
+    StableContextOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2332,6 +2337,10 @@ fn is_context_shape(kind: ShapeKind) -> bool {
     )
 }
 
+fn is_stable_far_context_shape(kind: ShapeKind) -> bool {
+    matches!(kind, ShapeKind::Die | ShapeKind::Core)
+}
+
 fn shape_kind_code(kind: ShapeKind) -> u8 {
     match kind {
         ShapeKind::Die => 1,
@@ -2867,6 +2876,32 @@ mod tests {
             .collect()
     }
 
+    fn plan_contains_source_id(plan: &crate::RenderPlan, source_id: u32) -> bool {
+        plan.batches
+            .iter()
+            .flat_map(|batch| batch.items.iter())
+            .any(|item| match item {
+                DrawItem::Rect(rect) => rect.source_id == source_id,
+                DrawItem::Marker(marker) => marker.source_id == source_id,
+                DrawItem::Line(line) => line.source_id == source_id,
+            })
+    }
+
+    fn plan_source_ids_except_hierarchy(
+        plan: &crate::RenderPlan,
+    ) -> std::collections::BTreeSet<u32> {
+        plan.batches
+            .iter()
+            .filter(|batch| batch.plane != RenderPlane::Hierarchy)
+            .flat_map(|batch| batch.items.iter())
+            .map(|item| match item {
+                DrawItem::Rect(rect) => rect.source_id,
+                DrawItem::Marker(marker) => marker.source_id,
+                DrawItem::Line(line) => line.source_id,
+            })
+            .collect()
+    }
+
     #[test]
     fn lod_classifier_uses_hysteresis_to_prevent_threshold_flicker() {
         let settings = RenderSettings {
@@ -2988,6 +3023,48 @@ mod tests {
         assert!(frame_source_ids.contains(&10));
         assert!(frame_source_ids.contains(&11));
         assert!(!frame_source_ids.contains(&42));
+    }
+
+    #[test]
+    fn far_view_ignores_locally_loaded_detail_context_geometry() {
+        let mut db = hierarchy_db_with_context_shapes();
+        let model = DisplayModel::from_layout_layers(db.layers());
+        let viewport = Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0);
+        let settings = RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            ..Default::default()
+        };
+        let planner = RenderPlanner::new(settings);
+
+        let before = planner.plan(&db, &model, viewport);
+        db.add_shape(
+            db.top_cell(),
+            ShapeRecord::new(
+                Rect::new(5_000, 5_000, 7_000, 7_000),
+                0,
+                ShapeKind::Instance,
+                302,
+            ),
+        );
+        db.add_shape(
+            db.top_cell(),
+            ShapeRecord::new(
+                Rect::new(7_000, 5_000, 8_000, 7_000),
+                0,
+                ShapeKind::Region,
+                303,
+            ),
+        );
+        let after = planner.plan(&db, &model, viewport);
+
+        assert_eq!(before.source, RenderPlanSource::HierarchyFar);
+        assert_eq!(after.source, RenderPlanSource::HierarchyFar);
+        assert!(!plan_contains_source_id(&after, 302));
+        assert!(!plan_contains_source_id(&after, 303));
+        assert_eq!(
+            plan_source_ids_except_hierarchy(&before),
+            plan_source_ids_except_hierarchy(&after)
+        );
     }
 
     #[test]

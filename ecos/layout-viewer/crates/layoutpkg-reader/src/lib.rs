@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -177,6 +177,14 @@ struct PackageHierarchy {
 struct TileIndex {
     tiles: Vec<TileEntry>,
     large_objects: Option<LargeObjectsEntry>,
+    #[serde(default)]
+    statistics: Option<TileIndexStatistics>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct TileIndexStatistics {
+    #[serde(default)]
+    by_layer: BTreeMap<u16, usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -312,6 +320,14 @@ impl LayoutPackage {
 
     pub fn detail_tileset_path(&self) -> &str {
         &self.manifest.tilesets.detail
+    }
+
+    pub fn detail_layer_counts(&self) -> BTreeMap<u16, usize> {
+        self.detail_index
+            .statistics
+            .as_ref()
+            .map(|statistics| statistics.by_layer.clone())
+            .unwrap_or_default()
     }
 
     pub fn design_name(&self) -> &str {
@@ -1023,6 +1039,16 @@ mod tests {
         assert_eq!(overlays.gcell_grids.len(), 1);
         assert_eq!(overlays.gcell_grids[0].direction, OverlayDirection::Y);
         assert_eq!(overlays.gcell_grids[0].step, 50);
+    }
+
+    #[test]
+    fn exposes_detail_layer_counts_from_index_statistics() {
+        let (_input, package_root) = create_layoutpkg();
+        let package = LayoutPackage::open(&package_root).unwrap();
+
+        let counts = package.detail_layer_counts();
+
+        assert_eq!(counts.get(&1), Some(&4));
     }
 
     #[test]

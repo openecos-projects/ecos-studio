@@ -24,15 +24,23 @@ use layoutdb::{
 
 const TARGET_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 const MAX_FPS_SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const FRAME_RATE_SAMPLE_COUNT: usize = 120;
 const PLANE_CACHE_TILE_PX: f32 = 256.0;
 const PLANE_CACHE_MARGIN_TILES: i32 = 1;
+const DETAIL_LOAD_TILE_PX: f32 = 256.0;
+const DETAIL_LOAD_MARGIN_TILES: i32 = 1;
 const HIERARCHY_ROWS_STEADY_LIMIT: usize = 512;
 const HIERARCHY_ROWS_INTERACTION_LIMIT: usize = 64;
+const SIDEBAR_DEFAULT_WIDTH: f32 = 320.0;
+const SIDEBAR_MIN_WIDTH: f32 = 190.0;
+const SIDEBAR_MAX_WIDTH: f32 = 640.0;
+const HIERARCHY_ROW_RIGHT_GUTTER: f32 = 12.0;
 const MAX_PATTERN_OPS_PER_RECT: usize = 512;
 const MAX_HATCH_OPS_PER_RECT: usize = 256;
 const PATTERN_TILE_PX: f32 = 10.0;
 const SPARSE_DOT_SPACING_PX: f32 = 9.0;
 const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
+const NEAR_RASTER_OPS_THRESHOLD: usize = 6_000;
 
 #[derive(Debug, Parser)]
 #[command(name = "layout-viewer-native-v2")]
@@ -51,12 +59,16 @@ fn main() -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "ECOS Layout Viewer V2",
+        window_title(),
         native_options,
         Box::new(move |_cc| Ok(Box::new(app))),
     )
     .map_err(|err| anyhow::anyhow!("{err}"))?;
     Ok(())
+}
+
+fn window_title() -> &'static str {
+    "ECOS Layout Viewer"
 }
 
 struct LayoutViewerV2App {
@@ -75,6 +87,7 @@ struct LayoutViewerV2App {
     render_surface: render_surface::RenderSurface,
     render_surface_texture: Option<egui::TextureHandle>,
     render_surface_texture_key: Option<plane_cache::PlaneKey>,
+    render_surface_texture_world: Option<Rect>,
     load_generation: u64,
     last_render_plan: Option<layout_render::RenderPlan>,
     last_render_plan_revision: u64,
@@ -210,10 +223,31 @@ impl FrameTimingState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct FrameRateState {
     last_frame_at: Option<std::time::Instant>,
     fps: f32,
+    active_fps: f32,
+    last_frame_ms: f32,
+    p95_frame_ms: f32,
+    samples_ms: [f32; FRAME_RATE_SAMPLE_COUNT],
+    sample_count: usize,
+    sample_cursor: usize,
+}
+
+impl Default for FrameRateState {
+    fn default() -> Self {
+        Self {
+            last_frame_at: None,
+            fps: 0.0,
+            active_fps: 0.0,
+            last_frame_ms: 0.0,
+            p95_frame_ms: 0.0,
+            samples_ms: [0.0; FRAME_RATE_SAMPLE_COUNT],
+            sample_count: 0,
+            sample_cursor: 0,
+        }
+    }
 }
 
 impl FrameRateState {
@@ -229,6 +263,12 @@ impl FrameRateState {
         } else {
             self.fps * 0.85 + instant_fps * 0.15
         };
+        self.active_fps = instant_fps;
+        self.last_frame_ms = seconds * 1_000.0;
+        self.samples_ms[self.sample_cursor] = self.last_frame_ms;
+        self.sample_cursor = (self.sample_cursor + 1) % FRAME_RATE_SAMPLE_COUNT;
+        self.sample_count = (self.sample_count + 1).min(FRAME_RATE_SAMPLE_COUNT);
+        self.p95_frame_ms = percentile_frame_ms(&self.samples_ms[..self.sample_count], 0.95);
     }
 
     fn record_frame_at(&mut self, now: std::time::Instant) {
@@ -239,6 +279,16 @@ impl FrameRateState {
             }
         }
     }
+}
+
+fn percentile_frame_ms(samples: &[f32], percentile: f32) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let index = ((sorted.len() as f32 - 1.0) * percentile.clamp(0.0, 1.0)).ceil() as usize;
+    sorted[index.min(sorted.len() - 1)]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,7 +398,7 @@ impl AsyncLoadState {
         ![self.pending, self.in_flight, self.completed]
             .into_iter()
             .flatten()
-            .any(|request| request.viewport == viewport)
+            .any(|request| rect_contains_rect(request.viewport, viewport))
     }
 
     fn mark_completed(&mut self, request: LoadRequest) {
@@ -418,10 +468,44 @@ fn should_request_smooth_repaint(interaction_active: bool, async_load: &AsyncLoa
     interaction_active || async_load.has_pending_work()
 }
 
+fn canvas_scroll_delta(response_hovered: bool, raw_scroll_delta_y: f32) -> Option<f32> {
+    (response_hovered && raw_scroll_delta_y.abs() > 0.0).then_some(raw_scroll_delta_y)
+}
+
+fn should_sample_layout_fps(
+    layout_active_frame: bool,
+    interaction_active: bool,
+    async_load: &AsyncLoadState,
+) -> bool {
+    layout_active_frame || interaction_active || async_load.has_pending_work()
+}
+
 fn should_request_detail_tiles(source: RenderPlanSource) -> bool {
     matches!(
         source,
         RenderPlanSource::FlatDetail | RenderPlanSource::HierarchyNear
+    )
+}
+
+fn revision_for_render_source(
+    source: RenderPlanSource,
+    hierarchy_revision: u64,
+    overview_revision: u64,
+    detail_revision: u64,
+) -> u64 {
+    match source {
+        RenderPlanSource::HierarchyFar | RenderPlanSource::HierarchyMid => hierarchy_revision,
+        RenderPlanSource::OverviewDensity => overview_revision,
+        RenderPlanSource::HierarchyNear | RenderPlanSource::FlatDetail => detail_revision,
+    }
+}
+
+fn render_source_revision(session: &LayoutSession, source: RenderPlanSource) -> u64 {
+    revision_for_render_source(
+        source,
+        session.hierarchy_revision(),
+        session.overview_revision(),
+        session.detail_revision(),
     )
 }
 
@@ -436,13 +520,13 @@ fn should_check_overview_density(
         && max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel
 }
 
-fn use_plane_renderer(source: RenderPlanSource, item_count: usize) -> bool {
+fn use_plane_renderer(source: RenderPlanSource, item_count: usize, estimated_ops: usize) -> bool {
     matches!(
         source,
         RenderPlanSource::HierarchyFar
             | RenderPlanSource::HierarchyMid
             | RenderPlanSource::OverviewDensity
-    ) || (item_count >= NEAR_RASTER_ITEM_THRESHOLD
+    ) || ((item_count >= NEAR_RASTER_ITEM_THRESHOLD || estimated_ops >= NEAR_RASTER_OPS_THRESHOLD)
         && matches!(
             source,
             RenderPlanSource::HierarchyNear | RenderPlanSource::FlatDetail
@@ -468,6 +552,21 @@ fn plane_cache_world_rect(screen_world: Rect, view: V2ViewState, source: RenderP
     }
     let tile_units = plane_cache_tile_units(view);
     let margin = tile_units.saturating_mul(PLANE_CACHE_MARGIN_TILES.max(0));
+    Rect::new(
+        floor_to_grid(screen_world.x1, tile_units).saturating_sub(margin),
+        floor_to_grid(screen_world.y1, tile_units).saturating_sub(margin),
+        ceil_to_grid(screen_world.x2, tile_units).saturating_add(margin),
+        ceil_to_grid(screen_world.y2, tile_units).saturating_add(margin),
+    )
+}
+
+fn detail_load_tile_units(view: V2ViewState) -> i32 {
+    (view.units_per_pixel * DETAIL_LOAD_TILE_PX).ceil().max(1.0) as i32
+}
+
+fn detail_load_world_rect(screen_world: Rect, view: V2ViewState) -> Rect {
+    let tile_units = detail_load_tile_units(view);
+    let margin = tile_units.saturating_mul(DETAIL_LOAD_MARGIN_TILES.max(0));
     Rect::new(
         floor_to_grid(screen_world.x1, tile_units).saturating_sub(margin),
         floor_to_grid(screen_world.y1, tile_units).saturating_sub(margin),
@@ -722,6 +821,72 @@ fn hierarchy_row_label(db: &layoutdb::LayoutDb, row: &HierarchyTreeRow) -> Strin
     )
 }
 
+fn hierarchy_rows_content_width(available_width: f32) -> f32 {
+    available_width.clamp(1.0, SIDEBAR_MAX_WIDTH)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HierarchyRowLayout {
+    row_width: f32,
+    label_width: f32,
+    button_width: f32,
+    button_visible: bool,
+}
+
+fn hierarchy_row_layout(
+    content_width: f32,
+    has_focus_action: bool,
+    spacing_x: f32,
+) -> HierarchyRowLayout {
+    let row_width = hierarchy_rows_content_width(content_width);
+    let desired_button_width = if has_focus_action { 44.0 } else { 0.0 };
+    let right_gutter = HIERARCHY_ROW_RIGHT_GUTTER.min((row_width - 1.0).max(0.0));
+    let spacing = if desired_button_width > 0.0 {
+        spacing_x.max(0.0)
+    } else {
+        0.0
+    };
+    let button_visible = desired_button_width > 0.0
+        && row_width >= desired_button_width + spacing + right_gutter + 48.0;
+    let button_width = if button_visible {
+        desired_button_width
+    } else {
+        0.0
+    };
+    let label_width = (row_width
+        - button_width
+        - if button_visible { spacing } else { 0.0 }
+        - if button_visible { right_gutter } else { 0.0 })
+    .max(1.0);
+    HierarchyRowLayout {
+        row_width,
+        label_width,
+        button_width,
+        button_visible,
+    }
+}
+
+fn layer_swatch_size() -> egui::Vec2 {
+    egui::vec2(12.0, 12.0)
+}
+
+fn layer_swatch_slot_size(row_height: f32) -> egui::Vec2 {
+    egui::vec2(16.0, row_height.max(layer_swatch_size().y))
+}
+
+fn layer_swatch_rect(slot: egui::Rect, swatch_size: egui::Vec2) -> egui::Rect {
+    egui::Rect::from_center_size(slot.center(), swatch_size)
+}
+
+#[cfg(test)]
+fn sidebar_title_text() -> Option<&'static str> {
+    None
+}
+
+fn hierarchy_row_has_focus_action(row: &HierarchyTreeRow) -> bool {
+    row.instance_id.is_some()
+}
+
 fn visible_hierarchy_row_slice(
     rows: &[HierarchyTreeRow],
     visible_range: std::ops::Range<usize>,
@@ -743,18 +908,74 @@ fn render_visible_hierarchy_rows(
     db: &layoutdb::LayoutDb,
     rows: &[HierarchyTreeRow],
     visible_range: std::ops::Range<usize>,
+    content_width: f32,
 ) -> Option<InstancePath> {
     let mut focused_path = None;
     for row in visible_hierarchy_row_slice(rows, visible_range) {
-        ui.horizontal(|ui| {
-            let label = hierarchy_row_label(db, row);
-            ui.monospace(label);
-            if ui.button("Focus").clicked() {
-                focused_path = Some(row.instance_path.clone());
-            }
-        });
+        let row_layout = hierarchy_row_layout(
+            content_width.min(ui.available_width()),
+            hierarchy_row_has_focus_action(row),
+            ui.spacing().item_spacing.x,
+        );
+        let row_height = ui.spacing().interact_size.y;
+        let (row_rect, _) = ui.allocate_exact_size(
+            egui::vec2(row_layout.row_width, row_height),
+            egui::Sense::hover(),
+        );
+        let mut row_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        row_ui.shrink_clip_rect(row_rect);
+        row_ui.set_width(row_layout.row_width);
+        row_ui.spacing_mut().item_spacing.x = 6.0;
+
+        let label = hierarchy_row_label(db, row);
+        let (label_rect, _) = row_ui.allocate_exact_size(
+            egui::vec2(row_layout.label_width, row_height),
+            egui::Sense::hover(),
+        );
+        let mut label_ui = row_ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(label_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        label_ui.shrink_clip_rect(label_rect);
+        label_ui.set_width(row_layout.label_width);
+        label_ui.add(
+            egui::Label::new(egui::RichText::new(label).monospace())
+                .truncate()
+                .halign(egui::Align::LEFT),
+        );
+
+        if row_layout.button_visible
+            && row_ui
+                .add_sized([row_layout.button_width, 18.0], egui::Button::new("Focus"))
+                .clicked()
+        {
+            focused_path = Some(row.instance_path.clone());
+        }
     }
     focused_path
+}
+
+fn draw_layer_visibility_row(
+    ui: &mut egui::Ui,
+    visible: &mut bool,
+    label: String,
+    color: Color,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        let swatch_size = layer_swatch_size();
+        let slot_size = layer_swatch_slot_size(ui.spacing().interact_size.y);
+        let (slot, _) = ui.allocate_exact_size(slot_size, egui::Sense::hover());
+        let rect = layer_swatch_rect(slot, swatch_size);
+        ui.painter()
+            .rect_filled(rect, 2.0, color_to_egui(color, 230));
+        ui.checkbox(visible, label)
+    })
+    .inner
 }
 
 fn focus_view_on_cell_bbox(
@@ -921,6 +1142,7 @@ impl LayoutViewerV2App {
             render_surface: render_surface::RenderSurface::new(32),
             render_surface_texture: None,
             render_surface_texture_key: None,
+            render_surface_texture_world: None,
             load_generation: 0,
             last_render_plan: None,
             last_render_plan_revision: 0,
@@ -964,36 +1186,42 @@ impl LayoutViewerV2App {
             .unwrap_or(false)
     }
 
-    fn draw_canvas(&mut self, ui: &mut egui::Ui, rect: egui::Rect, response: &egui::Response) {
+    fn draw_canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        response: &egui::Response,
+    ) -> bool {
         self.ensure_view(rect.size());
         let Some(mut view) = self.view else {
-            return;
+            return false;
         };
         view = view.with_screen_size(rect.width(), rect.height());
+        let mut layout_active_frame = false;
 
         if response.dragged() {
             let delta = ui.input(|input| input.pointer.delta());
             view.pan_pixels(delta.x, delta.y);
             self.last_interaction_at = Some(std::time::Instant::now());
+            layout_active_frame = true;
             ui.ctx().request_repaint();
         }
 
-        if response.hovered() {
-            let scroll = ui.input(|input| input.raw_scroll_delta.y);
-            if scroll.abs() > 0.0 {
-                let cursor = ui
-                    .input(|input| input.pointer.hover_pos())
-                    .unwrap_or(rect.center());
-                view.zoom_at_screen(
-                    scroll_zoom_factor(scroll),
-                    cursor.x - rect.left(),
-                    cursor.y - rect.top(),
-                    rect.width(),
-                    rect.height(),
-                );
-                self.last_interaction_at = Some(std::time::Instant::now());
-                ui.ctx().request_repaint();
-            }
+        let scroll = ui.input(|input| input.raw_scroll_delta.y);
+        if let Some(scroll) = canvas_scroll_delta(response.hovered(), scroll) {
+            let cursor = ui
+                .input(|input| input.pointer.hover_pos())
+                .unwrap_or(rect.center());
+            view.zoom_at_screen(
+                scroll_zoom_factor(scroll),
+                cursor.x - rect.left(),
+                cursor.y - rect.top(),
+                rect.width(),
+                rect.height(),
+            );
+            self.last_interaction_at = Some(std::time::Instant::now());
+            layout_active_frame = true;
+            ui.ctx().request_repaint();
         }
 
         if response.clicked_by(egui::PointerButton::Primary) {
@@ -1040,6 +1268,7 @@ impl LayoutViewerV2App {
                 .ensure_overview_for_units_per_pixel(max_units_per_pixel)
             {
                 Ok(true) => {
+                    layout_active_frame = true;
                     ui.ctx().request_repaint();
                     self.last_error = None;
                 }
@@ -1077,6 +1306,7 @@ impl LayoutViewerV2App {
                     Ok(batch) => {
                         self.session.apply_viewport_batch(batch);
                         self.async_load.mark_completed(result.request);
+                        layout_active_frame = true;
                         self.last_error = None;
                         ui.ctx().request_repaint();
                     }
@@ -1087,16 +1317,17 @@ impl LayoutViewerV2App {
             }
         }
         if should_request_detail_tiles(expected_source) {
+            let detail_load_viewport = detail_load_world_rect(viewport.world, view);
             if interaction_active {
                 self.load_generation += 1;
                 self.async_load
-                    .request(viewport.world, self.load_generation);
+                    .request(detail_load_viewport, self.load_generation);
                 self.last_error = None;
             } else {
-                if self.async_load.needs_request(viewport.world) {
+                if self.async_load.needs_request(detail_load_viewport) {
                     self.load_generation += 1;
                     self.async_load
-                        .request(viewport.world, self.load_generation);
+                        .request(detail_load_viewport, self.load_generation);
                 }
                 if let Some(request) = self.async_load.take_pending() {
                     self.background_load.request(request);
@@ -1118,7 +1349,7 @@ impl LayoutViewerV2App {
             &self.cell_view,
             &self.hierarchy_policy,
         );
-        let current_revision = self.session.revision();
+        let current_revision = render_source_revision(&self.session, expected_source);
         let cache_key_matches = self
             .last_render_plan
             .as_ref()
@@ -1166,16 +1397,19 @@ impl LayoutViewerV2App {
         self.last_display_cache_hits = paint_plan.query_stats.display_cache_hits;
         self.last_display_cache_misses = paint_plan.query_stats.display_cache_misses;
         self.last_lod_stats = paint_plan.lod_stats;
+        let estimated_paint_ops = estimated_vector_paint_ops(paint_plan);
 
         let paint_started = std::time::Instant::now();
         let mut paint_ops = 1;
-        self.last_used_plane_renderer = use_plane_renderer(paint_plan.source, self.last_plan_items);
+        self.last_used_plane_renderer =
+            use_plane_renderer(paint_plan.source, self.last_plan_items, estimated_paint_ops);
         if self.last_used_plane_renderer {
             let before = self.render_surface.cache.stats();
             paint_ops += draw_cached_plane(
                 &mut self.render_surface,
                 &mut self.render_surface_texture,
                 &mut self.render_surface_texture_key,
+                &mut self.render_surface_texture_world,
                 ui.ctx(),
                 &painter,
                 rect,
@@ -1194,7 +1428,11 @@ impl LayoutViewerV2App {
             self.last_plane_cache_misses = 0;
             paint_ops += draw_plan_vectors(&painter, rect, view, paint_plan, interaction_active);
         }
-        self.last_paint_ops = paint_ops;
+        self.last_paint_ops = if self.last_used_plane_renderer {
+            estimated_paint_ops
+        } else {
+            paint_ops
+        };
         self.frame_timing.record_paint(paint_started.elapsed());
 
         if let Some(selected) = &self.selected {
@@ -1209,102 +1447,76 @@ impl LayoutViewerV2App {
             }
         }
 
-        self.draw_hud(ui, rect, view);
-    }
-
-    fn draw_hud(&self, ui: &mut egui::Ui, screen: egui::Rect, view: V2ViewState) {
-        let db = self.session.db();
-        let text = hud_summary_text(
-            db.design_name(),
-            view.units_per_pixel,
-            self.frame_rate.fps,
-            self.last_render_plan
-                .as_ref()
-                .map(|plan| plan.source)
-                .unwrap_or_default(),
-            self.last_plan_items,
-            self.last_paint_ops,
-            self.last_plan_truncated,
-            self.last_plan_reused,
-            self.last_plane_cache_hits,
-            self.last_plane_cache_misses,
-            self.frame_timing,
-            self.last_error.as_deref(),
-        );
-        let hud_rect = egui::Rect::from_min_size(
-            screen.left_top() + egui::vec2(18.0, 18.0),
-            egui::vec2(390.0, 104.0),
-        );
-        ui.painter().rect_filled(
-            hud_rect,
-            6.0,
-            egui::Color32::from_rgba_unmultiplied(7, 12, 18, 238),
-        );
-        ui.painter().text(
-            hud_rect.left_top() + egui::vec2(10.0, 10.0),
-            egui::Align2::LEFT_TOP,
-            text,
-            egui::FontId::monospace(12.0),
-            egui::Color32::from_rgb(238, 243, 248),
-        );
+        layout_active_frame
     }
 
     fn draw_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("v2-display-panel")
+        egui::SidePanel::right("v2-display-panel-default-320")
             .resizable(true)
-            .default_width(240.0)
-            .min_width(190.0)
+            .default_width(SIDEBAR_DEFAULT_WIDTH)
+            .min_width(SIDEBAR_MIN_WIDTH)
+            .max_width(SIDEBAR_MAX_WIDTH)
             .show(ctx, |ui| {
-                ui.heading("Display V2");
-                ui.separator();
-                self.draw_hierarchy_panel(ui);
-                ui.separator();
-                self.draw_lod_panel(ui);
-                ui.separator();
-                self.draw_stats_panel(ui);
-                ui.separator();
-                ui.label("Layers");
-                let layer_counts = self
-                    .layer_counts_cache
-                    .get_or_build(self.session.db(), self.session.revision());
                 egui::ScrollArea::vertical()
-                    .max_height(360.0)
+                    .id_salt("v2-display-panel-scroll")
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        for layer in self.display.layers_mut() {
-                            let count = match layer.source {
-                                layout_display::SourceSelector::PhysicalLayer(layer_id) => {
-                                    layer_counts.get(&layer_id).copied().unwrap_or(0)
+                        self.draw_hierarchy_panel(ui);
+                        ui.separator();
+                        self.draw_layers_panel(ui);
+                        ui.separator();
+                        ui.label("Selection");
+                        if let Some(hit) = self.selected.clone() {
+                            egui::Grid::new("selection-inspector-grid")
+                                .num_columns(2)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for (label, value) in selection_inspector_rows(&hit) {
+                                        ui.label(label);
+                                        ui.monospace(value);
+                                        ui.end_row();
+                                    }
+                                });
+                            let enter_path = enter_path_for_hit(&hit);
+                            if ui
+                                .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
+                                .clicked()
+                            {
+                                if let Some(path) = enter_path {
+                                    self.enter_instance_path(path);
                                 }
-                                _ => 0,
-                            };
-                            let label = format!("{} ({count})", layer.name);
-                            ui.checkbox(&mut layer.visible, label);
+                            }
+                        } else {
+                            ui.label("No object selected");
                         }
                     });
-                ui.separator();
-                ui.label("Selection");
-                if let Some(hit) = self.selected.clone() {
-                    egui::Grid::new("selection-inspector-grid")
-                        .num_columns(2)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for (label, value) in selection_inspector_rows(&hit) {
-                                ui.label(label);
-                                ui.monospace(value);
-                                ui.end_row();
-                            }
-                        });
-                    let enter_path = enter_path_for_hit(&hit);
-                    if ui
-                        .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
-                        .clicked()
-                    {
-                        if let Some(path) = enter_path {
-                            self.enter_instance_path(path);
+            });
+    }
+
+    fn draw_layers_panel(&mut self, ui: &mut egui::Ui) {
+        ui.label("Layers");
+        let layer_counts = self
+            .layer_counts_cache
+            .get_or_build(self.session.db(), self.session.revision());
+        egui::ScrollArea::vertical()
+            .id_salt("v2-display-panel-layers-scroll")
+            .max_height(360.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for layer in self.display.layers_mut() {
+                    let count = match layer.source {
+                        layout_display::SourceSelector::PhysicalLayer(layer_id) => {
+                            layer_counts.get(&layer_id).copied().unwrap_or(0)
                         }
-                    }
-                } else {
-                    ui.label("No object selected");
+                        _ => 0,
+                    };
+                    let label = format!("{} ({count})", layer.name);
+                    draw_layer_visibility_row(
+                        ui,
+                        &mut layer.visible,
+                        label,
+                        layer.style.frame_color,
+                    );
                 }
             });
     }
@@ -1353,7 +1565,7 @@ impl LayoutViewerV2App {
                 };
                 let rows = self.hierarchy_rows_cache.get_or_build(
                     self.session.db(),
-                    self.session.revision(),
+                    self.session.hierarchy_revision(),
                     &self.cell_view,
                     8,
                     max_rows,
@@ -1363,11 +1575,15 @@ impl LayoutViewerV2App {
                 let focused_path = egui::ScrollArea::vertical()
                     .max_height(260.0)
                     .show_rows(ui, row_height, rows.rows.len(), |ui, visible_range| {
+                        let hierarchy_rows_width =
+                            hierarchy_rows_content_width(ui.available_width());
+                        ui.set_width(hierarchy_rows_width);
                         render_visible_hierarchy_rows(
                             ui,
                             self.session.db(),
                             &rows.rows,
                             visible_range,
+                            hierarchy_rows_width,
                         )
                     })
                     .inner;
@@ -1377,126 +1593,6 @@ impl LayoutViewerV2App {
                 if rows_truncated {
                     ui.label("Hierarchy rows truncated");
                 }
-            });
-    }
-
-    fn draw_lod_panel(&mut self, ui: &mut egui::Ui) {
-        egui::CollapsingHeader::new("LOD tuning")
-            .default_open(true)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.small_shape_px, 0.25..=12.0)
-                        .text("tiny px"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.frame_only_px, 1.0..=40.0)
-                        .text("frame px"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.fill_px, 4.0..=120.0).text("fill px"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.fill_units_per_pixel, 1.0..=500.0)
-                        .logarithmic(true)
-                        .text("fill upp"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.lod_tuning.hierarchy_bbox_units_per_pixel,
-                        8.0..=2000.0,
-                    )
-                    .logarithmic(true)
-                    .text("cell bbox upp"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.lod_tuning.hierarchy_coarse_units_per_pixel,
-                        1.0..=1000.0,
-                    )
-                    .logarithmic(true)
-                    .text("coarse upp"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.lod_tuning.idle_detail_units_per_pixel,
-                        1.0..=1000.0,
-                    )
-                    .logarithmic(true)
-                    .text("idle detail upp"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.lod_tuning.array_bbox_units_per_pixel,
-                        8.0..=2000.0,
-                    )
-                    .logarithmic(true)
-                    .text("array bbox upp"),
-                );
-                ui.add(
-                    egui::Slider::new(
-                        &mut self.lod_tuning.array_grid_units_per_pixel,
-                        1.0..=1000.0,
-                    )
-                    .logarithmic(true)
-                    .text("array grid upp"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.long_shape_px, 2.0..=120.0)
-                        .text("long px"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.lod_tuning.occupancy_bin_px, 2.0..=32.0)
-                        .text("bin px"),
-                );
-                ui.horizontal(|ui| {
-                    ui.label("hier depth");
-                    ui.add(
-                        egui::DragValue::new(&mut self.lod_tuning.hierarchy_expand_depth)
-                            .range(1..=64)
-                            .speed(1.0),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("quad/bin");
-                    ui.add(
-                        egui::DragValue::new(&mut self.lod_tuning.max_low_priority_quads_per_bin)
-                            .range(1..=512)
-                            .speed(1.0),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("frames/bin");
-                    ui.add(
-                        egui::DragValue::new(&mut self.lod_tuning.max_frames_per_bin)
-                            .range(1..=256)
-                            .speed(1.0),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("markers/bin");
-                    ui.add(
-                        egui::DragValue::new(&mut self.lod_tuning.max_markers_per_bin)
-                            .range(1..=128)
-                            .speed(1.0),
-                    );
-                });
-                if ui.button("Reset LOD").clicked() {
-                    self.lod_tuning = LodTuningState::default();
-                    sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
-                    self.clear_render_history();
-                }
-                ui.separator();
-                ui.monospace(format!(
-                    "exact={} frame={} marker={} hier={} abox={} agrid={} coarse={} suppress={}",
-                    self.last_lod_stats.exact,
-                    self.last_lod_stats.frame_only,
-                    self.last_lod_stats.marker,
-                    self.last_lod_stats.hierarchy_bbox,
-                    self.last_lod_stats.array_bbox,
-                    self.last_lod_stats.array_grid,
-                    self.last_lod_stats.coarse,
-                    self.last_lod_stats.suppress
-                ));
             });
     }
 
@@ -1523,65 +1619,29 @@ impl LayoutViewerV2App {
         self.clear_render_history();
         focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
     }
-
-    fn draw_stats_panel(&self, ui: &mut egui::Ui) {
-        let shape_count = self
-            .session
-            .db()
-            .cell(self.session.db().top_cell())
-            .map(|cell| cell.shapes().len())
-            .unwrap_or(0);
-        egui::CollapsingHeader::new("Render Stats")
-            .default_open(true)
-            .show(ui, |ui| {
-                for (label, value) in stats_panel_rows(
-                    self.session.last_load_stats(),
-                    shape_count,
-                    self.last_plan_batches,
-                    self.last_plan_items,
-                    self.last_plan_truncated,
-                    self.last_plan_reused,
-                    self.last_candidates_checked,
-                    self.last_hierarchy_candidates_checked,
-                    self.last_total_hierarchy_instances,
-                    self.last_display_cache_hits,
-                    self.last_display_cache_misses,
-                    self.last_plane_cache_hits,
-                    self.last_plane_cache_misses,
-                    self.last_paint_ops,
-                    self.frame_timing,
-                    self.frame_rate.fps,
-                    self.last_lod_stats,
-                ) {
-                    ui.label(label);
-                    ui.monospace(value);
-                    ui.add_space(4.0);
-                }
-                ui.label("Selection");
-                ui.monospace(
-                    self.selected
-                        .as_ref()
-                        .map(|hit| hit.source_id.to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                );
-            });
-    }
 }
 
 impl eframe::App for LayoutViewerV2App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let update_started = std::time::Instant::now();
-        self.frame_rate.record_frame_at(std::time::Instant::now());
-        let canvas_started = std::time::Instant::now();
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let available = ui.available_size();
-            let (rect, response) = ui.allocate_exact_size(available, canvas_interaction_sense());
-            self.draw_canvas(ui, rect, &response);
-        });
-        self.frame_timing.record_canvas(canvas_started.elapsed());
         let sidebar_started = std::time::Instant::now();
         self.draw_sidebar(ctx);
         self.frame_timing.record_sidebar(sidebar_started.elapsed());
+        let canvas_started = std::time::Instant::now();
+        let mut layout_active_frame = false;
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let available = ui.available_size();
+            let (rect, response) = ui.allocate_exact_size(available, canvas_interaction_sense());
+            layout_active_frame = self.draw_canvas(ui, rect, &response);
+        });
+        self.frame_timing.record_canvas(canvas_started.elapsed());
+        if should_sample_layout_fps(
+            layout_active_frame,
+            self.interaction_active(),
+            &self.async_load,
+        ) {
+            self.frame_rate.record_frame_at(std::time::Instant::now());
+        }
         if should_request_smooth_repaint(self.interaction_active(), &self.async_load) {
             ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
         }
@@ -1855,6 +1915,7 @@ fn draw_cached_plane(
     render_surface: &mut render_surface::RenderSurface,
     texture: &mut Option<egui::TextureHandle>,
     texture_key: &mut Option<plane_cache::PlaneKey>,
+    texture_world: &mut Option<Rect>,
     ctx: &egui::Context,
     painter: &egui::Painter,
     screen_rect: egui::Rect,
@@ -1888,40 +1949,61 @@ fn draw_cached_plane(
         interaction_active,
     );
     let has_cached_texture = texture.is_some();
-    if cached_plane_texture_action(texture_key.as_ref(), &key, has_cached_texture)
-        == CachedPlaneTextureAction::UploadTexture
-    {
-        let cached = if let Some(cached) = render_surface.cache.get(&key) {
-            cached.clone()
-        } else {
-            let rasterized =
-                render_surface::rasterize_plan(plan, cache_width, cache_height, |world| {
-                    world_rect_to_canvas_pixels(
-                        world,
-                        cache_view,
-                        cache_width as f32,
-                        cache_height as f32,
-                    )
-                });
-            render_surface.cache.insert(key.clone(), rasterized.clone());
-            rasterized
-        };
-        let image =
-            egui::ColorImage::from_rgba_unmultiplied([cached.width, cached.height], &cached.pixels);
-        if let Some(texture) = texture {
-            texture.set(image, egui::TextureOptions::NEAREST);
-        } else {
-            *texture = Some(ctx.load_texture(
-                "layout-viewer-render-surface",
-                image,
-                egui::TextureOptions::NEAREST,
-            ));
+    match cached_plane_texture_action(
+        texture_key.as_ref(),
+        &key,
+        has_cached_texture,
+        interaction_active,
+    ) {
+        CachedPlaneTextureAction::UploadTexture => {
+            let cached = if let Some(cached) = render_surface.cache.get(&key) {
+                cached.clone()
+            } else {
+                let rasterized =
+                    render_surface::rasterize_plan(plan, cache_width, cache_height, |world| {
+                        world_rect_to_canvas_pixels(
+                            world,
+                            cache_view,
+                            cache_width as f32,
+                            cache_height as f32,
+                        )
+                    });
+                render_surface.cache.insert(key.clone(), rasterized.clone());
+                rasterized
+            };
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [cached.width, cached.height],
+                &cached.pixels,
+            );
+            if let Some(texture) = texture {
+                texture.set(image, egui::TextureOptions::NEAREST);
+            } else {
+                *texture = Some(ctx.load_texture(
+                    "layout-viewer-render-surface",
+                    image,
+                    egui::TextureOptions::NEAREST,
+                ));
+            }
+            *texture_key = Some(key);
+            *texture_world = Some(cache_world);
         }
-        *texture_key = Some(key);
-    } else {
-        let _ = render_surface.cache.get(&key);
+        CachedPlaneTextureAction::ReuseTexture => {
+            let _ = render_surface.cache.get(&key);
+            *texture_world = Some(cache_world);
+        }
+        CachedPlaneTextureAction::DeferUpload => {
+            ui_deferred_plane_repaint(ctx);
+        }
     }
     if let Some(texture) = texture {
+        let image_world = texture_world.unwrap_or(cache_world);
+        let image_width = (image_world.width().max(1) as f32 / view.units_per_pixel.max(0.01))
+            .ceil()
+            .max(1.0) as usize;
+        let image_height = (image_world.height().max(1) as f32 / view.units_per_pixel.max(0.01))
+            .ceil()
+            .max(1.0) as usize;
+        let image_view = V2ViewState::fit(image_world, image_width as f32, image_height as f32);
         let visible_world = if rect_contains_rect(cache_world, screen_world) {
             screen_world
         } else if !cache_world.intersects(screen_world) {
@@ -1934,21 +2016,33 @@ fn draw_cached_plane(
                 cache_world.y2.min(screen_world.y2),
             )
         };
+        let visible_world = if rect_contains_rect(image_world, visible_world) {
+            visible_world
+        } else if !image_world.intersects(visible_world) {
+            return 0;
+        } else {
+            Rect::new(
+                image_world.x1.max(visible_world.x1),
+                image_world.y1.max(visible_world.y1),
+                image_world.x2.min(visible_world.x2),
+                image_world.y2.min(visible_world.y2),
+            )
+        };
         let image_rect = world_rect_to_screen(visible_world, view, screen_rect);
         let [u0, v0, u1, v1] = world_rect_to_canvas_pixels(
             visible_world,
-            cache_view,
-            cache_width as f32,
-            cache_height as f32,
+            image_view,
+            image_width as f32,
+            image_height as f32,
         );
         let uv = egui::Rect::from_min_max(
             egui::pos2(
-                (u0 as f32 / cache_width as f32).clamp(0.0, 1.0),
-                (v0 as f32 / cache_height as f32).clamp(0.0, 1.0),
+                (u0 as f32 / image_width as f32).clamp(0.0, 1.0),
+                (v0 as f32 / image_height as f32).clamp(0.0, 1.0),
             ),
             egui::pos2(
-                (u1 as f32 / cache_width as f32).clamp(0.0, 1.0),
-                (v1 as f32 / cache_height as f32).clamp(0.0, 1.0),
+                (u1 as f32 / image_width as f32).clamp(0.0, 1.0),
+                (v1 as f32 / image_height as f32).clamp(0.0, 1.0),
             ),
         );
         painter.image(texture.id(), image_rect, uv, egui::Color32::WHITE);
@@ -1962,18 +2056,26 @@ fn draw_cached_plane(
 enum CachedPlaneTextureAction {
     UploadTexture,
     ReuseTexture,
+    DeferUpload,
 }
 
 fn cached_plane_texture_action(
     texture_key: Option<&plane_cache::PlaneKey>,
     current_key: &plane_cache::PlaneKey,
     has_texture: bool,
+    interaction_active: bool,
 ) -> CachedPlaneTextureAction {
     if has_texture && texture_key == Some(current_key) {
         CachedPlaneTextureAction::ReuseTexture
+    } else if interaction_active && has_texture {
+        CachedPlaneTextureAction::DeferUpload
     } else {
         CachedPlaneTextureAction::UploadTexture
     }
+}
+
+fn ui_deferred_plane_repaint(ctx: &egui::Context) {
+    ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2224,6 +2326,9 @@ fn color_to_egui(color: Color, alpha: u8) -> egui::Color32 {
 }
 
 fn loaded_physical_layer_counts(db: &layoutdb::LayoutDb) -> BTreeMap<u16, usize> {
+    if !db.package_layer_counts().is_empty() {
+        return db.package_layer_counts().clone();
+    }
     let mut counts = BTreeMap::new();
     if let Some(cell) = db.cell(db.top_cell()) {
         for shape in cell.shapes() {
@@ -2237,106 +2342,20 @@ fn render_plan_item_count(plan: &layout_render::RenderPlan) -> usize {
     plan.batches.iter().map(|batch| batch.items.len()).sum()
 }
 
-fn hud_summary_text(
-    design_name: &str,
-    units_per_pixel: f32,
-    fps: f32,
-    plan_source: RenderPlanSource,
-    plan_items: usize,
-    paint_ops: usize,
-    plan_truncated: bool,
-    plan_reused: bool,
-    plane_cache_hits: usize,
-    plane_cache_misses: usize,
-    timing: FrameTimingState,
-    error: Option<&str>,
-) -> String {
-    if let Some(error) = error {
-        return format!("{design_name}\n{error}");
-    }
-    format!(
-        "{design_name}\nmode=v2  upp={units_per_pixel:.2}  fps={fps:.1}  source={plan_source:?}\nitems={plan_items} ops={paint_ops} truncated={plan_truncated} reuse={plan_reused}\nplane hit/miss={plane_cache_hits}/{plane_cache_misses}  paint={:.1}ms\ncanvas={:.1}ms sidebar={:.1}ms update={:.1}ms",
-        timing.paint_ms, timing.canvas_ms, timing.sidebar_ms, timing.update_ms
-    )
-}
-
-fn stats_panel_rows(
-    load: &layoutdb::ViewportLoadStats,
-    shape_count: usize,
-    plan_batches: usize,
-    plan_items: usize,
-    plan_truncated: bool,
-    plan_reused: bool,
-    candidates_checked: usize,
-    hierarchy_candidates_checked: usize,
-    total_hierarchy_instances: usize,
-    display_cache_hits: usize,
-    display_cache_misses: usize,
-    plane_cache_hits: usize,
-    plane_cache_misses: usize,
-    paint_ops: usize,
-    timing: FrameTimingState,
-    fps: f32,
-    lod: LodStats,
-) -> Vec<(&'static str, String)> {
-    vec![
-        (
-            "Tiles",
-            format!(
-                "viewport={} loaded={} hits={} misses={}",
-                load.tile_count, load.loaded_detail_tile_count, load.cache_hits, load.cache_misses
-            ),
-        ),
-        ("Shapes", format!("new={} total={shape_count}", load.new_shapes)),
-        (
-            "Query",
-            format!(
-                "candidates={} hier={} total={}",
-                candidates_checked, hierarchy_candidates_checked, total_hierarchy_instances
-            ),
-        ),
-        (
-            "Display Cache",
-            format!("hits={} misses={}", display_cache_hits, display_cache_misses),
-        ),
-        (
-            "Plane Cache Frame",
-            format!("hits={plane_cache_hits} misses={plane_cache_misses}"),
-        ),
-        (
-            "Render Plan",
-            format!(
-                "batches={plan_batches} items={plan_items} ops={paint_ops} truncated={plan_truncated} reuse={plan_reused}"
-            ),
-        ),
-        (
-            "Timing",
-            format!(
-                "load={:.2}ms plan={:.2}ms paint={:.2}ms canvas={:.2}ms sidebar={:.2}ms update={:.2}ms",
-                timing.load_ms,
-                timing.plan_ms,
-                timing.paint_ms,
-                timing.canvas_ms,
-                timing.sidebar_ms,
-                timing.update_ms
-            ),
-        ),
-        ("FPS", format!("{fps:.1}")),
-        (
-            "LOD",
-            format!(
-                "exact={} frame={} marker={} hier={} abox={} agrid={} coarse={} suppress={}",
-                lod.exact,
-                lod.frame_only,
-                lod.marker,
-                lod.hierarchy_bbox,
-                lod.array_bbox,
-                lod.array_grid,
-                lod.coarse,
-                lod.suppress
-            ),
-        ),
-    ]
+fn estimated_vector_paint_ops(plan: &layout_render::RenderPlan) -> usize {
+    plan.batches
+        .iter()
+        .map(|batch| {
+            let item_cost = match (batch.plane, batch.style.fill_pattern) {
+                (RenderPlane::Fill | RenderPlane::Frame, Pattern::CrossHatch) => 4,
+                (RenderPlane::Fill | RenderPlane::Frame, Pattern::DiagonalHatch) => 3,
+                (RenderPlane::Fill | RenderPlane::Frame, Pattern::SparseDots) => 2,
+                (RenderPlane::Frame, _) => 2,
+                _ => 1,
+            };
+            batch.items.len().saturating_mul(item_cost)
+        })
+        .sum()
 }
 
 fn scroll_zoom_factor(scroll: f32) -> f32 {
@@ -2350,24 +2369,26 @@ fn scroll_zoom_factor(scroll: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        cached_plane_texture_action, fill_draw_mode, hud_summary_text, overview_density_usable,
+        cached_plane_texture_action, canvas_scroll_delta, fill_draw_mode, overview_density_usable,
         overview_error_is_unavailable, plan_source_for_units_per_pixel, plane_cache_world_rect,
         scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
-        stats_panel_rows, use_plane_renderer, viewport_for_world_rect, visible_hierarchy_row_slice,
-        AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState, FrameTimingState,
-        LoadRequest, LodTuningState,
+        should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect,
+        visible_hierarchy_row_slice, AsyncLoadState, CachedPlaneTextureAction, FillDrawMode,
+        FrameRateState, FrameTimingState, LoadRequest, LodTuningState,
     };
     use crate::plane_cache::PlaneKey;
-    use layout_display::{DisplayLayer, DisplayModel, LayerStyle, Pattern};
+    use layout_display::{Color, DisplayLayer, DisplayModel, LayerStyle, Pattern};
     use layout_render::{
-        LodHysteresisState, LodStats, PickHit, PickHitTarget, RenderPlanSource, RenderSettings,
+        DrawBatch, DrawItem, DrawRect, LodHysteresisState, PickHit, PickHitTarget, RenderPlan,
+        RenderPlanSource, RenderPlane, RenderSettings,
     };
     use layoutdb::{
         CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo, LayoutDb,
         ObjectPath, ObjectPathTarget, OverviewDensityBin, Rect, ShapeId, ShapeKind, ShapeRecord,
     };
     use std::{
+        collections::BTreeMap,
         fs,
         sync::atomic::{AtomicU64, Ordering},
     };
@@ -2462,6 +2483,19 @@ mod tests {
     }
 
     #[test]
+    fn frame_rate_state_reports_active_fps_and_frame_percentiles() {
+        let mut frame_rate = FrameRateState::default();
+
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(16));
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(20));
+        frame_rate.record_frame_delta(std::time::Duration::from_millis(40));
+
+        assert!((frame_rate.active_fps - 25.0).abs() < 0.1);
+        assert!((frame_rate.last_frame_ms - 40.0).abs() < 0.1);
+        assert!((frame_rate.p95_frame_ms - 40.0).abs() < 0.1);
+    }
+
+    #[test]
     fn frame_rate_state_caps_repaint_bursts_to_viewer_cadence() {
         let mut frame_rate = FrameRateState::default();
 
@@ -2484,125 +2518,6 @@ mod tests {
 
         assert!((active_fps - 60.0).abs() < 0.1);
         assert!((frame_rate.fps - active_fps).abs() < 0.1);
-    }
-
-    #[test]
-    fn hud_summary_includes_key_runtime_diagnostics_without_full_stats_panel() {
-        let text = hud_summary_text(
-            "ysyx210340",
-            13.35,
-            58.7,
-            RenderPlanSource::HierarchyNear,
-            12_345,
-            67,
-            true,
-            false,
-            3,
-            1,
-            FrameTimingState {
-                paint_ms: 4.25,
-                canvas_ms: 2.5,
-                sidebar_ms: 5.25,
-                update_ms: 7.5,
-                ..Default::default()
-            },
-            None,
-        );
-
-        assert!(text.contains("mode=v2"));
-        assert!(text.contains("upp=13.35"));
-        assert!(text.contains("fps=58.7"));
-        assert!(text.contains("source=HierarchyNear"));
-        assert!(text.contains("items=12345"));
-        assert!(text.contains("ops=67"));
-        assert!(text.contains("plane hit/miss=3/1"));
-        assert!(text.contains("paint=4.2ms"));
-        assert!(text.contains("canvas=2.5ms"));
-        assert!(text.contains("sidebar=5.2ms"));
-        assert!(text.contains("update=7.5ms"));
-        assert!(!text.contains("tiles viewport"));
-        assert!(!text.contains("query candidates"));
-        assert!(text.lines().count() <= 5);
-    }
-
-    #[test]
-    fn stats_panel_rows_split_render_counters_into_readable_groups() {
-        let rows = stats_panel_rows(
-            &layoutdb::ViewportLoadStats {
-                tile_count: 12,
-                loaded_detail_tile_count: 42,
-                cache_hits: 10,
-                cache_misses: 2,
-                new_shapes: 7,
-                ..Default::default()
-            },
-            1024,
-            6,
-            2431,
-            true,
-            false,
-            87,
-            12,
-            45,
-            3,
-            1,
-            11,
-            13,
-            99,
-            FrameTimingState {
-                load_ms: 1.0,
-                plan_ms: 2.0,
-                paint_ms: 3.0,
-                canvas_ms: 3.5,
-                sidebar_ms: 0.5,
-                update_ms: 4.0,
-            },
-            58.7,
-            LodStats {
-                exact: 1,
-                frame_only: 2,
-                marker: 3,
-                hierarchy_bbox: 4,
-                array_bbox: 5,
-                array_grid: 6,
-                coarse: 7,
-                suppress: 8,
-            },
-        );
-
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Tiles" && value.contains("viewport=12") && value.contains("loaded=42")
-        }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Render Plan" && value.contains("items=2431") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Timing" && value.contains("paint=3.00ms") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Timing" && value.contains("canvas=3.50ms") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Timing" && value.contains("sidebar=0.50ms") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Timing" && value.contains("update=4.00ms") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "Render Plan" && value.contains("ops=99") }));
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Plane Cache Frame"
-                && value.contains("hits=11")
-                && value.contains("misses=13")
-                && !value.contains("reuse=")
-        }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "FPS" && value.contains("58.7") }));
-        assert!(rows
-            .iter()
-            .any(|(label, value)| { *label == "LOD" && value.contains("coarse=7") }));
     }
 
     #[test]
@@ -2657,6 +2572,24 @@ mod tests {
     }
 
     #[test]
+    fn async_load_state_reuses_covering_pending_in_flight_and_completed_viewports() {
+        let mut state = AsyncLoadState::default();
+        let requested = Rect::new(-256, -256, 768, 768);
+        let covered = Rect::new(0, 0, 500, 500);
+        let outside = Rect::new(760, 760, 900, 900);
+
+        state.request(requested, 1);
+        assert!(!state.needs_request(covered));
+
+        let request = state.take_pending().unwrap();
+        assert!(!state.needs_request(covered));
+
+        state.mark_completed(request);
+        assert!(!state.needs_request(covered));
+        assert!(state.needs_request(outside));
+    }
+
+    #[test]
     fn async_load_state_reports_pending_work() {
         let mut state = AsyncLoadState::default();
         assert!(!state.has_pending_work());
@@ -2693,6 +2626,18 @@ mod tests {
     }
 
     #[test]
+    fn layout_fps_sampling_ignores_idle_hover_repaints() {
+        let mut state = AsyncLoadState::default();
+
+        assert!(!should_sample_layout_fps(false, false, &state));
+        assert!(should_sample_layout_fps(true, false, &state));
+        assert!(should_sample_layout_fps(false, true, &state));
+
+        state.request(Rect::new(0, 0, 10, 10), 1);
+        assert!(should_sample_layout_fps(false, false, &state));
+    }
+
+    #[test]
     fn render_plan_is_reused_only_for_matching_cache_keys() {
         assert!(should_reuse_render_plan(
             true,
@@ -2713,13 +2658,63 @@ mod tests {
 
     #[test]
     fn plane_renderer_is_used_for_cached_lod_sources_and_dense_detail_plans() {
-        assert!(use_plane_renderer(RenderPlanSource::HierarchyFar, 0));
-        assert!(use_plane_renderer(RenderPlanSource::HierarchyMid, 0));
-        assert!(use_plane_renderer(RenderPlanSource::OverviewDensity, 0));
-        assert!(use_plane_renderer(RenderPlanSource::HierarchyNear, 20_000));
-        assert!(use_plane_renderer(RenderPlanSource::FlatDetail, 20_000));
-        assert!(!use_plane_renderer(RenderPlanSource::HierarchyNear, 128));
-        assert!(!use_plane_renderer(RenderPlanSource::FlatDetail, 128));
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyFar, 0, 0));
+        assert!(use_plane_renderer(RenderPlanSource::HierarchyMid, 0, 0));
+        assert!(use_plane_renderer(RenderPlanSource::OverviewDensity, 0, 0));
+        assert!(use_plane_renderer(
+            RenderPlanSource::HierarchyNear,
+            20_000,
+            20_000
+        ));
+        assert!(use_plane_renderer(
+            RenderPlanSource::FlatDetail,
+            20_000,
+            20_000
+        ));
+        assert!(!use_plane_renderer(
+            RenderPlanSource::HierarchyNear,
+            128,
+            128
+        ));
+        assert!(!use_plane_renderer(RenderPlanSource::FlatDetail, 128, 128));
+    }
+
+    #[test]
+    fn plane_renderer_is_used_for_hatch_heavy_near_plans() {
+        assert!(use_plane_renderer(
+            RenderPlanSource::HierarchyNear,
+            3_000,
+            8_000
+        ));
+        assert!(use_plane_renderer(
+            RenderPlanSource::FlatDetail,
+            3_000,
+            8_000
+        ));
+    }
+
+    #[test]
+    fn vector_paint_ops_estimate_counts_hatched_fills_as_expensive() {
+        let mut style = LayerStyle::new(Color::rgb(1, 2, 3), Color::rgb(4, 5, 6));
+        style.fill_pattern = Pattern::CrossHatch;
+        let plan = RenderPlan {
+            source: RenderPlanSource::HierarchyNear,
+            batches: vec![DrawBatch {
+                plane: RenderPlane::Fill,
+                display_layer_id: "m1".to_string(),
+                style,
+                items: vec![DrawItem::Rect(DrawRect {
+                    world: Rect::new(0, 0, 100, 100),
+                    color: Color::rgb(1, 2, 3),
+                    source_id: 1,
+                    layer_id: 1,
+                    composition: layout_display::CompositionMode::Copy,
+                })],
+            }],
+            ..Default::default()
+        };
+
+        assert!(super::estimated_vector_paint_ops(&plan) > super::render_plan_item_count(&plan));
     }
 
     #[test]
@@ -2819,6 +2814,41 @@ mod tests {
     }
 
     #[test]
+    fn detail_load_viewport_is_expanded_and_grid_aligned() {
+        let view = super::V2ViewState {
+            center_x: 500.0,
+            center_y: 500.0,
+            units_per_pixel: 4.0,
+            screen_width: 100.0,
+            screen_height: 100.0,
+        };
+        let screen_world = Rect::new(300, 300, 700, 700);
+
+        let load_world = super::detail_load_world_rect(screen_world, view);
+
+        assert_eq!(load_world, Rect::new(-1024, -1024, 2048, 2048));
+    }
+
+    #[test]
+    fn small_detail_pan_reuses_load_viewport() {
+        let view = super::V2ViewState {
+            center_x: 500.0,
+            center_y: 500.0,
+            units_per_pixel: 4.0,
+            screen_width: 100.0,
+            screen_height: 100.0,
+        };
+        let mut panned = view;
+        panned.pan_pixels(20.0, 0.0);
+
+        let first_world = super::detail_load_world_rect(view.viewport_rect(100.0, 100.0), view);
+        let panned_world =
+            super::detail_load_world_rect(panned.viewport_rect(100.0, 100.0), panned);
+
+        assert_eq!(first_world, panned_world);
+    }
+
+    #[test]
     fn small_far_pan_reuses_cache_viewport_and_plan_key() {
         let view = super::V2ViewState {
             center_x: 500.0,
@@ -2889,6 +2919,30 @@ mod tests {
         ));
         assert!(should_request_detail_tiles(RenderPlanSource::HierarchyNear));
         assert!(should_request_detail_tiles(RenderPlanSource::FlatDetail));
+    }
+
+    #[test]
+    fn revision_for_render_source_follows_plan_data_dependencies() {
+        assert_eq!(
+            super::revision_for_render_source(RenderPlanSource::HierarchyFar, 11, 22, 33),
+            11
+        );
+        assert_eq!(
+            super::revision_for_render_source(RenderPlanSource::HierarchyMid, 11, 22, 33),
+            11
+        );
+        assert_eq!(
+            super::revision_for_render_source(RenderPlanSource::OverviewDensity, 11, 22, 33),
+            22
+        );
+        assert_eq!(
+            super::revision_for_render_source(RenderPlanSource::HierarchyNear, 11, 22, 33),
+            33
+        );
+        assert_eq!(
+            super::revision_for_render_source(RenderPlanSource::FlatDetail, 11, 22, 33),
+            33
+        );
     }
 
     #[test]
@@ -3009,6 +3063,87 @@ mod tests {
         assert!(mid_label.contains("mid0"));
         assert!(mid_label.contains("inst 10"));
         assert!(mid_label.contains("mid"));
+    }
+
+    #[test]
+    fn sidebar_content_does_not_expand_to_unbounded_available_width() {
+        assert_eq!(
+            super::hierarchy_rows_content_width(10_000.0),
+            super::SIDEBAR_MAX_WIDTH
+        );
+        assert_eq!(super::hierarchy_rows_content_width(20.0), 20.0);
+    }
+
+    #[test]
+    fn sidebar_default_width_stays_compact_while_max_width_allows_expansion() {
+        assert_eq!(super::SIDEBAR_DEFAULT_WIDTH, 320.0);
+        assert!(super::SIDEBAR_MAX_WIDTH > super::SIDEBAR_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn sidebar_omits_redundant_display_title() {
+        assert_eq!(super::sidebar_title_text(), None);
+    }
+
+    #[test]
+    fn window_title_omits_version_suffix() {
+        assert_eq!(super::window_title(), "ECOS Layout Viewer");
+    }
+
+    #[test]
+    fn hierarchy_row_layout_keeps_label_and_focus_button_inside_sidebar_width() {
+        let layout = super::hierarchy_row_layout(10_000.0, true, 6.0);
+
+        assert_eq!(layout.row_width, super::SIDEBAR_MAX_WIDTH);
+        assert!(layout.button_visible);
+        assert_eq!(layout.button_width, 44.0);
+        assert!(
+            layout.label_width + layout.button_width + 6.0 + super::HIERARCHY_ROW_RIGHT_GUTTER
+                <= layout.row_width
+        );
+    }
+
+    #[test]
+    fn hierarchy_row_layout_hides_focus_button_when_row_is_too_narrow() {
+        let layout = super::hierarchy_row_layout(80.0, true, 6.0);
+
+        assert_eq!(layout.row_width, 80.0);
+        assert!(!layout.button_visible);
+        assert_eq!(layout.button_width, 0.0);
+        assert_eq!(layout.label_width, 80.0);
+    }
+
+    #[test]
+    fn layer_swatch_uses_compact_fixed_size() {
+        let size = super::layer_swatch_size();
+
+        assert_eq!(size.x, 12.0);
+        assert_eq!(size.y, 12.0);
+    }
+
+    #[test]
+    fn layer_swatch_is_centered_inside_row_slot() {
+        let slot = egui::Rect::from_min_size(egui::pos2(2.0, 4.0), egui::vec2(16.0, 24.0));
+        let rect = super::layer_swatch_rect(slot, super::layer_swatch_size());
+
+        assert_eq!(super::layer_swatch_slot_size(24.0).x, 16.0);
+        assert_eq!(rect.center(), slot.center());
+        assert_eq!(rect.size(), super::layer_swatch_size());
+    }
+
+    #[test]
+    fn hierarchy_focus_action_is_only_for_instance_rows() {
+        let (db, _leaf_view) = hierarchy_test_db_and_leaf_view();
+        let rows = db.hierarchy_tree_rows(CellViewState::top(&db), 8, 16);
+        let root = &rows.rows[0];
+        let instance = rows
+            .rows
+            .iter()
+            .find(|row| row.instance_id.is_some())
+            .expect("fixture should include an instance row");
+
+        assert!(!super::hierarchy_row_has_focus_action(root));
+        assert!(super::hierarchy_row_has_focus_action(instance));
     }
 
     #[test]
@@ -3414,6 +3549,13 @@ mod tests {
     }
 
     #[test]
+    fn canvas_scroll_delta_only_applies_when_canvas_is_hovered() {
+        assert_eq!(canvas_scroll_delta(true, 12.0), Some(12.0));
+        assert_eq!(canvas_scroll_delta(false, 12.0), None);
+        assert_eq!(canvas_scroll_delta(true, 0.0), None);
+    }
+
+    #[test]
     fn hatch_pattern_uses_continuous_visible_segments() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 90.0));
 
@@ -3521,24 +3663,49 @@ mod tests {
     }
 
     #[test]
+    fn loaded_physical_layer_counts_prefer_package_layer_totals() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 100, 100));
+        db.add_layer(LayerInfo::new(1, "ACT"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(10, 10, 20, 20), 1, ShapeKind::RegularWire, 1),
+        );
+        db.set_package_layer_counts(BTreeMap::from([(1, 42), (2, 7)]));
+
+        let counts = super::loaded_physical_layer_counts(&db);
+
+        assert_eq!(counts.get(&1), Some(&42));
+        assert_eq!(counts.get(&2), Some(&7));
+    }
+
+    #[test]
     fn cached_plane_texture_upload_is_skipped_when_key_and_texture_are_current() {
         let key = PlaneKey::for_test("hierarchy");
         let other_key = PlaneKey::for_test("other");
 
         assert_eq!(
-            cached_plane_texture_action(Some(&key), &key, true),
+            cached_plane_texture_action(Some(&key), &key, true, false),
             CachedPlaneTextureAction::ReuseTexture
         );
         assert_eq!(
-            cached_plane_texture_action(None, &key, true),
+            cached_plane_texture_action(None, &key, true, false),
             CachedPlaneTextureAction::UploadTexture
         );
         assert_eq!(
-            cached_plane_texture_action(Some(&key), &key, false),
+            cached_plane_texture_action(Some(&key), &key, false, false),
             CachedPlaneTextureAction::UploadTexture
         );
         assert_eq!(
-            cached_plane_texture_action(Some(&other_key), &key, true),
+            cached_plane_texture_action(Some(&other_key), &key, true, false),
+            CachedPlaneTextureAction::UploadTexture
+        );
+        assert_eq!(
+            cached_plane_texture_action(Some(&other_key), &key, true, true),
+            CachedPlaneTextureAction::DeferUpload
+        );
+        assert_eq!(
+            cached_plane_texture_action(None, &key, false, true),
             CachedPlaneTextureAction::UploadTexture
         );
     }

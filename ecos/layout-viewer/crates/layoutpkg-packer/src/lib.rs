@@ -145,6 +145,7 @@ pub fn pack_viewjson_to_layoutpkg(
         "statistics": {
             "primitive_count": dataset.rects.len(),
             "by_kind": kind_counts_json(&dataset.rects),
+            "by_layer": layer_counts_json(&dataset.rects),
             "large_object_count": detail_tiles.large_objects.len(),
         },
     });
@@ -270,6 +271,7 @@ pub fn pack_viewjson_to_layoutpkg(
         "statistics": {
             "primitive_count": dataset.rects.len(),
             "by_kind": kind_counts_json(&dataset.rects),
+            "by_layer": layer_counts_json(&dataset.rects),
             "source_files": dataset.source_files,
         },
     });
@@ -921,6 +923,16 @@ fn kind_counts_json(rects: &[LayoutRectRecord]) -> Value {
     let mut counts = BTreeMap::<String, usize>::new();
     for rect in rects {
         *counts.entry(kind_key(rect.kind).to_string()).or_default() += 1;
+    }
+    json!(counts)
+}
+
+fn layer_counts_json(rects: &[LayoutRectRecord]) -> Value {
+    let mut counts = BTreeMap::<u16, usize>::new();
+    for rect in rects {
+        if rect.layer_id > 0 {
+            *counts.entry(rect.layer_id).or_default() += 1;
+        }
     }
     json!(counts)
 }
@@ -2022,6 +2034,7 @@ mod tests {
         assert_eq!(detail_index["tiles"].as_array().unwrap().len(), 1);
         assert_eq!(detail_index["tiles"][0]["primitive_count"], 3);
         assert_eq!(detail_index["statistics"]["by_kind"]["regular_wire"], 2);
+        assert_eq!(detail_index["statistics"]["by_layer"]["1"], 2);
         assert_eq!(detail_index["large_objects"]["count"], 2);
 
         let tile_path = output.join(detail_index["tiles"][0]["file"].as_str().unwrap());

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -791,6 +791,7 @@ pub struct LayoutDb {
     cells: Vec<Cell>,
     top_cell: CellId,
     package_cell_ids: HashMap<u32, CellId>,
+    package_layer_counts: BTreeMap<u16, usize>,
     coverage: Vec<CoverageRecord>,
     overview_bins: Vec<OverviewDensityBin>,
 }
@@ -804,6 +805,7 @@ impl LayoutDb {
             cells: vec![Cell::new("top", world_bbox)],
             top_cell: CellId(0),
             package_cell_ids: HashMap::from([(0, CellId(0))]),
+            package_layer_counts: BTreeMap::new(),
             coverage: Vec::new(),
             overview_bins: Vec::new(),
         }
@@ -814,6 +816,7 @@ impl LayoutDb {
         cache_capacity: usize,
     ) -> Result<Self> {
         let mut db = Self::new(package.design_name(), Rect::from(package.world_bbox()));
+        db.set_package_layer_counts(package.detail_layer_counts());
         for layer in package.layers()? {
             db.add_layer(LayerInfo::from(layer));
         }
@@ -844,6 +847,7 @@ impl LayoutDb {
             cells: Vec::new(),
             top_cell: CellId(0),
             package_cell_ids: HashMap::new(),
+            package_layer_counts: hierarchy_layer_counts(&hierarchy),
             coverage: Vec::new(),
             overview_bins: Vec::new(),
         };
@@ -919,6 +923,14 @@ impl LayoutDb {
 
     pub fn layers(&self) -> &[LayerInfo] {
         &self.layers
+    }
+
+    pub fn set_package_layer_counts(&mut self, counts: BTreeMap<u16, usize>) {
+        self.package_layer_counts = counts;
+    }
+
+    pub fn package_layer_counts(&self) -> &BTreeMap<u16, usize> {
+        &self.package_layer_counts
     }
 
     pub fn with_overview_bins(mut self, bins: Vec<OverviewDensityBin>) -> Self {
@@ -2304,6 +2316,19 @@ fn child_bbox(cell: &Cell) -> Rect {
     cell.bbox()
 }
 
+fn hierarchy_layer_counts(hierarchy: &HierarchyDocument) -> BTreeMap<u16, usize> {
+    let mut counts = BTreeMap::new();
+    for cell in &hierarchy.cells {
+        for summary in &cell.layer_summaries {
+            if summary.layer_id == 0 {
+                continue;
+            }
+            *counts.entry(summary.layer_id).or_default() += summary.shape_count as usize;
+        }
+    }
+    counts
+}
+
 fn cell_view_cell_stack(cell_view: &CellViewState) -> Vec<CellId> {
     let mut cells = vec![cell_view.context_cell()];
     for element in cell_view.specific_path().elements() {
@@ -2586,10 +2611,14 @@ pub struct LayoutSession {
     applied_overview_units_per_bin: Option<i32>,
     last_load_stats: ViewportLoadStats,
     revision: u64,
+    hierarchy_revision: u64,
+    overview_revision: u64,
+    detail_revision: u64,
 }
 
 impl LayoutSession {
     pub fn from_source(mut source: PackageLayoutSource) -> Result<Self> {
+        let detail_layer_counts = source.package.detail_layer_counts();
         let hierarchy = source.package.load_hierarchy()?;
         let mut db = if let Some(hierarchy) = hierarchy {
             LayoutDb::from_hierarchy_document(
@@ -2603,6 +2632,9 @@ impl LayoutSession {
                 Rect::from(source.package.world_bbox()),
             )
         };
+        if !detail_layer_counts.is_empty() {
+            db.set_package_layer_counts(detail_layer_counts);
+        }
         for layer in source.package.layers()? {
             db.add_layer(LayerInfo::from(layer));
         }
@@ -2621,6 +2653,9 @@ impl LayoutSession {
             applied_overview_units_per_bin: None,
             last_load_stats: ViewportLoadStats::default(),
             revision: 0,
+            hierarchy_revision: 0,
+            overview_revision: 0,
+            detail_revision: 0,
         })
     }
 
@@ -2638,6 +2673,18 @@ impl LayoutSession {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub fn hierarchy_revision(&self) -> u64 {
+        self.hierarchy_revision
+    }
+
+    pub fn overview_revision(&self) -> u64 {
+        self.overview_revision
+    }
+
+    pub fn detail_revision(&self) -> u64 {
+        self.detail_revision
     }
 
     pub fn ensure_viewport_loaded(&mut self, viewport: Rect) -> Result<ViewportLoadStats> {
@@ -2697,6 +2744,7 @@ impl LayoutSession {
         }
         if new_shapes > 0 {
             self.revision = self.revision.saturating_add(1);
+            self.detail_revision = self.detail_revision.saturating_add(1);
         }
         let stats = ViewportLoadStats {
             tile_count: batch.tiles.len(),
@@ -2742,6 +2790,7 @@ impl LayoutSession {
         self.db.set_overview_bins(bins);
         self.applied_overview_units_per_bin = Some(units_per_bin);
         self.revision = self.revision.saturating_add(1);
+        self.overview_revision = self.overview_revision.saturating_add(1);
         Ok(true)
     }
 
@@ -4521,6 +4570,41 @@ mod tests {
         assert_eq!(shapes_after_second, shapes_after_first);
         assert_eq!(session.revision(), loaded_revision);
         assert_eq!(session.loaded_detail_tile_count(), 1);
+    }
+
+    #[test]
+    fn layout_session_imports_package_layer_counts_without_loading_detail_tiles() {
+        let (_input, package_root) = create_layoutpkg_fixture();
+        let source = PackageLayoutSource::open(package_root, 64).unwrap();
+        let session = LayoutSession::from_source(source).unwrap();
+
+        assert_eq!(session.loaded_detail_tile_count(), 0);
+        assert_eq!(session.db().package_layer_counts().get(&1), Some(&2));
+    }
+
+    #[test]
+    fn layout_session_tracks_detail_and_overview_revisions_separately() {
+        let (_input, package_root) = create_layoutpkg_fixture();
+        let source = PackageLayoutSource::open(package_root, 64).unwrap();
+        let mut session = LayoutSession::from_source(source).unwrap();
+        let initial_hierarchy_revision = session.hierarchy_revision();
+        let initial_overview_revision = session.overview_revision();
+        let initial_detail_revision = session.detail_revision();
+
+        session
+            .ensure_viewport_loaded(Rect::new(0, 0, 500, 500))
+            .unwrap();
+        let detail_loaded_revision = session.detail_revision();
+
+        assert_eq!(session.hierarchy_revision(), initial_hierarchy_revision);
+        assert_eq!(session.overview_revision(), initial_overview_revision);
+        assert!(detail_loaded_revision > initial_detail_revision);
+
+        session.ensure_overview_for_units_per_pixel(250.0).unwrap();
+
+        assert_eq!(session.hierarchy_revision(), initial_hierarchy_revision);
+        assert!(session.overview_revision() > initial_overview_revision);
+        assert_eq!(session.detail_revision(), detail_loaded_revision);
     }
 
     #[test]
