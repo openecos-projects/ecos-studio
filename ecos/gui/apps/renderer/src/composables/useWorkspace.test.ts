@@ -140,9 +140,6 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       scanPdkDirectory: vi.fn(),
       watchProjectFile: vi.fn(),
     },
-    tiles: {
-      generate: vi.fn(),
-    },
     ...overrides,
   } as DesktopApi
 }

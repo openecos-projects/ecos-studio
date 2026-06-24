@@ -35,7 +35,6 @@ const {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     },
   },
@@ -135,7 +134,6 @@ describe('useParameters desktop bridge integration', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     }
     const session = lifecycle.beginSession({
@@ -153,7 +151,6 @@ describe('useParameters desktop bridge integration', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     }
     fetchSharedHomeData.mockReset()
@@ -834,7 +831,6 @@ describe('useParameters desktop bridge integration', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     }
 
@@ -902,7 +898,6 @@ describe('useParameters desktop bridge integration', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     }
 

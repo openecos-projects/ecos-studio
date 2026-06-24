@@ -1,5 +1,5 @@
 import { Editor, type EditorOptions } from './core/Editor'
-import { RulerPlugin, SelectPlugin, HighlightPlugin, MeasurePlugin, LayerManagerPlugin } from './plugins'
+import { RulerPlugin } from './plugins'
 
 // 导出核心类
 export { Editor }
@@ -20,25 +20,18 @@ export type { EditorTheme, ThemeName } from './core/Theme'
 // 导出插件
 export * from './plugins'
 
-// 导出 layout 模块
-export * from './layout'
-
 // 导出组件
 export { default as EditorContainer } from './EditorContainer.vue'
 
 /**
  * 创建预配置的默认编辑器
- * 包含: RulerPlugin, SelectPlugin, HighlightPlugin, MeasurePlugin, LayerManagerPlugin
+ * 包含: RulerPlugin
  * @param options 编辑器选项 (可选)
  */
 export function createDefaultEditor(options?: EditorOptions): Editor {
   const editor = new Editor(options)
   editor.use([
     new RulerPlugin(),
-    new SelectPlugin(),
-    new HighlightPlugin(),
-    new MeasurePlugin(),
-    new LayerManagerPlugin(),
   ])
   return editor
 }
@@ -50,4 +43,3 @@ export function createDefaultEditor(options?: EditorOptions): Editor {
 export function createEditor(options?: EditorOptions): Editor {
   return new Editor(options)
 }
-

@@ -46,8 +46,6 @@ export const desktopApiIpcChannels = {
   resourcesRemovePdkReference: 'resources:remove-pdk-reference',
   resourcesImportPdkPath: 'resources:import-pdk-path',
   resourcesRefreshRegistry: 'resources:refresh-registry',
-  tilesGenerate: 'tiles:generate',
-  tilesStatus: 'tiles:status',
   layoutViewerOpen: 'layout-viewer:open',
   cliExecute: 'cli:execute',
   shellCreateSession: 'shell:create-session',

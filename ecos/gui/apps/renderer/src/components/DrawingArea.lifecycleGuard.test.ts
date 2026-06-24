@@ -10,19 +10,17 @@ describe('DrawingArea lifecycle guards', () => {
     )
   })
 
-  it('guards late DRC overlay reads against route, workspace, and editor changes', () => {
-    expect(source).toContain(
-      'guard: DrawingAsyncGuard = createDrawingAsyncGuard(currentStepKey.value)',
-    )
-    expect(source).toContain('const overlay = drcViolationOverlay')
-    expect(source).toContain('if (!guard.isCurrent() || drcViolationOverlay !== overlay) return')
+  it('does not keep late DRC overlay reads in DrawingArea', () => {
+    expect(source).not.toContain('drcViolationOverlay')
+    expect(source).not.toContain('loadDrcViolationOverlayAfterTiles')
+    expect(source).not.toContain('parseDrcStepJson')
   })
 
-  it('prevents stale view JSON overview loads from mutating a newer workspace session', () => {
+  it('prevents stale image preview loads from mutating a newer workspace session', () => {
     expect(source).toMatch(
-      /async function loadStepViewJsonOverview\([\s\S]*?viewJsonPackageRoot: string[\s\S]*?const overview = await loadViewJsonOverview\(viewJsonPackageRoot, \{[\s\S]*?projectPath,[\s\S]*?shouldCancel: \(\) => !guard\.isCurrent\(\),[\s\S]*?workerFactory: createViewJsonOverviewWorker,[\s\S]*?\}\)[\s\S]*?if \(!guard\.isCurrent\(\) \|\| editor\.value !== ed\) \{[\s\S]*?return null[\s\S]*?\}/,
+      /async function loadStepImagePreview\([\s\S]*?guard: DrawingAsyncGuard[\s\S]*?if \(!ed \|\| !guard\.isCurrent\(\)\) return[\s\S]*?await ed\.setBackgroundImage\(imageUrl\)[\s\S]*?if \(!guard\.isCurrent\(\) \|\| editor\.value !== ed\) return/,
     )
-    expect(source).toContain('isViewJsonLoadCancelled')
-    expect(source).toMatch(/if \(isViewJsonLoadCancelled\(err\) && !guard\.isCurrent\(\)\) \{[\s\S]*?return null/)
+    expect(source).not.toContain('loadStepViewJsonOverview')
+    expect(source).not.toContain('isViewJsonLoadCancelled')
   })
 })

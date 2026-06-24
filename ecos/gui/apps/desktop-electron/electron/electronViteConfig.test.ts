@@ -12,23 +12,16 @@ describe('desktop electron build config', () => {
       : electronViteConfig
 
     expect(resolvedConfig.main?.build?.externalizeDeps).toEqual(expect.objectContaining({
-      exclude: expect.arrayContaining([
-        '@ecos-studio/shared',
-        '@ecos-studio/tile-helper',
-      ]),
+      exclude: ['@ecos-studio/shared'],
     }))
     expect(resolvedConfig.preload?.build?.externalizeDeps).toEqual(expect.objectContaining({
-      exclude: expect.arrayContaining([
-        '@ecos-studio/shared',
-      ]),
+      exclude: ['@ecos-studio/shared'],
     }))
     expect(resolvedConfig.main?.resolve?.alias).toMatchObject({
       '@ecos-studio/shared': expect.stringContaining('/packages/shared/src/index.ts'),
-      '@ecos-studio/tile-helper': expect.stringContaining('/packages/tile-helper/src/index.ts'),
     })
     expect(resolvedConfig.preload?.resolve?.alias).toMatchObject({
       '@ecos-studio/shared': expect.stringContaining('/packages/shared/src/index.ts'),
-      '@ecos-studio/tile-helper': expect.stringContaining('/packages/tile-helper/src/index.ts'),
     })
   })
 

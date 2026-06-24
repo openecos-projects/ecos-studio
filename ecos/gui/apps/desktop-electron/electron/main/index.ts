@@ -20,7 +20,6 @@ import { RemoteContentService } from '../services/remoteContentService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
-import { TileService } from '../services/tileService'
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
@@ -35,7 +34,6 @@ let services:
       resourceManagerService: ResourceManagerService
       layoutViewerService: LayoutViewerService
       shellService: ShellPtyService
-      tileService: TileService
       workspaceResourceService: WorkspaceResourceService
       workspaceService: WorkspaceService
     }
@@ -116,9 +114,6 @@ function getDesktopServices() {
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
   })
-  const tileService = new TileService({
-    projectRootProvider: projectScopeService,
-  })
   const layoutViewerService = new LayoutViewerService({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -136,7 +131,6 @@ function getDesktopServices() {
     layoutViewerService,
     settingsStore,
     shellService,
-    tileService,
     workspaceResourceService,
     workspaceService,
   }
@@ -156,7 +150,6 @@ async function launchMainWindow(): Promise<void> {
       layoutViewerService: desktopServices.layoutViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
-      tileService: desktopServices.tileService,
       workspaceResourceService: desktopServices.workspaceResourceService,
       workspaceService: desktopServices.workspaceService,
     })

@@ -7,5 +7,7 @@ describe('DrawingToolbar native layout viewer action', () => {
     expect(source).toContain('nativeLayoutViewerBusy')
     expect(source).toContain('openNativeLayoutViewer')
     expect(source).toContain('打开 Native Layout Viewer')
+    expect(source).not.toContain('previewModeChange')
+    expect(source).not.toContain('generateTiles')
   })
 })

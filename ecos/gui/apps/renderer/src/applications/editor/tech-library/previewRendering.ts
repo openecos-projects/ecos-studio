@@ -16,7 +16,7 @@ export interface TechPreviewRenderGroup extends TechPreviewStyle {
   drawRects: PreviewWorldRect[]
 }
 
-const VIEW_JSON_LAYER_COLORS: Record<string, number> = {
+const TECH_LAYER_COLORS: Record<string, number> = {
   OVERLAP: 0x888888,
   ACT: 0xcc8844,
   NP: 0x88cc44,
@@ -51,8 +51,8 @@ const FALLBACK_COLORS = [
 
 export function colorForTechLayer(layer: TechLayer | undefined, fallbackIndex: number): number {
   const layerName = layer?.name.toUpperCase()
-  if (layerName && VIEW_JSON_LAYER_COLORS[layerName] !== undefined) {
-    return VIEW_JSON_LAYER_COLORS[layerName]
+  if (layerName && TECH_LAYER_COLORS[layerName] !== undefined) {
+    return TECH_LAYER_COLORS[layerName]
   }
   return FALLBACK_COLORS[fallbackIndex % FALLBACK_COLORS.length]
 }

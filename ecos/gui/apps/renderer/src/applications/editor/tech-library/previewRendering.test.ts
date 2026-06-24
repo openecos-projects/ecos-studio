@@ -56,7 +56,7 @@ describe('tech preview rendering', () => {
     ])
   })
 
-  it('uses the same default layer colors as the view-json renderer for known layers', () => {
+  it('uses the ECOS layer palette for known layers', () => {
     expect(colorForTechLayer(layers[0], 0)).toBe(0x4444ff)
     expect(colorForTechLayer(layers[1], 1)).toBe(0xaaaaaa)
   })

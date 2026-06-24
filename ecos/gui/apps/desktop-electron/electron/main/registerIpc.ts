@@ -33,8 +33,6 @@ import {
   type DesktopShellSession,
   type DesktopShellSessionOptions,
   type ScannedPdkDirectory,
-  type TileGenerationRequest,
-  type TileGenerationResult,
   type VersionInfo,
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
@@ -113,10 +111,6 @@ export interface DesktopBridgeServices {
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
   }
-  tileService: {
-    generate(request: TileGenerationRequest): Promise<TileGenerationResult>
-    getStatus(request: TileGenerationRequest): Promise<TileGenerationResult>
-  }
   layoutViewerService: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
@@ -193,20 +187,6 @@ function readErrorPath(error: unknown): string | null {
   return null
 }
 
-function summarizeTileGenerationError(
-  request: TileGenerationRequest,
-  error: unknown,
-): string {
-  if (isNodeErrorWithCode(error, 'ENOENT')) {
-    const path = readErrorPath(error)
-    return path
-      ? `[tile] Missing layout JSON for step ${request.stepKey}: ${path}`
-      : `[tile] Missing layout JSON for step ${request.stepKey}`
-  }
-
-  return `[tile] Tile generation failed for step ${request.stepKey}`
-}
-
 function summarizeProjectBinaryReadError(path: string, error: unknown): string {
   if (isNodeErrorWithCode(error, 'ENOENT')) {
     const errorPath = readErrorPath(error) ?? path
@@ -234,10 +214,6 @@ function serializeError(error: unknown): { code?: string; message: string; name:
 }
 
 function summarizeIpcError(channel: string, args: unknown[], error: unknown): string {
-  if (channel === desktopApiIpcChannels.tilesGenerate) {
-    return summarizeTileGenerationError(args[0] as TileGenerationRequest, error)
-  }
-
   if (channel === desktopApiIpcChannels.workspaceReadProjectBinaryFile) {
     return summarizeProjectBinaryReadError(String(args[0] ?? ''), error)
   }
@@ -625,20 +601,6 @@ export function registerIpc(
     desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
     async (_event, subscriptionId) => {
       await unsubscribeProjectLogTail(subscriptionId as string)
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.tilesGenerate,
-    async (_event, request) => {
-      return await services.tileService.generate(request as TileGenerationRequest)
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.tilesStatus,
-    async (_event, request) => {
-      return await services.tileService.getStatus(request as TileGenerationRequest)
     },
   )
 

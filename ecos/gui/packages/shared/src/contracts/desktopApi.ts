@@ -1,4 +1,3 @@
-import type { TileGenerationRequest, TileGenerationResult } from '../types/tile.ts'
 import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
@@ -171,10 +170,6 @@ export interface DesktopApi {
       path: string,
       listener: (event: DesktopProjectFileChangedEvent) => void,
     ): Promise<DesktopEventUnsubscribe>
-  }
-  tiles: {
-    generate(request: TileGenerationRequest): Promise<TileGenerationResult>
-    getStatus(request: TileGenerationRequest): Promise<TileGenerationResult>
   }
   layoutViewer: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>

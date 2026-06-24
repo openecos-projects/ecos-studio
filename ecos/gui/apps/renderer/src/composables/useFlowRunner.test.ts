@@ -28,7 +28,6 @@ const {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     },
   },
@@ -105,7 +104,6 @@ describe('useFlowRunner desktop-only guard', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     }
     workspaceSession.value = {

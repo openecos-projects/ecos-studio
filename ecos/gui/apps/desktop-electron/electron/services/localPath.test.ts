@@ -20,10 +20,10 @@ describe('resolveProjectFileAbsolutePath', () => {
 })
 
 describe('resolveContainedLocalPath', () => {
-  it('resolves cache bundle paths inside the allowed root', () => {
+  it('resolves project resource paths inside the allowed root', () => {
     expect(
-      resolveContainedLocalPath('/tmp/project', '.ecos/tile-cache/layout/route/manifest.json'),
-    ).toBe('/tmp/project/.ecos/tile-cache/layout/route/manifest.json')
+      resolveContainedLocalPath('/tmp/project', 'output/preview.bin'),
+    ).toBe('/tmp/project/output/preview.bin')
   })
 
   it('rejects escape attempts outside the allowed root', () => {

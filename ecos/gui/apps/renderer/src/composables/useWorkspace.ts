@@ -900,7 +900,6 @@ export function useWorkspace() {
       if (typeof payload.subflow_path === 'string' || typeof payload.step_path === 'string') {
         scopes.add('step')
         scopes.add('maps')
-        scopes.add('tiles')
       }
     }
 
@@ -912,7 +911,6 @@ export function useWorkspace() {
     if (typeof event.subflow_path === 'string' || typeof event.step_path === 'string') {
       scopes.add('step')
       scopes.add('maps')
-      scopes.add('tiles')
     }
 
     if (refreshKey) {
