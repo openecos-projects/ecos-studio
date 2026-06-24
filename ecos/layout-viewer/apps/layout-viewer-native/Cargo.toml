@@ -1,5 +1,5 @@
 [package]
-name = "layout-viewer-native-v2"
+name = "layout-viewer-native"
 edition.workspace = true
 license.workspace = true
 version.workspace = true

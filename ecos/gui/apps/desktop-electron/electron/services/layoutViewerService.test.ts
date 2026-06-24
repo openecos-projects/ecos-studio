@@ -39,7 +39,7 @@ describe('LayoutViewerService', () => {
     const repoRoot = '/repo'
     const releaseDir = join(repoRoot, 'ecos/layout-viewer/target/release')
     const packer = join(releaseDir, 'ecos-layout-packer')
-    const viewer = join(releaseDir, 'layout-viewer-native-v2')
+    const viewer = join(releaseDir, 'layout-viewer-native')
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
     const { execFile, service, spawnProcess, unref } = createService({
       existingPaths: [
@@ -76,7 +76,7 @@ describe('LayoutViewerService', () => {
     const repoRoot = '/repo'
     const debugDir = join(repoRoot, 'ecos/layout-viewer/target/debug')
     const packer = join(debugDir, 'ecos-layout-packer')
-    const viewer = join(debugDir, 'layout-viewer-native-v2')
+    const viewer = join(debugDir, 'layout-viewer-native')
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
     const { execFile, service, spawnProcess } = createService({
       existingPaths: [
@@ -111,7 +111,7 @@ describe('LayoutViewerService', () => {
         viewJsonPackageRoot: '/project/output/gcd_route_view',
       }),
     ).rejects.toThrow(
-      'Build them with: cd ecos/layout-viewer && cargo build --release -p layout-viewer-native-v2 -p ecos-layout-packer',
+      'Build them with: cd ecos/layout-viewer && cargo build --release -p layout-viewer-native -p ecos-layout-packer',
     )
   })
 
@@ -120,7 +120,7 @@ describe('LayoutViewerService', () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
     const packer = join(binaryDir, 'ecos-layout-packer')
-    const viewer = join(binaryDir, 'layout-viewer-native-v2')
+    const viewer = join(binaryDir, 'layout-viewer-native')
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
     const { execFile, service, spawnProcess } = createService({
       existingPaths: [

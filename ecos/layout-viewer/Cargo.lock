@@ -1800,7 +1800,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "layout-viewer-native-v2"
+name = "layout-viewer-native"
 version = "0.1.0"
 dependencies = [
  "anyhow",

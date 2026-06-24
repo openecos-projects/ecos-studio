@@ -8,7 +8,7 @@ import {
 } from '@ecos-studio/shared'
 
 const BUILD_HINT =
-  'Build them with: cd ecos/layout-viewer && cargo build --release -p layout-viewer-native-v2 -p ecos-layout-packer'
+  'Build them with: cd ecos/layout-viewer && cargo build --release -p layout-viewer-native -p ecos-layout-packer'
 
 type FileExists = (path: string) => boolean
 type ExecFileRunner = (file: string, args: string[]) => Promise<void>
@@ -127,7 +127,7 @@ export class LayoutViewerService {
   private resolvePackagedBinaries(): LayoutViewerBinaries {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const packerPath = join(binaryDir, executableName('ecos-layout-packer', this.platform))
-    const viewerPath = join(binaryDir, executableName('layout-viewer-native-v2', this.platform))
+    const viewerPath = join(binaryDir, executableName('layout-viewer-native', this.platform))
 
     if (this.fileExists(packerPath) && this.fileExists(viewerPath)) {
       return { packerPath, viewerPath }
@@ -139,7 +139,7 @@ export class LayoutViewerService {
   private resolveDevBinaries(): LayoutViewerBinaries {
     const repoRoot = this.findRepoRoot()
     const packerName = executableName('ecos-layout-packer', this.platform)
-    const viewerName = executableName('layout-viewer-native-v2', this.platform)
+    const viewerName = executableName('layout-viewer-native', this.platform)
     const profiles = ['release', 'debug']
 
     for (const profile of profiles) {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const NATIVE_LAYOUT_VIEWER_BINARIES = [
   'ecos-layout-packer',
-  'layout-viewer-native-v2',
+  'layout-viewer-native',
 ]
 
 function defaultExecFile(file, args, options) {
@@ -69,7 +69,7 @@ export async function prepareNativeLayoutViewerBinaries(options = {}) {
     'build',
     '--release',
     '-p',
-    'layout-viewer-native-v2',
+    'layout-viewer-native',
     '-p',
     'ecos-layout-packer',
   ], {

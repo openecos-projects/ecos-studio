@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const REQUIRED_NATIVE_BINARIES = [
   'ecos-layout-packer',
-  'layout-viewer-native-v2',
+  'layout-viewer-native',
 ]
 
 async function assertExists(path, label) {

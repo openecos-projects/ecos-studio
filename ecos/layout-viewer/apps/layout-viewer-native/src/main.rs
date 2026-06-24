@@ -43,7 +43,7 @@ const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
 const NEAR_RASTER_OPS_THRESHOLD: usize = 6_000;
 
 #[derive(Debug, Parser)]
-#[command(name = "layout-viewer-native-v2")]
+#[command(name = "layout-viewer-native")]
 struct Args {
     package_root: PathBuf,
 
@@ -3712,7 +3712,7 @@ mod tests {
 
     fn hierarchy_test_db_and_leaf_view() -> (LayoutDb, CellViewState) {
         let package_root = std::env::temp_dir().join(format!(
-            "layout_viewer_native_v2_hierarchy_test_{}_{}",
+            "layout_viewer_native_hierarchy_test_{}_{}",
             std::process::id(),
             HIERARCHY_TEST_PACKAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));

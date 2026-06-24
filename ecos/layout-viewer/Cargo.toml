@@ -10,7 +10,7 @@ members = [
   "crates/layoutpkg-reader",
   "apps/layout-packer-cli",
   "apps/layoutpkg-probe-cli",
-  "apps/layout-viewer-native-v2",
+  "apps/layout-viewer-native",
 ]
 
 [workspace.package]

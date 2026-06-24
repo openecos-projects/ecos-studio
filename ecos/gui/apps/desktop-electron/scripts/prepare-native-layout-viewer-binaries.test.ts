@@ -19,7 +19,7 @@ async function createFixture() {
   const targetRelease = join(root, 'ecos/layout-viewer/target/release')
   await import('node:fs/promises').then(({ mkdir }) => mkdir(targetRelease, { recursive: true }))
   await writeFile(join(targetRelease, 'ecos-layout-packer'), 'packer-binary')
-  await writeFile(join(targetRelease, 'layout-viewer-native-v2'), 'viewer-binary')
+  await writeFile(join(targetRelease, 'layout-viewer-native'), 'viewer-binary')
 
   return {
     resourcesBin: join(root, 'ecos/gui/apps/desktop-electron/resources/binaries'),
@@ -44,7 +44,7 @@ describe('prepareNativeLayoutViewerBinaries', () => {
       'build',
       '--release',
       '-p',
-      'layout-viewer-native-v2',
+      'layout-viewer-native',
       '-p',
       'ecos-layout-packer',
     ], {
@@ -53,10 +53,10 @@ describe('prepareNativeLayoutViewerBinaries', () => {
     })
     await expect(readFile(join(fixture.resourcesBin, 'ecos-layout-packer'), 'utf8'))
       .resolves.toBe('packer-binary')
-    await expect(readFile(join(fixture.resourcesBin, 'layout-viewer-native-v2'), 'utf8'))
+    await expect(readFile(join(fixture.resourcesBin, 'layout-viewer-native'), 'utf8'))
       .resolves.toBe('viewer-binary')
     expect((await stat(join(fixture.resourcesBin, 'ecos-layout-packer'))).mode & 0o111).not.toBe(0)
-    expect((await stat(join(fixture.resourcesBin, 'layout-viewer-native-v2'))).mode & 0o111).not.toBe(0)
+    expect((await stat(join(fixture.resourcesBin, 'layout-viewer-native'))).mode & 0o111).not.toBe(0)
   })
 
   it('cleans stale staged binaries before copying the current native viewer binaries', async () => {
@@ -77,7 +77,7 @@ describe('prepareNativeLayoutViewerBinaries', () => {
       .resolves.toBe('\n')
     await expect(readFile(join(fixture.resourcesBin, 'ecos-layout-packer'), 'utf8'))
       .resolves.toBe('packer-binary')
-    await expect(readFile(join(fixture.resourcesBin, 'layout-viewer-native-v2'), 'utf8'))
+    await expect(readFile(join(fixture.resourcesBin, 'layout-viewer-native'), 'utf8'))
       .resolves.toBe('viewer-binary')
   })
 })

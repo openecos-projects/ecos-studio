@@ -7,7 +7,7 @@ Current scope:
 - Convert existing ECC View JSON packages into a rebuildable `.layoutpkg` cache.
 - Define the first layout package manifest and binary detail tile format.
 - Read `.layoutpkg` viewport tiles through a small headless reader/probe path.
-- Open `.layoutpkg` directly in the native V2 viewer.
+- Open `.layoutpkg` directly in the native viewer.
 - Keep the new pipeline independent from the Electron renderer and ECC writer.
 
 ## Build And Test
@@ -83,7 +83,7 @@ The current converter writes:
 - `overview/index.json` is a coarse coverage tileset for low zoom. It uses
   bounded coverage bins, so it does not replay every wire segment while zoomed
   out.
-- `overview/pyramid.json` is a multi-resolution density pyramid used by the V2
+- `overview/pyramid.json` is a multi-resolution density pyramid used by the
   renderer for far/mid zoom summary drawing.
 - `query/index.json` is the hover/selection index. It reuses detail records and
   declares the queryable kinds, so selection can stay viewport-local without
@@ -104,7 +104,7 @@ property lookup and a dedicated GPU renderer are separate follow-up slices.
 ## Open The Native Viewer
 
 ```bash
-cargo run -p layout-viewer-native-v2 -- \
+cargo run -p layout-viewer-native -- \
   /path/to/view-json-package/.layoutpkg
 ```
 
@@ -129,17 +129,17 @@ The current native viewer architecture is:
   decisions, hierarchy bbox and array grid planning, overview density planning,
   separate frame/marker occupancy budgeting, draw planes, and
   visible-layer-aware picking.
-- `layout-viewer-native-v2`: a new app shell with readable render stats,
+- `layout-viewer-native`: app shell with readable render stats,
   source-aware plan reuse, cached far/mid raster planes, near vector detail, and
   vector selection overlays. The sidebar includes a minimal hierarchy panel for
   the active cell view and hierarchy depth policy.
 
-## Native V2 KLayout-Like Core Validation
+## Native KLayout-Like Core Validation
 
 ```bash
 cargo fmt --all -- --check
 cargo test --workspace -- --nocapture
-cargo run --release -p layout-viewer-native-v2 -- /path/to/package.layoutpkg
+cargo run --release -p layout-viewer-native -- /path/to/package.layoutpkg
 ```
 
 Expected interactive behavior:

@@ -22,9 +22,9 @@ async function createReleaseFixture() {
   await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.5_x86_64.AppImage'), 'appimage')
   await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.5_amd64.deb'), 'deb')
   await writeFile(join(binariesDir, 'ecos-layout-packer'), 'packer')
-  await writeFile(join(binariesDir, 'layout-viewer-native-v2'), 'viewer')
+  await writeFile(join(binariesDir, 'layout-viewer-native'), 'viewer')
   await chmod(join(binariesDir, 'ecos-layout-packer'), 0o755)
-  await chmod(join(binariesDir, 'layout-viewer-native-v2'), 0o755)
+  await chmod(join(binariesDir, 'layout-viewer-native'), 0o755)
 
   return { binariesDir, packageRoot, releaseDir }
 }
@@ -37,7 +37,7 @@ describe('verifyPackageArtifacts', () => {
       .resolves.toEqual({
         appImages: ['ECOS-Studio_0.1.0-alpha.5_x86_64.AppImage'],
         debs: ['ECOS-Studio_0.1.0-alpha.5_amd64.deb'],
-        nativeBinaries: ['ecos-layout-packer', 'layout-viewer-native-v2'],
+        nativeBinaries: ['ecos-layout-packer', 'layout-viewer-native'],
       })
   })
 

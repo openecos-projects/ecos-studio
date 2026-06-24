@@ -19,7 +19,7 @@ ecos/layout-viewer/
   crates/layoutpkg-reader/
   apps/layout-packer-cli/
   apps/layoutpkg-probe-cli/
-  apps/layout-viewer-native-v2/
+  apps/layout-viewer-native/
 ```
 
 This keeps the new pipeline separate from both Electron renderer code and ECC writer code.
@@ -84,7 +84,7 @@ clips records to tile bounds, writes only non-empty tiles, and moves die/core
 plus objects that cross too many tiles into `large_objects.bin`. It avoids
 subdivision when splitting mostly duplicates geometry. It also writes an overview
 coverage tileset for low zoom, so the native viewer can avoid replaying full
-detail while zoomed out, plus a multi-level overview density pyramid for the V2
+detail while zoomed out, plus a multi-level overview density pyramid for the
 render planner. It writes a query index for hover/selection so the viewer does
 not need to open full source JSON for picking; the query index reuses detail
 records instead of duplicating tile binaries. Tracks and gcell grids remain
@@ -98,11 +98,11 @@ exposes this same path as a headless verification tool.
 
 ## Native Viewer Slice
 
-`layout-viewer-native-v2` is the active native rendering slice. It owns the
+`layout-viewer-native` is the active native rendering slice. It owns the
 package session, viewport-local loading, render planning, cached far/mid raster
 planes, near vector detail, layer visibility, and selection overlay.
 
-V2 currently opens existing `.layoutpkg` packages through a lazy package session:
+The native viewer currently opens existing `.layoutpkg` packages through a lazy package session:
 
 ```txt
 .layoutpkg
@@ -112,10 +112,10 @@ V2 currently opens existing `.layoutpkg` packages through a lazy package session
       -> viewport detail tile import on demand
   -> layout-display::DisplayModel
   -> layout-render::RenderPlanner
-  -> layout-viewer-native-v2 egui backend
+  -> layout-viewer-native egui backend
 ```
 
-The V2 data/display/render split is:
+The native data/display/render split is:
 
 - `layoutdb`: package-independent layout data, cell/instance hierarchy records,
   KLayout-like `CellViewState`, path-aware recursive shape/instance queries,
@@ -130,18 +130,18 @@ The V2 data/display/render split is:
   summary planning, pixel-threshold shape simplification, long-thin shape
   preservation, per-screen-bin occupancy limits, and picking constrained by
   visible display layers.
-- `layout-viewer-native-v2`: app shell for validating pan, zoom, layer
+- `layout-viewer-native`: app shell for validating pan, zoom, layer
   visibility, picking, cached far/mid raster-plane drawing, near vector detail,
   lazy tile loading, a minimal hierarchy panel, and readable HUD/sidebar stats.
 
-The V2 backend still uses egui, but far/mid plans are rasterized into cached CPU
+The native backend still uses egui, but far/mid plans are rasterized into cached CPU
 planes before texture composition, while near plans and selection overlays remain
 vector primitives. This keeps the architecture open for a future GPU batch
 backend without coupling package data to the UI toolkit.
 
-## KLayout-Like V2 Core
+## KLayout-Like Native Core
 
-V2 now follows a KLayout-like split:
+The native viewer now follows a KLayout-like split:
 
 - `.layoutpkg` stores hierarchy metadata, per-cell layer summaries, compact array
   metadata, and overview density levels.
@@ -152,7 +152,7 @@ V2 now follows a KLayout-like split:
   hierarchy mid, overview density, hierarchy near, or flat detail. The
   view-aware planner includes the active cell view and hierarchy policy in cache
   keys so a focused cell or depth change cannot reuse the wrong render plan.
-- `layout-viewer-native-v2` composes far/mid/overview plans from cached raster
+- `layout-viewer-native` composes far/mid/overview plans from cached raster
   planes, preserves near detail as vector drawing, keeps selection overlays
   vector-on-top, and exposes Top/Up hierarchy controls for the active cell view.
 
@@ -161,7 +161,7 @@ Validation:
 ```bash
 cargo fmt --all -- --check
 cargo test --workspace -- --nocapture
-cargo run --release -p layout-viewer-native-v2 -- /path/to/package.layoutpkg
+cargo run --release -p layout-viewer-native -- /path/to/package.layoutpkg
 ```
 
 ## Next Steps
