@@ -109,13 +109,15 @@ describe('ECOSTerminal', () => {
     )
   })
 
-  it('keeps xterm internals on the terminal background instead of default black', () => {
-    expect(terminalSource).toContain("const terminalBackground = '#1e1e1e'")
-    expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*background:\s*#1e1e1e;/)
-    expect(terminalSource).toMatch(/\.terminal-body\s*\{[\s\S]*background:\s*#1e1e1e;/)
-    expect(terminalSource).toMatch(/\.terminal-surface\s*\{[\s\S]*background:\s*#1e1e1e;/)
+  it('uses theme tokens for terminal chrome and xterm surfaces', () => {
+    expect(terminalSource).not.toContain("const terminalBackground = '#1e1e1e'")
+    expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
+    expect(terminalSource).toMatch(/\.terminal-header\s*\{[\s\S]*background:\s*var\(--bg-secondary\);/)
+    expect(terminalSource).toMatch(/\.terminal-title\s*\{[\s\S]*color:\s*var\(--text-primary\);/)
+    expect(terminalSource).toMatch(/\.terminal-body\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
+    expect(terminalSource).toMatch(/\.terminal-surface\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
     expect(terminalSource).toMatch(
-      /:deep\(\.xterm-viewport\),\s*:deep\(\.xterm-screen\)\s*\{[\s\S]*background:\s*#1e1e1e;/,
+      /:deep\(\.xterm-viewport\),\s*:deep\(\.xterm-screen\)\s*\{[\s\S]*background:\s*var\(--bg-primary\);/,
     )
   })
 
@@ -139,13 +141,17 @@ describe('ECOSTerminal', () => {
 
   it('uses a readable terminal font size and high-contrast prompt colors', () => {
     expect(terminalSource).toContain('fontSize: 13')
-    expect(terminalSource).toContain("foreground: '#cccccc'")
+    expect(terminalSource).toContain("foreground: '#e3e3e8'")
+    expect(terminalSource).toContain("foreground: '#111827'")
     expect(terminalSource).toContain("green: '#23d18b'")
     expect(terminalSource).toContain("brightGreen: '#23d18b'")
     expect(terminalSource).not.toContain("green: '#6a9955'")
   })
 
   it('uses VS Code terminal colors for prompts, paths, and command output', () => {
+    expect(terminalSource).toContain("const terminalThemes: Record<'light' | 'dark', ITheme>")
+    expect(terminalSource).toMatch(/dark:\s*\{[\s\S]*background:\s*'#18181c'[\s\S]*foreground:\s*'#e3e3e8'/)
+    expect(terminalSource).toMatch(/light:\s*\{[\s\S]*background:\s*'#ffffff'[\s\S]*foreground:\s*'#111827'/)
     expect(terminalSource).toContain("blue: '#3b8eea'")
     expect(terminalSource).toContain("brightBlue: '#6cb6ff'")
     expect(terminalSource).toContain("green: '#23d18b'")
@@ -153,8 +159,33 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toContain("red: '#f14c4c'")
     expect(terminalSource).toContain("magenta: '#bc3fbc'")
     expect(terminalSource).toContain("brightMagenta: '#d670d6'")
-    expect(terminalSource).toContain("foreground: '#cccccc'")
     expect(terminalSource).not.toContain("blue: '#569cd6'")
+  })
+
+  it('updates existing xterm palettes when the app theme changes', () => {
+    expect(terminalSource).toContain('function getTerminalTheme()')
+    expect(terminalSource).toContain('theme: getTerminalTheme()')
+    expect(terminalSource).toMatch(
+      /function applyTerminalThemeToRecords\(\)[\s\S]*for \(const record of terminalRecords\.value\)[\s\S]*record\.terminal\.options\.theme = getTerminalTheme\(\)/,
+    )
+    expect(terminalSource).toMatch(
+      /watch\(\s*\(\) => props\.themeName,[\s\S]*applyTerminalThemeToRecords\(\)[\s\S]*\)/,
+    )
+  })
+
+  it('preserves existing terminal sessions when the project path changes', () => {
+    expect(terminalSource).not.toMatch(/watch\(\s*\(\) => props\.projectPath/)
+    expect(terminalSource).toMatch(
+      /desktopApi\.shell\.createSession\(\{[\s\S]*cwd:\s*props\.projectPath \?\? undefined,[\s\S]*\}\)/,
+    )
+  })
+
+  it('surfaces the cwd captured when each shell session starts', () => {
+    expect(terminalSource).toContain('cwdPath: string | null')
+    expect(terminalSource).toContain('record.cwdPath = props.projectPath')
+    expect(terminalSource).toContain('class="terminal-cwd"')
+    expect(terminalSource).toContain(':title="activeTerminalRecord.cwdPath"')
+    expect(terminalSource).toContain(':title="getTerminalRecordTitle(record)"')
   })
 
   it('refits after the overlay layout settles and keeps the viewport at the bottom', () => {
