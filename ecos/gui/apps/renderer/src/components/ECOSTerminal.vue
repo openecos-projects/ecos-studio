@@ -209,7 +209,7 @@ const terminalThemes: Record<'light' | 'dark', ITheme> = {
     brightGreen: '#047857',
     brightMagenta: '#7e22ce',
     brightRed: '#b91c1c',
-    brightWhite: '#ffffff',
+    brightWhite: '#111827',
     brightYellow: '#b45309',
     cursor: '#111827',
     cyan: '#0891b2',
@@ -218,7 +218,7 @@ const terminalThemes: Record<'light' | 'dark', ITheme> = {
     magenta: '#9333ea',
     red: '#dc2626',
     selectionBackground: '#bfdbfe',
-    white: '#f9fafb',
+    white: '#374151',
     yellow: '#ca8a04',
   },
 }

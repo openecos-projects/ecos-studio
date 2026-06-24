@@ -146,6 +146,8 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toContain("green: '#23d18b'")
     expect(terminalSource).toContain("brightGreen: '#23d18b'")
     expect(terminalSource).not.toContain("green: '#6a9955'")
+    expect(terminalSource).toContain("white: '#374151'")
+    expect(terminalSource).toContain("brightWhite: '#111827'")
   })
 
   it('uses VS Code terminal colors for prompts, paths, and command output', () => {
