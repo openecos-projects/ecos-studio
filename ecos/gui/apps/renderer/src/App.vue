@@ -15,6 +15,8 @@
         <ECOSTerminal
           :expanded="terminalExpanded"
           :maximized="terminalPanelMaximized"
+          :project-path="currentProject?.path ?? null"
+          :theme-name="themeStore.themeName"
           @collapse="terminalExpanded = false"
           @height-change="handleTerminalHeightChange"
           @toggle-maximize="toggleTerminalMaximized"

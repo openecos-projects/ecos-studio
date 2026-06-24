@@ -33,6 +33,21 @@ describe('ECOSTerminal', () => {
     )
   })
 
+  it('receives the current workspace path and theme from App.vue', () => {
+    expect(appSource).toContain(':project-path="currentProject?.path ?? null"')
+    expect(appSource).toContain(':theme-name="themeStore.themeName"')
+    expect(terminalSource).toMatch(/projectPath:\s*string \| null/)
+    expect(terminalSource).toMatch(/themeName:\s*'light' \| 'dark'/)
+  })
+
+  it('passes the current workspace path when creating new shell sessions', () => {
+    expect(terminalSource).toMatch(
+      /desktopApi\.shell\.createSession\(\{[\s\S]*cols:\s*record\.terminal\.cols \|\| 80,[\s\S]*rows:\s*record\.terminal\.rows \|\| 24,[\s\S]*cwd:\s*props\.projectPath \?\? undefined,[\s\S]*\}\)/,
+    )
+    expect(terminalSource).not.toContain("write(record.sessionId, 'cd ")
+    expect(terminalSource).not.toContain('write(record.sessionId, "cd ')
+  })
+
   it('is mounted as a VS Code-style bottom panel above the status bar', () => {
     expect(appSource).toMatch(
       /<div\s+class="app-main"[\s\S]*>\s*<div\s+class="app-content"[\s\S]*>\s*<router-view\s*\/>\s*<\/div>\s*<ECOSTerminal[^>]*\/>\s*<\/div>\s*<StatusBar/,

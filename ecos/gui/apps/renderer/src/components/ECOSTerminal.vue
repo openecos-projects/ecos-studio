@@ -159,6 +159,8 @@ import '@xterm/xterm/css/xterm.css'
 const props = defineProps<{
   expanded: boolean
   maximized: boolean
+  projectPath: string | null
+  themeName: 'light' | 'dark'
 }>()
 
 const emit = defineEmits<{
@@ -377,6 +379,7 @@ async function createShellSession(record: TerminalRecord) {
     const session = await desktopApi.shell.createSession({
       cols: record.terminal.cols || 80,
       rows: record.terminal.rows || 24,
+      cwd: props.projectPath ?? undefined,
     })
     record.sessionId = session.sessionId
     record.label = getShellDisplayName(session.shell)
