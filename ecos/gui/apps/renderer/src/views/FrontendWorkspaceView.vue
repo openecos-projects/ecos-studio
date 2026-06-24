@@ -158,7 +158,7 @@
             </div>
             <div>
               <span>Runtime</span>
-              <strong>{{ currentStepRuntime }}</strong>
+              <strong class="runtime-value">{{ currentStepRuntime }}</strong>
             </div>
             <div>
               <span>Tool</span>
@@ -181,35 +181,22 @@
 
           <section v-if="isSimStep" class="sim-run-card">
             <div class="sim-run-head">
-              <div class="suite-row">
-                <button
-                  type="button"
-                  class="suite-pill"
-                  :class="{ active: simSuite === 'cpu_tests' }"
-                  :disabled="runBusy"
-                  @click="simSuite = 'cpu_tests'"
-                >
-                  <i class="ri-cpu-line"></i>
-                  CPU Tests
-                </button>
-                <button
-                  type="button"
-                  class="suite-pill"
-                  :class="{ active: simSuite === 'rtthread' }"
-                  :disabled="runBusy"
-                  @click="simSuite = 'rtthread'"
-                >
-                  <i class="ri-terminal-box-line"></i>
-                  RT-Thread
-                </button>
-                <div v-if="simSuite === 'cpu_tests'" class="mode-segment">
-                  <button type="button" :disabled="runBusy" :class="{ active: simCpuMode === 'selected' }" @click="simCpuMode = 'selected'">
-                    Selected
-                  </button>
-                  <button type="button" :disabled="runBusy" :class="{ active: simCpuMode === 'all' }" @click="simCpuMode = 'all'">
-                    All
-                  </button>
-                </div>
+              <div class="sim-controls">
+                <label class="sim-select-field">
+                  <span>Suite</span>
+                  <select v-model="simSuite" :disabled="runBusy">
+                    <option v-for="suite in simSuites" :key="suite.id" :value="suite.id">
+                      {{ suite.label }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="simSuite === 'cpu_tests'" class="sim-select-field compact">
+                  <span>Mode</span>
+                  <select v-model="simCpuMode" :disabled="runBusy">
+                    <option value="selected">Selected</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
               </div>
               <button
                 type="button"
@@ -218,8 +205,37 @@
                 @click="runBusy ? cancelCurrentRun() : runCurrentStep()"
               >
                 <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
-                {{ runBusy ? `Cancel ${runPhaseDisplayLabel(runPhase)} · ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
+                <span class="sim-run-action-label">
+                  {{ runBusy ? `Cancel ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
+                </span>
+                <span v-if="runBusy" class="run-timer-badge">{{ runElapsedSecondsLabel }}</span>
               </button>
+            </div>
+            <button
+              v-if="simSuite === 'cpu_tests' && simCpuMode === 'selected'"
+              type="button"
+              class="cpu-case-dropdown"
+              :disabled="runBusy"
+              @click="cpuCasePickerOpen = !cpuCasePickerOpen"
+            >
+              <span>{{ cpuCaseSelectionLabel }}</span>
+              <i class="ri-arrow-down-s-line" :class="{ open: cpuCasePickerOpen }"></i>
+            </button>
+            <div
+              v-if="simSuite === 'cpu_tests' && simCpuMode === 'selected' && cpuCasePickerOpen"
+              class="case-picker dropdown"
+            >
+              <button
+                v-for="name in availableCpuTests"
+                :key="name"
+                type="button"
+                class="case-chip"
+                :class="{ active: selectedCpuCases.includes(name) }"
+                @click="toggleCpuCase(name)"
+              >
+                {{ name }}
+              </button>
+              <span v-if="!availableCpuTests.length" class="case-picker-empty">Run Prepare to load CPU tests.</span>
             </div>
             <div class="sim-run-context" :class="simResultFreshness.state">
               <div>
@@ -234,18 +250,6 @@
                 <span>Result State</span>
                 <strong>{{ simRunSubtitle }}</strong>
               </div>
-            </div>
-            <div v-if="simSuite === 'cpu_tests' && simCpuMode === 'selected'" class="case-picker">
-              <button
-                v-for="name in availableCpuTests"
-                :key="name"
-                type="button"
-                class="case-chip"
-                :class="{ active: selectedCpuCases.includes(name) }"
-                @click="toggleCpuCase(name)"
-              >
-                {{ name }}
-              </button>
             </div>
           </section>
 
@@ -1109,6 +1113,36 @@
                 </table>
               </div>
 
+              <section v-if="shouldShowSimTerminal" class="sim-terminal-card">
+                <header class="sim-terminal-head">
+                  <div>
+                    <span>Simulation Terminal</span>
+                    <strong>{{ simTerminalTitle }}</strong>
+                  </div>
+                  <div class="sim-terminal-actions">
+                    <select
+                      v-if="simTerminalLogs.length"
+                      v-model="selectedLogPath"
+                      class="log-select compact"
+                      @change="loadSelectedLog"
+                    >
+                      <option v-for="log in simTerminalLogs" :key="log.path" :value="log.path">
+                        {{ log.label }}
+                      </option>
+                    </select>
+                    <button
+                      type="button"
+                      class="icon-action compact"
+                      :disabled="logLoading || !selectedLogPath"
+                      @click="loadSelectedLog"
+                    >
+                      <i :class="logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
+                    </button>
+                  </div>
+                </header>
+                <pre class="sim-terminal-output">{{ simTerminalContent }}</pre>
+              </section>
+
             </section>
 
           </main>
@@ -1330,6 +1364,7 @@ type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'src'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
 type ReviewMode = 'source' | 'yosys' | 'modules'
+type SimSuite = 'cpu_tests' | 'rtthread' | 'coremark'
 
 interface ConsoleProblem {
   severity: 'error' | 'warning' | 'info'
@@ -1352,7 +1387,7 @@ interface SourcePathItem extends PathItem {
 }
 
 interface SimRunContext {
-  suite: 'cpu_tests' | 'rtthread'
+  suite: SimSuite
   mode: 'all' | 'selected'
   cases: string[]
 }
@@ -1572,10 +1607,16 @@ const consoleTab = ref<ConsoleTabId>('problems')
 const reviewMode = ref<ReviewMode>('source')
 const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
 let sourceFocusToken = 0
-const simSuite = ref<'cpu_tests' | 'rtthread'>('cpu_tests')
-const runningSimSuite = ref<'cpu_tests' | 'rtthread' | null>(null)
+const simSuites: Array<{ id: SimSuite; label: string; icon: string }> = [
+  { id: 'cpu_tests', label: 'CPU Tests', icon: 'ri-cpu-line' },
+  { id: 'rtthread', label: 'RT-Thread', icon: 'ri-terminal-box-line' },
+  { id: 'coremark', label: 'CoreMark', icon: 'ri-speed-up-line' },
+]
+const simSuite = ref<SimSuite>('cpu_tests')
+const runningSimSuite = ref<SimSuite | null>(null)
 const simCpuMode = ref<'all' | 'selected'>('selected')
 const selectedCpuCases = ref<string[]>([])
+const cpuCasePickerOpen = ref(false)
 const surferFrame = ref<HTMLIFrameElement | null>(null)
 const surferReady = ref(false)
 const waveformLoading = ref(false)
@@ -1639,6 +1680,12 @@ const currentStepDisplayState = computed(() =>
 const currentStepRuntime = computed(() =>
   runBusy.value ? runElapsedLabel() : detail.value?.runtime || currentStep.value?.runtime || '--',
 )
+const runElapsedSecondsLabel = computed(() => {
+  void runClockTick.value
+  if (!runStartedAt.value) return '0000s'
+  const seconds = Math.max(0, Math.floor((Date.now() - runStartedAt.value) / 1000))
+  return `${String(seconds).padStart(4, '0')}s`
+})
 const simSuiteLabel = computed(() => simSuiteLabelFor(simSuite.value))
 const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.value || simSuite.value))
 const cases = computed(() => detail.value?.cases || [])
@@ -1659,10 +1706,15 @@ const waveItems = computed<WaveSelection[]>(() =>
   detailIsSimStep.value ? detailWaveItems.value : cachedWaveItems.value,
 )
 const selectedCpuRunCases = computed(() => cpuRunCasesForSelection())
+const cpuCaseSelectionLabel = computed(() => {
+  if (!selectedCpuRunCases.value.length) return 'Select CPU test cases'
+  if (selectedCpuRunCases.value.length === 1) return selectedCpuRunCases.value[0]
+  return `${selectedCpuRunCases.value.length} CPU tests selected`
+})
 const currentSimRunContext = computed<SimRunContext>(() => ({
   suite: simSuite.value,
   mode: simSuite.value === 'cpu_tests' ? simCpuMode.value : 'selected',
-  cases: simSuite.value === 'cpu_tests' ? selectedCpuRunCases.value : ['rtthread.soc'],
+  cases: simCasesForSuite(simSuite.value),
 }))
 const resultSimRunContext = computed<SimRunContext | null>(() => resultContextFromDetail())
 const simResultFreshness = computed(() => simResultFreshnessText())
@@ -1671,6 +1723,27 @@ const simRunSubtitle = computed(() => {
   if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
   if (!cases.value.length) return 'No simulation result yet'
   return simResultFreshness.value.message
+})
+const shouldShowSimTerminal = computed(() =>
+  isSimStep.value && (runBusy.value || cases.value.length > 0 || textViewFiles.value.length > 0),
+)
+const simTerminalLogs = computed(() => textViewFiles.value)
+const simTerminalTitle = computed(() => {
+  if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
+  if (selectedCase.value?.name) return `${selectedCase.value.name} · ${selectedCase.value.ok ? 'PASS' : 'FAIL'}`
+  if (resultSimRunContext.value) return simContextLabel(resultSimRunContext.value)
+  return simSuiteLabel.value
+})
+const simTerminalContent = computed(() => {
+  if (logContent.value) return logContent.value
+  if (runBusy.value) {
+    return [
+      `Running ${runningSimSuiteLabel.value}...`,
+      'Waiting for simulation output.',
+      'The terminal will refresh when the run completes.',
+    ].join('\n')
+  }
+  return 'No simulation output yet.'
 })
 const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
   { label: 'Design', value: config.design || currentProject.value?.name || '--', highlight: true },
@@ -1723,7 +1796,7 @@ const workspaceGuideItems = computed(() => [
   {
     icon: 'ri-play-list-2-line',
     title: 'Simulation workflow',
-    text: 'Run prepare first, then choose CPU Tests or RT-Thread in Sim. Changed selections are marked stale until rerun.',
+    text: 'Run prepare first, then choose CPU Tests, RT-Thread, or CoreMark in Sim. Changed selections are marked stale until rerun.',
   },
   {
     icon: 'ri-bug-line',
@@ -2508,7 +2581,7 @@ async function loadSelectedLog(): Promise<void> {
   }
 }
 
-async function runCurrentStep(suiteOverride?: 'cpu_tests' | 'rtthread'): Promise<void> {
+async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
   if (!currentProject.value?.path || !currentStepName.value) return
   runBusy.value = true
   runPhase.value = 'queued'
@@ -2634,11 +2707,14 @@ function normalizeWorkspacePath(path: string): string {
   return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
 }
 
-function simRunPayload(suiteOverride?: 'cpu_tests' | 'rtthread') {
+function simRunPayload(suiteOverride?: SimSuite) {
   if (!isSimStep.value) return {}
   const suite = suiteOverride || simSuite.value
   if (suite === 'rtthread') {
     return { sim_test_suite: 'rtthread' }
+  }
+  if (suite === 'coremark') {
+    return { sim_test_suite: 'coremark' }
   }
   return {
     sim_test_suite: 'cpu_tests',
@@ -2656,12 +2732,18 @@ function cpuRunCasesForSelection(): string[] {
 
 function resultContextFromDetail(): SimRunContext | null {
   if (!isSimStep.value || !cases.value.length) return null
-  const resultSuite = String(detail.value?.summary?.test_suite || '')
-  const suite: SimRunContext['suite'] = resultSuite === 'RT-Thread' || resultCaseNames().includes('rtthread.soc')
+  const resultSuite = String(detail.value?.summary?.suite_id || detail.value?.summary?.test_suite || '')
+  const caseNames = resultCaseNames()
+  const suite: SimRunContext['suite'] = resultSuite === 'rtthread' || resultSuite === 'RT-Thread' || caseNames.includes('rtthread.soc')
     ? 'rtthread'
-    : 'cpu_tests'
+    : resultSuite === 'coremark' || resultSuite === 'CoreMark' || caseNames.includes('coremark.soc')
+      ? 'coremark'
+      : 'cpu_tests'
   if (suite === 'rtthread') {
     return { suite, mode: 'selected', cases: ['rtthread.soc'] }
+  }
+  if (suite === 'coremark') {
+    return { suite, mode: 'selected', cases: ['coremark.soc'] }
   }
   const mode = String(detail.value?.summary?.cpu_test_mode || '') === 'all' ? 'all' : 'selected'
   return {
@@ -2698,8 +2780,15 @@ function resultCaseNames(): string[] {
 
 function simContextLabel(context: SimRunContext): string {
   if (context.suite === 'rtthread') return 'RT-Thread'
+  if (context.suite === 'coremark') return 'CoreMark'
   if (context.mode === 'all') return 'CPU Tests · All'
   return `CPU Tests · ${context.cases.length ? context.cases.join(', ') : 'Selected'}`
+}
+
+function simCasesForSuite(suite: SimSuite): string[] {
+  if (suite === 'rtthread') return ['rtthread.soc']
+  if (suite === 'coremark') return ['coremark.soc']
+  return selectedCpuRunCases.value
 }
 
 function syncDefaultCpuSelection(): void {
@@ -2752,8 +2841,8 @@ function toggleCpuCase(name: string): void {
     : [...selectedCpuCases.value, name]
 }
 
-function simSuiteLabelFor(suite: 'cpu_tests' | 'rtthread'): string {
-  return suite === 'rtthread' ? 'RT-Thread' : 'CPU Tests'
+function simSuiteLabelFor(suite: SimSuite): string {
+  return simSuites.find((item) => item.id === suite)?.label || 'CPU Tests'
 }
 
 function displayCatalogId(value: string): string {
@@ -3660,7 +3749,7 @@ watch(visibleTabs, () => {
 .step-meta,
 .summary-grid,
 .sim-run-head,
-.suite-row,
+.sim-controls,
 .frontend-step-tabs,
 .source-row,
 .wave-header,
@@ -3723,8 +3812,7 @@ h2 {
 .refresh-btn,
 .run-btn,
 .icon-action,
-.suite-pill,
-.mode-segment button,
+.cpu-case-dropdown,
 .frontend-step-tab,
 .console-tab,
 .case-chip,
@@ -3932,6 +4020,13 @@ button:disabled {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.step-compact-meta .runtime-value {
+  display: inline-block;
+  width: 16ch;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .step-meta-action {
@@ -4160,15 +4255,84 @@ button:disabled {
   gap: 10px;
 }
 
-.suite-row {
+.sim-controls {
+  display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
+.sim-select-field {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+}
+
+.sim-select-field.compact {
+  min-width: 108px;
+}
+
+.sim-select-field span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sim-select-field select,
+.cpu-case-dropdown {
+  min-height: 32px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.sim-select-field select {
+  padding: 0 28px 0 9px;
+}
+
+.cpu-case-dropdown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: min(360px, 100%);
+  margin-top: 10px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+}
+
+.cpu-case-dropdown i {
+  transition: transform 0.15s ease;
+}
+
+.cpu-case-dropdown i.open {
+  transform: rotate(180deg);
+}
+
 .sim-run-action {
-  min-width: 138px;
+  width: 238px;
   flex-shrink: 0;
+}
+
+.sim-run-action-label {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-timer-badge {
+  display: inline-flex;
+  justify-content: center;
+  flex: 0 0 6ch;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .sim-run-context {
@@ -4223,49 +4387,33 @@ button:disabled {
   font-size: 12px;
 }
 
-.suite-pill,
-.mode-segment button,
 .case-chip {
   border-radius: 7px;
   background: var(--bg-secondary);
   color: var(--text-secondary);
 }
 
-.suite-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-color);
-}
-
-.suite-pill.active,
-.mode-segment button.active,
 .case-chip.active {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.13);
   color: var(--accent-color);
   border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.28);
 }
 
-.mode-segment {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.mode-segment button {
-  padding: 5px 8px;
-}
-
 .case-picker {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  max-height: 92px;
+  max-height: 128px;
   overflow: auto;
-  padding-top: 10px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.case-picker.dropdown {
+  width: min(520px, 100%);
 }
 
 .case-chip {
@@ -4273,6 +4421,11 @@ button:disabled {
   border: 1px solid var(--border-color);
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 10px;
+}
+
+.case-picker-empty {
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .frontend-step-tabs {
@@ -5678,6 +5831,89 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sim-terminal-card {
+  display: flex;
+  min-height: 180px;
+  max-height: 300px;
+  flex: 0 0 220px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.sim-terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(15, 23, 42, 0.92);
+  color: #e5e7eb;
+}
+
+.sim-terminal-head div:first-child {
+  min-width: 0;
+}
+
+.sim-terminal-head span,
+.sim-terminal-head strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-terminal-head span {
+  margin-bottom: 2px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sim-terminal-head strong {
+  font-size: 12px;
+}
+
+.sim-terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sim-terminal-actions .log-select {
+  max-width: 240px;
+  border-color: rgba(148, 163, 184, 0.34);
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.sim-terminal-actions .icon-action {
+  border-color: rgba(148, 163, 184, 0.34);
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.sim-terminal-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  background: #020617;
+  color: #d1d5db;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .cases-table {

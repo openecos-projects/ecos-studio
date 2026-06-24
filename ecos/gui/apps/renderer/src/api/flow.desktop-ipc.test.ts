@@ -55,6 +55,7 @@ describe('flow API desktop bridge payloads', () => {
       data: {
         directory: '/work/demo',
         rerun: false,
+        sim_test_suite: 'coremark',
         step: StepEnum.PLACEMENT,
       },
     }))
@@ -92,6 +93,7 @@ describe('flow API desktop bridge payloads', () => {
       data: {
         directory: '/work/demo',
         rerun: false,
+        sim_test_suite: 'coremark',
         step: StepEnum.PLACEMENT,
       },
     }))

@@ -49,7 +49,7 @@ export interface RunStepRequest {
   directory: string;
   step: string;
   rerun: boolean;
-  sim_test_suite?: string;
+  sim_test_suite?: 'cpu_tests' | 'rtthread' | 'coremark' | string;
   sim_cpu_test_mode?: 'all' | 'selected';
   sim_cpu_test_cases?: string[];
 }
