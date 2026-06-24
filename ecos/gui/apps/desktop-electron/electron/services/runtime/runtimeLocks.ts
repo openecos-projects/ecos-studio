@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, rm, stat } from 'node:fs/promises'
-import type { Stats } from 'node:fs'
-import type { FileHandle } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface RuntimeLockHandle {
@@ -105,7 +103,7 @@ async function acquireRuntimeLockWithReclaimRetry(
     pid: process.pid,
     scope,
   }
-  const lock = await acquireOwnerFileLock(lockPath, owner)
+  const lock = await acquireOwnerDirectoryLock(lockPath, owner)
   if (lock) return lock
 
   const active = await isRuntimeLockPathActive(lockPath, scope)
@@ -152,7 +150,7 @@ async function acquireRuntimeReclaimLock(
     pid: process.pid,
     scope: reclaimScope,
   }
-  const lock = await acquireOwnerFileLock(reclaimPath, owner)
+  const lock = await acquireOwnerDirectoryLock(reclaimPath, owner)
   if (lock) return lock
 
   if (await isRuntimeLockPathActive(reclaimPath, reclaimScope)) {
@@ -163,35 +161,34 @@ async function acquireRuntimeReclaimLock(
   return acquireRuntimeReclaimLock(rootDirectory, scope, jobId)
 }
 
-async function acquireOwnerFileLock(
+async function acquireOwnerDirectoryLock(
   lockPath: string,
   owner: RuntimeLockOwner,
 ): Promise<RuntimeLockHandle | null> {
-  let lockFile: FileHandle
-
+  let lockDirectoryCreated = false
   try {
-    lockFile = await open(lockPath, 'wx')
+    await mkdir(lockPath)
+    lockDirectoryCreated = true
+    if (!await writeRuntimeLockOwnerFile(lockPath, owner)) return null
   } catch (error) {
+    if (lockDirectoryCreated) {
+      await removeFailedRuntimeLockDirectory(lockPath, owner)
+    }
     const code = (error as NodeJS.ErrnoException).code
-    if (code === 'EEXIST' || code === 'EISDIR') return null
+    if (
+      code === 'EEXIST'
+      || code === 'EISDIR'
+      || code === 'ENOTDIR'
+      || code === 'ENOTEMPTY'
+    ) {
+      return null
+    }
     throw error
   }
 
-  let removeFailedLock = false
-  try {
-    await lockFile.writeFile(JSON.stringify(owner, null, 2))
-    const currentOwner = await readRuntimeLockOwner(lockPath)
-    if (!isSameRuntimeLockOwner(currentOwner, owner)) {
-      return null
-    }
-  } catch (error) {
-    removeFailedLock = await isSameFile(lockPath, lockFile)
-    throw error
-  } finally {
-    await lockFile.close()
-    if (removeFailedLock) {
-      await rm(lockPath, { force: true, recursive: true })
-    }
+  const currentOwner = await readRuntimeLockOwner(lockPath)
+  if (!isSameRuntimeLockOwner(currentOwner, owner)) {
+    return null
   }
 
   return {
@@ -256,20 +253,62 @@ function isSameRuntimeLockOwner(
     && actual.scope === expected.scope
 }
 
-async function isSameFile(lockPath: string, lockFile: FileHandle): Promise<boolean> {
+async function writeRuntimeLockOwnerFile(
+  lockPath: string,
+  owner: RuntimeLockOwner,
+): Promise<boolean> {
+  const ownerPath = path.join(lockPath, 'owner.json')
+  let ownerWritten = false
   try {
-    const [pathStats, fileStats] = await Promise.all([
-      stat(lockPath),
-      lockFile.stat(),
-    ])
-    return isSameStatsFile(pathStats, fileStats)
-  } catch {
-    return false
+    await writeFile(ownerPath, JSON.stringify(owner, null, 2), { flag: 'wx', mode: 0o444 })
+    ownerWritten = true
+    await chmod(ownerPath, 0o444)
+    return true
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (ownerWritten) {
+      await removeRuntimeLockOwnerFileIfOwnerMatches(lockPath, owner)
+      throw error
+    }
+    if (code === 'EEXIST') return false
+    if (
+      (code === 'EACCES' || code === 'EPERM')
+      && await readRuntimeLockOwner(lockPath) !== null
+    ) {
+      return false
+    }
+    throw error
   }
 }
 
-function isSameStatsFile(first: Stats, second: Stats): boolean {
-  return first.dev === second.dev && first.ino === second.ino
+async function removeRuntimeLockOwnerFileIfOwnerMatches(
+  lockPath: string,
+  owner: RuntimeLockOwner,
+): Promise<void> {
+  try {
+    const currentOwner = await readRuntimeLockOwner(lockPath)
+    if (isSameRuntimeLockOwner(currentOwner, owner)) {
+      await rm(path.join(lockPath, 'owner.json'), { force: true })
+    }
+  } catch {
+    // Losing a race should not turn into a runtime failure.
+  }
+}
+
+async function removeFailedRuntimeLockDirectory(
+  lockPath: string,
+  owner: RuntimeLockOwner,
+): Promise<void> {
+  try {
+    const currentOwner = await readRuntimeLockOwner(lockPath)
+    if (currentOwner && !isSameRuntimeLockOwner(currentOwner, owner)) return
+    if (currentOwner) {
+      await rm(path.join(lockPath, 'owner.json'), { force: true })
+    }
+    await rmdir(lockPath)
+  } catch {
+    // Cleanup is best-effort; the original acquisition error is more useful.
+  }
 }
 
 async function waitForRuntimeLockReclaimRetry(): Promise<void> {

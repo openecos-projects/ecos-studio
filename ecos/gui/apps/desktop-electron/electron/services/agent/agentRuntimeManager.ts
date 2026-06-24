@@ -65,7 +65,7 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
       runtime.onEvent((event) => {
         this.eventFanout.emit({
           ...event,
-          providerId: event.providerId ?? providerId,
+          providerId,
         })
       })
     }

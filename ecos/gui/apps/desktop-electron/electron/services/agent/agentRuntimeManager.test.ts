@@ -202,6 +202,32 @@ describe('AgentRuntimeManager', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
+  it('attributes provider events to the registered provider runtime', () => {
+    const localProvider = createProvider('local') as AgentProviderRuntime & {
+      emitForTest(event: DesktopAgentEvent): void
+    }
+    const manager = new AgentRuntimeManager({
+      defaultProviderId: 'local',
+      providers: [
+        { providerId: 'local', runtime: localProvider },
+      ],
+    })
+    const listener = vi.fn()
+    manager.onEvent(listener)
+
+    localProvider.emitForTest({
+      providerId: 'codex',
+      text: 'reported by local provider',
+      type: 'message',
+    })
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      text: 'reported by local provider',
+      type: 'message',
+    })
+  })
+
   it('rejects calls for unknown agent providers', async () => {
     const manager = new AgentRuntimeManager({
       providers: [

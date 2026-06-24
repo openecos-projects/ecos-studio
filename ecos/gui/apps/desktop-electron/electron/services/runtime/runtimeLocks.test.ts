@@ -1,8 +1,8 @@
-import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   acquireRuntimeLock,
   isProcessAlive,
@@ -30,6 +30,24 @@ describe('runtimeLocks', () => {
 
       await first?.release()
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('creates directory-format locks with owner files for existing clients', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    try {
+      const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
+      expect(lock).not.toBeNull()
+
+      await expect(stat(lockDirectory).then((stats) => stats.isDirectory())).resolves.toBe(true)
+      await expect(readFile(path.join(lockDirectory, 'owner.json'), 'utf8')).resolves.toContain(
+        '"jobId": "job-1"',
+      )
+
+      await lock?.release()
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -217,6 +235,226 @@ describe('runtimeLocks', () => {
       })
       await lock?.release()
     } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('does not remove a replacement lock when a stalled initializer cleanup resumes', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const scope = '/work/demo'
+    const lockDirectory = path.join(root, `${runtimeLockName(scope)}.lock`)
+    const ownerPath = path.join(lockDirectory, 'owner.json')
+    const replacementOwner = {
+      jobId: 'replacement-job',
+      pid: process.pid,
+      scope,
+    }
+
+    try {
+      let simulatedRace = false
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
+            const [target] = args
+            if (target === ownerPath && !simulatedRace) {
+              simulatedRace = true
+              await actual.rm(lockDirectory, { force: true, recursive: true })
+              await actual.mkdir(lockDirectory, { recursive: true })
+              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), { mode: 0o444 })
+              await actual.chmod(ownerPath, 0o444)
+              const error = new Error('permission denied') as NodeJS.ErrnoException
+              error.code = 'EACCES'
+              throw error
+            }
+            return actual.writeFile(...args)
+          }),
+        }
+      })
+      const locks = await import('./runtimeLocks')
+
+      await expect(locks.acquireRuntimeLock(root, scope, 'stalled-job')).resolves.toBeNull()
+      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(replacementOwner)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('does not replace an owner that races into a new lock directory', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const scope = '/work/demo'
+    const lockDirectory = path.join(root, `${runtimeLockName(scope)}.lock`)
+    const ownerPath = path.join(lockDirectory, 'owner.json')
+
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      const staleTime = new Date(Date.now() - runtimeLockInitializationGraceMs - 1_000)
+      await utimes(lockDirectory, staleTime, staleTime)
+
+      let simulatedRace = false
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
+            const [target] = args
+            if (target === ownerPath && !simulatedRace) {
+              simulatedRace = true
+              await actual.writeFile(ownerPath, JSON.stringify({
+                jobId: 'stalled-job',
+                pid: process.pid,
+                scope,
+              }), { flag: 'wx', mode: 0o444 })
+              await actual.chmod(ownerPath, 0o444)
+            }
+            return actual.writeFile(...args)
+          }),
+        }
+      })
+      const locks = await import('./runtimeLocks')
+
+      const lock = await locks.acquireRuntimeLock(root, scope, 'replacement-job')
+
+      expect(lock).toBeNull()
+      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toMatchObject({
+        jobId: 'stalled-job',
+      })
+      await lock?.release()
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('does not trust a replacement directory after creating a lock directory', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const scope = '/work/demo'
+    const lockDirectory = path.join(root, `${runtimeLockName(scope)}.lock`)
+    const ownerPath = path.join(lockDirectory, 'owner.json')
+    const replacementOwner = {
+      jobId: 'replacement-job',
+      pid: process.pid,
+      scope,
+    }
+
+    try {
+      let simulatedRace = false
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          mkdir: vi.fn(async (...args: Parameters<typeof actual.mkdir>) => {
+            const [target] = args
+            const result = await actual.mkdir(...args)
+            if (target === lockDirectory && !simulatedRace) {
+              simulatedRace = true
+              await actual.rm(lockDirectory, { force: true, recursive: true })
+              await actual.mkdir(lockDirectory, { recursive: true })
+              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), { mode: 0o444 })
+              await actual.chmod(ownerPath, 0o444)
+            }
+            return result
+          }),
+        }
+      })
+      const locks = await import('./runtimeLocks')
+
+      await expect(locks.acquireRuntimeLock(root, scope, 'stalled-job')).resolves.toBeNull()
+      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(replacementOwner)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('surfaces lock directory creation permission failures', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const scope = '/work/demo'
+    const lockDirectory = path.join(root, `${runtimeLockName(scope)}.lock`)
+    let lockDirectoryAttempts = 0
+
+    try {
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          mkdir: vi.fn(async (...args: Parameters<typeof actual.mkdir>) => {
+            const [target] = args
+            if (target === lockDirectory || String(target).endsWith('.reclaim.lock')) {
+              lockDirectoryAttempts += 1
+              const error = new Error(
+                lockDirectoryAttempts === 1
+                  ? 'permission denied'
+                  : 'recurred after permission failure',
+              ) as NodeJS.ErrnoException
+              error.code = lockDirectoryAttempts === 1 ? 'EACCES' : 'ELOOP'
+              throw error
+            }
+            return actual.mkdir(...args)
+          }),
+        }
+      })
+      const locks = await import('./runtimeLocks')
+
+      await expect(locks.acquireRuntimeLock(root, scope, 'job-1')).rejects.toThrow(
+        'permission denied',
+      )
+      expect(lockDirectoryAttempts).toBe(1)
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('surfaces owner-file permission failures in the created lock directory', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const scope = '/work/demo'
+    const lockDirectory = path.join(root, `${runtimeLockName(scope)}.lock`)
+    const ownerPath = path.join(lockDirectory, 'owner.json')
+    let ownerWriteAttempts = 0
+
+    try {
+      vi.resetModules()
+      vi.doMock('node:fs/promises', async () => {
+        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        return {
+          ...actual,
+          writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
+            const [target] = args
+            if (target === ownerPath) {
+              ownerWriteAttempts += 1
+              const error = new Error(
+                ownerWriteAttempts === 1
+                  ? 'permission denied'
+                  : 'permission failure retried',
+              ) as NodeJS.ErrnoException
+              error.code = ownerWriteAttempts === 1 ? 'EACCES' : 'ELOOP'
+              throw error
+            }
+            return actual.writeFile(...args)
+          }),
+        }
+      })
+      const locks = await import('./runtimeLocks')
+
+      await expect(locks.acquireRuntimeLock(root, scope, 'job-1')).rejects.toThrow(
+        'permission denied',
+      )
+      expect(ownerWriteAttempts).toBe(1)
+      await expect(stat(lockDirectory)).rejects.toThrow()
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
       await rm(root, { force: true, recursive: true })
     }
   })
