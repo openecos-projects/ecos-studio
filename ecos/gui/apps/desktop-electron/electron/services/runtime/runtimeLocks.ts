@@ -61,7 +61,15 @@ async function readLockOwnerText(lockPath: string): Promise<string | null> {
     return await readFile(lockPath, 'utf8')
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code !== 'EISDIR') return null
+    if (code !== 'EISDIR') {
+      if (code !== 'EPERM') return null
+      try {
+        const stats = await stat(lockPath)
+        if (!stats.isDirectory()) return null
+      } catch {
+        return null
+      }
+    }
   }
 
   try {
