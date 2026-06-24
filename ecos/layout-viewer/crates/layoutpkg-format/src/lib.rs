@@ -14,6 +14,8 @@ pub const HIERARCHY_INDEX_SCHEMA: &str = "ecos.layoutpkg.hierarchy_index.v1";
 pub const OVERVIEW_PYRAMID_SCHEMA: &str = "ecos.layoutpkg.overview_pyramid.v1";
 pub const DETAIL_TILE_MAGIC: &[u8; 8] = b"ELDTILE1";
 pub const DETAIL_TILE_VERSION: u16 = 1;
+pub const OVERVIEW_PYRAMID_MAGIC: &[u8; 8] = b"ELOPYR01";
+pub const OVERVIEW_PYRAMID_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -314,6 +316,101 @@ pub fn read_detail_tile(reader: &mut impl Read) -> Result<DetailTile> {
     Ok(DetailTile { rects })
 }
 
+pub fn write_overview_pyramid(
+    writer: &mut impl Write,
+    pyramid: &OverviewPyramidDocument,
+) -> Result<()> {
+    writer.write_all(OVERVIEW_PYRAMID_MAGIC)?;
+    writer.write_u16::<LittleEndian>(OVERVIEW_PYRAMID_VERSION)?;
+    writer.write_u16::<LittleEndian>(0)?;
+    for value in pyramid.world_bbox {
+        writer.write_i32::<LittleEndian>(value)?;
+    }
+    writer.write_u32::<LittleEndian>(pyramid.levels.len() as u32)?;
+    writer.write_u32::<LittleEndian>(0)?;
+    for level in &pyramid.levels {
+        writer.write_u32::<LittleEndian>(level.level)?;
+        writer.write_i32::<LittleEndian>(level.units_per_bin)?;
+        writer.write_u32::<LittleEndian>(level.grid[0])?;
+        writer.write_u32::<LittleEndian>(level.grid[1])?;
+        writer.write_u32::<LittleEndian>(level.bins.len() as u32)?;
+        writer.write_u32::<LittleEndian>(0)?;
+        for bin in &level.bins {
+            for value in bin.bbox {
+                writer.write_i32::<LittleEndian>(value)?;
+            }
+            writer.write_u16::<LittleEndian>(bin.layer_id)?;
+            writer.write_u8(bin.kind.code())?;
+            writer.write_u8(0)?;
+            writer.write_u32::<LittleEndian>(bin.count)?;
+            writer.write_i64::<LittleEndian>(bin.coverage_area)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn read_overview_pyramid(reader: &mut impl Read) -> Result<OverviewPyramidDocument> {
+    let mut magic = [0_u8; 8];
+    reader.read_exact(&mut magic)?;
+    if &magic != OVERVIEW_PYRAMID_MAGIC {
+        bail!("invalid overview pyramid magic");
+    }
+    let version = reader.read_u16::<LittleEndian>()?;
+    if version != OVERVIEW_PYRAMID_VERSION {
+        bail!("unsupported overview pyramid version {version}");
+    }
+    let _flags = reader.read_u16::<LittleEndian>()?;
+    let world_bbox = [
+        reader.read_i32::<LittleEndian>()?,
+        reader.read_i32::<LittleEndian>()?,
+        reader.read_i32::<LittleEndian>()?,
+        reader.read_i32::<LittleEndian>()?,
+    ];
+    let level_count = reader.read_u32::<LittleEndian>()?;
+    let _reserved = reader.read_u32::<LittleEndian>()?;
+    let mut levels = Vec::with_capacity(level_count as usize);
+    for _ in 0..level_count {
+        let level = reader.read_u32::<LittleEndian>()?;
+        let units_per_bin = reader.read_i32::<LittleEndian>()?;
+        let grid = [
+            reader.read_u32::<LittleEndian>()?,
+            reader.read_u32::<LittleEndian>()?,
+        ];
+        let bin_count = reader.read_u32::<LittleEndian>()?;
+        let _reserved = reader.read_u32::<LittleEndian>()?;
+        let mut bins = Vec::with_capacity(bin_count as usize);
+        for _ in 0..bin_count {
+            bins.push(OverviewBinRecord {
+                bbox: [
+                    reader.read_i32::<LittleEndian>()?,
+                    reader.read_i32::<LittleEndian>()?,
+                    reader.read_i32::<LittleEndian>()?,
+                    reader.read_i32::<LittleEndian>()?,
+                ],
+                layer_id: reader.read_u16::<LittleEndian>()?,
+                kind: LayoutObjectKind::from_code(reader.read_u8()?)?,
+                count: {
+                    let _reserved = reader.read_u8()?;
+                    reader.read_u32::<LittleEndian>()?
+                },
+                coverage_area: reader.read_i64::<LittleEndian>()?,
+            });
+        }
+        levels.push(OverviewLevel {
+            level,
+            units_per_bin,
+            grid,
+            bins,
+        });
+    }
+    Ok(OverviewPyramidDocument {
+        schema: OVERVIEW_PYRAMID_SCHEMA.to_string(),
+        version: u32::from(version),
+        world_bbox,
+        levels,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,5 +687,33 @@ mod tests {
 
         assert_eq!(decoded.levels[0].bins[0].count, 12);
         assert_eq!(decoded.levels[0].units_per_bin, 100);
+    }
+
+    #[test]
+    fn overview_pyramid_binary_round_trips_density_levels() {
+        let pyramid = OverviewPyramidDocument {
+            schema: OVERVIEW_PYRAMID_SCHEMA.to_string(),
+            version: 1,
+            world_bbox: [0, 0, 1000, 1000],
+            levels: vec![OverviewLevel {
+                level: 0,
+                units_per_bin: 100,
+                grid: [10, 10],
+                bins: vec![OverviewBinRecord {
+                    bbox: [0, 0, 100, 100],
+                    layer_id: 9,
+                    kind: LayoutObjectKind::Via,
+                    count: 12,
+                    coverage_area: 240,
+                }],
+            }],
+        };
+
+        let mut bytes = Vec::new();
+        write_overview_pyramid(&mut bytes, &pyramid).unwrap();
+
+        assert!(bytes.starts_with(OVERVIEW_PYRAMID_MAGIC));
+        let decoded = read_overview_pyramid(&mut bytes.as_slice()).unwrap();
+        assert_eq!(decoded, pyramid);
     }
 }

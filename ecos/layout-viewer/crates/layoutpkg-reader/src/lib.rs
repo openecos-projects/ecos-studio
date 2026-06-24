@@ -1,14 +1,15 @@
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fs,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::{bail, Context, Result};
 use layoutpkg_format::{
-    read_detail_tile, DetailScopeDocument, HierarchyDocument, LayoutObjectKind, LayoutRectRecord,
-    OverviewLevel, OverviewPyramidDocument,
+    read_detail_tile, read_overview_pyramid, DetailScopeDocument, HierarchyDocument,
+    LayoutObjectKind, LayoutRectRecord, OverviewLevel, OverviewPyramidDocument,
 };
 use serde::Deserialize;
 
@@ -192,6 +193,8 @@ struct TileEntry {
     id: String,
     bbox: [i32; 4],
     file: String,
+    byte_offset: Option<u64>,
+    byte_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -406,7 +409,12 @@ impl LayoutPackage {
         let Some(path) = self.manifest.tilesets.overview_pyramid.as_ref() else {
             return Ok(None);
         };
-        let pyramid: OverviewPyramidDocument = read_json(self.root.join(path))?;
+        let pyramid_path = self.root.join(path);
+        let file = fs::File::open(&pyramid_path)
+            .with_context(|| format!("failed to open {}", pyramid_path.display()))?;
+        let mut reader = std::io::BufReader::new(file);
+        let pyramid = read_overview_pyramid(&mut reader)
+            .with_context(|| format!("failed to read {}", pyramid_path.display()))?;
         self.overview_pyramid_cache = Some(pyramid.clone());
         Ok(Some(pyramid))
     }
@@ -458,7 +466,7 @@ impl LayoutPackage {
         }
         stats.cache_misses += 1;
         stats.disk_reads += 1;
-        let records = read_tile_file(self.root.join(&entry.file))?;
+        let records = read_tile_entry(&self.root, entry)?;
         self.cache
             .insert(entry.id.clone(), records.clone(), cache_capacity, stats);
         Ok(records)
@@ -621,6 +629,38 @@ fn read_tile_file(path: impl AsRef<Path>) -> Result<Arc<[LayoutRectRecord]>> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let tile = read_detail_tile(&mut bytes.as_slice())
         .with_context(|| format!("failed to decode {}", path.display()))?;
+    Ok(Arc::from(tile.rects))
+}
+
+fn read_tile_entry(root: &Path, entry: &TileEntry) -> Result<Arc<[LayoutRectRecord]>> {
+    let path = root.join(&entry.file);
+    let Some(byte_offset) = entry.byte_offset else {
+        return read_tile_file(path);
+    };
+    let byte_size = entry
+        .byte_size
+        .with_context(|| format!("tile {} is missing byte_size", entry.id))?;
+    let byte_size = usize::try_from(byte_size)
+        .with_context(|| format!("tile {} byte_size is too large", entry.id))?;
+    let mut file =
+        fs::File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+    file.seek(SeekFrom::Start(byte_offset))
+        .with_context(|| format!("failed to seek {}", path.display()))?;
+    let mut bytes = vec![0_u8; byte_size];
+    file.read_exact(&mut bytes).with_context(|| {
+        format!(
+            "failed to read {} at offset {}",
+            path.display(),
+            byte_offset
+        )
+    })?;
+    let tile = read_detail_tile(&mut bytes.as_slice()).with_context(|| {
+        format!(
+            "failed to decode {} at offset {}",
+            path.display(),
+            byte_offset
+        )
+    })?;
     Ok(Arc::from(tile.rects))
 }
 
@@ -799,32 +839,33 @@ mod tests {
         let levels = units_per_bins
             .iter()
             .enumerate()
-            .map(|(level, units_per_bin)| {
-                json!({
-                    "level": level,
-                    "units_per_bin": units_per_bin,
-                    "grid": [1, 1],
-                    "bins": [
-                        {
-                            "bbox": [0, 0, *units_per_bin, *units_per_bin],
-                            "layer_id": 1,
-                            "kind": "regular_wire",
-                            "count": 1,
-                            "coverage_area": i64::from(*units_per_bin) * i64::from(*units_per_bin)
-                        }
-                    ]
-                })
+            .map(|(level, units_per_bin)| layoutpkg_format::OverviewLevel {
+                level: level as u32,
+                units_per_bin: *units_per_bin,
+                grid: [1, 1],
+                bins: vec![layoutpkg_format::OverviewBinRecord {
+                    bbox: [0, 0, *units_per_bin, *units_per_bin],
+                    layer_id: 1,
+                    kind: layoutpkg_format::LayoutObjectKind::RegularWire,
+                    count: 1,
+                    coverage_area: i64::from(*units_per_bin) * i64::from(*units_per_bin),
+                }],
             })
             .collect::<Vec<_>>();
-        write_json(
-            &package_root.join("overview/pyramid.json"),
-            json!({
-                "schema": layoutpkg_format::OVERVIEW_PYRAMID_SCHEMA,
-                "version": 1,
-                "world_bbox": [0, 0, 1000, 1000],
-                "levels": levels
-            }),
-        );
+        let pyramid = layoutpkg_format::OverviewPyramidDocument {
+            schema: layoutpkg_format::OVERVIEW_PYRAMID_SCHEMA.to_string(),
+            version: 1,
+            world_bbox: [0, 0, 1000, 1000],
+            levels,
+        };
+        let mut bytes = Vec::new();
+        layoutpkg_format::write_overview_pyramid(&mut bytes, &pyramid).unwrap();
+        fs::write(package_root.join("overview/pyramid.bin"), bytes).unwrap();
+        let manifest_path = package_root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["tilesets"]["overview_pyramid"] = json!("overview/pyramid.bin");
+        write_json(&manifest_path, manifest);
     }
 
     fn remove_overview_pyramid_from_manifest(package_root: &std::path::Path) {
@@ -835,6 +876,25 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("overview_pyramid");
+        write_json(&manifest_path, manifest);
+    }
+
+    fn write_detail_scope(package_root: &std::path::Path) {
+        write_json(
+            &package_root.join("detail/scope.json"),
+            json!({
+                "schema": layoutpkg_format::DETAIL_SCOPE_SCHEMA,
+                "version": 1,
+                "records": [
+                    { "source_id": 1, "cell_id": 0, "coordinates": "top" }
+                ]
+            }),
+        );
+        let manifest_path = package_root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["capabilities"]["detail_scope"] = json!(true);
+        manifest["tilesets"]["detail_scope"] = json!("detail/scope.json");
         write_json(&manifest_path, manifest);
     }
 
@@ -924,8 +984,9 @@ mod tests {
     #[test]
     fn loads_overview_pyramid_once_and_selects_level_by_upp() {
         let (_input, package_root) = create_layoutpkg();
-        let pyramid_path = package_root.join("overview/pyramid.json");
+        let pyramid_path = package_root.join("overview/pyramid.bin");
         assert!(pyramid_path.exists());
+        assert!(!package_root.join("overview/pyramid.json").exists());
 
         let mut package = LayoutPackage::open(&package_root).unwrap();
 
@@ -1073,6 +1134,7 @@ mod tests {
     #[test]
     fn loads_detail_scope_document() {
         let (_input, package_root) = create_layoutpkg();
+        write_detail_scope(&package_root);
         let mut package = LayoutPackage::open(&package_root).unwrap();
 
         let scope = package.load_detail_scope().unwrap().unwrap();
@@ -1085,6 +1147,14 @@ mod tests {
                 && record.cell_id == 0
                 && record.coordinates == layoutpkg_format::DetailCoordinates::Top
         }));
+    }
+
+    #[test]
+    fn missing_detail_scope_is_reported_as_unavailable() {
+        let (_input, package_root) = create_layoutpkg();
+        let mut package = LayoutPackage::open(&package_root).unwrap();
+
+        assert!(package.load_detail_scope().unwrap().is_none());
     }
 
     #[test]
@@ -1123,6 +1193,22 @@ mod tests {
         assert_eq!(hit.record.x1, 100);
         assert_eq!(hit.record.y1, 100);
         assert_eq!(hit.record.x2, 150);
+        assert_eq!(hit.record.y2, 150);
+        assert_eq!(hit.source, QueryHitSource::Tile);
+    }
+
+    #[test]
+    fn query_point_reads_records_from_detail_shard_offset() {
+        let (_input, package_root) = create_layoutpkg();
+        let mut package = LayoutPackage::open(&package_root).unwrap();
+
+        let hit = package.query_point(725, 125, 2, 8).unwrap().unwrap();
+
+        assert_eq!(hit.tile_id.as_deref(), Some("1:0"));
+        assert_eq!(hit.record.source_id, 2);
+        assert_eq!(hit.record.x1, 700);
+        assert_eq!(hit.record.y1, 100);
+        assert_eq!(hit.record.x2, 750);
         assert_eq!(hit.record.y2, 150);
         assert_eq!(hit.source, QueryHitSource::Tile);
     }

@@ -51,15 +51,17 @@ The first implemented slice writes:
   manifest.json
   dictionaries/layers.json
   detail/index.json
-  detail/tile_<x>_<y>.bin
+  detail/shard_0.bin
   detail/large_objects.bin
   overview/index.json
   overview/tile_<x>_<y>.bin
-  overview/pyramid.json
+  overview/pyramid.bin
   query/index.json
 ```
 
-`detail/tile_0_0.bin` is a binary rectangle tile with this fixed record layout:
+Each `detail/index.json` tile entry points at a binary rectangle tile stored in
+`detail/shard_0.bin` with `file`, `byte_offset`, and `byte_size`. The tile bytes
+use this fixed record layout:
 
 ```txt
 magic:      8 bytes  "ELDTILE1"

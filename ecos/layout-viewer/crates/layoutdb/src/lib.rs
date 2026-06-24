@@ -1,7 +1,9 @@
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
     ops::Range,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -10,6 +12,8 @@ use layoutpkg_format::{
     LayoutRectRecord, Orientation, OverviewBinRecord, Transform,
 };
 use rstar::{RTree, RTreeObject, AABB};
+
+const EXPANDED_ARRAY_INSTANCE_THRESHOLD: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rect {
@@ -521,10 +525,15 @@ pub struct Cell {
     bbox: Rect,
     shapes: Vec<ShapeRecord>,
     instances: Vec<CellInstance>,
-    index: SpatialIndex,
+    index: RefCell<Option<SpatialIndex>>,
+    hierarchy_index: RefCell<Option<HierarchyIndex>>,
+    layer_stats: HashMap<u16, CellLayerStats>,
+}
+
+#[derive(Debug, Clone)]
+struct HierarchyIndex {
     instance_index: RTree<InstanceIndexEntry>,
     array_index: RTree<ArrayIndexEntry>,
-    layer_stats: HashMap<u16, CellLayerStats>,
 }
 
 impl Cell {
@@ -534,9 +543,8 @@ impl Cell {
             bbox: world_bbox,
             shapes: Vec::new(),
             instances: Vec::new(),
-            index: SpatialIndex::new(world_bbox),
-            instance_index: RTree::new(),
-            array_index: RTree::new(),
+            index: RefCell::new(None),
+            hierarchy_index: RefCell::new(None),
             layer_stats: HashMap::new(),
         }
     }
@@ -562,34 +570,83 @@ impl Cell {
     }
 
     pub fn array_index_len(&self) -> usize {
-        self.array_index.size()
+        self.ensure_hierarchy_index().array_index.size()
+    }
+
+    #[cfg(test)]
+    fn hierarchy_index_is_built(&self) -> bool {
+        self.hierarchy_index.borrow().is_some()
+    }
+
+    #[cfg(test)]
+    fn shape_index_is_built(&self) -> bool {
+        self.index.borrow().is_some()
+    }
+
+    fn ensure_shape_index(&self) -> std::cell::Ref<'_, SpatialIndex> {
+        if self.index.borrow().is_none() {
+            self.index
+                .replace(Some(SpatialIndex::from_shapes(self.bbox, &self.shapes)));
+        }
+        std::cell::Ref::map(self.index.borrow(), |index| {
+            index.as_ref().expect("shape index should be built")
+        })
     }
 
     fn add_instance(&mut self, instance: CellInstance, child_bbox: Rect) {
-        let instance_index = self.instances.len();
-        let columns = instance.array.columns.max(1);
-        let rows = instance.array.rows.max(1);
-        let elements = u64::from(columns) * u64::from(rows);
-        if elements > 256 {
-            self.array_index.insert(ArrayIndexEntry {
-                bbox: instance.bbox,
-                instance_index,
-            });
-        } else {
-            for row in 0..rows {
-                for column in 0..columns {
-                    let bbox = AffineTransform::from_instance(&instance, child_bbox, column, row)
-                        .transform_rect(child_bbox);
-                    self.instance_index.insert(InstanceIndexEntry {
-                        bbox,
-                        instance_index,
-                        column,
-                        row,
-                    });
-                }
+        let _ = child_bbox;
+        self.instances.push(instance);
+        self.hierarchy_index.replace(None);
+    }
+
+    fn ensure_hierarchy_index(&self) -> std::cell::Ref<'_, HierarchyIndex> {
+        if self.hierarchy_index.borrow().is_none() {
+            let mut instance_entries = Vec::new();
+            let mut array_entries = Vec::new();
+            for (instance_index, instance) in self.instances.iter().enumerate() {
+                append_hierarchy_index_entries(
+                    instance_index,
+                    instance,
+                    &mut instance_entries,
+                    &mut array_entries,
+                );
+            }
+            self.hierarchy_index.replace(Some(HierarchyIndex {
+                instance_index: RTree::bulk_load(instance_entries),
+                array_index: RTree::bulk_load(array_entries),
+            }));
+        }
+        std::cell::Ref::map(self.hierarchy_index.borrow(), |index| {
+            index.as_ref().expect("hierarchy index should be built")
+        })
+    }
+}
+
+fn append_hierarchy_index_entries(
+    instance_index: usize,
+    instance: &CellInstance,
+    instance_entries: &mut Vec<InstanceIndexEntry>,
+    array_entries: &mut Vec<ArrayIndexEntry>,
+) {
+    let columns = instance.array.columns.max(1);
+    let rows = instance.array.rows.max(1);
+    let elements = u64::from(columns) * u64::from(rows);
+    if elements > EXPANDED_ARRAY_INSTANCE_THRESHOLD {
+        array_entries.push(ArrayIndexEntry {
+            bbox: instance.bbox,
+            instance_index,
+        });
+    } else {
+        for row in 0..rows {
+            for column in 0..columns {
+                instance_entries.push(InstanceIndexEntry {
+                    bbox: instance.bbox,
+                    instance_index,
+                    column,
+                    row,
+                });
             }
         }
-        self.instances.push(instance);
     }
 }
 
@@ -720,6 +777,14 @@ impl SpatialIndex {
         }
     }
 
+    fn from_shapes(world_bbox: Rect, shapes: &[ShapeRecord]) -> Self {
+        let mut index = Self::new(world_bbox);
+        for (shape_index, shape) in shapes.iter().enumerate() {
+            index.insert(shape_index, shape);
+        }
+        index
+    }
+
     fn insert(&mut self, shape_index: usize, shape: &ShapeRecord) {
         for bin in self.bins_for_rect(shape.bbox) {
             self.all_bins.entry(bin).or_default().push(shape_index);
@@ -840,6 +905,17 @@ impl LayoutDb {
         world_bbox: Rect,
         hierarchy: HierarchyDocument,
     ) -> Self {
+        Self::from_hierarchy_document_profiled(design_name, world_bbox, hierarchy).0
+    }
+
+    pub fn from_hierarchy_document_profiled(
+        design_name: impl Into<String>,
+        world_bbox: Rect,
+        hierarchy: HierarchyDocument,
+    ) -> (Self, HierarchyBuildProfile) {
+        let layer_count_started = std::time::Instant::now();
+        let package_layer_counts = hierarchy_layer_counts(&hierarchy);
+        let layer_count = layer_count_started.elapsed();
         let mut db = Self {
             design_name: design_name.into(),
             world_bbox,
@@ -847,10 +923,11 @@ impl LayoutDb {
             cells: Vec::new(),
             top_cell: CellId(0),
             package_cell_ids: HashMap::new(),
-            package_layer_counts: hierarchy_layer_counts(&hierarchy),
+            package_layer_counts,
             coverage: Vec::new(),
             overview_bins: Vec::new(),
         };
+        let cell_alloc_started = std::time::Instant::now();
         let mut cell_ids = HashMap::new();
         for cell in &hierarchy.cells {
             let id = CellId(db.cells.len());
@@ -863,11 +940,17 @@ impl LayoutDb {
                 Rect::new(cell.bbox[0], cell.bbox[1], cell.bbox[2], cell.bbox[3]),
             ));
         }
+        let cell_alloc = cell_alloc_started.elapsed();
+        let cell_map_started = std::time::Instant::now();
         db.package_cell_ids = cell_ids.clone();
+        let cell_map = cell_map_started.elapsed();
+        let mut shape_import = Duration::default();
+        let mut instance_import = Duration::default();
         for cell in hierarchy.cells {
             let Some(cell_id) = cell_ids.get(&cell.id).copied() else {
                 continue;
             };
+            let shape_import_started = std::time::Instant::now();
             for shape in cell.shapes {
                 db.add_shape(
                     cell_id,
@@ -879,6 +962,8 @@ impl LayoutDb {
                     ),
                 );
             }
+            shape_import += shape_import_started.elapsed();
+            let instance_import_started = std::time::Instant::now();
             for instance in cell.instances {
                 let Some(child_cell) = cell_ids.get(&instance.child_cell).copied() else {
                     continue;
@@ -901,8 +986,18 @@ impl LayoutDb {
                     },
                 );
             }
+            instance_import += instance_import_started.elapsed();
         }
-        db
+        (
+            db,
+            HierarchyBuildProfile {
+                layer_count,
+                cell_alloc,
+                cell_map,
+                shape_import,
+                instance_import,
+            },
+        )
     }
 
     pub fn design_name(&self) -> &str {
@@ -961,8 +1056,6 @@ impl LayoutDb {
 
     pub fn add_shape(&mut self, cell: CellId, shape: ShapeRecord) {
         if let Some(cell) = self.cells.get_mut(cell.0) {
-            let index = cell.shapes.len();
-            cell.index.insert(index, &shape);
             cell.layer_stats
                 .entry(shape.layer_id)
                 .and_modify(|stats| {
@@ -980,6 +1073,7 @@ impl LayoutDb {
                     shape_count: 1,
                 });
             cell.shapes.push(shape);
+            cell.index.replace(None);
         }
     }
 
@@ -1047,7 +1141,7 @@ impl LayoutDb {
                 total_shapes_in_cell: 0,
             };
         };
-        let candidates = cell.index.candidate_indexes(query);
+        let candidates = cell.ensure_shape_index().candidate_indexes(query);
         let mut shapes = Vec::new();
         for index in &candidates {
             let Some(shape) = cell.shapes.get(*index) else {
@@ -1366,7 +1460,8 @@ impl LayoutDb {
             .inverse()
             .map(|world_to_cell| world_to_cell.transform_rect(viewport))
             .unwrap_or(viewport);
-        for candidate in cell
+        let hierarchy_index = cell.ensure_hierarchy_index();
+        for candidate in hierarchy_index
             .instance_index
             .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
         {
@@ -1426,7 +1521,7 @@ impl LayoutDb {
             );
         }
         if policy.expand_arrays {
-            for entry in cell
+            for entry in hierarchy_index
                 .array_index
                 .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
             {
@@ -1516,7 +1611,8 @@ impl LayoutDb {
                 .inverse()
                 .map(|world_to_cell| world_to_cell.transform_rect(viewport))
                 .unwrap_or(viewport);
-            for candidate in cell
+            let hierarchy_index = cell.ensure_hierarchy_index();
+            for candidate in hierarchy_index
                 .instance_index
                 .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
             {
@@ -1583,7 +1679,7 @@ impl LayoutDb {
                     path,
                 );
             }
-            for entry in cell
+            for entry in hierarchy_index
                 .array_index
                 .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
             {
@@ -1895,7 +1991,8 @@ impl LayoutDb {
             .inverse()
             .map(|world_to_cell| world_to_cell.transform_rect(viewport))
             .unwrap_or(viewport);
-        for candidate in cell
+        let hierarchy_index = cell.ensure_hierarchy_index();
+        for candidate in hierarchy_index
             .instance_index
             .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
         {
@@ -1950,7 +2047,7 @@ impl LayoutDb {
             );
         }
         if include_compact_arrays {
-            for entry in cell
+            for entry in hierarchy_index
                 .array_index
                 .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
             {
@@ -2059,7 +2156,8 @@ impl LayoutDb {
             .inverse()
             .map(|world_to_cell| world_to_cell.transform_rect(viewport))
             .unwrap_or(viewport);
-        for candidate in cell
+        let hierarchy_index = cell.ensure_hierarchy_index();
+        for candidate in hierarchy_index
             .instance_index
             .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
         {
@@ -2099,7 +2197,7 @@ impl LayoutDb {
                 path,
             );
         }
-        for entry in cell
+        for entry in hierarchy_index
             .array_index
             .locate_in_envelope_intersecting(rect_to_aabb(query_viewport))
         {
@@ -2616,42 +2714,91 @@ pub struct LayoutSession {
     detail_revision: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LayoutSessionLoadProfile {
+    pub total: Duration,
+    pub hierarchy_load: Duration,
+    pub hierarchy_build: Duration,
+    pub hierarchy_build_detail: HierarchyBuildProfile,
+    pub layers_load: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HierarchyBuildProfile {
+    pub layer_count: Duration,
+    pub cell_alloc: Duration,
+    pub cell_map: Duration,
+    pub shape_import: Duration,
+    pub instance_import: Duration,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ViewportApplyProfile {
+    pub total: Duration,
+    pub scope_load: Duration,
+}
+
 impl LayoutSession {
-    pub fn from_source(mut source: PackageLayoutSource) -> Result<Self> {
+    pub fn from_source(source: PackageLayoutSource) -> Result<Self> {
+        Ok(Self::from_source_profiled(source)?.0)
+    }
+
+    pub fn from_source_profiled(
+        mut source: PackageLayoutSource,
+    ) -> Result<(Self, LayoutSessionLoadProfile)> {
+        let total_started = std::time::Instant::now();
         let detail_layer_counts = source.package.detail_layer_counts();
+        let hierarchy_load_started = std::time::Instant::now();
         let hierarchy = source.package.load_hierarchy()?;
-        let mut db = if let Some(hierarchy) = hierarchy {
-            LayoutDb::from_hierarchy_document(
+        let hierarchy_load = hierarchy_load_started.elapsed();
+        let hierarchy_build_started = std::time::Instant::now();
+        let (mut db, hierarchy_build_detail) = if let Some(hierarchy) = hierarchy {
+            LayoutDb::from_hierarchy_document_profiled(
                 source.package.design_name(),
                 Rect::from(source.package.world_bbox()),
                 hierarchy,
             )
         } else {
-            LayoutDb::new(
-                source.package.design_name(),
-                Rect::from(source.package.world_bbox()),
+            (
+                LayoutDb::new(
+                    source.package.design_name(),
+                    Rect::from(source.package.world_bbox()),
+                ),
+                HierarchyBuildProfile::default(),
             )
         };
+        let hierarchy_build = hierarchy_build_started.elapsed();
         if !detail_layer_counts.is_empty() {
             db.set_package_layer_counts(detail_layer_counts);
         }
+        let layers_started = std::time::Instant::now();
         for layer in source.package.layers()? {
             db.add_layer(LayerInfo::from(layer));
         }
-        Ok(Self {
-            source,
-            db,
-            loaded_detail_tiles: HashSet::new(),
-            large_objects_loaded: false,
-            detail_scopes: None,
-            overview_loaded: false,
-            applied_overview_units_per_bin: None,
-            last_load_stats: ViewportLoadStats::default(),
-            revision: 0,
-            hierarchy_revision: 0,
-            overview_revision: 0,
-            detail_revision: 0,
-        })
+        let layers_load = layers_started.elapsed();
+        Ok((
+            Self {
+                source,
+                db,
+                loaded_detail_tiles: HashSet::new(),
+                large_objects_loaded: false,
+                detail_scopes: None,
+                overview_loaded: false,
+                applied_overview_units_per_bin: None,
+                last_load_stats: ViewportLoadStats::default(),
+                revision: 0,
+                hierarchy_revision: 0,
+                overview_revision: 0,
+                detail_revision: 0,
+            },
+            LayoutSessionLoadProfile {
+                total: total_started.elapsed(),
+                hierarchy_load,
+                hierarchy_build,
+                hierarchy_build_detail,
+                layers_load,
+            },
+        ))
     }
 
     pub fn db(&self) -> &LayoutDb {
@@ -2688,7 +2835,17 @@ impl LayoutSession {
     }
 
     pub fn apply_viewport_batch(&mut self, batch: ViewportLoadBatch) -> Result<ViewportLoadStats> {
+        Ok(self.apply_viewport_batch_profiled(batch)?.0)
+    }
+
+    pub fn apply_viewport_batch_profiled(
+        &mut self,
+        batch: ViewportLoadBatch,
+    ) -> Result<(ViewportLoadStats, ViewportApplyProfile)> {
+        let total_started = std::time::Instant::now();
+        let scope_started = std::time::Instant::now();
         self.ensure_detail_scopes_loaded()?;
+        let scope_load = scope_started.elapsed();
         let mut new_shapes = 0;
         let mut scoped_shapes = 0;
         let mut scope_fallback_shapes = 0;
@@ -2756,7 +2913,13 @@ impl LayoutSession {
             scope_fallback_shapes,
         };
         self.last_load_stats = stats.clone();
-        Ok(stats)
+        Ok((
+            stats,
+            ViewportApplyProfile {
+                total: total_started.elapsed(),
+                scope_load,
+            },
+        ))
     }
 
     fn ensure_detail_scopes_loaded(&mut self) -> Result<()> {
@@ -2964,35 +3127,49 @@ mod tests {
     }
 
     fn write_identical_two_level_overview_pyramid(package_root: &std::path::Path) {
-        let bin = json!({
-            "bbox": [0, 0, 1000, 1000],
-            "layer_id": 1,
-            "kind": "regular_wire",
-            "count": 2,
-            "coverage_area": 5000
-        });
-        write_json(
-            &package_root.join("overview/pyramid.json"),
-            json!({
-                "schema": layoutpkg_format::OVERVIEW_PYRAMID_SCHEMA,
-                "version": 1,
-                "world_bbox": [0, 0, 1000, 1000],
-                "levels": [
-                    {
-                        "level": 0,
-                        "units_per_bin": 10,
-                        "grid": [1, 1],
-                        "bins": [bin.clone()]
-                    },
-                    {
-                        "level": 1,
-                        "units_per_bin": 100,
-                        "grid": [1, 1],
-                        "bins": [bin]
-                    }
-                ]
-            }),
-        );
+        let bin = layoutpkg_format::OverviewBinRecord {
+            bbox: [0, 0, 1000, 1000],
+            layer_id: 1,
+            kind: layoutpkg_format::LayoutObjectKind::RegularWire,
+            count: 2,
+            coverage_area: 5000,
+        };
+        let pyramid = layoutpkg_format::OverviewPyramidDocument {
+            schema: layoutpkg_format::OVERVIEW_PYRAMID_SCHEMA.to_string(),
+            version: 1,
+            world_bbox: [0, 0, 1000, 1000],
+            levels: vec![
+                layoutpkg_format::OverviewLevel {
+                    level: 0,
+                    units_per_bin: 10,
+                    grid: [1, 1],
+                    bins: vec![bin.clone()],
+                },
+                layoutpkg_format::OverviewLevel {
+                    level: 1,
+                    units_per_bin: 100,
+                    grid: [1, 1],
+                    bins: vec![bin],
+                },
+            ],
+        };
+        let mut bytes = Vec::new();
+        layoutpkg_format::write_overview_pyramid(&mut bytes, &pyramid).unwrap();
+        fs::write(package_root.join("overview/pyramid.bin"), bytes).unwrap();
+        let manifest_path = package_root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest["tilesets"]["overview_pyramid"] = json!("overview/pyramid.bin");
+        write_json(&manifest_path, manifest);
+    }
+
+    fn advertise_detail_scope(package_root: &std::path::Path) {
+        let manifest_path = package_root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest["capabilities"]["detail_scope"] = json!(true);
+        manifest["tilesets"]["detail_scope"] = json!("detail/scope.json");
+        write_json(&manifest_path, manifest);
     }
 
     fn nested_test_db() -> LayoutDb {
@@ -3502,6 +3679,24 @@ mod tests {
     }
 
     #[test]
+    fn shape_spatial_index_is_built_lazily_on_first_indexed_query() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 1000, 1000));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(10, 10, 20, 20), 1, ShapeKind::RegularWire, 7),
+        );
+
+        assert!(!db.cell(top).unwrap().shape_index_is_built());
+
+        let result = db.query_shapes_indexed(top, Some(1), Rect::new(0, 0, 30, 30));
+
+        assert!(db.cell(top).unwrap().shape_index_is_built());
+        assert_eq!(result.shapes.len(), 1);
+        assert_eq!(result.shapes[0].source_id, 7);
+    }
+
+    #[test]
     fn indexed_query_can_filter_by_shape_kind() {
         let mut db = LayoutDb::new("unit", Rect::new(0, 0, 1000, 1000));
         let top = db.top_cell();
@@ -3856,6 +4051,77 @@ mod tests {
             result.shapes[0].bbox,
             Rect::new(50_010, 50_010, 50_020, 50_020)
         );
+    }
+
+    #[test]
+    fn hierarchy_instance_index_is_built_lazily_on_first_indexed_query() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 20_000, 20_000));
+        let child = db.add_cell("leaf", Rect::new(0, 0, 100, 100));
+        db.add_shape(
+            child,
+            ShapeRecord::new(Rect::new(10, 10, 20, 20), 1, ShapeKind::IoPin, 11),
+        );
+        db.add_instance(
+            db.top_cell(),
+            CellInstance {
+                id: 17,
+                name: "u0".to_string(),
+                child_cell: child,
+                transform: Transform {
+                    dx: 1_000,
+                    dy: 1_000,
+                    orient: Orientation::R0,
+                },
+                array: CellArray::default(),
+                bbox: Rect::new(1_000, 1_000, 1_100, 1_100),
+                source_id: 17,
+            },
+        );
+
+        assert!(!db.cell(db.top_cell()).unwrap().hierarchy_index_is_built());
+
+        let result = db.query_hierarchy_shapes_indexed(Rect::new(1_000, 1_000, 1_100, 1_100), 1);
+
+        assert!(db.cell(db.top_cell()).unwrap().hierarchy_index_is_built());
+        assert_eq!(result.shapes.len(), 1);
+    }
+
+    #[test]
+    fn small_arrays_use_compact_array_index_instead_of_per_element_instance_index() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 1_000, 1_000));
+        let child = db.add_cell("leaf", Rect::new(0, 0, 20, 20));
+        db.add_shape(
+            child,
+            ShapeRecord::new(Rect::new(0, 0, 10, 10), 1, ShapeKind::IoPin, 11),
+        );
+        db.add_instance(
+            db.top_cell(),
+            CellInstance {
+                id: 17,
+                name: "u_array".to_string(),
+                child_cell: child,
+                transform: Transform {
+                    dx: 0,
+                    dy: 0,
+                    orient: Orientation::R0,
+                },
+                array: CellArray {
+                    columns: 2,
+                    rows: 2,
+                    step_x: 100,
+                    step_y: 100,
+                },
+                bbox: Rect::new(0, 0, 120, 120),
+                source_id: 17,
+            },
+        );
+
+        let result = db.query_hierarchy_shapes_indexed(Rect::new(100, 100, 120, 120), 1);
+        let top = db.cell(db.top_cell()).unwrap();
+
+        assert_eq!(top.array_index_len(), 1);
+        assert_eq!(result.shapes.len(), 1);
+        assert_eq!(result.shapes[0].bbox, Rect::new(100, 100, 110, 110));
     }
 
     #[test]
@@ -4595,6 +4861,7 @@ mod tests {
     #[test]
     fn layout_session_defers_detail_scope_until_detail_batch_apply() {
         let (_input, package_root) = create_layoutpkg_fixture();
+        advertise_detail_scope(&package_root);
         fs::write(package_root.join("detail/scope.json"), b"{not-json").unwrap();
         let source = PackageLayoutSource::open(package_root, 64).unwrap();
 
@@ -4643,6 +4910,7 @@ mod tests {
     #[test]
     fn layout_session_applies_scoped_detail_records_to_child_cells() {
         let (_input, package_root) = create_layoutpkg_fixture();
+        advertise_detail_scope(&package_root);
         write_json(
             &package_root.join("detail/scope.json"),
             json!({

@@ -59,18 +59,19 @@ The current converter writes:
   manifest.json
   dictionaries/layers.json
   detail/index.json
-  detail/tile_<x>_<y>.bin
+  detail/shard_0.bin
   detail/large_objects.bin       # only when wide objects exceed the threshold
   overview/index.json
   overview/tile_<x>_<y>.bin
-  overview/pyramid.json
+  overview/pyramid.bin
   query/index.json
 ```
 
 ## Package Semantics
 
-- `detail/index.json` is the viewport-driven tileset. A viewer should load only
-  intersecting `detail/tile_<x>_<y>.bin` files at close zoom.
+- `detail/index.json` is the viewport-driven tileset. Each tile entry points to
+  a shard plus `byte_offset` and `byte_size`, so a viewer should read only the
+  intersecting byte ranges at close zoom.
 - Detail records are clipped to tile bounds so a tile does not carry geometry
   that belongs outside its viewport region.
 - Overfull detail tiles are adaptively subdivided. The packer avoids subdivisions
@@ -83,8 +84,8 @@ The current converter writes:
 - `overview/index.json` is a coarse coverage tileset for low zoom. It uses
   bounded coverage bins, so it does not replay every wire segment while zoomed
   out.
-- `overview/pyramid.json` is a multi-resolution density pyramid used by the
-  renderer for far/mid zoom summary drawing.
+- `overview/pyramid.bin` is a compact multi-resolution density pyramid used by
+  the renderer for far/mid zoom summary drawing.
 - `query/index.json` is the hover/selection index. It reuses detail records and
   declares the queryable kinds, so selection can stay viewport-local without
   duplicating tile binaries or opening full source JSON.

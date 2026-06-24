@@ -1,18 +1,18 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt, fs,
-    io::BufReader,
+    io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use anyhow::{bail, Context, Result};
 use layoutpkg_format::{
-    write_detail_tile, CellArray, CellHierarchySummary, CellLayerSummary, DetailCoordinates,
-    DetailRecordScope, DetailScopeDocument, DetailTile, HierarchyCell, HierarchyDocument,
-    HierarchyInstance, HierarchyShape, LayoutObjectKind, LayoutRectRecord, Orientation,
-    OverviewBinRecord, OverviewLevel, OverviewPyramidDocument, Transform, DETAIL_INDEX_SCHEMA,
-    DETAIL_SCOPE_SCHEMA, HIERARCHY_SCHEMA, LAYOUTPKG_SCHEMA, OVERVIEW_INDEX_SCHEMA,
-    OVERVIEW_PYRAMID_SCHEMA, QUERY_INDEX_SCHEMA,
+    write_detail_tile, write_overview_pyramid, CellArray, CellHierarchySummary, CellLayerSummary,
+    DetailTile, HierarchyCell, HierarchyDocument, HierarchyInstance, HierarchyShape,
+    LayoutObjectKind, LayoutRectRecord, Orientation, OverviewBinRecord, OverviewLevel,
+    OverviewPyramidDocument, Transform, DETAIL_INDEX_SCHEMA, HIERARCHY_SCHEMA, LAYOUTPKG_SCHEMA,
+    OVERVIEW_INDEX_SCHEMA, OVERVIEW_PYRAMID_SCHEMA, QUERY_INDEX_SCHEMA,
 };
 use serde::de::{DeserializeSeed, Error as DeError, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,7 @@ const DEFAULT_TARGET_PRIMITIVES_PER_TILE: usize = 6000;
 const DEFAULT_MAX_SUBDIVISION_DEPTH: usize = 6;
 const OVERVIEW_PYRAMID_BIN_SIZES: [i32; 4] = [1024, 4096, 16384, 65536];
 const OVERVIEW_PYRAMID_MAX_BINS_PER_RECT_PER_LEVEL: u64 = 256;
+const DETAIL_TILE_SHARD_FILE: &str = "detail/shard_0.bin";
 
 #[derive(Debug, Clone)]
 pub struct PackLayoutPackageOptions {
@@ -58,11 +59,51 @@ pub struct PackLayoutPackageResult {
     pub detail_tile_count: usize,
     pub overview_tile_count: usize,
     pub primitive_count: usize,
+    pub timing: PackTimingStats,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackTimingStats {
+    pub total_ms: f32,
+    pub manifest_ms: f32,
+    pub layers_ms: f32,
+    pub hierarchy_ms: f32,
+    pub geometry_ms: f32,
+    pub detail_tiles_ms: f32,
+    pub overview_tiles_ms: f32,
+    pub overview_pyramid_ms: f32,
+    pub write_ms: f32,
+    pub fingerprint_ms: f32,
+}
+
+impl PackTimingStats {
+    pub fn summary(&self) -> String {
+        format!(
+            concat!(
+                "total={:.1}ms manifest={:.1}ms layers={:.1}ms hierarchy={:.1}ms ",
+                "geometry={:.1}ms detail_tiles={:.1}ms overview_tiles={:.1}ms ",
+                "overview_pyramid={:.1}ms write={:.1}ms fingerprint={:.1}ms"
+            ),
+            self.total_ms,
+            self.manifest_ms,
+            self.layers_ms,
+            self.hierarchy_ms,
+            self.geometry_ms,
+            self.detail_tiles_ms,
+            self.overview_tiles_ms,
+            self.overview_pyramid_ms,
+            self.write_ms,
+            self.fingerprint_ms
+        )
+    }
 }
 
 pub fn pack_viewjson_to_layoutpkg(
     options: PackLayoutPackageOptions,
 ) -> Result<PackLayoutPackageResult> {
+    let total_started = Instant::now();
+    let mut timing = PackTimingStats::default();
+    let manifest_started = Instant::now();
     let manifest_path = options.input_root.join("manifest.json");
     let manifest_text = fs::read_to_string(&manifest_path)
         .with_context(|| format!("failed to read {}", manifest_path.display()))?;
@@ -72,10 +113,18 @@ pub fn pack_viewjson_to_layoutpkg(
         Some(bbox) => bbox,
         None => read_die_bbox(&options.input_root, &source_manifest)?.unwrap_or([0, 0, 0, 0]),
     };
+    timing.manifest_ms = elapsed_ms(manifest_started);
+    let layers_started = Instant::now();
     let layers = read_layers(&options.input_root, &source_manifest)?;
+    timing.layers_ms = elapsed_ms(layers_started);
+    let hierarchy_started = Instant::now();
     let hierarchy = build_hierarchy_document(&options.input_root, &source_manifest, world_bbox)?;
+    timing.hierarchy_ms = elapsed_ms(hierarchy_started);
+    let geometry_started = Instant::now();
     let dataset = collect_geometry_dataset(&options.input_root, &source_manifest, world_bbox)?;
+    timing.geometry_ms = elapsed_ms(geometry_started);
 
+    let detail_tiles_started = Instant::now();
     let detail_grid = DetailTileGrid::new(
         world_bbox,
         options.detail_grid_columns,
@@ -88,7 +137,9 @@ pub fn pack_viewjson_to_layoutpkg(
         options.target_primitives_per_tile,
         options.max_subdivision_depth,
     );
+    timing.detail_tiles_ms = elapsed_ms(detail_tiles_started);
 
+    let overview_tiles_started = Instant::now();
     let overview_grid = DetailTileGrid::new(
         world_bbox,
         DEFAULT_OVERVIEW_GRID_COLUMNS,
@@ -99,7 +150,11 @@ pub fn pack_viewjson_to_layoutpkg(
         &dataset.rects,
         OVERVIEW_COVERAGE_BINS_PER_TILE,
     );
+    timing.overview_tiles_ms = elapsed_ms(overview_tiles_started);
+    let overview_pyramid_started = Instant::now();
     let overview_pyramid = build_overview_pyramid(world_bbox, &dataset.rects);
+    timing.overview_pyramid_ms = elapsed_ms(overview_pyramid_started);
+    let write_started = Instant::now();
     recreate_dir(&options.output_root.join("detail"))?;
     recreate_dir(&options.output_root.join("overview"))?;
     recreate_dir(&options.output_root.join("query"))?;
@@ -107,9 +162,9 @@ pub fn pack_viewjson_to_layoutpkg(
     recreate_dir(&options.output_root.join("hierarchy"))?;
 
     let mut tile_entries = Vec::new();
+    let mut detail_shard = None::<BufWriter<fs::File>>;
+    let mut detail_shard_offset = 0_u64;
     for tile in detail_tiles.tiles {
-        let tile_file = detail_tile_file_name(&tile);
-        let tile_path = options.output_root.join(&tile_file);
         let mut tile_bytes = Vec::new();
         write_detail_tile(
             &mut tile_bytes,
@@ -117,23 +172,42 @@ pub fn pack_viewjson_to_layoutpkg(
                 rects: tile.rects.clone(),
             },
         )?;
-        fs::write(&tile_path, &tile_bytes)
-            .with_context(|| format!("failed to write {}", tile_path.display()))?;
+        if detail_shard.is_none() {
+            let shard_path = options.output_root.join(DETAIL_TILE_SHARD_FILE);
+            let shard_file = fs::File::create(&shard_path)
+                .with_context(|| format!("failed to create {}", shard_path.display()))?;
+            detail_shard = Some(BufWriter::new(shard_file));
+        }
+        let byte_offset = detail_shard_offset;
+        let byte_size = tile_bytes.len();
+        detail_shard
+            .as_mut()
+            .expect("detail shard writer is initialized before writes")
+            .write_all(&tile_bytes)
+            .with_context(|| format!("failed to write {}", DETAIL_TILE_SHARD_FILE))?;
+        detail_shard_offset = detail_shard_offset
+            .checked_add(byte_size as u64)
+            .context("detail tile shard offset overflow")?;
         let layers = tile_layers(&tile.rects);
         tile_entries.push(json!({
             "id": detail_tile_id(&tile),
             "lod": 0,
             "subdivision_depth": tile.subdivision_depth,
             "bbox": tile.bbox,
-            "file": tile_file,
-            "byte_size": tile_bytes.len(),
+            "file": DETAIL_TILE_SHARD_FILE,
+            "byte_offset": byte_offset,
+            "byte_size": byte_size,
             "primitive_count": tile.rects.len(),
             "layers": layers,
             "kind_counts": kind_counts_json(&tile.rects),
         }));
     }
+    if let Some(mut detail_shard) = detail_shard {
+        detail_shard
+            .flush()
+            .with_context(|| format!("failed to flush {}", DETAIL_TILE_SHARD_FILE))?;
+    }
     let large_objects = write_large_objects(&options.output_root, &detail_tiles.large_objects)?;
-    let detail_scope = top_detail_scope_document(&dataset.rects);
 
     let detail_index = json!({
         "schema": DETAIL_INDEX_SCHEMA,
@@ -150,10 +224,6 @@ pub fn pack_viewjson_to_layoutpkg(
         },
     });
     write_json_pretty(options.output_root.join("detail/index.json"), &detail_index)?;
-    write_json_pretty(
-        options.output_root.join("detail/scope.json"),
-        &serde_json::to_value(&detail_scope)?,
-    )?;
 
     let mut overview_entries = Vec::new();
     for tile in overview_tiles {
@@ -193,9 +263,9 @@ pub fn pack_viewjson_to_layoutpkg(
         options.output_root.join("overview/index.json"),
         &overview_index,
     )?;
-    write_json_pretty(
-        options.output_root.join("overview/pyramid.json"),
-        &serde_json::to_value(&overview_pyramid)?,
+    write_overview_pyramid_file(
+        options.output_root.join("overview/pyramid.bin"),
+        &overview_pyramid,
     )?;
 
     let query_index = json!({
@@ -233,6 +303,15 @@ pub fn pack_viewjson_to_layoutpkg(
         &grid_overlays,
     )?;
 
+    let tilesets = json!({
+        "detail": "detail/index.json",
+        "overview": "overview/index.json",
+        "query": "query/index.json",
+        "overview_pyramid": "overview/pyramid.bin",
+    });
+    let fingerprint_started = Instant::now();
+    let fingerprint = source_fingerprint(&options.input_root, &source_manifest)?;
+    timing.fingerprint_ms = elapsed_ms(fingerprint_started);
     let manifest = json!({
         "schema": LAYOUTPKG_SCHEMA,
         "version": 1,
@@ -242,7 +321,7 @@ pub fn pack_viewjson_to_layoutpkg(
         "source": {
             "kind": "view-json",
             "root": options.input_root.to_string_lossy(),
-            "fingerprint": source_fingerprint(&options.input_root, &source_manifest)?,
+            "fingerprint": fingerprint,
         },
         "dictionaries": {
             "layers": "dictionaries/layers.json",
@@ -256,15 +335,9 @@ pub fn pack_viewjson_to_layoutpkg(
             "source_view_json_fallback": true,
             "cell_layer_summaries": true,
             "overview_pyramid": true,
-            "detail_scope": true,
+            "detail_scope": false,
         },
-        "tilesets": {
-            "detail": "detail/index.json",
-            "detail_scope": "detail/scope.json",
-            "overview": "overview/index.json",
-            "query": "query/index.json",
-            "overview_pyramid": "overview/pyramid.json",
-        },
+        "tilesets": tilesets,
         "hierarchy": {
             "cells": "hierarchy/cells.json",
         },
@@ -276,13 +349,20 @@ pub fn pack_viewjson_to_layoutpkg(
         },
     });
     write_json_pretty(options.output_root.join("manifest.json"), &manifest)?;
+    timing.write_ms = elapsed_ms(write_started);
+    timing.total_ms = elapsed_ms(total_started);
 
     Ok(PackLayoutPackageResult {
         output_root: options.output_root,
         detail_tile_count: tile_entries.len(),
         overview_tile_count: overview_entries.len(),
         primitive_count: dataset.rects.len(),
+        timing,
     })
+}
+
+fn elapsed_ms(started: Instant) -> f32 {
+    started.elapsed().as_secs_f32() * 1_000.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -532,17 +612,6 @@ fn detail_tile_id(tile: &DetailTileBucket) -> String {
     }
 }
 
-fn detail_tile_file_name(tile: &DetailTileBucket) -> String {
-    if tile.subdivision_depth == 0 {
-        format!("detail/tile_{}_{}.bin", tile.x, tile.y)
-    } else {
-        format!(
-            "detail/tile_{}_{}_d{}_{}_{}.bin",
-            tile.x, tile.y, tile.subdivision_depth, tile.bbox[0], tile.bbox[1]
-        )
-    }
-}
-
 fn sort_detail_tiles(tiles: &mut [DetailTileBucket]) {
     tiles.sort_by_key(|tile| {
         (
@@ -553,25 +622,6 @@ fn sort_detail_tiles(tiles: &mut [DetailTileBucket]) {
             tile.bbox[1],
         )
     });
-}
-
-fn top_detail_scope_document(rects: &[LayoutRectRecord]) -> DetailScopeDocument {
-    let mut seen = BTreeSet::new();
-    let mut records = Vec::new();
-    for rect in rects {
-        if seen.insert(rect.source_id) {
-            records.push(DetailRecordScope {
-                source_id: rect.source_id,
-                cell_id: 0,
-                coordinates: DetailCoordinates::Top,
-            });
-        }
-    }
-    DetailScopeDocument {
-        schema: DETAIL_SCOPE_SCHEMA.to_string(),
-        version: 1,
-        records,
-    }
 }
 
 fn is_shared_geometry(kind: LayoutObjectKind) -> bool {
@@ -1001,6 +1051,14 @@ fn write_binary_rects(output_root: &Path, file: &str, rects: &[LayoutRectRecord]
         "count": rects.len(),
         "byte_size": bytes.len(),
     }))
+}
+
+fn write_overview_pyramid_file(path: PathBuf, pyramid: &OverviewPyramidDocument) -> Result<()> {
+    let parent = path.parent().context("output path has no parent")?;
+    fs::create_dir_all(parent)?;
+    let mut bytes = Vec::new();
+    write_overview_pyramid(&mut bytes, pyramid)?;
+    fs::write(&path, bytes).with_context(|| format!("failed to write {}", path.display()))
 }
 
 fn write_json_pretty(path: PathBuf, value: &Value) -> Result<()> {
@@ -1832,20 +1890,32 @@ fn via_layers_for_item(item: &Value, fallback_layer_id: u16) -> Vec<u16> {
 fn source_fingerprint(root: &Path, manifest: &ViewJsonManifest) -> Result<String> {
     let mut hasher = Sha256::new();
     let manifest_path = root.join("manifest.json");
-    hasher.update(
-        fs::read(&manifest_path)
-            .with_context(|| format!("failed to read {}", manifest_path.display()))?,
-    );
+    update_hash_with_file(&mut hasher, &manifest_path)?;
     for relative in manifest.files.values() {
         let path = root.join(relative);
         if path.is_file() {
             hasher.update(relative.as_bytes());
-            hasher.update(
-                fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?,
-            );
+            update_hash_with_file(&mut hasher, &path)?;
         }
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn update_hash_with_file(hasher: &mut Sha256, path: &Path) -> Result<()> {
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1988,7 +2058,9 @@ mod tests {
 
     fn read_tile_from_entry(output: &std::path::Path, entry: &serde_json::Value) -> DetailTile {
         let bytes = fs::read(output.join(entry["file"].as_str().unwrap())).unwrap();
-        layoutpkg_format::read_detail_tile(&mut bytes.as_slice()).unwrap()
+        let offset = entry["byte_offset"].as_u64().unwrap_or(0) as usize;
+        let byte_size = entry["byte_size"].as_u64().unwrap() as usize;
+        layoutpkg_format::read_detail_tile(&mut &bytes[offset..offset + byte_size]).unwrap()
     }
 
     #[test]
@@ -2008,6 +2080,9 @@ mod tests {
 
         assert_eq!(result.output_root, output);
         assert_eq!(result.detail_tile_count, 1);
+        assert!(result.timing.total_ms >= result.timing.manifest_ms);
+        assert!(result.timing.summary().contains("total="));
+        assert!(result.timing.summary().contains("fingerprint="));
 
         let manifest_text = fs::read_to_string(output.join("manifest.json")).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
@@ -2063,6 +2138,29 @@ mod tests {
             .unwrap()
             .iter()
             .any(|kind| kind == "regular_wire"));
+    }
+
+    #[test]
+    fn source_fingerprint_matches_read_all_reference_hash() {
+        let input = create_minimal_viewjson_package();
+        let manifest: ViewJsonManifest =
+            serde_json::from_str(&fs::read_to_string(input.path().join("manifest.json")).unwrap())
+                .unwrap();
+        let mut hasher = Sha256::new();
+        let manifest_path = input.path().join("manifest.json");
+        hasher.update(fs::read(&manifest_path).unwrap());
+        for relative in manifest.files.values() {
+            let path = input.path().join(relative);
+            if path.is_file() {
+                hasher.update(relative.as_bytes());
+                hasher.update(fs::read(&path).unwrap());
+            }
+        }
+        let expected = format!("{:x}", hasher.finalize());
+
+        let actual = source_fingerprint(input.path(), &manifest).unwrap();
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -2293,8 +2391,11 @@ mod tests {
         })
         .unwrap();
 
-        let pyramid: layoutpkg_format::OverviewPyramidDocument =
-            serde_json::from_value(read_index(&output, "overview/pyramid.json")).unwrap();
+        assert!(!output.join("overview/pyramid.json").exists());
+        let pyramid_bytes = fs::read(output.join("overview/pyramid.bin")).unwrap();
+        assert!(pyramid_bytes.starts_with(layoutpkg_format::OVERVIEW_PYRAMID_MAGIC));
+        let pyramid =
+            layoutpkg_format::read_overview_pyramid(&mut pyramid_bytes.as_slice()).unwrap();
         assert_eq!(pyramid.schema, layoutpkg_format::OVERVIEW_PYRAMID_SCHEMA);
         assert_eq!(pyramid.world_bbox, [0, 0, 1000, 1000]);
         assert!(!pyramid.levels.is_empty());
@@ -2309,8 +2410,30 @@ mod tests {
         assert_eq!(manifest["capabilities"]["cell_layer_summaries"], true);
         assert_eq!(
             manifest["tilesets"]["overview_pyramid"],
-            "overview/pyramid.json"
+            "overview/pyramid.bin"
         );
+    }
+
+    #[test]
+    fn packer_omits_redundant_top_detail_scope() {
+        let input = create_minimal_viewjson_package();
+        let output = input.path().join(".layoutpkg");
+
+        pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 1,
+            detail_grid_rows: 1,
+            max_tiles_per_object: 16,
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        let manifest = read_index(&output, "manifest.json");
+
+        assert!(!output.join("detail/scope.json").exists());
+        assert_eq!(manifest["capabilities"]["detail_scope"], false);
+        assert!(manifest["tilesets"].get("detail_scope").is_none());
     }
 
     #[test]
@@ -2361,6 +2484,59 @@ mod tests {
         for tile in tiles {
             let tile_path = output.join(tile["file"].as_str().unwrap());
             assert!(tile_path.is_file());
+        }
+    }
+
+    #[test]
+    fn packer_writes_detail_tiles_into_shared_shard_file() {
+        let input = create_minimal_viewjson_package();
+        write_json(
+            input.path().join("design/regular_wires.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "regular_wires",
+                "data": [
+                    { "id": 11, "kind": "patch", "layer_id": 1, "rect": [100, 100, 160, 160] },
+                    { "id": 12, "kind": "patch", "layer_id": 1, "rect": [700, 700, 760, 760] }
+                ]
+            }),
+        );
+        let output = input.path().join(".layoutpkg");
+
+        let result = pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 2,
+            detail_grid_rows: 2,
+            max_tiles_per_object: 16,
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        assert_eq!(result.detail_tile_count, 2);
+
+        let detail_index = read_index(&output, "detail/index.json");
+        let tiles = detail_index["tiles"].as_array().unwrap();
+        assert_eq!(tiles.len(), 2);
+        assert!(tiles
+            .iter()
+            .all(|tile| tile["file"] == "detail/shard_0.bin"));
+        assert_eq!(tiles[0]["byte_offset"], 0);
+        assert!(tiles[1]["byte_offset"].as_u64().unwrap() > 0);
+        assert!(!output.join("detail/tile_0_0.bin").exists());
+        assert!(!output.join("detail/tile_1_1.bin").exists());
+
+        let shard = fs::read(output.join("detail/shard_0.bin")).unwrap();
+        for tile_entry in tiles {
+            let offset = tile_entry["byte_offset"].as_u64().unwrap() as usize;
+            let byte_size = tile_entry["byte_size"].as_u64().unwrap() as usize;
+            let decoded =
+                layoutpkg_format::read_detail_tile(&mut &shard[offset..offset + byte_size])
+                    .unwrap();
+            assert_eq!(
+                decoded.rects.len(),
+                tile_entry["primitive_count"].as_u64().unwrap() as usize
+            );
         }
     }
 

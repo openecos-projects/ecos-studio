@@ -118,6 +118,58 @@ struct LoadedViewerState {
     display: DisplayModel,
     cell_view: CellViewState,
     background_load: BackgroundLoadHandle,
+    load_timing: LoadTimingStats,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LoadTimingStats {
+    session_total_ms: f32,
+    package_open_ms: f32,
+    hierarchy_load_ms: f32,
+    hierarchy_build_ms: f32,
+    hierarchy_layer_count_ms: f32,
+    hierarchy_cell_alloc_ms: f32,
+    hierarchy_cell_map_ms: f32,
+    hierarchy_shape_import_ms: f32,
+    hierarchy_instance_import_ms: f32,
+    display_build_ms: f32,
+    detail_read_ms: f32,
+    detail_apply_ms: f32,
+    scope_load_ms: f32,
+    overview_ms: f32,
+    detail_tiles: usize,
+    detail_records: usize,
+    detail_large_records: usize,
+}
+
+impl LoadTimingStats {
+    fn summary(&self) -> String {
+        format!(
+            concat!(
+                "session={:.1}ms package={:.1}ms hierarchy={:.1}/{:.1}ms ",
+                "hbuild=layer_count:{:.1} cell_alloc:{:.1} map:{:.1} shapes:{:.1} inst:{:.1}ms ",
+                "display={:.1}ms detail_read={:.1}ms scope={:.1}ms apply={:.1}ms ",
+                "overview={:.1}ms tiles={} records={} large={}"
+            ),
+            self.session_total_ms,
+            self.package_open_ms,
+            self.hierarchy_load_ms,
+            self.hierarchy_build_ms,
+            self.hierarchy_layer_count_ms,
+            self.hierarchy_cell_alloc_ms,
+            self.hierarchy_cell_map_ms,
+            self.hierarchy_shape_import_ms,
+            self.hierarchy_instance_import_ms,
+            self.display_build_ms,
+            self.detail_read_ms,
+            self.scope_load_ms,
+            self.detail_apply_ms,
+            self.overview_ms,
+            self.detail_tiles,
+            self.detail_records,
+            self.detail_large_records,
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,7 +358,16 @@ struct LoadRequest {
 #[derive(Debug)]
 struct LoadResult {
     request: LoadRequest,
-    result: Result<ViewportLoadBatch, String>,
+    result: Result<TimedViewportLoadBatch, String>,
+}
+
+#[derive(Debug)]
+struct TimedViewportLoadBatch {
+    batch: ViewportLoadBatch,
+    read_ms: f32,
+    tile_count: usize,
+    record_count: usize,
+    large_record_count: usize,
 }
 
 struct BackgroundLoadHandle {
@@ -335,16 +396,38 @@ impl SessionLoadHandle {
 }
 
 fn load_viewer_state(package_root: PathBuf, cache_capacity: usize) -> Result<LoadedViewerState> {
+    let package_started = std::time::Instant::now();
     let source = PackageLayoutSource::open(&package_root, cache_capacity)?;
-    let session = LayoutSession::from_source(source)?;
+    let package_open_ms = package_started.elapsed().as_secs_f32() * 1_000.0;
+    let (session, profile) = LayoutSession::from_source_profiled(source)?;
+    let display_started = std::time::Instant::now();
     let display = DisplayModel::from_layout_layers(session.db().layers());
+    let display_build_ms = display_started.elapsed().as_secs_f32() * 1_000.0;
     let cell_view = CellViewState::top(session.db());
     let background_load = BackgroundLoadHandle::spawn(package_root, cache_capacity);
+    let load_timing = LoadTimingStats {
+        session_total_ms: profile.total.as_secs_f32() * 1_000.0,
+        package_open_ms,
+        hierarchy_load_ms: profile.hierarchy_load.as_secs_f32() * 1_000.0,
+        hierarchy_build_ms: profile.hierarchy_build.as_secs_f32() * 1_000.0,
+        hierarchy_layer_count_ms: profile.hierarchy_build_detail.layer_count.as_secs_f32()
+            * 1_000.0,
+        hierarchy_cell_alloc_ms: profile.hierarchy_build_detail.cell_alloc.as_secs_f32() * 1_000.0,
+        hierarchy_cell_map_ms: profile.hierarchy_build_detail.cell_map.as_secs_f32() * 1_000.0,
+        hierarchy_shape_import_ms: profile.hierarchy_build_detail.shape_import.as_secs_f32()
+            * 1_000.0,
+        hierarchy_instance_import_ms: profile.hierarchy_build_detail.instance_import.as_secs_f32()
+            * 1_000.0,
+        display_build_ms,
+        ..Default::default()
+    };
+    eprintln!("[layout-viewer] load {}", load_timing.summary());
     Ok(LoadedViewerState {
         session,
         display,
         cell_view,
         background_load,
+        load_timing,
     })
 }
 
@@ -370,8 +453,25 @@ impl BackgroundLoadHandle {
                 while let Ok(newer) = request_rx.try_recv() {
                     request = newer;
                 }
+                let started = std::time::Instant::now();
                 let result = source
                     .load_viewport_batch(request.viewport)
+                    .map(|batch| {
+                        let tile_count = batch.tiles.len();
+                        let record_count = batch
+                            .tiles
+                            .iter()
+                            .map(|tile| tile.records.len())
+                            .sum::<usize>();
+                        let large_record_count = batch.large_objects.records.len();
+                        TimedViewportLoadBatch {
+                            batch,
+                            read_ms: started.elapsed().as_secs_f32() * 1_000.0,
+                            tile_count,
+                            record_count,
+                            large_record_count,
+                        }
+                    })
                     .map_err(|error| error.to_string());
                 if result_tx.send(LoadResult { request, result }).is_err() {
                     break;
@@ -1361,11 +1461,15 @@ impl LayoutViewerV2App {
         if !hierarchy_exists
             && max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel
         {
+            let overview_started = std::time::Instant::now();
             match loaded
                 .session
                 .ensure_overview_for_units_per_pixel(max_units_per_pixel)
             {
                 Ok(true) => {
+                    loaded.load_timing.overview_ms =
+                        overview_started.elapsed().as_secs_f32() * 1_000.0;
+                    eprintln!("[layout-viewer] load {}", loaded.load_timing.summary());
                     layout_active_frame = true;
                     ui.ctx().request_repaint();
                     self.last_error = None;
@@ -1401,17 +1505,31 @@ impl LayoutViewerV2App {
         if let Some(result) = loaded.background_load.try_recv() {
             if self.async_load.should_apply_result(result.request) {
                 match result.result {
-                    Ok(batch) => match loaded.session.apply_viewport_batch(batch) {
-                        Ok(_) => {
-                            self.async_load.mark_completed(result.request);
-                            layout_active_frame = true;
-                            self.last_error = None;
-                            ui.ctx().request_repaint();
+                    Ok(timed_batch) => {
+                        loaded.load_timing.detail_read_ms = timed_batch.read_ms;
+                        loaded.load_timing.detail_tiles = timed_batch.tile_count;
+                        loaded.load_timing.detail_records = timed_batch.record_count;
+                        loaded.load_timing.detail_large_records = timed_batch.large_record_count;
+                        match loaded
+                            .session
+                            .apply_viewport_batch_profiled(timed_batch.batch)
+                        {
+                            Ok((_stats, profile)) => {
+                                loaded.load_timing.scope_load_ms =
+                                    profile.scope_load.as_secs_f32() * 1_000.0;
+                                loaded.load_timing.detail_apply_ms =
+                                    profile.total.as_secs_f32() * 1_000.0;
+                                eprintln!("[layout-viewer] load {}", loaded.load_timing.summary());
+                                self.async_load.mark_completed(result.request);
+                                layout_active_frame = true;
+                                self.last_error = None;
+                                ui.ctx().request_repaint();
+                            }
+                            Err(error) => {
+                                self.last_error = Some(error.to_string());
+                            }
                         }
-                        Err(error) => {
-                            self.last_error = Some(error.to_string());
-                        }
-                    },
+                    }
                     Err(error) => {
                         self.last_error = Some(error);
                     }
@@ -1572,6 +1690,8 @@ impl LayoutViewerV2App {
                             ui.separator();
                             self.draw_layers_panel(ui, &mut loaded);
                             ui.separator();
+                            self.draw_load_timing_panel(ui, &loaded);
+                            ui.separator();
                             ui.label("Selection");
                             if let Some(hit) = self.selected.clone() {
                                 egui::Grid::new("selection-inspector-grid")
@@ -1602,6 +1722,18 @@ impl LayoutViewerV2App {
                         }
                     });
             });
+    }
+
+    fn draw_load_timing_panel(&self, ui: &mut egui::Ui, loaded: &LoadedViewerState) {
+        ui.label("Load Timing");
+        ui.monospace(loaded.load_timing.summary());
+        ui.monospace(format!(
+            "frame load={:.1}ms plan={:.1}ms paint={:.1}ms canvas={:.1}ms",
+            self.frame_timing.load_ms,
+            self.frame_timing.plan_ms,
+            self.frame_timing.paint_ms,
+            self.frame_timing.canvas_ms
+        ));
     }
 
     fn draw_layers_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
@@ -2607,6 +2739,39 @@ mod tests {
         assert_eq!(timing.canvas_ms, 8.5);
         assert_eq!(timing.sidebar_ms, 2.75);
         assert_eq!(timing.update_ms, 12.0);
+    }
+
+    #[test]
+    fn load_timing_stats_summary_lists_expensive_stages() {
+        let mut stats = super::LoadTimingStats::default();
+        stats.session_total_ms = 12.5;
+        stats.hierarchy_load_ms = 4.0;
+        stats.hierarchy_build_ms = 5.5;
+        stats.hierarchy_layer_count_ms = 1.0;
+        stats.hierarchy_cell_alloc_ms = 2.0;
+        stats.hierarchy_cell_map_ms = 3.0;
+        stats.hierarchy_shape_import_ms = 4.5;
+        stats.hierarchy_instance_import_ms = 5.0;
+        stats.detail_read_ms = 6.0;
+        stats.scope_load_ms = 7.0;
+        stats.detail_apply_ms = 8.0;
+        stats.overview_ms = 9.0;
+        stats.detail_tiles = 32;
+        stats.detail_records = 2048;
+
+        let summary = stats.summary();
+
+        assert!(summary.contains("session=12.5ms"));
+        assert!(summary.contains("hierarchy=4.0/5.5ms"));
+        assert!(
+            summary.contains("hbuild=layer_count:1.0 cell_alloc:2.0 map:3.0 shapes:4.5 inst:5.0ms")
+        );
+        assert!(summary.contains("detail_read=6.0ms"));
+        assert!(summary.contains("scope=7.0ms"));
+        assert!(summary.contains("apply=8.0ms"));
+        assert!(summary.contains("overview=9.0ms"));
+        assert!(summary.contains("tiles=32"));
+        assert!(summary.contains("records=2048"));
     }
 
     #[test]
@@ -3618,7 +3783,7 @@ mod tests {
     fn native_overview_unavailable_errors_are_non_fatal() {
         let missing = anyhow::anyhow!("overview pyramid is not available");
         let empty = anyhow::anyhow!("overview pyramid has no levels");
-        let corrupt = anyhow::anyhow!("failed to parse overview/pyramid.json");
+        let corrupt = anyhow::anyhow!("failed to read overview/pyramid.bin");
 
         assert!(overview_error_is_unavailable(&missing));
         assert!(overview_error_is_unavailable(&empty));
