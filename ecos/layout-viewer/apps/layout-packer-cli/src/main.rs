@@ -44,6 +44,5 @@ fn main() -> Result<()> {
         result.overview_tile_count,
         result.output_root.display(),
     );
-    println!("Timing {}", result.timing.summary());
     Ok(())
 }

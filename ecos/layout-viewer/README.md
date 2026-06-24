@@ -49,8 +49,8 @@ cargo run -p layoutpkg-probe -- \
 
 The probe opens the package, finds detail tiles intersecting the viewport,
 decodes only those tile binaries, reads shared large objects, and prints cache
-load stats. This is the headless check that the native viewer path can stay
-viewport-local.
+activity. This is the headless check that the native viewer path can stay
+viewport-local without opening the original View JSON files.
 
 The current converter writes:
 
@@ -121,7 +121,7 @@ The current native viewer architecture is:
 
 - `layoutdb`: package-independent layout data model with per-layer spatial
   indexes, KLayout-like `CellViewState`, instance/object paths, compact
-  hierarchy/array queries, lazy package sessions, viewport tile load stats, and
+  hierarchy/array queries, lazy package sessions, viewport tile loading, and
   overview density bins loaded from the package pyramid.
 - `layout-display`: display layers, fill/frame color separation, patterns,
   brightness shifts, and composition modes.
@@ -130,7 +130,7 @@ The current native viewer architecture is:
   decisions, hierarchy bbox and array grid planning, overview density planning,
   separate frame/marker occupancy budgeting, draw planes, and
   visible-layer-aware picking.
-- `layout-viewer-native`: app shell with readable render stats,
+- `layout-viewer-native`: app shell with asynchronous package opening,
   source-aware plan reuse, cached far/mid raster planes, near vector detail, and
   vector selection overlays. The sidebar includes a minimal hierarchy panel for
   the active cell view and hierarchy depth policy.
@@ -150,4 +150,4 @@ Expected interactive behavior:
 - Near zoom shows detailed layer geometry.
 - Drag/zoom does not reuse a render plan from a mismatched source or viewport.
 - Cell view and hierarchy policy changes do not reuse a stale render plan.
-- `Plane Cache Frame` reports far/mid raster-plane cache activity.
+- Far/mid raster-plane cache reuse keeps pan and zoom interaction responsive.
