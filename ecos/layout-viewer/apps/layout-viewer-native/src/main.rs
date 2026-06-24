@@ -29,6 +29,7 @@ const PLANE_CACHE_TILE_PX: f32 = 256.0;
 const PLANE_CACHE_MARGIN_TILES: i32 = 1;
 const DETAIL_LOAD_TILE_PX: f32 = 256.0;
 const DETAIL_LOAD_MARGIN_TILES: i32 = 1;
+const DETAIL_LOAD_MAX_VIEWPORT_WORLD_AREA_RATIO: f64 = 0.15;
 const HIERARCHY_ROWS_STEADY_LIMIT: usize = 512;
 const HIERARCHY_ROWS_INTERACTION_LIMIT: usize = 64;
 const SIDEBAR_DEFAULT_WIDTH: f32 = 320.0;
@@ -519,11 +520,24 @@ fn should_sample_layout_fps(
     layout_active_frame || interaction_active || async_load.has_pending_work()
 }
 
-fn should_request_detail_tiles(source: RenderPlanSource) -> bool {
-    matches!(
+fn should_request_detail_tiles(source: RenderPlanSource, viewport: Rect, world_bbox: Rect) -> bool {
+    let detail_backed = matches!(
         source,
         RenderPlanSource::FlatDetail | RenderPlanSource::HierarchyNear
-    )
+    );
+    detail_backed && detail_viewport_is_local(viewport, world_bbox)
+}
+
+fn detail_viewport_is_local(viewport: Rect, world_bbox: Rect) -> bool {
+    let world_area = rect_area(world_bbox);
+    if world_area <= 0.0 {
+        return true;
+    }
+    rect_area(viewport) / world_area <= DETAIL_LOAD_MAX_VIEWPORT_WORLD_AREA_RATIO
+}
+
+fn rect_area(rect: Rect) -> f64 {
+    f64::from(rect.width().max(0)) * f64::from(rect.height().max(0))
 }
 
 fn revision_for_render_source(
@@ -1404,7 +1418,11 @@ impl LayoutViewerV2App {
                 }
             }
         }
-        if should_request_detail_tiles(expected_source) {
+        if should_request_detail_tiles(
+            expected_source,
+            viewport.world,
+            loaded.session.db().world_bbox(),
+        ) {
             let detail_load_viewport = detail_load_world_rect(viewport.world, view);
             if interaction_active {
                 self.load_generation += 1;
@@ -3033,13 +3051,51 @@ mod tests {
 
     #[test]
     fn detail_tiles_are_requested_only_for_detail_backed_plan_sources() {
-        assert!(!should_request_detail_tiles(RenderPlanSource::HierarchyFar));
-        assert!(!should_request_detail_tiles(RenderPlanSource::HierarchyMid));
+        let world = Rect::new(0, 0, 10_000, 10_000);
+        let local = Rect::new(1_000, 1_000, 2_000, 2_000);
+
         assert!(!should_request_detail_tiles(
-            RenderPlanSource::OverviewDensity
+            RenderPlanSource::HierarchyFar,
+            local,
+            world
         ));
-        assert!(should_request_detail_tiles(RenderPlanSource::HierarchyNear));
-        assert!(should_request_detail_tiles(RenderPlanSource::FlatDetail));
+        assert!(!should_request_detail_tiles(
+            RenderPlanSource::HierarchyMid,
+            local,
+            world
+        ));
+        assert!(!should_request_detail_tiles(
+            RenderPlanSource::OverviewDensity,
+            local,
+            world
+        ));
+        assert!(should_request_detail_tiles(
+            RenderPlanSource::HierarchyNear,
+            local,
+            world
+        ));
+        assert!(should_request_detail_tiles(
+            RenderPlanSource::FlatDetail,
+            local,
+            world
+        ));
+    }
+
+    #[test]
+    fn detail_tiles_are_not_requested_for_large_viewports() {
+        let world = Rect::new(0, 0, 1_000_000, 1_000_000);
+        let nearly_global = Rect::new(0, 0, 900_000, 900_000);
+
+        assert!(!should_request_detail_tiles(
+            RenderPlanSource::HierarchyNear,
+            nearly_global,
+            world
+        ));
+        assert!(!should_request_detail_tiles(
+            RenderPlanSource::FlatDetail,
+            nearly_global,
+            world
+        ));
     }
 
     #[test]
