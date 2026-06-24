@@ -16,6 +16,8 @@ runs:
   steps:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@1.95.0
+      with:
+        components: rustfmt
 
     - name: Cache Rust build artifacts
       if: ${{ inputs.workspaces != '' }}
