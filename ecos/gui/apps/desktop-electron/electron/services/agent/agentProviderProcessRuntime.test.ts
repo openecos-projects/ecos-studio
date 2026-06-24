@@ -265,4 +265,56 @@ describe('AgentProviderProcessRuntime', () => {
       state: 'ready',
     })
   })
+
+  it('continues parsing batched stdout after a provider event listener throws', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const manager = new AgentRuntimeManager({
+      providers: [
+        { providerId: 'codex', runtime },
+      ],
+    })
+    manager.onEvent(() => {
+      throw new Error('listener failed')
+    })
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    const child = harness.children[0]
+    const request = readProtocolRequest(child)
+
+    expect(() => {
+      child.stdout.emit('data', `${JSON.stringify({
+        event: {
+          text: 'working',
+          type: 'message',
+        },
+        type: 'event',
+      })}\n${JSON.stringify({
+        id: request.id,
+        result: {
+          providerId: 'codex',
+          state: 'ready',
+        },
+      })}\n`)
+    }).toThrow('listener failed')
+
+    await expect(Promise.race([
+      response,
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ timedOut: true }), 25)
+      }),
+    ])).resolves.toEqual({
+      providerId: 'codex',
+      state: 'ready',
+    })
+  })
 })

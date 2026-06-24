@@ -168,10 +168,24 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.stdoutBuffer += text
     const lines = this.stdoutBuffer.split(/\r?\n/)
     this.stdoutBuffer = lines.pop() ?? ''
+    let deferredError: unknown
+    let hasDeferredError = false
 
     for (const line of lines) {
       const record = this.readProtocolLine(line)
-      if (record) this.handleProtocolRecord(record)
+      if (!record) continue
+      try {
+        this.handleProtocolRecord(record)
+      } catch (error) {
+        if (!hasDeferredError) {
+          deferredError = error
+          hasDeferredError = true
+        }
+      }
+    }
+
+    if (hasDeferredError) {
+      throw deferredError
     }
   }
 
