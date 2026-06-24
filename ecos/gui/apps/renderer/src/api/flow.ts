@@ -52,6 +52,14 @@ export interface RunStepRequest {
   sim_test_suite?: 'cpu_tests' | 'rtthread' | 'coremark' | string;
   sim_cpu_test_mode?: 'all' | 'selected';
   sim_cpu_test_cases?: string[];
+  sim_compile_preset?: 'balanced' | 'speed' | 'size' | 'debug' | 'custom' | string;
+  sim_compile_opt_level?: '-O0' | '-O1' | '-O2' | '-O3' | '-Os' | '-Og' | string;
+  sim_compile_march?: string;
+  sim_compile_mabi?: string;
+  sim_compile_extra_cflags?: string[];
+  sim_coremark_iterations?: string;
+  sim_coremark_total_data_size?: string;
+  sim_coremark_has_float?: string;
 }
 
 export interface RunStepResponse {

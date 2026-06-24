@@ -237,6 +237,64 @@
               </button>
               <span v-if="!availableCpuTests.length" class="case-picker-empty">Run Prepare to load CPU tests.</span>
             </div>
+            <div v-if="simSuite === 'coremark'" class="coremark-compile-panel">
+              <div class="coremark-compile-grid">
+                <label class="sim-select-field">
+                  <span>Preset</span>
+                  <select v-model="coremarkCompilePreset" :disabled="runBusy">
+                    <option v-for="preset in coremarkCompilePresets" :key="preset.id" :value="preset.id">
+                      {{ preset.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="sim-select-field compact">
+                  <span>Opt</span>
+                  <select v-model="coremarkOptLevel" :disabled="runBusy || coremarkCompilePreset !== 'custom'">
+                    <option v-for="level in coremarkOptLevels" :key="level" :value="level">
+                      {{ level }}
+                    </option>
+                  </select>
+                </label>
+                <label class="sim-select-field">
+                  <span>ISA</span>
+                  <select v-model="coremarkMarch" :disabled="runBusy">
+                    <option v-for="march in coremarkMarchOptions" :key="march" :value="march">
+                      {{ march }}
+                    </option>
+                  </select>
+                </label>
+                <label class="sim-select-field compact">
+                  <span>ABI</span>
+                  <select v-model="coremarkMabi" :disabled="runBusy">
+                    <option v-for="mabi in coremarkMabiOptions" :key="mabi" :value="mabi">
+                      {{ mabi }}
+                    </option>
+                  </select>
+                </label>
+                <label class="sim-select-field compact">
+                  <span>Iterations</span>
+                  <input v-model.number="coremarkIterations" type="number" min="1" step="1" :disabled="runBusy">
+                </label>
+                <label class="sim-select-field compact">
+                  <span>Data</span>
+                  <input v-model.number="coremarkTotalDataSize" type="number" min="1" step="1" :disabled="runBusy">
+                </label>
+              </div>
+              <label class="coremark-extra-flags">
+                <span>Extra CFLAGS</span>
+                <input
+                  v-model="coremarkExtraCflags"
+                  type="text"
+                  :disabled="runBusy"
+                  placeholder="-funroll-loops -fno-inline"
+                >
+              </label>
+              <label class="coremark-float-toggle">
+                <input v-model="coremarkHasFloat" type="checkbox" :disabled="runBusy">
+                <span>Enable float reporting</span>
+              </label>
+              <div class="coremark-compile-summary">{{ coremarkCompileSummary }}</div>
+            </div>
             <div class="sim-run-context" :class="simResultFreshness.state">
               <div>
                 <span>Current Selection</span>
@@ -1365,6 +1423,7 @@ type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
 type ReviewMode = 'source' | 'yosys' | 'modules'
 type SimSuite = 'cpu_tests' | 'rtthread' | 'coremark'
+type CoremarkCompilePreset = 'balanced' | 'speed' | 'size' | 'debug' | 'custom'
 
 interface ConsoleProblem {
   severity: 'error' | 'warning' | 'info'
@@ -1612,11 +1671,29 @@ const simSuites: Array<{ id: SimSuite; label: string; icon: string }> = [
   { id: 'rtthread', label: 'RT-Thread', icon: 'ri-terminal-box-line' },
   { id: 'coremark', label: 'CoreMark', icon: 'ri-speed-up-line' },
 ]
+const coremarkCompilePresets: Array<{ id: CoremarkCompilePreset; label: string; opt: string }> = [
+  { id: 'balanced', label: 'Balanced', opt: '-O2' },
+  { id: 'speed', label: 'Speed', opt: '-O3' },
+  { id: 'size', label: 'Size', opt: '-Os' },
+  { id: 'debug', label: 'Debug', opt: '-O0' },
+  { id: 'custom', label: 'Custom', opt: '-O2' },
+]
+const coremarkOptLevels = ['-O0', '-O1', '-O2', '-O3', '-Os', '-Og']
+const coremarkMarchOptions = ['rv32im_zicsr', 'rv32i_zicsr', 'rv32imc_zicsr']
+const coremarkMabiOptions = ['ilp32']
 const simSuite = ref<SimSuite>('cpu_tests')
 const runningSimSuite = ref<SimSuite | null>(null)
 const simCpuMode = ref<'all' | 'selected'>('selected')
 const selectedCpuCases = ref<string[]>([])
 const cpuCasePickerOpen = ref(false)
+const coremarkCompilePreset = ref<CoremarkCompilePreset>('balanced')
+const coremarkOptLevel = ref('-O2')
+const coremarkMarch = ref('rv32im_zicsr')
+const coremarkMabi = ref('ilp32')
+const coremarkIterations = ref(128)
+const coremarkTotalDataSize = ref(2000)
+const coremarkHasFloat = ref(true)
+const coremarkExtraCflags = ref('')
 const surferFrame = ref<HTMLIFrameElement | null>(null)
 const surferReady = ref(false)
 const waveformLoading = ref(false)
@@ -1710,6 +1787,15 @@ const cpuCaseSelectionLabel = computed(() => {
   if (!selectedCpuRunCases.value.length) return 'Select CPU test cases'
   if (selectedCpuRunCases.value.length === 1) return selectedCpuRunCases.value[0]
   return `${selectedCpuRunCases.value.length} CPU tests selected`
+})
+const coremarkCompileSummary = computed(() => {
+  const flags = [
+    coremarkOptLevel.value,
+    `-march=${coremarkMarch.value}`,
+    `-mabi=${coremarkMabi.value}`,
+    ...splitCompileFlags(coremarkExtraCflags.value),
+  ]
+  return `${flags.join(' ')} · ${Math.max(1, Number(coremarkIterations.value) || 128)} iterations`
 })
 const currentSimRunContext = computed<SimRunContext>(() => ({
   suite: simSuite.value,
@@ -2714,7 +2800,17 @@ function simRunPayload(suiteOverride?: SimSuite) {
     return { sim_test_suite: 'rtthread' }
   }
   if (suite === 'coremark') {
-    return { sim_test_suite: 'coremark' }
+    return {
+      sim_test_suite: 'coremark',
+      sim_compile_preset: coremarkCompilePreset.value,
+      sim_compile_opt_level: coremarkOptLevel.value,
+      sim_compile_march: coremarkMarch.value,
+      sim_compile_mabi: coremarkMabi.value,
+      sim_compile_extra_cflags: splitCompileFlags(coremarkExtraCflags.value),
+      sim_coremark_iterations: String(Math.max(1, Number(coremarkIterations.value) || 128)),
+      sim_coremark_total_data_size: String(Math.max(1, Number(coremarkTotalDataSize.value) || 2000)),
+      sim_coremark_has_float: coremarkHasFloat.value ? 'true' : 'false',
+    }
   }
   return {
     sim_test_suite: 'cpu_tests',
@@ -2772,6 +2868,13 @@ function simContextsEqual(left: SimRunContext, right: SimRunContext): boolean {
 
 function normalizedCaseKey(items: string[]): string {
   return [...new Set(items.map((item) => item.trim()).filter(Boolean))].sort().join('\n')
+}
+
+function splitCompileFlags(value: string): string[] {
+  return value
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function resultCaseNames(): string[] {
@@ -3722,6 +3825,12 @@ watch(detailWaveItems, (items) => {
   cachedWaveItems.value = uniqueWaveItems(items)
 }, { immediate: true })
 
+watch(coremarkCompilePreset, (preset) => {
+  if (preset === 'custom') return
+  const selected = coremarkCompilePresets.find((item) => item.id === preset)
+  if (selected) coremarkOptLevel.value = selected.opt
+})
+
 watch(visibleTabs, () => {
   ensureActiveTabVisible()
 })
@@ -4280,6 +4389,7 @@ button:disabled {
 }
 
 .sim-select-field select,
+.sim-select-field input,
 .cpu-case-dropdown {
   min-height: 32px;
   border: 1px solid var(--border-color);
@@ -4289,8 +4399,13 @@ button:disabled {
   font-size: 12px;
 }
 
-.sim-select-field select {
+.sim-select-field select,
+.sim-select-field input {
   padding: 0 28px 0 9px;
+}
+
+.sim-select-field input {
+  padding-right: 9px;
 }
 
 .cpu-case-dropdown {
@@ -4426,6 +4541,64 @@ button:disabled {
 .case-picker-empty {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.coremark-compile-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.coremark-compile-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.coremark-extra-flags {
+  display: grid;
+  gap: 4px;
+}
+
+.coremark-extra-flags span,
+.coremark-float-toggle,
+.coremark-compile-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coremark-extra-flags > span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.coremark-extra-flags input {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.coremark-float-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.coremark-compile-summary {
+  overflow: hidden;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .frontend-step-tabs {
@@ -6379,7 +6552,8 @@ button:disabled {
   .workspace-home-card__head,
   .workspace-home-card__body,
   .workspace-guide-card,
-  .sim-run-context {
+  .sim-run-context,
+  .coremark-compile-grid {
     grid-template-columns: 1fr;
   }
 
@@ -6415,6 +6589,10 @@ button:disabled {
 
   .review-module-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .coremark-compile-summary {
+    white-space: normal;
   }
 
   .review-issue-title {

@@ -189,6 +189,10 @@ function isEnabled(value: unknown): boolean {
   return value === true || value === 'true' || value === 1 || value === '1'
 }
 
+function optionEquals(name: string, value: string): string {
+  return `${name}=${value}`
+}
+
 function defaultPythonCommand(): string {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
@@ -272,6 +276,14 @@ function normalizeCreateData(data: Record<string, unknown>): Record<string, unkn
     sim_program_names: data.sim_program_names ?? data.simProgramNames ?? [],
     sim_program_sources: data.sim_program_sources ?? data.simProgramSources ?? [],
     sim_programs_dir: readString(data.sim_programs_dir) || readString(data.simProgramsDir),
+    sim_compile_preset: readString(data.sim_compile_preset) || readString(data.simCompilePreset),
+    sim_compile_opt_level: readString(data.sim_compile_opt_level) || readString(data.simCompileOptLevel),
+    sim_compile_march: readString(data.sim_compile_march) || readString(data.simCompileMarch),
+    sim_compile_mabi: readString(data.sim_compile_mabi) || readString(data.simCompileMabi),
+    sim_compile_extra_cflags: readOptionalStringList(data.sim_compile_extra_cflags ?? data.simCompileExtraCflags) ?? [],
+    sim_coremark_iterations: readString(data.sim_coremark_iterations) || readString(data.simCoremarkIterations),
+    sim_coremark_total_data_size: readString(data.sim_coremark_total_data_size) || readString(data.simCoremarkTotalDataSize),
+    sim_coremark_has_float: data.sim_coremark_has_float ?? data.simCoremarkHasFloat ?? false,
     sim_run_args: data.sim_run_args ?? data.simRunArgs ?? [],
     sim_soc_root: readString(data.sim_soc_root) || readString(data.simSocRoot),
     sim_test_suite: readString(data.sim_test_suite) || readString(data.simTestSuite),
@@ -468,6 +480,14 @@ export class FrontendCliAdapter {
     const suite = readString(request.data.sim_test_suite || request.data.simTestSuite)
     const cpuTestMode = readString(request.data.sim_cpu_test_mode || request.data.simCpuTestMode)
     const cpuCases = readStringList(request.data.sim_cpu_test_cases || request.data.simCpuTestCases)
+    const compilePreset = readString(request.data.sim_compile_preset || request.data.simCompilePreset)
+    const compileOptLevel = readString(request.data.sim_compile_opt_level || request.data.simCompileOptLevel)
+    const compileMarch = readString(request.data.sim_compile_march || request.data.simCompileMarch)
+    const compileMabi = readString(request.data.sim_compile_mabi || request.data.simCompileMabi)
+    const compileExtraCflags = readStringList(request.data.sim_compile_extra_cflags || request.data.simCompileExtraCflags)
+    const coremarkIterations = readString(request.data.sim_coremark_iterations || request.data.simCoremarkIterations)
+    const coremarkTotalDataSize = readString(request.data.sim_coremark_total_data_size || request.data.simCoremarkTotalDataSize)
+    const coremarkHasFloat = readString(request.data.sim_coremark_has_float || request.data.simCoremarkHasFloat)
     return {
       args: [
         ...this.moduleArgs,
@@ -482,6 +502,14 @@ export class FrontendCliAdapter {
         ...(suite ? ['--sim-test-suite', suite] : []),
         ...(cpuTestMode ? ['--sim-cpu-test-mode', cpuTestMode] : []),
         ...cpuCases.flatMap((testCase) => ['--sim-cpu-test-case', testCase]),
+        ...(compilePreset ? [optionEquals('--sim-compile-preset', compilePreset)] : []),
+        ...(compileOptLevel ? [optionEquals('--sim-compile-opt-level', compileOptLevel)] : []),
+        ...(compileMarch ? [optionEquals('--sim-compile-march', compileMarch)] : []),
+        ...(compileMabi ? [optionEquals('--sim-compile-mabi', compileMabi)] : []),
+        ...compileExtraCflags.map((flag) => optionEquals('--sim-compile-extra-cflag', flag)),
+        ...(coremarkIterations ? [optionEquals('--sim-coremark-iterations', coremarkIterations)] : []),
+        ...(coremarkTotalDataSize ? [optionEquals('--sim-coremark-total-data-size', coremarkTotalDataSize)] : []),
+        ...(coremarkHasFloat ? [optionEquals('--sim-coremark-has-float', coremarkHasFloat)] : []),
       ],
     }
   }

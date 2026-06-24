@@ -93,18 +93,18 @@ describe('FrontendCliAdapter', () => {
       directory: '/work/test06221',
       parameters: {
         Design: 'test06221',
-        soc_harness_id: 'litex-vexriscv-soc',
-        soc_variant: 'litex-vexriscv',
+        soc_harness_id: 'ysyx-am-soc',
+        soc_variant: 'soc1',
       },
-      soc_harness_id: 'litex-vexriscv-soc',
-      soc_variant: 'litex-vexriscv',
+      soc_harness_id: 'ysyx-am-soc',
+      soc_variant: 'soc1',
       test_suite_id: 'cpu-tests',
       toolchain_id: 'riscv32-unknown-elf',
     }), { emit: vi.fn() })
 
     const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
-    expect(input.soc_harness_id).toBe('litex-vexriscv-soc')
-    expect(input.soc_variant).toBe('litex-vexriscv')
+    expect(input.soc_harness_id).toBe('ysyx-am-soc')
+    expect(input.soc_variant).toBe('soc1')
     expect(input.soc_filelist).toBe('')
     expect(input.sim_soc_root).toBe('')
     expect(input.testbench).toBe('')
@@ -120,6 +120,67 @@ describe('FrontendCliAdapter', () => {
 
     await expect(createPromise).resolves.toMatchObject({
       cmd: 'create_workspace',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('passes CoreMark compile options to the frontend CLI run-step command', async () => {
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      command: '/usr/bin/python3',
+      frontendRoot: '/repo/ecc-fe',
+      spawn: harness.spawn,
+    })
+
+    const runPromise = adapter.execute(request('run_step', {
+      directory: '/work/test0623a',
+      rerun: true,
+      sim_compile_extra_cflags: ['-funroll-loops', '-DMEM_METHOD=MEM_STACK'],
+      sim_compile_mabi: 'ilp32',
+      sim_compile_march: 'rv32im_zicsr',
+      sim_compile_opt_level: '-O3',
+      sim_compile_preset: 'speed',
+      sim_coremark_has_float: 'true',
+      sim_coremark_iterations: '32',
+      sim_coremark_total_data_size: '2000',
+      sim_test_suite: 'coremark',
+      step: 'sim',
+    }), { emit: vi.fn() })
+
+    expect(harness.calls[0].args).toEqual([
+      '-m',
+      'fecompiler.cli.main',
+      'workspace',
+      'run-step',
+      '--directory',
+      '/work/test0623a',
+      '--step',
+      'sim',
+      '--json',
+      '--rerun',
+      '--sim-test-suite',
+      'coremark',
+      '--sim-compile-preset=speed',
+      '--sim-compile-opt-level=-O3',
+      '--sim-compile-march=rv32im_zicsr',
+      '--sim-compile-mabi=ilp32',
+      '--sim-compile-extra-cflag=-funroll-loops',
+      '--sim-compile-extra-cflag=-DMEM_METHOD=MEM_STACK',
+      '--sim-coremark-iterations=32',
+      '--sim-coremark-total-data-size=2000',
+      '--sim-coremark-has-float=true',
+    ])
+
+    complete(harness.children[0], {
+      cmd: 'run_step',
+      data: { directory: '/work/test0623a', state: 'Success', step: 'sim' },
+      message: ['sim completed'],
+      response: 'success',
+    })
+
+    await expect(runPromise).resolves.toMatchObject({
+      cmd: 'run_step',
       ok: true,
       response: 'success',
     })

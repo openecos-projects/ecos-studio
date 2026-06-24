@@ -51,6 +51,14 @@ export interface CreateWorkspaceRequest {
     sim_program_sources?: string[],
     sim_program_link_base?: string,
     sim_programs_dir?: string,
+    sim_compile_preset?: string,
+    sim_compile_opt_level?: string,
+    sim_compile_march?: string,
+    sim_compile_mabi?: string,
+    sim_compile_extra_cflags?: string[],
+    sim_coremark_iterations?: string,
+    sim_coremark_total_data_size?: string,
+    sim_coremark_has_float?: boolean,
     sim_run_args?: string[],
     sim_soc_root?: string,
     sim_test_suite?: string,
@@ -110,6 +118,14 @@ export function createWorkspaceApi(
     sim_program_sources?: string[]
     sim_program_link_base?: string
     sim_programs_dir?: string
+    sim_compile_preset?: string
+    sim_compile_opt_level?: string
+    sim_compile_march?: string
+    sim_compile_mabi?: string
+    sim_compile_extra_cflags?: string[]
+    sim_coremark_iterations?: string
+    sim_coremark_total_data_size?: string
+    sim_coremark_has_float?: boolean
     sim_tests_dir?: string
     sim_tests_out_dir?: string
     sim_build_all_programs?: boolean
@@ -143,6 +159,14 @@ export function createWorkspaceApi(
     sim_program_sources: options.sim_program_sources || [],
     sim_program_link_base: options.sim_program_link_base || '',
     sim_programs_dir: options.sim_programs_dir || '',
+    sim_compile_preset: options.sim_compile_preset || '',
+    sim_compile_opt_level: options.sim_compile_opt_level || '',
+    sim_compile_march: options.sim_compile_march || '',
+    sim_compile_mabi: options.sim_compile_mabi || '',
+    sim_compile_extra_cflags: options.sim_compile_extra_cflags || [],
+    sim_coremark_iterations: options.sim_coremark_iterations || '',
+    sim_coremark_total_data_size: options.sim_coremark_total_data_size || '',
+    sim_coremark_has_float: options.sim_coremark_has_float ?? false,
     sim_run_args: options.sim_run_args || [],
     sim_soc_root: options.sim_soc_root || '',
     sim_tests_dir: options.sim_tests_dir || '',
