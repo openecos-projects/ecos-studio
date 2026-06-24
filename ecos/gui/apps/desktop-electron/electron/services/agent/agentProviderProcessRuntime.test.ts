@@ -140,6 +140,43 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
+  it('drops partial stdout from a crashed provider before respawning', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const firstResponse = runtime.getStatus({ providerId: 'codex' })
+    harness.children[0].stdout.emit('data', '{"id":')
+    harness.children[0].emit('close', 1, null)
+    await expect(firstResponse).rejects.toThrow(
+      'Agent provider codex exited with code 1',
+    )
+
+    const secondResponse = runtime.getStatus({ providerId: 'codex' })
+    const secondChild = harness.children[1]
+    const secondRequest = readProtocolRequest(secondChild)
+    secondChild.stdout.emit('data', `${JSON.stringify({
+      id: secondRequest.id,
+      result: {
+        providerId: 'codex',
+        state: 'ready',
+      },
+    })}\n`)
+
+    await expect(secondResponse).resolves.toEqual({
+      providerId: 'codex',
+      state: 'ready',
+    })
+  })
+
   it('drains provider stderr so diagnostics cannot block the child process', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

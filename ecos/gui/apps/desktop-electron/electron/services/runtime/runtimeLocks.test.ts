@@ -82,6 +82,90 @@ describe('runtimeLocks', () => {
     }
   })
 
+  it('allows only one concurrent stale lock reclaimer to acquire the scope', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
+        jobId: 'stale-job',
+        pid: -1,
+        scope: '/work/demo',
+      }))
+
+      const attempts = await Promise.all(
+        Array.from({ length: 8 }, (_value, index) =>
+          acquireRuntimeLock(root, '/work/demo', `job-${index}`),
+        ),
+      )
+      const locks = attempts.filter((lock): lock is NonNullable<typeof lock> => lock !== null)
+
+      expect(locks).toHaveLength(1)
+      await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(true)
+      await locks[0]?.release()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('retries after clearing a stale reclaim lock', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    const reclaimLock = path.join(root, `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
+        jobId: 'stale-job',
+        pid: -1,
+        scope: '/work/demo',
+      }))
+      await writeFile(reclaimLock, JSON.stringify({
+        jobId: 'stale-reclaimer:reclaim',
+        pid: -1,
+        scope: '/work/demo:reclaim',
+      }))
+
+      const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
+
+      expect(lock).not.toBeNull()
+      await lock?.release()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('waits for observer reclaim contention before reporting lock acquisition blocked', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
+    const reclaimLock = path.join(root, `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`)
+    try {
+      await mkdir(lockDirectory, { recursive: true })
+      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
+        jobId: 'stale-job',
+        pid: -1,
+        scope: '/work/demo',
+      }))
+      await writeFile(reclaimLock, JSON.stringify({
+        jobId: `observer-${process.pid}:reclaim`,
+        pid: process.pid,
+        scope: '/work/demo:reclaim',
+      }))
+      const observerRelease = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          rm(reclaimLock, { force: true, recursive: true }).then(resolve, reject)
+        }, 5)
+      })
+
+      const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
+      await observerRelease
+
+      expect(lock).not.toBeNull()
+      await lock?.release()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   it('does not delete locks that are still being initialized', async () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)

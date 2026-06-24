@@ -127,6 +127,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private ensureChild(): ReturnType<SpawnLike> {
     if (this.child) return this.child
 
+    this.stdoutBuffer = ''
     const child = this.spawnImpl(
       this.manifest.command,
       this.manifest.args ?? [],
@@ -145,15 +146,19 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       // Drain diagnostics so provider stderr cannot fill its pipe and block stdout responses.
     })
     child.once('error', (error) => {
+      if (this.child !== child) return
       this.rejectPending(error instanceof Error ? error : new Error(String(error)))
       this.child = null
+      this.stdoutBuffer = ''
     })
     child.once('close', (code, signal) => {
+      if (this.child !== child) return
       const message = signal
         ? `Agent provider ${this.manifest.providerId} exited with signal ${signal}`
         : `Agent provider ${this.manifest.providerId} exited with code ${code ?? 'unknown'}`
       this.rejectPending(new Error(message))
       this.child = null
+      this.stdoutBuffer = ''
     })
 
     return child

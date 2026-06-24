@@ -16,6 +16,8 @@ export interface RuntimeLockOwner {
 }
 
 export const runtimeLockInitializationGraceMs = 5_000
+const runtimeLockReclaimRetryAttempts = 50
+const runtimeLockReclaimRetryDelayMs = 10
 
 export function runtimeLockName(scope: string): string {
   return createHash('sha256').update(scope).digest('hex').slice(0, 24)
@@ -74,29 +76,99 @@ export async function acquireRuntimeLock(
   scope: string,
   jobId: string,
 ): Promise<RuntimeLockHandle | null> {
+  return acquireRuntimeLockWithReclaimRetry(
+    rootDirectory,
+    scope,
+    jobId,
+    runtimeLockReclaimRetryAttempts,
+  )
+}
+
+async function acquireRuntimeLockWithReclaimRetry(
+  rootDirectory: string,
+  scope: string,
+  jobId: string,
+  remainingReclaimRetries: number,
+): Promise<RuntimeLockHandle | null> {
   await mkdir(rootDirectory, { recursive: true })
   const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
+  const owner: RuntimeLockOwner = {
+    jobId,
+    pid: process.pid,
+    scope,
+  }
+  const lock = await acquireOwnerFileLock(lockPath, owner)
+  if (lock) return lock
+
+  const active = await isRuntimeLockPathActive(lockPath, scope)
+  if (active) return null
+
+  const reclaimLock = await acquireRuntimeReclaimLock(rootDirectory, scope, jobId)
+  if (!reclaimLock) {
+    if (await isRuntimeLockPathActive(lockPath, scope)) return null
+    if (remainingReclaimRetries <= 0) return null
+    await waitForRuntimeLockReclaimRetry()
+    return acquireRuntimeLockWithReclaimRetry(
+      rootDirectory,
+      scope,
+      jobId,
+      remainingReclaimRetries - 1,
+    )
+  }
+  try {
+    if (await isRuntimeLockPathActive(lockPath, scope)) {
+      return null
+    }
+    await rm(lockPath, { force: true, recursive: true })
+  } finally {
+    await reclaimLock.release()
+  }
+  return acquireRuntimeLockWithReclaimRetry(
+    rootDirectory,
+    scope,
+    jobId,
+    runtimeLockReclaimRetryAttempts,
+  )
+}
+
+async function acquireRuntimeReclaimLock(
+  rootDirectory: string,
+  scope: string,
+  jobId: string,
+): Promise<RuntimeLockHandle | null> {
+  await mkdir(rootDirectory, { recursive: true })
+  const reclaimScope = `${scope}:reclaim`
+  const reclaimPath = path.join(rootDirectory, `${runtimeLockName(reclaimScope)}.reclaim.lock`)
+  const owner: RuntimeLockOwner = {
+    jobId: `${jobId}:reclaim`,
+    pid: process.pid,
+    scope: reclaimScope,
+  }
+  const lock = await acquireOwnerFileLock(reclaimPath, owner)
+  if (lock) return lock
+
+  if (await isRuntimeLockPathActive(reclaimPath, reclaimScope)) {
+    return null
+  }
+
+  await rm(reclaimPath, { force: true, recursive: true })
+  return acquireRuntimeReclaimLock(rootDirectory, scope, jobId)
+}
+
+async function acquireOwnerFileLock(
+  lockPath: string,
+  owner: RuntimeLockOwner,
+): Promise<RuntimeLockHandle | null> {
   let lockFile: FileHandle
 
   try {
     lockFile = await open(lockPath, 'wx')
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code !== 'EEXIST') throw error
-
-    const active = await isRuntimeLockPathActive(lockPath, scope)
-    if (!active) {
-      await rm(lockPath, { force: true, recursive: true })
-      return acquireRuntimeLock(rootDirectory, scope, jobId)
-    }
-    return null
+    if (code === 'EEXIST' || code === 'EISDIR') return null
+    throw error
   }
 
-  const owner: RuntimeLockOwner = {
-    jobId,
-    pid: process.pid,
-    scope,
-  }
   let removeFailedLock = false
   try {
     await lockFile.writeFile(JSON.stringify(owner, null, 2))
@@ -132,7 +204,18 @@ export async function isRuntimeScopeActive(
   const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
   const active = await isRuntimeLockPathActive(lockPath, scope)
   if (!active) {
-    await rm(lockPath, { force: true, recursive: true })
+    const reclaimLock = await acquireRuntimeReclaimLock(rootDirectory, scope, `observer-${process.pid}`)
+    if (!reclaimLock) {
+      return isRuntimeLockPathActive(lockPath, scope)
+    }
+    try {
+      if (await isRuntimeLockPathActive(lockPath, scope)) {
+        return true
+      }
+      await rm(lockPath, { force: true, recursive: true })
+    } finally {
+      await reclaimLock.release()
+    }
   }
   return active
 }
@@ -179,4 +262,8 @@ async function isSameFile(lockPath: string, lockFile: FileHandle): Promise<boole
 
 function isSameStatsFile(first: Stats, second: Stats): boolean {
   return first.dev === second.dev && first.ino === second.ino
+}
+
+async function waitForRuntimeLockReclaimRetry(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, runtimeLockReclaimRetryDelayMs))
 }
