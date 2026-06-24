@@ -10,7 +10,6 @@ members = [
   "crates/layoutpkg-reader",
   "apps/layout-packer-cli",
   "apps/layoutpkg-probe-cli",
-  "apps/layout-viewer-native",
   "apps/layout-viewer-native-v2",
 ]
 

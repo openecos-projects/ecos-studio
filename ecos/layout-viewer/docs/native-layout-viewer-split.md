@@ -19,7 +19,6 @@ ecos/layout-viewer/
   crates/layoutpkg-reader/
   apps/layout-packer-cli/
   apps/layoutpkg-probe-cli/
-  apps/layout-viewer-native/
   apps/layout-viewer-native-v2/
 ```
 
@@ -97,20 +96,11 @@ bounded by tile count, exposes typed layer/grid-overlay dictionaries, and can
 query a point by reusing detail records plus shared large objects. `layoutpkg-probe`
 exposes this same path as a headless verification tool.
 
-`layout-viewer-native` is the first GUI slice. It opens `.layoutpkg` directly,
-fits to the package world bbox, renders a dark `far-view` chip skeleton at very
-far zoom, renders overview as an outline/density LOD at medium zoom, switches to
-detail tiles at close zoom, supports drag pan, wheel zoom, and primary-click
-selection, provides a right-side visibility/properties panel for object kinds,
-layers, overlays, and selected-object metadata, renders tracks and gcell grids
-from parameter dictionaries, and shows tile cache/load stats in a small HUD. It
-intentionally does not depend on Electron or Pixi.
+## Native Viewer Slice
 
-## V2 Viewer Slice
-
-`layout-viewer-native-v2` is a greenfield rendering slice. It is intentionally
-separate from `layout-viewer-native` and does not reuse the old immediate
-`draw_records` path, `lod_style` mapping, visibility state, or app render loop.
+`layout-viewer-native-v2` is the active native rendering slice. It owns the
+package session, viewport-local loading, render planning, cached far/mid raster
+planes, near vector detail, layer visibility, and selection overlay.
 
 V2 currently opens existing `.layoutpkg` packages through a lazy package session:
 
@@ -140,7 +130,7 @@ The V2 data/display/render split is:
   summary planning, pixel-threshold shape simplification, long-thin shape
   preservation, per-screen-bin occupancy limits, and picking constrained by
   visible display layers.
-- `layout-viewer-native-v2`: new app shell for validating V2 pan, zoom, layer
+- `layout-viewer-native-v2`: app shell for validating pan, zoom, layer
   visibility, picking, cached far/mid raster-plane drawing, near vector detail,
   lazy tile loading, a minimal hierarchy panel, and readable HUD/sidebar stats.
 

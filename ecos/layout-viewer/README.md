@@ -7,7 +7,7 @@ Current scope:
 - Convert existing ECC View JSON packages into a rebuildable `.layoutpkg` cache.
 - Define the first layout package manifest and binary detail tile format.
 - Read `.layoutpkg` viewport tiles through a small headless reader/probe path.
-- Open `.layoutpkg` directly in a first native viewer MVP.
+- Open `.layoutpkg` directly in the native V2 viewer.
 - Keep the new pipeline independent from the Electron renderer and ECC writer.
 
 ## Build And Test
@@ -51,45 +51,6 @@ The probe opens the package, finds detail tiles intersecting the viewport,
 decodes only those tile binaries, reads shared large objects, and prints cache
 load stats. This is the headless check that the native viewer path can stay
 viewport-local.
-
-## Open The Native Viewer
-
-```bash
-cargo run -p layout-viewer-native -- \
-  /path/to/view-json-package/.layoutpkg
-```
-
-The native viewer starts in overview mode, pans with drag, zooms with the wheel,
-selects objects with a primary click, switches to detail tiles when
-`units_per_pixel <= 200`, and provides a right-side visibility panel for object
-kinds, layers, tracks, gcell grids, and selected-object properties. Override the
-detail threshold or cache size for experiments:
-
-```bash
-cargo run -p layout-viewer-native -- \
-  /path/to/view-json-package/.layoutpkg \
-  --detail-units-per-pixel 200 \
-  --cache-capacity 128
-```
-
-The HUD shows the active mode, units per pixel, loaded tile count, decoded
-record count, shared large-object count, and cache hit/miss/eviction counters.
-The viewer has three visual modes:
-
-- `far-view`: dark chip skeleton view for very far zoom. It emphasizes die/core
-  outlines, weak routing density, IO markers, and shared large objects.
-- `overview-density`: outline/density LOD for medium zoom. Die/core are rendered
-  as outlines, routing coverage is low alpha, and vias/pins are capped markers.
-- `detail`: exact detail tile records for close zoom.
-
-Tracks and gcell grids are drawn from parameterized overlay dictionaries instead
-of expanded tile records, and dense overlays are skipped when their projected
-spacing is too small to inspect.
-
-Selection is viewport-local: the viewer queries detail tiles and shared large
-objects through the `.layoutpkg` reader and does not open the source View JSON
-files. The first properties view shows kind, layer, source id, bbox, tile id,
-and whether the hit came from a regular tile or shared large-object storage.
 
 The current converter writes:
 
@@ -140,25 +101,22 @@ shared large objects, layer/kind visibility controls, and parametric track/gcell
 overlays. It also supports click selection for queryable objects. Rich source
 property lookup and a dedicated GPU renderer are separate follow-up slices.
 
-## Open The Native Viewer V2
+## Open The Native Viewer
 
 ```bash
 cargo run -p layout-viewer-native-v2 -- \
   /path/to/view-json-package/.layoutpkg
 ```
 
-V2 is a greenfield viewer path, not an incremental rewrite of
-`layout-viewer-native`. It opens current `.layoutpkg` output through
-`PackageLayoutSource` and `LayoutSession`, initializes metadata without loading
-detail geometry, then loads only viewport-intersecting detail tiles as the view
-pans and zooms. LOD is applied inside `RenderPlanner` with a KLayout-like split:
-far/mid zoom can draw hierarchy boxes, array grids, or overview density bins,
-while near zoom expands visible detail geometry. The first backend uses egui,
-but far/mid plans are composed through cached raster planes instead of replaying
-every primitive through the immediate painter.
+The native viewer opens current `.layoutpkg` output through `PackageLayoutSource`
+and `LayoutSession`, initializes metadata without loading detail geometry, then
+loads only viewport-intersecting detail tiles as the view pans and zooms. LOD is
+applied inside `RenderPlanner` with a KLayout-like split: far/mid zoom can draw
+hierarchy boxes, array grids, or overview density bins, while near zoom expands
+visible detail geometry. Far/mid plans are composed through cached raster planes
+instead of replaying every primitive through the immediate painter.
 
-The V2 vertical slice already establishes the architecture intended for the next
-renderer:
+The current native viewer architecture is:
 
 - `layoutdb`: package-independent layout data model with per-layer spatial
   indexes, KLayout-like `CellViewState`, instance/object paths, compact
