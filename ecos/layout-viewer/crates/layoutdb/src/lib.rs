@@ -2606,7 +2606,7 @@ pub struct LayoutSession {
     db: LayoutDb,
     loaded_detail_tiles: HashSet<String>,
     large_objects_loaded: bool,
-    detail_scopes: HashMap<u32, DetailDestination>,
+    detail_scopes: Option<HashMap<u32, DetailDestination>>,
     overview_loaded: bool,
     applied_overview_units_per_bin: Option<i32>,
     last_load_stats: ViewportLoadStats,
@@ -2638,17 +2638,12 @@ impl LayoutSession {
         for layer in source.package.layers()? {
             db.add_layer(LayerInfo::from(layer));
         }
-        let detail_scopes = source
-            .package
-            .load_detail_scope()?
-            .map(|scope| detail_scope_destinations(&db, scope))
-            .unwrap_or_default();
         Ok(Self {
             source,
             db,
             loaded_detail_tiles: HashSet::new(),
             large_objects_loaded: false,
-            detail_scopes,
+            detail_scopes: None,
             overview_loaded: false,
             applied_overview_units_per_bin: None,
             last_load_stats: ViewportLoadStats::default(),
@@ -2689,10 +2684,11 @@ impl LayoutSession {
 
     pub fn ensure_viewport_loaded(&mut self, viewport: Rect) -> Result<ViewportLoadStats> {
         let batch = self.source.load_viewport_batch(viewport)?;
-        Ok(self.apply_viewport_batch(batch))
+        self.apply_viewport_batch(batch)
     }
 
-    pub fn apply_viewport_batch(&mut self, batch: ViewportLoadBatch) -> ViewportLoadStats {
+    pub fn apply_viewport_batch(&mut self, batch: ViewportLoadBatch) -> Result<ViewportLoadStats> {
+        self.ensure_detail_scopes_loaded()?;
         let mut new_shapes = 0;
         let mut scoped_shapes = 0;
         let mut scope_fallback_shapes = 0;
@@ -2760,13 +2756,27 @@ impl LayoutSession {
             scope_fallback_shapes,
         };
         self.last_load_stats = stats.clone();
-        stats
+        Ok(stats)
+    }
+
+    fn ensure_detail_scopes_loaded(&mut self) -> Result<()> {
+        if self.detail_scopes.is_some() {
+            return Ok(());
+        }
+        let detail_scopes = self
+            .source
+            .package
+            .load_detail_scope()?
+            .map(|scope| detail_scope_destinations(&self.db, scope))
+            .unwrap_or_default();
+        self.detail_scopes = Some(detail_scopes);
+        Ok(())
     }
 
     fn detail_destination_for_record(&self, record: &LayoutRectRecord) -> DetailDestination {
         self.detail_scopes
-            .get(&record.source_id)
-            .copied()
+            .as_ref()
+            .and_then(|scopes| scopes.get(&record.source_id).copied())
             .unwrap_or(DetailDestination::Top)
     }
 
@@ -4540,7 +4550,7 @@ mod tests {
             .load_viewport_batch(Rect::new(0, 0, 500, 500))
             .unwrap();
 
-        let first = session.apply_viewport_batch(batch.clone());
+        let first = session.apply_viewport_batch(batch.clone()).unwrap();
         let loaded_revision = session.revision();
         let shapes_after_first = session
             .db()
@@ -4552,7 +4562,7 @@ mod tests {
             .into_iter()
             .map(|shape| shape.kind)
             .collect::<std::collections::HashSet<_>>();
-        let second = session.apply_viewport_batch(batch);
+        let second = session.apply_viewport_batch(batch).unwrap();
         let shapes_after_second = session
             .db()
             .query_shapes(session.db().top_cell(), session.db().world_bbox())
@@ -4580,6 +4590,29 @@ mod tests {
 
         assert_eq!(session.loaded_detail_tile_count(), 0);
         assert_eq!(session.db().package_layer_counts().get(&1), Some(&2));
+    }
+
+    #[test]
+    fn layout_session_defers_detail_scope_until_detail_batch_apply() {
+        let (_input, package_root) = create_layoutpkg_fixture();
+        fs::write(package_root.join("detail/scope.json"), b"{not-json").unwrap();
+        let source = PackageLayoutSource::open(package_root, 64).unwrap();
+
+        let session = LayoutSession::from_source(source);
+
+        assert!(
+            session.is_ok(),
+            "session startup should not read detail/scope.json"
+        );
+        let mut session = session.unwrap();
+        let error = session
+            .ensure_viewport_loaded(Rect::new(0, 0, 500, 500))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("detail/scope.json") || error.contains("expected"),
+            "detail scope errors should surface when detail batches are applied: {error}"
+        );
     }
 
     #[test]

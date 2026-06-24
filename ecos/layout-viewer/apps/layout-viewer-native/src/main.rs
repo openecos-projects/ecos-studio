@@ -72,10 +72,9 @@ fn window_title() -> &'static str {
 }
 
 struct LayoutViewerV2App {
-    session: LayoutSession,
-    display: DisplayModel,
+    loaded: Option<LoadedViewerState>,
+    session_load: Option<SessionLoadHandle>,
     view: Option<V2ViewState>,
-    cell_view: CellViewState,
     hierarchy_policy: HierarchyPolicy,
     lod_tuning: LodTuningState,
     frame_timing: FrameTimingState,
@@ -83,7 +82,6 @@ struct LayoutViewerV2App {
     last_interaction_at: Option<std::time::Instant>,
     interaction_settle_ms: u64,
     async_load: AsyncLoadState,
-    background_load: BackgroundLoadHandle,
     render_surface: render_surface::RenderSurface,
     render_surface_texture: Option<egui::TextureHandle>,
     render_surface_texture_key: Option<plane_cache::PlaneKey>,
@@ -112,6 +110,13 @@ struct LayoutViewerV2App {
     last_lod_stats: LodStats,
     hierarchy_rows_cache: HierarchyRowsCache,
     layer_counts_cache: LayerCountsCache,
+}
+
+struct LoadedViewerState {
+    session: LayoutSession,
+    display: DisplayModel,
+    cell_view: CellViewState,
+    background_load: BackgroundLoadHandle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +311,40 @@ struct LoadResult {
 struct BackgroundLoadHandle {
     requests: Sender<LoadRequest>,
     results: Receiver<LoadResult>,
+}
+
+struct SessionLoadHandle {
+    results: Receiver<Result<LoadedViewerState, String>>,
+}
+
+impl SessionLoadHandle {
+    fn spawn(package_root: PathBuf, cache_capacity: usize) -> Self {
+        let (result_tx, result_rx) = mpsc::channel::<Result<LoadedViewerState, String>>();
+        std::thread::spawn(move || {
+            let result =
+                load_viewer_state(package_root, cache_capacity).map_err(|error| error.to_string());
+            let _ = result_tx.send(result);
+        });
+        Self { results: result_rx }
+    }
+
+    fn try_recv(&self) -> Option<Result<LoadedViewerState, String>> {
+        self.results.try_recv().ok()
+    }
+}
+
+fn load_viewer_state(package_root: PathBuf, cache_capacity: usize) -> Result<LoadedViewerState> {
+    let source = PackageLayoutSource::open(&package_root, cache_capacity)?;
+    let session = LayoutSession::from_source(source)?;
+    let display = DisplayModel::from_layout_layers(session.db().layers());
+    let cell_view = CellViewState::top(session.db());
+    let background_load = BackgroundLoadHandle::spawn(package_root, cache_capacity);
+    Ok(LoadedViewerState {
+        session,
+        display,
+        cell_view,
+        background_load,
+    })
 }
 
 impl BackgroundLoadHandle {
@@ -1120,17 +1159,13 @@ impl LodTuningState {
 
 impl LayoutViewerV2App {
     fn open(args: Args) -> Result<Self> {
-        let source = PackageLayoutSource::open(&args.package_root, args.cache_capacity)?;
-        let session = LayoutSession::from_source(source)?;
-        let display = DisplayModel::from_layout_layers(session.db().layers());
-        let cell_view = CellViewState::top(session.db());
-        let background_load =
-            BackgroundLoadHandle::spawn(args.package_root.clone(), args.cache_capacity);
         Ok(Self {
-            session,
-            display,
+            loaded: None,
+            session_load: Some(SessionLoadHandle::spawn(
+                args.package_root,
+                args.cache_capacity,
+            )),
             view: None,
-            cell_view,
             hierarchy_policy: hierarchy_policy_from_tuning(LodTuningState::default()),
             lod_tuning: LodTuningState::default(),
             frame_timing: FrameTimingState::default(),
@@ -1138,7 +1173,6 @@ impl LayoutViewerV2App {
             last_interaction_at: None,
             interaction_settle_ms: 120,
             async_load: AsyncLoadState::default(),
-            background_load,
             render_surface: render_surface::RenderSurface::new(32),
             render_surface_texture: None,
             render_surface_texture_key: None,
@@ -1170,13 +1204,49 @@ impl LayoutViewerV2App {
         })
     }
 
-    fn ensure_view(&mut self, size: egui::Vec2) {
+    fn poll_session_load(&mut self, ctx: &egui::Context) {
+        let Some(load) = self.session_load.as_ref() else {
+            return;
+        };
+        match load.try_recv() {
+            Some(Ok(loaded)) => {
+                self.loaded = Some(loaded);
+                self.session_load = None;
+                self.last_error = None;
+                self.clear_render_history();
+                ctx.request_repaint();
+            }
+            Some(Err(error)) => {
+                self.session_load = None;
+                self.last_error = Some(error);
+                ctx.request_repaint();
+            }
+            None => {
+                ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
+            }
+        }
+    }
+
+    fn draw_loading_canvas(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(18, 24, 32));
+        let text = self
+            .last_error
+            .as_ref()
+            .map(|error| format!("Failed to load layout\n{error}"))
+            .unwrap_or_else(|| "Loading layout...".to_owned());
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::FontId::monospace(14.0),
+            egui::Color32::from_rgb(190, 198, 208),
+        );
+    }
+
+    fn ensure_view(&mut self, world_bbox: Rect, size: egui::Vec2) {
         if self.view.is_none() && size.x > 0.0 && size.y > 0.0 {
-            self.view = Some(V2ViewState::fit(
-                self.session.db().world_bbox(),
-                size.x,
-                size.y,
-            ));
+            self.view = Some(V2ViewState::fit(world_bbox, size.x, size.y));
         }
     }
 
@@ -1192,7 +1262,18 @@ impl LayoutViewerV2App {
         rect: egui::Rect,
         response: &egui::Response,
     ) -> bool {
-        self.ensure_view(rect.size());
+        let Some(world_bbox) = self
+            .loaded
+            .as_ref()
+            .map(|loaded| loaded.session.db().world_bbox())
+        else {
+            self.draw_loading_canvas(ui, rect);
+            return false;
+        };
+        self.ensure_view(world_bbox, rect.size());
+        let Some(loaded) = self.loaded.as_mut() else {
+            return false;
+        };
         let Some(mut view) = self.view else {
             return false;
         };
@@ -1235,10 +1316,10 @@ impl LayoutViewerV2App {
                 let tolerance = (view.units_per_pixel * 4.0).ceil().max(1.0) as i32;
                 self.selected = RenderPlanner::new(self.lod_tuning.render_settings(false))
                     .pick_for_cell_view(
-                        self.session.db(),
-                        &self.display,
+                        loaded.session.db(),
+                        &loaded.display,
                         PickRequest::new(world_x.round() as i32, world_y.round() as i32, tolerance),
-                        &self.cell_view,
+                        &loaded.cell_view,
                         &self.hierarchy_policy,
                     );
             }
@@ -1254,16 +1335,19 @@ impl LayoutViewerV2App {
             rect.width(),
             rect.height(),
         );
-        let interaction_active = self.interaction_active();
+        let interaction_active = self
+            .last_interaction_at
+            .map(|instant| instant.elapsed().as_millis() < u128::from(self.interaction_settle_ms))
+            .unwrap_or(false);
         let render_settings = self.lod_tuning.render_settings(interaction_active);
         let max_units_per_pixel = viewport
             .units_per_pixel_x()
             .max(viewport.units_per_pixel_y());
-        let hierarchy_exists = current_cell_has_instances(self.session.db(), &self.cell_view);
+        let hierarchy_exists = current_cell_has_instances(loaded.session.db(), &loaded.cell_view);
         if !hierarchy_exists
             && max_units_per_pixel >= render_settings.hierarchy_coarse_units_per_pixel
         {
-            match self
+            match loaded
                 .session
                 .ensure_overview_for_units_per_pixel(max_units_per_pixel)
             {
@@ -1283,14 +1367,14 @@ impl LayoutViewerV2App {
         let planner = RenderPlanner::new(render_settings);
         sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
         let mut preview_lod_hysteresis = self.lod_hysteresis;
-        let has_visible_layers = !self.display.resolved_layers().is_empty();
+        let has_visible_layers = !loaded.display.resolved_layers().is_empty();
         let overview_available =
             should_check_overview_density(
                 hierarchy_exists,
-                is_top_cell_view(self.session.db(), &self.cell_view),
+                is_top_cell_view(loaded.session.db(), &loaded.cell_view),
                 max_units_per_pixel,
                 render_settings,
-            ) && overview_density_usable(self.session.db(), &self.display, viewport);
+            ) && overview_density_usable(loaded.session.db(), &loaded.display, viewport);
         let expected_source = plan_source_for_units_per_pixel(
             max_units_per_pixel,
             render_settings,
@@ -1300,16 +1384,20 @@ impl LayoutViewerV2App {
             has_visible_layers,
         );
         let load_started = std::time::Instant::now();
-        if let Some(result) = self.background_load.try_recv() {
+        if let Some(result) = loaded.background_load.try_recv() {
             if self.async_load.should_apply_result(result.request) {
                 match result.result {
-                    Ok(batch) => {
-                        self.session.apply_viewport_batch(batch);
-                        self.async_load.mark_completed(result.request);
-                        layout_active_frame = true;
-                        self.last_error = None;
-                        ui.ctx().request_repaint();
-                    }
+                    Ok(batch) => match loaded.session.apply_viewport_batch(batch) {
+                        Ok(_) => {
+                            self.async_load.mark_completed(result.request);
+                            layout_active_frame = true;
+                            self.last_error = None;
+                            ui.ctx().request_repaint();
+                        }
+                        Err(error) => {
+                            self.last_error = Some(error.to_string());
+                        }
+                    },
                     Err(error) => {
                         self.last_error = Some(error);
                     }
@@ -1330,7 +1418,7 @@ impl LayoutViewerV2App {
                         .request(detail_load_viewport, self.load_generation);
                 }
                 if let Some(request) = self.async_load.take_pending() {
-                    self.background_load.request(request);
+                    loaded.background_load.request(request);
                 }
             }
         } else {
@@ -1343,13 +1431,13 @@ impl LayoutViewerV2App {
         let cache_world = plane_cache_world_rect(screen_world, view, expected_source);
         let plan_viewport = viewport_for_world_rect(cache_world, view);
         let expected_cache_key = planner.cache_key_for_cell_view(
-            &self.display,
+            &loaded.display,
             plan_viewport,
             expected_source,
-            &self.cell_view,
+            &loaded.cell_view,
             &self.hierarchy_policy,
         );
-        let current_revision = render_source_revision(&self.session, expected_source);
+        let current_revision = render_source_revision(&loaded.session, expected_source);
         let cache_key_matches = self
             .last_render_plan
             .as_ref()
@@ -1369,10 +1457,10 @@ impl LayoutViewerV2App {
                 .record_plan(std::time::Duration::from_secs(0));
         } else {
             let plan = planner.plan_for_cell_view(
-                self.session.db(),
-                &self.display,
+                loaded.session.db(),
+                &loaded.display,
                 plan_viewport,
-                &self.cell_view,
+                &loaded.cell_view,
                 &self.hierarchy_policy,
                 &mut self.lod_hysteresis,
             );
@@ -1461,49 +1549,54 @@ impl LayoutViewerV2App {
                     .id_salt("v2-display-panel-scroll")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.draw_hierarchy_panel(ui);
-                        ui.separator();
-                        self.draw_layers_panel(ui);
-                        ui.separator();
-                        ui.label("Selection");
-                        if let Some(hit) = self.selected.clone() {
-                            egui::Grid::new("selection-inspector-grid")
-                                .num_columns(2)
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    for (label, value) in selection_inspector_rows(&hit) {
-                                        ui.label(label);
-                                        ui.monospace(value);
-                                        ui.end_row();
+                        if let Some(mut loaded) = self.loaded.take() {
+                            self.draw_hierarchy_panel(ui, &mut loaded);
+                            ui.separator();
+                            self.draw_layers_panel(ui, &mut loaded);
+                            ui.separator();
+                            ui.label("Selection");
+                            if let Some(hit) = self.selected.clone() {
+                                egui::Grid::new("selection-inspector-grid")
+                                    .num_columns(2)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for (label, value) in selection_inspector_rows(&hit) {
+                                            ui.label(label);
+                                            ui.monospace(value);
+                                            ui.end_row();
+                                        }
+                                    });
+                                let enter_path = enter_path_for_hit(&hit);
+                                if ui
+                                    .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
+                                    .clicked()
+                                {
+                                    if let Some(path) = enter_path {
+                                        self.enter_instance_path(&mut loaded, path);
                                     }
-                                });
-                            let enter_path = enter_path_for_hit(&hit);
-                            if ui
-                                .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
-                                .clicked()
-                            {
-                                if let Some(path) = enter_path {
-                                    self.enter_instance_path(path);
                                 }
+                            } else {
+                                ui.label("No object selected");
                             }
+                            self.loaded = Some(loaded);
                         } else {
-                            ui.label("No object selected");
+                            ui.label(self.last_error.as_deref().unwrap_or("Loading layout..."));
                         }
                     });
             });
     }
 
-    fn draw_layers_panel(&mut self, ui: &mut egui::Ui) {
+    fn draw_layers_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
         ui.label("Layers");
         let layer_counts = self
             .layer_counts_cache
-            .get_or_build(self.session.db(), self.session.revision());
+            .get_or_build(loaded.session.db(), loaded.session.revision());
         egui::ScrollArea::vertical()
             .id_salt("v2-display-panel-layers-scroll")
             .max_height(360.0)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for layer in self.display.layers_mut() {
+                for layer in loaded.display.layers_mut() {
                     let count = match layer.source {
                         layout_display::SourceSelector::PhysicalLayer(layer_id) => {
                             layer_counts.get(&layer_id).copied().unwrap_or(0)
@@ -1521,27 +1614,35 @@ impl LayoutViewerV2App {
             });
     }
 
-    fn draw_hierarchy_panel(&mut self, ui: &mut egui::Ui) {
+    fn draw_hierarchy_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
         egui::CollapsingHeader::new("Hierarchy")
             .default_open(true)
             .show(ui, |ui| {
                 sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
                 ui.horizontal(|ui| {
                     if ui.button("Top").clicked() {
-                        self.cell_view = CellViewState::reset_to_top(self.session.db());
+                        loaded.cell_view = CellViewState::reset_to_top(loaded.session.db());
                         self.selected = None;
                         self.clear_render_history();
-                        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+                        focus_view_on_cell_bbox(
+                            &mut self.view,
+                            loaded.session.db(),
+                            &loaded.cell_view,
+                        );
                     }
-                    let can_ascend = !self.cell_view.specific_path().is_empty();
+                    let can_ascend = !loaded.cell_view.specific_path().is_empty();
                     if ui
                         .add_enabled(can_ascend, egui::Button::new("Up"))
                         .clicked()
                     {
-                        self.cell_view = ascended_cell_view(&self.cell_view);
+                        loaded.cell_view = ascended_cell_view(&loaded.cell_view);
                         self.selected = None;
                         self.clear_render_history();
-                        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+                        focus_view_on_cell_bbox(
+                            &mut self.view,
+                            loaded.session.db(),
+                            &loaded.cell_view,
+                        );
                     }
                     let enter_path = self.selected.as_ref().and_then(enter_path_for_hit);
                     if ui
@@ -1549,13 +1650,13 @@ impl LayoutViewerV2App {
                         .clicked()
                     {
                         if let Some(path) = enter_path {
-                            self.enter_instance_path(path);
+                            self.enter_instance_path(loaded, path);
                         }
                     }
                 });
                 ui.monospace(hierarchy_summary_text(
-                    self.session.db(),
-                    &self.cell_view,
+                    loaded.session.db(),
+                    &loaded.cell_view,
                     &self.hierarchy_policy,
                 ));
                 let max_rows = if self.interaction_active() {
@@ -1564,9 +1665,9 @@ impl LayoutViewerV2App {
                     HIERARCHY_ROWS_STEADY_LIMIT
                 };
                 let rows = self.hierarchy_rows_cache.get_or_build(
-                    self.session.db(),
-                    self.session.hierarchy_revision(),
-                    &self.cell_view,
+                    loaded.session.db(),
+                    loaded.session.hierarchy_revision(),
+                    &loaded.cell_view,
                     8,
                     max_rows,
                 );
@@ -1580,7 +1681,7 @@ impl LayoutViewerV2App {
                         ui.set_width(hierarchy_rows_width);
                         render_visible_hierarchy_rows(
                             ui,
-                            self.session.db(),
+                            loaded.session.db(),
                             &rows.rows,
                             visible_range,
                             hierarchy_rows_width,
@@ -1588,7 +1689,7 @@ impl LayoutViewerV2App {
                     })
                     .inner;
                 if let Some(path) = focused_path {
-                    self.focus_instance_path(path);
+                    self.focus_instance_path(loaded, path);
                 }
                 if rows_truncated {
                     ui.label("Hierarchy rows truncated");
@@ -1606,24 +1707,25 @@ impl LayoutViewerV2App {
         self.layer_counts_cache.clear();
     }
 
-    fn enter_instance_path(&mut self, path: InstancePath) {
-        self.cell_view = CellViewState::from_path(self.cell_view.context_cell(), path);
+    fn enter_instance_path(&mut self, loaded: &mut LoadedViewerState, path: InstancePath) {
+        loaded.cell_view = CellViewState::from_path(loaded.cell_view.context_cell(), path);
         self.selected = None;
         self.clear_render_history();
-        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+        focus_view_on_cell_bbox(&mut self.view, loaded.session.db(), &loaded.cell_view);
     }
 
-    fn focus_instance_path(&mut self, path: InstancePath) {
-        self.cell_view = CellViewState::from_path(self.cell_view.context_cell(), path);
+    fn focus_instance_path(&mut self, loaded: &mut LoadedViewerState, path: InstancePath) {
+        loaded.cell_view = CellViewState::from_path(loaded.cell_view.context_cell(), path);
         self.selected = None;
         self.clear_render_history();
-        focus_view_on_cell_bbox(&mut self.view, self.session.db(), &self.cell_view);
+        focus_view_on_cell_bbox(&mut self.view, loaded.session.db(), &loaded.cell_view);
     }
 }
 
 impl eframe::App for LayoutViewerV2App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let update_started = std::time::Instant::now();
+        self.poll_session_load(ctx);
         let sidebar_started = std::time::Instant::now();
         self.draw_sidebar(ctx);
         self.frame_timing.record_sidebar(sidebar_started.elapsed());
@@ -2374,8 +2476,8 @@ mod tests {
         scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
         should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect,
-        visible_hierarchy_row_slice, AsyncLoadState, CachedPlaneTextureAction, FillDrawMode,
-        FrameRateState, FrameTimingState, LoadRequest, LodTuningState,
+        visible_hierarchy_row_slice, Args, AsyncLoadState, CachedPlaneTextureAction, FillDrawMode,
+        FrameRateState, FrameTimingState, LayoutViewerV2App, LoadRequest, LodTuningState,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{Color, DisplayLayer, DisplayModel, LayerStyle, Pattern};
@@ -2394,6 +2496,25 @@ mod tests {
     };
 
     static HIERARCHY_TEST_PACKAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn app_open_returns_before_package_io() {
+        let path = std::env::temp_dir().join(format!(
+            "missing-layoutpkg-{}",
+            HIERARCHY_TEST_PACKAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        assert!(!path.exists());
+
+        let app = LayoutViewerV2App::open(Args {
+            package_root: path,
+            cache_capacity: 1,
+        });
+
+        assert!(
+            app.is_ok(),
+            "opening the app should not block on package IO"
+        );
+    }
 
     #[test]
     fn canvas_interaction_sense_supports_click_selection_and_drag_pan() {
