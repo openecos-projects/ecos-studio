@@ -126,6 +126,30 @@ describe('ShellPtyService', () => {
     }))
   })
 
+  it('uses an explicit cwd instead of the HOME fallback', async () => {
+    const fakePty = new FakePty()
+    const ptyBackend = {
+      spawn: vi.fn(() => fakePty),
+    }
+    const service = new ShellPtyService({
+      env: {
+        HOME: '/home/ecos',
+        SHELL: '/bin/zsh',
+      },
+      platform: 'linux',
+      ptyBackend,
+    })
+
+    await service.createSession({ cols: 80, cwd: '/workspace/demo', rows: 24 }, vi.fn())
+
+    expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
+      cwd: '/workspace/demo',
+    }))
+    expect(ptyBackend.spawn).not.toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
+      cwd: '/home/ecos',
+    }))
+  })
+
   it('resolves envProvider for each new session and uses it for shell, cwd, and spawn env', async () => {
     const firstPty = new FakePty()
     const secondPty = new FakePty()
