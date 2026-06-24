@@ -208,21 +208,22 @@ export async function isRuntimeScopeActive(
 ): Promise<boolean> {
   const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
   const active = await isRuntimeLockPathActive(lockPath, scope)
-  if (!active) {
-    const reclaimLock = await acquireRuntimeReclaimLock(rootDirectory, scope, `observer-${process.pid}`)
-    if (!reclaimLock) {
-      return isRuntimeLockPathActive(lockPath, scope)
-    }
-    try {
-      if (await isRuntimeLockPathActive(lockPath, scope)) {
-        return true
-      }
-      await rm(lockPath, { force: true, recursive: true })
-    } finally {
-      await reclaimLock.release()
-    }
+  if (active) return true
+  if (!await runtimeLockPathExists(lockPath)) return false
+
+  const reclaimLock = await acquireRuntimeReclaimLock(rootDirectory, scope, `observer-${process.pid}`)
+  if (!reclaimLock) {
+    return isRuntimeLockPathActive(lockPath, scope)
   }
-  return active
+  try {
+    if (await isRuntimeLockPathActive(lockPath, scope)) {
+      return true
+    }
+    await rm(lockPath, { force: true, recursive: true })
+  } finally {
+    await reclaimLock.release()
+  }
+  return false
 }
 
 async function isRuntimeLockPathActive(
@@ -242,6 +243,15 @@ async function isRuntimeLockPathActive(
     return false
   }
   return true
+}
+
+async function runtimeLockPathExists(lockPath: string): Promise<boolean> {
+  try {
+    await stat(lockPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function isSameRuntimeLockOwner(

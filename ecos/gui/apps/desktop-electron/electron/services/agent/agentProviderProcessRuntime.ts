@@ -111,6 +111,10 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
 
   private sendRequest(method: AgentProviderMethod, params?: unknown): Promise<unknown> {
     const child = this.ensureChild()
+    const stdin = child.stdin
+    if (!stdin || stdin.destroyed || stdin.writableEnded) {
+      return Promise.reject(new Error(`Agent provider ${this.manifest.providerId} stdin is closed`))
+    }
     const id = randomUUID()
     const request: AgentProviderProtocolRequest = {
       id,
@@ -120,7 +124,17 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
 
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(id, { reject, resolve })
-      child.stdin?.write(`${JSON.stringify(request)}\n`)
+      try {
+        stdin.write(`${JSON.stringify(request)}\n`, (error?: Error | null) => {
+          if (error) {
+            this.handleChildFailure(child, error)
+            child.kill()
+          }
+        })
+      } catch (error) {
+        this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
+        child.kill()
+      }
     })
   }
 
@@ -140,25 +154,27 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     this.child = child
 
     child.stdout?.on('data', (data: unknown) => {
+      if (this.child !== child) return
       this.handleStdout(dataToString(data))
     })
     child.stderr?.on('data', () => {
       // Drain diagnostics so provider stderr cannot fill its pipe and block stdout responses.
     })
+    child.stdin?.once('error', (error) => {
+      if (this.child !== child) return
+      this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
+      child.kill()
+    })
     child.once('error', (error) => {
       if (this.child !== child) return
-      this.rejectPending(error instanceof Error ? error : new Error(String(error)))
-      this.child = null
-      this.stdoutBuffer = ''
+      this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
     })
     child.once('close', (code, signal) => {
       if (this.child !== child) return
       const message = signal
         ? `Agent provider ${this.manifest.providerId} exited with signal ${signal}`
         : `Agent provider ${this.manifest.providerId} exited with code ${code ?? 'unknown'}`
-      this.rejectPending(new Error(message))
-      this.child = null
-      this.stdoutBuffer = ''
+      this.handleChildFailure(child, new Error(message))
     })
 
     return child
@@ -234,6 +250,13 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       pending.reject(error)
     }
     this.pendingRequests.clear()
+  }
+
+  private handleChildFailure(child: ReturnType<SpawnLike>, error: Error): void {
+    if (this.child !== child) return
+    this.rejectPending(error)
+    this.child = null
+    this.stdoutBuffer = ''
   }
 }
 

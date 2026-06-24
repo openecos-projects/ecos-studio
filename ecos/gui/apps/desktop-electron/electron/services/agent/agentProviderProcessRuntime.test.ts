@@ -8,12 +8,14 @@ import {
 } from './agentProviderProcessRuntime'
 import { supportedAgentProviderProtocolVersion } from './agentProviderPlugin'
 
+class FakeStdin extends EventEmitter {
+  readonly write = vi.fn()
+}
+
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter()
   readonly stderr = new EventEmitter()
-  readonly stdin = {
-    write: vi.fn(),
-  }
+  readonly stdin = new FakeStdin()
   readonly kill = vi.fn()
 }
 
@@ -138,6 +140,109 @@ describe('AgentProviderProcessRuntime', () => {
     await expect(response).rejects.toThrow(
       'Agent provider codex exited with code 1',
     )
+  })
+
+  it('rejects pending requests when provider stdin writes fail', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    const error = new Error('write EPIPE') as NodeJS.ErrnoException
+    error.code = 'EPIPE'
+
+    expect(() => {
+      harness.children[0].stdin.emit('error', error)
+    }).not.toThrow()
+
+    await expect(response).rejects.toThrow('write EPIPE')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+  })
+
+  it('kills the provider when stdin write callbacks fail', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const error = new Error('write EPIPE') as NodeJS.ErrnoException
+    error.code = 'EPIPE'
+
+    const response = runtime.getStatus({ providerId: 'codex' })
+    harness.children[0].stdin.write.mock.calls[0][1]?.(error)
+
+    await expect(response).rejects.toThrow('write EPIPE')
+    expect(harness.children[0].kill).toHaveBeenCalled()
+
+    const nextResponse = runtime.getStatus({ providerId: 'codex' })
+    expect(harness.children).toHaveLength(2)
+    const secondRequest = readProtocolRequest(harness.children[1])
+    harness.children[1].stdout.emit('data', `${JSON.stringify({
+      id: secondRequest.id,
+      result: {
+        providerId: 'codex',
+        state: 'ready',
+      },
+    })}\n`)
+
+    await expect(nextResponse).resolves.toEqual({
+      providerId: 'codex',
+      state: 'ready',
+    })
+  })
+
+  it('ignores stdout from failed providers after respawning', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'codex-provider',
+        manifestPath: '/plugins/codex/agent-provider.json',
+        pluginRoot: '/plugins/codex',
+        providerId: 'codex',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const error = new Error('write EPIPE') as NodeJS.ErrnoException
+    error.code = 'EPIPE'
+
+    const firstResponse = runtime.getStatus({ providerId: 'codex' })
+    harness.children[0].stdin.write.mock.calls[0][1]?.(error)
+    await expect(firstResponse).rejects.toThrow('write EPIPE')
+
+    const secondResponse = runtime.getStatus({ providerId: 'codex' })
+    const secondRequest = readProtocolRequest(harness.children[1])
+
+    expect(() => {
+      harness.children[0].stdout.emit('data', 'not json\n')
+    }).not.toThrow()
+
+    harness.children[1].stdout.emit('data', `${JSON.stringify({
+      id: secondRequest.id,
+      result: {
+        providerId: 'codex',
+        state: 'ready',
+      },
+    })}\n`)
+
+    await expect(secondResponse).resolves.toEqual({
+      providerId: 'codex',
+      state: 'ready',
+    })
   })
 
   it('drops partial stdout from a crashed provider before respawning', async () => {

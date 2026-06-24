@@ -197,6 +197,16 @@ describe('runtimeLocks', () => {
     }
   })
 
+  it('does not create reclaim locks when checking a missing scope', async () => {
+    const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
+    try {
+      await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
+      await expect(stat(root)).rejects.toThrow()
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
   it('reclaims ownerless locks after initialization stalls', async () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
