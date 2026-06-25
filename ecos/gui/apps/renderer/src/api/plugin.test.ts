@@ -5,11 +5,13 @@ const resourcesBridge = vi.hoisted(() => ({
   cancel: vi.fn(),
   get: vi.fn(),
   importPdkPath: vi.fn(),
+  importToolPath: vi.fn(),
   install: vi.fn(),
   list: vi.fn(),
   onProgress: vi.fn(),
   refreshRegistry: vi.fn(),
   removePdkReference: vi.fn(),
+  scanToolDirectory: vi.fn(),
   uninstall: vi.fn(),
   update: vi.fn(),
   validatePdk: vi.fn(),
@@ -24,10 +26,12 @@ vi.mock('@/platform/desktop', () => ({
 import {
   cancelResourceApi,
   importPdkPathApi,
+  importToolPathApi,
   resourceJobToInstallProgress,
   resourceListToResources,
   resourceListToTools,
   resourceToResourceItem,
+  scanToolDirectoryApi,
   subscribeResourceProgress,
   type ResourceList,
 } from './plugin'
@@ -232,6 +236,36 @@ describe('Resource Manager tool API adapter', () => {
 
     expect(resourcesBridge.importPdkPath).toHaveBeenCalledWith({
       path: '/tmp/pdks/local55',
+    })
+  })
+
+  it('scans and imports local Yosys through the desktop resource bridge', async () => {
+    const scanned = {
+      canonicalPath: '/tmp/oss-cad-suite',
+      name: 'Yosys',
+      description: 'Local Yosys / OSS CAD Suite installation',
+      version: '0.61+local',
+      toolName: 'yosys',
+      detectedFiles: { directories: ['bin', 'share'], files: [] },
+      valid: true,
+      errors: [],
+    }
+    const imported = {
+      ...resourceListPayload.resources[0],
+      path: '/tmp/oss-cad-suite',
+      managed_root: null,
+      source: 'local',
+      actions: ['validate' as const, 'remove_reference' as const],
+    }
+    resourcesBridge.scanToolDirectory.mockResolvedValue(scanned)
+    resourcesBridge.importToolPath.mockResolvedValue(imported)
+
+    await expect(scanToolDirectoryApi('/tmp/oss-cad-suite')).resolves.toEqual(scanned)
+    await expect(importToolPathApi('/tmp/oss-cad-suite')).resolves.toEqual(imported)
+
+    expect(resourcesBridge.scanToolDirectory).toHaveBeenCalledWith('/tmp/oss-cad-suite')
+    expect(resourcesBridge.importToolPath).toHaveBeenCalledWith({
+      path: '/tmp/oss-cad-suite',
     })
   })
 

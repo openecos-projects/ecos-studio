@@ -31,6 +31,7 @@ export type {
 export type {
   ResourceAction,
   ResourceImportPdkRequest,
+  ResourceImportToolRequest,
   ResourceInfo,
   ResourceInstallRequest,
   ResourceJob,
@@ -38,6 +39,7 @@ export type {
   ResourceOperationResult,
   ResourceStatus,
   ResourceType,
+  ScannedToolDirectory,
 } from './contracts/resources.ts';
 export type {
   RemoteContentApi,

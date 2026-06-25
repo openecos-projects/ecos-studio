@@ -26,6 +26,7 @@ import {
   type RemoteContentReadJsonFileRequest,
   type RemoteContentReadTextFileRequest,
   type ResourceImportPdkRequest,
+  type ResourceImportToolRequest,
   type ResourceInstallRequest,
   type ResourceJob,
   type DesktopShellDataEvent,
@@ -136,6 +137,8 @@ export interface DesktopBridgeServices {
     validatePdk(resourceId: string): Promise<unknown>
     removePdkReference(resourceId: string): Promise<unknown>
     importPdkPath(path: string): Promise<unknown>
+    scanToolDirectory(path: string): Promise<unknown>
+    importToolPath(path: string): Promise<unknown>
     refreshRegistry(): Promise<unknown>
   }
   desktopRuntimeManager: {
@@ -706,6 +709,16 @@ export function registerIpc(
   handle(desktopApiIpcChannels.resourcesImportPdkPath, async (_event, request) => {
     return await services.resourceManagerService.importPdkPath(
       (request as ResourceImportPdkRequest).path,
+    )
+  })
+
+  handle(desktopApiIpcChannels.resourcesScanToolDirectory, async (_event, path) => {
+    return await services.resourceManagerService.scanToolDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesImportToolPath, async (_event, request) => {
+    return await services.resourceManagerService.importToolPath(
+      (request as ResourceImportToolRequest).path,
     )
   })
 

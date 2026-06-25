@@ -138,6 +138,14 @@ export function importPdkPathApi(path: string) {
   return getDesktopApi().resources.importPdkPath({ path })
 }
 
+export function scanToolDirectoryApi(path: string) {
+  return getDesktopApi().resources.scanToolDirectory(path)
+}
+
+export function importToolPathApi(path: string) {
+  return getDesktopApi().resources.importToolPath({ path })
+}
+
 export function installResourceApi(resourceId: string, version?: string) {
   return getDesktopApi().resources.install({ resourceId, version })
 }

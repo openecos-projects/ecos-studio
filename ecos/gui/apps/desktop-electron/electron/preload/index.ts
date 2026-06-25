@@ -240,6 +240,10 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesRemovePdkReference, resourceId),
     importPdkPath: (request) =>
       invokeDesktop(desktopApiIpcChannels.resourcesImportPdkPath, request),
+    scanToolDirectory: (path) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesScanToolDirectory, path),
+    importToolPath: (request) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesImportToolPath, request),
     refreshRegistry: () =>
       invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
     onProgress: (listener) =>

@@ -186,6 +186,10 @@ export function primaryActionForRow(row: ResourceRow): PrimaryRowAction | null {
   return null
 }
 
+export function canImportLocalTool(row: ResourceRow): boolean {
+  return row.id === 'tool:yosys' && row.statusKind !== 'installing'
+}
+
 export function createPrimaryActionTask(
   row: ResourceRow,
   executor: ResourceActionExecutor,

@@ -78,10 +78,12 @@ function registerHandlers() {
       cancelResource: vi.fn(),
       getResource: vi.fn(),
       importPdkPath: vi.fn(),
+      importToolPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
       refreshRegistry: vi.fn(),
       removePdkReference: vi.fn(),
+      scanToolDirectory: vi.fn(),
       uninstallResource: vi.fn(),
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
@@ -184,6 +186,8 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesValidatePdk,
       desktopApiIpcChannels.resourcesRemovePdkReference,
       desktopApiIpcChannels.resourcesImportPdkPath,
+      desktopApiIpcChannels.resourcesScanToolDirectory,
+      desktopApiIpcChannels.resourcesImportToolPath,
       desktopApiIpcChannels.resourcesRefreshRegistry,
       desktopApiIpcChannels.layoutViewerOpen,
       desktopApiIpcChannels.systemOpenExternal,
@@ -254,6 +258,23 @@ describe('registerIpc', () => {
       resource_id: 'tool:yosys',
     })
     services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
+    services.resourceManagerService.scanToolDirectory.mockResolvedValue({
+      canonicalPath: '/tmp/oss-cad-suite',
+      name: 'Yosys',
+      description: 'Local Yosys / OSS CAD Suite installation',
+      version: '0.61+local',
+      toolName: 'yosys',
+      detectedFiles: { directories: ['bin', 'share'], files: [] },
+      valid: true,
+      errors: [],
+    })
+    services.resourceManagerService.importToolPath.mockResolvedValue({
+      ...resources.resources[0],
+      id: 'tool:yosys',
+      type: 'tool',
+      path: '/tmp/oss-cad-suite',
+      source: 'local',
+    })
 
     await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
     await expect(
@@ -272,6 +293,20 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual(resources.resources[0])
     await expect(
+      handlers.get(desktopApiIpcChannels.resourcesScanToolDirectory)?.(event, '/tmp/oss-cad-suite'),
+    ).resolves.toMatchObject({
+      canonicalPath: '/tmp/oss-cad-suite',
+      toolName: 'yosys',
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesImportToolPath)?.(event, {
+        path: '/tmp/oss-cad-suite',
+      }),
+    ).resolves.toMatchObject({
+      id: 'tool:yosys',
+      source: 'local',
+    })
+    await expect(
       handlers.get(desktopApiIpcChannels.resourcesCancel)?.(event, 'tool:yosys'),
     ).resolves.toEqual({
       status: 'cancelled',
@@ -285,6 +320,8 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.resourceManagerService.scanToolDirectory).toHaveBeenCalledWith('/tmp/oss-cad-suite')
+    expect(services.resourceManagerService.importToolPath).toHaveBeenCalledWith('/tmp/oss-cad-suite')
     expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
   })
 

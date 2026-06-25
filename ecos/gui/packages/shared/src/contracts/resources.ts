@@ -68,7 +68,25 @@ export interface ResourceImportPdkRequest {
   path: string
 }
 
+export interface ResourceImportToolRequest {
+  path: string
+}
+
 export interface ResourceInstallRequest {
   resourceId: string
   version?: string
+}
+
+export interface ScannedToolDirectory {
+  canonicalPath: string
+  name: string
+  description: string
+  version: string
+  toolName: string
+  detectedFiles: {
+    directories: string[]
+    files: string[]
+  }
+  valid: boolean
+  errors: string[]
 }

@@ -12,6 +12,7 @@ import type {
   ResourceList,
   ResourceOperationResult,
   ResourceStatus,
+  ScannedToolDirectory,
 } from '@ecos-studio/shared'
 
 const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
@@ -93,6 +94,8 @@ interface ToolInventoryEntry {
   executable: string
   active: boolean
   managed: boolean
+  source: string
+  source_path: string
 }
 
 interface PdkInventoryEntry {
@@ -318,6 +321,36 @@ export class ResourceManagerService {
     return { status: 'cancelled', resource_id: resourceId }
   }
 
+  async scanToolDirectory(path: string): Promise<ScannedToolDirectory> {
+    return await scanToolDirectory(path)
+  }
+
+  async importToolPath(path: string): Promise<ResourceInfo> {
+    const scanned = await scanToolDirectory(path)
+    if (!scanned.valid) {
+      throw new Error(`Invalid Yosys directory: ${scanned.errors.join('; ')}`)
+    }
+
+    const manifest = await this.readManifest()
+    const resourceId = `tool:${scanned.toolName}`
+    manifest.installed[resourceId] = {
+      type: 'tool',
+      name: scanned.toolName,
+      version: scanned.version,
+      path: scanned.canonicalPath,
+      installed_at: utcNowIso(),
+      sha256: localToolFingerprint(scanned),
+      detected_executables: [`bin/${process.platform === 'win32' ? 'yosys.exe' : 'yosys'}`],
+      executable: `bin/${process.platform === 'win32' ? 'yosys.exe' : 'yosys'}`,
+      active: true,
+      managed: false,
+      source: 'local',
+      source_path: path,
+    }
+    await this.writeManifest(manifest)
+    return this.installedToolToResource(scanned.toolName, manifest.installed[resourceId] as ToolInventoryEntry)
+  }
+
   async uninstallResource(resourceId: string): Promise<ResourceOperationResult> {
     if (!resourceId.startsWith('tool:')) {
       if (resourceId.startsWith('pdk:')) {
@@ -342,6 +375,21 @@ export class ResourceManagerService {
     return { status: 'uninstalled', resource_id: resourceId }
   }
 
+  async removeToolReference(resourceId: string): Promise<ResourceOperationResult> {
+    const toolName = resourceNameFromId(resourceId, 'tool')
+    const manifest = await this.readManifest()
+    const entry = manifest.installed[`tool:${toolName}`]
+    if (!isToolEntry(entry)) {
+      throw new Error(`Tool '${toolName}' not found`)
+    }
+    if (entry.managed) {
+      throw new Error(`Tool '${toolName}' is managed and cannot remove reference; use uninstall`)
+    }
+    delete manifest.installed[`tool:${toolName}`]
+    await this.writeManifest(manifest)
+    return { status: 'removed', resource_id: `tool:${toolName}` }
+  }
+
   async activatePdk(resourceId: string): Promise<ResourceOperationResult> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
     const manifest = await this.readManifest()
@@ -359,6 +407,10 @@ export class ResourceManagerService {
   }
 
   async validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }> {
+    if (resourceId.startsWith('tool:')) {
+      return await this.validateTool(resourceId)
+    }
+
     const pdkId = resourceNameFromId(resourceId, 'pdk')
     const manifest = await this.readManifest()
     const entry = manifest.installed[`pdk:${pdkId}`]
@@ -378,7 +430,31 @@ export class ResourceManagerService {
     return { resource_id: `pdk:${pdkId}`, health: { status: health } }
   }
 
+  async validateTool(resourceId: string): Promise<{ resource_id: string; health: { status: string } }> {
+    const toolName = resourceNameFromId(resourceId, 'tool')
+    const manifest = await this.readManifest()
+    const entry = manifest.installed[`tool:${toolName}`]
+    if (!isToolEntry(entry)) {
+      throw new Error(`Tool '${toolName}' not found in inventory`)
+    }
+
+    const executable = entry.executable || `bin/${toolName}`
+    const executablePath = join(entry.path, executable)
+    let health = 'ok'
+    if (!await isExistingDirectory(entry.path)) {
+      health = 'missing'
+    } else if (!await isUsableExecutable(executablePath, process.platform)) {
+      health = 'invalid'
+    }
+
+    return { resource_id: `tool:${toolName}`, health: { status: health } }
+  }
+
   async removePdkReference(resourceId: string): Promise<ResourceOperationResult> {
+    if (resourceId.startsWith('tool:')) {
+      return await this.removeToolReference(resourceId)
+    }
+
     const pdkId = resourceNameFromId(resourceId, 'pdk')
     const manifest = await this.readManifest()
     const entry = manifest.installed[`pdk:${pdkId}`]
@@ -524,6 +600,8 @@ export class ResourceManagerService {
         executable: detected[0] ?? `bin/${name}`,
         active: true,
         managed: true,
+        source: 'registry',
+        source_path: asset.url,
       }
       await this.writeManifest(manifest)
       this.publish(listener, {
@@ -920,8 +998,13 @@ export class ResourceManagerService {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
-      actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
+      if (local.managed) {
+        status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
+        actions = status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']
+      } else {
+        status = 'installed'
+        actions = ['validate', 'remove_reference']
+      }
     }
 
     return {
@@ -937,10 +1020,10 @@ export class ResourceManagerService {
       active_version: local?.active ? local.version : null,
       active: local?.active ?? false,
       path: local?.path ?? null,
-      managed_root: this.toolsDir,
+      managed_root: local && !local.managed ? null : this.toolsDir,
       platform,
       size: asset?.size ?? null,
-      source: 'registry',
+      source: local?.source || 'registry',
       homepage: tool.homepage,
       actions,
       health: local ? toolHealth(local) : {},
@@ -963,12 +1046,12 @@ export class ResourceManagerService {
       active_version: entry.active ? entry.version : null,
       active: entry.active,
       path: entry.path,
-      managed_root: this.toolsDir,
+      managed_root: entry.managed ? this.toolsDir : null,
       platform: null,
       size: null,
-      source: 'local',
+      source: entry.source || (entry.managed ? 'registry' : 'local'),
       homepage: '',
-      actions: entry.managed ? ['uninstall'] : [],
+      actions: entry.managed ? ['uninstall'] : ['validate', 'remove_reference'],
       health: toolHealth(entry),
       error: null,
     }
@@ -1261,6 +1344,8 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
       executable: readString(record.executable),
       active: record.active !== false,
       managed: record.managed !== false,
+      source: readString(record.source) || (record.managed === false ? 'local' : 'registry'),
+      source_path: readString(record.source_path),
     }
   }
   if (record.type === 'pdk') {
@@ -1416,6 +1501,8 @@ function toolHealth(entry: ToolInventoryEntry): Record<string, unknown> {
     managed: entry.managed,
     sha256: entry.sha256,
     executable: entry.executable,
+    source: entry.source || (entry.managed ? 'registry' : 'local'),
+    source_path: entry.source_path,
   }
 }
 
@@ -1431,6 +1518,60 @@ function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
     sha256: entry.sha256,
     source: entry.source,
     source_url: entry.source_url,
+  }
+}
+
+async function scanToolDirectory(path: string): Promise<ScannedToolDirectory> {
+  const canonicalPath = resolve(path)
+  const detectedFiles = await detectTopLevelEntries(canonicalPath)
+  const executable = process.platform === 'win32' ? 'bin/yosys.exe' : 'bin/yosys'
+  const executablePath = join(canonicalPath, executable)
+  const sharePath = join(canonicalPath, 'share', 'yosys')
+  const errors: string[] = []
+  let version = ''
+
+  try {
+    const rootStats = await stat(canonicalPath)
+    if (!rootStats.isDirectory()) {
+      errors.push(`Not a directory: ${path}`)
+    }
+  } catch {
+    errors.push(`Directory does not exist: ${path}`)
+  }
+
+  if (!await isUsableExecutable(executablePath, process.platform)) {
+    errors.push(`Missing executable: ${executable}`)
+  }
+
+  if (!await isExistingDirectory(sharePath)) {
+    errors.push('Missing yosys share directory: share/yosys')
+  }
+
+  if (errors.length === 0) {
+    try {
+      version = parseYosysVersion(await runCommandText(executablePath, ['--version']))
+    } catch (error) {
+      errors.push(`Failed to read Yosys version: ${formatCommandProbeError(error)}`)
+    }
+  }
+
+  if (errors.length === 0) {
+    try {
+      await runCommandText(executablePath, ['-p', 'plugin -i slang'])
+    } catch (error) {
+      errors.push(`Yosys slang plugin check failed: ${formatCommandProbeError(error)}`)
+    }
+  }
+
+  return {
+    canonicalPath,
+    name: 'Yosys',
+    description: 'Local Yosys / OSS CAD Suite installation',
+    version: version || 'local',
+    toolName: 'yosys',
+    detectedFiles,
+    valid: errors.length === 0,
+    errors,
   }
 }
 
@@ -1617,6 +1758,38 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function detectTopLevelEntries(path: string): Promise<{ directories: string[]; files: string[] }> {
+  try {
+    const entries = await readdir(path, { withFileTypes: true })
+    return {
+      directories: entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT),
+      files: entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT),
+    }
+  } catch {
+    return { directories: [], files: [] }
+  }
+}
+
+function parseYosysVersion(output: string): string {
+  const line = output.split(/\r?\n/).find(Boolean) ?? ''
+  const match = line.match(/Yosys\s+([^\s]+)/i)
+  return match?.[1] ?? line.trim()
+}
+
+function localToolFingerprint(scanned: ScannedToolDirectory): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      path: scanned.canonicalPath,
+      version: scanned.version,
+      executable: process.platform === 'win32' ? 'bin/yosys.exe' : 'bin/yosys',
+    }))
+    .digest('hex')
+}
+
+function formatCommandProbeError(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : String(error)
+}
+
 async function readPdkReleaseAssetNames(destination: string): Promise<string[]> {
   const makefilePath = join(destination, 'Makefile')
   const makefile = await readFile(makefilePath, 'utf8').catch(() => '')
@@ -1775,6 +1948,35 @@ async function runCommand(command: string, args: string[], options?: CommandRunn
         resolvePromise()
       } else {
         const details = stderr.trim()
+        reject(new Error(`${command} failed with exit code ${code}${details ? `: ${details}` : ''}`))
+      }
+    })
+  })
+}
+
+async function runCommandText(command: string, args: string[], options?: CommandRunnerOptions): Promise<string> {
+  return await new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(command, args, { cwd: options?.cwd, stdio: 'pipe' })
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (chunk) => {
+      stdout = `${stdout}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)}`
+      if (stdout.length > COMMAND_ERROR_OUTPUT_LIMIT) {
+        stdout = stdout.slice(-COMMAND_ERROR_OUTPUT_LIMIT)
+      }
+    })
+    child.stderr?.on('data', (chunk) => {
+      stderr = `${stderr}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)}`
+      if (stderr.length > COMMAND_ERROR_OUTPUT_LIMIT) {
+        stderr = stderr.slice(-COMMAND_ERROR_OUTPUT_LIMIT)
+      }
+    })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolvePromise(stdout)
+      } else {
+        const details = (stderr || stdout).trim()
         reject(new Error(`${command} failed with exit code ${code}${details ? `: ${details}` : ''}`))
       }
     })

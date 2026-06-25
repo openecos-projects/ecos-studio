@@ -187,6 +187,7 @@
                   <span class="row-actions">
                     <template
                       v-if="
+                        canImportLocalTool(row) ||
                         rowActionForStatus(row.resource) !== 'none' ||
                         (
                           row.statusKind !== 'installing' &&
@@ -194,6 +195,19 @@
                         )
                       "
                     >
+                      <button
+                        v-if="canImportLocalTool(row)"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Import local Yosys"
+                        :disabled="isImportingLocalTool(row)"
+                        @click.stop="handleImportLocalTool(row)"
+                      >
+                        <i
+                          :class="isImportingLocalTool(row) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
+                          aria-hidden="true"
+                        ></i>
+                      </button>
                       <button
                         v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
                         type="button"
@@ -344,10 +358,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { importToolPathApi, scanToolDirectoryApi } from '@/api/plugin'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
+  canImportLocalTool,
   primaryActionForRow,
   resourceToRow,
   resolveRowInstallPath,
@@ -379,6 +395,7 @@ const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
 const importingPdk = ref(false)
+const importingLocalToolIds = ref<Set<string>>(new Set())
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -517,6 +534,10 @@ function rowError(row: ResourceRow): string | undefined {
   return pluginStore.resourceErrors[row.id] || row.resource.error || undefined
 }
 
+function isImportingLocalTool(row: ResourceRow): boolean {
+  return importingLocalToolIds.value.has(row.id)
+}
+
 async function handleRowInstall(row: ResourceRow): Promise<void> {
   await runPrimaryAction(row, pluginStore)
 }
@@ -538,6 +559,42 @@ async function handleImportPdk(): Promise<void> {
     }
   } finally {
     importingPdk.value = false
+  }
+}
+
+async function handleImportLocalTool(row: ResourceRow): Promise<void> {
+  if (!canImportLocalTool(row) || isImportingLocalTool(row)) {
+    return
+  }
+
+  const nextImporting = new Set(importingLocalToolIds.value)
+  nextImporting.add(row.id)
+  importingLocalToolIds.value = nextImporting
+  pluginStore.error = null
+
+  try {
+    const desktopApi = await waitForDesktopApi()
+    const path = await desktopApi.dialog.pickDirectory({
+      title: 'Select Yosys Root Directory',
+    })
+    if (!path) {
+      return
+    }
+
+    const scanned = await scanToolDirectoryApi(path)
+    if (!scanned.valid) {
+      pluginStore.error = scanned.errors.join('; ') || 'Selected directory is not a valid Yosys installation'
+      return
+    }
+
+    await importToolPathApi(scanned.canonicalPath)
+    await pluginStore.fetchTools({ silent: true })
+  } catch (error) {
+    pluginStore.error = error instanceof Error ? error.message : 'Failed to import local Yosys'
+  } finally {
+    const remainingImporting = new Set(importingLocalToolIds.value)
+    remainingImporting.delete(row.id)
+    importingLocalToolIds.value = remainingImporting
   }
 }
 

@@ -10,6 +10,8 @@ import type {
   ResourceJob,
   ResourceList,
   ResourceOperationResult,
+  ResourceImportToolRequest,
+  ScannedToolDirectory,
 } from './resources.ts'
 import type { RemoteContentApi } from './remoteContent.ts'
 import type {
@@ -192,6 +194,8 @@ export interface DesktopApi {
     validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>
     removePdkReference(resourceId: string): Promise<ResourceOperationResult>
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
+    scanToolDirectory(path: string): Promise<ScannedToolDirectory>
+    importToolPath(request: ResourceImportToolRequest): Promise<ResourceInfo>
     refreshRegistry(): Promise<{ status: string; tools_count: number }>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }

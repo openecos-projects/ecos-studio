@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ResourceItem } from '@/api/plugin'
 import {
+  canImportLocalTool,
   formatResourceSize,
   managedInstallLocation,
   primaryActionForRow,
@@ -139,6 +140,40 @@ describe('pluginToolsRows', () => {
         ),
       ),
     ).toBeNull()
+  })
+
+  it('allows local import for the idle Yosys tool row only', () => {
+    expect(
+      canImportLocalTool(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            name: 'yosys',
+            display_name: 'Yosys',
+            status: 'available',
+            actions: ['install'],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      canImportLocalTool(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            name: 'yosys',
+            display_name: 'Yosys',
+            status: 'installing',
+            actions: [],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(false)
+    expect(canImportLocalTool(resourceToRow(resource({ id: 'pdk:ics55' }), undefined))).toBe(false)
   })
 
   it('runs batch download for selected available PDKs and updateable tools', async () => {

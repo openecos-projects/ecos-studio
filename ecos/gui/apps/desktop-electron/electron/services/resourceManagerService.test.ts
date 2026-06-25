@@ -25,6 +25,34 @@ async function createFixtureArchive(root: string): Promise<{ path: string; sha25
   }
 }
 
+async function createLocalYosysRoot(root: string): Promise<string> {
+  const yosysRoot = join(root, 'oss-cad-suite')
+  const binDir = join(yosysRoot, 'bin')
+  const shareDir = join(yosysRoot, 'share', 'yosys')
+  await mkdir(binDir, { recursive: true })
+  await mkdir(shareDir, { recursive: true })
+  await writeFile(join(shareDir, 'slang.so'), 'fixture plugin\n', 'utf8')
+  const executable = join(binDir, 'yosys')
+  await writeFile(
+    executable,
+    [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then',
+      '  echo "Yosys 0.61+local"',
+      '  exit 0',
+      'fi',
+      'if [ "$1" = "-p" ] && [ "$2" = "plugin -i slang" ]; then',
+      '  exit 0',
+      'fi',
+      'exit 0',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  await chmod(executable, 0o755)
+  return yosysRoot
+}
+
 async function runFixtureCommand(command: string, args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = execFile(command, args, (error, _stdout, stderr) => {
@@ -278,6 +306,177 @@ describe('ResourceManagerService', () => {
     expect(env.KEEP_ME).toBe('yes')
     expect(env.PATH).not.toContain(join(inactiveRoot, 'bin'))
     expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
+  })
+
+  it('scans an existing local Yosys root without downloading it', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.scanToolDirectory(yosysRoot)).resolves.toMatchObject({
+      canonicalPath: yosysRoot,
+      toolName: 'yosys',
+      name: 'Yosys',
+      version: '0.61+local',
+      valid: true,
+      errors: [],
+      detectedFiles: {
+        directories: ['bin', 'share'],
+        files: [],
+      },
+    })
+  })
+
+  it('imports an existing local Yosys root into the resource inventory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.importToolPath(yosysRoot)).resolves.toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      installed_version: '0.61+local',
+      path: yosysRoot,
+      managed_root: null,
+      source: 'local',
+      active: true,
+      actions: ['validate', 'remove_reference'],
+      health: expect.objectContaining({
+        managed: false,
+        source: 'local',
+        source_path: yosysRoot,
+      }),
+    })
+
+    const manifest = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, Record<string, unknown>> }
+    expect(manifest.installed['tool:yosys']).toMatchObject({
+      type: 'tool',
+      name: 'yosys',
+      version: '0.61+local',
+      path: yosysRoot,
+      executable: 'bin/yosys',
+      detected_executables: ['bin/yosys'],
+      active: true,
+      managed: false,
+      source: 'local',
+      source_path: yosysRoot,
+    })
+  })
+
+  it('keeps an imported local Yosys installed when registry versions differ', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '99.0',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/yosys.tar',
+                  sha256: 'sha',
+                  size: 12,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+    await service.importToolPath(yosysRoot)
+
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      installed_version: '0.61+local',
+      available_versions: ['99.0'],
+      source: 'local',
+      managed_root: null,
+      actions: ['validate', 'remove_reference'],
+    })
+  })
+
+  it('validates an imported local Yosys root through the resource validation path', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+    await service.importToolPath(yosysRoot)
+
+    await expect(service.validatePdk('tool:yosys')).resolves.toMatchObject({
+      resource_id: 'tool:yosys',
+      health: { status: 'ok' },
+    })
+  })
+
+  it('removes an imported local Yosys reference without deleting the selected directory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+    await service.importToolPath(yosysRoot)
+
+    await expect(service.removePdkReference('tool:yosys')).resolves.toEqual({
+      status: 'removed',
+      resource_id: 'tool:yosys',
+    })
+
+    const manifest = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, Record<string, unknown>> }
+    expect(manifest.installed['tool:yosys']).toBeUndefined()
+    await expect(readFile(join(yosysRoot, 'bin', 'yosys'), 'utf8')).resolves.toContain('Yosys')
+  })
+
+  it('injects runtime environment from an imported local Yosys root', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const yosysRoot = await createLocalYosysRoot(root)
+    const service = new ResourceManagerService({
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+    await service.importToolPath(yosysRoot)
+
+    const env = await service.createRuntimeEnv({ PATH: '/usr/bin' }, { platform: 'linux' })
+
+    expect(env.PATH?.split(':')).toEqual([
+      join(yosysRoot, 'bin'),
+      '/usr/bin',
+    ])
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(yosysRoot)
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
   })
 
   it('returns a copied base env when no Resource Manager manifest exists', async () => {
