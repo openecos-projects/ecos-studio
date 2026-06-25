@@ -8,7 +8,7 @@
       style="background-image: linear-gradient(var(--text-primary) 1px, transparent 1px), linear-gradient(90deg, var(--text-primary) 1px, transparent 1px); background-size: 50px 50px;">
     </div>
 
-    <router-view class="flex-1 min-h-0 flex flex-col overflow-hidden" />
+    <router-view class="flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden" />
   </div>
 </template>
 

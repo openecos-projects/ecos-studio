@@ -492,7 +492,7 @@ const {
 const runStages = computed(() => flowStages.value.filter(s => s.group === 'run'))
 const sidebarStages = computed(() => {
   if (!isFrontendProject.value) return flowStages.value
-  const stages = flowStages.value.filter((stage) => stage.path !== 'configure')
+  const stages = flowStages.value.filter((stage) => stage.path !== 'configure' && stage.path !== 'tech')
   const srcStage = {
     label: 'Src',
     path: 'src',

@@ -1,9 +1,9 @@
 <template>
   <div
-    class="flex flex-col items-center justify-center h-screen w-screen bg-(--bg-primary) text-(--text-primary) relative overflow-hidden">
+    class="flex flex-col items-center min-h-full w-full bg-(--bg-primary) text-(--text-primary) relative overflow-y-auto overflow-x-hidden py-8">
 
 
-    <div class="relative z-10 flex flex-col items-center w-full">
+    <div class="relative z-10 my-auto flex flex-col items-center w-full">
       <!-- Logo 和标题 -->
       <div class="flex items-center justify-center mb-12">
         <div class="relative">
@@ -75,7 +75,7 @@
           <p class="text-xs mt-2 opacity-60">Click "New Workspace" to start your chip design journey</p>
         </div>
 
-        <div v-else class="space-y-2 max-h-[280px] overflow-y-auto scrollbar-thin">
+        <div v-else class="space-y-2 max-h-[min(42vh,420px)] overflow-y-auto overscroll-contain scrollbar-thin pr-1">
           <div v-for="project in displayedProjects" :key="project.id"
             class="w-full flex items-center justify-between px-5 py-4 bg-(--bg-secondary) rounded-xl transition-all duration-200 border text-left group"
             :class="project.workspaceRecognized === false

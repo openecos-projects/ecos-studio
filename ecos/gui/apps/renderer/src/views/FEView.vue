@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex flex-col items-center justify-center min-h-full w-full text-(--text-primary) relative overflow-y-auto overflow-x-hidden py-8">
+    class="flex flex-col items-center min-h-full w-full text-(--text-primary) relative overflow-y-auto overflow-x-hidden py-8">
 
     <button @click="goBack"
       class="absolute top-6 left-6 z-20 flex items-center gap-2 px-3 py-2 rounded-lg bg-(--bg-secondary) border border-(--border-color) hover:border-(--accent-color) text-(--text-secondary) hover:text-(--accent-color) transition-all cursor-pointer text-sm">
@@ -8,7 +8,7 @@
       <span>Back to ECOS</span>
     </button>
 
-    <div class="relative z-10 flex flex-col items-center w-full">
+    <div class="relative z-10 my-auto flex flex-col items-center w-full">
       <div class="flex items-center justify-center mb-12">
         <div class="relative">
           <div class="absolute -inset-4 bg-(--accent-color)/10 rounded-full blur-xl"></div>
@@ -67,7 +67,7 @@
           <p class="text-xs mt-2 opacity-60">Click "New Workspace" to start your frontend design flow</p>
         </div>
 
-        <div v-else class="space-y-2">
+        <div v-else class="space-y-2 max-h-[min(42vh,420px)] overflow-y-auto overscroll-contain scrollbar-thin pr-1">
           <div v-for="project in displayedProjects" :key="project.id"
             class="w-full flex items-center justify-between px-5 py-4 bg-(--bg-secondary) rounded-xl transition-all border text-left group"
             :class="project.workspaceRecognized === false
