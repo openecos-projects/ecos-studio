@@ -8815,7 +8815,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
-- 本次未执行 commit、merge、push、rebase、reset、clean。
+- 用户要求本次提交，因此本次允许执行 commit；未执行 merge、push、rebase、reset、clean。
 
 ## 已知后续风险
 
@@ -9805,3 +9805,36 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 本次只做轻量路径和 filelist 完整性验证，未重新运行 CPU+SoC 仿真矩阵；后续如继续改仿真链路，仍建议单独跑矩阵。
+
+# 第 145 次 开发
+
+## 开发目标
+
+继续清理 `/home/luyoung/ecos-studio/ecc-fe/.gitignore`，只保留仓库当前真实会产生的本地缓存与仿真临时产物规则，并补齐 `trace_hart_*` 指令跟踪文件的忽略范围。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.gitignore`
+  - 继续移除旧式 Python 打包产物相关的历史包袱后，补充 `trace_hart_*.log` 与 `trace_hart_*_commit.log` 忽略规则。
+  - 将 `trace_hart_00.dasm` 这类 CVA6/仿真指令跟踪文件统一归类为 simulator traces，避免运行后污染工作区。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 `.gitignore` 清理与 trace ignore 范围补全。
+
+## 验证情况
+
+- 已执行 `git -C ecc-fe diff -- .gitignore`，确认本次仅包含 ignore 规则清理与 trace 文件补充。
+- 已执行 `git -C ecc-fe check-ignore -v trace_hart_00.dasm .envrc .venv/test bazel-out workspace_projects/demo`，确认关键本地产物命中预期 ignore 规则。
+- 已执行 `rg -n "trace_hart_.*(log|commit|dasm)" ecc-fe/fecompiler/thirdparty`，确认新增 ignore 规则覆盖当前源码中实际会生成的 trace 文件命名。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- `.gitignore` 清理只覆盖了当前仓库已知的本地产物类型；如果后续新增新的仿真 trace 命名格式，还需要同步补规则。
