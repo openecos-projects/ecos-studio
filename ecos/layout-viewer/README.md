@@ -24,6 +24,13 @@ cargo run -p ecos-layout-packer -- \
   /path/to/view-json-package/.layoutpkg
 ```
 
+For cache checks, the packer can print the current source metadata without
+rewriting the package:
+
+```bash
+cargo run -p ecos-layout-packer -- --fingerprint --json /path/to/view-json-package
+```
+
 By default, the packer uses a `128 x 128` fixed detail grid and writes only
 non-empty tiles. Override it for experiments:
 

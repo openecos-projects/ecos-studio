@@ -27,6 +27,8 @@ const DEFAULT_MAX_SUBDIVISION_DEPTH: usize = 6;
 const OVERVIEW_PYRAMID_BIN_SIZES: [i32; 4] = [1024, 4096, 16384, 65536];
 const OVERVIEW_PYRAMID_MAX_BINS_PER_RECT_PER_LEVEL: u64 = 256;
 const DETAIL_TILE_SHARD_FILE: &str = "detail/shard_0.bin";
+pub const LAYOUTPKG_GENERATOR_NAME: &str = "ecos-layout-packer";
+pub const LAYOUTPKG_GENERATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone)]
 pub struct PackLayoutPackageOptions {
@@ -76,6 +78,24 @@ pub struct PackTimingStats {
     pub fingerprint_ms: f32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LayoutPackageGenerator {
+    pub name: &'static str,
+    pub version: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LayoutPackageSource {
+    pub kind: &'static str,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LayoutPackageSourceMetadata {
+    pub generator: LayoutPackageGenerator,
+    pub source: LayoutPackageSource,
+}
+
 impl PackTimingStats {
     pub fn summary(&self) -> String {
         format!(
@@ -96,6 +116,35 @@ impl PackTimingStats {
             self.fingerprint_ms
         )
     }
+}
+
+pub fn viewjson_source_metadata(
+    input_root: impl AsRef<Path>,
+) -> Result<LayoutPackageSourceMetadata> {
+    let root = input_root.as_ref();
+    let manifest_path = root.join("manifest.json");
+    let manifest_text = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    let source_manifest: ViewJsonManifest = serde_json::from_str(&manifest_text)
+        .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+    viewjson_source_metadata_from_manifest(root, &source_manifest)
+}
+
+fn viewjson_source_metadata_from_manifest(
+    root: &Path,
+    source_manifest: &ViewJsonManifest,
+) -> Result<LayoutPackageSourceMetadata> {
+    let fingerprint = source_fingerprint(root, source_manifest)?;
+    Ok(LayoutPackageSourceMetadata {
+        generator: LayoutPackageGenerator {
+            name: LAYOUTPKG_GENERATOR_NAME,
+            version: LAYOUTPKG_GENERATOR_VERSION,
+        },
+        source: LayoutPackageSource {
+            kind: "view-json",
+            fingerprint,
+        },
+    })
 }
 
 pub fn pack_viewjson_to_layoutpkg(
@@ -310,18 +359,20 @@ pub fn pack_viewjson_to_layoutpkg(
         "overview_pyramid": "overview/pyramid.bin",
     });
     let fingerprint_started = Instant::now();
-    let fingerprint = source_fingerprint(&options.input_root, &source_manifest)?;
+    let source_metadata =
+        viewjson_source_metadata_from_manifest(&options.input_root, &source_manifest)?;
     timing.fingerprint_ms = elapsed_ms(fingerprint_started);
     let manifest = json!({
         "schema": LAYOUTPKG_SCHEMA,
         "version": 1,
+        "generator": source_metadata.generator,
         "design_name": source_manifest.design_name.as_deref().unwrap_or("layout"),
         "dbu_per_micron": source_manifest.unit.as_ref().and_then(|unit| unit.dbu_per_micron).unwrap_or(1000),
         "world_bbox": world_bbox,
         "source": {
-            "kind": "view-json",
+            "kind": source_metadata.source.kind,
             "root": options.input_root.to_string_lossy(),
-            "fingerprint": fingerprint,
+            "fingerprint": source_metadata.source.fingerprint,
         },
         "dictionaries": {
             "layers": "dictionaries/layers.json",
@@ -2087,6 +2138,11 @@ mod tests {
         let manifest_text = fs::read_to_string(output.join("manifest.json")).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
         assert_eq!(manifest["schema"], "ecos.layoutpkg.v1");
+        assert_eq!(manifest["generator"]["name"], "ecos-layout-packer");
+        assert_eq!(
+            manifest["generator"]["version"],
+            LAYOUTPKG_GENERATOR_VERSION
+        );
         assert_eq!(manifest["design_name"], "unit");
         assert_eq!(manifest["source"]["kind"], "view-json");
         assert!(manifest["source"]["fingerprint"].as_str().unwrap().len() >= 16);
@@ -2161,6 +2217,18 @@ mod tests {
         let actual = source_fingerprint(input.path(), &manifest).unwrap();
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn viewjson_source_metadata_exposes_generator_and_fingerprint() {
+        let input = create_minimal_viewjson_package();
+
+        let metadata = viewjson_source_metadata(input.path()).unwrap();
+
+        assert_eq!(metadata.generator.name, "ecos-layout-packer");
+        assert_eq!(metadata.generator.version, LAYOUTPKG_GENERATOR_VERSION);
+        assert_eq!(metadata.source.kind, "view-json");
+        assert_eq!(metadata.source.fingerprint.len(), 64);
     }
 
     #[test]

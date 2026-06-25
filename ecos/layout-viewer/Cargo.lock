@@ -930,6 +930,7 @@ dependencies = [
  "anyhow",
  "clap",
  "layoutpkg-packer",
+ "serde_json",
 ]
 
 [[package]]

@@ -8,3 +8,4 @@ version.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 layoutpkg-packer = { path = "../../crates/layoutpkg-packer" }
+serde_json.workspace = true

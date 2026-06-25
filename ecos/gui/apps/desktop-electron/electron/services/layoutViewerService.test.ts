@@ -2,17 +2,58 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { LayoutViewerService } from './layoutViewerService'
 
+interface ExecFileResult {
+  stdout: string
+  stderr: string
+}
+
+const CURRENT_SOURCE_METADATA = {
+  generator: {
+    name: 'ecos-layout-packer',
+    version: '0.1.0',
+  },
+  source: {
+    fingerprint: 'current-source-fingerprint',
+    kind: 'view-json',
+  },
+}
+
+function layoutPackageManifest(fingerprint = CURRENT_SOURCE_METADATA.source.fingerprint) {
+  return JSON.stringify({
+    generator: CURRENT_SOURCE_METADATA.generator,
+    schema: 'ecos.layoutpkg.v1',
+    source: {
+      fingerprint,
+      kind: 'view-json',
+    },
+    tilesets: {
+      detail: 'detail/index.json',
+    },
+    version: 1,
+    world_bbox: [0, 0, 100, 100],
+  })
+}
+
 function createService(options: {
   appPath?: string
   cwd?: string
+  execFile?: (file: string, args: string[]) => Promise<ExecFileResult>
+  files?: Record<string, string>
   existingPaths?: string[]
   isPackaged?: boolean
   resourcesPath?: string
 }) {
-  const execFile = vi.fn(async () => {})
+  const files = new Map(Object.entries(options.files ?? {}))
+  const execFile = options.execFile ?? vi.fn(async () => ({
+    stderr: '',
+    stdout: '',
+  }))
   const unref = vi.fn()
   const spawnProcess = vi.fn(() => ({ unref }))
-  const existingPaths = new Set(options.existingPaths ?? [])
+  const existingPaths = new Set([
+    ...(options.existingPaths ?? []),
+    ...files.keys(),
+  ])
   const service = new LayoutViewerService({
     appPath: options.appPath ?? '/repo/ecos/gui/apps/desktop-electron',
     cwd: options.cwd ?? '/repo/ecos/gui/apps/desktop-electron',
@@ -21,6 +62,13 @@ function createService(options: {
     fileExists: (path) => existingPaths.has(path),
     isPackaged: options.isPackaged ?? false,
     platform: 'linux',
+    readTextFile: async (path) => {
+      const text = files.get(path)
+      if (text === undefined) {
+        throw new Error(`file not found: ${path}`)
+      }
+      return text
+    },
     resourcesPath: options.resourcesPath,
     spawnProcess,
   })
@@ -71,17 +119,33 @@ describe('LayoutViewerService', () => {
     })
   })
 
-  it('reuses an existing .layoutpkg manifest unless rebuildPackage is requested', async () => {
+  it('reuses an existing .layoutpkg manifest when the source fingerprint and generator match', async () => {
     const packageRoot = '/project/output/gcd_route_view'
     const repoRoot = '/repo'
     const debugDir = join(repoRoot, 'ecos/layout-viewer/target/debug')
     const packer = join(debugDir, 'ecos-layout-packer')
     const viewer = join(debugDir, 'layout-viewer-native')
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
+    const manifestPath = join(layoutPackagePath, 'manifest.json')
+    const execFileRunner = vi.fn(async (file: string, args: string[]) => {
+      if (file === packer && args.join(' ') === `--fingerprint --json ${packageRoot}`) {
+        return {
+          stderr: '',
+          stdout: JSON.stringify(CURRENT_SOURCE_METADATA),
+        }
+      }
+      return {
+        stderr: '',
+        stdout: '',
+      }
+    })
     const { execFile, service, spawnProcess } = createService({
+      execFile: execFileRunner,
+      files: {
+        [manifestPath]: layoutPackageManifest(),
+      },
       existingPaths: [
         join(repoRoot, 'ecos/layout-viewer/Cargo.toml'),
-        join(layoutPackagePath, 'manifest.json'),
         packer,
         viewer,
       ],
@@ -92,12 +156,54 @@ describe('LayoutViewerService', () => {
       viewJsonPackageRoot: packageRoot,
     })
 
-    expect(execFile).not.toHaveBeenCalled()
+    expect(execFile).toHaveBeenCalledWith(packer, ['--fingerprint', '--json', packageRoot])
+    expect(execFile).not.toHaveBeenCalledWith(packer, [packageRoot, layoutPackagePath])
     expect(spawnProcess).toHaveBeenCalledWith(
       viewer,
       [layoutPackagePath],
       expect.any(Object),
     )
+  })
+
+  it('rebuilds an existing .layoutpkg when the source fingerprint changes', async () => {
+    const packageRoot = '/project/output/gcd_route_view'
+    const repoRoot = '/repo'
+    const debugDir = join(repoRoot, 'ecos/layout-viewer/target/debug')
+    const packer = join(debugDir, 'ecos-layout-packer')
+    const viewer = join(debugDir, 'layout-viewer-native')
+    const layoutPackagePath = join(packageRoot, '.layoutpkg')
+    const manifestPath = join(layoutPackagePath, 'manifest.json')
+    const execFile = vi.fn(async (file: string, args: string[]) => {
+      if (file === packer && args.join(' ') === `--fingerprint --json ${packageRoot}`) {
+        return {
+          stderr: '',
+          stdout: JSON.stringify(CURRENT_SOURCE_METADATA),
+        }
+      }
+      return {
+        stderr: '',
+        stdout: '',
+      }
+    })
+    const { service } = createService({
+      execFile,
+      files: {
+        [manifestPath]: layoutPackageManifest('stale-source-fingerprint'),
+      },
+      existingPaths: [
+        join(repoRoot, 'ecos/layout-viewer/Cargo.toml'),
+        packer,
+        viewer,
+      ],
+    })
+
+    await service.open({
+      projectPath: '/project',
+      viewJsonPackageRoot: packageRoot,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(packer, ['--fingerprint', '--json', packageRoot])
+    expect(execFile).toHaveBeenCalledWith(packer, [packageRoot, layoutPackagePath])
   })
 
   it('throws a build hint when dev binaries are missing', async () => {
