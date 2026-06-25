@@ -9737,3 +9737,71 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 本次未进行真实 GUI 交互验证；需要用户运行 GUI 后检查 ECOS/ECC/FE 三个入口页的 `View All` 展开和滚动行为。
+
+# 第 144 次 开发
+
+## 开发目标
+
+整理 `ecc-fe` 示例工程目录：保留唯一有效的 CL3 示例，将 runnable examples 从 `docs/` 下迁出到仓库根目录 `examples/`，并同步清理用户已删除的冗余 `cl3_1`、`cl3_2` 和简单 adder/mux 示例引用。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/`
+  - 从 `/home/luyoung/ecos-studio/ecc-fe/docs/examples/cl3/` 迁移而来，保留 CL3 CPU 示例 RTL、`filelist.cpu.f` 和嵌套 `cl3_verilog/filelist.f`。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/BUILD.bazel`
+  - 将 CL3 示例数据依赖从 `docs/examples/cl3/**` 改为 `examples/cl3/**`。
+  - 移除已删除的 `cl3_1`、`cl3_2` 数据依赖。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 更新仓库目录结构，明确 `examples/cl3/` 是示例 collateral 位置。
+  - 更新 CLI 示例中的 CPU filelist 路径。
+- `/home/luyoung/ecos-studio/ecc-fe/docs/README.zh-CN.md`
+  - 将最小 API 示例中的 CPU filelist 写法改为通用路径，不再引用已删除的 `cl3_1`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/README.md`
+  - 更新 SoC bundle 文档中的默认 CL3 CPU 路径。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/build_soc_sim.sh`
+  - 默认 `CPU_ROOT` 改为 `/home/luyoung/ecc-fe/examples/cl3`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`
+  - 默认 `CPU_ROOT` 改为 `/home/luyoung/ecc-fe/examples/cl3`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/README.md`
+  - 更新 `test_examples.py` 说明：从旧 adder/mux 集成流改为 CL3 示例 filelist 完整性检查。
+  - 更新 CPU+SoC matrix 说明：当前只保留 `examples/cl3` 这一套示例 CPU。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 更新 custom-filelist fallback 路径到 `examples/cl3/filelist.cpu.f`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_flow.py`
+  - 更新 CL3 CPU filelist 路径到 `examples/cl3/filelist.cpu.f`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_matrix_flow.py`
+  - 更新 CPU variant 列表，只保留 `examples/cl3`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_rtthread_flow.py`
+  - 更新 CL3 CPU filelist 路径到 `examples/cl3/filelist.cpu.f`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 去掉对已删除 `adder.v`、`mux.v`、`docs/examples/filelist.f` 的依赖。
+  - 改为检查 `examples/cl3/filelist.cpu.f` 与嵌套 filelist 中列出的 RTL 文件是否存在。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 examples 迁移和引用清理。
+
+## 删除文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/docs/examples/adder.v`
+- `/home/luyoung/ecos-studio/ecc-fe/docs/examples/filelist.f`
+- `/home/luyoung/ecos-studio/ecc-fe/docs/examples/mux.v`
+- `/home/luyoung/ecos-studio/ecc-fe/docs/examples/cl3_1/`
+- `/home/luyoung/ecos-studio/ecc-fe/docs/examples/cl3_2/`
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile test/test_examples.py test/test_cpu_soc_flow.py test/test_cpu_soc_matrix_flow.py test/test_cpu_soc_rtthread_flow.py test/test_catalog_contract.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_examples.py`，3 个用例通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `rg -n "docs/examples|examples/cl3_1|examples/cl3_2|cl3_1|cl3_2" ecc-fe -g '!**/node_modules/**'`，无残留匹配。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 用户要求本次提交，因此本次允许执行 commit；未执行 merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次只做轻量路径和 filelist 完整性验证，未重新运行 CPU+SoC 仿真矩阵；后续如继续改仿真链路，仍建议单独跑矩阵。
