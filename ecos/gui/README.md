@@ -68,7 +68,7 @@ pnpm --filter @ecos-studio/renderer exec vitest run src/utils/sanitizeHtml.test.
 - **Electron 41** — desktop shell and native integration
 - **electron-vite 5** — Electron build and dev pipeline
 - **Vue 3** — Composition API
-- **PixiJS 8** — WebGL/WebGPU canvas and editor rendering
+- **Canvas 2D** — step layout preview and tech-library geometry rendering (no WebGL)
 - **PrimeVue 4** — UI components (Aura theme)
 - **Tailwind CSS v4** — styling
 - **Vite 7** — dev and build

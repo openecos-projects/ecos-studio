@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Application, Container, Graphics } from 'pixi.js'
-import { markRaw, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { TechCellMaster, TechLayer, TechPreviewGeometry, TechViaMaster } from '@/applications/editor/tech-library/types'
 import { buildCellPreviewGeometry, buildViaPreviewGeometry } from '@/applications/editor/tech-library/previewGeometry'
 import { buildTechPreviewRenderGroups } from '@/applications/editor/tech-library/previewRendering'
+import { colorNumberToCss } from '@/applications/image-preview/themeUtils'
 
 const props = defineProps<{
   mode: 'cell' | 'via' | 'empty'
@@ -13,35 +13,11 @@ const props = defineProps<{
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
-let app: Application | null = null
-let root: Container | null = null
+const canvasRef = ref<HTMLCanvasElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
-
-async function ensurePixi(): Promise<void> {
-  if (!host.value || app) return
-  const bounds = host.value.getBoundingClientRect()
-  app = markRaw(new Application())
-  await app.init({
-    width: Math.max(1, Math.floor(bounds.width)),
-    height: Math.max(1, Math.floor(bounds.height)),
-    backgroundAlpha: 0,
-    antialias: true,
-    resolution: window.devicePixelRatio || 1,
-    autoDensity: true,
-  })
-  root = markRaw(new Container())
-  app.stage.addChild(root)
-  host.value.appendChild(app.canvas as HTMLCanvasElement)
-  resizeObserver = new ResizeObserver(() => resizeCanvas())
-  resizeObserver.observe(host.value)
-}
-
-function resizeCanvas(): void {
-  if (!host.value || !app) return
-  const bounds = host.value.getBoundingClientRect()
-  app.renderer.resize(Math.max(1, Math.floor(bounds.width)), Math.max(1, Math.floor(bounds.height)))
-  draw()
-}
+let screenWidth = 0
+let screenHeight = 0
+let devicePixelRatio = 1
 
 function geometryForSelection(): TechPreviewGeometry | null {
   if (props.mode === 'cell' && props.cell) return buildCellPreviewGeometry(props.cell)
@@ -49,45 +25,95 @@ function geometryForSelection(): TechPreviewGeometry | null {
   return null
 }
 
-function fitGraphics(g: Graphics, geometry: TechPreviewGeometry): void {
-  if (!app) return
-  const screenW = app.screen.width
-  const screenH = app.screen.height
+function ensureCanvasSize(width: number, height: number): CanvasRenderingContext2D | null {
+  const canvas = canvasRef.value
+  if (!canvas) return null
+
+  screenWidth = Math.max(1, Math.floor(width))
+  screenHeight = Math.max(1, Math.floor(height))
+  devicePixelRatio = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(screenWidth * devicePixelRatio))
+  canvas.height = Math.max(1, Math.floor(screenHeight * devicePixelRatio))
+  canvas.style.width = `${screenWidth}px`
+  canvas.style.height = `${screenHeight}px`
+  return canvas.getContext('2d')
+}
+
+function fitTransform(geometry: TechPreviewGeometry): { scale: number; offsetX: number; offsetY: number } {
   const padding = 26
   const scale = Math.min(
-    (screenW - padding * 2) / Math.max(geometry.bounds.w, 1),
-    (screenH - padding * 2) / Math.max(geometry.bounds.h, 1),
+    (screenWidth - padding * 2) / Math.max(geometry.bounds.w, 1),
+    (screenHeight - padding * 2) / Math.max(geometry.bounds.h, 1),
   )
-  g.scale.set(Math.max(scale, 0.001))
-  g.position.set(
-    (screenW - geometry.bounds.w * g.scale.x) / 2,
-    (screenH - geometry.bounds.h * g.scale.y) / 2,
-  )
+  const safeScale = Math.max(scale, 0.001)
+  return {
+    scale: safeScale,
+    offsetX: (screenWidth - geometry.bounds.w * safeScale) / 2,
+    offsetY: (screenHeight - geometry.bounds.h * safeScale) / 2,
+  }
+}
+
+function drawRectGroup(
+  ctx: CanvasRenderingContext2D,
+  transform: { scale: number; offsetX: number; offsetY: number },
+  color: number,
+  fillAlpha: number,
+  strokeAlpha: number,
+  rects: Array<{ x: number; y: number; w: number; h: number }>,
+): void {
+  ctx.save()
+  ctx.translate(transform.offsetX, transform.offsetY)
+  ctx.scale(transform.scale, transform.scale)
+  ctx.fillStyle = colorNumberToCss(color)
+  ctx.globalAlpha = fillAlpha
+  for (const rect of rects) {
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
+  }
+  ctx.globalAlpha = strokeAlpha
+  ctx.strokeStyle = colorNumberToCss(color)
+  ctx.lineWidth = 1 / transform.scale
+  for (const rect of rects) {
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
+  }
+  ctx.restore()
 }
 
 function draw(): void {
-  if (!root) return
-  root.removeChildren().forEach((child) => child.destroy())
+  const hostEl = host.value
+  const canvas = canvasRef.value
+  if (!hostEl || !canvas) return
+
+  const bounds = hostEl.getBoundingClientRect()
+  const ctx = ensureCanvasSize(bounds.width, bounds.height)
+  if (!ctx) return
+
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+  ctx.clearRect(0, 0, screenWidth, screenHeight)
+
   const geometry = geometryForSelection()
   if (!geometry) return
 
-  const boundsGraphics = new Graphics()
-  boundsGraphics.rect(geometry.bounds.x, geometry.bounds.y, geometry.bounds.w, geometry.bounds.h)
-    .fill({ color: 0x111827, alpha: 0.12 })
-    .stroke({ color: 0x9ca3af, alpha: 0.75, width: 1 })
-  fitGraphics(boundsGraphics, geometry)
-  root.addChild(boundsGraphics)
+  const transform = fitTransform(geometry)
+
+  drawRectGroup(
+    ctx,
+    transform,
+    0x9ca3af,
+    0.12,
+    0.75,
+    [{ x: geometry.bounds.x, y: geometry.bounds.y, w: geometry.bounds.w, h: geometry.bounds.h }],
+  )
 
   const groups = buildTechPreviewRenderGroups(geometry, props.layers ?? [])
   for (const group of groups) {
-    const g = new Graphics()
-    for (const rect of group.drawRects) {
-      g.rect(rect.x, rect.y, rect.w, rect.h)
-    }
-    g.fill({ color: group.color, alpha: group.fillAlpha })
-    g.stroke({ color: group.color, alpha: group.strokeAlpha, width: 1 })
-    fitGraphics(g, geometry)
-    root.addChild(g)
+    drawRectGroup(
+      ctx,
+      transform,
+      group.color,
+      group.fillAlpha,
+      group.strokeAlpha,
+      group.drawRects,
+    )
   }
 }
 
@@ -95,7 +121,6 @@ watch(
   () => [props.mode, props.cell?.id, props.via?.id, props.layers?.length ?? 0],
   async () => {
     await nextTick()
-    await ensurePixi()
     draw()
   },
   { immediate: true },
@@ -104,14 +129,27 @@ watch(
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
-  app?.destroy(true, { children: true })
-  app = null
-  root = null
 })
+
+watch(host, (hostEl, _, onCleanup) => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (!hostEl) return
+
+  resizeObserver = new ResizeObserver(() => draw())
+  resizeObserver.observe(hostEl)
+  draw()
+
+  onCleanup(() => {
+    resizeObserver?.disconnect()
+    resizeObserver = null
+  })
+}, { immediate: true })
 </script>
 
 <template>
   <div ref="host" class="tech-preview-canvas">
+    <canvas ref="canvasRef" class="tech-preview-canvas__surface" />
     <div v-if="mode === 'empty'" class="preview-empty">
       <i class="ri-crosshair-2-line"></i>
       <span>Select a via or cell master</span>
@@ -132,10 +170,10 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bg-primary) 72%, transparent);
 }
 
-.tech-preview-canvas :deep(canvas) {
+.tech-preview-canvas__surface {
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 100%;
 }
 
 .preview-empty {
@@ -148,6 +186,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   color: var(--text-secondary);
   font-size: 12px;
+  pointer-events: none;
 }
 
 .preview-empty i {

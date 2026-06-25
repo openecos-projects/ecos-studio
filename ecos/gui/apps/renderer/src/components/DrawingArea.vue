@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { EditorContainer, type Editor } from '@/applications/editor'
+import { ImagePreviewContainer, type ImagePreviewController } from '@/applications/image-preview'
 import DrawingToolbar from './DrawingToolbar.vue'
 import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
@@ -14,7 +14,7 @@ const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
 const { getResourceUrl } = useEDA()
 
-const editor = shallowRef<Editor | null>(null)
+const preview = shallowRef<ImagePreviewController | null>(null)
 const currentViewJsonPackageRoot = ref<string | null>(null)
 const previewImageUrl = ref<string | null>(null)
 const loadingState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -49,11 +49,11 @@ interface DrawingAsyncGuard {
 function createDrawingAsyncGuard(expectedStep = currentStepKey.value): DrawingAsyncGuard {
   const expectedProjectPath = currentProject.value?.path ?? null
   const expectedSessionId = workspaceSession.value.sessionId
-  const expectedEditor = editor.value
+  const expectedPreview = preview.value
 
   return {
     isCurrent: () =>
-      editor.value === expectedEditor
+      preview.value === expectedPreview
       && currentProject.value?.path === expectedProjectPath
       && workspaceSession.value.sessionId === expectedSessionId
       && currentStepKey.value === expectedStep,
@@ -84,15 +84,13 @@ function formatCursorCoord(n: number): string {
   return Math.round(n).toLocaleString()
 }
 
-function attachCanvasPointerTracking(ed: Editor): void {
+function attachCanvasPointerTracking(controller: ImagePreviewController): void {
   detachCanvasPointerListeners?.()
-  const canvas = ed.application?.canvas as HTMLCanvasElement | undefined
-  const vp = ed.view
-  if (!canvas || !vp) return
+  const canvas = controller.canvas
 
   const onMove = (e: PointerEvent): void => {
-    const world = vp.toWorld(e.offsetX, e.offsetY)
-    const d = ed.worldToDisplay(world.x, world.y)
+    const world = controller.screenToWorld(e.offsetX, e.offsetY)
+    const d = controller.worldToDisplay(world.x, world.y)
     cursorEda.value = { x: d.x, y: d.y }
   }
   const onLeave = (): void => {
@@ -113,22 +111,22 @@ async function loadStepImagePreview(
   imagePath: string,
   guard: DrawingAsyncGuard,
 ): Promise<void> {
-  const ed = editor.value
-  if (!ed || !guard.isCurrent()) return
+  const controller = preview.value
+  if (!controller || !guard.isCurrent()) return
 
   const imageUrl = previewImageUrl.value
     ?? await getResourceUrl(imagePath, currentProject.value?.path || '')
-  if (!guard.isCurrent() || editor.value !== ed) return
+  if (!guard.isCurrent() || preview.value !== controller) return
 
   previewImageUrl.value = imageUrl
-  await ed.setBackgroundImage(imageUrl)
-  if (!guard.isCurrent() || editor.value !== ed) return
+  await controller.setBackgroundImage(imageUrl)
+  if (!guard.isCurrent() || preview.value !== controller) return
 
   loadingState.value = 'ready'
   loadingMessage.value = ''
   void nextTick(() => {
-    editor.value?.fitToWorld(10)
-    requestAnimationFrame(() => editor.value?.fitToWorld(10))
+    preview.value?.fitToWorld(10)
+    requestAnimationFrame(() => preview.value?.fitToWorld(10))
   })
 }
 
@@ -163,13 +161,13 @@ async function onOpenNativeLayoutViewer(): Promise<void> {
 }
 
 const handleStageChange = async (stage: string) => {
-  if (!editor.value || !stage) return
+  if (!preview.value || !stage) return
   const guard = createDrawingAsyncGuard(stage)
   resetLoadingState()
 
   const stepEnum = getStepEnumFromPath(stage)
   if (!stepEnum) {
-    editor.value.clearBackground()
+    preview.value.clearBackground()
     clearCurrentPreview()
     return
   }
@@ -190,7 +188,7 @@ const handleStageChange = async (stage: string) => {
       previewImageUrl.value = null
 
       if (!imagePath) {
-        editor.value?.clearBackground()
+        preview.value?.clearBackground()
         resetLoadingState()
         return
       }
@@ -201,19 +199,19 @@ const handleStageChange = async (stage: string) => {
       return
     }
 
-    editor.value?.clearBackground()
+    preview.value?.clearBackground()
     clearCurrentPreview()
   } catch (error) {
     console.error('Failed to load stage results:', error)
     if (!guard.isCurrent()) return
-    editor.value?.clearBackground()
+    preview.value?.clearBackground()
     clearCurrentPreview()
     resetLoadingState()
   }
 }
 
-const onEditorReady = (editorInstance: Editor) => {
-  editor.value = editorInstance
+const onPreviewReady = (controller: ImagePreviewController) => {
+  preview.value = controller
   const pathParts = route.path.split('/')
   const stage = pathParts[pathParts.length - 1] || 'home'
   handleStageChange(stage)
@@ -231,11 +229,11 @@ watch(
 )
 
 watch(
-  () => editor.value,
-  (ed) => {
+  () => preview.value,
+  (controller) => {
     detachCanvasPointerListeners?.()
     cursorEda.value = null
-    if (ed) attachCanvasPointerTracking(ed)
+    if (controller) attachCanvasPointerTracking(controller)
   },
   { immediate: true },
 )
@@ -266,14 +264,14 @@ onUnmounted(() => {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <DrawingToolbar
-      :editor="editor"
+      :preview="preview"
       :show-native-layout-viewer="showNativeLayoutViewer"
       :native-layout-viewer-busy="nativeLayoutViewerBusy"
       @openNativeLayoutViewer="onOpenNativeLayoutViewer"
     />
 
     <div class="relative flex-1 overflow-hidden">
-      <EditorContainer @ready="onEditorReady" />
+      <ImagePreviewContainer @ready="onPreviewReady" />
 
       <div
         v-if="loadingState === 'loading'"
