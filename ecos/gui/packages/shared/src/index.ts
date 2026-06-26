@@ -55,6 +55,24 @@ export type {
   DesktopShellSession,
   DesktopShellSessionOptions,
 } from './contracts/desktopShell.ts';
+export type {
+  DesktopAgentEvent,
+  DesktopAgentEventType,
+  DesktopAgentListSessionsRequest,
+  DesktopAgentListSessionsResponse,
+  DesktopAgentProviderRequest,
+  DesktopAgentResumeSessionRequest,
+  DesktopAgentResumeSessionResponse,
+  DesktopAgentSendMessageRequest,
+  DesktopAgentSendMessageResponse,
+  DesktopAgentSessionSummary,
+  DesktopAgentSetModeRequest,
+  DesktopAgentStartRequest,
+  DesktopAgentStartSessionRequest,
+  DesktopAgentStartSessionResponse,
+  DesktopAgentStatus,
+  DesktopAgentStatusState,
+} from './contracts/desktopAgent.ts';
 export {
   appMenuActionIds,
   desktopMenuEventIds,

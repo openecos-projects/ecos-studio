@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from 'vue'
-import type { Editor } from '@/applications/editor'
+import type { ImagePreviewController } from '@/applications/image-preview'
 
 interface Props {
-  editor?: Editor | null
+  preview?: ImagePreviewController | null
   /** 是否显示「打开 Native Layout Viewer」工具 */
   showNativeLayoutViewer?: boolean
   /** Native viewer 拉起中 */
@@ -11,6 +11,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  preview: null,
   showNativeLayoutViewer: false,
   nativeLayoutViewerBusy: false,
 })
@@ -33,32 +34,32 @@ function formatZoomPercentLabel(scale: number): string {
 
 function toggleRuler(): void {
   isRulerEnabled.value = !isRulerEnabled.value
-  props.editor?.setPluginEnabled('ruler', isRulerEnabled.value)
+  props.preview?.setRulerEnabled(isRulerEnabled.value)
 }
 
 function handleZoomIn(): void {
-  props.editor?.zoomIn()
+  props.preview?.zoomIn()
 }
 
 function handleZoomOut(): void {
-  props.editor?.zoomOut()
+  props.preview?.zoomOut()
 }
 
 function handleFitToWorld(): void {
-  props.editor?.fitToWorld()
+  props.preview?.fitToWorld()
 }
 
-watch(() => props.editor, (editor) => {
+watch(() => props.preview, (preview) => {
   if (unlistenTransform) {
     unlistenTransform()
     unlistenTransform = null
   }
 
-  if (!editor) return
+  if (!preview) return
 
-  editor.setPluginEnabled('ruler', isRulerEnabled.value)
-  zoomPercentLabel.value = formatZoomPercentLabel(editor.getScale())
-  unlistenTransform = editor.onTransformChange((t) => {
+  preview.setRulerEnabled(isRulerEnabled.value)
+  zoomPercentLabel.value = formatZoomPercentLabel(preview.getScale())
+  unlistenTransform = preview.onTransformChange((t) => {
     zoomPercentLabel.value = formatZoomPercentLabel(t.scale)
   })
 }, { immediate: true })

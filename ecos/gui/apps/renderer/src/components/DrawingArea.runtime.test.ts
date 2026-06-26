@@ -3,11 +3,14 @@ import source from './DrawingArea.vue?raw'
 
 describe('DrawingArea runtime wiring', () => {
   it('keeps the in-canvas render path limited to the generated preview image', () => {
-    expect(source).toContain('await ed.setBackgroundImage(imageUrl)')
+    expect(source).toContain('await controller.setBackgroundImage(imageUrl)')
     expect(source).toContain('await getResourceUrl(imagePath')
-    expect(source).toContain('editor.value?.fitToWorld(10)')
+    expect(source).toContain('preview.value?.fitToWorld(10)')
+    expect(source).toContain('ImagePreviewContainer')
 
     expect(source).not.toContain('@/applications/editor/layout')
+    expect(source).not.toContain('pixi.js')
+    expect(source).not.toContain('EditorContainer')
     expect(source).not.toContain('@/applications/editor/tile')
     expect(source).not.toContain('@/applications/editor/view-json')
     expect(source).not.toContain('useLayoutState')

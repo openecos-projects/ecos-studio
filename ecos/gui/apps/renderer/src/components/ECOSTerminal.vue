@@ -14,6 +14,13 @@
       <div class="terminal-title">
         <i class="ri-terminal-box-line" aria-hidden="true"></i>
         <span>Terminal</span>
+        <span
+          v-if="activeTerminalRecord?.cwdPath"
+          class="terminal-cwd"
+          :title="activeTerminalRecord.cwdPath"
+        >
+          {{ activeTerminalRecord.cwdPath }}
+        </span>
       </div>
       <div ref="terminalActions" class="terminal-actions" aria-label="Terminal actions">
         <button
@@ -111,7 +118,7 @@
               type="button"
               role="tab"
               :aria-selected="record.localId === activeTerminalId"
-              :title="record.label"
+              :title="getTerminalRecordTitle(record)"
               @click="activateTerminal(record.localId)"
             >
               <i class="ri-terminal-box-line" aria-hidden="true"></i>
@@ -149,7 +156,7 @@ import {
   watch,
 } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -159,6 +166,8 @@ import '@xterm/xterm/css/xterm.css'
 const props = defineProps<{
   expanded: boolean
   maximized: boolean
+  projectPath: string | null
+  themeName: 'light' | 'dark'
 }>()
 
 const emit = defineEmits<{
@@ -167,7 +176,52 @@ const emit = defineEmits<{
   toggleMaximize: []
 }>()
 
-const terminalBackground = '#1e1e1e'
+const terminalThemes: Record<'light' | 'dark', ITheme> = {
+  dark: {
+    background: '#18181c',
+    black: '#18181c',
+    blue: '#3b8eea',
+    brightBlack: '#9a9a9a',
+    brightBlue: '#6cb6ff',
+    brightCyan: '#4ec9b0',
+    brightGreen: '#23d18b',
+    brightMagenta: '#d670d6',
+    brightRed: '#f14c4c',
+    brightWhite: '#f2f2f2',
+    brightYellow: '#dcdcaa',
+    cursor: '#e3e3e8',
+    cyan: '#4ec9b0',
+    foreground: '#e3e3e8',
+    green: '#23d18b',
+    magenta: '#bc3fbc',
+    red: '#f14c4c',
+    selectionBackground: '#264f78',
+    white: '#e3e3e8',
+    yellow: '#dcdcaa',
+  },
+  light: {
+    background: '#ffffff',
+    black: '#111827',
+    blue: '#2563eb',
+    brightBlack: '#6b7280',
+    brightBlue: '#1d4ed8',
+    brightCyan: '#0e7490',
+    brightGreen: '#047857',
+    brightMagenta: '#7e22ce',
+    brightRed: '#b91c1c',
+    brightWhite: '#111827',
+    brightYellow: '#b45309',
+    cursor: '#111827',
+    cyan: '#0891b2',
+    foreground: '#111827',
+    green: '#047857',
+    magenta: '#9333ea',
+    red: '#dc2626',
+    selectionBackground: '#bfdbfe',
+    white: '#374151',
+    yellow: '#ca8a04',
+  },
+}
 const MIN_TERMINAL_PANEL_HEIGHT = 160
 const TERMINAL_PANEL_MARGIN = 56
 const DEFAULT_TERMINAL_SESSION_LIST_WIDTH = 150
@@ -178,6 +232,7 @@ interface TerminalRecord {
   fitAddon: FitAddon
   label: string
   localId: string
+  cwdPath: string | null
   exitCode: number | null
   opened: boolean
   sessionId: string | null
@@ -213,6 +268,16 @@ let sessionListResizePointerTarget: HTMLElement | null = null
 let sessionListResizePointerId: number | null = null
 const pendingShellData = new Map<string, string[]>()
 
+function getTerminalTheme(): ITheme {
+  return { ...terminalThemes[props.themeName] }
+}
+
+function applyTerminalThemeToRecords() {
+  for (const record of terminalRecords.value) {
+    record.terminal.options.theme = getTerminalTheme()
+  }
+}
+
 function createTerminalRecord(): TerminalRecord {
   terminalSequence += 1
   const terminal = new Terminal({
@@ -221,34 +286,14 @@ function createTerminalRecord(): TerminalRecord {
     fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.4,
-    theme: {
-      background: terminalBackground,
-      black: terminalBackground,
-      blue: '#3b8eea',
-      brightBlack: '#9a9a9a',
-      brightBlue: '#6cb6ff',
-      brightCyan: '#4ec9b0',
-      brightGreen: '#23d18b',
-      brightMagenta: '#d670d6',
-      brightRed: '#f14c4c',
-      brightWhite: '#f2f2f2',
-      brightYellow: '#dcdcaa',
-      cursor: '#cccccc',
-      cyan: '#4ec9b0',
-      foreground: '#cccccc',
-      green: '#23d18b',
-      magenta: '#bc3fbc',
-      red: '#f14c4c',
-      selectionBackground: '#264f78',
-      white: '#cccccc',
-      yellow: '#dcdcaa',
-    },
+    theme: getTerminalTheme(),
   })
   const fitAddon = new FitAddon()
   const record: TerminalRecord = {
     fitAddon,
     label: `Terminal ${terminalSequence}`,
     localId: `terminal-${terminalSequence}`,
+    cwdPath: null,
     exitCode: null,
     opened: false,
     sessionId: null,
@@ -288,6 +333,10 @@ function findRecordBySessionId(sessionId: string) {
 
 function getShellDisplayName(shellPath: string) {
   return shellPath.split(/[\\/]/).filter(Boolean).pop() || shellPath
+}
+
+function getTerminalRecordTitle(record: TerminalRecord) {
+  return record.cwdPath ? `${record.label} - ${record.cwdPath}` : record.label
 }
 
 function clampTerminalSessionListWidth(width: number) {
@@ -374,9 +423,11 @@ async function createShellSession(record: TerminalRecord) {
   }
 
   try {
+    record.cwdPath = props.projectPath
     const session = await desktopApi.shell.createSession({
       cols: record.terminal.cols || 80,
       rows: record.terminal.rows || 24,
+      cwd: props.projectPath ?? undefined,
     })
     record.sessionId = session.sessionId
     record.label = getShellDisplayName(session.shell)
@@ -678,6 +729,13 @@ watch(
     fitTerminalAfterLayout()
   },
 )
+
+watch(
+  () => props.themeName,
+  () => {
+    applyTerminalThemeToRecords()
+  },
+)
 </script>
 
 <style scoped>
@@ -692,9 +750,9 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #1e1e1e;
-  border-top: 1px solid #2b2b2b;
-  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.24);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.16);
 }
 
 .terminal-resize-handle {
@@ -709,7 +767,7 @@ watch(
 }
 
 .terminal-resize-handle:hover {
-  background: rgba(0, 122, 204, 0.56);
+  background: color-mix(in srgb, var(--accent-color) 58%, transparent);
 }
 
 .terminal-header {
@@ -720,8 +778,8 @@ watch(
   justify-content: space-between;
   gap: 12px;
   padding: 0 8px 0 12px;
-  background: #181818;
-  border-bottom: 1px solid #2b2b2b;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .terminal-title {
@@ -730,13 +788,24 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #cccccc;
+  color: var(--text-primary);
   font-size: 11px;
   font-weight: 600;
 }
 
 .terminal-title i {
   font-size: 14px;
+}
+
+.terminal-cwd {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .terminal-actions {
@@ -751,7 +820,7 @@ watch(
   width: 1px;
   height: 20px;
   margin: 0 4px;
-  background: #3a3a3a;
+  background: var(--border-color);
 }
 
 .terminal-icon-button {
@@ -762,20 +831,20 @@ watch(
   justify-content: center;
   border: none;
   border-radius: 4px;
-  color: #cccccc;
+  color: var(--text-primary);
   background: transparent;
   cursor: pointer;
 }
 
 .terminal-icon-button:hover {
-  color: #f2f2f2;
-  background: #2a2d2e;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 
 .terminal-icon-button:focus-visible,
 .terminal-session-activate:focus-visible,
 .terminal-session-delete:focus-visible {
-  outline: 1px solid #007acc;
+  outline: 1px solid var(--accent-color);
   outline-offset: -1px;
 }
 
@@ -799,10 +868,10 @@ watch(
   z-index: 5;
   min-width: 156px;
   padding: 4px;
-  border: 1px solid #3c3c3c;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: #252526;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 .terminal-profile-menu {
@@ -817,7 +886,7 @@ watch(
   border: none;
   border-radius: 3px;
   padding: 0 10px;
-  color: #cccccc;
+  color: var(--text-primary);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
@@ -827,15 +896,15 @@ watch(
 .terminal-menu-item:hover,
 .terminal-menu-item:focus-visible {
   outline: none;
-  background: #04395e;
-  color: #ffffff;
+  background: color-mix(in srgb, var(--accent-color) 18%, var(--bg-secondary));
+  color: var(--text-primary);
 }
 
 .terminal-body {
   flex: 1;
   min-height: 0;
   padding: 8px 10px 0;
-  background: #1e1e1e;
+  background: var(--bg-primary);
 }
 
 .terminal-workspace {
@@ -843,7 +912,7 @@ watch(
   min-height: 0;
   display: flex;
   overflow: hidden;
-  background: #1e1e1e;
+  background: var(--bg-primary);
 }
 
 .terminal-surfaces {
@@ -856,7 +925,7 @@ watch(
 .terminal-surface {
   height: 100%;
   min-height: 0;
-  background: #1e1e1e;
+  background: var(--bg-primary);
 }
 
 .terminal-session-list {
@@ -864,7 +933,7 @@ watch(
   flex: 0 0 150px;
   padding: 3px 3px 0 0;
   overflow-y: auto;
-  border-left: 1px solid #2b2b2b;
+  border-left: 1px solid var(--border-color);
 }
 
 .terminal-session-list,
@@ -922,14 +991,14 @@ watch(
   bottom: 0;
   left: 4px;
   width: 1px;
-  background: #2b2b2b;
+  background: var(--border-color);
 }
 
 .terminal-session-resize-handle:hover::before,
 :global(body.terminal-session-list-resizing) .terminal-session-resize-handle::before {
   left: 3px;
   width: 2px;
-  background: #007acc;
+  background: var(--accent-color);
 }
 
 .terminal-session-item {
@@ -939,7 +1008,7 @@ watch(
   display: flex;
   align-items: center;
   background: transparent;
-  color: #cccccc;
+  color: var(--text-primary);
 }
 
 .terminal-session-item::before {
@@ -951,7 +1020,7 @@ watch(
 }
 
 .terminal-session-item--active {
-  background: #37373d;
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-secondary));
 }
 
 .terminal-session-item--active::before {
@@ -975,7 +1044,7 @@ watch(
   gap: 5px;
   padding: 0 6px 0 8px;
   overflow: hidden;
-  color: #d4d4d4;
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
   line-height: 26px;
@@ -996,7 +1065,7 @@ watch(
 
 .terminal-session-warning {
   margin-left: auto;
-  color: #cca700;
+  color: var(--warn-color);
 }
 
 .terminal-session-delete {
@@ -1008,14 +1077,14 @@ watch(
   justify-content: center;
   margin-right: 2px;
   border-radius: 3px;
-  color: #cccccc;
+  color: var(--text-primary);
   opacity: 0;
   pointer-events: none;
 }
 
 .terminal-session-item:hover,
 .terminal-session-item:focus-within {
-  background: #2a2d2e;
+  background: color-mix(in srgb, var(--text-primary) 8%, var(--bg-secondary));
 }
 
 .terminal-session-item:hover .terminal-session-delete,
@@ -1025,8 +1094,8 @@ watch(
 }
 
 .terminal-session-delete:hover {
-  color: #f2f2f2;
-  background: #4a4a4a;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 12%, var(--bg-secondary));
 }
 
 :deep(.xterm) {
@@ -1035,7 +1104,7 @@ watch(
 
 :deep(.xterm-viewport),
 :deep(.xterm-screen) {
-  background: #1e1e1e;
+  background: var(--bg-primary);
 }
 
 :global(body.terminal-panel-resizing),
