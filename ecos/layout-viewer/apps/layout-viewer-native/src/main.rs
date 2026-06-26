@@ -3255,21 +3255,11 @@ mod tests {
         let mut db = layoutdb::LayoutDb::new("unit", Rect::new(0, 0, 1000, 1000));
         db.add_shape(
             db.top_cell(),
-            layoutdb::ShapeRecord::new(
-                Rect::new(0, 0, 1000, 1000),
-                0,
-                ShapeKind::Die,
-                0,
-            ),
+            layoutdb::ShapeRecord::new(Rect::new(0, 0, 1000, 1000), 0, ShapeKind::Die, 0),
         );
         db.add_shape(
             db.top_cell(),
-            layoutdb::ShapeRecord::new(
-                Rect::new(100, 100, 900, 900),
-                0,
-                ShapeKind::Core,
-                0,
-            ),
+            layoutdb::ShapeRecord::new(Rect::new(100, 100, 900, 900), 0, ShapeKind::Core, 0),
         );
 
         let (die, core) = super::die_core_boundaries(&db);

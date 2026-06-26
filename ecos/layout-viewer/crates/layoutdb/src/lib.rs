@@ -2752,10 +2752,7 @@ fn ensure_die_core_overlay_shapes(
             .and_then(|boundaries| boundaries.die)
             .map(|bbox| Rect::new(bbox[0], bbox[1], bbox[2], bbox[3]))
             .unwrap_or(world);
-        db.add_shape(
-            top,
-            ShapeRecord::new(bbox, 0, ShapeKind::Die, 0),
-        );
+        db.add_shape(top, ShapeRecord::new(bbox, 0, ShapeKind::Die, 0));
     }
     if !has_core {
         if let Some(bbox) = boundaries.and_then(|boundaries| boundaries.core) {

@@ -58,7 +58,7 @@ function isGzipFilePath(path: string): boolean {
 }
 
 async function gunzipToText(bytes: Uint8Array): Promise<string> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const stream = new Blob([bytes.slice()]).stream().pipeThrough(new DecompressionStream('gzip'))
   const buffer = await new Response(stream).arrayBuffer()
   return new TextDecoder().decode(buffer)
 }

@@ -2155,7 +2155,9 @@ mod tests {
             .as_object_mut()
             .expect("manifest files must be an object");
         for relative in files.values_mut() {
-            let old_relative = relative.as_str().expect("manifest file path must be a string");
+            let old_relative = relative
+                .as_str()
+                .expect("manifest file path must be a string");
             let old_path = root.join(old_relative);
             let new_relative = format!("{old_relative}.gz");
             let new_path = root.join(&new_relative);
@@ -2401,7 +2403,8 @@ mod tests {
 
         assert!(result.detail_tile_count >= 1);
         let manifest: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap()).unwrap();
+            serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap())
+                .unwrap();
         assert_eq!(manifest["design_name"], "unit");
         assert_eq!(manifest["statistics"]["by_kind"]["die"], 1);
         assert_eq!(manifest["statistics"]["by_kind"]["regular_wire"], 2);
@@ -2448,7 +2451,12 @@ mod tests {
         let die = [0, 0, 246_637, 246_637];
         // `reset` pin: port already in absolute, in-die EDA coordinates.
         assert_eq!(
-            io_pin_rect_to_die([0, 1_250, 600, 1_550], Some([300, 1_400]), Orientation::R0, die),
+            io_pin_rect_to_die(
+                [0, 1_250, 600, 1_550],
+                Some([300, 1_400]),
+                Orientation::R0,
+                die
+            ),
             Some([0, 1_250, 600, 1_550])
         );
     }
@@ -2464,7 +2472,12 @@ mod tests {
         );
         // With a valid location the local rect is centred on the anchor.
         assert_eq!(
-            io_pin_rect_to_die([-100, -100, 100, 100], Some([5_000, 6_000]), Orientation::R0, die),
+            io_pin_rect_to_die(
+                [-100, -100, 100, 100],
+                Some([5_000, 6_000]),
+                Orientation::R0,
+                die
+            ),
             Some([4_900, 5_900, 5_100, 6_100])
         );
     }
@@ -2475,7 +2488,12 @@ mod tests {
         // A pin-local rect (negative coords force the relative branch). R90
         // rotates it about the pin origin before anchoring, swapping w/h.
         assert_eq!(
-            io_pin_rect_to_die([-100, -50, 100, 50], Some([1_000, 1_000]), Orientation::R90, die),
+            io_pin_rect_to_die(
+                [-100, -50, 100, 50],
+                Some([1_000, 1_000]),
+                Orientation::R90,
+                die
+            ),
             Some([950, 900, 1_050, 1_100])
         );
     }
