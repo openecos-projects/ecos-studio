@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { chmod, copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -43,15 +43,12 @@ async function assertFileExists(path, label) {
   }
 }
 
-async function cleanStagingDirectory(path) {
+async function removeStaleLayoutViewerBinaries(path, platform) {
   await mkdir(path, { recursive: true })
-  const entries = await readdir(path, { withFileTypes: true })
 
-  await Promise.all(entries.map((entry) => {
-    if (entry.name === '.gitkeep') {
-      return undefined
-    }
-    return rm(join(path, entry.name), { force: true, recursive: true })
+  await Promise.all(NATIVE_LAYOUT_VIEWER_BINARIES.map((binary) => {
+    const filename = executableName(binary, platform)
+    return rm(join(path, filename), { force: true })
   }))
 }
 
@@ -77,7 +74,7 @@ export async function prepareNativeLayoutViewerBinaries(options = {}) {
     stdio: 'inherit',
   })
 
-  await cleanStagingDirectory(resourcesBin)
+  await removeStaleLayoutViewerBinaries(resourcesBin, platform)
 
   for (const binary of NATIVE_LAYOUT_VIEWER_BINARIES) {
     const filename = executableName(binary, platform)

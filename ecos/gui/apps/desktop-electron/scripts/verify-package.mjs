@@ -8,6 +8,10 @@ const REQUIRED_NATIVE_BINARIES = [
   'layout-viewer-native',
 ]
 
+function requiredEccBinary(platform) {
+  return platform === 'win32' ? 'ecc.cmd' : 'ecc'
+}
+
 async function assertExists(path, label) {
   try {
     await access(path)
@@ -53,14 +57,17 @@ export async function verifyPackageArtifacts(options = {}) {
   }
 
   const binariesDir = join(releaseDir, 'linux-unpacked/resources/binaries')
-  for (const binary of REQUIRED_NATIVE_BINARIES) {
+  const eccBinary = requiredEccBinary(platform)
+  const packagedBinaries = [...REQUIRED_NATIVE_BINARIES, eccBinary]
+
+  for (const binary of packagedBinaries) {
     await assertExecutable(join(binariesDir, binary), `Packaged native binary ${binary}`, platform)
   }
 
   return {
     appImages,
     debs,
-    nativeBinaries: [...REQUIRED_NATIVE_BINARIES],
+    nativeBinaries: packagedBinaries,
   }
 }
 

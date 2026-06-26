@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -59,11 +59,11 @@ describe('prepareNativeLayoutViewerBinaries', () => {
     expect((await stat(join(fixture.resourcesBin, 'layout-viewer-native'))).mode & 0o111).not.toBe(0)
   })
 
-  it('cleans stale staged binaries before copying the current native viewer binaries', async () => {
+  it('replaces stale layout viewer binaries before copying the current native viewer binaries', async () => {
     const fixture = await createFixture()
     await import('node:fs/promises').then(({ mkdir }) => mkdir(fixture.resourcesBin, { recursive: true }))
     await writeFile(join(fixture.resourcesBin, '.gitkeep'), '\n')
-    await writeFile(join(fixture.resourcesBin, 'stale-viewer'), 'old-binary')
+    await writeFile(join(fixture.resourcesBin, 'layout-viewer-native'), 'old-binary')
 
     await prepareNativeLayoutViewerBinaries({
       execFile: vi.fn(async () => {}),
@@ -72,12 +72,31 @@ describe('prepareNativeLayoutViewerBinaries', () => {
       repoRoot: fixture.root,
     })
 
-    await expect(access(join(fixture.resourcesBin, 'stale-viewer'))).rejects.toThrow()
     await expect(readFile(join(fixture.resourcesBin, '.gitkeep'), 'utf8'))
       .resolves.toBe('\n')
     await expect(readFile(join(fixture.resourcesBin, 'ecos-layout-packer'), 'utf8'))
       .resolves.toBe('packer-binary')
     await expect(readFile(join(fixture.resourcesBin, 'layout-viewer-native'), 'utf8'))
       .resolves.toBe('viewer-binary')
+  })
+
+  it('preserves bundled ecc runtime files staged before layout viewer preparation', async () => {
+    const fixture = await createFixture()
+    await mkdir(fixture.resourcesBin, { recursive: true })
+    await mkdir(join(fixture.resourcesBin, '_internal'), { recursive: true })
+    await writeFile(join(fixture.resourcesBin, 'ecc'), 'ecc-binary')
+    await writeFile(join(fixture.resourcesBin, '_internal', 'placeholder.txt'), 'runtime')
+
+    await prepareNativeLayoutViewerBinaries({
+      execFile: vi.fn(async () => {}),
+      packageRoot: join(fixture.root, 'ecos/gui/apps/desktop-electron'),
+      platform: 'linux',
+      repoRoot: fixture.root,
+    })
+
+    await expect(readFile(join(fixture.resourcesBin, 'ecc'), 'utf8'))
+      .resolves.toBe('ecc-binary')
+    await expect(readFile(join(fixture.resourcesBin, '_internal', 'placeholder.txt'), 'utf8'))
+      .resolves.toBe('runtime')
   })
 })
