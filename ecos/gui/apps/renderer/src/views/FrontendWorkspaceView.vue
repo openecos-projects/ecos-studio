@@ -63,86 +63,96 @@
           <span>{{ isHomeView ? 'frontend' : isGlobalSrcView ? 'CPU RTL' : currentStep?.tool || '--' }}</span>
         </div>
 
-        <div v-if="isHomeView" class="detail-content">
-          <section class="summary-grid">
-            <div class="summary-tile">
-              <span>Workspace</span>
-              <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Workspace' }}</strong>
-            </div>
-            <div class="summary-tile">
-              <span>Flow Steps</span>
-              <strong>{{ steps.length }}</strong>
-            </div>
-            <div class="summary-tile">
-              <span>Completed</span>
-              <strong>{{ completedCount }}/{{ steps.length }}</strong>
-            </div>
-            <div class="summary-tile" :class="nextPendingStep ? stateClass(nextPendingStep.state) : ''">
-              <span>Next Step</span>
-              <strong>{{ nextPendingStep ? labelForStep(nextPendingStep.name) : 'Complete' }}</strong>
-            </div>
-          </section>
+        <div v-if="isHomeView" class="detail-content home-detail-content">
+          <Splitter layout="vertical" class="home-splitter frontend-resizable-splitter">
+            <SplitterPanel :size="20" :minSize="12" class="home-pane">
+              <section class="summary-grid home-summary-grid">
+                <div class="summary-tile">
+                  <span>Workspace</span>
+                  <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Workspace' }}</strong>
+                </div>
+                <div class="summary-tile">
+                  <span>Flow Steps</span>
+                  <strong>{{ steps.length }}</strong>
+                </div>
+                <div class="summary-tile">
+                  <span>Completed</span>
+                  <strong>{{ completedCount }}/{{ steps.length }}</strong>
+                </div>
+                <div class="summary-tile" :class="nextPendingStep ? stateClass(nextPendingStep.state) : ''">
+                  <span>Next Step</span>
+                  <strong>{{ nextPendingStep ? labelForStep(nextPendingStep.name) : 'Complete' }}</strong>
+                </div>
+              </section>
+            </SplitterPanel>
 
-          <section class="frontend-config-card">
-            <div class="frontend-config-card__head">
-              <div>
-                <strong>Frontend Configuration</strong>
-                <span>Read-only selections from this workspace.</span>
-              </div>
-              <span class="frontend-config-card__badge">Read only</span>
-            </div>
-            <div class="frontend-config-grid">
-              <div
-                v-for="item in frontendConfigItems"
-                :key="item.label"
-                class="frontend-config-item"
-                :class="{ wide: item.wide }"
-              >
-                <span>{{ item.label }}</span>
-                <strong
-                  :title="item.value"
-                  :class="{ mono: item.mono, highlight: item.highlight }"
-                >
-                  {{ item.value }}
-                </strong>
-              </div>
-            </div>
-          </section>
+            <SplitterPanel :size="42" :minSize="18" class="home-pane">
+              <section class="frontend-config-card home-fill-card">
+                <div class="frontend-config-card__head">
+                  <div>
+                    <strong>Frontend Configuration</strong>
+                    <span>Read-only selections from this workspace.</span>
+                  </div>
+                  <span class="frontend-config-card__badge">Read only</span>
+                </div>
+                <div class="frontend-config-grid">
+                  <div
+                    v-for="item in frontendConfigItems"
+                    :key="item.label"
+                    class="frontend-config-item"
+                    :class="{ wide: item.wide }"
+                  >
+                    <span>{{ item.label }}</span>
+                    <strong
+                      :title="item.value"
+                      :class="{ mono: item.mono, highlight: item.highlight }"
+                    >
+                      {{ item.value }}
+                    </strong>
+                  </div>
+                </div>
+              </section>
+            </SplitterPanel>
 
-          <section class="workspace-home-card">
-            <div class="workspace-home-card__head">
-              <strong>Workspace Home</strong>
-              <span>Choose a step from the left sidebar to inspect logs, reports, source, and waveforms.</span>
-            </div>
-            <div class="workspace-home-card__body">
-              <div class="workspace-home-metric">
-                <span>Current Status</span>
-                <strong>{{ currentOverallState }}</strong>
-              </div>
-              <div class="workspace-home-metric">
-                <span>Latest Tool</span>
-                <strong>{{ latestActiveTool }}</strong>
-              </div>
-              <div class="workspace-home-metric">
-                <span>Simulation</span>
-                <strong>{{ simStepState }}</strong>
-              </div>
-            </div>
-          </section>
+            <SplitterPanel :size="38" :minSize="20" class="home-pane">
+              <section class="home-lower-grid">
+                <section class="workspace-home-card home-fill-card">
+                  <div class="workspace-home-card__head">
+                    <strong>Workspace Home</strong>
+                    <span>Choose a step from the left sidebar to inspect logs, reports, source, and waveforms.</span>
+                  </div>
+                  <div class="workspace-home-card__body">
+                    <div class="workspace-home-metric">
+                      <span>Current Status</span>
+                      <strong>{{ currentOverallState }}</strong>
+                    </div>
+                    <div class="workspace-home-metric">
+                      <span>Latest Tool</span>
+                      <strong>{{ latestActiveTool }}</strong>
+                    </div>
+                    <div class="workspace-home-metric">
+                      <span>Simulation</span>
+                      <strong>{{ simStepState }}</strong>
+                    </div>
+                  </div>
+                </section>
 
-          <section class="workspace-guide-card">
-            <div
-              v-for="item in workspaceGuideItems"
-              :key="item.title"
-              class="workspace-guide-item"
-            >
-              <i :class="item.icon"></i>
-              <div>
-                <strong>{{ item.title }}</strong>
-                <span>{{ item.text }}</span>
-              </div>
-            </div>
-          </section>
+                <section class="workspace-guide-card home-fill-card">
+                  <div
+                    v-for="item in workspaceGuideItems"
+                    :key="item.title"
+                    class="workspace-guide-item"
+                  >
+                    <i :class="item.icon"></i>
+                    <div>
+                      <strong>{{ item.title }}</strong>
+                      <span>{{ item.text }}</span>
+                    </div>
+                  </div>
+                </section>
+              </section>
+            </SplitterPanel>
+          </Splitter>
         </div>
 
         <div v-else-if="!currentStep && !isGlobalSrcView && !isGlobalWaveView" class="state-panel">
@@ -1110,7 +1120,7 @@
             </section>
 
             <section v-else-if="activeTab === 'cases'" class="cases-panel">
-              <Splitter v-if="shouldShowSimTerminal" layout="vertical" class="sim-cases-splitter">
+              <Splitter v-if="shouldShowSimTerminal" layout="vertical" class="sim-cases-splitter frontend-resizable-splitter">
                 <SplitterPanel :size="58" :minSize="18" class="sim-cases-pane">
                   <div v-if="simResultIsStale" class="sim-stale-banner">
                     <i class="ri-time-line"></i>
@@ -4194,9 +4204,85 @@ button:disabled {
   padding: 14px;
 }
 
+.home-detail-content {
+  padding: 10px;
+}
+
 .summary-grid {
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.home-splitter,
+.frontend-resizable-splitter {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+
+.home-splitter {
+  flex-direction: column;
+}
+
+.frontend-resizable-splitter :deep(.p-splitterpanel) {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  contain: style;
+}
+
+.frontend-resizable-splitter :deep(.p-splitter-gutter) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 6px !important;
+  cursor: row-resize;
+  background: transparent;
+  transition: background-color 0.14s ease;
+}
+
+.frontend-resizable-splitter :deep(.p-splitter-gutter)::after {
+  width: 54px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border-color);
+  content: '';
+  transition: background 0.14s ease, opacity 0.14s ease;
+}
+
+.frontend-resizable-splitter :deep(.p-splitter-gutter:hover)::after,
+.frontend-resizable-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true'])::after {
+  background: var(--accent-color);
+  opacity: 0.9;
+}
+
+.frontend-resizable-splitter :deep(.p-splitter-gutter-handle) {
+  display: none;
+}
+
+.home-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.home-pane > * {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.home-summary-grid {
+  flex: 1;
+  align-content: start;
+  overflow: auto;
+  padding: 4px;
 }
 
 .summary-tile {
@@ -4286,6 +4372,9 @@ button:disabled {
 }
 
 .frontend-config-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -4297,6 +4386,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-shrink: 0;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -4332,7 +4422,11 @@ button:disabled {
 .frontend-config-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-content: start;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
 }
 
@@ -4378,7 +4472,17 @@ button:disabled {
   color: var(--accent-color);
 }
 
+.home-fill-card {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .workspace-home-card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-primary);
@@ -4403,7 +4507,11 @@ button:disabled {
 .workspace-home-card__body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding-top: 14px;
 }
 
@@ -4432,8 +4540,23 @@ button:disabled {
 
 .workspace-guide-card {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  align-content: start;
   gap: 12px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+}
+
+.home-lower-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.4fr);
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .workspace-guide-item {
@@ -4783,43 +4906,6 @@ button:disabled {
   min-height: 0;
   border: 0;
   background: transparent;
-}
-
-.sim-cases-splitter :deep(.p-splitterpanel) {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  contain: style;
-}
-
-.sim-cases-splitter :deep(.p-splitter-gutter) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 6px !important;
-  cursor: row-resize;
-  background: transparent;
-  transition: background-color 0.14s ease;
-}
-
-.sim-cases-splitter :deep(.p-splitter-gutter)::after {
-  width: 54px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--border-color);
-  content: '';
-  transition: background 0.14s ease, opacity 0.14s ease;
-}
-
-.sim-cases-splitter :deep(.p-splitter-gutter:hover)::after,
-.sim-cases-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true'])::after {
-  background: var(--accent-color);
-  opacity: 0.9;
-}
-
-.sim-cases-splitter :deep(.p-splitter-gutter-handle) {
-  display: none;
 }
 
 .sim-cases-pane,
@@ -6762,9 +6848,12 @@ button:disabled {
 
   .workspace-home-card__head,
   .workspace-home-card__body,
-  .workspace-guide-card,
   .sim-run-context,
   .coremark-compile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-lower-grid {
     grid-template-columns: 1fr;
   }
 
@@ -6814,6 +6903,14 @@ button:disabled {
 
   .frontend-config-item.wide {
     grid-column: auto;
+  }
+
+  .home-detail-content {
+    padding: 8px;
+  }
+
+  .home-summary-grid {
+    gap: 8px;
   }
 
 }

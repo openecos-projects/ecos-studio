@@ -10047,3 +10047,37 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 本次未启动 GUI 做视觉实测；需要用户在 Sim 页面确认 CPU Tests case 下拉浮层的位置和高度是否合适。
 - 若后续希望点击浮层外部自动关闭，可再补全局 outside-click 行为。
+
+# 第 151 次 开发
+
+## 开发目标
+
+优化 Frontend Workspace 的 Home 页面，让窗口整体较小时不再裁掉内容；Home 的主要区域改为可通过边界拖拽调整高度的面板，并让每个面板内部独立滚动。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 将 Home 内容拆为 `Summary`、`Frontend Configuration`、`Workspace Home / Guide` 三个上下可拖拽面板。
+  - 复用 frontend 通用 Splitter 样式，让 Home 和 Sim 的可缩放边界保持一致。
+  - 为 Home 配置区、概览区、Workspace Home 和 Guide 区添加独立滚动和填充布局，避免小窗口下内容被外层裁切。
+  - 调整窄屏规则，使 Home 底部区域和配置网格能够降列显示。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Home 可缩放布局优化。
+
+## 验证情况
+
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次未启动 GUI 做视觉实测；需要用户在小窗口下确认 Home 三段面板的默认比例和拖拽手感是否合适。
+- 如果后续还希望 Home 底部左右两块也能横向拖拽，可再把 `home-lower-grid` 改为嵌套 horizontal Splitter。
