@@ -296,43 +296,11 @@
           <span class="header-count">{{ checklistCompletedCount }}/{{ checklistItems.length }}</span>
         </div>
         <div class="checklist-content">
-          <!-- Table format -->
-          <div class="checklist-table-wrap" v-if="checklistItems.length > 0">
-            <table class="checklist-table">
-              <thead>
-                <tr>
-                  <th>Step/Stage</th>
-                  <th>Validation Type</th>
-                  <th>Acceptance Criteria</th>
-                  <th>Acceptance Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(item, idx) in checklistItems" :key="idx" :class="stateClass(item.state)">
-                  <td>
-                    <div class="table-step-name">
-                      <i class="ri-checkbox-blank-circle-line table-step-icon"></i>
-                      {{ item.step }}
-                    </div>
-                  </td>
-                  <td class="table-tool">{{ item.type }}</td>
-                  <td class="table-criteria">{{ item.item }}</td>
-                  <td>
-                    <span class="table-state-tag" :class="stateClass(item.state)">
-                      <i :class="stateIcon(item.state)" class="table-state-icon"></i>
-                      {{ item.state }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <!-- Empty state -->
-          <div class="checklist-placeholder" v-else>
-            <i class="ri-list-check-2"></i>
-            <p>No checklist items</p>
-            <span>After running the flow, the checklist will be displayed.</span>
-          </div>
+          <ChecklistTable
+            :items="checklistItems"
+            :show-summary="false"
+            empty-hint="After running the flow, the checklist will be displayed."
+          />
         </div>
       </section>
           </SplitterPanel>
@@ -555,8 +523,10 @@ import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import FlowLogStepChooser from '@/components/FlowLogStepChooser.vue'
+import ChecklistTable from '@/components/ChecklistTable.vue'
 import { useParameters } from '@/composables/useParameters'
 import { useHomeData, type AnalysisChartItem, type FlowLogSegment } from '@/composables/useHomeData'
+import { isChecklistPassed } from '@/utils/checklistState'
 import { isWindowResizing } from '@/composables/useWindowResizeState'
 import {
   flowLogStepKey,
@@ -751,7 +721,7 @@ watch(
 
 // checklist 完成计数
 const checklistCompletedCount = computed(() =>
-  checklistItems.value.filter(c => c.state === 'Success').length
+  checklistItems.value.filter(item => isChecklistPassed(item.state)).length
 )
 
 // ============ Layout 全屏 & 缩放平移 ============
@@ -1285,42 +1255,6 @@ function onAnalysisChartClick(chart: AnalysisChartItem) {
 
 function closeChartPreview() {
   chartPreview.value.visible = false
-}
-
-// ============ 辅助函数 ============
-
-/** 根据步骤状态返回图标类名 */
-function stateIcon(state: string): string {
-  switch (state) {
-    case 'Success':
-      return 'ri-checkbox-circle-fill'
-    case 'Ongoing':
-      return 'ri-loader-4-line spin'
-    case 'Imcomplete':
-      return 'ri-close-circle-fill'
-    case 'Pending':
-      return 'ri-time-line'
-    case 'Unstart':
-    default:
-      return 'ri-checkbox-blank-circle-line'
-  }
-}
-
-/** 根据步骤状态返回 CSS 类名 */
-function stateClass(state: string): string {
-  switch (state) {
-    case 'Success':
-      return 'state-success'
-    case 'Ongoing':
-      return 'state-ongoing'
-    case 'Imcomplete':
-      return 'state-failed'
-    case 'Pending':
-      return 'state-pending'
-    case 'Unstart':
-    default:
-      return 'state-unstart'
-  }
 }
 
 </script>
@@ -2429,162 +2363,7 @@ html.dark .chart-card:hover {
   flex: 1;
   padding: 8px;
   overflow: auto;
-}
-
-.checklist-table-wrap {
-  height: 100%;
-  overflow: auto;
-  /*
-   * 隔离表格内部重排：窗口宽度变化时 section-card 已经 contain: layout，
-   * 再给滚动容器加一层 contain 能阻止表格列宽重算反向影响卡片自身。
-   */
   contain: content;
-}
-
-.checklist-table {
-  width: 100%;
-  /*
-   * table-layout: fixed —— 列宽仅按首行 <th> 的声明分配，不再逐格测量
-   * 内容。默认的 auto 布局在窗口缩放时会对所有行单元格做 min/max-content
-   * 计算，行数越多越慢。这里配合下面的 th 宽度声明直接锁死列比例。
-   */
-  table-layout: fixed;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 10px;
-}
-
-.checklist-table thead th:nth-child(1) { width: 22%; }
-.checklist-table thead th:nth-child(2) { width: 18%; }
-.checklist-table thead th:nth-child(3) { width: auto; }
-.checklist-table thead th:nth-child(4) { width: 16%; }
-
-.checklist-table td {
-  /* fixed 布局下超长单元格不会再撑开列宽，统一允许在词内换行避免溢出 */
-  overflow-wrap: anywhere;
-}
-
-.checklist-table thead th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-sidebar);
-  padding: 6px 8px;
-  text-align: left;
-  font-weight: 700;
-  font-size: 9px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
-}
-
-.checklist-table tbody td {
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  vertical-align: middle;
-}
-
-.checklist-table tbody tr {
-  transition: background 0.1s ease;
-}
-
-.checklist-table tbody tr:hover {
-  background: rgba(var(--accent-rgb, 59, 130, 246), 0.04);
-}
-
-.table-step-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.table-step-icon {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.table-tool,
-.table-criteria {
-  color: var(--text-secondary);
-  font-size: 10px;
-}
-
-.table-state-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  font-size: 9px;
-  font-weight: 600;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.table-state-icon {
-  font-size: 11px;
-}
-
-.table-state-tag.state-success {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
-}
-
-.table-state-tag.state-ongoing {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3b82f6;
-}
-
-.table-state-tag.state-failed {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-
-.table-state-tag.state-pending {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-}
-
-.table-state-tag.state-unstart {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-/* Empty state */
-.checklist-placeholder {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 20px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-}
-
-.checklist-placeholder i {
-  font-size: 28px;
-  color: var(--text-secondary);
-  opacity: 0.3;
-}
-
-.checklist-placeholder p {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.checklist-placeholder span {
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
 }
 
 /* ==================== 通用动画 ==================== */
@@ -2600,14 +2379,6 @@ html.dark .chart-card:hover {
 
 .spin {
   animation: spin 1s linear infinite;
-}
-
-/* Checklist 单元格内容在 resize 期间切回 normal（非 anywhere）——
- * anywhere 允许的 "任意位置断词" 需要测量每一个字符，缩放帧上代价偏高。
- */
-.window-resizing .checklist-table td {
-  overflow-wrap: normal !important;
-  word-break: keep-all !important;
 }
 
 /* ==================== 响应式 ==================== */

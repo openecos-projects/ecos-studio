@@ -14,14 +14,21 @@ describe('thumbnailGalleryCache', () => {
       Floorplan_sta: 'old sta error',
       place_maps: 'keep me',
     }
+    const checklistItemsCache = {
+      Floorplan_checklist_items: [{ step: 'route', type: 'Route', item: 'x', state: 'Passed' }],
+      place_checklist_items: [{ step: 'place', type: 'Density', item: 'y', state: 'Passed' }],
+    }
 
-    clearStepTabCache(tabInfoCache, tabErrorCache, 'Floorplan')
+    clearStepTabCache(tabInfoCache, tabErrorCache, 'Floorplan', checklistItemsCache)
 
     expect(tabInfoCache).toEqual({
       place_maps: { density: 'other-step' },
     })
     expect(tabErrorCache).toEqual({
       place_maps: 'keep me',
+    })
+    expect(checklistItemsCache).toEqual({
+      place_checklist_items: [{ step: 'place', type: 'Density', item: 'y', state: 'Passed' }],
     })
   })
 

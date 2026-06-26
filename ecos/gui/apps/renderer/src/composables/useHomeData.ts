@@ -54,6 +54,7 @@ export interface ChecklistItem {
   type: string
   item: string
   state: string
+  info?: string
 }
 
 /** checklist.json 数据结构 */
