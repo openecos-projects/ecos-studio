@@ -9979,3 +9979,71 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 本次仅验证 filelist 解析、示例测试和 prepare 自动 wrapper 生成，未运行 elab/lint/sim 全流程；用户可在 GUI 中继续测试后续步骤。
+
+# 第 149 次 开发
+
+## 开发目标
+
+优化 Frontend Workspace 的 Sim 页面窗口布局，让仿真结果列表和 Simulation Terminal 可以通过边界拖拽调整高度，减少固定高度终端在不同屏幕下不舒服的问题。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 引入 PrimeVue `Splitter` / `SplitterPanel`。
+  - 将 Sim `Cases` tab 中的结果列表区域和 `Simulation Terminal` 改为上下可拖拽分隔面板。
+  - 为 Sim Splitter 增加低调分隔条样式、拖拽光标和文本选择抑制处理。
+  - 让 Simulation Terminal 在 Splitter 面板内填满可用高度，不再被固定 `220px` 高度限制。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Sim 布局可缩放优化。
+
+## 验证情况
+
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次未启动 GUI 做视觉实测；用户需要在 Sim 页面确认结果列表与 Simulation Terminal 的拖拽手感是否符合预期。
+- 底部 Problems/Log Console 仍沿用原有顶部边界拖拽逻辑，本次主要完善 Sim 内部结果区和终端区的可缩放布局。
+
+# 第 150 次 开发
+
+## 开发目标
+
+优化 Sim 页面 CPU Tests 的 case 选择布局，避免展开 case 列表时占用普通文档流并挤压下方 Cases 结果区和 Simulation Terminal。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 将 CPU Tests 的 case 选择器移动到 Sim 顶部控制行内。
+  - 将 case 列表从普通展开区域改为浮层下拉，不再挤压下面的 `Cases` 内容。
+  - 为 case 下拉增加最大高度和内部滚动，避免测试项较多时撑大 Sim 顶部区域。
+  - 切换 Suite 或 CPU Tests Mode 时自动收起 case 下拉，避免浮层状态残留。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CPU Tests 布局优化。
+
+## 验证情况
+
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次未启动 GUI 做视觉实测；需要用户在 Sim 页面确认 CPU Tests case 下拉浮层的位置和高度是否合适。
+- 若后续希望点击浮层外部自动关闭，可再补全局 outside-click 行为。
