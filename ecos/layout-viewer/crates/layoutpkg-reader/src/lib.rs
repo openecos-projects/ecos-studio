@@ -146,10 +146,17 @@ pub struct LoadStats {
     pub large_object_disk_reads: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct PackageBoundaries {
+    pub die: Option<[i32; 4]>,
+    pub core: Option<[i32; 4]>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct PackageManifest {
     design_name: Option<String>,
     world_bbox: [i32; 4],
+    boundaries: Option<PackageBoundaries>,
     dictionaries: Option<PackageDictionaries>,
     tilesets: PackageTilesets,
     hierarchy: Option<PackageHierarchy>,
@@ -339,6 +346,10 @@ impl LayoutPackage {
 
     pub fn world_bbox(&self) -> Rect {
         Rect::from_bbox(self.manifest.world_bbox)
+    }
+
+    pub fn boundaries(&self) -> Option<PackageBoundaries> {
+        self.manifest.boundaries
     }
 
     pub fn layers(&self) -> Result<Vec<LayoutLayer>> {
@@ -913,7 +924,8 @@ mod tests {
         assert_eq!(batch.stats.disk_reads, 1);
         assert_eq!(batch.stats.cache_hits, 0);
         assert_eq!(batch.stats.cache_misses, 1);
-        assert_eq!(batch.large_objects.records.len(), 2);
+        assert_eq!(batch.large_objects.records.len(), 0);
+        assert_eq!(batch.stats.large_object_disk_reads, 0);
     }
 
     #[test]
@@ -924,7 +936,8 @@ mod tests {
         let first = package
             .load_detail_viewport(Rect::new(0, 0, 500, 500), 8)
             .unwrap();
-        assert_eq!(first.stats.large_object_disk_reads, 1);
+        assert_eq!(first.stats.large_object_disk_reads, 0);
+        assert_eq!(first.large_objects.records.len(), 0);
         let batch = package
             .load_detail_viewport(Rect::new(0, 0, 500, 500), 8)
             .unwrap();
@@ -938,10 +951,8 @@ mod tests {
             &first.tiles[0].records,
             &batch.tiles[0].records
         ));
-        assert!(Arc::ptr_eq(
-            &first.large_objects.records,
-            &batch.large_objects.records
-        ));
+        assert!(first.large_objects.records.is_empty());
+        assert!(batch.large_objects.records.is_empty());
     }
 
     #[test]

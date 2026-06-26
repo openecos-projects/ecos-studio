@@ -3003,7 +3003,7 @@ mod tests {
     }
 
     #[test]
-    fn far_top_view_preserves_die_and_core_context_frames() {
+    fn far_top_view_does_not_render_die_and_core_frames() {
         let db = hierarchy_db_with_context_shapes();
         let model = DisplayModel::from_layout_layers(db.layers());
 
@@ -3020,8 +3020,8 @@ mod tests {
         let frame_source_ids = frame_rect_source_ids(&plan);
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
-        assert!(frame_source_ids.contains(&10));
-        assert!(frame_source_ids.contains(&11));
+        assert!(!frame_source_ids.contains(&10));
+        assert!(!frame_source_ids.contains(&11));
         assert!(!frame_source_ids.contains(&42));
     }
 
@@ -3169,7 +3169,7 @@ mod tests {
     }
 
     #[test]
-    fn interaction_mid_view_preserves_die_and_core_context_frames() {
+    fn interaction_mid_view_does_not_render_die_and_core_frames() {
         let db = hierarchy_db_with_context_shapes();
         let model = DisplayModel::from_layout_layers(db.layers());
 
@@ -3189,8 +3189,8 @@ mod tests {
         let frame_source_ids = frame_rect_source_ids(&plan);
 
         assert_eq!(plan.source, RenderPlanSource::HierarchyMid);
-        assert!(frame_source_ids.contains(&10));
-        assert!(frame_source_ids.contains(&11));
+        assert!(!frame_source_ids.contains(&10));
+        assert!(!frame_source_ids.contains(&11));
         assert!(!frame_source_ids.contains(&42));
     }
 
@@ -4794,7 +4794,7 @@ mod tests {
     }
 
     #[test]
-    fn default_display_model_renders_die_and_core_context_shapes() {
+    fn default_display_model_hides_die_and_core_from_render_plan() {
         let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
         db.add_layer(LayerInfo::new(1, "M1"));
         let top = db.top_cell();
@@ -4829,8 +4829,8 @@ mod tests {
             })
             .collect::<std::collections::HashSet<_>>();
 
-        assert!(context_source_ids.contains(&10));
-        assert!(context_source_ids.contains(&11));
+        assert!(!context_source_ids.contains(&10));
+        assert!(!context_source_ids.contains(&11));
     }
 
     #[test]

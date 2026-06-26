@@ -510,12 +510,12 @@ impl DisplayModel {
                 LayerStyle::default_for_layer(layer.id, &layer.name, index),
             ));
         }
-        model.add_layer(DisplayLayer::shape_kind(ShapeKind::Die, "Die", die_style()));
-        model.add_layer(DisplayLayer::shape_kind(
-            ShapeKind::Core,
-            "Core",
-            core_style(),
-        ));
+        model.add_layer(
+            DisplayLayer::shape_kind(ShapeKind::Die, "Die", die_style()).hidden(),
+        );
+        model.add_layer(
+            DisplayLayer::shape_kind(ShapeKind::Core, "Core", core_style()).hidden(),
+        );
         model.add_layer(DisplayLayer::shape_kind(
             ShapeKind::Instance,
             "Instance",
@@ -659,11 +659,11 @@ mod tests {
 
         assert!(layers.iter().any(|layer| layer.source
             == SourceSelector::ShapeKind(ShapeKind::Die)
-            && layer.visible
+            && !layer.visible
             && layer.name == "Die"));
         assert!(layers.iter().any(|layer| layer.source
             == SourceSelector::ShapeKind(ShapeKind::Core)
-            && layer.visible
+            && !layer.visible
             && layer.name == "Core"));
         assert!(layers.iter().any(|layer| layer.source
             == SourceSelector::ShapeKind(ShapeKind::Instance)

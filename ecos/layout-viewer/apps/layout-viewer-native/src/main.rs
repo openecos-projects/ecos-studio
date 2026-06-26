@@ -42,6 +42,8 @@ const PATTERN_TILE_PX: f32 = 10.0;
 const SPARSE_DOT_SPACING_PX: f32 = 9.0;
 const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
 const NEAR_RASTER_OPS_THRESHOLD: usize = 6_000;
+const DIE_BOUNDARY_WIDTH: f32 = 2.0;
+const CORE_BOUNDARY_WIDTH: f32 = 1.0;
 
 #[derive(Debug, Parser)]
 #[command(name = "layout-viewer-native")]
@@ -628,6 +630,80 @@ fn is_top_cell_view(db: &layoutdb::LayoutDb, cell_view: &CellViewState) -> bool 
     cell_view.context_cell() == db.top_cell()
         && cell_view.target_cell() == db.top_cell()
         && cell_view.specific_path().is_empty()
+}
+
+fn is_layers_panel_layer(layer: &layout_display::DisplayLayer) -> bool {
+    !matches!(
+        layer.source,
+        layout_display::SourceSelector::ShapeKind(ShapeKind::Die | ShapeKind::Core)
+    )
+}
+
+fn die_core_boundaries(db: &layoutdb::LayoutDb) -> (Option<Rect>, Option<Rect>) {
+    let mut die = None;
+    let mut core = None;
+    for shape in db.query_shapes(db.top_cell(), db.world_bbox()) {
+        match shape.kind {
+            ShapeKind::Die if die.is_none() => die = Some(shape.bbox),
+            ShapeKind::Core if core.is_none() => core = Some(shape.bbox),
+            _ => {}
+        }
+        if die.is_some() && core.is_some() {
+            break;
+        }
+    }
+    if die.is_none() {
+        die = Some(db.world_bbox());
+    }
+    (die, core)
+}
+
+fn stroke_world_bbox(
+    painter: &egui::Painter,
+    canvas: egui::Rect,
+    view: V2ViewState,
+    bbox: Rect,
+    color: egui::Color32,
+    width: f32,
+) {
+    let screen = world_rect_to_screen(bbox, view, canvas);
+    if screen.intersects(canvas) {
+        painter.rect_stroke(
+            screen,
+            0.0,
+            egui::Stroke::new(width.max(1.0), color),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+fn draw_die_core_boundaries(
+    painter: &egui::Painter,
+    canvas: egui::Rect,
+    view: V2ViewState,
+    die: Option<Rect>,
+    core: Option<Rect>,
+) {
+    if let Some(bbox) = die {
+        stroke_world_bbox(
+            painter,
+            canvas,
+            view,
+            bbox,
+            egui::Color32::from_rgb(96, 196, 255),
+            DIE_BOUNDARY_WIDTH,
+        );
+    }
+    if let Some(bbox) = core {
+        stroke_world_bbox(
+            painter,
+            canvas,
+            view,
+            bbox,
+            egui::Color32::from_rgb(128, 232, 196),
+            CORE_BOUNDARY_WIDTH,
+        );
+    }
 }
 
 fn hierarchy_policy_from_tuning(tuning: LodTuningState) -> HierarchyPolicy {
@@ -1495,6 +1571,13 @@ impl LayoutViewerV2App {
             paint_ops
         };
 
+        if let Some(view) = self.view {
+            if is_top_cell_view(loaded.session.db(), &loaded.cell_view) {
+                let (die, core) = die_core_boundaries(loaded.session.db());
+                draw_die_core_boundaries(&painter, rect, view, die, core);
+            }
+        }
+
         if let Some(selected) = &self.selected {
             let selected_rect = world_rect_to_screen(selected.bbox, view, rect);
             if selected_rect.intersects(rect) {
@@ -1569,6 +1652,9 @@ impl LayoutViewerV2App {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for layer in loaded.display.layers_mut() {
+                    if !is_layers_panel_layer(layer) {
+                        continue;
+                    }
                     let count = match layer.source {
                         layout_display::SourceSelector::PhysicalLayer(layer_id) => {
                             layer_counts.get(&layer_id).copied().unwrap_or(0)
@@ -1757,8 +1843,10 @@ impl V2ViewState {
     }
 
     fn pan_pixels(&mut self, dx: f32, dy: f32) {
+        // World/EDA space is Y-up while the screen is Y-down, so dragging the
+        // canvas down (dy > 0) must increase the EDA y at the screen center.
         self.center_x -= dx * self.units_per_pixel;
-        self.center_y -= dy * self.units_per_pixel;
+        self.center_y += dy * self.units_per_pixel;
     }
 
     fn zoom_at_screen(
@@ -1783,15 +1871,17 @@ impl V2ViewState {
         screen_width: f32,
         screen_height: f32,
     ) -> (f32, f32) {
+        // EDA/world coordinates are Y-up; the screen is Y-down. The Y axis is
+        // flipped here so the rest of the pipeline can stay in raw EDA space.
         let world_x = self.center_x + (sx - screen_width * 0.5) * self.units_per_pixel;
-        let world_y = self.center_y + (sy - screen_height * 0.5) * self.units_per_pixel;
+        let world_y = self.center_y - (sy - screen_height * 0.5) * self.units_per_pixel;
         (world_x, world_y)
     }
 
     fn world_to_screen(&self, x: f32, y: f32, screen_width: f32, screen_height: f32) -> (f32, f32) {
         (
             (x - self.center_x) / self.units_per_pixel + screen_width * 0.5,
-            (y - self.center_y) / self.units_per_pixel + screen_height * 0.5,
+            (self.center_y - y) / self.units_per_pixel + screen_height * 0.5,
         )
     }
 }
@@ -2490,6 +2580,73 @@ mod tests {
         assert!(sense.senses_drag());
     }
 
+    fn projection_test_view() -> super::V2ViewState {
+        super::V2ViewState {
+            center_x: 500.0,
+            center_y: 500.0,
+            units_per_pixel: 4.0,
+            screen_width: 100.0,
+            screen_height: 80.0,
+        }
+    }
+
+    #[test]
+    fn screen_world_projection_round_trips() {
+        let view = projection_test_view();
+        for (sx, sy) in [(0.0, 0.0), (30.0, 70.0), (100.0, 80.0), (12.5, 64.0)] {
+            let (wx, wy) = view.screen_to_world(sx, sy, view.screen_width, view.screen_height);
+            let (rx, ry) = view.world_to_screen(wx, wy, view.screen_width, view.screen_height);
+            assert!((rx - sx).abs() < 1e-3, "x round trip {sx} -> {rx}");
+            assert!((ry - sy).abs() < 1e-3, "y round trip {sy} -> {ry}");
+        }
+    }
+
+    #[test]
+    fn higher_eda_y_projects_higher_on_screen() {
+        let view = projection_test_view();
+        let upper = view.world_to_screen(500.0, 600.0, view.screen_width, view.screen_height);
+        let lower = view.world_to_screen(500.0, 400.0, view.screen_width, view.screen_height);
+        // EDA Y-up: larger eda y must map to a smaller (higher) screen y.
+        assert!(
+            upper.1 < lower.1,
+            "expected larger eda y to map higher on screen: {} vs {}",
+            upper.1,
+            lower.1
+        );
+        // X axis keeps its direction.
+        let right = view.world_to_screen(700.0, 500.0, view.screen_width, view.screen_height);
+        let left = view.world_to_screen(300.0, 500.0, view.screen_width, view.screen_height);
+        assert!(right.0 > left.0);
+    }
+
+    #[test]
+    fn fit_anchors_die_corners_with_y_up_orientation() {
+        let view = super::V2ViewState::fit(Rect::new(0, 0, 1_000, 1_000), 100.0, 100.0);
+        let bottom_left = view.world_to_screen(0.0, 0.0, 100.0, 100.0);
+        let top_left = view.world_to_screen(0.0, 1_000.0, 100.0, 100.0);
+        let bottom_right = view.world_to_screen(1_000.0, 0.0, 100.0, 100.0);
+        // EDA bottom-left sits at the bottom of the screen (large screen y),
+        // the die top edge sits near the top (small screen y).
+        assert!(bottom_left.1 > top_left.1);
+        assert!(bottom_right.0 > bottom_left.0);
+    }
+
+    #[test]
+    fn pan_down_increases_center_eda_y() {
+        let mut view = projection_test_view();
+        let before = view.center_y;
+        view.pan_pixels(0.0, 10.0);
+        assert!(
+            view.center_y > before,
+            "dragging the canvas down should raise the EDA y at screen center"
+        );
+        // Horizontal pan keeps the existing direction.
+        let mut horizontal = projection_test_view();
+        let before_x = horizontal.center_x;
+        horizontal.pan_pixels(10.0, 0.0);
+        assert!(horizontal.center_x < before_x);
+    }
+
     #[test]
     fn selection_inspector_rows_expose_json_trace_metadata() {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
@@ -3091,6 +3248,33 @@ mod tests {
 
         assert!(super::is_top_cell_view(&db, &CellViewState::top(&db)));
         assert!(!super::is_top_cell_view(&db, &leaf_view));
+    }
+
+    #[test]
+    fn die_core_boundaries_reads_top_cell_shapes() {
+        let mut db = layoutdb::LayoutDb::new("unit", Rect::new(0, 0, 1000, 1000));
+        db.add_shape(
+            db.top_cell(),
+            layoutdb::ShapeRecord::new(
+                Rect::new(0, 0, 1000, 1000),
+                0,
+                ShapeKind::Die,
+                0,
+            ),
+        );
+        db.add_shape(
+            db.top_cell(),
+            layoutdb::ShapeRecord::new(
+                Rect::new(100, 100, 900, 900),
+                0,
+                ShapeKind::Core,
+                0,
+            ),
+        );
+
+        let (die, core) = super::die_core_boundaries(&db);
+        assert_eq!(die, Some(Rect::new(0, 0, 1000, 1000)));
+        assert_eq!(core, Some(Rect::new(100, 100, 900, 900)));
     }
 
     #[test]

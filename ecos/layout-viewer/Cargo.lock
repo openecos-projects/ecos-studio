@@ -1843,6 +1843,7 @@ name = "layoutpkg-packer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "layoutpkg-format",
  "serde",
  "serde_json",
@@ -3387,8 +3388,10 @@ name = "viewjson-importer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

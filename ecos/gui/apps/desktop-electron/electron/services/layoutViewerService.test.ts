@@ -9,6 +9,7 @@ interface ExecFileResult {
 
 const CURRENT_SOURCE_METADATA = {
   generator: {
+    build_id: 'current-packer-build-id',
     name: 'ecos-layout-packer',
     version: '0.1.0',
   },
@@ -18,9 +19,15 @@ const CURRENT_SOURCE_METADATA = {
   },
 }
 
-function layoutPackageManifest(fingerprint = CURRENT_SOURCE_METADATA.source.fingerprint) {
+function layoutPackageManifest(
+  fingerprint = CURRENT_SOURCE_METADATA.source.fingerprint,
+  buildId = CURRENT_SOURCE_METADATA.generator.build_id,
+) {
   return JSON.stringify({
-    generator: CURRENT_SOURCE_METADATA.generator,
+    generator: {
+      ...CURRENT_SOURCE_METADATA.generator,
+      build_id: buildId,
+    },
     schema: 'ecos.layoutpkg.v1',
     source: {
       fingerprint,
@@ -203,6 +210,46 @@ describe('LayoutViewerService', () => {
     })
 
     expect(execFile).toHaveBeenCalledWith(packer, ['--fingerprint', '--json', packageRoot])
+    expect(execFile).toHaveBeenCalledWith(packer, [packageRoot, layoutPackagePath])
+  })
+
+  it('rebuilds an existing .layoutpkg when the packer build id changes', async () => {
+    const packageRoot = '/project/output/gcd_route_view'
+    const repoRoot = '/repo'
+    const debugDir = join(repoRoot, 'ecos/layout-viewer/target/debug')
+    const packer = join(debugDir, 'ecos-layout-packer')
+    const viewer = join(debugDir, 'layout-viewer-native')
+    const layoutPackagePath = join(packageRoot, '.layoutpkg')
+    const manifestPath = join(layoutPackagePath, 'manifest.json')
+    const execFile = vi.fn(async (file: string, args: string[]) => {
+      if (file === packer && args.join(' ') === `--fingerprint --json ${packageRoot}`) {
+        return {
+          stderr: '',
+          stdout: JSON.stringify(CURRENT_SOURCE_METADATA),
+        }
+      }
+      return {
+        stderr: '',
+        stdout: '',
+      }
+    })
+    const { service } = createService({
+      execFile,
+      files: {
+        [manifestPath]: layoutPackageManifest(undefined, 'stale-packer-build-id'),
+      },
+      existingPaths: [
+        join(repoRoot, 'ecos/layout-viewer/Cargo.toml'),
+        packer,
+        viewer,
+      ],
+    })
+
+    await service.open({
+      projectPath: '/project',
+      viewJsonPackageRoot: packageRoot,
+    })
+
     expect(execFile).toHaveBeenCalledWith(packer, [packageRoot, layoutPackagePath])
   })
 

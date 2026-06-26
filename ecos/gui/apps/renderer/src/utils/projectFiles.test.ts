@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getMimeTypeFromPath,
@@ -128,5 +129,29 @@ describe('projectFiles', () => {
     expect(getMimeTypeFromPath('chart.png')).toBe('image/png')
     expect(getMimeTypeFromPath('report.csv')).toBe('text/csv')
     expect(getMimeTypeFromPath('unknown.bin')).toBe('application/octet-stream')
+  })
+
+  it('decompresses gzip project text files before returning content', async () => {
+    const payload = '{"schema":"ecc.view.v1","kind":"sites","data":[]}'
+    const readProjectBinary = vi.fn().mockResolvedValue(
+      Uint8Array.from(gzipSync(Buffer.from(payload, 'utf8'))),
+    )
+    const readProjectText = vi.fn()
+
+    setWindow({
+      ecosDesktop: {
+        workspace: {
+          readProjectTextFile: readProjectText,
+          readProjectBinaryFile: readProjectBinary,
+        },
+      },
+    })
+
+    await expect(
+      readProjectTextFile('gcd_view/tech/sites.json.gz', { projectPath: '/workspace/demo' }),
+    ).resolves.toBe(payload)
+
+    expect(readProjectBinary).toHaveBeenCalledWith('/workspace/demo/gcd_view/tech/sites.json.gz')
+    expect(readProjectText).not.toHaveBeenCalled()
   })
 })

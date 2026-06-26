@@ -51,6 +51,7 @@ interface LayoutViewerBinaries {
 
 interface LayoutPackageSourceMetadata {
   generator: {
+    build_id: string
     name: string
     version: string
   }
@@ -112,6 +113,7 @@ function isLayoutPackageSourceMetadata(value: unknown): value is LayoutPackageSo
   return (
     value.generator.name === LAYOUT_PACKER_NAME &&
     typeof value.generator.version === 'string' &&
+    typeof value.generator.build_id === 'string' &&
     value.source.kind === 'view-json' &&
     typeof value.source.fingerprint === 'string'
   )
@@ -133,8 +135,12 @@ function layoutPackageCacheMatches(
   manifest: LayoutPackageCacheManifest,
   currentSource: LayoutPackageSourceMetadata,
 ): boolean {
+  const cachedBuildId =
+    typeof manifest.generator.build_id === 'string' ? manifest.generator.build_id : ''
+
   return (
     manifest.generator.version === currentSource.generator.version &&
+    cachedBuildId === currentSource.generator.build_id &&
     manifest.source.fingerprint === currentSource.source.fingerprint
   )
 }

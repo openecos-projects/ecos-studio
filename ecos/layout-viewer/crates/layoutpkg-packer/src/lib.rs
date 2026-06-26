@@ -18,6 +18,7 @@ use serde::de::{DeserializeSeed, Error as DeError, IgnoredAny, MapAccess, SeqAcc
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use viewjson_importer::{open_json_buf_reader, read_json_value};
 
 const OVERVIEW_COVERAGE_BINS_PER_TILE: usize = 16;
 const DEFAULT_OVERVIEW_GRID_COLUMNS: usize = 1;
@@ -29,6 +30,7 @@ const OVERVIEW_PYRAMID_MAX_BINS_PER_RECT_PER_LEVEL: u64 = 256;
 const DETAIL_TILE_SHARD_FILE: &str = "detail/shard_0.bin";
 pub const LAYOUTPKG_GENERATOR_NAME: &str = "ecos-layout-packer";
 pub const LAYOUTPKG_GENERATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const LAYOUTPKG_GENERATOR_BUILD_ID: &str = env!("LAYOUTPKG_GENERATOR_BUILD_ID");
 
 #[derive(Debug, Clone)]
 pub struct PackLayoutPackageOptions {
@@ -82,6 +84,7 @@ pub struct PackTimingStats {
 pub struct LayoutPackageGenerator {
     pub name: &'static str,
     pub version: &'static str,
+    pub build_id: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -139,6 +142,7 @@ fn viewjson_source_metadata_from_manifest(
         generator: LayoutPackageGenerator {
             name: LAYOUTPKG_GENERATOR_NAME,
             version: LAYOUTPKG_GENERATOR_VERSION,
+            build_id: LAYOUTPKG_GENERATOR_BUILD_ID,
         },
         source: LayoutPackageSource {
             kind: "view-json",
@@ -169,6 +173,7 @@ pub fn pack_viewjson_to_layoutpkg(
     let hierarchy_started = Instant::now();
     let hierarchy = build_hierarchy_document(&options.input_root, &source_manifest, world_bbox)?;
     timing.hierarchy_ms = elapsed_ms(hierarchy_started);
+    let boundaries = read_die_core_bboxes(&options.input_root, &source_manifest, world_bbox)?;
     let geometry_started = Instant::now();
     let dataset = collect_geometry_dataset(&options.input_root, &source_manifest, world_bbox)?;
     timing.geometry_ms = elapsed_ms(geometry_started);
@@ -369,6 +374,7 @@ pub fn pack_viewjson_to_layoutpkg(
         "design_name": source_manifest.design_name.as_deref().unwrap_or("layout"),
         "dbu_per_micron": source_manifest.unit.as_ref().and_then(|unit| unit.dbu_per_micron).unwrap_or(1000),
         "world_bbox": world_bbox,
+        "boundaries": boundaries_json(boundaries),
         "source": {
             "kind": source_metadata.source.kind,
             "root": options.input_root.to_string_lossy(),
@@ -536,9 +542,10 @@ fn build_detail_tiles(
     for rect in rects {
         let (x0, x1, y0, y1) = grid.tile_range_for_rect(&rect);
         let intersected_tile_count = (x1 - x0 + 1) * (y1 - y0 + 1);
-        if is_shared_geometry(rect.kind)
-            || (max_tiles_per_object > 0 && intersected_tile_count > max_tiles_per_object)
-        {
+        if is_shared_geometry(rect.kind) {
+            continue;
+        }
+        if max_tiles_per_object > 0 && intersected_tile_count > max_tiles_per_object {
             large_objects.push(rect);
             continue;
         }
@@ -1124,9 +1131,7 @@ fn package_file(root: &Path, manifest: &ViewJsonManifest, key: &str) -> Option<P
 }
 
 fn read_json_file(path: &Path) -> Result<Value> {
-    let text =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+    read_json_value(path)
 }
 
 fn for_each_data_item(
@@ -1138,9 +1143,7 @@ fn for_each_data_item(
     let Some(path) = package_file(root, manifest, key) else {
         return Ok(0);
     };
-    let file =
-        fs::File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
-    let reader = BufReader::new(file);
+    let reader = open_json_buf_reader(&path)?;
     let mut seed = DataArraySeed {
         key,
         count: 0,
@@ -1373,6 +1376,7 @@ fn build_hierarchy_document(
         Ok(())
     })?;
 
+    append_die_core_hierarchy_shapes(root, manifest, world_bbox, &mut top_cell.shapes)?;
     top_cell.layer_summaries = cell_layer_summaries(&top_cell.shapes);
     top_cell.hierarchy_summary = cell_hierarchy_summary(&top_cell.instances);
     cells.insert(0, top_cell);
@@ -1577,7 +1581,7 @@ fn collect_geometry_dataset(
     source_files.insert("die".to_string(), die_count);
     let instances_count = collect_instances(root, manifest, &mut rects)?;
     source_files.insert("instances".to_string(), instances_count);
-    let io_pins_count = collect_io_pins(root, manifest, &mut rects)?;
+    let io_pins_count = collect_io_pins(root, manifest, &mut rects, world_bbox)?;
     source_files.insert("io_pins".to_string(), io_pins_count);
     let regular_wires_count = collect_wire_rects(
         root,
@@ -1626,6 +1630,64 @@ fn collect_geometry_dataset(
         tracks,
         gcell_grids,
     })
+}
+
+fn append_die_core_hierarchy_shapes(
+    root: &Path,
+    manifest: &ViewJsonManifest,
+    world_bbox: [i32; 4],
+    shapes: &mut Vec<HierarchyShape>,
+) -> Result<()> {
+    let (die, core) = read_die_core_bboxes(root, manifest, world_bbox)?;
+    if let Some(bbox) = die {
+        shapes.push(HierarchyShape {
+            layer_id: 0,
+            kind: LayoutObjectKind::Die,
+            bbox,
+            source_id: 0,
+        });
+    }
+    if let Some(bbox) = core {
+        shapes.push(HierarchyShape {
+            layer_id: 0,
+            kind: LayoutObjectKind::Core,
+            bbox,
+            source_id: 0,
+        });
+    }
+    Ok(())
+}
+
+fn read_die_core_bboxes(
+    root: &Path,
+    manifest: &ViewJsonManifest,
+    world_bbox: [i32; 4],
+) -> Result<(Option<[i32; 4]>, Option<[i32; 4]>)> {
+    let Some(path) = package_file(root, manifest, "die") else {
+        return Ok((valid_bbox(world_bbox), None));
+    };
+    let value = read_json_file(&path)?;
+    let Some(data) = value.get("data") else {
+        return Ok((valid_bbox(world_bbox), None));
+    };
+    let die = data
+        .get("die_area")
+        .and_then(parse_bbox)
+        .or_else(|| data.get("bbox").and_then(parse_bbox))
+        .or_else(|| valid_bbox(world_bbox));
+    let core = data.get("core_area").and_then(parse_bbox);
+    Ok((die, core))
+}
+
+fn boundaries_json(boundaries: (Option<[i32; 4]>, Option<[i32; 4]>)) -> Value {
+    let mut value = json!({});
+    if let Some(die) = boundaries.0 {
+        value["die"] = json!(die);
+    }
+    if let Some(core) = boundaries.1 {
+        value["core"] = json!(core);
+    }
+    value
 }
 
 fn collect_die(
@@ -1721,19 +1783,96 @@ fn collect_wire_rects(
     })
 }
 
+fn bbox_within(inner: [i32; 4], outer: [i32; 4]) -> bool {
+    inner[0] >= outer[0] && inner[1] >= outer[1] && inner[2] <= outer[2] && inner[3] <= outer[3]
+}
+
+fn clip_bbox_to(bbox: [i32; 4], outer: [i32; 4]) -> Option<[i32; 4]> {
+    valid_bbox([
+        bbox[0].max(outer[0]),
+        bbox[1].max(outer[1]),
+        bbox[2].min(outer[2]),
+        bbox[3].min(outer[3]),
+    ])
+}
+
+fn rotate_point_about_origin(point: [i32; 2], orient: Orientation) -> [i32; 2] {
+    let [x, y] = point;
+    match orient {
+        Orientation::R0 | Orientation::Unknown => [x, y],
+        Orientation::R90 => [-y, x],
+        Orientation::R180 => [-x, -y],
+        Orientation::R270 => [y, -x],
+        Orientation::MX => [x, -y],
+        Orientation::MY => [-x, y],
+        Orientation::MXR90 => [y, x],
+        Orientation::MYR90 => [-y, -x],
+    }
+}
+
+fn rotate_bbox_about_origin(bbox: [i32; 4], orient: Orientation) -> [i32; 4] {
+    let a = rotate_point_about_origin([bbox[0], bbox[1]], orient);
+    let b = rotate_point_about_origin([bbox[2], bbox[3]], orient);
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[0].max(b[0]),
+        a[1].max(b[1]),
+    ]
+}
+
+/// Resolve an IO pin port rectangle to absolute, in-die EDA coordinates.
+///
+/// Pins exported with absolute coordinates already sit inside the die and are
+/// used verbatim. Pins whose port geometry is defined in pin-local coordinates
+/// (negative/out-of-die rects, e.g. power pins) are rotated by their
+/// orientation, anchored at `location`, and clipped to the die so they cannot
+/// spill outside the floorplan boundary.
+fn io_pin_rect_to_die(
+    rect_eda: [i32; 4],
+    location: Option<[i32; 2]>,
+    orient: Orientation,
+    die_bbox: [i32; 4],
+) -> Option<[i32; 4]> {
+    if bbox_within(rect_eda, die_bbox) {
+        return valid_bbox(rect_eda);
+    }
+    let anchor = match location {
+        Some([x, y]) if x >= 0 && y >= 0 => [x, y],
+        _ => [die_bbox[0], die_bbox[1]],
+    };
+    let rotated = rotate_bbox_about_origin(rect_eda, orient);
+    let translated = [
+        rotated[0] + anchor[0],
+        rotated[1] + anchor[1],
+        rotated[2] + anchor[0],
+        rotated[3] + anchor[1],
+    ];
+    clip_bbox_to(translated, die_bbox)
+}
+
 fn collect_io_pins(
     root: &Path,
     manifest: &ViewJsonManifest,
     rects: &mut Vec<LayoutRectRecord>,
+    die_bbox: [i32; 4],
 ) -> Result<usize> {
     for_each_data_item(root, manifest, "io_pins", |item| {
         let source_id = source_id(&item);
+        let location = item.get("location").and_then(parse_point);
+        let orient = item
+            .get("orient")
+            .and_then(Value::as_str)
+            .map(parse_orientation)
+            .unwrap_or(Orientation::R0);
         if let Some(ports) = item.get("ports").and_then(Value::as_array) {
             for port in ports {
                 let layer_id = layer_id(port);
                 if let Some(port_rects) = port.get("rects").and_then(Value::as_array) {
                     for rect in port_rects {
-                        if let Some(bbox) = parse_bbox(rect) {
+                        if let Some(bbox) = parse_bbox(rect)
+                            .and_then(|eda| io_pin_rect_to_die(eda, location, orient, die_bbox))
+                        {
                             push_bbox_rect(
                                 rects,
                                 bbox,
@@ -1748,7 +1887,11 @@ fn collect_io_pins(
         }
         if let Some(vias) = item.get("vias").and_then(Value::as_array) {
             for via in vias {
-                let Some(bbox) = via.get("bbox").and_then(parse_bbox) else {
+                let Some(bbox) = via
+                    .get("bbox")
+                    .and_then(parse_bbox)
+                    .and_then(|eda| io_pin_rect_to_die(eda, location, orient, die_bbox))
+                else {
                     continue;
                 };
                 for layer_id in via_layers_for_item(via, layer_id(via)) {
@@ -1756,7 +1899,11 @@ fn collect_io_pins(
                 }
             }
         }
-        if let Some(bbox) = item.get("bbox").and_then(parse_bbox) {
+        if let Some(bbox) = item
+            .get("bbox")
+            .and_then(parse_bbox)
+            .and_then(|eda| io_pin_rect_to_die(eda, location, orient, die_bbox))
+        {
             let already_has_port = item
                 .get("ports")
                 .and_then(Value::as_array)
@@ -1982,6 +2129,46 @@ mod tests {
         fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
     }
 
+    fn write_gz_json(path: &std::path::Path, value: serde_json::Value) {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let file = fs::File::create(path).unwrap();
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder
+            .write_all(serde_json::to_vec(&value).unwrap().as_slice())
+            .unwrap();
+        encoder.finish().unwrap();
+    }
+
+    fn create_gzip_minimal_viewjson_package() -> TempDir {
+        let tmp = create_minimal_viewjson_package();
+        let root = tmp.path();
+        let manifest_path = root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        let files = manifest["files"]
+            .as_object_mut()
+            .expect("manifest files must be an object");
+        for relative in files.values_mut() {
+            let old_relative = relative.as_str().expect("manifest file path must be a string");
+            let old_path = root.join(old_relative);
+            let new_relative = format!("{old_relative}.gz");
+            let new_path = root.join(&new_relative);
+            let value: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&old_path).unwrap()).unwrap();
+            write_gz_json(&new_path, value);
+            fs::remove_file(&old_path).unwrap();
+            *relative = serde_json::Value::String(new_relative);
+        }
+        write_json(&manifest_path, manifest);
+        tmp
+    }
+
     fn create_minimal_viewjson_package() -> TempDir {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
@@ -2143,6 +2330,10 @@ mod tests {
             manifest["generator"]["version"],
             LAYOUTPKG_GENERATOR_VERSION
         );
+        assert_eq!(
+            manifest["generator"]["build_id"],
+            LAYOUTPKG_GENERATOR_BUILD_ID
+        );
         assert_eq!(manifest["design_name"], "unit");
         assert_eq!(manifest["source"]["kind"], "view-json");
         assert!(manifest["source"]["fingerprint"].as_str().unwrap().len() >= 16);
@@ -2166,7 +2357,8 @@ mod tests {
         assert_eq!(detail_index["tiles"][0]["primitive_count"], 3);
         assert_eq!(detail_index["statistics"]["by_kind"]["regular_wire"], 2);
         assert_eq!(detail_index["statistics"]["by_layer"]["1"], 2);
-        assert_eq!(detail_index["large_objects"]["count"], 2);
+        assert_eq!(detail_index["statistics"]["large_object_count"], 0);
+        assert!(detail_index["large_objects"].is_null());
 
         let tile_path = output.join(detail_index["tiles"][0]["file"].as_str().unwrap());
         let tile = fs::read(tile_path).unwrap();
@@ -2194,6 +2386,25 @@ mod tests {
             .unwrap()
             .iter()
             .any(|kind| kind == "regular_wire"));
+    }
+
+    #[test]
+    fn packs_gzip_viewjson_package() {
+        let input = create_gzip_minimal_viewjson_package();
+        let output = input.path().join(".layoutpkg");
+        let result = pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        assert!(result.detail_tile_count >= 1);
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["design_name"], "unit");
+        assert_eq!(manifest["statistics"]["by_kind"]["die"], 1);
+        assert_eq!(manifest["statistics"]["by_kind"]["regular_wire"], 2);
     }
 
     #[test]
@@ -2227,8 +2438,46 @@ mod tests {
 
         assert_eq!(metadata.generator.name, "ecos-layout-packer");
         assert_eq!(metadata.generator.version, LAYOUTPKG_GENERATOR_VERSION);
+        assert_eq!(metadata.generator.build_id, LAYOUTPKG_GENERATOR_BUILD_ID);
         assert_eq!(metadata.source.kind, "view-json");
         assert_eq!(metadata.source.fingerprint.len(), 64);
+    }
+
+    #[test]
+    fn io_pin_absolute_rect_is_used_verbatim() {
+        let die = [0, 0, 246_637, 246_637];
+        // `reset` pin: port already in absolute, in-die EDA coordinates.
+        assert_eq!(
+            io_pin_rect_to_die([0, 1_250, 600, 1_550], Some([300, 1_400]), Orientation::R0, die),
+            Some([0, 1_250, 600, 1_550])
+        );
+    }
+
+    #[test]
+    fn io_pin_relative_rect_anchors_and_clips_to_die() {
+        let die = [0, 0, 246_637, 246_637];
+        // Power pin (`VDD`): pin-local port rect with an invalid location.
+        // Anchors at the die origin and clips the negative half away.
+        assert_eq!(
+            io_pin_rect_to_die([-151, -301, 149, 299], Some([-1, -1]), Orientation::R0, die),
+            Some([0, 0, 149, 299])
+        );
+        // With a valid location the local rect is centred on the anchor.
+        assert_eq!(
+            io_pin_rect_to_die([-100, -100, 100, 100], Some([5_000, 6_000]), Orientation::R0, die),
+            Some([4_900, 5_900, 5_100, 6_100])
+        );
+    }
+
+    #[test]
+    fn io_pin_relative_rect_respects_orientation() {
+        let die = [0, 0, 10_000, 10_000];
+        // A pin-local rect (negative coords force the relative branch). R90
+        // rotates it about the pin origin before anchoring, swapping w/h.
+        assert_eq!(
+            io_pin_rect_to_die([-100, -50, 100, 50], Some([1_000, 1_000]), Orientation::R90, die),
+            Some([950, 900, 1_050, 1_100])
+        );
     }
 
     #[test]
@@ -2995,7 +3244,7 @@ mod tests {
 
         let detail_index = read_index(&output, "detail/index.json");
         assert_eq!(detail_index["tiles"].as_array().unwrap().len(), 0);
-        assert_eq!(detail_index["large_objects"]["count"], 3);
+        assert_eq!(detail_index["large_objects"]["count"], 1);
         assert_eq!(
             detail_index["large_objects"]["file"],
             "detail/large_objects.bin"

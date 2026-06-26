@@ -2738,6 +2738,40 @@ pub struct ViewportApplyProfile {
     pub scope_load: Duration,
 }
 
+fn ensure_die_core_overlay_shapes(
+    db: &mut LayoutDb,
+    boundaries: Option<layoutpkg_reader::PackageBoundaries>,
+) {
+    let top = db.top_cell();
+    let world = db.world_bbox();
+    let existing = db.query_shapes(top, world);
+    let has_die = existing.iter().any(|shape| shape.kind == ShapeKind::Die);
+    let has_core = existing.iter().any(|shape| shape.kind == ShapeKind::Core);
+    if !has_die {
+        let bbox = boundaries
+            .and_then(|boundaries| boundaries.die)
+            .map(|bbox| Rect::new(bbox[0], bbox[1], bbox[2], bbox[3]))
+            .unwrap_or(world);
+        db.add_shape(
+            top,
+            ShapeRecord::new(bbox, 0, ShapeKind::Die, 0),
+        );
+    }
+    if !has_core {
+        if let Some(bbox) = boundaries.and_then(|boundaries| boundaries.core) {
+            db.add_shape(
+                top,
+                ShapeRecord::new(
+                    Rect::new(bbox[0], bbox[1], bbox[2], bbox[3]),
+                    0,
+                    ShapeKind::Core,
+                    0,
+                ),
+            );
+        }
+    }
+}
+
 impl LayoutSession {
     pub fn from_source(source: PackageLayoutSource) -> Result<Self> {
         Ok(Self::from_source_profiled(source)?.0)
@@ -2776,6 +2810,7 @@ impl LayoutSession {
             db.add_layer(LayerInfo::from(layer));
         }
         let layers_load = layers_started.elapsed();
+        ensure_die_core_overlay_shapes(&mut db, source.package.boundaries());
         Ok((
             Self {
                 source,
