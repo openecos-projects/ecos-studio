@@ -27,7 +27,7 @@ function parseJson<T>(text: string, label: string): T {
 }
 
 function validateTechFile<T>(raw: TechJsonFile, expectedKind: string): T[] {
-  if (raw.schema !== 'ieda.view.v1' || raw.kind !== expectedKind || !Array.isArray(raw.data)) {
+  if (raw.schema !== 'ecc.view.v1' || raw.kind !== expectedKind || !Array.isArray(raw.data)) {
     throw new Error(`Unsupported ${expectedKind.replace(/_/g, ' ')} tech file.`)
   }
   return raw.data as T[]

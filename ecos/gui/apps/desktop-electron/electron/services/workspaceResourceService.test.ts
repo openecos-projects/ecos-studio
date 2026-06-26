@@ -99,7 +99,7 @@ describe('WorkspaceResourceService', () => {
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
     await mkdir(join(root, 'gcd_view', 'tech'), { recursive: true })
     await writeJson(join(root, 'gcd_view', 'manifest.json'), {
-      schema: 'ieda.view.v1',
+      schema: 'ecc.view.v1',
       format: 'layout_view_package',
       files: {
         meta: 'meta.json',
@@ -155,7 +155,7 @@ describe('WorkspaceResourceService', () => {
     const packageRoot = join(root, 'place_dreamplace', 'output', 'gcd_place_view')
     await mkdir(join(packageRoot, 'tech'), { recursive: true })
     await writeJson(join(packageRoot, 'manifest.json'), {
-      schema: 'ieda.view.v1',
+      schema: 'ecc.view.v1',
       format: 'layout_view_package',
       files: {
         meta: 'meta.json',
@@ -210,7 +210,7 @@ describe('WorkspaceResourceService', () => {
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
     await mkdir(join(root, 'gcd_view', 'tech'), { recursive: true })
     await writeJson(join(root, 'gcd_view', 'manifest.json'), {
-      schema: 'ieda.view.v1',
+      schema: 'ecc.view.v1',
       format: 'layout_view_package',
       files: {
         layers: 'tech/layers.json',

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 type RuntimePlatform = NodeJS.Platform | 'linux' | 'darwin' | 'win32'
@@ -58,6 +58,57 @@ function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string 
     ?? join(options.appPath, 'resources')
 }
 
+function repoEccVenvBinDir(repoRoot: string, platform: RuntimePlatform): string | null {
+  const venvBin = join(repoRoot, 'ecc', '.venv', 'bin')
+  const candidates = platform === 'win32'
+    ? ['ecc.exe', 'ecc.cmd', 'ecc']
+    : ['ecc']
+
+  if (candidates.some((name) => existsSync(join(venvBin, name)))) {
+    return venvBin
+  }
+
+  return null
+}
+
+function ensureRepoEccDevShim(
+  userDataPath: string,
+  wrapperScript: string,
+  platform: RuntimePlatform,
+): string {
+  const runtimeBin = join(userDataPath, 'runtime-bin')
+  mkdirSync(runtimeBin, { recursive: true })
+
+  if (platform === 'win32') {
+    const shimPath = join(runtimeBin, 'ecc.cmd')
+    writeFileSync(shimPath, `@echo off\r\n"${wrapperScript}" %*\r\n`)
+    return runtimeBin
+  }
+
+  const shimPath = join(runtimeBin, 'ecc')
+  writeFileSync(shimPath, `#!/usr/bin/env bash\nexec "${wrapperScript}" "$@"\n`)
+  chmodSync(shimPath, 0o755)
+  return runtimeBin
+}
+
+function resolveDevelopmentEccBinDir(options: EccCliRuntimeEnvOptions): string | null {
+  const repoRoot = findRepoRootFromAppPath(options.appPath)
+  if (!repoRoot) {
+    return null
+  }
+
+  const venvBin = repoEccVenvBinDir(repoRoot, options.platform)
+  if (venvBin) {
+    return venvBin
+  }
+
+  const wrapperScript = join(repoRoot, 'ecos', 'scripts', 'ecc-wrapper.sh')
+  if (options.platform !== 'win32' && existsSync(wrapperScript)) {
+    return ensureRepoEccDevShim(options.userDataPath, wrapperScript, options.platform)
+  }
+
+  return null
+}
 
 export function createEccCliRuntimeEnv(
   options: EccCliRuntimeEnvOptions,
@@ -85,5 +136,15 @@ export function createEccCliRuntimeEnv(
     return { ...baseEnv }
   }
 
-  return { ...options.env }
+  const developmentBinDir = resolveDevelopmentEccBinDir(options)
+  if (!developmentBinDir) {
+    return { ...options.env }
+  }
+
+  const nextPath = prependPath(options.env, developmentBinDir, options.platform)
+
+  return {
+    ...options.env,
+    [nextPath.key]: nextPath.value,
+  }
 }
