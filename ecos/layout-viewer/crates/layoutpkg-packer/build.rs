@@ -3,9 +3,8 @@ use std::fs;
 use std::path::Path;
 
 fn hash_path(path: &Path, hasher: &mut Sha256) {
-    let bytes = fs::read(path).unwrap_or_else(|error| {
-        panic!("failed to read {} for build id: {error}", path.display())
-    });
+    let bytes = fs::read(path)
+        .unwrap_or_else(|error| panic!("failed to read {} for build id: {error}", path.display()));
     hasher.update(path.to_string_lossy().as_bytes());
     hasher.update(&bytes);
 }

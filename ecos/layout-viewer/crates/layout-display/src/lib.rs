@@ -510,12 +510,8 @@ impl DisplayModel {
                 LayerStyle::default_for_layer(layer.id, &layer.name, index),
             ));
         }
-        model.add_layer(
-            DisplayLayer::shape_kind(ShapeKind::Die, "Die", die_style()).hidden(),
-        );
-        model.add_layer(
-            DisplayLayer::shape_kind(ShapeKind::Core, "Core", core_style()).hidden(),
-        );
+        model.add_layer(DisplayLayer::shape_kind(ShapeKind::Die, "Die", die_style()).hidden());
+        model.add_layer(DisplayLayer::shape_kind(ShapeKind::Core, "Core", core_style()).hidden());
         model.add_layer(DisplayLayer::shape_kind(
             ShapeKind::Instance,
             "Instance",
