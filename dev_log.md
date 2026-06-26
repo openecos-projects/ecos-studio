@@ -9838,3 +9838,62 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `.gitignore` 清理只覆盖了当前仓库已知的本地产物类型；如果后续新增新的仿真 trace 命名格式，还需要同步补规则。
+
+# 第 146 次 开发
+
+## 开发目标
+
+新增用户友好的标准 CPU filelist 模式：用户只需提供符合 ECOS 标准 CPU socket 的 `ecos_user_cpu_top` 和 filelist，`prepare` 自动生成 SoC 侧 `ysyx_00000000` 兼容 wrapper，避免用户手写历史兼容 wrapper。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 新增 `standard-cpu-filelist` catalog 项，声明标准用户 CPU top 为 `ecos_user_cpu_top`。
+  - 保留旧 `custom-filelist`，并明确它表示用户 filelist 已经自带 `ysyx_00000000`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - 将 `cpu_standard_top` 和 `cpu_wrapper_generation` 写入 catalog validate normalized 结果。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+  - 允许 `standard-cpu-filelist` 这类需要用户 filelist 的 sim-ready CPU 通过自动 wrapper generation 契约检查。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - workspace 创建时持久化 `cpu_standard_top` 和 `cpu_wrapper_generation`。
+  - fallback test-suite/difftest 策略识别 `standard-cpu-filelist`，默认关闭 difftest 并支持 smoke、cpu-tests、coremark。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/data/workspace.py`
+  - workspace 字段模型新增 `cpu_standard_top` 和 `cpu_wrapper_generation`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/rtl_inputs.py`
+  - prepare input fingerprint 纳入标准 wrapper 相关字段。
+  - 对旧 manifest 做兼容：新增空字段缺失时不强制判定 prepare 产物过期。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 当 `cpu_wrapper_generation=standard_alias_v1` 时，检查用户 CPU filelist 中恰好有一个 `ecos_user_cpu_top`。
+  - 自动生成 `prepare_fe/output/generated_standard_cpu_wrapper.sv`，提供 `ysyx_00000000` 兼容模块。
+  - 生成 wrapper 内保留 UART/HALT MMIO 约定：`0x1000_0000` 打印字符，`0x1000_000c` 结束 GOOD/BAD TRAP。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 更新 catalog 数量断言。
+  - 覆盖 `standard-cpu-filelist` workspace 创建和 prepare 自动生成 wrapper 行为。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 更新 catalog compatibility 数量断言。
+  - 覆盖标准 CPU filelist 的 test suite、wrapper generation、difftest 策略。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 新增用户 CPU filelist 两种模式说明：`custom-filelist` 和 `standard-cpu-filelist`。
+  - 记录 prepare 生成的 `generated_standard_cpu_wrapper.sv` 产物。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次标准 CPU filelist 模式实现。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile fecompiler/tools/prepare/runner.py fecompiler/catalog/registry.py fecompiler/catalog/contract.py fecompiler/cli/workspace.py fecompiler/data/workspace.py fecompiler/tools/common/rtl_inputs.py test/test_catalog_contract.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_contract.py`，5 个用例通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_compatibility.py test/test_cpu_soc_flow.py test/test_engine_flow.py`，101 个用例通过，4 个 `test_cpu_soc_flow` 用例失败；失败点为旧 `cpu_soc_test` workspace 中直接跑 elab/lint 或 sim 时工具报告无输入/仿真 binary 未编译，已确认新逻辑的 catalog 与 prepare focused tests 通过，且 `prepared_inputs_current()` 对旧 manifest 可返回 True。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- `standard-cpu-filelist` V1 要求用户 top 端口名和语义严格匹配 `ysyx-axi-cpu-socket-v1`；它不是任意裸 CPU 自动桥接。
+- 本次只实现后端 catalog/prepare 契约，GUI 选择项的说明和提示文案后续还可以继续加强。
