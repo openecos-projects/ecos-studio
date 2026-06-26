@@ -9897,3 +9897,85 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `standard-cpu-filelist` V1 要求用户 top 端口名和语义严格匹配 `ysyx-axi-cpu-socket-v1`；它不是任意裸 CPU 自动桥接。
 - 本次只实现后端 catalog/prepare 契约，GUI 选择项的说明和提示文案后续还可以继续加强。
+
+# 第 147 次 开发
+
+## 开发目标
+
+为 `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std` 添加标准 CPU filelist 示例适配：在 CL3 原始顶层外加一层很薄的 `ecos_user_cpu_top`，让用户可以用 `standard-cpu-filelist` 路径验证“只上传标准 CPU filelist，不手写 SoC compatibility wrapper”的流程。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/ecos_user_cpu_top.sv`
+  - 新增标准 CPU 顶层适配层，把 ECOS 标准 AXI-like master socket 映射到 CL3Top 的 Chisel/FIRRTL 风格 AXI 端口。
+  - 将 CL3Top 没有的 `awqos/awregion/arqos/arregion` sideband 信号固定为 0。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f`
+  - 将 `ecos_user_cpu_top.sv` 加入标准 CPU filelist。
+  - 移除 DPI difftest package/implementation 文件，仅保留无 DPI 的 `difftest_wrapper` 空壳，避免 RTL Review/Yosys/Slang 被 DPI 结构误伤。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/filelist.f`
+  - 同步加入 `ecos_user_cpu_top.sv`，并移除 DPI difftest 文件条目。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/difftest_wrapper.sv`
+  - 改为无 DPI、无行为的同名空壳模块，只满足 CL3 内部实例化依赖。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 增加 `cl3_std` 示例 filelist 完整性检查。
+  - 增加标准顶层唯一性检查，确认 `filelist.cpu.f` 中只有一个 `ecos_user_cpu_top`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 `cl3_std` 标准 CPU 示例适配。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile test/test_examples.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_examples.py`，7 个用例通过。
+- 已执行 `PrepareStep._parse_sv_filelist('/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f')` 轻量检查，确认 68 个 RTL 文件全部存在、包含 `ecos_user_cpu_top`、不包含 `ysyx_00000000`、不包含 `import "DPI-C"`。
+- 已用临时 workspace 执行 `standard-cpu-filelist + cl3_std/filelist.cpu.f` 的 prepare 验证，结果为 `Success`，确认生成 `generated_standard_cpu_wrapper.sv`，最终 compatibility alias 数量为 1。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- `examples/cl3_std` 目录名已规整为无空格形式；后续若新增示例，建议继续使用无空格、下划线分隔的目录命名。
+- 本次验证覆盖 filelist 解析和 prepare 自动 wrapper 生成，未运行 elab/lint/sim 全流程；用户可在 GUI 中创建工程后继续验证后续步骤。
+
+# 第 148 次 开发
+
+## 开发目标
+
+将标准 CL3 示例目录从 `/home/luyoung/ecos-studio/ecc-fe/examples/cl3 _std` 规整为 `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std`，避免示例路径带空格导致用户选择 filelist 或外部工具读取时产生歧义。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/`
+  - 由原 `/home/luyoung/ecos-studio/ecc-fe/examples/cl3 _std/` 改名而来，文件内容保持标准 CPU 示例适配后的状态。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 将 `CL3_STD_ROOT` 测试路径从 `examples/cl3 _std` 更新为 `examples/cl3_std`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 同步修正第 147 次开发记录中的示例路径，并记录本次目录改名。
+
+## 验证情况
+
+- 已执行 `rg -n "cl3 _std" . -S`，确认旧目录名无残留引用。
+- 已执行 `PrepareStep._parse_sv_filelist('/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f')` 轻量检查，确认 68 个 RTL 文件全部存在、包含 `ecos_user_cpu_top`、不包含 `ysyx_00000000`、不包含 `import "DPI-C"`。
+- 已执行 `python3 -m py_compile test/test_examples.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_examples.py`，7 个用例通过。
+- 已用临时 workspace 执行 `standard-cpu-filelist + cl3_std/filelist.cpu.f` 的 prepare 验证，结果为 `Success`，确认生成 `generated_standard_cpu_wrapper.sv`，最终 compatibility alias 数量为 1。
+- 已执行 `git -C ecc-fe diff --check` 和 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、merge、push、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次仅验证 filelist 解析、示例测试和 prepare 自动 wrapper 生成，未运行 elab/lint/sim 全流程；用户可在 GUI 中继续测试后续步骤。
