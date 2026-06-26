@@ -280,8 +280,19 @@ export class DesktopRuntimeManager {
     }
 
     if (isLongRunning) {
-      runtimeLock = await acquireRuntimeLock(this.runtimeLockRoot, workspaceScope.scope, jobId)
+      this.activeLongRunningJobsByScope.set(workspaceScope.scope, jobId)
+      try {
+        runtimeLock = await acquireRuntimeLock(this.runtimeLockRoot, workspaceScope.scope, jobId)
+      } catch (error) {
+        if (this.activeLongRunningJobsByScope.get(workspaceScope.scope) === jobId) {
+          this.activeLongRunningJobsByScope.delete(workspaceScope.scope)
+        }
+        throw error
+      }
       if (!runtimeLock) {
+        if (this.activeLongRunningJobsByScope.get(workspaceScope.scope) === jobId) {
+          this.activeLongRunningJobsByScope.delete(workspaceScope.scope)
+        }
         const result = createResult(
           request.cmd,
           'warning',
@@ -301,7 +312,6 @@ export class DesktopRuntimeManager {
         }, listener)
         return result
       }
-      this.activeLongRunningJobsByScope.set(workspaceScope.scope, jobId)
     }
 
     this.emit({

@@ -209,14 +209,15 @@ describe('DesktopRuntimeManager', () => {
   it('blocks overlapping long-running ECC commands for the same workspace directory', async () => {
     let release!: () => void
     const listener = vi.fn()
+    const adapterExecute = vi.fn(() => new Promise<DesktopCliCommandResult>((resolve) => {
+      release = () => resolve(result({
+        cmd: 'rtl2gds',
+        message: ['done'],
+      }))
+    }))
     const manager = createManager({
       adapter: {
-        execute: vi.fn(() => new Promise<DesktopCliCommandResult>((resolve) => {
-          release = () => resolve(result({
-            cmd: 'rtl2gds',
-            message: ['done'],
-          }))
-        })),
+        execute: adapterExecute,
       },
     })
 
@@ -244,6 +245,9 @@ describe('DesktopRuntimeManager', () => {
       type: 'failed',
     }))
 
+    await vi.waitFor(() => {
+      expect(adapterExecute).toHaveBeenCalledTimes(1)
+    })
     release()
     await expect(first).resolves.toMatchObject({ ok: true })
   })
