@@ -172,19 +172,37 @@ describe('ResourceManagerService', () => {
     const pdksDir = join(root, 'data', 'pdks')
     const packagedBin = join(root, 'packaged', 'binaries')
     const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
+    const slangRoot = join(toolsDir, 'slang', '10.0')
+    const verilatorRoot = join(toolsDir, 'verilator', '5.046')
+    const riscvRoot = join(toolsDir, 'riscv-toolchain', 'rv32')
+    const surferRoot = join(toolsDir, 'surfer', '0.4.0')
     const duplicateRoot = join(toolsDir, 'duplicate', '1.0')
     const inactiveRoot = join(toolsDir, 'inactive', '1.0')
     const missingRoot = join(toolsDir, 'missing', '1.0')
     const ics55Root = join(pdksDir, 'ics55', '1.10.100')
     await mkdir(join(yosysRoot, 'bin'), { recursive: true })
+    await mkdir(join(slangRoot, 'bin'), { recursive: true })
+    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(join(riscvRoot, 'bin'), { recursive: true })
+    await mkdir(surferRoot, { recursive: true })
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
     await mkdir(join(inactiveRoot, 'bin'), { recursive: true })
     await mkdir(ics55Root, { recursive: true })
     await mkdir(resourcesDir, { recursive: true })
     await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(surferRoot, 'index.html'), '<!doctype html>\n', 'utf8')
+    await writeFile(join(surferRoot, 'integration.js'), 'function register_message_listener() {}\n', 'utf8')
+    await writeFile(join(surferRoot, 'surfer.js'), 'export default async function init() {}\n', 'utf8')
+    await writeFile(join(surferRoot, 'surfer_bg.wasm'), 'wasm', 'utf8')
     await writeFile(join(duplicateRoot, 'bin', 'duplicate'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(inactiveRoot, 'bin', 'inactive'), '#!/bin/sh\n', 'utf8')
     await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
+    await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
+    await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
+    await chmod(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), 0o755)
     await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
     await chmod(join(inactiveRoot, 'bin', 'inactive'), 0o755)
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
@@ -205,6 +223,43 @@ describe('ResourceManagerService', () => {
           version: '1.0',
           path: duplicateRoot,
           executable: 'bin/duplicate',
+          active: true,
+          managed: true,
+        },
+        'tool:slang': {
+          type: 'tool',
+          name: 'slang',
+          version: '10.0',
+          path: slangRoot,
+          executable: 'bin/slang',
+          active: true,
+          managed: true,
+        },
+        'tool:verilator': {
+          type: 'tool',
+          name: 'verilator',
+          version: '5.046',
+          path: verilatorRoot,
+          executable: 'bin/verilator',
+          active: true,
+          managed: true,
+        },
+        'tool:riscv-toolchain': {
+          type: 'tool',
+          name: 'riscv-toolchain',
+          version: 'rv32',
+          path: riscvRoot,
+          executable: 'bin/riscv32-unknown-elf-gcc',
+          detected_executables: ['bin/riscv32-unknown-elf-gcc'],
+          active: true,
+          managed: true,
+        },
+        'tool:surfer': {
+          type: 'tool',
+          name: 'surfer',
+          version: '0.4.0',
+          path: surferRoot,
+          executable: 'index.html',
           active: true,
           managed: true,
         },
@@ -269,10 +324,20 @@ describe('ResourceManagerService', () => {
       packagedBin,
       join(yosysRoot, 'bin'),
       join(duplicateRoot, 'bin'),
+      join(slangRoot, 'bin'),
+      join(verilatorRoot, 'bin'),
+      join(riscvRoot, 'bin'),
       '/usr/bin',
     ])
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(yosysRoot)
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
+    expect(env.ECOS_SLANG).toBe(join(slangRoot, 'bin', 'slang'))
+    expect(env.ECOS_VERILATOR).toBe(join(verilatorRoot, 'bin', 'verilator'))
+    expect(env.VERILATOR_ROOT).toBe(verilatorRoot)
+    expect(env.RISCV_PREFIX).toBe('riscv32-unknown-elf-')
+    expect(env.RISCV).toBe(riscvRoot)
+    expect(env.RISCV_TOOLCHAIN).toBe(riscvRoot)
+    expect(env.ECOS_SURFER_ASSETS_PATH).toBe(surferRoot)
     expect(env.CHIPCOMPILER_ICS55_PDK_ROOT).toBe(ics55Root)
     expect(env.ICS55_PDK_ROOT).toBe(ics55Root)
     expect(env.KEEP_ME).toBe('yes')

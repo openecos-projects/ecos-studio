@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { access, readFile, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
@@ -17,6 +17,8 @@ const WAVEFORM_EXTENSIONS = new Set(['.fst', '.ghw', '.vcd'])
 interface ProjectScopeProvider {
   requestProjectPathAccess(path: string): Promise<string>
 }
+
+type SurferAssetsPathProvider = () => Promise<string | null | undefined>
 
 interface ProtocolRegistrar {
   handle(scheme: string, handler: (request: Request) => Promise<Response>): void
@@ -37,10 +39,12 @@ interface ProtocolRegistrar {
 
 export interface SurferProtocolServiceOptions {
   appPath?: string
+  env?: NodeJS.ProcessEnv
   isPackaged?: boolean
   projectScopeProvider: ProjectScopeProvider
   resourcesPath?: string
   surferAssetsPath?: string
+  surferAssetsPathProvider?: SurferAssetsPathProvider
 }
 
 let schemesRegistered = false
@@ -65,12 +69,14 @@ export function registerSurferProtocolSchemes(protocol: ProtocolRegistrar): void
 export class SurferProtocolService {
   private readonly projectScopeProvider: ProjectScopeProvider
   private readonly surferAssetsPath: string
+  private readonly surferAssetsPathProvider?: SurferAssetsPathProvider
   private readonly assetCache = new Map<string, Buffer>()
   private registered = false
 
   constructor(options: SurferProtocolServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
     this.surferAssetsPath = options.surferAssetsPath ?? resolveSurferAssetsPath(options)
+    this.surferAssetsPathProvider = options.surferAssetsPathProvider
   }
 
   register(protocol: ProtocolRegistrar): void {
@@ -105,12 +111,13 @@ export class SurferProtocolService {
   }
 
   private async buildSurferHtml(): Promise<Buffer> {
-    const htmlCacheKey = '__surfer_html__'
+    const assetsPath = await this.currentSurferAssetsPath()
+    const htmlCacheKey = `${assetsPath}:__surfer_html__`
     const cached = this.assetCache.get(htmlCacheKey)
     if (cached) return cached
 
-    let text = (await this.readSurferAsset('index.html')).toString('utf8')
-    const integrationScript = (await this.readSurferAsset('integration.js')).toString('utf8')
+    let text = (await this.readSurferAssetFrom(assetsPath, 'index.html')).toString('utf8')
+    const integrationScript = (await this.readSurferAssetFrom(assetsPath, 'integration.js')).toString('utf8')
     const setupHooks = `
       try {
         ${integrationScript}
@@ -164,13 +171,29 @@ export class SurferProtocolService {
   }
 
   private async readSurferAsset(asset: string): Promise<Buffer> {
+    return await this.readSurferAssetFrom(await this.currentSurferAssetsPath(), asset)
+  }
+
+  private async readSurferAssetFrom(assetsPath: string, asset: string): Promise<Buffer> {
     const key = asset || 'index.html'
-    const cached = this.assetCache.get(key)
+    const cacheKey = `${assetsPath}:${key}`
+    const cached = this.assetCache.get(cacheKey)
     if (cached) return cached
 
-    const body = await readFile(join(this.surferAssetsPath, key))
-    this.assetCache.set(key, body)
+    const body = await readFile(join(assetsPath, key))
+    this.assetCache.set(cacheKey, body)
     return body
+  }
+
+  private async currentSurferAssetsPath(): Promise<string> {
+    const resourcePath = (await this.surferAssetsPathProvider?.())?.trim()
+    if (resourcePath && await isSurferAssetsPathReady(resourcePath)) {
+      return resourcePath
+    }
+    if (await isSurferAssetsPathReady(this.surferAssetsPath)) {
+      return this.surferAssetsPath
+    }
+    throw new Error('Surfer waveform viewer assets are not installed. Install the Surfer resource in Resource Manager.')
   }
 
   private async waveformResponse(request: Request, url: URL): Promise<Response> {
@@ -246,14 +269,30 @@ export function surferWaveformUrl(path: string): string {
 
 export function resolveSurferAssetsPath(options: {
   appPath?: string
+  env?: NodeJS.ProcessEnv
   isPackaged?: boolean
   resourcesPath?: string
 } = {}): string {
-  if (options.isPackaged && options.resourcesPath) {
-    return join(options.resourcesPath, 'surfer')
+  const resourceManagedPath = options.env?.ECOS_SURFER_ASSETS_PATH?.trim()
+  if (resourceManagedPath) {
+    return resourceManagedPath
   }
   if (options.appPath) {
     return join(options.appPath, 'resources', 'surfer')
   }
   return fileURLToPath(new URL('../../resources/surfer', import.meta.url))
+}
+
+export async function isSurferAssetsPathReady(path: string): Promise<boolean> {
+  try {
+    await Promise.all([
+      access(join(path, 'index.html')),
+      access(join(path, 'integration.js')),
+      access(join(path, 'surfer.js')),
+      access(join(path, 'surfer_bg.wasm')),
+    ])
+    return true
+  } catch {
+    return false
+  }
 }

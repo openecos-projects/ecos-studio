@@ -3208,7 +3208,7 @@ async function loadCurrentWaveform(): Promise<void> {
     window.setTimeout(() => {
       if (token === waveformLoadToken && !surferReady.value) {
         waveformLoading.value = false
-        waveformError.value = 'Surfer viewer is not ready. Check bundled Surfer assets and reload Wave.'
+        waveformError.value = 'Surfer viewer is not ready. Install the Surfer resource in Resource Manager and reload Wave.'
       }
     }, 12000)
     return

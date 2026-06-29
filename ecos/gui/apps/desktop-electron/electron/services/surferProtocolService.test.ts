@@ -64,7 +64,7 @@ afterEach(async () => {
 })
 
 describe('SurferProtocolService', () => {
-  it('serves the Surfer viewer from bundled assets without runtime network fetch', async () => {
+  it('serves the Surfer viewer from local assets without runtime network fetch', async () => {
     const surferAssetsPath = await createSurferAssets()
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -89,7 +89,7 @@ describe('SurferProtocolService', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('serves local Surfer static assets from the bundled asset directory', async () => {
+  it('serves local Surfer static assets from the configured asset directory', async () => {
     const surferAssetsPath = await createSurferAssets()
     const harness = createProtocolHarness()
     const service = new SurferProtocolService({
@@ -105,6 +105,26 @@ describe('SurferProtocolService', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toContain('application/javascript')
     await expect(response.text()).resolves.toContain('init')
+  })
+
+  it('prefers Resource Manager-installed Surfer assets when available', async () => {
+    const fallbackAssetsPath = await createSurferAssets()
+    const resourceAssetsPath = await createSurferAssets()
+    await writeFile(join(resourceAssetsPath, 'surfer.js'), 'export default async function resourceManagedInit() {}')
+    const harness = createProtocolHarness()
+    const service = new SurferProtocolService({
+      projectScopeProvider: {
+        requestProjectPathAccess: async (path) => path,
+      },
+      surferAssetsPath: fallbackAssetsPath,
+      surferAssetsPathProvider: async () => resourceAssetsPath,
+    })
+
+    service.register(harness.protocol)
+    const response = await harness.request('ecos-surfer://viewer/surfer.js')
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toContain('resourceManagedInit')
   })
 
   it('keeps waveform files local and scoped through the project scope provider', async () => {
@@ -130,11 +150,16 @@ describe('SurferProtocolService', () => {
     expect(requestProjectPathAccess).toHaveBeenCalledWith(waveform)
   })
 
-  it('resolves packaged and development Surfer asset locations', () => {
+  it('resolves Resource Manager and development Surfer asset locations', () => {
+    expect(resolveSurferAssetsPath({
+      env: { ECOS_SURFER_ASSETS_PATH: '/data/ecos/tools/surfer/0.4.0' },
+      isPackaged: true,
+      resourcesPath: '/opt/ecos/resources',
+    })).toBe('/data/ecos/tools/surfer/0.4.0')
     expect(resolveSurferAssetsPath({
       isPackaged: true,
       resourcesPath: '/opt/ecos/resources',
-    })).toBe('/opt/ecos/resources/surfer')
+    })).not.toBe('/opt/ecos/resources/surfer')
     expect(resolveSurferAssetsPath({
       appPath: '/repo/ecos/gui/apps/desktop-electron',
       isPackaged: false,

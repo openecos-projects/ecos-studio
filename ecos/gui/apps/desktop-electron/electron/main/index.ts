@@ -130,9 +130,14 @@ function getDesktopServices() {
   })
   const surferProtocolService = new SurferProtocolService({
     appPath: app.getAppPath(),
+    env: runtimeEnv,
     isPackaged: app.isPackaged,
     projectScopeProvider: projectScopeService,
     resourcesPath: process.resourcesPath,
+    surferAssetsPathProvider: async () => {
+      const env = await runtimeEnvProvider()
+      return env.ECOS_SURFER_ASSETS_PATH
+    },
   })
   surferProtocolService.register(protocol)
   const layoutViewerService = new LayoutViewerService({

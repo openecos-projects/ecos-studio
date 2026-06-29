@@ -10164,3 +10164,111 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `/home/luyoung/ecos-studio/ecc` 子仓库内部仍显示嵌套 submodule dirty：`chipcompiler/thirdparty/ecc-dreamplace` 和 `chipcompiler/thirdparty/ecc-tools`。本次不清理它们，避免误动子仓库内部状态。
+
+# 第 154 次 开发
+
+## 开发目标
+
+按用户澄清的方向接入远端 Resource Manager 工具，并同步删除对应本地工具依赖：`ecc-fe` 不再携带 Slang / Verilator 本地二进制、头文件和源码子模块；Electron 侧改为通过 Resource Manager 安装目录向前端 flow 注入 Slang、Verilator、Yosys、RISC-V toolchain、Surfer 的运行时环境。
+
+## 新增文件
+
+- 无新增文件。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.gitmodules`
+  - 移除 `fecompiler/thirdparty/slang` 和 `fecompiler/thirdparty/verilator` 子模块配置。
+- `/home/luyoung/ecos-studio/ecc-fe/BUILD.bazel`
+  - 移除测试和示例 target 对 `fecompiler/tools/slang/**`、`fecompiler/tools/verilator/**` repo-local 工具 payload 的 data 依赖。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 将 Third-party Tools 说明改为 Resource Manager / PATH 驱动的工具契约。
+  - 明确 `ECOS_SLANG`、`ECOS_VERILATOR`、`RISCV_PREFIX`、`ECOS_SURFER_ASSETS_PATH` 等运行时入口。
+- `/home/luyoung/ecos-studio/ecc-fe/docs/fe-flow.md`
+  - 将 `elab_slang`、`lint_verilator` 的工具来源说明改成 Resource Manager / PATH。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/README`
+  - 删除从源码构建 Slang / Verilator 并安装到 repo-local 路径的旧说明。
+  - 保留 RT-Thread BSP 说明，并补充工具应由 Resource Manager 或 PATH 提供。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/runner.py`
+  - 删除 repo-local `fecompiler/tools/slang/bin/slang` 查找逻辑。
+  - 改为优先使用 `ECOS_SLANG` / `SLANG`，否则使用 PATH 中的 `slang`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - 删除 repo-local Verilator binary/include 查找逻辑。
+  - 改为优先使用 `ECOS_VERILATOR` / `VERILATOR`，否则使用 PATH 中的 `verilator`。
+  - 删除 Verilator lint/sim 命令里的 repo-local include 注入。
+  - RISC-V toolchain 前缀探测增加 `riscv32-unknown-elf-` 和 `riscv64-unknown-elf-`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_flow.py`
+  - 测试 skip 条件改成只检查 PATH 中的 `slang` / `verilator`。
+  - RISC-V toolchain 探测增加 RV32/RV64 unknown-elf 前缀。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_matrix_flow.py`
+  - 同步移除 repo-local tool ready 检查。
+  - 同步增加 RISC-V unknown-elf 前缀探测。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_rtthread_flow.py`
+  - 同步移除 repo-local tool ready 检查。
+  - 同步增加 RISC-V unknown-elf 前缀探测。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager runtime env 注入扩展为工具能力识别：从 installed tool 的 executable 列表识别 `yosys`、`slang`、`verilator`、RISC-V gcc 前缀。
+  - 注入 `ECOS_SLANG`、`ECOS_VERILATOR`、`VERILATOR_ROOT`、`RISCV_PREFIX`、`RISCV`、`RISCV_TOOLCHAIN`、`ECOS_SURFER_ASSETS_PATH`。
+  - 安装工具时按工具类型选择更稳定的 executable，例如 `bin/slang`、`bin/verilator`、RISC-V gcc、Surfer `index.html`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 Resource Manager runtime env 注入测试覆盖 Slang、Verilator、RISC-V toolchain、Surfer。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - Surfer viewer 改为优先使用 Resource Manager 提供的本地资源路径。
+  - Wave 打开时可动态读取最新 `ECOS_SURFER_ASSETS_PATH`，避免安装 Surfer 后必须重启。
+  - 缺少 Surfer 资源时返回明确的安装提示。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 增加 Resource Manager-installed Surfer assets 优先级测试。
+  - 保持无运行时网络 fetch 的回归测试。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/main/index.ts`
+  - 创建 Surfer protocol service 时接入 Resource Manager runtime env provider。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron-builder.yml`
+  - 删除 packaged `extraResources/surfer`，Surfer 不再作为 Electron 包内固定资源携带。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - Wave viewer 超时提示改为提示安装 Resource Manager Surfer 资源。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次远端工具接入和本地依赖删除。
+
+## 删除文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/slang`
+  - 删除 Slang 源码子模块 gitlink。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/verilator`
+  - 删除 Verilator 源码子模块 gitlink。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/bin/*`
+  - 删除 repo-local Slang 可执行文件。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/include/**`
+  - 删除 repo-local Slang headers。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/share/**`
+  - 删除 repo-local Slang pkgconfig 等安装产物。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/bin/*`
+  - 删除 repo-local Verilator 可执行文件。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/include/**`
+  - 删除 repo-local Verilator runtime headers/sources。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/examples/**`
+  - 删除 repo-local Verilator 示例文件。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/verilator-config.cmake`
+  - 删除 repo-local Verilator CMake 配置。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/verilator-config-version.cmake`
+  - 删除 repo-local Verilator CMake 版本配置。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/resources/surfer/**`
+  - 删除 Electron bundled Surfer 静态资源，后续由 Resource Manager 管理。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile ecc-fe/fecompiler/tools/slang/runner.py ecc-fe/fecompiler/tools/verilator/runner.py ecc-fe/test/test_cpu_soc_flow.py ecc-fe/test/test_cpu_soc_matrix_flow.py ecc-fe/test/test_cpu_soc_rtthread_flow.py`，通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/surferProtocolService.test.ts`，通过：2 个测试文件、17 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已执行旧路径扫描：`fecompiler/tools/slang/bin`、`fecompiler/tools/verilator/bin`、`fecompiler/tools/verilator/include`、`thirdparty/slang`、`thirdparty/verilator`、`app.surfer-project.org`、`Check network access` 均无运行时代码残留命中。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未执行真实 Verilator/Slang/Yosys/RISC-V 工具链长流程或 CPU/SoC 矩阵仿真。
+
+## 已知后续风险
+
+- 当前远端 `https://emin017.github.io/ecos-registry/tool-registry.json` 仍只有 `yosys` 和 `ics55`，尚未发布 `slang`、`verilator`、`riscv-toolchain`、`surfer` 条目；本次完成的是 ECOS Studio/ecc-fe 侧接入和去本地依赖。
+- 如果用户没有通过 Resource Manager 安装对应资源，`ecc-fe` 会依赖 PATH 中已有工具；缺工具时步骤会按原工具执行失败路径报错。
+- Surfer 不再随 Electron 包携带，打包产物必须能通过 Resource Manager 安装 Surfer assets 后才能打开波形。
+- `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。

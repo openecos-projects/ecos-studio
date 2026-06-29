@@ -231,9 +231,24 @@ export class ResourceManagerService {
     const manifest = await this.readRuntimeManifest()
     const toolBinDirs: string[] = []
     let activeYosysRoot: string | null = null
+    let activeSurferRoot: string | null = null
 
     for (const entry of Object.values(manifest.installed)) {
       if (!isToolEntry(entry) || !entry.active) continue
+      const toolKind = normalizeToolName(entry.name)
+      const toolBinDir = findToolBinDir(entry)
+
+      if (toolKind === 'surfer') {
+        if (await isSurferAssetsRoot(entry.path)) {
+          activeSurferRoot = entry.path
+        } else {
+          electronLogger.debug(
+            '[resources] Skipping runtime Surfer assets: missing index.html/surfer.js under %s',
+            entry.path,
+          )
+        }
+        continue
+      }
 
       const executablePath = join(entry.path, entry.executable)
       if (!await isUsableExecutable(executablePath, options.platform)) {
@@ -245,9 +260,25 @@ export class ResourceManagerService {
         continue
       }
 
-      toolBinDirs.push(dirname(executablePath))
-      if (entry.name === 'yosys') {
+      toolBinDirs.push(toolBinDir || dirname(executablePath))
+      const capabilities = detectToolCapabilities(entry)
+      if (toolKind === 'yosys' || toolKind === 'oss-cad-suite' || capabilities.has('yosys')) {
         activeYosysRoot = entry.path
+      }
+      if (toolKind === 'slang' || capabilities.has('slang')) {
+        env.ECOS_SLANG = join(entry.path, findExecutableByBasename(entry, 'slang') || entry.executable)
+      }
+      if (toolKind === 'verilator' || capabilities.has('verilator')) {
+        env.ECOS_VERILATOR = join(entry.path, findExecutableByBasename(entry, 'verilator') || entry.executable)
+        env.VERILATOR_ROOT = entry.path
+      }
+      if (toolKind === 'riscv-toolchain' || capabilities.has('riscv-toolchain')) {
+        const prefix = detectRiscvPrefix(entry.detected_executables, entry.executable)
+        if (prefix) {
+          env.RISCV_PREFIX = prefix
+        }
+        env.RISCV = entry.path
+        env.RISCV_TOOLCHAIN = entry.path
       }
     }
 
@@ -259,6 +290,9 @@ export class ResourceManagerService {
     if (activeYosysRoot) {
       env.CHIPCOMPILER_OSS_CAD_DIR = activeYosysRoot
       env.ECOS_ELECTRON_OSS_CAD_DIR = activeYosysRoot
+    }
+    if (activeSurferRoot) {
+      env.ECOS_SURFER_ASSETS_PATH = activeSurferRoot
     }
 
     for (const entry of Object.values(manifest.installed)) {
@@ -512,6 +546,7 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
 
       const detected = await detectExecutables(destination)
+      const executable = selectToolExecutable(name, detected)
       const manifest = await this.readManifest()
       manifest.installed[resourceId] = {
         type: 'tool',
@@ -521,7 +556,7 @@ export class ResourceManagerService {
         installed_at: utcNowIso(),
         sha256: asset.sha256,
         detected_executables: detected,
-        executable: detected[0] ?? `bin/${name}`,
+        executable,
         active: true,
         managed: true,
       }
@@ -1366,6 +1401,13 @@ async function isExistingDirectory(path: string): Promise<boolean> {
   }
 }
 
+async function isSurferAssetsRoot(path: string): Promise<boolean> {
+  return await pathExists(join(path, 'index.html'))
+    && await pathExists(join(path, 'integration.js'))
+    && await pathExists(join(path, 'surfer.js'))
+    && await pathExists(join(path, 'surfer_bg.wasm'))
+}
+
 async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promise<ResourceRegistry> {
   if (url.startsWith('file://')) {
     return parseRegistry(JSON.parse(await readFile(new URL(url), 'utf8')))
@@ -1399,6 +1441,91 @@ function isToolEntry(entry: unknown): entry is ToolInventoryEntry {
 
 function isPdkEntry(entry: unknown): entry is PdkInventoryEntry {
   return readRecord(entry).type === 'pdk'
+}
+
+function normalizeToolName(name: string): string {
+  return name.trim().toLowerCase().replace(/[_\s]+/g, '-')
+}
+
+function selectToolExecutable(name: string, detected: string[]): string {
+  const normalized = normalizeToolName(name)
+  if (normalized === 'surfer') {
+    return 'index.html'
+  }
+  const preferred = preferredExecutableNames(normalized)
+  for (const candidate of preferred) {
+    const match = detected.find((entry) => entry === candidate || entry.endsWith(`/${candidate}`))
+    if (match) return match
+  }
+  return detected[0] ?? `bin/${name}`
+}
+
+function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
+  const capabilities = new Set<string>()
+  const normalized = normalizeToolName(entry.name)
+  if (normalized === 'yosys' || normalized === 'oss-cad-suite') capabilities.add('yosys')
+  if (normalized === 'slang') capabilities.add('slang')
+  if (normalized === 'verilator') capabilities.add('verilator')
+  if (normalized === 'riscv-toolchain') capabilities.add('riscv-toolchain')
+
+  for (const executable of [entry.executable, ...entry.detected_executables]) {
+    const name = basename(executable)
+    if (name === 'yosys') capabilities.add('yosys')
+    if (name === 'slang') capabilities.add('slang')
+    if (name === 'verilator') capabilities.add('verilator')
+    if (name.endsWith('gcc') && detectRiscvPrefix([executable], '')) {
+      capabilities.add('riscv-toolchain')
+    }
+  }
+  return capabilities
+}
+
+function findToolBinDir(entry: ToolInventoryEntry): string | null {
+  const candidate = entry.detected_executables.find((item) => dirname(item) === 'bin')
+  return candidate ? join(entry.path, dirname(candidate)) : null
+}
+
+function findExecutableByBasename(entry: ToolInventoryEntry, name: string): string | null {
+  return [entry.executable, ...entry.detected_executables].find((item) => basename(item) === name) ?? null
+}
+
+function preferredExecutableNames(normalizedName: string): string[] {
+  if (normalizedName === 'slang') {
+    return ['bin/slang', 'slang']
+  }
+  if (normalizedName === 'verilator') {
+    return ['bin/verilator', 'verilator']
+  }
+  if (normalizedName === 'yosys' || normalizedName === 'oss-cad-suite') {
+    return ['bin/yosys', 'yosys']
+  }
+  if (normalizedName === 'riscv-toolchain') {
+    return [
+      'bin/riscv32-unknown-elf-gcc',
+      'riscv32-unknown-elf-gcc',
+      'bin/riscv64-unknown-elf-gcc',
+      'riscv64-unknown-elf-gcc',
+      'bin/riscv64-none-elf-gcc',
+      'riscv64-none-elf-gcc',
+      'bin/riscv-none-elf-gcc',
+      'riscv-none-elf-gcc',
+    ]
+  }
+  if (normalizedName === 'surfer') {
+    return ['index.html']
+  }
+  return [`bin/${normalizedName}`, normalizedName]
+}
+
+function detectRiscvPrefix(detected: string[], executable: string): string {
+  const candidates = [executable, ...detected]
+  for (const candidate of candidates) {
+    const basenameOnly = basename(candidate)
+    const match = /^(riscv(?:32|64)?-[^-]+-[^-]+-)gcc$/.exec(basenameOnly)
+      ?? /^(riscv(?:32|64)?-[^-]+-)gcc$/.exec(basenameOnly)
+    if (match?.[1]) return match[1]
+  }
+  return ''
 }
 
 function resourceNameFromId(resourceId: string, prefix: 'tool' | 'pdk'): string {
