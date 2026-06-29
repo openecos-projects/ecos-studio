@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ResourceItem } from '@/api/plugin'
 import {
   formatResourceSize,
+  frontendFlowTagsFor,
   managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
@@ -50,6 +51,40 @@ describe('pluginToolsRows', () => {
       statusKind: 'available',
       statusText: 'Available',
     })
+    expect(row.isFrontendTool).toBe(false)
+    expect(row.flowTags).toEqual([])
+  })
+
+  it('marks ECC-FE frontend tool resources with flow tags', () => {
+    const yosys = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'Yosys from the OSS CAD Suite distribution.',
+        category: 'synthesis',
+        status: 'available',
+        available_versions: ['2026-05-13'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+      }),
+      undefined,
+    )
+    const riscv = resource({
+      id: 'tool:riscv-toolchain',
+      type: 'tool',
+      name: 'riscv-toolchain',
+      display_name: 'RISC-V GNU Toolchain',
+      description: 'xPack RISC-V bare-metal GCC toolchain.',
+      category: 'toolchain',
+      status: 'available',
+      available_versions: ['15.2.0-1'],
+      managed_root: '/home/user/.local/share/ecos-studio/tools',
+    })
+
+    expect(yosys.isFrontendTool).toBe(true)
+    expect(yosys.flowTags).toEqual(['Review', 'Yosys', 'Lint', 'Sim'])
+    expect(frontendFlowTagsFor(riscv)).toEqual(['CPU Tests', 'CoreMark'])
   })
 
   it('maps active managed PDK to installed row', () => {

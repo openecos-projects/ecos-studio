@@ -10419,3 +10419,47 @@ fatal error: driver/difftest.h: No such file or directory
 - ECOS Studio 默认 registry URL 当前临时固定到用户 fork 的某个 commit；当 upstream registry PR 合并并发布后，需要改回 `https://emin017.github.io/ecos-registry/tool-registry.json`。
 - 用户 fork 的 `main` raw URL 存在短时间缓存，测试时仍可能读到旧 JSON；固定 commit URL 可避免此问题。
 - `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。
+
+# 第 158 次 开发
+
+## 开发目标
+
+优化 ECOS Studio Resource Manager 前端 GUI，让刚接入的 ECC-FE frontend 工具资源不再只是普通下载列表，而是能按 Review / Elab / Lint / Sim / Wave 的前端流程语义展示安装状态和用途。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/PluginToolsView.vue`
+  - 左侧资源分类新增 `Frontend Flow`，可只看 ECC-FE 前端相关工具。
+  - 表格上方新增 `Frontend Flow` 紧凑状态条，展示 Review、Elab、Lint、Sim、Wave 各步骤所需工具的安装覆盖情况。
+  - 资源行名称下方新增 flow 标签，例如 `Review`、`Yosys`、`Elab`、`Lint`、`Sim`、`CPU Tests`、`CoreMark`、`Wave`。
+  - Selected Resources 列表中同步展示所选资源对应的前端用途，便于批量下载前确认。
+  - 调整资源行最小高度和移动端状态条布局，避免新增标签挤压文字。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 为 Resource Manager 行数据增加 `flowTags` 和 `isFrontendTool` 字段。
+  - 新增 `frontendFlowTagsFor()`，将 `yosys` / OSS CAD Suite、`slang`、`verilator`、RISC-V toolchain、Surfer 映射到 ECC-FE 前端步骤。
+  - 补充 Slang、Surfer、RISC-V toolchain 的图标缩写和强调色。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加 ECC-FE frontend tool flow tag 映射测试。
+  - 确认普通 PDK 不会被标记为 frontend tool。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager GUI 前端工具视图优化。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、10 个测试用例。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未做真实 GUI 截图验证；需要用户启动 GUI 后确认 Resource Manager 在不同窗口尺寸下的观感。
+
+## 已知后续风险
+
+- `Frontend Flow` 步骤状态目前基于 registry 资源名称、显示名和描述做语义映射；如果未来 registry 改名或引入更复杂工具包，最好在 registry schema 中显式加入 capability 字段。
+- Verilator 当前通过 OSS CAD Suite / Yosys 资源能力间接覆盖，GUI 中不会单独出现一个 `Verilator` 资源，除非后续发布独立 Verilator 包或支持一个资源多 capability 展示。

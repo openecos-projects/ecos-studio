@@ -24,6 +24,8 @@ export interface ResourceRow {
   statusKind: StatusKind
   icon: string
   accent: string
+  flowTags: string[]
+  isFrontendTool: boolean
   progressPercent: number | null
   actions: ResourceAction[]
   resource: ResourceItem
@@ -32,6 +34,10 @@ export interface ResourceRow {
 const toolMeta: Record<string, { icon: string; accent: string }> = {
   openroad: { icon: 'O', accent: '#79c142' },
   yosys: { icon: 'Y', accent: '#63666d' },
+  slang: { icon: 'SV', accent: '#7c5fb4' },
+  surfer: { icon: 'W', accent: '#2f8f83' },
+  'riscv-toolchain': { icon: 'RV', accent: '#b35f3a' },
+  riscv: { icon: 'RV', accent: '#b35f3a' },
   klayout: { icon: 'K', accent: '#d99427' },
   magic: { icon: 'M', accent: '#6b7078' },
   netgen: { icon: 'N', accent: '#607d8b' },
@@ -82,6 +88,30 @@ function accentFor(resource: ResourceItem): string {
     return match[1].accent
   }
   return '#68707d'
+}
+
+export function frontendFlowTagsFor(resource: ResourceItem): string[] {
+  if (resource.type !== 'tool') return []
+  const haystack = `${resource.name} ${resource.display_name} ${resource.description}`.toLowerCase()
+  const tags: string[] = []
+
+  if (haystack.includes('yosys') || haystack.includes('oss cad')) {
+    tags.push('Review', 'Yosys')
+  }
+  if (haystack.includes('slang')) {
+    tags.push('Elab')
+  }
+  if (haystack.includes('verilator') || haystack.includes('oss cad')) {
+    tags.push('Lint', 'Sim')
+  }
+  if (haystack.includes('riscv')) {
+    tags.push('CPU Tests', 'CoreMark')
+  }
+  if (haystack.includes('surfer')) {
+    tags.push('Wave')
+  }
+
+  return [...new Set(tags)]
 }
 
 function progressPercentFor(progress: InstallProgress | undefined): number | null {
@@ -288,6 +318,7 @@ export function resourceToRow(
   const progressPercent = progressPercentFor(progress)
   const size = formatResourceSize(resource.size)
   const status = mapStatus(resource, progress)
+  const flowTags = frontendFlowTagsFor(resource)
 
   return {
     id: resource.id,
@@ -303,6 +334,8 @@ export function resourceToRow(
     statusKind: status.kind,
     icon: iconFor(resource),
     accent: accentFor(resource),
+    flowTags,
+    isFrontendTool: flowTags.length > 0,
     progressPercent,
     actions: resource.actions,
     resource,
