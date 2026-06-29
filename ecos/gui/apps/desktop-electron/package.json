@@ -14,13 +14,14 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml",
+    "prepare:native-layout-viewer": "node scripts/prepare-native-layout-viewer-binaries.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
+    "package": "pnpm run build && pnpm run prepare:native-layout-viewer && rm -rf release && electron-builder --config electron-builder.yml && pnpm run verify:package",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
     "@ecos-studio/shared": "workspace:*",
-    "@ecos-studio/tile-helper": "workspace:*",
     "@electron/rebuild": "^4.0.4",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.0.6",

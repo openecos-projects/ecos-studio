@@ -66,10 +66,6 @@ function registerHandlers() {
       watchProjectFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
     },
-    tileService: {
-      generate: vi.fn(),
-      getStatus: vi.fn(),
-    },
     workspaceResourceService: {
       getIndex: vi.fn(),
       readFlow: vi.fn(),
@@ -103,6 +99,9 @@ function registerHandlers() {
       kill: vi.fn(),
       resize: vi.fn(),
       write: vi.fn(),
+    },
+    layoutViewerService: {
+      open: vi.fn(),
     },
   }
 
@@ -187,8 +186,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesRemovePdkReference,
       desktopApiIpcChannels.resourcesImportPdkPath,
       desktopApiIpcChannels.resourcesRefreshRegistry,
-      desktopApiIpcChannels.tilesGenerate,
-      desktopApiIpcChannels.tilesStatus,
+      desktopApiIpcChannels.layoutViewerOpen,
       desktopApiIpcChannels.systemOpenExternal,
       desktopApiIpcChannels.cliCancel,
       desktopApiIpcChannels.cliExecute,
@@ -599,7 +597,7 @@ describe('registerIpc', () => {
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceReadProjectBinaryFile)?.(
         event,
-        '/tmp/project/.ecos/tile-cache/layout/route/cells.bin',
+        '/tmp/project/output/preview.bin',
       ),
     ).resolves.toEqual(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
     await handlers.get(desktopApiIpcChannels.workspaceWriteProjectTextFile)?.(
@@ -654,7 +652,7 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.workspaceService.readProjectBinaryFile).toHaveBeenCalledWith(
-      '/tmp/project/.ecos/tile-cache/layout/route/cells.bin',
+      '/tmp/project/output/preview.bin',
     )
     expect(services.workspaceService.writeProjectTextFile).toHaveBeenCalledWith(
       '/tmp/project/home/parameters.json',
@@ -663,55 +661,28 @@ describe('registerIpc', () => {
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
   })
 
-  it('delegates tile generation to the provided tile service', async () => {
+  it('delegates native layout viewer launches to the layout viewer service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
-    services.tileService.generate.mockResolvedValue({
-      baseUrl: 'file:///tmp/project/.ecos/tile-cache/layout/route',
-      outDir: '/tmp/project/.ecos/tile-cache/layout/route',
-      fromCache: true,
-    })
     const request = {
-      projectPath: '/tmp/project',
-      layoutJsonRelative: 'home/layout.json',
-      stepKey: 'route',
+      projectPath: '/tmp/project/home.json',
+      viewJsonPackageRoot: 'output/gcd_route_view',
     }
+    services.layoutViewerService.open.mockResolvedValue({
+      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
+      packageRoot: '/tmp/project/output/gcd_route_view',
+      spawned: true,
+    })
 
     await expect(
-      handlers.get(desktopApiIpcChannels.tilesGenerate)?.(event, request),
+      handlers.get(desktopApiIpcChannels.layoutViewerOpen)?.(event, request),
     ).resolves.toEqual({
-      baseUrl: 'file:///tmp/project/.ecos/tile-cache/layout/route',
-      outDir: '/tmp/project/.ecos/tile-cache/layout/route',
-      fromCache: true,
+      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
+      packageRoot: '/tmp/project/output/gcd_route_view',
+      spawned: true,
     })
 
-    expect(services.tileService.generate).toHaveBeenCalledWith(request)
-  })
-
-  it('delegates tile cache status checks to the provided tile service', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    services.tileService.getStatus.mockResolvedValue({
-      baseUrl: 'file:///tmp/project/.ecos/tile-cache/layout/route',
-      outDir: '/tmp/project/.ecos/tile-cache/layout/route',
-      fromCache: true,
-    })
-    const request = {
-      projectPath: '/tmp/project',
-      layoutJsonRelative: 'home/layout.json',
-      stepKey: 'route',
-    }
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.tilesStatus)?.(event, request),
-    ).resolves.toEqual({
-      baseUrl: 'file:///tmp/project/.ecos/tile-cache/layout/route',
-      outDir: '/tmp/project/.ecos/tile-cache/layout/route',
-      fromCache: true,
-    })
-
-    expect(services.tileService.getStatus).toHaveBeenCalledWith(request)
-    expect(services.tileService.generate).not.toHaveBeenCalled()
+    expect(services.layoutViewerService.open).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {
@@ -1048,40 +1019,6 @@ describe('registerIpc', () => {
     )
   })
 
-  it('logs tile generation failures in a single normalized warning before rethrowing', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    const error = Object.assign(
-      new Error("ENOENT: no such file or directory, realpath '/tmp/project/route.json'"),
-      {
-        code: 'ENOENT',
-        path: '/tmp/project/route.json',
-      },
-    )
-    services.tileService.generate.mockRejectedValue(error)
-    const request = {
-      projectPath: '/tmp/project',
-      layoutJsonRelative: 'route_ecc/output/minirv_route.json',
-      stepKey: 'route',
-    }
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.tilesGenerate)?.(event, request),
-    ).resolves.toEqual({
-      error: {
-        code: 'ENOENT',
-        message: "ENOENT: no such file or directory, realpath '/tmp/project/route.json'",
-        name: 'Error',
-      },
-      ok: false,
-    })
-
-    expect(electronLogger.warn).toHaveBeenCalledTimes(1)
-    expect(electronLogger.warn).toHaveBeenCalledWith(
-      '[tile] Missing layout JSON for step route: /tmp/project/route.json',
-      error,
-    )
-  })
 
   it('sends project file change notifications to the requesting renderer', async () => {
     const { handlers, services } = registerHandlers()

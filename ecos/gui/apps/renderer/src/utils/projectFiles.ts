@@ -53,11 +53,26 @@ export function getMimeTypeFromPath(path: string): string {
   }
 }
 
+function isGzipFilePath(path: string): boolean {
+  return path.toLowerCase().endsWith('.gz')
+}
+
+async function gunzipToText(bytes: Uint8Array): Promise<string> {
+  const stream = new Blob([bytes.slice()]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const buffer = await new Response(stream).arrayBuffer()
+  return new TextDecoder().decode(buffer)
+}
+
 export async function readProjectTextFile(
   path: string,
   options: ProjectFilePathOptions = {},
 ): Promise<string> {
   const resolvedPath = resolveProjectFilePath(path, options.projectPath)
+  if (isGzipFilePath(resolvedPath)) {
+    const bytes = await getDesktopApi().workspace.readProjectBinaryFile(resolvedPath)
+    return await gunzipToText(bytes)
+  }
+
   return await getDesktopApi().workspace.readProjectTextFile(resolvedPath)
 }
 

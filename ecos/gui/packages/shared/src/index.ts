@@ -13,6 +13,8 @@ export type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
+  LayoutViewerOpenRequest,
+  LayoutViewerOpenResult,
   PdkDetectedFiles,
   ScannedPdkDirectory,
   VersionInfo,
@@ -51,6 +53,24 @@ export type {
   DesktopShellSession,
   DesktopShellSessionOptions,
 } from './contracts/desktopShell.ts';
+export type {
+  DesktopAgentEvent,
+  DesktopAgentEventType,
+  DesktopAgentListSessionsRequest,
+  DesktopAgentListSessionsResponse,
+  DesktopAgentProviderRequest,
+  DesktopAgentResumeSessionRequest,
+  DesktopAgentResumeSessionResponse,
+  DesktopAgentSendMessageRequest,
+  DesktopAgentSendMessageResponse,
+  DesktopAgentSessionSummary,
+  DesktopAgentSetModeRequest,
+  DesktopAgentStartRequest,
+  DesktopAgentStartSessionRequest,
+  DesktopAgentStartSessionResponse,
+  DesktopAgentStatus,
+  DesktopAgentStatusState,
+} from './contracts/desktopAgent.ts';
 export {
   appMenuActionIds,
   desktopMenuEventIds,
@@ -80,7 +100,6 @@ export type {
   WorkspaceStepResource,
   WorkspaceTechResources,
 } from './types/workspaceResources.ts';
-export type { TileGenerationRequest, TileGenerationResult } from './types/tile.ts';
 export {
   isAbsoluteLocalPath,
   isWindowsDrivePath,

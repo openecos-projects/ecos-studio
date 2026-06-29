@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import type { DesktopCliCommandResult } from '@ecos-studio/shared'
 import { DesktopRuntimeManager, type DesktopRuntimeManagerOptions } from './desktopRuntimeManager'
+import { runtimeLockName } from './runtime/runtimeLocks'
 
 function createManager(
   options: Omit<DesktopRuntimeManagerOptions, 'runtimeLockRoot'> & {
@@ -164,12 +165,13 @@ describe('DesktopRuntimeManager', () => {
   })
 
   it('allows overlapping long-running ECC commands for different workspace directories', async () => {
-    const releases: Array<() => void> = []
+    const releases = new Map<string, () => void>()
     const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
-      releases.push(() => resolve(result({
+      const directory = String(request.data.directory)
+      releases.set(directory, () => resolve(result({
         cmd: request.cmd,
-        data: { directory: request.data.directory },
-        message: [`done ${request.data.directory}`],
+        data: { directory },
+        message: [`done ${directory}`],
       })))
     }))
     const manager = createManager({
@@ -193,13 +195,15 @@ describe('DesktopRuntimeManager', () => {
       expect(adapterExecute).toHaveBeenCalledTimes(2)
     })
 
-    releases[1]?.()
+    expect(releases.get('/work/b')).toBeDefined()
+    releases.get('/work/b')?.()
     await expect(second).resolves.toMatchObject({
       data: { directory: '/work/b' },
       ok: true,
     })
 
-    releases[0]?.()
+    expect(releases.get('/work/a')).toBeDefined()
+    releases.get('/work/a')?.()
     await expect(first).resolves.toMatchObject({
       data: { directory: '/work/a' },
       ok: true,
@@ -209,14 +213,15 @@ describe('DesktopRuntimeManager', () => {
   it('blocks overlapping long-running ECC commands for the same workspace directory', async () => {
     let release!: () => void
     const listener = vi.fn()
+    const adapterExecute = vi.fn(() => new Promise<DesktopCliCommandResult>((resolve) => {
+      release = () => resolve(result({
+        cmd: 'rtl2gds',
+        message: ['done'],
+      }))
+    }))
     const manager = createManager({
       adapter: {
-        execute: vi.fn(() => new Promise<DesktopCliCommandResult>((resolve) => {
-          release = () => resolve(result({
-            cmd: 'rtl2gds',
-            message: ['done'],
-          }))
-        })),
+        execute: adapterExecute,
       },
     })
 
@@ -244,6 +249,9 @@ describe('DesktopRuntimeManager', () => {
       type: 'failed',
     }))
 
+    await vi.waitFor(() => {
+      expect(adapterExecute).toHaveBeenCalledTimes(1)
+    })
     release()
     await expect(first).resolves.toMatchObject({ ok: true })
   })
@@ -294,6 +302,34 @@ describe('DesktopRuntimeManager', () => {
 
       releaseFirst()
       await expect(first).resolves.toMatchObject({ ok: true })
+    } finally {
+      await rm(runtimeLockRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('blocks commands when a shared runtime lock is still initializing', async () => {
+    const runtimeLockRoot = await mkdtemp(path.join(tmpdir(), 'ecos-runtime-lock-test-'))
+    try {
+      await mkdir(path.join(runtimeLockRoot, `${runtimeLockName('/work/demo')}.lock`))
+      const adapterExecute = vi.fn(async (request) => result({
+        cmd: request.cmd,
+        message: ['should not run'],
+      }))
+      const manager = createManager({
+        adapter: { execute: adapterExecute },
+        runtimeLockRoot,
+      })
+
+      await expect(manager.execute({
+        cmd: 'run_step',
+        data: { directory: '/work/demo', step: 'place', rerun: false },
+        source: 'button',
+      })).resolves.toMatchObject({
+        cmd: 'run_step',
+        ok: false,
+        response: 'warning',
+      })
+      expect(adapterExecute).not.toHaveBeenCalled()
     } finally {
       await rm(runtimeLockRoot, { force: true, recursive: true })
     }

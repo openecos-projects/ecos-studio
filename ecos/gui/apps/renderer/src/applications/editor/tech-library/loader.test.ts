@@ -36,7 +36,7 @@ describe('loadTechLibrary', () => {
     const reads: string[] = []
     const files: Record<string, unknown> = {
       '/workspace/demo/gcd_view/tech/layers.json': {
-        schema: 'ieda.view.v1',
+        schema: 'ecc.view.v1',
         kind: 'layers',
         count: 2,
         data: [
@@ -45,7 +45,7 @@ describe('loadTechLibrary', () => {
         ],
       },
       '/workspace/demo/gcd_view/tech/sites.json': {
-        schema: 'ieda.view.v1',
+        schema: 'ecc.view.v1',
         kind: 'sites',
         count: 1,
         data: [
@@ -53,7 +53,7 @@ describe('loadTechLibrary', () => {
         ],
       },
       '/workspace/demo/gcd_view/tech/vias.json': {
-        schema: 'ieda.view.v1',
+        schema: 'ecc.view.v1',
         kind: 'via_masters',
         count: 1,
         data: [
@@ -69,7 +69,7 @@ describe('loadTechLibrary', () => {
         ],
       },
       '/workspace/demo/gcd_view/tech/cell_masters.json': {
-        schema: 'ieda.view.v1',
+        schema: 'ecc.view.v1',
         kind: 'cell_masters',
         count: 1,
         data: [

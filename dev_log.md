@@ -10081,3 +10081,86 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 本次未启动 GUI 做视觉实测；需要用户在小窗口下确认 Home 三段面板的默认比例和拖拽手感是否合适。
 - 如果后续还希望 Home 底部左右两块也能横向拖拽，可再把 `home-lower-grid` 改为嵌套 horizontal Splitter。
+
+# 第 152 次 开发
+
+## 开发目标
+
+将当前 `ecc-fe-electron-cli` 分支对齐远端 `origin/main`，解析主仓库 merge 冲突，并盘点远端 main 当前 Resource Manager registry 中已有的工具和资源。
+
+## 新增文件
+
+- 无手工新增文件
+  - 本次 `origin/main` 合并本身带入了 native layout viewer、shared runtime、agent runtime 等一批新增文件，保持为主分支合并内容。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/main/index.ts`
+  - 合并 frontend-aware runtime、Surfer 本地波形协议服务与 main 的 native layout viewer service。
+  - 去掉已被 main 删除的旧 `TileService` 入口，避免引用不存在的 tile pipeline 文件。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/desktopRuntimeManager.ts`
+  - 采用 main 的 `SharedRuntimeManager` 架构，同时保留 frontend CLI 需要的 `catalog_list`、`validate_frontend_config` 命令支持。
+  - 保留当前分支已有的 `cancel` / `cancelAll` 对外接口，兼容 IPC 和应用退出取消逻辑。
+  - 将 adapter context 中的 `AbortSignal` 继续传递给 ECC/FE CLI adapter。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/runtime/sharedRuntimeManager.ts`
+  - 在 main 新增 shared runtime 基础上补齐 `signal`、取消任务跟踪、`cancel` / `cancelAll`、cancelled result 钩子。
+  - 修复锁获取失败时 active job 记录未清理的边界情况。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/projectScopeService.test.ts`
+  - 将 symlink 越界测试断言对齐当前实现返回的 `outside current project scope` 文案。
+- `/home/luyoung/ecos-studio/ecc`
+  - 按远端 `origin/main` 合并结果将主仓库记录的 ECC 后端子仓库指针更新到 `95d10c9`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 main 对齐、冲突解析和资源盘点。
+
+## 验证情况
+
+- 已执行 `git fetch origin --prune`，远端 `origin/main` 更新到 `4d4370a`。
+- 已执行 `git merge origin/main`，出现冲突后已解析并 stage。
+- 已执行 `git diff --check`，通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron test -- desktopRuntimeManager.test.ts sharedRuntimeManager.test.ts`，通过：37 个测试文件、240 个测试用例。
+- 已读取远端 Resource Manager registry：当前 schema 版本为 2，资源总数 2 个，其中 tool 1 个、PDK 1 个。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次未执行 commit、push、rebase、reset、clean。
+- 本次 merge 已经执行但尚未 commit，等待用户决定下一步。
+
+## 已知后续风险
+
+- `ecc` 子仓库内部显示嵌套 submodule dirty：`chipcompiler/thirdparty/ecc-dreamplace` 和 `chipcompiler/thirdparty/ecc-tools`。本次未清理它们，避免误动子仓库内部状态。
+- `ecc-fe` 子仓库仍保留用户本地修改：`examples/cl3_std/cl3_verilog/CL3Decode.sv`，本次未触碰。
+- 主仓库现在处于 merge resolved but uncommitted 状态，下一步需要用户确认是否提交这个 merge。
+
+# 第 153 次 开发
+
+## 开发目标
+
+按用户要求恢复 `ecc-fe/examples/cl3_std/cl3_verilog/CL3Decode.sv` 的本地修改，并提交当前已解析完成的 main 对齐结果。
+
+## 新增文件
+
+- 无手工新增文件
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/CL3Decode.sv`
+  - 已恢复到 `ecc-fe` 子仓库 `HEAD` 状态，清掉本地末尾空行差异。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次恢复文件和提交动作。
+
+## 验证情况
+
+- 已执行 `git -C ecc-fe diff -- examples/cl3_std/cl3_verilog/CL3Decode.sv`，确认目标文件无 diff。
+- 已执行 `git status --porcelain=v1 -uall | rg '^U|^AA|^DD|^AU|^UA|^DU|^UD' || true`，确认没有未解决冲突。
+- 将执行 `git diff --check` 做提交前空白检查。
+- 复用第 152 次开发已执行的 focused 测试结果：`pnpm --filter @ecos-studio/desktop-electron test -- desktopRuntimeManager.test.ts sharedRuntimeManager.test.ts` 通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、打包等构建/启动命令。
+- 本次按用户明确要求执行 commit；未执行 push、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/ecos-studio/ecc` 子仓库内部仍显示嵌套 submodule dirty：`chipcompiler/thirdparty/ecc-dreamplace` 和 `chipcompiler/thirdparty/ecc-tools`。本次不清理它们，避免误动子仓库内部状态。

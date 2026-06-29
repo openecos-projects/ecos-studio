@@ -1,0 +1,10 @@
+[package]
+name = "layoutpkg-probe"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+layoutpkg-reader = { path = "../../crates/layoutpkg-reader" }

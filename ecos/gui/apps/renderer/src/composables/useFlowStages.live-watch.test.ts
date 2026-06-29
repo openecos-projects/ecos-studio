@@ -16,7 +16,6 @@ const testState = vi.hoisted(() => ({
     'step-config': number
     maps: number
     logs: number
-    tiles: number
     all: number
   }> | null,
   watchProjectFile: vi.fn(),
@@ -106,7 +105,6 @@ describe('useFlowStages live project file watchers', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     })
     testState.projectFileWatchers.length = 0

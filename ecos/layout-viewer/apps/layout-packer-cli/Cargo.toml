@@ -1,0 +1,11 @@
+[package]
+name = "ecos-layout-packer"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+layoutpkg-packer = { path = "../../crates/layoutpkg-packer" }
+serde_json.workspace = true

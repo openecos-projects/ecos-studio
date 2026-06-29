@@ -13,7 +13,6 @@ const testState = vi.hoisted(() => ({
     'step-config': number
     maps: number
     logs: number
-    tiles: number
     all: number
   }> | null,
   getWorkspaceResourceIndexApi: vi.fn(),
@@ -183,7 +182,6 @@ describe('useHomeData live project file watchers', () => {
       'step-config': 0,
       maps: 0,
       logs: 0,
-      tiles: 0,
       all: 0,
     })
     testState.unmountCallbacks.length = 0

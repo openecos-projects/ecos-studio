@@ -22,31 +22,53 @@ function createRepoFixture(): { appPath: string; repoRoot: string; userDataPath:
 }
 
 describe('createEccCliRuntimeEnv', () => {
-  it('does not create a POSIX development wrapper when local ecc exists', () => {
+  it('prepends a repo ecc development shim when the submodule exists without a venv', () => {
     const fixture = createRepoFixture()
     mkdirSync(join(fixture.repoRoot, 'ecc'), { recursive: true })
     const pyprojectPath = join(fixture.repoRoot, 'ecc', 'pyproject.toml')
     writeFileSync(pyprojectPath, '[project]\nname = "ecc"\n')
+    const wrapperPath = join(fixture.repoRoot, 'ecos', 'scripts')
+    mkdirSync(wrapperPath, { recursive: true })
+    writeFileSync(join(wrapperPath, 'ecc-wrapper.sh'), '#!/usr/bin/env bash\n')
 
     const env = createEccCliRuntimeEnv({
       appPath: fixture.appPath,
       cwd: fixture.appPath,
       env: {
         HOME: '/home/ecos',
-        PATH: '/usr/bin',
+        PATH: '/home/ecos/.local/ecos/ecc:/usr/bin',
       },
       isPackaged: false,
       platform: 'linux',
       userDataPath: fixture.userDataPath,
     })
 
-    const wrapperPath = join(fixture.userDataPath, 'runtime-bin', 'ecc')
+    const runtimeBin = join(fixture.userDataPath, 'runtime-bin')
+    const shimPath = join(runtimeBin, 'ecc')
 
-    expect(env).toEqual({
-      HOME: '/home/ecos',
-      PATH: '/usr/bin',
+    expect(env.PATH).toBe(`${runtimeBin}:/home/ecos/.local/ecos/ecc:/usr/bin`)
+    expect(existsSync(shimPath)).toBe(true)
+  })
+
+  it('prepends the repo ecc venv bin directory ahead of host ecc installs', () => {
+    const fixture = createRepoFixture()
+    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '[project]\nname = "ecc"\n')
+    const venvBin = join(fixture.repoRoot, 'ecc', '.venv', 'bin')
+    mkdirSync(venvBin, { recursive: true })
+    writeFileSync(join(venvBin, 'ecc'), '#!/usr/bin/env bash\n')
+
+    const env = createEccCliRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        PATH: '/home/ecos/.local/ecos/ecc:/usr/bin',
+      },
+      isPackaged: false,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
     })
-    expect(existsSync(wrapperPath)).toBe(false)
+
+    expect(env.PATH).toBe(`${venvBin}:/home/ecos/.local/ecos/ecc:/usr/bin`)
   })
 
   it('leaves Windows development env unchanged', () => {

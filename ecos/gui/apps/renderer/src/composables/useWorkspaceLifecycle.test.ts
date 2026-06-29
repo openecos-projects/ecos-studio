@@ -205,7 +205,6 @@ describe('useWorkspaceLifecycle', () => {
       'step-config',
       'maps',
       'logs',
-      'tiles',
       'all',
     ]
 

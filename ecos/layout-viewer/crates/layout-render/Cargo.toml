@@ -1,0 +1,10 @@
+[package]
+name = "layout-render"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+layout-display = { path = "../layout-display" }
+layoutdb = { path = "../layoutdb" }
+layoutpkg-format = { path = "../layoutpkg-format" }

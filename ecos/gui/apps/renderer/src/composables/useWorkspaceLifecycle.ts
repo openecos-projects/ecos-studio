@@ -8,7 +8,6 @@ export const WORKSPACE_INVALIDATION_SCOPES = [
   'step-config',
   'maps',
   'logs',
-  'tiles',
   'all',
 ] as const
 
@@ -80,7 +79,6 @@ function createResourceVersions(): WorkspaceResourceVersions {
     'step-config': 0,
     maps: 0,
     logs: 0,
-    tiles: 0,
     all: 0,
   }
 }

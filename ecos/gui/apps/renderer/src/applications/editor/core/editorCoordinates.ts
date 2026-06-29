@@ -57,7 +57,7 @@ export function worldTopLeftFromDisplayBottomLeft(
 
 /**
  * DRC/EDA 轴对齐框（llx,lly,urx,ury 为显示坐标：左下原点、Y 向上）→ Pixi 世界 rect（左上 + 宽高，Y 向下）。
- * 与 `COORDINATES.md`、瓦片生成（Rust `gen_layout_tiles`）中 `dieH - y` 翻转一致；`worldHeight` 为 die 高度（与 `Editor.worldHeight` / `dieArea.h` 一致）。
+ * 与 `COORDINATES.md` 中的显示/世界 Y 轴翻转一致；`worldHeight` 为当前编辑器世界高度。
  */
 export function edaBBoxToWorldRect(
   llx: number,

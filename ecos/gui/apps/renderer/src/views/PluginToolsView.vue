@@ -612,6 +612,8 @@ async function openDocs(): Promise<void> {
   --warn-bg: color-mix(in srgb, var(--warn-color) 14%, transparent);
   --danger-color: #d85d5d;
   --danger-bg: color-mix(in srgb, var(--danger-color) 14%, transparent);
+  --dialog-inline-gutter: clamp(24px, 6vw, 96px);
+  --dialog-block-gutter: clamp(28px, 7vh, 64px);
   position: relative;
   display: flex;
   align-items: center;
@@ -714,12 +716,12 @@ async function openDocs(): Promise<void> {
   z-index: 2;
   display: flex;
   flex-direction: column;
-  width: min(1280px, calc(100% - 96px));
-  max-height: calc(100% - 64px);
-  min-height: 620px;
+  width: min(1280px, calc(100% - var(--dialog-inline-gutter)));
+  height: min(760px, calc(100% - var(--dialog-block-gutter)));
+  min-height: min(560px, calc(100% - var(--dialog-block-gutter)));
   margin: 0 auto;
-  padding: 36px 38px 38px;
-  overflow: auto;
+  padding: clamp(24px, 3.2vh, 36px) clamp(24px, 3vw, 38px) clamp(24px, 3.4vh, 38px);
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
   border-radius: 16px;
   background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
@@ -751,7 +753,7 @@ async function openDocs(): Promise<void> {
 .manager-header {
   flex: 0 0 auto;
   padding-right: 42px;
-  margin-bottom: 28px;
+  margin-bottom: clamp(18px, 3vh, 28px);
 }
 
 .manager-header h1 {
@@ -771,9 +773,10 @@ async function openDocs(): Promise<void> {
 /* ---- Grid ---- */
 .manager-grid {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) 240px;
+  grid-template-columns: minmax(170px, 200px) minmax(420px, 1fr) minmax(220px, 240px);
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
   flex: 1 1 auto;
 }
 
@@ -895,16 +898,17 @@ async function openDocs(): Promise<void> {
 .manager-table-panel {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   padding: 16px;
   overflow: hidden;
 }
 
 .manager-toolbar {
   display: grid;
-  grid-template-columns: minmax(120px, 160px) auto;
+  grid-template-columns: minmax(120px, 180px) minmax(0, auto);
   align-items: center;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: clamp(14px, 2.5vh, 24px);
 }
 
 .resource-search {
@@ -942,11 +946,18 @@ async function openDocs(): Promise<void> {
   justify-self: end;
   display: flex;
   align-items: center;
+  max-width: 100%;
   min-height: 36px;
   padding: 3px;
+  overflow-x: auto;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  scrollbar-width: none;
+}
+
+.resource-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .resource-tabs button {
@@ -1056,7 +1067,7 @@ async function openDocs(): Promise<void> {
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(180px, 2fr) 72px 68px 110px 90px;
+  grid-template-columns: 32px minmax(150px, 2fr) minmax(68px, 0.6fr) minmax(58px, 0.5fr) minmax(88px, 0.7fr) minmax(70px, auto);
   align-items: center;
   gap: 0;
 }
@@ -1160,7 +1171,7 @@ async function openDocs(): Promise<void> {
 .resource-copy small {
   display: block;
   overflow: hidden;
-  max-width: 260px;
+  max-width: min(260px, 100%);
   margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
@@ -1464,9 +1475,9 @@ async function openDocs(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  flex: 1;
+  flex: 1 1 0;
   overflow: auto;
-  min-height: 160px;
+  min-height: 0;
 }
 
 .selected-empty {
@@ -1611,6 +1622,7 @@ async function openDocs(): Promise<void> {
 .selected-actions {
   display: grid;
   gap: 10px;
+  flex: 0 0 auto;
   margin-top: auto;
 }
 
@@ -1716,37 +1728,66 @@ async function openDocs(): Promise<void> {
 }
 
 /* ---- Responsive ---- */
-@media (max-width: 1120px) {
+@media (max-width: 1240px) {
   .manager-dialog {
-    width: min(980px, calc(100% - 40px));
-    height: auto;
-    min-height: calc(100vh - 96px);
-    margin: 48px auto;
-    overflow: visible;
+    --dialog-inline-gutter: 40px;
+    --dialog-block-gutter: 40px;
+    width: min(980px, calc(100% - var(--dialog-inline-gutter)));
+    height: calc(100% - var(--dialog-block-gutter));
+    min-height: 0;
   }
 
   .manager-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding-right: 2px;
   }
 
   .manager-sidebar {
-    flex-direction: row;
-    gap: 16px;
+    flex: 0 0 auto;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .resource-nav {
-    flex: 1;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .resource-nav-item {
+    min-height: 42px;
+    padding: 0 12px;
   }
 
   .manager-help {
-    width: 220px;
-    flex-shrink: 0;
+    width: auto;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 12px 14px;
+  }
+
+  .manager-help p {
+    margin: 2px 0 0;
+  }
+
+  .manager-help button {
+    grid-column: auto;
+    justify-self: end;
+    margin-left: 12px;
+    white-space: nowrap;
+  }
+
+  .manager-table-panel {
+    flex: 0 0 clamp(280px, 42vh, 420px);
+    min-height: 280px;
   }
 
   .selected-panel {
-    max-height: 320px;
+    flex: 0 0 auto;
+    min-height: 220px;
+    max-height: none;
   }
 
   .selected-list {
@@ -1755,11 +1796,15 @@ async function openDocs(): Promise<void> {
 }
 
 @media (max-width: 767px) {
+  .resource-manager-view {
+    --dialog-inline-gutter: 24px;
+    --dialog-block-gutter: 24px;
+  }
+
   .manager-dialog {
     width: calc(100% - 24px);
+    height: calc(100% - var(--dialog-block-gutter));
     padding: 24px 18px;
-    margin: 24px auto;
-    min-height: calc(100vh - 48px);
   }
 
   .manager-sidebar {
@@ -1770,17 +1815,39 @@ async function openDocs(): Promise<void> {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .resource-nav-item {
+    min-height: 40px;
+  }
+
   .manager-help {
     width: auto;
   }
 
   .manager-toolbar {
     grid-template-columns: 1fr;
+    margin-bottom: 16px;
   }
 
   .resource-tabs {
     justify-self: stretch;
-    overflow-x: auto;
+  }
+
+  .manager-table-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .resource-table-head,
+  .resource-row {
+    grid-template-columns: 28px minmax(130px, 1fr) minmax(74px, auto) minmax(68px, auto);
+  }
+
+  .resource-table-head span:nth-child(3),
+  .resource-row > .resource-muted:nth-child(3),
+  .resource-table-head span:nth-child(4),
+  .resource-row > .resource-muted:nth-child(4) {
+    display: none;
   }
 
   .manager-close {

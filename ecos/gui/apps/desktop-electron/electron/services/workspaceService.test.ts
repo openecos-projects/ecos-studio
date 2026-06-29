@@ -202,10 +202,10 @@ describe('WorkspaceService', () => {
         service as WorkspaceService & {
           readProjectBinaryFile(path: string): Promise<Uint8Array>
         }
-      ).readProjectBinaryFile('/workspace/.ecos/tile-cache/layout/route/cells.bin'),
+      ).readProjectBinaryFile('/workspace/output/preview.bin'),
     ).resolves.toEqual(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
     expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-      '/workspace/.ecos/tile-cache/layout/route/cells.bin',
+      '/workspace/output/preview.bin',
     )
   })
 

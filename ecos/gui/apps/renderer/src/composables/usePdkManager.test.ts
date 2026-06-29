@@ -119,9 +119,8 @@ const desktopBridge = {
     scanPdkDirectory,
     watchProjectFile: async () => () => undefined,
   },
-  tiles: {
-    generate: async () => ({ baseUrl: '', outDir: '', fromCache: false }),
-    getStatus: async () => ({ baseUrl: '', outDir: '', fromCache: false }),
+  layoutViewer: {
+    open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
   },
   workspaceResources: {
     getIndex: async () => ({

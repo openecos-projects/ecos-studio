@@ -58,7 +58,7 @@ describe('ProjectScopeService', () => {
     await service.registerProjectRoot(root)
 
     await expect(service.requestProjectPathAccess(linkedPath)).rejects.toThrow(
-      'outside current project root',
+      'outside current project scope',
     )
   })
 

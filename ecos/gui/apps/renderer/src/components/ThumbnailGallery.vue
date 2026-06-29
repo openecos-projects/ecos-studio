@@ -83,6 +83,11 @@
         <div v-else-if="activeTab === InfoEnum.maps" class="w-full">
           <MapsGallery :maps-data="currentTabInfo as Record<string, MapInfoType>" @select="handleMapSelect" />
         </div>
+
+        <!-- Checklist 表格 -->
+        <div v-else-if="activeTab === InfoEnum.checklist" class="w-full h-full min-h-0">
+          <ChecklistTable :items="currentChecklistItems" />
+        </div>
       </div>
 
       <!-- 错误提示 -->
@@ -107,6 +112,8 @@ import { requestProjectPathAccess } from '@/utils/projectFs'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { convertRemoteToLocalPath } from '@/utils/projectPaths'
 import MapsGallery from './MapsGallery.vue'
+import ChecklistTable from './ChecklistTable.vue'
+import type { ChecklistItem } from '@/composables/useHomeData'
 import type { MapInfo as MapInfoType } from '../types'
 import { clearStepTabCache } from './thumbnailGalleryCache'
 
@@ -187,6 +194,9 @@ function getAnalysisIcon(key: string): string {
 // 存储每个 tab 的 info 数据（值可能是字符串路径或对象）
 const tabInfoCache = ref<Record<string, Record<string, unknown>>>({})
 
+// 存储每个 step 解析后的 checklist 条目
+const checklistItemsCache = ref<Record<string, ChecklistItem[]>>({})
+
 // 存储每个 tab 的错误信息
 const tabErrorCache = ref<Record<string, string | null>>({})
 
@@ -222,6 +232,11 @@ const currentTabInfo = computed(() => {
   if (!currentStep.value) return {}
   const cacheKey = `${currentStep.value}_${activeTab.value}`
   return tabInfoCache.value[cacheKey] || {}
+})
+
+const currentChecklistItems = computed(() => {
+  if (!currentStep.value) return []
+  return checklistItemsCache.value[`${currentStep.value}_checklist_items`] ?? []
 })
 
 // 定义带有 path 和 info 的对象类型
@@ -275,6 +290,49 @@ function convertToLocalPath(remotePath: string): string {
   return convertRemoteToLocalPath(remotePath, currentProject.value?.path ?? '')
 }
 
+function getChecklistPathFromTabInfo(info: Record<string, unknown>): string | null {
+  const path = info.path
+  return typeof path === 'string' && path.length > 0 ? path : null
+}
+
+async function loadChecklistItems(force = false): Promise<void> {
+  if (!currentStep.value) return
+
+  const itemsCacheKey = `${currentStep.value}_checklist_items`
+  if (!force && itemsCacheKey in checklistItemsCache.value) return
+
+  const tabCacheKey = `${currentStep.value}_${InfoEnum.checklist}`
+  const checklistPath = getChecklistPathFromTabInfo(tabInfoCache.value[tabCacheKey] ?? {})
+  if (!checklistPath) {
+    checklistItemsCache.value[itemsCacheKey] = []
+    return
+  }
+
+  if (!isDesktopRuntimeAvailable) {
+    checklistItemsCache.value[itemsCacheKey] = []
+    setTabError('Checklist is readable only in the ECOS Studio desktop runtime')
+    return
+  }
+
+  try {
+    const localPath = convertToLocalPath(checklistPath)
+    if (!(await requestProjectPathAccess(localPath))) {
+      checklistItemsCache.value[itemsCacheKey] = []
+      setTabError('No file-system access in current workspace scope')
+      return
+    }
+
+    const fileContent = await readProjectTextFile(localPath)
+    const data = JSON.parse(fileContent) as { checklist?: ChecklistItem[] }
+    checklistItemsCache.value[itemsCacheKey] = Array.isArray(data.checklist) ? data.checklist : []
+    setTabError(null)
+  } catch (err) {
+    console.error('loadChecklistItems error:', err)
+    checklistItemsCache.value[itemsCacheKey] = []
+    setTabError(err instanceof Error ? err.message : 'Failed to load checklist')
+  }
+}
+
 // 获取 Tab 数据
 async function fetchTabInfo(tabId: InfoEnum) {
   if (!currentStep.value) return
@@ -282,7 +340,12 @@ async function fetchTabInfo(tabId: InfoEnum) {
   const cacheKey = `${currentStep.value}_${tabId}`
 
   // 如果已有缓存，不重新请求
-  if (tabInfoCache.value[cacheKey]) return
+  if (tabInfoCache.value[cacheKey]) {
+    if (tabId === InfoEnum.checklist) {
+      await loadChecklistItems()
+    }
+    return
+  }
 
   isLoadingTab.value = true
   setTabError(null)
@@ -303,6 +366,10 @@ async function fetchTabInfo(tabId: InfoEnum) {
     const infoObj = response.info
     if (infoObj && typeof infoObj === 'object') {
       tabInfoCache.value[cacheKey] = infoObj as Record<string, unknown>
+    }
+
+    if (tabId === InfoEnum.checklist) {
+      await loadChecklistItems(true)
     }
   } catch (err) {
     console.error('fetchTabInfo error:', err)
@@ -434,6 +501,7 @@ watch(currentStep, async (newStep) => {
     // 清除缓存
     tabInfoCache.value = {}
     tabErrorCache.value = {}
+    checklistItemsCache.value = {}
     // 获取当前 tab 的数据
     await fetchTabInfo(activeTab.value)
   }
@@ -448,7 +516,12 @@ watch(
   ],
   async () => {
     if (!currentStep.value) return
-    clearStepTabCache(tabInfoCache.value, tabErrorCache.value, currentStep.value)
+    clearStepTabCache(
+      tabInfoCache.value,
+      tabErrorCache.value,
+      currentStep.value,
+      checklistItemsCache.value,
+    )
     await fetchTabInfo(activeTab.value)
   },
 )

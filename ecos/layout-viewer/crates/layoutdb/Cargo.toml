@@ -1,0 +1,16 @@
+[package]
+name = "layoutdb"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+layoutpkg-format = { path = "../layoutpkg-format" }
+layoutpkg-reader = { path = "../layoutpkg-reader" }
+rstar.workspace = true
+
+[dev-dependencies]
+layoutpkg-packer = { path = "../layoutpkg-packer" }
+serde_json.workspace = true
+tempfile.workspace = true

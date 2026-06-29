@@ -9,6 +9,7 @@ import type {
   DesktopCliCommandRequest,
   DesktopDirectoryDialogOptions,
   DesktopFileDialogOptions,
+  LayoutViewerOpenRequest,
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
@@ -22,12 +23,7 @@ import type {
   WorkspaceStepInfoRequest,
 } from '@ecos-studio/shared'
 
-function isMissingFileError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.includes('ENOENT') || message.includes('no such file or directory')
-}
-
-function isTileGenerationErrorResult(
+function isDesktopBridgeErrorResult(
   value: unknown,
 ): value is { error: { code?: string; message: string; name: string }; ok: false } {
   return (
@@ -57,7 +53,7 @@ async function invokeDesktop<T = unknown>(
   ...args: unknown[]
 ): Promise<T> {
   const result = await ipcRenderer.invoke(channel, ...args)
-  if (isTileGenerationErrorResult(result)) {
+  if (isDesktopBridgeErrorResult(result)) {
     throw toErrorFromIpcResult(result)
   }
   return result as T
@@ -207,27 +203,9 @@ const desktopApi: DesktopApi = {
       }
     },
   },
-  tiles: {
-    getStatus: async (request) => {
-      try {
-        return await invokeDesktop(desktopApiIpcChannels.tilesStatus, request)
-      } catch (error) {
-        if (isMissingFileError(error)) {
-          throw new Error(`Layout data is not available for step "${request.stepKey}" yet.`)
-        }
-        throw error
-      }
-    },
-    generate: async (request) => {
-      try {
-        return await invokeDesktop(desktopApiIpcChannels.tilesGenerate, request)
-      } catch (error) {
-        if (isMissingFileError(error)) {
-          throw new Error(`Layout data is not available for step "${request.stepKey}" yet.`)
-        }
-        throw error
-      }
-    },
+  layoutViewer: {
+    open: (request: LayoutViewerOpenRequest) =>
+      invokeDesktop(desktopApiIpcChannels.layoutViewerOpen, request),
   },
   workspaceResources: {
     getIndex: () =>

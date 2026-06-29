@@ -17,8 +17,8 @@ if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
   exit 0
 fi
 
-if command -v direnv; then
-  eval "$(direnv export bash)"
+if [ "${ECOS_ECC_USE_NIX:-}" = "1" ]; then
+  exec nix develop --command uv run pyinstaller ecc.spec --clean --noconfirm
 fi
 
 uv run pyinstaller ecc.spec --clean --noconfirm
