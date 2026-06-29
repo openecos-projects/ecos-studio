@@ -1,9 +1,18 @@
 import { EventEmitter } from 'node:events'
 import type { spawn as spawnChild } from 'node:child_process'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopCliCommandRequest } from '@ecos-studio/shared'
 import { EccCliAdapter } from './eccCliAdapter'
 import { electronLogger } from './logger'
@@ -70,10 +79,16 @@ async function waitForSpawn(harness: ReturnType<typeof createSpawnHarness>, inde
 describe('EccCliAdapter', () => {
   const tempDirs: string[] = []
 
+  beforeEach(() => {
+    vi.spyOn(electronLogger, 'status').mockImplementation(() => undefined)
+  })
+
   afterEach(() => {
     for (const directory of tempDirs.splice(0)) {
       rmSync(directory, { force: true, recursive: true })
     }
+    vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   function createTempDir(prefix = 'ecos-ecc-adapter-'): string {
@@ -464,6 +479,181 @@ describe('EccCliAdapter', () => {
       text: 'warning text\n',
       type: 'stderr',
     })
+  })
+
+  it('tees ECC CLI stdout and stderr to a workspace command log without disrupting JSON results', async () => {
+    const workspaceDir = createTempDir('ecos-ecc-workspace-')
+    const harness = createSpawnHarness()
+    const emit = vi.fn()
+    const adapter = new EccCliAdapter({ spawn: harness.spawn })
+    const promise = adapter.execute(request('run_step', {
+      directory: workspaceDir,
+      step: 'Place',
+    }), { emit })
+
+    harness.children[0].stdout.emit('data', 'preparing dreamplace\n')
+    harness.children[0].stderr.emit('data', 'CMake Error at cmake/TorchExtension.cmake:19\n')
+    complete(harness.children[0], {
+      cmd: 'run_step',
+      data: { state: 'Success', step: 'Place' },
+      message: ['done'],
+      response: 'success',
+    })
+
+    const result = await promise
+
+    expect(result).toMatchObject({
+      data: {
+        cli_log_file: expect.stringContaining(`${workspaceDir}/log/ecc-cli-`),
+        state: 'Success',
+        step: 'Place',
+      },
+      ok: true,
+      response: 'success',
+    })
+
+    const logFiles = readdirSync(join(workspaceDir, 'log'))
+      .filter((name) => /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name))
+    expect(logFiles).toHaveLength(1)
+
+    const logText = readFileSync(join(workspaceDir, 'log', logFiles[0]), 'utf8')
+    expect(logText).toContain('[command] ecc workspace run-step')
+    expect(logText).toContain('[stdout] preparing dreamplace')
+    expect(logText).toContain('[stderr] CMake Error at cmake/TorchExtension.cmake:19')
+    expect(logText).toContain('[exit] code=0 signal=null')
+  })
+
+  it('does not create a target workspace directory just to store create_workspace logs', async () => {
+    const tempDir = createTempDir('ecos-ecc-temp-')
+    const workspaceDir = join(tempDir, 'new workspace')
+    const harness = createSpawnHarness()
+    const adapter = new EccCliAdapter({
+      spawn: harness.spawn,
+      tempDir,
+    })
+    const promise = adapter.execute(request('create_workspace', {
+      directory: workspaceDir,
+      pdk: 'ics55',
+      parameters: { Design: 'demo' },
+    }), { emit: vi.fn() })
+
+    expect(existsSync(workspaceDir)).toBe(false)
+
+    complete(harness.children[0], {
+      cmd: 'create_workspace',
+      data: { directory: workspaceDir },
+      message: ['created'],
+      response: 'success',
+    })
+
+    const result = await promise
+
+    expect(result.data.cli_log_file).toEqual(expect.stringContaining(`${tempDir}/ecos-ecc-cli-logs/ecc-cli-`))
+    expect(existsSync(workspaceDir)).toBe(false)
+  })
+
+  it('keeps separate command logs for same-command runs that start in the same second', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-29T10:00:00.000Z'))
+
+    const workspaceDir = createTempDir('ecos-ecc-workspace-')
+    const harness = createSpawnHarness()
+    const adapter = new EccCliAdapter({ spawn: harness.spawn })
+
+    const first = adapter.execute(request('run_step', {
+      directory: workspaceDir,
+      step: 'Place',
+    }), { emit: vi.fn() })
+    complete(harness.children[0], {
+      cmd: 'run_step',
+      data: { state: 'Success', step: 'Place' },
+      message: ['first'],
+      response: 'success',
+    })
+    await first
+
+    const second = adapter.execute(request('run_step', {
+      directory: workspaceDir,
+      step: 'Place',
+    }), { emit: vi.fn() })
+    complete(harness.children[1], {
+      cmd: 'run_step',
+      data: { state: 'Success', step: 'Place' },
+      message: ['second'],
+      response: 'success',
+    })
+    await second
+
+    const logFiles = readdirSync(join(workspaceDir, 'log'))
+      .filter((name) => /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name))
+    expect(logFiles).toHaveLength(2)
+  })
+
+  it('quotes command log argv so paths with spaces can be copied back to a shell', async () => {
+    const rootDir = createTempDir('ecos-ecc-workspace-root-')
+    const workspaceDir = join(rootDir, "workspace with space's")
+    mkdirSync(workspaceDir, { recursive: true })
+    const harness = createSpawnHarness()
+    const adapter = new EccCliAdapter({ spawn: harness.spawn })
+    const promise = adapter.execute(request('run_step', {
+      directory: workspaceDir,
+      step: 'Place',
+    }), { emit: vi.fn() })
+
+    complete(harness.children[0], {
+      cmd: 'run_step',
+      data: { state: 'Success', step: 'Place' },
+      message: ['done'],
+      response: 'success',
+    })
+    const result = await promise
+
+    const logText = readFileSync(String(result.data.cli_log_file), 'utf8')
+    expect(logText).toContain(`--directory '${workspaceDir.replace(/'/g, "'\\''")}'`)
+  })
+
+  it('announces the ECC CLI command log path in terminal output and repeats it on failure', async () => {
+    const workspaceDir = createTempDir('ecos-ecc-workspace-')
+    const harness = createSpawnHarness()
+    const emit = vi.fn()
+    const adapter = new EccCliAdapter({ spawn: harness.spawn })
+    const promise = adapter.execute(request('run_step', {
+      directory: workspaceDir,
+      step: 'CTS',
+    }), { emit })
+
+    const startMessage = emit.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.stream === 'stdout'
+        && event.type === 'stdout'
+        && event.text?.includes('[ECC CLI log] Writing full command log to:'))
+    expect(startMessage?.text).toContain(`${workspaceDir}/log/ecc-cli-`)
+    expect(electronLogger.status).toHaveBeenCalledWith(
+      '[ECC CLI log] Writing full command log to: %s',
+      expect.stringContaining(`${workspaceDir}/log/ecc-cli-`),
+    )
+
+    harness.children[0].stderr.emit('data', 'tool failed\n')
+    harness.children[0].emit('close', 1, null)
+
+    await expect(promise).resolves.toMatchObject({
+      ok: false,
+      response: 'error',
+    })
+    expect(emit).toHaveBeenCalledWith({
+      stream: 'stderr',
+      text: expect.stringContaining('[ECC CLI log] Command failed. Full log:'),
+      type: 'stderr',
+    })
+    expect(emit).toHaveBeenCalledWith({
+      stream: 'stderr',
+      text: expect.stringContaining(`${workspaceDir}/log/ecc-cli-`),
+      type: 'stderr',
+    })
+    expect(electronLogger.status).toHaveBeenCalledWith(
+      '[ECC CLI log] Command failed. Full log: %s',
+      expect.stringContaining(`${workspaceDir}/log/ecc-cli-`),
+    )
   })
 
   it('preserves structured data from CLI lifecycle event records', async () => {

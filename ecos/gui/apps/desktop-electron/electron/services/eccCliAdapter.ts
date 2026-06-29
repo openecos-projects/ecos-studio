@@ -1,6 +1,7 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type {
@@ -219,6 +220,128 @@ function resolveEccWrapperFallback(): string | null {
   return existsSync(wrapperPath) ? wrapperPath : null
 }
 
+function timestampForFile(date = new Date()): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join('') + '-' + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('')
+}
+
+function safeLogToken(value: string): string {
+  const normalized = value.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+  return normalized || 'command'
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_/@%+=:,.-]+$/.test(value)) {
+    return value
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+function commandLine(command: string, args: string[]): string {
+  return [command, ...args].map(shellQuote).join(' ')
+}
+
+function withCliLogFile(
+  resultValue: DesktopCliCommandResult,
+  cliLogFile: string | null,
+): DesktopCliCommandResult {
+  if (!cliLogFile) return resultValue
+  return {
+    ...resultValue,
+    data: {
+      ...resultValue.data,
+      cli_log_file: cliLogFile,
+    },
+  }
+}
+
+function cliLogStartText(path: string): string {
+  return `[ECC CLI log] Writing full command log to:\n${path}\n`
+}
+
+function cliLogFailedText(path: string): string {
+  return `[ECC CLI log] Command failed. Full log:\n${path}\n`
+}
+
+class CliCommandLog {
+  readonly path: string | null
+  private pendingWrite = Promise.resolve()
+
+  constructor(
+    request: DesktopCliCommandRequest,
+    private readonly prepared: PreparedCommand,
+    private readonly command: string,
+    activeWorkspace: string | null,
+    tempDir: string,
+  ) {
+    const workspaceDirectory = directoryFromRequest(request, activeWorkspace)
+    const filename = `ecc-cli-${timestampForFile()}-${safeLogToken(request.cmd)}-${randomUUID().slice(0, 8)}.log`
+    const fallbackLogDir = join(tempDir, 'ecos-ecc-cli-logs')
+    const canUseWorkspaceLog = request.cmd !== 'create_workspace'
+      && Boolean(workspaceDirectory)
+      && existsSync(workspaceDirectory)
+    const logDirs = canUseWorkspaceLog
+      ? [join(workspaceDirectory, 'log'), fallbackLogDir]
+      : [fallbackLogDir]
+
+    let lastError: unknown = null
+    for (const logDir of logDirs) {
+      const logPath = join(logDir, filename)
+      try {
+        mkdirSync(logDir, { recursive: true })
+        writeFileSync(logPath, '', { encoding: 'utf8', flag: 'wx' })
+        this.path = logPath
+        this.append('command', commandLine(this.command, this.prepared.args))
+        return
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    this.path = null
+    electronLogger.warn(
+      '[ECC CLI] failed to create command log: %s',
+      lastError instanceof Error ? lastError.message : String(lastError),
+    )
+  }
+
+  append(section: string, text: string): void {
+    if (!this.path) return
+    const logPath = this.path
+    const lines = text.endsWith('\n') ? text : `${text}\n`
+    this.pendingWrite = this.pendingWrite
+      .then(() => appendFile(logPath, `[${section}] ${lines}`, 'utf8'))
+      .catch((error) => {
+        electronLogger.warn(
+          '[ECC CLI] failed to write command log at %s: %s',
+          logPath,
+          error instanceof Error ? error.message : String(error),
+        )
+      })
+  }
+
+  async flush(): Promise<void> {
+    try {
+      await this.pendingWrite
+    } catch (error) {
+      electronLogger.warn(
+        '[ECC CLI] failed to write command log at %s: %s',
+        this.path,
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+}
+
 export class EccCliAdapter {
   private readonly command: string
   private readonly env: NodeJS.ProcessEnv
@@ -398,6 +521,7 @@ export class EccCliAdapter {
       let stdoutBuffer = ''
       let stderrText = ''
       let invalidJsonLine: string | null = null
+      let failureLogAnnounced = false
       const start = Date.now()
       const resolvedCommand = resolveCommandFromPath(this.command, env)
       const fallbackCommand = !this.isPackaged
@@ -406,6 +530,46 @@ export class EccCliAdapter {
         ? resolveEccWrapperFallback()
         : null
       const spawnCommand = fallbackCommand ?? this.command
+      const commandLog = new CliCommandLog(
+        request,
+        prepared,
+        spawnCommand,
+        this.activeWorkspace,
+        this.tempDir,
+      )
+
+      const emitText = (stream: 'stdout' | 'stderr', text: string): void => {
+        context.emit({
+          stream,
+          text,
+          type: stream,
+        })
+      }
+
+      const announceCliLogStart = (): void => {
+        if (!commandLog.path) return
+        emitText('stdout', cliLogStartText(commandLog.path))
+        electronLogger.status(
+          '[ECC CLI log] Writing full command log to: %s',
+          commandLog.path,
+        )
+      }
+
+      const announceCliLogFailure = (): void => {
+        if (!commandLog.path || failureLogAnnounced) return
+        failureLogAnnounced = true
+        emitText('stderr', cliLogFailedText(commandLog.path))
+        electronLogger.status(
+          '[ECC CLI log] Command failed. Full log: %s',
+          commandLog.path,
+        )
+      }
+
+      const resolveAfterLogFlush = (resultValue: DesktopCliCommandResult): void => {
+        void commandLog.flush().finally(() => {
+          resolve(resultValue)
+        })
+      }
 
       electronLogger.debug(
         '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
@@ -420,13 +584,7 @@ export class EccCliAdapter {
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
-      const emitText = (stream: 'stdout' | 'stderr', text: string): void => {
-        context.emit({
-          stream,
-          text,
-          type: stream,
-        })
-      }
+      announceCliLogStart()
 
       const handleCliJson = (value: unknown): boolean => {
         if (isResultPayload(value)) {
@@ -482,7 +640,9 @@ export class EccCliAdapter {
       }
 
       child.stdout?.on('data', (data: unknown) => {
-        stdoutBuffer += dataToString(data)
+        const text = dataToString(data)
+        commandLog.append('stdout', text)
+        stdoutBuffer += text
         const lines = stdoutBuffer.split(/\r?\n/)
         stdoutBuffer = lines.pop() ?? ''
         for (const line of lines) {
@@ -492,18 +652,23 @@ export class EccCliAdapter {
 
       child.stderr?.on('data', (data: unknown) => {
         const text = dataToString(data)
+        commandLog.append('stderr', text)
         stderrText += text
         emitText('stderr', text)
       })
 
       child.once('error', (spawnError) => {
-        resolve(error(
+        const message = spawnError instanceof Error ? spawnError.message : String(spawnError)
+        commandLog.append('error', message)
+        announceCliLogFailure()
+        resolveAfterLogFlush(withCliLogFile(error(
           request,
-          spawnError instanceof Error ? spawnError.message : String(spawnError),
-        ))
+          message,
+        ), commandLog.path))
       })
 
       child.once('close', (code, signal) => {
+        commandLog.append('exit', `code=${code ?? 'unknown'} signal=${signal ?? 'null'}`)
         const remaining = stdoutBuffer.trim()
         if (remaining) {
           try {
@@ -524,19 +689,26 @@ export class EccCliAdapter {
             finalResult.response,
             Date.now() - start,
           )
-          resolve(finalResult)
+          if (!finalResult.ok) {
+            announceCliLogFailure()
+          }
+          resolveAfterLogFlush(withCliLogFile(finalResult, commandLog.path))
           return
         }
 
         if (code === 0 && invalidJsonLine) {
-          const result = error(request, `Invalid JSON from ECC CLI: ${invalidJsonLine}`)
+          const result = withCliLogFile(
+            error(request, `Invalid JSON from ECC CLI: ${invalidJsonLine}`),
+            commandLog.path,
+          )
           electronLogger.debug(
             '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
             request.cmd,
             result.response,
             Date.now() - start,
           )
-          resolve(result)
+          announceCliLogFailure()
+          resolveAfterLogFlush(result)
           return
         }
 
@@ -544,14 +716,18 @@ export class EccCliAdapter {
           ? `ECC CLI exited with signal ${signal}.`
           : `ECC CLI exited with code ${code ?? 'unknown'}.`
         const details = stderrText.trim() || invalidJsonLine || exitText
-        const result = error(request, details === exitText ? exitText : `${exitText} ${details}`)
+        const result = withCliLogFile(
+          error(request, details === exitText ? exitText : `${exitText} ${details}`),
+          commandLog.path,
+        )
         electronLogger.debug(
           '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
           request.cmd,
           result.response,
           Date.now() - start,
         )
-        resolve(result)
+        announceCliLogFailure()
+        resolveAfterLogFlush(result)
       })
     })
   }
