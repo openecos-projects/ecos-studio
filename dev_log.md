@@ -10272,3 +10272,150 @@ fatal error: driver/difftest.h: No such file or directory
 - 如果用户没有通过 Resource Manager 安装对应资源，`ecc-fe` 会依赖 PATH 中已有工具；缺工具时步骤会按原工具执行失败路径报错。
 - Surfer 不再随 Electron 包携带，打包产物必须能通过 Resource Manager 安装 Surfer assets 后才能打开波形。
 - `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。
+
+# 第 155 次 开发
+
+## 开发目标
+
+推进 ECOS Studio Resource Manager 前端工具远程化落地：补齐可直接引用官方 release 的 Slang / RISC-V toolchain registry 条目，并修复 Resource Manager 安装 zip 资源时无法按 zip 解压的问题，为后续 Surfer web assets 远程资源接入做准备。
+
+## 新增文件
+
+- `/home/luyoung/surfer-web-assets-0.7.0-ecos.zip`
+  - 从此前 Electron bundled Surfer web assets 重新打包生成 Resource Manager 可安装的 web assets zip。
+  - 包内包含 `index.html`、`integration.js`、`surfer.js`、`surfer_bg.wasm`、`sw.js`、`README.md`、`LICENSE-EUPL-1.2.txt`。
+  - SHA256：`3a8cce2c9ef57fcdbecca2371c533e811eef5a31c0f76af10d05d7cc6220b095`。
+  - 大小：`4654743` bytes。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager 下载临时归档文件时根据 URL 保留 `.zip`、`.tar.gz`、`.tgz`、`.tar` 后缀，避免统一保存为 `.archive` 后 zip 资源被误当作 tar 解压。
+  - 新增 `archiveExtensionFromUrl()`，集中处理 registry asset URL 到临时文件后缀的映射。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 zip-packaged Surfer web assets 安装回归测试，验证 Resource Manager 可以安装带 `strip_prefix` 的 zip 工具资源并写入 `tool:surfer` manifest。
+  - 测试 fixture 命令 helper 增加可选 `cwd`，用于生成 zip 测试包。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 新增 `slang` 工具条目，使用官方 `MikePopoloski/slang` v11.0 Linux x86_64 release。
+  - 新增 `riscv-toolchain` 工具条目，使用 xPack RISC-V bare-metal GCC `15.2.0-1` Linux x86_64 release。
+  - 保留现有 `yosys` OSS CAD Suite 条目；已确认该包内包含 `yosys` 和 `verilator`，因此 Verilator 能先通过 OSS CAD Suite 资源提供。
+- `/home/luyoung/ecos-registry/README.md`
+  - 补充 frontend tool registry 维护说明，明确工具 URL 由 registry 管理、运行时通过 Resource Manager 注入环境变量。
+  - 说明 Surfer 必须使用 ECOS Studio 兼容的 web assets 包，不能直接使用 upstream desktop zip。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager zip 安装修复、registry 条目准备和 Surfer web assets 打包情况。
+
+## 验证情况
+
+- 已执行 `python3 /home/luyoung/ecos-registry/.github/scripts/validate_registry.py /home/luyoung/ecos-registry/tool-registry.json`，通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/surferProtocolService.test.ts`，通过：2 个测试文件、18 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已通过官方 release/API 和 HEAD 请求确认：
+  - Slang v11.0 Linux x86_64 包 URL 可访问，SHA256 已本地计算。
+  - xPack RISC-V toolchain `15.2.0-1` Linux x64 包 URL 可访问，SHA256 使用官方 `.sha` 文件。
+  - Upstream Surfer Linux zip 是 native desktop application，不是 ECOS Studio Wave 所需 web assets。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未执行真实 Resource Manager 大包下载安装测试；未下载完整 OSS CAD Suite 或完整 RISC-V toolchain。
+
+## 已知后续风险
+
+- `/home/luyoung/ecos-registry` 是独立仓库，本次只在本地准备了 registry 修改，尚未 commit/push；远端 `https://emin017.github.io/ecos-registry/tool-registry.json` 仍不会变化，直到 registry 仓库提交并发布 GitHub Pages。
+- Surfer web assets 需要上传到一个稳定下载 URL 后，才能把 `tool:surfer` 条目写入 registry。当前已生成本地包 `/home/luyoung/surfer-web-assets-0.7.0-ecos.zip`，但还没有远端 URL。
+- Verilator 暂时通过 `yosys` OSS CAD Suite 资源提供；如果后续希望 Resource Manager UI 中单独显示 `Verilator`，需要扩展 registry/resource 模型支持“一个 archive 提供多个 capability”或发布单独 Verilator 预编译包。
+- `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。
+
+# 第 156 次 开发
+
+## 开发目标
+
+按用户提供的 fork 仓库 `git@github.com:Luyoung0001/ecos-registry.git` 完成临时 registry 闭环：将 ECOS registry 本地仓库远端切换到用户 fork，加入 Surfer web assets 静态包发布能力和 `tool:surfer` 条目，并把 ECOS Studio 默认 registry URL 临时指向用户 fork 的 GitHub Pages 地址用于测试。
+
+## 新增文件
+
+- `/home/luyoung/ecos-registry/assets/surfer-web-assets-0.7.0-ecos.zip`
+  - 加入 registry 仓库，作为 Resource Manager 可下载的 Surfer web assets 包。
+  - SHA256：`3a8cce2c9ef57fcdbecca2371c533e811eef5a31c0f76af10d05d7cc6220b095`。
+  - 大小：`4654743` bytes。
+
+## 修改文件
+
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 在第 155 次准备的 `slang`、`riscv-toolchain` 条目基础上新增 `surfer` 工具条目。
+  - `surfer` URL 临时指向 `https://luyoung0001.github.io/ecos-registry/assets/surfer-web-assets-0.7.0-ecos.zip`。
+- `/home/luyoung/ecos-registry/.github/scripts/build_pages_site.py`
+  - 支持将目录递归复制到 Pages `_site` 目录，用于发布 `assets/` 下的资源包。
+- `/home/luyoung/ecos-registry/.github/workflows/pages.yml`
+  - Pages 构建时新增 `assets` 输入，让 `assets/surfer-web-assets-0.7.0-ecos.zip` 随 registry 一起发布。
+- `/home/luyoung/ecos-registry/README.md`
+  - 保留第 155 次新增的 frontend tool registry 维护说明。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 默认 registry URL 临时改为 `https://luyoung0001.github.io/ecos-registry/tool-registry.json`，方便在用户 fork 发布后直接测试。
+  - 保留第 155 次新增的归档后缀识别逻辑。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 fork registry、assets 发布和临时默认 URL 切换。
+
+## 验证情况
+
+- 已执行 `git ls-remote git@github.com:Luyoung0001/ecos-registry.git HEAD refs/heads/main`，确认用户 fork 可访问。
+- 已执行 `python3 /home/luyoung/ecos-registry/.github/scripts/validate_registry.py /home/luyoung/ecos-registry/tool-registry.json`，通过。
+- 已执行 `python3 /home/luyoung/ecos-registry/.github/scripts/build_pages_site.py --output-dir /tmp/ecos-registry-site index.html tool-registry.json assets`，通过。
+- 已确认 `/tmp/ecos-registry-site/assets/surfer-web-assets-0.7.0-ecos.zip` 存在且 SHA256 与 registry 条目一致。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/surferProtocolService.test.ts`，通过：2 个测试文件、18 个测试用例。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 尚未真实访问 `https://luyoung0001.github.io/ecos-registry/...`，因为 fork 需要提交并由 GitHub Pages workflow 发布后 URL 才会生效。
+
+## 已知后续风险
+
+- ECOS Studio 默认 registry URL 现在临时指向用户 fork，后续当 upstream registry PR 合并后需要改回 `https://emin017.github.io/ecos-registry/tool-registry.json`。
+- `/home/luyoung/ecos-registry` 已将 `origin` 切换为 `git@github.com:Luyoung0001/ecos-registry.git`，方便用户 fork 测试；后续如需对 upstream 提 PR，可从该 fork 发起。
+- `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。
+
+# 第 157 次 开发
+
+## 开发目标
+
+完成用户 fork registry 的提交发布，并将 ECOS Studio 临时默认 registry 地址调整为可立即访问的 raw commit URL，绕开 fork GitHub Pages 尚未启用或未部署导致的 404。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 默认 registry URL 从用户 fork Pages 地址调整为固定 commit 的 raw URL：`https://raw.githubusercontent.com/Luyoung0001/ecos-registry/e281758aa4faebb9cce32edfc75c12d54ab0fb16/tool-registry.json`。
+  - 保留 Resource Manager zip 归档安装修复。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录 registry fork 已推送、Pages 404、raw commit URL 验证通过和本次临时 URL 调整。
+
+## 验证情况
+
+- 已在 `/home/luyoung/ecos-registry` 提交并推送：
+  - `2de89a1 feat: add frontend tool registry entries`
+  - `e281758 fix: use raw asset URL for surfer package`
+- 已确认 `https://luyoung0001.github.io/ecos-registry/tool-registry.json` 和 Surfer Pages asset 当前返回 404，因此临时切换到 raw commit URL。
+- 已执行远端 raw registry 校验脚本，确认工具列表包含 `yosys`、`slang`、`riscv-toolchain`、`surfer`。
+- 已下载 raw Surfer asset 并确认大小 `4654743` bytes、SHA256 与 registry 条目一致。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/surferProtocolService.test.ts`，通过：2 个测试文件、18 个测试用例。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 尚未提交 `/home/luyoung/ecos-studio` 主仓库改动，本条日志记录提交前状态。
+- 未启用或排查用户 fork 的 GitHub Pages 设置。
+
+## 已知后续风险
+
+- ECOS Studio 默认 registry URL 当前临时固定到用户 fork 的某个 commit；当 upstream registry PR 合并并发布后，需要改回 `https://emin017.github.io/ecos-registry/tool-registry.json`。
+- 用户 fork 的 `main` raw URL 存在短时间缓存，测试时仍可能读到旧 JSON；固定 commit URL 可避免此问题。
+- `/home/luyoung/ecos-studio/ecc` 子仓库仍显示既有 nested submodule dirty，本次未触碰。

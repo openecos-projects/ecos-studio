@@ -14,7 +14,7 @@ import type {
   ResourceStatus,
 } from '@ecos-studio/shared'
 
-const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
+const DEFAULT_REGISTRY_URL = 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/e281758aa4faebb9cce32edfc75c12d54ab0fb16/tool-registry.json'
 const ALL_PLATFORM = 'all-platform'
 const TOP_LEVEL_ENTRY_LIMIT = 20
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
@@ -489,7 +489,7 @@ export class ResourceManagerService {
       if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}.archive`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(asset.url)}`)
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -630,7 +630,7 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}.archive`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(asset.url)}`)
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -1813,6 +1813,20 @@ function parseGithubArchiveUrl(sourceUrl: string): { owner: string; repo: string
   const refsIndex = parts.findIndex((part, index) => part === 'refs' && parts[index + 1] === 'tags')
   const tag = refsIndex >= 0 ? parts[refsIndex + 2]?.replace(/\.tar\.gz$|\.zip$/, '') ?? null : null
   return { owner, repo, tag }
+}
+
+function archiveExtensionFromUrl(sourceUrl: string): string {
+  let pathname = sourceUrl
+  try {
+    pathname = new URL(sourceUrl).pathname
+  } catch {
+    pathname = sourceUrl.split(/[?#]/, 1)[0]
+  }
+  const lower = pathname.toLowerCase()
+  for (const extension of ['.tar.gz', '.tgz', '.tar', '.zip']) {
+    if (lower.endsWith(extension)) return extension
+  }
+  return '.archive'
 }
 
 async function verifySha256(filePath: string, expected: string): Promise<boolean> {

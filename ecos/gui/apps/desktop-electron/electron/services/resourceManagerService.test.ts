@@ -25,9 +25,9 @@ async function createFixtureArchive(root: string): Promise<{ path: string; sha25
   }
 }
 
-async function runFixtureCommand(command: string, args: string[]): Promise<void> {
+async function runFixtureCommand(command: string, args: string[], options?: { cwd?: string }): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = execFile(command, args, (error, _stdout, stderr) => {
+    const child = execFile(command, args, { cwd: options?.cwd }, (error, _stdout, stderr) => {
       if (error) {
         reject(new Error(`${command} failed: ${stderr || error.message}`))
         return
@@ -56,6 +56,24 @@ async function createPdkArchive(
   return {
     path: archive,
     sha256: 'fixture-pdk-sha',
+    size,
+  }
+}
+
+async function createSurferAssetsZip(root: string): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'surfer-source')
+  const sourceDir = join(sourceRoot, 'surfer-web-assets')
+  const archive = join(root, 'surfer.zip')
+  await mkdir(sourceDir, { recursive: true })
+  await writeFile(join(sourceDir, 'index.html'), '<!doctype html>\n', 'utf8')
+  await writeFile(join(sourceDir, 'integration.js'), 'function register_message_listener() {}\n', 'utf8')
+  await writeFile(join(sourceDir, 'surfer.js'), 'export default async function init() {}\n', 'utf8')
+  await writeFile(join(sourceDir, 'surfer_bg.wasm'), 'wasm', 'utf8')
+  await runFixtureCommand('zip', ['-qr', archive, 'surfer-web-assets'], { cwd: sourceRoot })
+  const size = Buffer.byteLength(await readFile(archive))
+  return {
+    path: archive,
+    sha256: 'fixture-surfer-sha',
     size,
   }
 }
@@ -442,6 +460,66 @@ describe('ResourceManagerService', () => {
       version: '0.61',
       managed: true,
     })
+  })
+
+  it('installs a zip-packaged Surfer web asset tool', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createSurferAssetsZip(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'surfer',
+          display_name: 'Surfer',
+          description: 'Waveform viewer web assets',
+          category: 'viewer',
+          homepage: 'https://gitlab.com/surfer-project/surfer',
+          versions: [
+            {
+              version: '0.7.0-ecos',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'surfer-web-assets',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const verifySha256 = vi.fn(async () => true)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.installResource('tool:surfer', '0.7.0-ecos')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:surfer',
+      version: '0.7.0-ecos',
+    })
+
+    const surferRoot = join(root, 'data', 'tools', 'surfer', '0.7.0-ecos')
+    await expect(readFile(join(surferRoot, 'index.html'), 'utf8')).resolves.toContain('<!doctype html>')
+    await expect(readFile(join(surferRoot, 'surfer.js'), 'utf8')).resolves.toContain('init')
+    await expect(readFile(join(surferRoot, 'surfer_bg.wasm'), 'utf8')).resolves.toBe('wasm')
+
+    const manifest = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, { executable?: string; detected_executables?: string[] }> }
+    expect(manifest.installed['tool:surfer']).toMatchObject({
+      executable: 'index.html',
+      detected_executables: [],
+    })
+    expect(verifySha256).toHaveBeenCalledTimes(1)
   })
 
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {
