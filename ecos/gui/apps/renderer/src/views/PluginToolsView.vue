@@ -26,7 +26,7 @@
 
       <header class="manager-header">
         <h1 id="resource-manager-title">Resource Manager</h1>
-        <p>Discover, install, and manage EDA tools and PDKs</p>
+        <p>Install frontend flow resources, EDA tools, compiler toolchains, and PDKs</p>
       </header>
 
       <div class="manager-grid">
@@ -380,6 +380,7 @@ import {
   resolveRowInstallPath,
   rowActionForStatus,
   runBatchDownload,
+  isEdaToolRow,
   runPrimaryAction,
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
@@ -418,7 +419,7 @@ const filteredRows = computed(() => {
 
   return resourceRows.value.filter((row) => {
     if (categoryFilter.value === 'frontend' && !row.isFrontendTool) return false
-    if (categoryFilter.value === 'tools' && row.type !== 'tool') return false
+    if (categoryFilter.value === 'tools' && !isEdaToolRow(row)) return false
     if (categoryFilter.value === 'pdks' && row.type !== 'pdk') return false
     if (categoryFilter.value === 'installed' && !isInstalledLike(row)) return false
 
@@ -449,6 +450,7 @@ const totalSizeText = computed(() => formatSize(totalSizeMb.value))
 const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
 const frontendToolRows = computed(() => resourceRows.value.filter((row) => row.isFrontendTool))
+const edaToolRows = computed(() => resourceRows.value.filter(isEdaToolRow))
 const frontendInstalledCount = computed(() => frontendToolRows.value.filter(isInstalledLike).length)
 const frontendAvailableCount = computed(() => frontendToolRows.value.filter((row) => row.statusKind === 'available').length)
 const frontendFlowItems = computed(() => {
@@ -478,7 +480,7 @@ const sidebarItems = computed(() => [
     id: 'tools' as const,
     label: 'EDA Tools',
     icon: 'ri-tools-line',
-    count: resourceRows.value.filter((row) => row.type === 'tool').length,
+    count: edaToolRows.value.length,
   },
   {
     id: 'pdks' as const,

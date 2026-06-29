@@ -4,6 +4,7 @@ import type { ResourceItem } from '@/api/plugin'
 import {
   formatResourceSize,
   frontendFlowTagsFor,
+  isEdaToolRow,
   managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
@@ -83,8 +84,32 @@ describe('pluginToolsRows', () => {
     })
 
     expect(yosys.isFrontendTool).toBe(true)
+    expect(isEdaToolRow(yosys)).toBe(true)
     expect(yosys.flowTags).toEqual(['Review', 'Yosys', 'Lint', 'Sim'])
     expect(frontendFlowTagsFor(riscv)).toEqual(['CPU Tests', 'CoreMark'])
+    expect(isEdaToolRow(resourceToRow(riscv, undefined))).toBe(false)
+  })
+
+  it('keeps EDA tool identity separate from ECC-FE frontend flow usage', () => {
+    const openroad = resourceToRow(
+      resource({
+        id: 'tool:openroad',
+        type: 'tool',
+        name: 'openroad',
+        display_name: 'OpenROAD',
+        description: 'Digital physical design and place-and-route tool.',
+        category: 'place-route',
+        status: 'available',
+        available_versions: ['2026-06-01'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+      }),
+      undefined,
+    )
+
+    expect(openroad.type).toBe('tool')
+    expect(openroad.isFrontendTool).toBe(false)
+    expect(openroad.flowTags).toEqual([])
+    expect(isEdaToolRow(openroad)).toBe(true)
   })
 
   it('maps active managed PDK to installed row', () => {

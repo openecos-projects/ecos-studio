@@ -216,6 +216,27 @@ export function primaryActionForRow(row: ResourceRow): PrimaryRowAction | null {
   return null
 }
 
+function isCompilerToolchainRow(row: ResourceRow): boolean {
+  if (row.type !== 'tool') {
+    return false
+  }
+
+  const category = row.resource.category.toLowerCase()
+  const haystack = `${row.resource.name} ${row.resource.display_name} ${row.resource.description}`.toLowerCase()
+  return (
+    category.includes('toolchain') ||
+    category.includes('compiler') ||
+    haystack.includes('gnu toolchain') ||
+    haystack.includes('risc-v gnu') ||
+    haystack.includes('riscv-toolchain') ||
+    haystack.includes('bare-metal gcc')
+  )
+}
+
+export function isEdaToolRow(row: ResourceRow): boolean {
+  return row.type === 'tool' && !isCompilerToolchainRow(row)
+}
+
 export function createPrimaryActionTask(
   row: ResourceRow,
   executor: ResourceActionExecutor,

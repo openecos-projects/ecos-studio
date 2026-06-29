@@ -10463,3 +10463,41 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `Frontend Flow` 步骤状态目前基于 registry 资源名称、显示名和描述做语义映射；如果未来 registry 改名或引入更复杂工具包，最好在 registry schema 中显式加入 capability 字段。
 - Verilator 当前通过 OSS CAD Suite / Yosys 资源能力间接覆盖，GUI 中不会单独出现一个 `Verilator` 资源，除非后续发布独立 Verilator 包或支持一个资源多 capability 展示。
+
+# 第 159 次 开发
+
+## 开发目标
+
+明确 Resource Manager 中 `Frontend Flow` 与 `EDA Tools` 的关系：`EDA Tools` 是工具类型，`Frontend Flow` 是 ECC-FE 使用场景，Yosys 这类工具允许同时属于两边；RISC-V GNU toolchain 这类编译工具链不归入 EDA 工具。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/PluginToolsView.vue`
+  - 将资源管理器顶部说明调整为 `frontend flow resources / EDA tools / compiler toolchains / PDKs`。
+  - 保留左侧 `Frontend Flow` 与 `EDA Tools` 两个入口的交集语义：Yosys 等硬件 EDA 工具可以同时显示为前端流程资源和 EDA 工具。
+  - `EDA Tools` 分类的过滤逻辑和计数不再简单等同于所有 `tool` 类型资源，而是排除 RISC-V GNU toolchain 这类软件编译工具链。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 新增 `isEdaToolRow()`，集中定义 Resource Manager 里的 EDA 工具分类：硬件设计、验证、综合、波形、物理实现工具属于 EDA；编译器/toolchain 不属于 EDA。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加分类测试，确认 Yosys 既属于 `Frontend Flow` 也属于 `EDA Tools`，OpenROAD 属于 `EDA Tools`，RISC-V GNU toolchain 不属于 `EDA Tools`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 分类语义调整。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、11 个测试用例。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 当前 `Frontend Flow` 和 `EDA Tools` 仍部分基于 registry 资源名称、显示名、分类和描述做能力识别；后续最好在 registry schema 中增加显式 capability/resource_kind 字段，让分类不依赖字符串匹配。
+- `EDA Tools` 与 `Frontend Flow` 现在允许交集，这是刻意设计；后续如果 UI 希望进一步降低用户困惑，可以在资源详情里展示“工具类型”和“用于哪些流程”两个字段。
