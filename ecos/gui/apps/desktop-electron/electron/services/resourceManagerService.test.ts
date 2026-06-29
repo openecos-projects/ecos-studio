@@ -363,6 +363,43 @@ describe('ResourceManagerService', () => {
     expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
   })
 
+  it('recovers runtime tools when an old manifest points at the wrong executable path', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const pdksDir = join(root, 'data', 'pdks')
+    const slangRoot = join(toolsDir, 'slang', '11.0')
+    await mkdir(slangRoot, { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(slangRoot, 'slang'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(slangRoot, 'slang'), 0o755)
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:slang': {
+          type: 'tool',
+          name: 'slang',
+          version: '11.0',
+          path: slangRoot,
+          executable: 'bin/slang',
+          detected_executables: [],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir,
+    })
+
+    const env = await service.createRuntimeEnv({ PATH: '/usr/bin' }, { platform: 'linux' })
+
+    expect(env.ECOS_SLANG).toBe(join(slangRoot, 'slang'))
+    expect(env.PATH?.split(':')).toEqual([slangRoot, '/usr/bin'])
+  })
+
   it('returns a copied base env when no Resource Manager manifest exists', async () => {
     const root = await createTempDir('ecos-resources-')
     const service = new ResourceManagerService({
@@ -455,10 +492,12 @@ describe('ResourceManagerService', () => {
 
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
-    ) as { installed: Record<string, unknown> }
+    ) as { installed: Record<string, { detected_executables?: string[]; executable?: string }> }
     expect(manifest.installed['tool:yosys']).toMatchObject({
       version: '0.61',
       managed: true,
+      detected_executables: ['bin/yosys'],
+      executable: 'bin/yosys',
     })
   })
 

@@ -10501,3 +10501,44 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 当前 `Frontend Flow` 和 `EDA Tools` 仍部分基于 registry 资源名称、显示名、分类和描述做能力识别；后续最好在 registry schema 中增加显式 capability/resource_kind 字段，让分类不依赖字符串匹配。
 - `EDA Tools` 与 `Frontend Flow` 现在允许交集，这是刻意设计；后续如果 UI 希望进一步降低用户困惑，可以在资源详情里展示“工具类型”和“用于哪些流程”两个字段。
+
+# 第 160 次 开发
+
+## 开发目标
+
+排查并修复 `/home/luyoung/test0629a` 在 ELAB 步骤失败的问题，确保 Resource Manager 安装的 Slang 能稳定注入 ECC-FE 前端运行环境。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 修复 Resource Manager runtime env 对已安装工具 executable 的解析逻辑。
+  - 不再盲信 manifest 中的 `executable` 字段；当旧 manifest 写了错误路径，例如 `bin/slang`，但真实文件在工具根目录 `slang` 时，会按工具名候选自动寻找可执行文件。
+  - `ECOS_SLANG` / `ECOS_VERILATOR` 改为使用解析后的真实可执行文件路径。
+  - 安装时扫描 executable 改用 `constants.X_OK`，修复之前 `detected_executables` 可能为空的问题。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加旧 manifest executable 路径错误的回归测试，覆盖 Slang 安装在根目录但 manifest 指向 `bin/slang` 的情况。
+  - 加强 managed tool 安装测试，确认可执行文件会被记录到 `detected_executables` 并选为 `executable`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 test0629a ELAB 失败排查和 Resource Manager runtime env 修复。
+
+## 验证情况
+
+- 已确认 `/home/luyoung/test0629a/elab_slang/report/log.txt` 原始失败原因为 `failed to execute slang: [Errno 2] No such file or directory: 'slang'`，`elab_summary.json` 中 `returncode=127`。
+- 已确认本机 Slang 实际安装在 `/home/luyoung/.local/share/ecos-studio/tools/slang/11.0/slang`，而 Resource Manager manifest 中旧记录为 `executable: "bin/slang"`，导致 runtime env 跳过 Slang 注入。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、14 个测试用例。
+- 已执行 `ECOS_SLANG=/home/luyoung/.local/share/ecos-studio/tools/slang/11.0/slang PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe /home/luyoung/ecos-studio/ecc/.venv/bin/python -m fecompiler.cli.main workspace run-step --directory /home/luyoung/test0629a --step elab --json --rerun`，通过；`elab_summary.json` 显示 `status=pass`、`returncode=0`，Slang 日志显示 `Build succeeded: 0 errors, 0 warnings`。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次修复会让旧 manifest 中路径写错的工具在运行时自动恢复，但不会主动改写 manifest；用户重新安装或后续安装新工具时会因为 executable 扫描修复而写入更准确的 `detected_executables`。
+- `test0629a` 目前只复测了 ELAB；如果用户继续跑 all steps，后续 Lint/Sim 仍可能暴露与 Verilator 或 RISC-V toolchain 注入相关的独立问题。

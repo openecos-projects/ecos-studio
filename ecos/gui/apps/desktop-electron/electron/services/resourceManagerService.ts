@@ -236,7 +236,6 @@ export class ResourceManagerService {
     for (const entry of Object.values(manifest.installed)) {
       if (!isToolEntry(entry) || !entry.active) continue
       const toolKind = normalizeToolName(entry.name)
-      const toolBinDir = findToolBinDir(entry)
 
       if (toolKind === 'surfer') {
         if (await isSurferAssetsRoot(entry.path)) {
@@ -250,26 +249,26 @@ export class ResourceManagerService {
         continue
       }
 
-      const executablePath = join(entry.path, entry.executable)
-      if (!await isUsableExecutable(executablePath, options.platform)) {
+      const resolvedExecutable = await resolveRuntimeExecutable(entry, options.platform)
+      if (!resolvedExecutable) {
         electronLogger.debug(
-          '[resources] Skipping runtime tool %s: executable is missing or not executable at %s',
+          '[resources] Skipping runtime tool %s: no usable executable found under %s',
           entry.name,
-          executablePath,
+          entry.path,
         )
         continue
       }
 
-      toolBinDirs.push(toolBinDir || dirname(executablePath))
+      toolBinDirs.push(dirname(resolvedExecutable))
       const capabilities = detectToolCapabilities(entry)
       if (toolKind === 'yosys' || toolKind === 'oss-cad-suite' || capabilities.has('yosys')) {
         activeYosysRoot = entry.path
       }
       if (toolKind === 'slang' || capabilities.has('slang')) {
-        env.ECOS_SLANG = join(entry.path, findExecutableByBasename(entry, 'slang') || entry.executable)
+        env.ECOS_SLANG = resolvedExecutable
       }
       if (toolKind === 'verilator' || capabilities.has('verilator')) {
-        env.ECOS_VERILATOR = join(entry.path, findExecutableByBasename(entry, 'verilator') || entry.executable)
+        env.ECOS_VERILATOR = resolvedExecutable
         env.VERILATOR_ROOT = entry.path
       }
       if (toolKind === 'riscv-toolchain' || capabilities.has('riscv-toolchain')) {
@@ -1480,13 +1479,32 @@ function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
   return capabilities
 }
 
-function findToolBinDir(entry: ToolInventoryEntry): string | null {
-  const candidate = entry.detected_executables.find((item) => dirname(item) === 'bin')
-  return candidate ? join(entry.path, dirname(candidate)) : null
-}
+async function resolveRuntimeExecutable(
+  entry: ToolInventoryEntry,
+  platform: NodeJS.Platform,
+): Promise<string | null> {
+  const normalized = normalizeToolName(entry.name)
+  const candidates = [
+    entry.executable,
+    ...entry.detected_executables,
+    ...preferredExecutableNames(normalized),
+    `bin/${entry.name}`,
+    entry.name,
+  ].filter(Boolean)
+  const seen = new Set<string>()
 
-function findExecutableByBasename(entry: ToolInventoryEntry, name: string): string | null {
-  return [entry.executable, ...entry.detected_executables].find((item) => basename(item) === name) ?? null
+  for (const candidate of candidates) {
+    const relativePath = candidate.replace(/\\/g, '/')
+    if (seen.has(relativePath)) continue
+    seen.add(relativePath)
+
+    const absolutePath = join(entry.path, relativePath)
+    if (await isUsableExecutable(absolutePath, platform)) {
+      return absolutePath
+    }
+  }
+
+  return null
 }
 
 function preferredExecutableNames(normalizedName: string): string[] {
@@ -1938,7 +1956,7 @@ async function collectExecutableFiles(root: string, directory: string, results: 
       await collectExecutableFiles(root, path, results)
     } else if (entry.isFile()) {
       try {
-        await access(path, 0o111)
+        await access(path, constants.X_OK)
         results.push(path.slice(root.length + 1).replace(/\\/g, '/'))
       } catch {
         // Non-executable files are ignored.
