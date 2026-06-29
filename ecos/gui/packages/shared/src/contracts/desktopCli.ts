@@ -9,6 +9,7 @@ export type DesktopCliCommandName =
   | 'home_page'
   | 'refresh_config'
   | 'sync_config'
+  | 'reset_flow'
 
 export type DesktopCliCommandSource = 'button' | 'menu' | 'terminal' | 'test'
 

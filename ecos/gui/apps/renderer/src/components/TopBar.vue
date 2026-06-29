@@ -118,6 +118,7 @@ const isEcosHome = computed(() => route.name === 'ECOS')
 // ---- Props & Emits ----
 const props = defineProps<{
   projectName?: string | null
+  hasWorkspace?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -137,16 +138,22 @@ const handleGoHome = () => {
 }
 
 // ---- 菜单配置 ----
-const menus: Menu[] = [
+const menus = computed<Menu[]>(() => [
   {
     label: 'File',
     action: 'file',
     children: [
       { label: 'New Workspace', icon: 'ri-add-line', shortcut: '⌘N', event: appMenuActionIds.newProject },
       { label: 'Open Workspace', icon: 'ri-folder-open-line', shortcut: '⌘O', event: appMenuActionIds.openProject },
-      // { separator: true },
-    ]
+    ],
   },
+  ...(props.hasWorkspace ? [{
+    label: 'Design',
+    action: 'design',
+    children: [
+      { label: 'Manage RTL Files...', icon: 'ri-file-code-line', event: appMenuActionIds.manageDesignFiles },
+    ],
+  }] : []),
   {
     label: 'Help',
     action: 'help',
@@ -154,9 +161,9 @@ const menus: Menu[] = [
       { label: 'Documentation', icon: 'ri-book-open-line', event: appMenuActionIds.documentation },
       { separator: true },
       { label: 'About', icon: 'ri-information-line', event: appMenuActionIds.about },
-    ]
-  }
-]
+    ],
+  },
+])
 
 // ---- 下拉菜单状态 ----
 const activeMenu = ref<string | null>(null)

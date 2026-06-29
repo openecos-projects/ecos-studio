@@ -44,6 +44,7 @@ const supportedCommands = new Set<DesktopCliCommandName>([
   'home_page',
   'refresh_config',
   'sync_config',
+  'reset_flow',
 ])
 
 const longRunningCommands = new Set<DesktopCliCommandName>([
@@ -53,6 +54,7 @@ const longRunningCommands = new Set<DesktopCliCommandName>([
   'rtl2gds',
   'refresh_config',
   'sync_config',
+  'reset_flow',
 ])
 
 function isSupportedCommand(cmd: string): cmd is DesktopCliCommandName {

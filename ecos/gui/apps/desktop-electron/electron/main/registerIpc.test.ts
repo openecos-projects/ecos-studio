@@ -2,11 +2,20 @@ import { EventEmitter } from 'node:events'
 import { desktopApiEventChannels, desktopApiIpcChannels } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { fromWebContents, openExternal, showOpenDialog } = vi.hoisted(() => ({
+const { fromWebContents, openExternal, showOpenDialog, statMock } = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
   openExternal: vi.fn(),
   showOpenDialog: vi.fn(),
+  statMock: vi.fn(),
 }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    stat: statMock,
+  }
+})
 
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -60,6 +69,10 @@ function registerHandlers() {
       registerProjectRoot: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       scanPdkDirectory: vi.fn(),
+      scanRtlDirectory: vi.fn(),
+      listDesignFiles: vi.fn(),
+      addDesignFiles: vi.fn(),
+      removeDesignFile: vi.fn(),
       subscribeProjectLogTail: vi.fn(),
       unwatchProjectFile: vi.fn(),
       unsubscribeProjectLogTail: vi.fn(),
@@ -133,6 +146,22 @@ describe('registerIpc', () => {
     electronLogger.warn.mockReset()
     openExternal.mockReset()
     showOpenDialog.mockReset()
+    statMock.mockReset()
+    statMock.mockImplementation(async (path: string) => {
+      if (path === '/tmp/project') {
+        return { isDirectory: () => true, isFile: () => false }
+      }
+      if (path === '/tmp/rtl-dir') {
+        return { isDirectory: () => true, isFile: () => false }
+      }
+      if (path === '/tmp/a.v' || path === '/tmp/b.sv') {
+        return { isDirectory: () => false, isFile: () => true }
+      }
+      throw Object.assign(
+        new Error(`ENOENT: no such file or directory, stat '${path}'`),
+        { code: 'ENOENT', path },
+      )
+    })
   })
 
   it('registers a handler for every desktop bridge channel', () => {
@@ -153,6 +182,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.remoteContentReadJsonFile,
       desktopApiIpcChannels.dialogPickDirectory,
       desktopApiIpcChannels.dialogPickFiles,
+      desktopApiIpcChannels.dialogPickRtlSources,
       desktopApiIpcChannels.workspaceIsProjectDirectory,
       desktopApiIpcChannels.workspaceRegisterProjectRoot,
       desktopApiIpcChannels.workspaceClearProjectRoot,
@@ -167,6 +197,10 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.workspaceReadProjectBinaryFile,
       desktopApiIpcChannels.workspaceWriteProjectTextFile,
       desktopApiIpcChannels.workspaceScanPdkDirectory,
+      desktopApiIpcChannels.workspaceScanRtlDirectory,
+      desktopApiIpcChannels.workspaceListDesignFiles,
+      desktopApiIpcChannels.workspaceAddDesignFiles,
+      desktopApiIpcChannels.workspaceRemoveDesignFile,
       desktopApiIpcChannels.workspaceWatchProjectFile,
       desktopApiIpcChannels.workspaceUnwatchProjectFile,
       desktopApiIpcChannels.workspaceResourcesGetIndex,
@@ -616,6 +650,7 @@ describe('registerIpc', () => {
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openDirectory'],
       title: 'Select Project',
+      buttonLabel: 'Select Folder',
     })
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openFile', 'multiSelections'],
@@ -657,6 +692,48 @@ describe('registerIpc', () => {
       '{"PDK":"ics55"}',
     )
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens RTL source file picker as single file selection and rejects returned directories', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/a.v'],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogPickRtlSources)?.(event, {
+        title: 'Add RTL Design Files',
+        multiple: false,
+      }),
+    ).resolves.toEqual({
+      directories: [],
+      files: ['/tmp/a.v'],
+    })
+
+    expect(showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      title: 'Add RTL Design Files',
+      filters: [{ name: 'HDL Files', extensions: ['v', 'sv', 'vhd', 'vhdl'] }],
+    })
+
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/rtl-dir'],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogPickRtlSources)?.(event, {
+        title: 'Add RTL Design Files',
+        multiple: false,
+      }),
+    ).resolves.toEqual({
+      error: expect.objectContaining({
+        message: 'Please select RTL design files, not folders. Use Select design folder to scan a folder.',
+      }),
+      ok: false,
+    })
   })
 
   it('delegates native layout viewer launches to the layout viewer service', async () => {

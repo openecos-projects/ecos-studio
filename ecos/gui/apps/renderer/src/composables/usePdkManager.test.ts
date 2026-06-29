@@ -50,6 +50,10 @@ const scannedPdk: ScannedPdkDirectory = {
 }
 
 const scanPdkDirectory = vi.fn(async () => scannedPdk)
+const scanRtlDirectory = vi.fn(async () => ({
+  rootPath: '/tmp/rtl',
+  files: [],
+}))
 const localStorageState = new Map<string, string>()
 const localStorageMock = {
   getItem: vi.fn((key: string) => localStorageState.get(key) ?? null),
@@ -105,6 +109,7 @@ const desktopBridge = {
   dialog: {
     pickDirectory,
     pickFiles: async () => null,
+    pickRtlSources: async () => null,
   },
   workspace: {
     isProjectDirectory: async () => false,
@@ -117,7 +122,11 @@ const desktopBridge = {
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
     scanPdkDirectory,
+    scanRtlDirectory,
     watchProjectFile: async () => () => undefined,
+    listDesignFiles: async () => [],
+    addDesignFiles: async () => ({ added: [], skipped: [] }),
+    removeDesignFile: async () => null,
   },
   layoutViewer: {
     open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),

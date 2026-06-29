@@ -3,7 +3,11 @@
     <!-- 主应用容器 -->
     <div class="app-container">
       <!-- 全局顶部菜单栏 -->
-      <TopBar :project-name="isWelcome ? null : currentProject?.name" @menu-action="handleMenuAction" />
+      <TopBar
+        :project-name="isWelcome ? null : currentProject?.name"
+        :has-workspace="Boolean(currentProject?.path)"
+        @menu-action="handleMenuAction"
+      />
       <!-- 页面内容 -->
       <div
         class="app-main"
@@ -35,6 +39,8 @@
     <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
 
     <AboutDialog v-model="showAboutDialog" />
+
+    <DesignFilesManageDialog v-model="showManageDialog" />
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
@@ -75,8 +81,10 @@ import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
 import Toast from 'primevue/toast'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
+import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
+import { useDesignFiles } from '@/composables/useDesignFiles'
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -96,6 +104,10 @@ const {
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
+const {
+  showManageDialog,
+  openManageDialog,
+} = useDesignFiles()
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
@@ -156,6 +168,7 @@ const { handleMenuAction } = useAppMenuActions({
   showNewProjectWizard: () => {
     showNewProjectWizard.value = true
   },
+  manageDesignFiles: openManageDialog,
 })
 useAppWindowClose(closeProject)
 

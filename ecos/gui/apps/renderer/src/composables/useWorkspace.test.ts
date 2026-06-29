@@ -121,6 +121,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
     dialog: {
       pickDirectory: vi.fn(),
       pickFiles: vi.fn(),
+      pickRtlSources: vi.fn(),
     },
     workspace: {
       isProjectDirectory: vi.fn(),
@@ -138,6 +139,10 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
       scanPdkDirectory: vi.fn(),
+      scanRtlDirectory: vi.fn(),
+      listDesignFiles: vi.fn(),
+      addDesignFiles: vi.fn(),
+      removeDesignFile: vi.fn(),
       watchProjectFile: vi.fn(),
     },
     ...overrides,

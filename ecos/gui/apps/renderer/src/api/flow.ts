@@ -96,6 +96,22 @@ export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
   }) as unknown as Promise<ResponseData<SyncConfigResponse>>
 }
 
+export interface ResetFlowRequest {
+  directory: string
+}
+
+export interface ResetFlowResponse {
+  directory: string
+}
+
+export function resetFlowApi(request: RequestData<ResetFlowRequest>) {
+  return getDesktopApi().cli.execute({
+    cmd: 'reset_flow',
+    data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
+    source: 'button',
+  }) as unknown as Promise<ResponseData<ResetFlowResponse>>
+}
+
 // ============ Home Page API ============
 
 export interface HomePageResponse {

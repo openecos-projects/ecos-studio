@@ -136,45 +136,106 @@
               </div>
 
               <!-- Step 2: Design Files -->
-              <div v-else-if="currentStep === 2" key="step2" class="max-w-2xl mx-auto w-full">
+              <div v-else-if="currentStep === 2" key="step2" :class="rtlSourceDirectory ? 'w-full' : 'max-w-2xl mx-auto w-full'">
                 <div class="mb-10">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Design Files</h2>
                   <p class="text-(--text-secondary) mt-2">Upload or select your RTL design files to be synthesized.</p>
                 </div>
 
-                <!-- Drag & Drop Zone -->
-                <div @dragover.prevent="isDragging = true" @dragleave.prevent="isDragging = false"
-                  @drop.prevent="handleFileDrop" :class="[
-                    'relative border-2 border-dashed rounded-2xl p-10 text-center transition-colors duration-200 cursor-pointer group',
-                    isDragging
+                <!-- RTL Source: files or directory -->
+                <div
+                  @dragover.prevent="isDraggingFiles = true"
+                  @dragleave.prevent="isDraggingFiles = false"
+                  @drop.prevent="handleFileDrop"
+                  :class="[
+                    'relative border-2 border-dashed rounded-2xl p-8 md:p-10 text-center transition-colors duration-200 group',
+                    isDraggingFiles
                       ? 'border-(--accent-color) bg-(--accent-color)/5'
                       : 'border-(--border-color) hover:border-(--accent-color)/50 hover:bg-(--bg-secondary)/40'
-                  ]" @click="selectDesignFiles">
+                  ]"
+                >
                   <div class="flex flex-col items-center">
                     <div
                       class="w-20 h-20 rounded-2xl bg-(--bg-secondary)/50 border border-(--border-color) flex items-center justify-center mb-5 shadow-sm transition-colors duration-200"
-                      :class="{ 'border-(--accent-color) text-(--accent-color)': isDragging }">
-                      <i class="ri-upload-cloud-2-line text-4xl" :class="isDragging ? 'text-(--accent-color)' : 'text-(--text-secondary) group-hover:text-(--accent-color)'"></i>
+                      :class="{ 'border-(--accent-color) text-(--accent-color)': isDraggingFiles }">
+                      <i class="ri-upload-cloud-2-line text-4xl" :class="isDraggingFiles ? 'text-(--accent-color)' : 'text-(--text-secondary) group-hover:text-(--accent-color)'"></i>
                     </div>
-                    <h3 class="text-lg font-bold text-(--text-primary) mb-2">Click or drag files here</h3>
-                    <p class="text-sm text-(--text-secondary) mb-6 max-w-sm">Supports Verilog (.v), SystemVerilog (.sv), and VHDL (.vhd) files</p>
-                    <button type="button"
-                      class="px-8 py-3 bg-(--accent-color) text-white rounded-xl hover:opacity-90 shadow-sm transition-opacity duration-200 font-medium cursor-pointer">
-                      Browse Files
-                    </button>
+                    <h3 class="text-lg font-bold text-(--text-primary) mb-2">Add RTL Design Files</h3>
+                    <p class="text-sm text-(--text-secondary) mb-6 max-w-md">
+                      Drag HDL files here, or browse to select individual files or a design folder.
+                    </p>
+                    <div class="relative">
+                      <button type="button"
+                        class="px-8 py-3 bg-(--accent-color) text-white rounded-xl hover:opacity-90 shadow-sm transition-opacity duration-200 font-medium cursor-pointer inline-flex items-center gap-2"
+                        @click="toggleBrowseMenu">
+                        Browse
+                        <i class="ri-arrow-down-s-line transition-transform duration-200" :class="{ 'rotate-180': showBrowseMenu }"></i>
+                      </button>
+                      <div
+                        v-if="showBrowseMenu"
+                        class="absolute left-1/2 top-[calc(100%+0.5rem)] z-20 w-56 -translate-x-1/2 rounded-xl border border-(--border-color) bg-(--bg-primary) shadow-lg overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          class="w-full px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60 transition-colors duration-200 cursor-pointer flex items-center gap-2"
+                          @click="browseRtlFiles"
+                        >
+                          <i class="ri-file-code-line text-blue-500"></i>
+                          Select RTL files...
+                        </button>
+                        <button
+                          type="button"
+                          class="w-full px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60 transition-colors duration-200 cursor-pointer flex items-center gap-2 border-t border-(--border-color)/60"
+                          @click="browseRtlFolder"
+                        >
+                          <i class="ri-folder-open-line text-yellow-500/80"></i>
+                          Select design folder...
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="isScanningDirectory" class="mt-6 flex items-center justify-center gap-2 text-sm text-(--text-secondary)">
+                      <i class="ri-loader-4-line animate-spin"></i>
+                      Scanning RTL files in the selected directory...
+                    </div>
+                    <p v-else-if="manualFilePickError" class="mt-6 text-xs text-red-500 flex items-center justify-center gap-1">
+                      <i class="ri-error-warning-fill"></i> {{ manualFilePickError }}
+                    </p>
+                    <p v-else-if="directoryScanError" class="mt-6 text-xs text-red-500 flex items-center justify-center gap-1">
+                      <i class="ri-error-warning-fill"></i> {{ directoryScanError }}
+                    </p>
+                    <p v-else class="mt-6 text-xs text-(--text-secondary)">
+                      Supports Verilog (.v), SystemVerilog (.sv), VHDL (.vhd, .vhdl), or a design folder
+                    </p>
                   </div>
                 </div>
 
-                <!-- File List -->
-                <div v-if="config.rtl_list.length > 0" class="mt-8 space-y-3">
+                <DesignFileTransfer
+                  v-if="rtlSourceDirectory && scannedRtlFiles.length > 0"
+                  class="mt-8"
+                  :root-path="rtlSourceDirectory"
+                  :all-files="scannedRtlFiles"
+                  :selected-files="directorySelectedFiles"
+                  @update:selected-files="updateDirectorySelectedFiles"
+                />
+
+                <p
+                  v-else-if="rtlSourceDirectory && !isScanningDirectory && scannedRtlFiles.length === 0"
+                  class="mt-6 text-xs text-(--text-secondary) flex items-center gap-1"
+                >
+                  <i class="ri-information-line"></i> No RTL files were found in the selected directory.
+                </p>
+
+                <!-- Manually Added Files -->
+                <div v-if="manuallyAddedFiles.length > 0" class="mt-8 space-y-3">
                   <div class="flex items-center justify-between mb-4">
                     <h4 class="text-sm font-semibold text-(--text-primary)">
-                      Added Files <span class="bg-(--bg-secondary) px-2 py-0.5 rounded-full text-xs ml-2">{{ config.rtl_list.length }}</span>
+                      Added Files <span class="bg-(--bg-secondary) px-2 py-0.5 rounded-full text-xs ml-2">{{ manuallyAddedFiles.length }}</span>
                     </h4>
                   </div>
                   <div class="max-h-48 overflow-y-auto custom-scrollbar pr-2 space-y-2">
                     <TransitionGroup name="list">
-                      <div v-for="file in config.rtl_list" :key="file"
+                      <div v-for="file in manuallyAddedFiles" :key="file"
                         class="flex items-center justify-between px-4 py-3 bg-(--bg-secondary)/30 rounded-xl border border-(--border-color) group hover:bg-(--bg-secondary)/60 transition-colors duration-200 shadow-sm cursor-default">
                         <div class="flex items-center gap-4 min-w-0">
                           <div class="w-10 h-10 rounded-lg bg-(--bg-primary)/80 flex items-center justify-center border border-(--border-color)/50 shadow-sm">
@@ -182,7 +243,7 @@
                               'text-lg',
                               file.endsWith('.v') || file.endsWith('.sv')
                                 ? 'ri-file-code-line text-blue-500'
-                                : file.endsWith('.vhd')
+                                : file.endsWith('.vhd') || file.endsWith('.vhdl')
                                   ? 'ri-file-code-line text-purple-500'
                                   : 'ri-file-line text-(--text-secondary)'
                             ]"></i>
@@ -192,7 +253,7 @@
                             <p class="text-xs text-(--text-secondary) truncate opacity-70">{{ file }}</p>
                           </div>
                         </div>
-                        <button @click.stop="removeFile(file)"
+                        <button @click.stop="removeManualFile(file)"
                           class="w-8 h-8 flex items-center justify-center rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-colors duration-200 cursor-pointer text-(--text-secondary) hover:text-red-500 shrink-0">
                           <i class="ri-delete-bin-line"></i>
                         </button>
@@ -548,7 +609,10 @@
 import { ref, computed } from 'vue'
 import type { WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
+import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
+import { isHdlFilePath, type PickedRtlSources } from '@ecos-studio/shared'
+import DesignFileTransfer from './DesignFileTransfer.vue'
 
 interface Emits {
   (e: 'close'): void
@@ -559,8 +623,15 @@ const emit = defineEmits<Emits>()
 
 const currentStep = ref(1)
 const highestStep = ref(1)
-const isDragging = ref(false)
+const isDraggingFiles = ref(false)
 const isCreating = ref(false)
+const isScanningDirectory = ref(false)
+const directoryScanError = ref('')
+const rtlSourceDirectory = ref<string | null>(null)
+const scannedRtlFiles = ref<string[]>([])
+const directorySelectedFiles = ref<string[]>([])
+const manuallyAddedFiles = ref<string[]>([])
+const showBrowseMenu = ref(false)
 
 const steps = [
   { id: 1, title: 'Basic Info' },
@@ -571,6 +642,7 @@ const steps = [
 
 // PDK 管理
 const { importedPdks, loadPdks, importPdk: doImportPdk, removePdk } = usePdkManager()
+const { showToast } = useWorkspace()
 const selectedPdkId = ref<string>('')
 const hasLoadedPdks = ref(false)
 
@@ -653,43 +725,162 @@ const selectLocation = async () => {
   }
 }
 
-const selectDesignFiles = async () => {
-  const result = await getDesktopApi().dialog.pickFiles({
-    multiple: true,
-    filters: [{
-      name: 'HDL Files',
-      extensions: ['v', 'sv', 'vhd', 'vhdl']
-    }],
-    title: 'Select Design Files'
+const manualFilePickError = ref('')
+const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
+  'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.'
+
+const closeBrowseMenu = () => {
+  showBrowseMenu.value = false
+}
+
+const toggleBrowseMenu = () => {
+  showBrowseMenu.value = !showBrowseMenu.value
+}
+
+const showDirectoryUploadFailurePrompt = () => {
+  manualFilePickError.value = DIRECTORY_UPLOAD_FAILURE_MESSAGE
+  showToast({
+    severity: 'warn',
+    summary: 'Folder Upload Failed',
+    detail: DIRECTORY_UPLOAD_FAILURE_MESSAGE,
+    life: 5000,
   })
-  if (result) {
-    addFiles(result)
+}
+
+const browseRtlFiles = async () => {
+  closeBrowseMenu()
+  manualFilePickError.value = ''
+  directoryScanError.value = ''
+
+  let result: PickedRtlSources | null = null
+  try {
+    result = await getDesktopApi().dialog.pickRtlSources({
+      multiple: false,
+      title: 'Select RTL Design Files',
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('not folders')) {
+      showDirectoryUploadFailurePrompt()
+      return
+    }
+
+    manualFilePickError.value = error instanceof Error
+      ? error.message
+      : 'Failed to select RTL design files.'
+    return
   }
+
+  if (!result || result.files.length === 0) {
+    return
+  }
+
+  if (result.directories.length > 0) {
+    showDirectoryUploadFailurePrompt()
+    return
+  }
+
+  const hdlFiles = result.files.filter((path) => isHdlFilePath(path))
+  if (hdlFiles.length === 0) {
+    manualFilePickError.value = 'Please select RTL design files only (.v, .sv, .vhd, .vhdl).'
+    return
+  }
+
+  addManualFiles(hdlFiles)
+}
+
+const browseRtlFolder = async () => {
+  closeBrowseMenu()
+  manualFilePickError.value = ''
+  directoryScanError.value = ''
+
+  let directoryPath: string | null = null
+  try {
+    directoryPath = await getDesktopApi().dialog.pickDirectory({
+      title: 'Select RTL Design Folder',
+    })
+  } catch (error) {
+    directoryScanError.value = error instanceof Error
+      ? error.message
+      : 'Please select a folder, not a file.'
+    return
+  }
+
+  if (!directoryPath) {
+    return
+  }
+
+  await loadRtlDirectory(directoryPath)
+}
+
+const loadRtlDirectory = async (directoryPath: string) => {
+  isScanningDirectory.value = true
+  directoryScanError.value = ''
+  try {
+    const scanned = await getDesktopApi().workspace.scanRtlDirectory(directoryPath)
+    rtlSourceDirectory.value = scanned.rootPath
+    scannedRtlFiles.value = scanned.files
+    directorySelectedFiles.value = [...scanned.files]
+    syncRtlList()
+  } catch (error) {
+    directoryScanError.value = error instanceof Error
+      ? error.message
+      : 'Failed to scan the selected directory.'
+  } finally {
+    isScanningDirectory.value = false
+  }
+}
+
+const updateDirectorySelectedFiles = (files: string[]) => {
+  directorySelectedFiles.value = files
+  syncRtlList()
+}
+
+const syncRtlList = () => {
+  const merged = new Set([
+    ...directorySelectedFiles.value,
+    ...manuallyAddedFiles.value,
+  ])
+  config.value.rtl_list = [...merged]
 }
 
 const handleFileDrop = (event: DragEvent) => {
-  isDragging.value = false
+  isDraggingFiles.value = false
+  manualFilePickError.value = ''
   const files = event.dataTransfer?.files
-  if (files) {
-    const paths = Array.from(files)
-      .map((file) => (file as File & { path?: string }).path ?? file.name)
-      .filter((path): path is string => Boolean(path))
-    addFiles(paths)
+  if (!files) {
+    return
   }
+
+  const paths = Array.from(files)
+    .map((file) => (file as File & { path?: string }).path ?? file.name)
+    .filter((path): path is string => Boolean(path))
+    .filter((path) => isHdlFilePath(path))
+
+  if (paths.length === 0) {
+    manualFilePickError.value = 'Only RTL design files can be dropped here. Use Browse to select a folder.'
+    return
+  }
+
+  addManualFiles(paths)
 }
 
-const addFiles = (paths: string[]) => {
-  const existing = new Set(config.value.rtl_list)
+const addManualFiles = (paths: string[]) => {
+  const existing = new Set([
+    ...manuallyAddedFiles.value,
+    ...directorySelectedFiles.value,
+  ])
   for (const path of paths) {
     if (!existing.has(path)) {
-      config.value.rtl_list.push(path)
+      manuallyAddedFiles.value.push(path)
       existing.add(path)
     }
   }
+  syncRtlList()
 }
 
-const removeFile = (path: string) => {
-  config.value.rtl_list = config.value.rtl_list.filter(f => f !== path)
+const removeManualFile = (path: string) => {
+  manuallyAddedFiles.value = manuallyAddedFiles.value.filter((file) => file !== path)
+  syncRtlList()
 }
 
 /** 选中一个已导入的 PDK */

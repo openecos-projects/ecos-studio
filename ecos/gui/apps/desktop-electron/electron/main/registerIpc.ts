@@ -6,6 +6,7 @@ import {
   type IpcMain,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { stat } from 'node:fs/promises'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -16,6 +17,8 @@ import {
   type DesktopProjectLogTailEvent,
   type DesktopDirectoryDialogOptions,
   type DesktopFileDialogOptions,
+  type DesktopRtlSourceDialogOptions,
+  type PickedRtlSources,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
@@ -33,6 +36,7 @@ import {
   type DesktopShellSession,
   type DesktopShellSessionOptions,
   type ScannedPdkDirectory,
+  type ScannedRtlDirectory,
   type VersionInfo,
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
@@ -103,6 +107,10 @@ export interface DesktopBridgeServices {
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
+    scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    listDesignFiles(): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry[]>
+    addDesignFiles(sourcePaths: string[]): Promise<import('@ecos-studio/shared').WorkspaceDesignFileAddResult>
+    removeDesignFile(filelistEntry: string): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry | null>
     unwatchProjectFile(subscriptionId: string): Promise<void>
     unsubscribeProjectLogTail(subscriptionId: string): Promise<void>
     watchProjectFile(
@@ -241,13 +249,24 @@ async function pickDirectory(
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
     title: options?.title,
+    buttonLabel: 'Select Folder',
   })
 
   if (result.canceled) {
     return null
   }
 
-  return result.filePaths[0] ?? null
+  const selectedPath = result.filePaths[0]
+  if (!selectedPath) {
+    return null
+  }
+
+  const info = await stat(selectedPath)
+  if (!info.isDirectory()) {
+    throw new Error('Please select a directory, not a file.')
+  }
+
+  return selectedPath
 }
 
 async function pickFiles(
@@ -263,7 +282,64 @@ async function pickFiles(
     return null
   }
 
-  return result.filePaths
+  const filePaths: string[] = []
+  const directoryPaths: string[] = []
+  for (const selectedPath of result.filePaths) {
+    const info = await stat(selectedPath)
+    if (info.isFile()) {
+      filePaths.push(selectedPath)
+    } else if (info.isDirectory()) {
+      directoryPaths.push(selectedPath)
+    }
+  }
+
+  if (filePaths.length === 0 && directoryPaths.length > 0) {
+    throw new Error('Please select files, not folders. Use Browse Directory to add RTL files from a folder.')
+  }
+
+  return filePaths.length > 0 ? filePaths : null
+}
+
+async function classifyLocalPaths(paths: string[]): Promise<PickedRtlSources> {
+  const files: string[] = []
+  const directories: string[] = []
+
+  for (const selectedPath of paths) {
+    const info = await stat(selectedPath)
+    if (info.isFile()) {
+      files.push(selectedPath)
+    } else if (info.isDirectory()) {
+      directories.push(selectedPath)
+    }
+  }
+
+  return { files, directories }
+}
+
+async function pickRtlSources(
+  options?: DesktopRtlSourceDialogOptions,
+): Promise<PickedRtlSources | null> {
+  const result = await dialog.showOpenDialog({
+    properties: options?.multiple === false
+      ? ['openFile']
+      : ['openFile', 'multiSelections'],
+    title: options?.title,
+    filters: [{
+      name: 'HDL Files',
+      extensions: ['v', 'sv', 'vhd', 'vhdl'],
+    }],
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+
+  const picked = await classifyLocalPaths(result.filePaths)
+  if (picked.directories.length > 0) {
+    throw new Error('Please select RTL design files, not folders. Use Select design folder to scan a folder.')
+  }
+
+  return picked.files.length > 0 ? picked : null
 }
 
 export function registerIpc(
@@ -423,6 +499,13 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.dialogPickRtlSources,
+    async (_event, options) => {
+      return await pickRtlSources(options as DesktopRtlSourceDialogOptions | undefined)
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.workspaceIsProjectDirectory,
     async (_event, path) => {
       return await services.workspaceService.isProjectDirectory(path as string)
@@ -555,6 +638,34 @@ export function registerIpc(
     desktopApiIpcChannels.workspaceScanPdkDirectory,
     async (_event, path) => {
       return await services.workspaceService.scanPdkDirectory(path as string)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceScanRtlDirectory,
+    async (_event, path) => {
+      return await services.workspaceService.scanRtlDirectory(path as string)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceListDesignFiles,
+    async () => {
+      return await services.workspaceService.listDesignFiles()
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceAddDesignFiles,
+    async (_event, sourcePaths) => {
+      return await services.workspaceService.addDesignFiles(sourcePaths as string[])
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceRemoveDesignFile,
+    async (_event, filelistEntry) => {
+      return await services.workspaceService.removeDesignFile(filelistEntry as string)
     },
   )
 

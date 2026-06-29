@@ -7,6 +7,7 @@ interface AppMenuActionDependencies {
   openProject(): Promise<boolean | undefined>
   showAboutDialog(): void
   showNewProjectWizard(): void
+  manageDesignFiles?(): void | Promise<void>
 }
 
 export function useAppMenuActions({
@@ -15,6 +16,7 @@ export function useAppMenuActions({
   openProject,
   showAboutDialog,
   showNewProjectWizard,
+  manageDesignFiles,
 }: AppMenuActionDependencies) {
   const handleMenuAction = async (action: AppMenuAction) => {
     switch (action) {
@@ -25,6 +27,9 @@ export function useAppMenuActions({
         if (await openProject()) {
           navigateToWorkspace()
         }
+        break
+      case appMenuActionIds.manageDesignFiles:
+        await manageDesignFiles?.()
         break
       case appMenuActionIds.documentation:
         await openDocumentation()
@@ -49,6 +54,9 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.about]: () => {
       void handleMenuAction(appMenuActionIds.about)
+    },
+    [appMenuActionIds.manageDesignFiles]: () => {
+      void handleMenuAction(appMenuActionIds.manageDesignFiles)
     },
   })
 

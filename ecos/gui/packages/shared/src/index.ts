@@ -9,6 +9,8 @@ export type {
   DesktopDirectoryDialogOptions,
   DesktopFileDialogFilter,
   DesktopFileDialogOptions,
+  DesktopRtlSourceDialogOptions,
+  PickedRtlSources,
   DesktopProjectLogTailSubscriptionOptions,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
@@ -17,6 +19,7 @@ export type {
   LayoutViewerOpenResult,
   PdkDetectedFiles,
   ScannedPdkDirectory,
+  ScannedRtlDirectory,
   VersionInfo,
 } from './contracts/desktopApi.ts';
 export type {
@@ -86,6 +89,11 @@ export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts'
 export type { DesktopFailure, DesktopResult, DesktopSuccess, VoidDesktopResult } from './types/desktop.ts';
 export type { WorkspaceConfig, WorkspaceParameters, WorkspaceStatus, WorkspaceSummary } from './types/workspace.ts';
 export type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+  WorkspaceDesignFileSkip,
+} from './types/designFiles.ts';
+export type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
   WorkspaceResourceStatus,
@@ -103,3 +111,4 @@ export {
   resolveContainedLocalPath,
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts';
+export { isHdlFilePath } from './utils/hdlPath.ts';

@@ -1,16 +1,10 @@
-import { isAbsoluteLocalPath, joinLocalPath, normalizeLocalPath } from '@ecos-studio/shared'
+import { isAbsoluteLocalPath, isHdlFilePath, joinLocalPath, normalizeLocalPath } from '@ecos-studio/shared'
 
 export type FilelistLine =
   | { kind: 'file'; raw: string; path: string }
   | { kind: 'other'; raw: string }
 
-const HDL_EXTENSIONS = new Set(['v', 'sv', 'vhd', 'vhdl'])
-
-export function isHdlFilePath(path: string): boolean {
-  const basename = path.split(/[\\/]/).pop() ?? path
-  const extension = basename.includes('.') ? basename.split('.').pop()?.toLowerCase() : ''
-  return Boolean(extension && HDL_EXTENSIONS.has(extension))
-}
+export { isHdlFilePath }
 
 export function parseFilelistContent(content: string): FilelistLine[] {
   const lines: FilelistLine[] = []

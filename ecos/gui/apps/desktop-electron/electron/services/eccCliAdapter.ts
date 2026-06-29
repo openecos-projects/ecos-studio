@@ -374,6 +374,13 @@ export class EccCliAdapter {
           ],
         }
       }
+      case 'reset_flow': {
+        const directory = directoryFromRequest(request, this.activeWorkspace)
+        if (!directory) return failed(request, 'missing required field: directory')
+        return {
+          args: ['workspace', 'reset-flow', '--directory', directory, '--json'],
+        }
+      }
       default:
         return error(request, `Command "${request.cmd}" cannot be sent to the ECC CLI adapter.`)
     }

@@ -4,6 +4,10 @@ import type {
   WorkspaceStepInfoResult,
 } from '../types/workspaceResources.ts'
 import type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+} from '../types/designFiles.ts'
+import type {
   ResourceImportPdkRequest,
   ResourceInfo,
   ResourceInstallRequest,
@@ -55,6 +59,16 @@ export interface DesktopFileDialogOptions {
   filters?: DesktopFileDialogFilter[]
 }
 
+export interface DesktopRtlSourceDialogOptions {
+  title?: string
+  multiple?: boolean
+}
+
+export interface PickedRtlSources {
+  files: string[]
+  directories: string[]
+}
+
 export interface PdkDetectedFiles {
   directories: string[]
   files: string[]
@@ -67,6 +81,11 @@ export interface ScannedPdkDirectory {
   techNode: string
   pdkId: string
   detectedFiles: PdkDetectedFiles
+}
+
+export interface ScannedRtlDirectory {
+  rootPath: string
+  files: string[]
 }
 
 export interface VersionInfo {
@@ -140,6 +159,7 @@ export interface DesktopApi {
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
+    pickRtlSources(options?: DesktopRtlSourceDialogOptions): Promise<PickedRtlSources | null>
   }
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
@@ -166,6 +186,10 @@ export interface DesktopApi {
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
+    scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>
+    addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult>
+    removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>
     watchProjectFile(
       path: string,
       listener: (event: DesktopProjectFileChangedEvent) => void,

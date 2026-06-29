@@ -9,6 +9,7 @@ import type {
   DesktopCliCommandRequest,
   DesktopDirectoryDialogOptions,
   DesktopFileDialogOptions,
+  DesktopRtlSourceDialogOptions,
   LayoutViewerOpenRequest,
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
@@ -128,6 +129,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),
     pickFiles: (options?: DesktopFileDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickFiles, options),
+    pickRtlSources: (options?: DesktopRtlSourceDialogOptions) =>
+      invokeDesktop(desktopApiIpcChannels.dialogPickRtlSources, options),
   },
   workspace: {
     isProjectDirectory: (path) =>
@@ -186,6 +189,14 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
     scanPdkDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
+    scanRtlDirectory: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceScanRtlDirectory, path),
+    listDesignFiles: () =>
+      invokeDesktop(desktopApiIpcChannels.workspaceListDesignFiles),
+    addDesignFiles: (sourcePaths) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceAddDesignFiles, sourcePaths),
+    removeDesignFile: (filelistEntry) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceRemoveDesignFile, filelistEntry),
     watchProjectFile: async (path, listener) => {
       const subscriptionId = await ipcRenderer.invoke(
         desktopApiIpcChannels.workspaceWatchProjectFile,

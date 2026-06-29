@@ -62,6 +62,12 @@ export function registerApplicationMenu(): void {
       ],
     },
     {
+      label: 'Design',
+      submenu: [
+        createMenuAction('Manage RTL Files...', appMenuActionIds.manageDesignFiles),
+      ],
+    },
+    {
       label: 'Help',
       submenu: [
         createMenuAction('Documentation', appMenuActionIds.documentation),

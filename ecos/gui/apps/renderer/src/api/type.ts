@@ -6,7 +6,8 @@ export enum CMDEnum {
   get_info = "get_info",
   home_page = "home_page",
   refresh_config = "refresh_config",
-  sync_config = "sync_config"
+  sync_config = "sync_config",
+  reset_flow = "reset_flow"
 }
 
 // get_info command 的 id 枚举

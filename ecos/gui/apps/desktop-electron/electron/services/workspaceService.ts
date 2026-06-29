@@ -7,8 +7,20 @@ import type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   ScannedPdkDirectory,
+  ScannedRtlDirectory,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
+import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
+import {
+  addWorkspaceDesignFiles,
+  getWorkspaceFilelistPath,
+  listWorkspaceDesignFiles,
+  removeWorkspaceDesignFile,
+} from './designFileService'
+import type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+} from '@ecos-studio/shared'
 
 export interface ProjectScopeProvider {
   clearProjectRoot(): Promise<void>
@@ -413,6 +425,33 @@ export class WorkspaceService {
 
   async scanPdkDirectory(path: string): Promise<ScannedPdkDirectory> {
     return await this.projectScopeProvider.scanPdkDirectory(path)
+  }
+
+  async scanRtlDirectory(path: string): Promise<ScannedRtlDirectory> {
+    return await scanRtlDirectoryFiles(path)
+  }
+
+  async listDesignFiles(): Promise<WorkspaceDesignFileEntry[]> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    return await listWorkspaceDesignFiles(projectRoot)
+  }
+
+  async addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
+      getWorkspaceFilelistPath(projectRoot),
+    )
+    await this.assertCanWriteProjectTextFile(canonicalFilelist)
+    return await addWorkspaceDesignFiles(projectRoot, sourcePaths)
+  }
+
+  async removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
+      getWorkspaceFilelistPath(projectRoot),
+    )
+    await this.assertCanWriteProjectTextFile(canonicalFilelist)
+    return await removeWorkspaceDesignFile(projectRoot, filelistEntry)
   }
 
   private async closeAllProjectFileWatchers(): Promise<void> {

@@ -79,6 +79,7 @@ const desktopBridge = {
   dialog: {
     pickDirectory: async () => null,
     pickFiles: async () => null,
+    pickRtlSources: async () => null,
   },
   workspace: {
     isProjectDirectory: async () => false,
@@ -101,7 +102,14 @@ const desktopBridge = {
         files: [],
       },
     }),
+    scanRtlDirectory: async () => ({
+      rootPath: '',
+      files: [],
+    }),
     watchProjectFile: async () => () => undefined,
+    listDesignFiles: async () => [],
+    addDesignFiles: async () => ({ added: [], skipped: [] }),
+    removeDesignFile: async () => null,
   },
   layoutViewer: {
     open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
