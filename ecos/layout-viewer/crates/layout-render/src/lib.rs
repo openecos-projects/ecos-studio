@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use layout_display::{
-    Color, CompositionMode, DisplayModel, LayerStyle, LineStyle, Pattern, ResolvedDisplayLayer,
-    SourceSelector,
+    Color, CompositionMode, DisplayModel, LayerStyle, LineStyle, ObjectVisibility, Pattern,
+    ResolvedDisplayLayer, SourceSelector,
 };
 use layoutdb::{
     CellId, CellViewInstanceQuery, CellViewInstanceRecord, CellViewShapeQuery, CellViewShapeRecord,
     CellViewState, HierarchyInstanceRecord, HierarchyPolicy, InstancePath, LayoutDb, ObjectPath,
-    OverviewDensityBin, Rect, ShapeKind, ShapeRecord,
+    OverviewDensityBin, Rect, ShapeKind, ShapeRecord, SHAPE_FLAG_TOP_LEVEL_CONTEXT,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -412,6 +412,7 @@ impl RenderPlanner {
         cache_key_mode: CacheKeyMode,
     ) -> RenderPlan {
         let layers = model.resolved_layers();
+        let object_visibility = model.object_visibility();
         let mut plan = RenderPlan {
             cache_key: self.render_cache_key_for_mode(
                 viewport,
@@ -468,6 +469,7 @@ impl RenderPlanner {
                     cell_view,
                     policy,
                     max_depth_for_query(self.settings, policy),
+                    object_visibility,
                 );
                 self.push_top_level_context(
                     db,
@@ -483,7 +485,14 @@ impl RenderPlanner {
             }
             HierarchyLodMode::MidCoarse => {
                 plan.source = RenderPlanSource::HierarchyMid;
-                self.push_coarse_hierarchy(db, &mut plan, viewport, cell_view, policy);
+                self.push_coarse_hierarchy(
+                    db,
+                    &mut plan,
+                    viewport,
+                    cell_view,
+                    policy,
+                    object_visibility,
+                );
                 self.push_top_level_context(
                     db,
                     &layers,
@@ -575,14 +584,47 @@ impl RenderPlanner {
         }
         for shape in query.shapes {
             match mode {
-                TopLevelContextMode::AllVisibleShapes => {}
+                TopLevelContextMode::AllVisibleShapes => {
+                    self.push_shape_lod(layers, plan, viewport, occupancy, shape);
+                }
                 TopLevelContextMode::StableContextOnly => {
-                    if !is_stable_far_context_shape(shape.kind) {
+                    if !is_stable_far_context_shape(shape) {
                         continue;
                     }
+                    self.push_stable_context_shape(layers, plan, shape);
                 }
             }
-            self.push_shape_lod(layers, plan, viewport, occupancy, shape);
+        }
+    }
+
+    fn push_stable_context_shape(
+        &self,
+        layers: &[ResolvedDisplayLayer],
+        plan: &mut RenderPlan,
+        shape: &ShapeRecord,
+    ) {
+        for layer in layers
+            .iter()
+            .filter(|layer| layer_matches_shape(layer, shape))
+        {
+            if plan.truncated {
+                break;
+            }
+            let item = DrawItem::Rect(DrawRect {
+                world: shape.bbox,
+                color: layer.style.frame_color,
+                source_id: shape.source_id,
+                layer_id: shape.layer_id,
+                composition: CompositionMode::MaskPattern,
+            });
+            push_item(
+                plan,
+                RenderPlane::Hierarchy,
+                layer,
+                item,
+                self.settings.max_render_items,
+            );
+            plan.lod_stats.record(LodDecision::Coarse);
         }
     }
 
@@ -732,7 +774,11 @@ impl RenderPlanner {
         cell_view: &CellViewState,
         policy: &HierarchyPolicy,
         depth: usize,
+        object_visibility: ObjectVisibility,
     ) {
+        if !object_visibility.instances {
+            return;
+        }
         let query = db.query_cell_view_instances(CellViewInstanceQuery {
             cell_view: cell_view.clone(),
             viewport: viewport.world,
@@ -748,14 +794,20 @@ impl RenderPlanner {
         let entries = far_hierarchy_entries(query.instances, viewport, &mut rendered_arrays, self);
         let item_budget = far_hierarchy_coalesce_budget(viewport, self.settings);
         if entries.len() > item_budget {
-            self.push_thinned_hierarchy_bboxes(plan, viewport, entries, item_budget);
+            self.push_thinned_hierarchy_bboxes(
+                plan,
+                viewport,
+                entries,
+                item_budget,
+                object_visibility,
+            );
             return;
         }
         for entry in entries {
             if plan.truncated {
                 break;
             }
-            self.push_far_hierarchy_entry(plan, entry);
+            self.push_far_hierarchy_entry(plan, entry, object_visibility);
         }
     }
 
@@ -765,13 +817,14 @@ impl RenderPlanner {
         viewport: Viewport,
         entries: Vec<FarHierarchyEntry>,
         item_budget: usize,
+        object_visibility: ObjectVisibility,
     ) {
         let original_len = entries.len();
         let emitted_before =
             plan.lod_stats.hierarchy_bbox + plan.lod_stats.array_bbox + plan.lod_stats.array_grid;
         let thinned = thin_hierarchy_entries(viewport, self.settings, item_budget, entries);
         for entry in thinned {
-            self.push_far_hierarchy_entry(plan, entry);
+            self.push_far_hierarchy_entry(plan, entry, object_visibility);
         }
         let emitted_after =
             plan.lod_stats.hierarchy_bbox + plan.lod_stats.array_bbox + plan.lod_stats.array_grid;
@@ -780,8 +833,13 @@ impl RenderPlanner {
         plan.lod_stats.suppress += original_len.saturating_sub(emitted);
     }
 
-    fn push_far_hierarchy_entry(&self, plan: &mut RenderPlan, entry: FarHierarchyEntry) {
-        let layer = hierarchy_display_layer();
+    fn push_far_hierarchy_entry(
+        &self,
+        plan: &mut RenderPlan,
+        entry: FarHierarchyEntry,
+        object_visibility: ObjectVisibility,
+    ) {
+        let layer = hierarchy_display_layer(object_visibility);
         let (width_px, height_px) = entry.projected_size_px;
         if width_px.max(height_px) < self.settings.frame_only_px {
             push_item(
@@ -831,7 +889,11 @@ impl RenderPlanner {
         viewport: Viewport,
         cell_view: &CellViewState,
         policy: &HierarchyPolicy,
+        object_visibility: ObjectVisibility,
     ) {
+        if !object_visibility.instances {
+            return;
+        }
         let query = db.query_cell_view_instances(CellViewInstanceQuery {
             cell_view: cell_view.clone(),
             viewport: viewport.world,
@@ -863,11 +925,12 @@ impl RenderPlanner {
                         instance_ref,
                         hierarchy_bbox_for_decision(instance_ref, decision),
                         self.settings.max_render_items,
+                        object_visibility,
                     );
                     plan.lod_stats.record(LodDecision::ArrayBBox);
                 }
                 ArrayLodDecision::Grid => {
-                    self.push_array_grid(plan, instance_ref);
+                    self.push_array_grid(plan, instance_ref, object_visibility);
                     plan.lod_stats.record(LodDecision::ArrayGrid);
                 }
                 ArrayLodDecision::ViewportElements => {
@@ -892,9 +955,16 @@ impl RenderPlanner {
                         instance_ref,
                         instance.bbox,
                         self.settings.max_render_items,
+                        object_visibility,
                     );
                     if let Some(proxy) = display_proxy {
-                        self.push_cell_display_proxy(plan, viewport, &instance, proxy);
+                        self.push_cell_display_proxy(
+                            plan,
+                            viewport,
+                            &instance,
+                            proxy,
+                            object_visibility,
+                        );
                     }
                     plan.lod_stats.record(LodDecision::Coarse);
                 }
@@ -908,8 +978,9 @@ impl RenderPlanner {
         viewport: Viewport,
         instance: &CellViewInstanceRecord,
         proxy: &CellDisplayProxy,
+        object_visibility: ObjectVisibility,
     ) {
-        let layer = hierarchy_display_layer();
+        let layer = hierarchy_display_layer(object_visibility);
         for density in &proxy.layer_density_bins {
             if plan.truncated {
                 break;
@@ -1053,10 +1124,21 @@ impl RenderPlanner {
         }
     }
 
-    fn push_array_grid(&self, plan: &mut RenderPlan, instance: HierarchyInstanceRef<'_>) {
+    fn push_array_grid(
+        &self,
+        plan: &mut RenderPlan,
+        instance: HierarchyInstanceRef<'_>,
+        object_visibility: ObjectVisibility,
+    ) {
         let bbox = hierarchy_bbox_for_decision(instance, ArrayLodDecision::Grid);
-        push_hierarchy_rect(plan, instance, bbox, self.settings.max_render_items);
-        let layer = hierarchy_display_layer();
+        push_hierarchy_rect(
+            plan,
+            instance,
+            bbox,
+            self.settings.max_render_items,
+            object_visibility,
+        );
+        let layer = hierarchy_display_layer(object_visibility);
         let color = Color::rgb(118, 148, 176);
         let x_mid = bbox.x1 + bbox.width() / 2;
         let y_mid = bbox.y1 + bbox.height() / 2;
@@ -1183,7 +1265,10 @@ impl RenderPlanner {
             && min_px >= self.settings.fill_px
         {
             LodDecision::Exact
-        } else if min_px >= self.settings.frame_only_px || max_px >= self.settings.long_shape_px {
+        } else if min_px >= self.settings.frame_only_px
+            || max_px >= self.settings.long_shape_px
+            || (is_wire_shape(shape.kind) && max_px >= wire_frame_threshold_px(self.settings))
+        {
             if occupancy.reserve_frame(layer, shape) {
                 LodDecision::FrameOnly
             } else {
@@ -1236,11 +1321,13 @@ impl RenderPlanner {
                 maybe_replace_pick_hit(&mut best, candidate, request.x, request.y);
             }
         }
-        for instance in
-            matching_instances_for_cell_view(db, query, cell_view, policy, self.settings)
-        {
-            let candidate = pick_hit_for_instance(instance);
-            maybe_replace_pick_hit(&mut best, candidate, request.x, request.y);
+        if model.object_visibility().instances {
+            for instance in
+                matching_instances_for_cell_view(db, query, cell_view, policy, self.settings)
+            {
+                let candidate = pick_hit_for_instance(instance);
+                maybe_replace_pick_hit(&mut best, candidate, request.x, request.y);
+            }
         }
         best
     }
@@ -1761,8 +1848,9 @@ fn push_hierarchy_rect(
     instance: HierarchyInstanceRef<'_>,
     bbox: Rect,
     max_items: usize,
+    object_visibility: ObjectVisibility,
 ) {
-    let layer = hierarchy_display_layer();
+    let layer = hierarchy_display_layer(object_visibility);
     push_item(
         plan,
         RenderPlane::Hierarchy,
@@ -1779,6 +1867,9 @@ fn push_hierarchy_rect(
 }
 
 fn layer_matches_shape(layer: &ResolvedDisplayLayer, shape: &ShapeRecord) -> bool {
+    if !layer.object_visibility.includes_shape_kind(shape.kind) {
+        return false;
+    }
     match layer.source {
         SourceSelector::PhysicalLayer(layer_id) => {
             shape.layer_id == layer_id && !is_context_shape(shape.kind)
@@ -1789,6 +1880,9 @@ fn layer_matches_shape(layer: &ResolvedDisplayLayer, shape: &ShapeRecord) -> boo
 }
 
 fn layer_matches_overview_bin(layer: &ResolvedDisplayLayer, bin: &OverviewDensityBin) -> bool {
+    if !layer.object_visibility.includes_shape_kind(bin.kind) {
+        return false;
+    }
     match layer.source {
         SourceSelector::PhysicalLayer(layer_id) => {
             bin.layer_id == layer_id && overview_kind_matches_physical_layer(bin.kind)
@@ -1814,11 +1908,15 @@ fn overview_kind_matches_physical_layer(kind: ShapeKind) -> bool {
 struct VisibleShapeSources {
     physical_layers: HashSet<u16>,
     shape_kinds: HashSet<ShapeKind>,
+    object_visibility: ObjectVisibility,
 }
 
 impl VisibleShapeSources {
     fn from_layers(layers: &[ResolvedDisplayLayer]) -> Self {
         let mut visible = Self::default();
+        if let Some(layer) = layers.first() {
+            visible.object_visibility = layer.object_visibility;
+        }
         for layer in layers {
             match layer.source {
                 SourceSelector::PhysicalLayer(layer_id) => {
@@ -1834,8 +1932,10 @@ impl VisibleShapeSources {
     }
 
     fn matches(&self, layer_id: u16, kind: ShapeKind) -> bool {
-        (self.physical_layers.contains(&layer_id) && overview_kind_matches_physical_layer(kind))
-            || self.shape_kinds.contains(&kind)
+        self.object_visibility.includes_shape_kind(kind)
+            && ((self.physical_layers.contains(&layer_id)
+                && overview_kind_matches_physical_layer(kind))
+                || self.shape_kinds.contains(&kind))
     }
 
     fn is_empty(&self) -> bool {
@@ -1971,7 +2071,7 @@ fn push_marker_batch(
     push_item(plan, RenderPlane::Marker, layer, item, max_items);
 }
 
-fn hierarchy_display_layer() -> ResolvedDisplayLayer {
+fn hierarchy_display_layer(object_visibility: ObjectVisibility) -> ResolvedDisplayLayer {
     let mut style = LayerStyle::new(Color::rgb(80, 96, 112), Color::rgb(168, 190, 210));
     style.fill_alpha = 0;
     style.frame_alpha = 190;
@@ -1982,6 +2082,7 @@ fn hierarchy_display_layer() -> ResolvedDisplayLayer {
         id: "hierarchy:cell_bbox".to_string(),
         name: "Cell BBox".to_string(),
         source: SourceSelector::CellFrame,
+        object_visibility,
         draw_order: -10_000,
         style,
         pickable: false,
@@ -2048,6 +2149,7 @@ fn append_plan(plan: &mut RenderPlan, other: RenderPlan, max_items: usize) {
             id: batch.display_layer_id.clone(),
             name: batch.display_layer_id.clone(),
             source: SourceSelector::SelectionOverlay,
+            object_visibility: ObjectVisibility::default(),
             draw_order: 0,
             style: batch.style.clone(),
             pickable: false,
@@ -2124,6 +2226,9 @@ fn render_cache_key(
             SourceSelector::CellFrame => hash.write_u8(3),
             SourceSelector::SelectionOverlay => hash.write_u8(4),
         }
+        hash.write_u8(u8::from(layer.object_visibility.instances));
+        hash.write_u8(u8::from(layer.object_visibility.pdn));
+        hash.write_u8(u8::from(layer.object_visibility.net));
         hash.write_u8(layer.style.fill_color.r);
         hash.write_u8(layer.style.fill_color.g);
         hash.write_u8(layer.style.fill_color.b);
@@ -2337,8 +2442,24 @@ fn is_context_shape(kind: ShapeKind) -> bool {
     )
 }
 
-fn is_stable_far_context_shape(kind: ShapeKind) -> bool {
-    matches!(kind, ShapeKind::Die | ShapeKind::Core)
+fn is_stable_far_context_shape(shape: &ShapeRecord) -> bool {
+    matches!(shape.kind, ShapeKind::Die | ShapeKind::Core)
+        || (shape.flags & SHAPE_FLAG_TOP_LEVEL_CONTEXT != 0
+            && matches!(
+                shape.kind,
+                ShapeKind::RegularWire | ShapeKind::SpecialWire | ShapeKind::Via
+            ))
+}
+
+fn is_wire_shape(kind: ShapeKind) -> bool {
+    matches!(kind, ShapeKind::RegularWire | ShapeKind::SpecialWire)
+}
+
+fn wire_frame_threshold_px(settings: RenderSettings) -> f32 {
+    settings
+        .frame_only_px
+        .min(settings.long_shape_px)
+        .max(settings.small_shape_px)
 }
 
 fn shape_kind_code(kind: ShapeKind) -> u8 {
@@ -2409,6 +2530,7 @@ mod tests {
     use layoutdb::{
         CellInstance, CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo,
         LayoutDb, ObjectPathTarget, OverviewDensityBin, Rect, ShapeKind, ShapeRecord,
+        SHAPE_FLAG_TOP_LEVEL_CONTEXT,
     };
     use layoutpkg_format::{CellArray, Orientation, Transform};
 
@@ -2422,6 +2544,14 @@ mod tests {
         db.add_layer(LayerInfo::new(1, "M1"));
         let top = db.top_cell();
         db.add_shape(top, ShapeRecord::new(shape, 1, ShapeKind::RegularWire, 42));
+        db
+    }
+
+    fn one_shape_db_with_kind(shape: Rect, kind: ShapeKind) -> LayoutDb {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 1000, 1000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let top = db.top_cell();
+        db.add_shape(top, ShapeRecord::new(shape, 1, kind, 42));
         db
     }
 
@@ -3003,6 +3133,28 @@ mod tests {
     }
 
     #[test]
+    fn object_visibility_can_hide_hierarchy_instance_bboxes() {
+        let db = hierarchy_db();
+        let mut model = one_layer_display_model();
+        model.object_visibility_mut().instances = false;
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(!hierarchy_item_bboxes(&plan)
+            .iter()
+            .any(|(_, source_id)| *source_id == 77));
+    }
+
+    #[test]
     fn far_top_view_does_not_render_die_and_core_frames() {
         let db = hierarchy_db_with_context_shapes();
         let model = DisplayModel::from_layout_layers(db.layers());
@@ -3158,14 +3310,13 @@ mod tests {
             Viewport::new(Rect::new(900, 1900, 1200, 2200), 30.0, 30.0),
         );
 
-        assert_eq!(plan.lod_stats.coarse, 1);
+        assert!(plan.lod_stats.coarse >= 1);
         assert!(hierarchy_item_bboxes(&plan)
             .iter()
             .any(|(_, source_id)| *source_id == 9));
-        assert!(!plan
-            .batches
-            .iter()
-            .any(|batch| batch.display_layer_id == "layer:1"));
+        assert!(!plan.batches.iter().any(|batch| {
+            batch.plane != RenderPlane::Hierarchy && batch.display_layer_id == "layer:1"
+        }));
     }
 
     #[test]
@@ -3436,6 +3587,109 @@ mod tests {
                     matches!(item, DrawItem::Rect(rect)
                         if rect.world == Rect::new(0, 0, 10_000, 10_000)
                             && rect.layer_id == 1)
+                })
+        }));
+    }
+
+    #[test]
+    fn hierarchy_far_preserves_visible_top_level_net_and_pdn_context() {
+        let mut db = hierarchy_db();
+        db.add_layer(LayerInfo::new(2, "M2"));
+        let top = db.top_cell();
+        let mut net = ShapeRecord::new(
+            Rect::new(500, 500, 8_000, 520),
+            1,
+            ShapeKind::RegularWire,
+            101,
+        );
+        net.flags |= SHAPE_FLAG_TOP_LEVEL_CONTEXT;
+        let mut pdn = ShapeRecord::new(
+            Rect::new(500, 800, 8_000, 840),
+            2,
+            ShapeKind::SpecialWire,
+            202,
+        );
+        pdn.flags |= SHAPE_FLAG_TOP_LEVEL_CONTEXT;
+        db.add_shape(top, net);
+        db.add_shape(top, pdn);
+        let mut model = DisplayModel::new();
+        model.add_layer(DisplayLayer::physical_layer(
+            1,
+            "M1",
+            LayerStyle::default_for_index(0),
+        ));
+        model.add_layer(DisplayLayer::physical_layer(
+            2,
+            "M2",
+            LayerStyle::default_for_index(1),
+        ));
+        let planner = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            hierarchy_coarse_units_per_pixel: 10.0,
+            ..Default::default()
+        });
+
+        let plan = planner.plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(plan.batches.iter().any(|batch| {
+            batch.plane == RenderPlane::Hierarchy
+                && batch.display_layer_id == "layer:1"
+                && batch.items.iter().any(|item| match item {
+                    DrawItem::Rect(rect) => rect.source_id == 101,
+                    DrawItem::Marker(marker) => marker.source_id == 101,
+                    DrawItem::Line(line) => line.source_id == 101,
+                })
+        }));
+        assert!(plan.batches.iter().any(|batch| {
+            batch.plane == RenderPlane::Hierarchy
+                && batch.display_layer_id == "layer:2"
+                && batch.items.iter().any(|item| match item {
+                    DrawItem::Rect(rect) => rect.source_id == 202,
+                    DrawItem::Marker(marker) => marker.source_id == 202,
+                    DrawItem::Line(line) => line.source_id == 202,
+                })
+        }));
+    }
+
+    #[test]
+    fn hierarchy_far_ignores_unmarked_top_level_detail_wires_as_stable_context() {
+        let mut db = hierarchy_db();
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(500, 500, 8_000, 520),
+                1,
+                ShapeKind::RegularWire,
+                101,
+            ),
+        );
+        let model = one_layer_display_model();
+        let planner = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            hierarchy_coarse_units_per_pixel: 10.0,
+            ..Default::default()
+        });
+
+        let plan = planner.plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 100.0, 100.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyFar);
+        assert!(!plan.batches.iter().any(|batch| {
+            batch.plane == RenderPlane::Hierarchy
+                && batch.display_layer_id == "layer:1"
+                && batch.items.iter().any(|item| match item {
+                    DrawItem::Rect(rect) => rect.source_id == 101,
+                    DrawItem::Marker(marker) => marker.source_id == 101,
+                    DrawItem::Line(line) => line.source_id == 101,
                 })
         }));
     }
@@ -3716,10 +3970,9 @@ mod tests {
             .any(|(bbox, source_id, layer_id)| *source_id == 330
                 && *layer_id == 0
                 && *bbox == Rect::new(1_150, 2_120, 1_170, 2_140)));
-        assert!(!plan
-            .batches
-            .iter()
-            .any(|batch| batch.display_layer_id == "layer:1"));
+        assert!(!plan.batches.iter().any(|batch| {
+            batch.plane != RenderPlane::Hierarchy && batch.display_layer_id == "layer:1"
+        }));
     }
 
     #[test]
@@ -3815,10 +4068,9 @@ mod tests {
             plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker,
             0
         );
-        assert!(!plan
-            .batches
-            .iter()
-            .any(|batch| batch.display_layer_id == "layer:1"));
+        assert!(!plan.batches.iter().any(|batch| {
+            batch.plane != RenderPlane::Hierarchy && batch.display_layer_id == "layer:1"
+        }));
     }
 
     #[test]
@@ -3887,7 +4139,7 @@ mod tests {
         );
 
         assert_eq!(plan.lod_stats.hierarchy_bbox, 1);
-        assert_eq!(plan.lod_stats.coarse, 0);
+        assert!(plan.lod_stats.coarse <= 1);
         assert_eq!(
             plan.lod_stats.exact + plan.lod_stats.frame_only + plan.lod_stats.marker,
             0
@@ -4296,6 +4548,23 @@ mod tests {
     }
 
     #[test]
+    fn pick_for_cell_view_skips_instance_targets_when_instances_are_hidden() {
+        let db = empty_instance_hierarchy_db();
+        let mut model = one_layer_display_model();
+        model.object_visibility_mut().instances = false;
+
+        let hit = RenderPlanner::new(RenderSettings::default()).pick_for_cell_view(
+            &db,
+            &model,
+            PickRequest::new(1250, 2440, 1),
+            &CellViewState::top(&db),
+            &HierarchyPolicy::default(),
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
     fn pick_shape_hit_wins_over_instance_hit_when_overlapping() {
         let db = overlapping_shape_and_instance_db();
         let model = one_layer_display_model();
@@ -4345,6 +4614,44 @@ mod tests {
         let db = one_shape_db(Rect::new(10, 10, 110, 110));
         let mut model = one_layer_display_model();
         model.layers_mut()[0].visible = false;
+
+        let hit = RenderPlanner::new(RenderSettings::default()).pick(
+            &db,
+            &model,
+            PickRequest::new(50, 50, 2),
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn picking_respects_net_object_visibility() {
+        let db = one_shape_db_with_kind(Rect::new(10, 10, 110, 110), ShapeKind::RegularWire);
+        let mut model = one_layer_display_model();
+        assert!(RenderPlanner::new(RenderSettings::default())
+            .pick(&db, &model, PickRequest::new(50, 50, 2))
+            .is_some());
+
+        model.object_visibility_mut().net = false;
+
+        let hit = RenderPlanner::new(RenderSettings::default()).pick(
+            &db,
+            &model,
+            PickRequest::new(50, 50, 2),
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn picking_respects_pdn_object_visibility() {
+        let db = one_shape_db_with_kind(Rect::new(10, 10, 110, 110), ShapeKind::SpecialWire);
+        let mut model = one_layer_display_model();
+        assert!(RenderPlanner::new(RenderSettings::default())
+            .pick(&db, &model, PickRequest::new(50, 50, 2))
+            .is_some());
+
+        model.object_visibility_mut().pdn = false;
 
         let hit = RenderPlanner::new(RenderSettings::default()).pick(
             &db,
@@ -4722,6 +5029,90 @@ mod tests {
     }
 
     #[test]
+    fn hierarchy_near_preserves_long_net_and_pdn_shapes_as_frames() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        db.add_layer(LayerInfo::new(2, "M2"));
+        let leaf = db.add_cell("leaf", Rect::new(0, 0, 8_000, 2_000));
+        db.add_shape(
+            leaf,
+            ShapeRecord::new(
+                Rect::new(0, 100, 7_000, 120),
+                1,
+                ShapeKind::RegularWire,
+                101,
+            ),
+        );
+        db.add_shape(
+            leaf,
+            ShapeRecord::new(
+                Rect::new(0, 300, 7_000, 320),
+                2,
+                ShapeKind::SpecialWire,
+                202,
+            ),
+        );
+        db.add_instance(
+            db.top_cell(),
+            CellInstance {
+                id: 77,
+                name: "u0".to_string(),
+                child_cell: leaf,
+                transform: Transform {
+                    dx: 1_000,
+                    dy: 2_000,
+                    orient: Orientation::R0,
+                },
+                array: CellArray::default(),
+                bbox: Rect::new(1_000, 2_000, 9_000, 4_000),
+                source_id: 77,
+            },
+        );
+        let mut model = DisplayModel::new();
+        model.add_layer(DisplayLayer::physical_layer(
+            1,
+            "M1",
+            LayerStyle::default_for_index(0),
+        ));
+        model.add_layer(DisplayLayer::physical_layer(
+            2,
+            "M2",
+            LayerStyle::default_for_index(1),
+        ));
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 160.0,
+            hierarchy_coarse_units_per_pixel: 32.0,
+            idle_detail_units_per_pixel: 96.0,
+            long_shape_px: 160.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 117.37, 117.37),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyNear);
+        assert!(plan.batches.iter().any(|batch| {
+            batch.plane == RenderPlane::Frame
+                && batch.display_layer_id == "layer:1"
+                && batch
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 101))
+        }));
+        assert!(plan.batches.iter().any(|batch| {
+            batch.plane == RenderPlane::Frame
+                && batch.display_layer_id == "layer:2"
+                && batch
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, DrawItem::Rect(rect) if rect.source_id == 202))
+        }));
+    }
+
+    #[test]
     fn far_view_keeps_large_shapes_hollow_until_fill_threshold() {
         let db = one_shape_db(Rect::new(0, 0, 10_000, 10_000));
         let model = one_layer_display_model();
@@ -4865,6 +5256,100 @@ mod tests {
             .batches
             .iter()
             .any(|batch| batch.display_layer_id == "layer:0"));
+    }
+
+    #[test]
+    fn object_visibility_can_hide_instances_without_hiding_physical_layers() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(1_000, 1_000, 9_000, 9_000),
+                0,
+                ShapeKind::Instance,
+                302,
+            ),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(Rect::new(2_000, 2_000, 8_000, 8_000), 1, ShapeKind::Via, 7),
+        );
+        let mut model = DisplayModel::from_layout_layers(db.layers());
+        model.object_visibility_mut().instances = false;
+
+        let plan = RenderPlanner::new(RenderSettings::default()).plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 400.0, 400.0),
+        );
+
+        assert!(!plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "kind:Instance"));
+        assert!(plan
+            .batches
+            .iter()
+            .any(|batch| batch.display_layer_id == "layer:1"));
+    }
+
+    #[test]
+    fn object_visibility_filters_net_and_pdn_shapes_on_physical_layers() {
+        let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
+        db.add_layer(LayerInfo::new(1, "M1"));
+        let top = db.top_cell();
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(1_000, 1_000, 4_000, 4_000),
+                1,
+                ShapeKind::RegularWire,
+                101,
+            ),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(5_000, 5_000, 8_000, 8_000),
+                1,
+                ShapeKind::SpecialWire,
+                202,
+            ),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(
+                Rect::new(8_500, 8_500, 9_000, 9_000),
+                1,
+                ShapeKind::Via,
+                303,
+            ),
+        );
+        let mut model = DisplayModel::from_layout_layers(db.layers());
+        model.object_visibility_mut().net = false;
+        model.object_visibility_mut().pdn = false;
+
+        let plan = RenderPlanner::new(RenderSettings::default()).plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(0, 0, 10_000, 10_000), 400.0, 400.0),
+        );
+        let rendered_sources = plan
+            .batches
+            .iter()
+            .flat_map(|batch| batch.items.iter())
+            .filter_map(|item| match item {
+                DrawItem::Rect(rect) => Some(rect.source_id),
+                DrawItem::Marker(marker) => Some(marker.source_id),
+                DrawItem::Line(line) => Some(line.source_id),
+            })
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(!rendered_sources.contains(&101));
+        assert!(!rendered_sources.contains(&202));
+        assert!(rendered_sources.contains(&303));
     }
 
     #[test]

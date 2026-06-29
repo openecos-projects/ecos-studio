@@ -117,6 +117,31 @@ struct LoadedViewerState {
     background_load: BackgroundLoadHandle,
 }
 
+#[cfg(any(debug_assertions, test))]
+#[derive(Debug, Clone, Copy)]
+struct DebugPanelSnapshot {
+    scale_units_per_pixel: Option<f32>,
+    render_source: Option<RenderPlanSource>,
+    render_revision: u64,
+    interaction_active: bool,
+    interaction_coarse: bool,
+    plan_reused: bool,
+    plan_batches: usize,
+    plan_items: usize,
+    plan_truncated: bool,
+    candidates_checked: usize,
+    total_shapes: usize,
+    hierarchy_candidates_checked: usize,
+    total_hierarchy_instances: usize,
+    display_cache_hits: usize,
+    display_cache_misses: usize,
+    plane_cache_hits: usize,
+    plane_cache_misses: usize,
+    used_plane_renderer: bool,
+    paint_ops: usize,
+    lod_stats: LodStats,
+}
+
 #[derive(Debug, Default)]
 struct LayerCountsCache {
     revision: Option<u64>,
@@ -582,10 +607,33 @@ fn is_top_cell_view(db: &layoutdb::LayoutDb, cell_view: &CellViewState) -> bool 
 }
 
 fn is_layers_panel_layer(layer: &layout_display::DisplayLayer) -> bool {
-    !matches!(
+    matches!(
         layer.source,
-        layout_display::SourceSelector::ShapeKind(ShapeKind::Die | ShapeKind::Core)
+        layout_display::SourceSelector::PhysicalLayer(_)
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ObjectVisibilityRow {
+    label: &'static str,
+    kind: ShapeKind,
+}
+
+fn object_visibility_rows() -> [ObjectVisibilityRow; 3] {
+    [
+        ObjectVisibilityRow {
+            label: "Instances",
+            kind: ShapeKind::Instance,
+        },
+        ObjectVisibilityRow {
+            label: "PDN",
+            kind: ShapeKind::SpecialWire,
+        },
+        ObjectVisibilityRow {
+            label: "Net",
+            kind: ShapeKind::RegularWire,
+        },
+    ]
 }
 
 fn die_core_boundaries(db: &layoutdb::LayoutDb) -> (Option<Rect>, Option<Rect>) {
@@ -828,6 +876,110 @@ fn layer_swatch_rect(slot: egui::Rect, swatch_size: egui::Vec2) -> egui::Rect {
     egui::Rect::from_center_size(slot.center(), swatch_size)
 }
 
+#[cfg(any(debug_assertions, test))]
+fn debug_panel_rows(snapshot: DebugPanelSnapshot) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "Scale",
+            snapshot
+                .scale_units_per_pixel
+                .map(|scale| format!("{scale:.3} units/px"))
+                .unwrap_or_else(|| "n/a".to_string()),
+        ),
+        (
+            "LOD Source",
+            snapshot
+                .render_source
+                .map(|source| format!("{source:?}"))
+                .unwrap_or_else(|| "none".to_string()),
+        ),
+        (
+            "Interaction",
+            if snapshot.interaction_active {
+                "active".to_string()
+            } else {
+                "idle".to_string()
+            },
+        ),
+        (
+            "Coarse LOD",
+            yes_no(snapshot.interaction_coarse).to_string(),
+        ),
+        ("Plan Reused", yes_no(snapshot.plan_reused).to_string()),
+        ("Revision", snapshot.render_revision.to_string()),
+        (
+            "Plan",
+            format!(
+                "{} batches / {} items",
+                snapshot.plan_batches, snapshot.plan_items
+            ),
+        ),
+        ("Truncated", yes_no(snapshot.plan_truncated).to_string()),
+        (
+            "Query",
+            format!(
+                "{}/{} shapes",
+                snapshot.candidates_checked, snapshot.total_shapes
+            ),
+        ),
+        (
+            "Hierarchy Query",
+            format!(
+                "{}/{} instances",
+                snapshot.hierarchy_candidates_checked, snapshot.total_hierarchy_instances
+            ),
+        ),
+        (
+            "Display Cache",
+            format!(
+                "{} hits / {} misses",
+                snapshot.display_cache_hits, snapshot.display_cache_misses
+            ),
+        ),
+        (
+            "Plane Cache",
+            format!(
+                "{} hits / {} misses",
+                snapshot.plane_cache_hits, snapshot.plane_cache_misses
+            ),
+        ),
+        (
+            "Renderer",
+            if snapshot.used_plane_renderer {
+                "raster plane".to_string()
+            } else {
+                "egui vectors".to_string()
+            },
+        ),
+        ("Paint Ops", snapshot.paint_ops.to_string()),
+        ("LOD Exact", snapshot.lod_stats.exact.to_string()),
+        ("LOD Frame", snapshot.lod_stats.frame_only.to_string()),
+        ("LOD Marker", snapshot.lod_stats.marker.to_string()),
+        (
+            "LOD Hierarchy BBox",
+            snapshot.lod_stats.hierarchy_bbox.to_string(),
+        ),
+        ("LOD Array BBox", snapshot.lod_stats.array_bbox.to_string()),
+        ("LOD Array Grid", snapshot.lod_stats.array_grid.to_string()),
+        ("LOD Coarse", snapshot.lod_stats.coarse.to_string()),
+        ("LOD Suppress", snapshot.lod_stats.suppress.to_string()),
+    ]
+}
+
+#[cfg(any(debug_assertions, test))]
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+#[cfg(any(debug_assertions, test))]
+fn should_show_debug_panel() -> bool {
+    cfg!(debug_assertions)
+}
+
 #[cfg(test)]
 fn sidebar_title_text() -> Option<&'static str> {
     None
@@ -849,6 +1001,15 @@ fn draw_layer_visibility_row(
         ui.checkbox(visible, label)
     })
     .inner
+}
+
+fn object_visibility_color(kind: ShapeKind) -> Color {
+    match kind {
+        ShapeKind::Instance => Color::rgb(176, 155, 255),
+        ShapeKind::SpecialWire => Color::rgb(255, 214, 118),
+        ShapeKind::RegularWire => Color::rgb(160, 218, 255),
+        _ => Color::rgb(132, 146, 156),
+    }
 }
 
 fn focus_view_on_cell_bbox(
@@ -1383,6 +1544,13 @@ impl LayoutViewerV2App {
                         if let Some(mut loaded) = self.loaded.take() {
                             self.draw_layers_panel(ui, &mut loaded);
                             ui.separator();
+                            self.draw_objects_panel(ui, &mut loaded);
+                            #[cfg(debug_assertions)]
+                            if should_show_debug_panel() {
+                                ui.separator();
+                                self.draw_debug_panel(ui);
+                            }
+                            ui.separator();
                             ui.label("Selection");
                             if let Some(hit) = self.selected.clone() {
                                 egui::Grid::new("selection-inspector-grid")
@@ -1415,6 +1583,52 @@ impl LayoutViewerV2App {
             });
     }
 
+    #[cfg(debug_assertions)]
+    fn debug_panel_snapshot(&self) -> DebugPanelSnapshot {
+        DebugPanelSnapshot {
+            scale_units_per_pixel: self.view.as_ref().map(|view| view.units_per_pixel),
+            render_source: self.last_render_plan.as_ref().map(|plan| plan.source),
+            render_revision: self.last_render_plan_revision,
+            interaction_active: self.interaction_active(),
+            interaction_coarse: self.last_render_plan_interaction_coarse,
+            plan_reused: self.last_plan_reused,
+            plan_batches: self.last_plan_batches,
+            plan_items: self.last_plan_items,
+            plan_truncated: self.last_plan_truncated,
+            candidates_checked: self.last_candidates_checked,
+            total_shapes: self.last_total_shapes,
+            hierarchy_candidates_checked: self.last_hierarchy_candidates_checked,
+            total_hierarchy_instances: self.last_total_hierarchy_instances,
+            display_cache_hits: self.last_display_cache_hits,
+            display_cache_misses: self.last_display_cache_misses,
+            plane_cache_hits: self.last_plane_cache_hits,
+            plane_cache_misses: self.last_plane_cache_misses,
+            used_plane_renderer: self.last_used_plane_renderer,
+            paint_ops: self.last_paint_ops,
+            lod_stats: self.last_lod_stats,
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn draw_debug_panel(&self, ui: &mut egui::Ui) {
+        ui.label("Debug");
+        egui::Grid::new("debug-inspector-grid")
+            .num_columns(2)
+            .striped(true)
+            .show(ui, |ui| {
+                for (label, value) in debug_panel_rows(self.debug_panel_snapshot()) {
+                    ui.label(label);
+                    let value_width =
+                        (ui.available_width() - ui.spacing().item_spacing.x).max(80.0);
+                    ui.add_sized(
+                        egui::vec2(value_width, 0.0),
+                        egui::Label::new(egui::RichText::new(value).monospace()).wrap(),
+                    );
+                    ui.end_row();
+                }
+            });
+    }
+
     fn draw_layers_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
         ui.label("Layers");
         let layer_counts = self
@@ -1444,6 +1658,25 @@ impl LayoutViewerV2App {
                     );
                 }
             });
+    }
+
+    fn draw_objects_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
+        ui.label("Objects");
+        let visibility = loaded.display.object_visibility_mut();
+        for row in object_visibility_rows() {
+            let visible = match row.kind {
+                ShapeKind::Instance => &mut visibility.instances,
+                ShapeKind::SpecialWire => &mut visibility.pdn,
+                ShapeKind::RegularWire => &mut visibility.net,
+                _ => unreachable!("object visibility row uses supported kinds"),
+            };
+            draw_layer_visibility_row(
+                ui,
+                visible,
+                row.label.to_string(),
+                object_visibility_color(row.kind),
+            );
+        }
     }
 
     fn clear_render_history(&mut self) {
@@ -2214,15 +2447,15 @@ mod tests {
         overview_error_is_unavailable, plan_source_for_units_per_pixel, plane_cache_world_rect,
         scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
-        should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect,
-        Args, AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState,
-        LayoutViewerV2App, LoadRequest, LodTuningState,
+        should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect, Args,
+        AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState, LayoutViewerV2App,
+        LoadRequest, LodTuningState,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{Color, DisplayLayer, DisplayModel, LayerStyle, Pattern};
     use layout_render::{
-        DrawBatch, DrawItem, DrawRect, LodHysteresisState, PickHit, PickHitTarget, RenderPlan,
-        RenderPlanSource, RenderPlane, RenderSettings,
+        DrawBatch, DrawItem, DrawRect, LodHysteresisState, LodStats, PickHit, PickHitTarget,
+        RenderPlan, RenderPlanSource, RenderPlane, RenderSettings,
     };
     use layoutdb::{
         CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo, LayoutDb,
@@ -2969,17 +3202,134 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_layers_panel_accepts_only_physical_layers() {
+        let physical = DisplayLayer::physical_layer(1, "M1", LayerStyle::default_for_index(0));
+        let instance = DisplayLayer::shape_kind(
+            ShapeKind::Instance,
+            "Instances",
+            LayerStyle::default_for_index(1),
+        );
+        let net = DisplayLayer::shape_kind(
+            ShapeKind::RegularWire,
+            "Net",
+            LayerStyle::default_for_index(2),
+        );
+
+        assert!(super::is_layers_panel_layer(&physical));
+        assert!(!super::is_layers_panel_layer(&instance));
+        assert!(!super::is_layers_panel_layer(&net));
+    }
+
+    #[test]
+    fn sidebar_objects_panel_lists_instances_pdn_and_net() {
+        let rows = super::object_visibility_rows();
+
+        assert_eq!(
+            rows.iter().map(|row| row.label).collect::<Vec<_>>(),
+            vec!["Instances", "PDN", "Net"]
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
+            vec![
+                ShapeKind::Instance,
+                ShapeKind::SpecialWire,
+                ShapeKind::RegularWire,
+            ]
+        );
+    }
+
+    #[test]
+    fn debug_panel_rows_include_scale_and_lod_source() {
+        let rows = super::debug_panel_rows(super::DebugPanelSnapshot {
+            scale_units_per_pixel: Some(12.5),
+            render_source: Some(RenderPlanSource::HierarchyMid),
+            render_revision: 7,
+            interaction_active: true,
+            interaction_coarse: true,
+            plan_reused: false,
+            plan_batches: 3,
+            plan_items: 42,
+            plan_truncated: false,
+            candidates_checked: 9,
+            total_shapes: 100,
+            hierarchy_candidates_checked: 2,
+            total_hierarchy_instances: 6,
+            display_cache_hits: 4,
+            display_cache_misses: 1,
+            plane_cache_hits: 5,
+            plane_cache_misses: 0,
+            used_plane_renderer: true,
+            paint_ops: 123,
+            lod_stats: LodStats {
+                exact: 1,
+                frame_only: 2,
+                marker: 3,
+                hierarchy_bbox: 4,
+                array_bbox: 5,
+                array_grid: 6,
+                coarse: 7,
+                suppress: 8,
+            },
+        });
+
+        assert!(rows.contains(&("Scale", "12.500 units/px".to_string())));
+        assert!(rows.contains(&("LOD Source", "HierarchyMid".to_string())));
+        assert!(rows.contains(&("Coarse LOD", "yes".to_string())));
+        assert!(rows.contains(&("LOD Exact", "1".to_string())));
+        assert!(rows.contains(&("LOD Suppress", "8".to_string())));
+    }
+
+    #[test]
+    fn debug_panel_rows_keep_values_compact_for_sidebar_width() {
+        let rows = super::debug_panel_rows(super::DebugPanelSnapshot {
+            scale_units_per_pixel: Some(85.232),
+            render_source: Some(RenderPlanSource::HierarchyNear),
+            render_revision: 0,
+            interaction_active: false,
+            interaction_coarse: false,
+            plan_reused: true,
+            plan_batches: 4,
+            plan_items: 6799,
+            plan_truncated: false,
+            candidates_checked: 2,
+            total_shapes: 2,
+            hierarchy_candidates_checked: 607,
+            total_hierarchy_instances: 775,
+            display_cache_hits: 0,
+            display_cache_misses: 0,
+            plane_cache_hits: 1,
+            plane_cache_misses: 0,
+            used_plane_renderer: true,
+            paint_ops: 7577,
+            lod_stats: LodStats {
+                exact: 0,
+                frame_only: 389,
+                marker: 6410,
+                hierarchy_bbox: 0,
+                array_bbox: 0,
+                array_grid: 0,
+                coarse: 0,
+                suppress: 0,
+            },
+        });
+
+        assert!(
+            rows.iter().all(|(_label, value)| value.len() <= 32),
+            "debug values should stay compact enough for the default sidebar: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn debug_panel_is_visible_only_in_debug_builds() {
+        assert_eq!(super::should_show_debug_panel(), cfg!(debug_assertions));
+    }
+
+    #[test]
     fn sidebar_does_not_render_hierarchy_module() {
         let source = include_str!("main.rs");
 
         assert!(!source.contains(&["self.", "draw_", "hierarchy_panel"].concat()));
-        assert!(!source.contains(&[
-            "CollapsingHeader::new(",
-            "\"Hier",
-            "archy\"",
-            ")",
-        ]
-        .concat()));
+        assert!(!source.contains(&["CollapsingHeader::new(", "\"Hier", "archy\"", ")",].concat()));
     }
 
     #[test]
@@ -3724,5 +4074,4 @@ mod tests {
             target,
         }
     }
-
 }
