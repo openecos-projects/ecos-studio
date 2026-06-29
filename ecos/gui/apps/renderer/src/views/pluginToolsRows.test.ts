@@ -112,6 +112,50 @@ describe('pluginToolsRows', () => {
     expect(isEdaToolRow(openroad)).toBe(true)
   })
 
+  it('treats ecc-fe as a frontend flow runtime instead of an EDA tool', () => {
+    const eccFe = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe',
+        type: 'tool',
+        name: 'ecc-fe',
+        display_name: 'ECC-FE Frontend Flow',
+        description: 'ECOS frontend flow runtime CLI for Review, Elab, Lint, Sim, and Wave integration.',
+        category: 'frontend',
+        status: 'available',
+        available_versions: ['0.1.0-alpha.0-ecos'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+      }),
+      undefined,
+    )
+
+    expect(eccFe.icon).toBe('FE')
+    expect(eccFe.isFrontendTool).toBe(true)
+    expect(eccFe.flowTags).toEqual(['Frontend CLI'])
+    expect(isEdaToolRow(eccFe)).toBe(false)
+  })
+
+  it('treats ecc-fe SoC harness resources as frontend resources instead of EDA tools', () => {
+    const soc = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe-soc-ysyx-am',
+        type: 'tool',
+        name: 'ecc-fe-soc-ysyx-am',
+        display_name: 'ECC-FE YSYX AM SoC Harness',
+        description: 'Installable SoC harness resource assembled with the ECC-FE frontend flow runtime.',
+        category: 'frontend',
+        status: 'available',
+        available_versions: ['0.1.0-alpha.0-ecos'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+      }),
+      undefined,
+    )
+
+    expect(soc.icon).toBe('SOC')
+    expect(soc.isFrontendTool).toBe(true)
+    expect(soc.flowTags).toContain('SoC Harness')
+    expect(isEdaToolRow(soc)).toBe(false)
+  })
+
   it('maps active managed PDK to installed row', () => {
     const row = resourceToRow(
       resource({

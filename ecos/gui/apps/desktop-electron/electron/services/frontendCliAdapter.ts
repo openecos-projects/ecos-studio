@@ -15,6 +15,8 @@ import { electronLogger } from './logger'
 type SpawnLike = typeof spawnChild
 type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
 type CliEventType = 'queued' | 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled'
+const DEFAULT_FRONTEND_CLI_COMMAND = 'ecc-fe'
+const PYTHON_FRONTEND_MODULE_ARGS = ['-m', 'fecompiler.cli.main']
 
 export interface FrontendCliAdapterOptions {
   command?: string
@@ -197,6 +199,19 @@ function defaultPythonCommand(): string {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
+function commandBasename(command: string): string {
+  return command.split(/[\\/]/).pop()?.toLowerCase() ?? command.toLowerCase()
+}
+
+function isPythonCommand(command: string): boolean {
+  const basename = commandBasename(command).replace(/\.exe$/, '')
+  return basename === 'python' || /^python\d+(\.\d+)?$/.test(basename)
+}
+
+function defaultModuleArgsForCommand(command: string): string[] {
+  return isPythonCommand(command) ? [...PYTHON_FRONTEND_MODULE_ARGS] : []
+}
+
 function candidateFrontendPythonCommands(
   env: NodeJS.ProcessEnv,
   frontendRoot: string,
@@ -311,19 +326,27 @@ function normalizeFrontendCatalogConfigData(data: Record<string, unknown>): Reco
   }
 }
 
-function prependPythonPath(
+function frontendRuntimeEnv(
   env: NodeJS.ProcessEnv,
   frontendRoot: string,
+  options: { includePythonPath: boolean },
 ): NodeJS.ProcessEnv {
   if (!frontendRoot || !existsSync(join(frontendRoot, 'fecompiler'))) {
     return { ...env }
   }
 
+  const baseEnv = {
+    ...env,
+    ECOS_FE_COMPILER_ROOT: frontendRoot,
+  }
+  if (!options.includePythonPath) {
+    return baseEnv
+  }
+
   const currentPythonPath = env.PYTHONPATH ?? ''
   const separator = process.platform === 'win32' ? ';' : ':'
   return {
-    ...env,
-    ECOS_FE_COMPILER_ROOT: frontendRoot,
+    ...baseEnv,
     PYTHONPATH: currentPythonPath
       ? `${frontendRoot}${separator}${currentPythonPath}`
       : frontendRoot,
@@ -348,8 +371,8 @@ export class FrontendCliAdapter {
     this.frontendRoot = options.frontendRoot
       ?? process.env.ECOS_FE_COMPILER_ROOT
       ?? join(process.cwd(), 'ecc-fe')
-    this.command = options.command ?? defaultPythonCommand()
-    this.moduleArgs = options.moduleArgs ?? ['-m', 'fecompiler.cli.main']
+    this.command = options.command ?? DEFAULT_FRONTEND_CLI_COMMAND
+    this.moduleArgs = options.moduleArgs ?? defaultModuleArgsForCommand(this.command)
     this.spawnImpl = options.spawn ?? spawnChild
     this.tempDir = options.tempDir ?? tmpdir()
   }
@@ -381,14 +404,14 @@ export class FrontendCliAdapter {
     switch (request.cmd) {
       case 'catalog_list':
         return {
-          args: [...this.moduleArgs, 'workspace', 'catalog-list', '--json'],
+          args: ['workspace', 'catalog-list', '--json'],
         }
       case 'validate_frontend_config': {
         mkdirSync(this.tempDir, { recursive: true })
         const inputJson = join(this.tempDir, `fe-validate-config-${randomUUID()}.json`)
         writeFileSync(inputJson, JSON.stringify(normalizeFrontendCatalogConfigData(request.data)), 'utf8')
         return {
-          args: [...this.moduleArgs, 'workspace', 'validate-config', '--input-json', inputJson, '--json'],
+          args: ['workspace', 'validate-config', '--input-json', inputJson, '--json'],
           cleanup: () => {
             try {
               unlinkSync(inputJson)
@@ -403,7 +426,7 @@ export class FrontendCliAdapter {
         const inputJson = join(this.tempDir, `fe-create-workspace-${randomUUID()}.json`)
         writeFileSync(inputJson, JSON.stringify(normalizeCreateData(request.data)), 'utf8')
         return {
-          args: [...this.moduleArgs, 'workspace', 'create', '--input-json', inputJson, '--json'],
+          args: ['workspace', 'create', '--input-json', inputJson, '--json'],
           cleanup: () => {
             try {
               unlinkSync(inputJson)
@@ -417,7 +440,7 @@ export class FrontendCliAdapter {
         const directory = directoryFromRequest(request, this.activeWorkspace)
         if (!directory) return failed(request, 'missing required field: directory')
         return {
-          args: [...this.moduleArgs, 'workspace', 'load', '--directory', directory, '--json'],
+          args: ['workspace', 'load', '--directory', directory, '--json'],
         }
       }
       case 'rtl2gds': {
@@ -425,7 +448,6 @@ export class FrontendCliAdapter {
         if (!directory) return failed(request, 'missing required field: directory')
         return {
           args: [
-            ...this.moduleArgs,
             'workspace',
             'run-flow',
             '--directory',
@@ -446,7 +468,6 @@ export class FrontendCliAdapter {
         if (!id) return failed(request, 'missing required field: id')
         return {
           args: [
-            ...this.moduleArgs,
             'workspace',
             'get-info',
             '--directory',
@@ -463,7 +484,7 @@ export class FrontendCliAdapter {
         const directory = directoryFromRequest(request, this.activeWorkspace)
         if (!directory) return failed(request, 'missing required field: directory')
         return {
-          args: [...this.moduleArgs, 'workspace', 'get-home', '--directory', directory, '--json'],
+          args: ['workspace', 'get-home', '--directory', directory, '--json'],
         }
       }
       default:
@@ -490,7 +511,6 @@ export class FrontendCliAdapter {
     const coremarkHasFloat = readString(request.data.sim_coremark_has_float || request.data.simCoremarkHasFloat)
     return {
       args: [
-        ...this.moduleArgs,
         'workspace',
         'run-step',
         '--directory',
@@ -519,13 +539,30 @@ export class FrontendCliAdapter {
     prepared: PreparedCommand,
     context: DesktopRuntimeAdapterContext,
   ): Promise<DesktopCliCommandResult> {
-    const env = prependPythonPath(
-      this.envProvider ? await this.resolveProvidedEnv() : this.env,
-      this.frontendRoot,
-    )
-    const command = !this.hasExplicitCommand
-      ? resolveFrontendPythonCommand(env, this.frontendRoot)
+    const baseEnv = this.envProvider ? await this.resolveProvidedEnv() : this.env
+    const runtimeCommandOverride = readString(baseEnv.ECOS_FE_CLI).trim()
+    const command = !this.hasExplicitCommand && runtimeCommandOverride
+      ? runtimeCommandOverride
       : this.command
+    const moduleArgs = !this.hasExplicitCommand && runtimeCommandOverride
+      ? defaultModuleArgsForCommand(command)
+      : this.moduleArgs
+    const lookupEnv = frontendRuntimeEnv(baseEnv, this.frontendRoot, { includePythonPath: false })
+    const resolvedCommand = resolveCommandFromPath(command, lookupEnv)
+    const shouldUsePythonFallback = !this.hasExplicitCommand
+      && !runtimeCommandOverride
+      && command === DEFAULT_FRONTEND_CLI_COMMAND
+      && resolvedCommand === '(not found)'
+    const env = frontendRuntimeEnv(baseEnv, this.frontendRoot, {
+      includePythonPath: shouldUsePythonFallback || isPythonCommand(command),
+    })
+    const spawnCommand = shouldUsePythonFallback
+      ? resolveFrontendPythonCommand(env, this.frontendRoot)
+      : command
+    const spawnArgs = [
+      ...(shouldUsePythonFallback ? PYTHON_FRONTEND_MODULE_ARGS : moduleArgs),
+      ...prepared.args,
+    ]
 
     return await new Promise((resolve) => {
       let finalResult: DesktopCliCommandResult | null = null
@@ -538,14 +575,14 @@ export class FrontendCliAdapter {
 
       electronLogger.debug(
         '[Frontend CLI] spawn command=%s resolved=%s args=%s pathHead=%s frontendRoot=%s',
-        command,
-        resolveCommandFromPath(command, env),
-        prepared.args.join(' '),
+        spawnCommand,
+        shouldUsePythonFallback ? resolveCommandFromPath(spawnCommand, env) : resolvedCommand,
+        spawnArgs.join(' '),
         pathHeadForEnv(env),
         this.frontendRoot,
       )
 
-      const child = this.spawnImpl(command, prepared.args, {
+      const child = this.spawnImpl(spawnCommand, spawnArgs, {
         cwd: existsSync(this.frontendRoot) ? this.frontendRoot : undefined,
         detached: process.platform !== 'win32',
         env,

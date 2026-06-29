@@ -10542,3 +10542,200 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 本次修复会让旧 manifest 中路径写错的工具在运行时自动恢复，但不会主动改写 manifest；用户重新安装或后续安装新工具时会因为 executable 扫描修复而写入更准确的 `detected_executables`。
 - `test0629a` 目前只复测了 ELAB；如果用户继续跑 all steps，后续 Lint/Sim 仍可能暴露与 Verilator 或 RISC-V toolchain 注入相关的独立问题。
+
+# 第 161 次 开发
+
+## 开发目标
+
+把 `/home/luyoung/ecos-studio/ecc-fe` 作为独立 CLI 工具集成进 ECOS Studio，收紧 GUI 与 ECC-FE 的边界：GUI 优先调用 `ecc-fe workspace ...`，不再默认依赖 `python -m fecompiler.cli.main`，同时保留开发环境 fallback。
+
+## 新增文件
+
+- 无
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/pyproject.toml`
+  - 新增 `ecc-fe = "fecompiler.cli.main:main"` console script。
+  - 保留旧的 `fecompiler` console script，避免已有脚本断掉。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 将 workspace CLI 的帮助入口从 `fecompiler workspace` 调整为 `ecc-fe workspace`。
+  - 文档字符串中的 Electron bridge 示例改为 `ecc-fe workspace ... --json`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace_typer.py`
+  - 同步 Typer CLI 模块说明，明确它是 `ecc-fe workspace` 命令绑定。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 更新 workspace CLI help 断言，匹配新的 `ecc-fe workspace` 用户入口。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 增加 `ecc-fe` 作为 ECOS Studio 稳定命令行边界的说明。
+  - 将主要 CLI 示例从 `python3 -m fecompiler.cli.main` 改为 `ecc-fe`。
+  - 增加 `ecc-fe workspace create/load/run-step/run-flow/get-info/get-home --json` 协议示例。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.ts`
+  - 默认 frontend runtime 命令从 Python module invocation 改为独立 `ecc-fe` CLI。
+  - `prepareCommand()` 只生成业务参数，例如 `workspace run-step ...`，由 spawn 阶段决定是否需要 Python module 前缀。
+  - 支持 `ECOS_FE_CLI` 环境变量覆盖 frontend CLI 路径。
+  - 当默认 `ecc-fe` 不在 PATH 时，自动 fallback 到 `python -m fecompiler.cli.main`，并只在 fallback/Python 模式下注入 `PYTHONPATH`。
+  - 继续设置 `ECOS_FE_COMPILER_ROOT`，供 catalog 和 repo-relative 资源解析使用。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.test.ts`
+  - 更新默认调用预期为 `ecc-fe workspace ...`。
+  - 增加显式 Python command 兼容测试。
+  - 增加 `ECOS_FE_CLI` 覆盖测试。
+  - 增加 `ECOS_FE_CLI=python3` 自动 module mode 测试。
+  - 增加默认 `ecc-fe` 不在 PATH 时 fallback 到 Python module 的测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CLI 解耦集成工作。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/frontendCliAdapter.test.ts`，通过：1 个测试文件、6 个测试用例。
+- 已执行 `python3 -m pytest test/test_engine_flow.py -q -k "workspace_help_uses_typer_when_available or workspace_create_help_lists_gui_compatible_options or workspace_cli_falls_back_to_argparse_when_typer_is_missing"`，通过：3 个测试用例，84 个用例未选中。
+- 已执行 `git diff --check`，通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 本次未执行完整矩阵测试；改动集中在 CLI 调用边界和帮助文案，未改动 ECC-FE flow 业务逻辑。
+
+## 已知后续风险
+
+- 目前 `ecc-fe` 独立 CLI 已有 console script 和 GUI adapter 边界，但还没有作为 Resource Manager 资源单独发布；后续如果要彻底脱离 submodule/source tree，需要给 `ecc-fe` 增加打包产物和 registry 条目。
+- 开发环境 fallback 会继续依赖本地 `ecc-fe` 源码根和 Python 环境，这是为了平滑过渡；正式发布路径应优先使用安装好的 `ecc-fe` 可执行文件。
+
+# 第 162 次 开发
+
+## 开发目标
+
+把 `ecc-fe` 做成 ECOS Studio Resource Manager 可安装资源：用户可以像安装 Slang / Yosys / RISC-V toolchain 一样安装 ECC-FE frontend runtime，GUI 运行时从 Resource Manager 注入 `ECOS_FE_CLI` 和 `ECOS_FE_COMPILER_ROOT`，优先调用已安装的 `ecc-fe`。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/bin/ecc-fe`
+  - 新增可随资源包安装的 runtime shim。
+  - 自动把安装根目录加入 `PYTHONPATH`，设置默认 `ECOS_FE_COMPILER_ROOT`，再执行 `python3 -m fecompiler.cli.main`。
+- `/home/luyoung/ecos-registry/assets/ecc-fe-0.1.0-alpha.0-ecos.tar.gz`
+  - 新增 ECC-FE frontend runtime 资源包。
+  - 资源包包含 `bin/ecc-fe`、`fecompiler` 核心代码、catalog/adapters、当前 GUI flow 需要的 SoC harness、RT-Thread AM 精简源码、examples、README/LICENSE/pyproject。
+  - 已排除 workspace 输出、cache、`riscv32-spike-so`、预编译 `.soc.bin`、RT-Thread build 产物、对象文件和本机路径痕迹。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager runtime env 新增 `ecc-fe` 工具能力识别。
+  - 安装了 `tool:ecc-fe` 后会注入 `ECOS_FE_CLI=<install>/bin/ecc-fe` 和 `ECOS_FE_COMPILER_ROOT=<install>`。
+  - `preferredExecutableNames()` 新增 `bin/ecc-fe` / `ecc-fe` 候选。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 在 runtime env 测试中加入 `tool:ecc-fe`，确认 PATH、`ECOS_FE_CLI`、`ECOS_FE_COMPILER_ROOT` 注入正确。
+  - 新增本地 tar fixture，验证 `ecc-fe` 可作为 managed tool 安装并记录 `detected_executables: ["bin/ecc-fe"]`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - Resource Manager 前端列表新增 `ecc-fe` 图标/颜色。
+  - `ecc-fe` 被标记为 `Frontend CLI`，属于 `Frontend Flow`，但不归入 `EDA Tools`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加 `ecc-fe` 资源行分类测试，确认它是 frontend flow runtime 而不是 EDA tool。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 新增 `tool:ecc-fe` registry 条目，版本 `0.1.0-alpha.0-ecos`。
+  - 下载地址指向 fork registry 的 `assets/ecc-fe-0.1.0-alpha.0-ecos.tar.gz`。
+  - sha256 更新为 `58cdc79400fa804039b8037c78da2bd9bdc949922ac522c980a9dfb80dc1085e`，size 为 `5018759`。
+- `/home/luyoung/ecos-registry/README.md`
+  - 说明 `ecc-fe` 是 frontend flow runtime CLI，不是 EDA tool；它负责调度 Review / Elab / Lint / Sim / Wave metadata。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 可安装资源接入。
+
+## 验证情况
+
+- 已执行 `python3 .github/scripts/validate_registry.py tool-registry.json`，通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/frontendCliAdapter.test.ts`，通过：2 个测试文件、21 个测试用例。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、12 个测试用例。
+- 已执行资源包 smoke：解压 `/home/luyoung/ecos-registry/assets/ecc-fe-0.1.0-alpha.0-ecos.tar.gz` 后运行 `bin/ecc-fe workspace catalog-list --json`，返回 `catalog_list success`，可读取 11 个 CPU catalog 条目。
+- 已执行 `git diff --check`，通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 本次未执行完整矩阵测试；改动集中在资源安装、runtime env 注入和 GUI 分类，未改 ECC-FE flow 业务逻辑。
+
+## 已知后续风险
+
+- 当前 `ecc-fe` resource asset 是轻量 runtime 包，未携带所有 metadata-only CPU submodule 源码，也未携带 `riscv32-spike-so`；用户自定义 filelist、标准 CPU filelist、当前 SoC harness、CPU tests、CoreMark、RT-Thread 源码路径可用，difftest reference 和更多内置 CPU 源码后续更适合拆成单独资源。
+- Registry asset URL 仍指向 `Luyoung0001/ecos-registry` fork；上游 registry PR 合并后需要把 ECOS Studio 默认 registry URL 从 fork commit 切回正式上游地址。
+
+# 第 163 次 开发
+
+## 开发目标
+
+把 ECC-FE Resource Manager 集成从“单个 runtime 包”推进到“runtime + 外部资源可组装”：`ecc-fe` runtime 不再携带 SoC harness，`ysyx-am-soc` 作为独立资源安装，ECOS Studio 运行时通过环境变量把它们组合起来。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/resources.py`
+  - 新增 ECC-FE runtime/resource 根目录解析工具。
+  - 支持 `ECOS_FE_COMPILER_ROOT`、`ECOS_FE_RESOURCE_ROOTS`、`ECOS_FE_SOC_ROOT`。
+- `/home/luyoung/ecos-registry/assets/ecc-fe-soc-ysyx-am-0.1.0-alpha.0-ecos.tar.gz`
+  - 新增独立 SoC harness 资源包，包含 `ysyx-am-soc` RTL、driver、测试程序、预编译 CPU test images、manifest/catalog。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - catalog manifest 搜索改为支持 runtime 自带目录和外部资源根。
+  - 外部资源可直接把 `catalog.json` 放在资源根目录。
+  - SoC 资源中旧的 `directory: fecompiler/thirdparty/SoC` 会被解析为该资源目录本身，兼容现有 harness catalog。
+  - catalog loader 增加 kind 过滤，避免 SoC catalog 被 cores loader 误读成 CPU。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/soc/registry.py`
+  - SoC runtime manifest 搜索改为支持 runtime 自带目录和外部资源根。
+  - 外部资源可直接把 `manifest.json` 放在资源根目录，也可放在子目录。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+  - 统一使用新的 runtime root 解析工具。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 记录 `ECOS_FE_RESOURCE_ROOTS` / `ECOS_FE_SOC_ROOT` 的组装方式。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加外部 SoC resource root 发现测试。
+  - 增加 SoC runtime options 外部 manifest 发现测试。
+  - 增加旧 `fecompiler/thirdparty/SoC` directory 兼容测试。
+  - 增加防止 SoC catalog 被误并入 CPU catalog 的断言。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager runtime env 增加 frontend resource 识别。
+  - 安装 `ecc-fe-soc-*` 后注入 `ECOS_FE_RESOURCE_ROOTS` 和 `ECOS_FE_SOC_ROOT`。
+  - SoC/CPU/test 资源不进入 PATH，也不要求有可执行文件。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 覆盖 `ecc-fe-soc-ysyx-am` active resource 的环境变量注入。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - `ecc-fe-soc-*` / `ecc-fe-cpu-*` 显示为 frontend resource，不归入 EDA Tools。
+  - 增加 SoC Harness / CPU Adapter 标签识别。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加 SoC harness resource 行分类测试。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - `tool:ecc-fe` 资源包更新为拆分后的 runtime 包：sha256 `0242eec70b324de5ccf3ea7497b8f6ca4ebd0fc9a104458831b656c2af68aede`，size `24347354`。
+  - 新增 `tool:ecc-fe-soc-ysyx-am`，sha256 `2a6f5e5df33aff55d218cc1f4b1c28d191620ab0805abd98f38b66849711f70e`，size `21133977`。
+  - `tool:ecc-fe` 声明依赖 `tool:ecc-fe-soc-ysyx-am`。
+- `/home/luyoung/ecos-registry/README.md`
+  - 说明 `ecc-fe-soc-*` 是可独立安装并与 `ecc-fe` runtime 组装的 frontend SoC harness 资源。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次资源拆分和组装能力。
+
+## 验证情况
+
+- 已执行 `python3 .github/scripts/validate_registry.py tool-registry.json`，通过。
+- 已执行 `python3 -m pytest test/test_engine_flow.py -q -k "external_soc_resource_root or soc_runtime_options_discovers_external_soc_root or workspace_create_fills_soc_defaults_for_empty_gui_sim_lists or legacy_builtin_directory"`，通过：4 个测试用例，86 个用例未选中。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/services/frontendCliAdapter.test.ts`，通过：2 个测试文件、21 个测试用例。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、13 个测试用例。
+- 已执行真实资源包 smoke：分别解压 `ecc-fe-0.1.0-alpha.0-ecos.tar.gz` 和 `ecc-fe-soc-ysyx-am-0.1.0-alpha.0-ecos.tar.gz`，设置 `ECOS_FE_RESOURCE_ROOTS` 后运行 `bin/ecc-fe workspace catalog-list --json` 与 `bin/ecc-fe workspace catalog-check --json`，通过。
+- 已检查 runtime tar 包不包含 `fecompiler/thirdparty/SoC`、workspace 输出、`.git`、cache、trace、`__pycache__`。
+- 已检查 SoC tar 包不包含 `.git`、workspace 输出、trace、cache、`.o`、`.d`、`.vcd`。
+- 已执行 `git diff --check`，通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 本次未执行完整矩阵测试；改动集中在资源拆分、发现机制、环境注入和 Resource Manager 展示。
+
+## 已知后续风险
+
+- 当前只拆出了 `ysyx-am-soc` SoC harness；其它 CPU adapter/RTL、difftest reference、更多测试资源后续仍应继续拆成独立资源。
+- `tool:ecc-fe` 的 registry URL 仍指向 `Luyoung0001/ecos-registry` fork；正式 PR 合并后需要切回上游 registry 地址。
+- `tool:ecc-fe` 的 `requires` 字段目前只是 registry 元数据，Resource Manager 尚未自动级联安装依赖；用户仍需要在 GUI 中安装 runtime 和 SoC resource 两个条目。

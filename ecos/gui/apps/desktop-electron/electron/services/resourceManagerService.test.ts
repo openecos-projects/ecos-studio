@@ -78,6 +78,24 @@ async function createSurferAssetsZip(root: string): Promise<{ path: string; sha2
   }
 }
 
+async function createEccFeArchive(root: string): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'ecc-fe-source')
+  const sourceDir = join(sourceRoot, 'ecc-fe-runtime')
+  const archive = join(root, 'ecc-fe.tar')
+  await mkdir(join(sourceDir, 'bin'), { recursive: true })
+  await mkdir(join(sourceDir, 'fecompiler'), { recursive: true })
+  await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+  await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+  await writeFile(join(sourceDir, 'fecompiler', '__init__.py'), '', 'utf8')
+  await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-runtime'])
+  const size = Buffer.byteLength(await readFile(archive))
+  return {
+    path: archive,
+    sha256: 'fixture-ecc-fe-sha',
+    size,
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return await Promise.race([
     promise,
@@ -192,6 +210,8 @@ describe('ResourceManagerService', () => {
     const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
     const slangRoot = join(toolsDir, 'slang', '10.0')
     const verilatorRoot = join(toolsDir, 'verilator', '5.046')
+    const eccFeRoot = join(toolsDir, 'ecc-fe', '0.1.0-alpha.0-ecos')
+    const eccFeSocRoot = join(toolsDir, 'ecc-fe-soc-ysyx-am', '0.1.0-alpha.0-ecos')
     const riscvRoot = join(toolsDir, 'riscv-toolchain', 'rv32')
     const surferRoot = join(toolsDir, 'surfer', '0.4.0')
     const duplicateRoot = join(toolsDir, 'duplicate', '1.0')
@@ -201,6 +221,8 @@ describe('ResourceManagerService', () => {
     await mkdir(join(yosysRoot, 'bin'), { recursive: true })
     await mkdir(join(slangRoot, 'bin'), { recursive: true })
     await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
+    await mkdir(eccFeSocRoot, { recursive: true })
     await mkdir(join(riscvRoot, 'bin'), { recursive: true })
     await mkdir(surferRoot, { recursive: true })
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
@@ -210,6 +232,7 @@ describe('ResourceManagerService', () => {
     await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(surferRoot, 'index.html'), '<!doctype html>\n', 'utf8')
     await writeFile(join(surferRoot, 'integration.js'), 'function register_message_listener() {}\n', 'utf8')
@@ -220,6 +243,7 @@ describe('ResourceManagerService', () => {
     await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
     await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
     await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
+    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
     await chmod(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), 0o755)
     await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
     await chmod(join(inactiveRoot, 'bin', 'inactive'), 0o755)
@@ -259,6 +283,26 @@ describe('ResourceManagerService', () => {
           version: '5.046',
           path: verilatorRoot,
           executable: 'bin/verilator',
+          active: true,
+          managed: true,
+        },
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: '0.1.0-alpha.0-ecos',
+          path: eccFeRoot,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+        'tool:ecc-fe-soc-ysyx-am': {
+          type: 'tool',
+          name: 'ecc-fe-soc-ysyx-am',
+          version: '0.1.0-alpha.0-ecos',
+          path: eccFeSocRoot,
+          executable: '',
+          detected_executables: [],
           active: true,
           managed: true,
         },
@@ -344,6 +388,7 @@ describe('ResourceManagerService', () => {
       join(duplicateRoot, 'bin'),
       join(slangRoot, 'bin'),
       join(verilatorRoot, 'bin'),
+      join(eccFeRoot, 'bin'),
       join(riscvRoot, 'bin'),
       '/usr/bin',
     ])
@@ -352,6 +397,10 @@ describe('ResourceManagerService', () => {
     expect(env.ECOS_SLANG).toBe(join(slangRoot, 'bin', 'slang'))
     expect(env.ECOS_VERILATOR).toBe(join(verilatorRoot, 'bin', 'verilator'))
     expect(env.VERILATOR_ROOT).toBe(verilatorRoot)
+    expect(env.ECOS_FE_CLI).toBe(join(eccFeRoot, 'bin', 'ecc-fe'))
+    expect(env.ECOS_FE_COMPILER_ROOT).toBe(eccFeRoot)
+    expect(env.ECOS_FE_RESOURCE_ROOTS).toBe(eccFeSocRoot)
+    expect(env.ECOS_FE_SOC_ROOT).toBe(eccFeSocRoot)
     expect(env.RISCV_PREFIX).toBe('riscv32-unknown-elf-')
     expect(env.RISCV).toBe(riscvRoot)
     expect(env.RISCV_TOOLCHAIN).toBe(riscvRoot)
@@ -557,6 +606,65 @@ describe('ResourceManagerService', () => {
     expect(manifest.installed['tool:surfer']).toMatchObject({
       executable: 'index.html',
       detected_executables: [],
+    })
+    expect(verifySha256).toHaveBeenCalledTimes(1)
+  })
+
+  it('installs ecc-fe as a managed frontend CLI resource', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: '0.1.0-alpha.0-ecos',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const verifySha256 = vi.fn(async () => true)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.installResource('tool:ecc-fe', '0.1.0-alpha.0-ecos')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:ecc-fe',
+      version: '0.1.0-alpha.0-ecos',
+    })
+
+    const eccFeRoot = join(root, 'data', 'tools', 'ecc-fe', '0.1.0-alpha.0-ecos')
+    await expect(readFile(join(eccFeRoot, 'bin', 'ecc-fe'), 'utf8')).resolves.toContain('#!/bin/sh')
+    await expect(readFile(join(eccFeRoot, 'fecompiler', '__init__.py'), 'utf8')).resolves.toBe('')
+
+    const manifest = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, { executable?: string; detected_executables?: string[] }> }
+    expect(manifest.installed['tool:ecc-fe']).toMatchObject({
+      executable: 'bin/ecc-fe',
+      detected_executables: ['bin/ecc-fe'],
     })
     expect(verifySha256).toHaveBeenCalledTimes(1)
   })

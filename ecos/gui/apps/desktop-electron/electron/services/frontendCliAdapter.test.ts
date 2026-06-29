@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { spawn as spawnChild } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -78,11 +78,18 @@ describe('FrontendCliAdapter', () => {
     return directory
   }
 
+  function createFrontendCliEnv(tempDir: string): NodeJS.ProcessEnv {
+    const binDir = join(tempDir, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(join(binDir, process.platform === 'win32' ? 'ecc-fe.cmd' : 'ecc-fe'), '')
+    return { PATH: binDir }
+  }
+
   it('lets the frontend CLI resolve catalog SoC runtime defaults', async () => {
     const tempDir = createTempDir()
     const harness = createSpawnHarness()
     const adapter = new FrontendCliAdapter({
-      command: '/usr/bin/python3',
+      env: createFrontendCliEnv(tempDir),
       frontendRoot: '/repo/ecc-fe',
       spawn: harness.spawn,
       tempDir,
@@ -103,6 +110,7 @@ describe('FrontendCliAdapter', () => {
     }), { emit: vi.fn() })
 
     const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
+    expect(harness.calls[0].command).toBe('ecc-fe')
     expect(input.soc_harness_id).toBe('ysyx-am-soc')
     expect(input.soc_variant).toBe('soc1')
     expect(input.soc_filelist).toBe('')
@@ -126,9 +134,10 @@ describe('FrontendCliAdapter', () => {
   })
 
   it('passes CoreMark compile options to the frontend CLI run-step command', async () => {
+    const tempDir = createTempDir()
     const harness = createSpawnHarness()
     const adapter = new FrontendCliAdapter({
-      command: '/usr/bin/python3',
+      env: createFrontendCliEnv(tempDir),
       frontendRoot: '/repo/ecc-fe',
       spawn: harness.spawn,
     })
@@ -148,9 +157,8 @@ describe('FrontendCliAdapter', () => {
       step: 'sim',
     }), { emit: vi.fn() })
 
+    expect(harness.calls[0].command).toBe('ecc-fe')
     expect(harness.calls[0].args).toEqual([
-      '-m',
-      'fecompiler.cli.main',
       'workspace',
       'run-step',
       '--directory',
@@ -181,6 +189,153 @@ describe('FrontendCliAdapter', () => {
 
     await expect(runPromise).resolves.toMatchObject({
       cmd: 'run_step',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('keeps explicit python command overrides compatible with module mode', async () => {
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      command: '/usr/bin/python3',
+      frontendRoot: '/repo/ecc-fe',
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    expect(harness.calls[0]).toEqual({
+      args: [
+        '-m',
+        'fecompiler.cli.main',
+        'workspace',
+        'catalog-list',
+        '--json',
+      ],
+      command: '/usr/bin/python3',
+    })
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+
+    await expect(listPromise).resolves.toMatchObject({
+      cmd: 'catalog_list',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('honors ECOS_FE_CLI command override from the runtime environment', async () => {
+    const tempDir = createTempDir()
+    const customCli = join(tempDir, 'tools', 'ecc-fe')
+    mkdirSync(join(tempDir, 'tools'), { recursive: true })
+    writeFileSync(customCli, '')
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      env: {
+        ECOS_FE_CLI: customCli,
+        PATH: '',
+      },
+      frontendRoot: '/repo/ecc-fe',
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    expect(harness.calls[0]).toEqual({
+      args: ['workspace', 'catalog-list', '--json'],
+      command: customCli,
+    })
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+
+    await expect(listPromise).resolves.toMatchObject({
+      cmd: 'catalog_list',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('treats ECOS_FE_CLI python overrides as module mode', async () => {
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      env: {
+        ECOS_FE_CLI: '/usr/bin/python3',
+        PATH: '',
+      },
+      frontendRoot: '/repo/ecc-fe',
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    expect(harness.calls[0]).toEqual({
+      args: [
+        '-m',
+        'fecompiler.cli.main',
+        'workspace',
+        'catalog-list',
+        '--json',
+      ],
+      command: '/usr/bin/python3',
+    })
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+
+    await expect(listPromise).resolves.toMatchObject({
+      cmd: 'catalog_list',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('falls back to python module mode when the ecc-fe command is not on PATH', async () => {
+    const tempDir = createTempDir()
+    const frontendRoot = join(tempDir, 'ecc-fe')
+    mkdirSync(join(frontendRoot, 'fecompiler'), { recursive: true })
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      env: {
+        PATH: '',
+      },
+      frontendRoot,
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    expect(harness.calls[0].command).toMatch(/python/)
+    expect(harness.calls[0].args).toEqual([
+      '-m',
+      'fecompiler.cli.main',
+      'workspace',
+      'catalog-list',
+      '--json',
+    ])
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+
+    await expect(listPromise).resolves.toMatchObject({
+      cmd: 'catalog_list',
       ok: true,
       response: 'success',
     })

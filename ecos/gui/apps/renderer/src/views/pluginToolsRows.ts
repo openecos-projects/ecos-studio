@@ -36,6 +36,9 @@ const toolMeta: Record<string, { icon: string; accent: string }> = {
   yosys: { icon: 'Y', accent: '#63666d' },
   slang: { icon: 'SV', accent: '#7c5fb4' },
   surfer: { icon: 'W', accent: '#2f8f83' },
+  'ecc-fe-soc': { icon: 'SOC', accent: '#4f7f75' },
+  'ecc-fe-cpu': { icon: 'CPU', accent: '#4f7f75' },
+  'ecc-fe': { icon: 'FE', accent: '#4f7f75' },
   'riscv-toolchain': { icon: 'RV', accent: '#b35f3a' },
   riscv: { icon: 'RV', accent: '#b35f3a' },
   klayout: { icon: 'K', accent: '#d99427' },
@@ -109,6 +112,15 @@ export function frontendFlowTagsFor(resource: ResourceItem): string[] {
   }
   if (haystack.includes('surfer')) {
     tags.push('Wave')
+  }
+  if (haystack.includes('ecc-fe') || haystack.includes('frontend flow runtime')) {
+    tags.push('Frontend CLI')
+  }
+  if (haystack.includes('soc harness')) {
+    tags.push('SoC Harness')
+  }
+  if (haystack.includes('cpu adapter')) {
+    tags.push('CPU Adapter')
   }
 
   return [...new Set(tags)]
@@ -229,7 +241,9 @@ function isCompilerToolchainRow(row: ResourceRow): boolean {
     haystack.includes('gnu toolchain') ||
     haystack.includes('risc-v gnu') ||
     haystack.includes('riscv-toolchain') ||
-    haystack.includes('bare-metal gcc')
+    haystack.includes('bare-metal gcc') ||
+    haystack.includes('ecc-fe') ||
+    haystack.includes('frontend flow runtime')
   )
 }
 

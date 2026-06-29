@@ -232,10 +232,20 @@ export class ResourceManagerService {
     const toolBinDirs: string[] = []
     let activeYosysRoot: string | null = null
     let activeSurferRoot: string | null = null
+    const frontendResourceRoots: string[] = []
+    let activeSocRoot: string | null = null
 
     for (const entry of Object.values(manifest.installed)) {
       if (!isToolEntry(entry) || !entry.active) continue
       const toolKind = normalizeToolName(entry.name)
+
+      if (isFrontendResourceTool(toolKind)) {
+        frontendResourceRoots.push(entry.path)
+        if (toolKind.startsWith('ecc-fe-soc-')) {
+          activeSocRoot = entry.path
+        }
+        continue
+      }
 
       if (toolKind === 'surfer') {
         if (await isSurferAssetsRoot(entry.path)) {
@@ -271,6 +281,10 @@ export class ResourceManagerService {
         env.ECOS_VERILATOR = resolvedExecutable
         env.VERILATOR_ROOT = entry.path
       }
+      if (toolKind === 'ecc-fe' || capabilities.has('ecc-fe')) {
+        env.ECOS_FE_CLI = resolvedExecutable
+        env.ECOS_FE_COMPILER_ROOT = entry.path
+      }
       if (toolKind === 'riscv-toolchain' || capabilities.has('riscv-toolchain')) {
         const prefix = detectRiscvPrefix(entry.detected_executables, entry.executable)
         if (prefix) {
@@ -292,6 +306,16 @@ export class ResourceManagerService {
     }
     if (activeSurferRoot) {
       env.ECOS_SURFER_ASSETS_PATH = activeSurferRoot
+    }
+    if (frontendResourceRoots.length > 0) {
+      env.ECOS_FE_RESOURCE_ROOTS = mergePathList(
+        env.ECOS_FE_RESOURCE_ROOTS ?? '',
+        frontendResourceRoots,
+        options.platform,
+      )
+    }
+    if (activeSocRoot) {
+      env.ECOS_FE_SOC_ROOT = activeSocRoot
     }
 
     for (const entry of Object.values(manifest.installed)) {
@@ -1383,6 +1407,24 @@ function mergeRuntimePath(
     .join(runtimePathSeparator(platform))
 }
 
+function mergePathList(
+  basePath: string,
+  entries: string[],
+  platform: NodeJS.Platform,
+): string {
+  const seen = new Set<string>()
+  return [
+    ...entries,
+    ...splitRuntimePath(basePath, platform),
+  ]
+    .filter((entry) => {
+      if (seen.has(entry)) return false
+      seen.add(entry)
+      return true
+    })
+    .join(runtimePathSeparator(platform))
+}
+
 async function isUsableExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
   try {
     await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
@@ -1466,17 +1508,26 @@ function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
   if (normalized === 'slang') capabilities.add('slang')
   if (normalized === 'verilator') capabilities.add('verilator')
   if (normalized === 'riscv-toolchain') capabilities.add('riscv-toolchain')
+  if (normalized === 'ecc-fe') capabilities.add('ecc-fe')
 
   for (const executable of [entry.executable, ...entry.detected_executables]) {
     const name = basename(executable)
     if (name === 'yosys') capabilities.add('yosys')
     if (name === 'slang') capabilities.add('slang')
     if (name === 'verilator') capabilities.add('verilator')
+    if (name === 'ecc-fe') capabilities.add('ecc-fe')
     if (name.endsWith('gcc') && detectRiscvPrefix([executable], '')) {
       capabilities.add('riscv-toolchain')
     }
   }
   return capabilities
+}
+
+function isFrontendResourceTool(normalizedName: string): boolean {
+  return normalizedName.startsWith('ecc-fe-soc-')
+    || normalizedName.startsWith('ecc-fe-cpu-')
+    || normalizedName.startsWith('ecc-fe-test-')
+    || normalizedName === 'ecc-fe-difftest-ref'
 }
 
 async function resolveRuntimeExecutable(
@@ -1531,6 +1582,9 @@ function preferredExecutableNames(normalizedName: string): string[] {
   }
   if (normalizedName === 'surfer') {
     return ['index.html']
+  }
+  if (normalizedName === 'ecc-fe') {
+    return ['bin/ecc-fe', 'ecc-fe']
   }
   return [`bin/${normalizedName}`, normalizedName]
 }
