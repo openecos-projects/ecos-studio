@@ -346,6 +346,8 @@ function closeReportLightbox() {
 function onDocumentKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && reportLightbox.value.visible) {
     closeReportLightbox()
+    e.preventDefault()
+    e.stopPropagation()
   }
 }
 

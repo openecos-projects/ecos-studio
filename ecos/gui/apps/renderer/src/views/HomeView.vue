@@ -1,5 +1,8 @@
 <template>
-  <div :class="['home-view', { 'layout-fullscreen-active': isLayoutFullscreen }]">
+  <div :class="['home-view', {
+    'layout-fullscreen-active': isLayoutFullscreen,
+    'flow-log-fullscreen-active': isFlowLogFullscreen,
+  }]">
     <!-- 背景装饰 -->
     <div class="bg-grid"></div>
 
@@ -178,6 +181,17 @@
           <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
           <h2>Flow Step Log</h2>
           <span v-if="flowLogStepName" class="header-badge">{{ flowLogStepName }}</span>
+          <div class="header-actions">
+            <button
+              type="button"
+              class="action-btn flow-log-fullscreen-toggle"
+              :title="isFlowLogFullscreen ? 'Exit full screen' : 'Full screen'"
+              :aria-label="isFlowLogFullscreen ? 'Exit flow step log full screen' : 'View flow step log full screen'"
+              @click="toggleFlowLogFullscreen"
+            >
+              <i :class="isFlowLogFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
+            </button>
+          </div>
         </div>
         <div class="flow-log-content">
           <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
@@ -220,7 +234,7 @@
                     :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
                     aria-haspopup="dialog"
                     :aria-label="isFlowLogStepChooserOpen ? 'Hide flow step chooser' : 'Show flow step chooser'"
-                    @click="toggleFlowLogStepChooser"
+                    @click="toggleFlowLogStepChooserFromTrigger"
                   >
                     <i class="ri-list-check"></i>
                     <span>Steps</span>
@@ -336,6 +350,139 @@
               @select="onSelectFlowLogStep"
             />
           </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== Flow Step Log Fullscreen Overlay ===== -->
+    <Teleport to="body">
+      <Transition name="lightbox">
+        <div
+          v-if="isFlowLogFullscreen"
+          class="flow-log-fullscreen-overlay"
+          @click="closeFlowLogFullscreen"
+        >
+          <section class="section-card flow-log-fullscreen-card" @click.stop>
+            <div class="section-header">
+              <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
+              <h2>Flow Step Log</h2>
+              <span v-if="flowLogStepName" class="header-badge">{{ flowLogStepName }}</span>
+              <div class="header-actions">
+                <button
+                  type="button"
+                  class="action-btn flow-log-fullscreen-toggle"
+                  title="Exit full screen"
+                  aria-label="Exit flow step log full screen"
+                  @click="closeFlowLogFullscreen"
+                >
+                  <i class="ri-fullscreen-exit-line"></i>
+                </button>
+              </div>
+            </div>
+            <div class="flow-log-content flow-log-fullscreen-content">
+              <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
+              <div v-else-if="flowLogListItems.length" class="flow-log-layout flow-log-fullscreen-layout">
+                <div class="flow-log-viewer-panel">
+                  <div class="flow-log-viewer-header">
+                    <div class="flow-log-viewer-header-main">
+                      <div v-if="selectedFlowLogSegment" class="flow-log-viewer-summary-row">
+                        <span class="flow-log-viewer-title">{{ selectedFlowLogSegment.stepName }}</span>
+                        <span class="flow-log-viewer-tool">{{ selectedFlowLogSegment.tool }}</span>
+                        <span
+                          class="flow-log-viewer-state"
+                          :class="{ failed: selectedFlowLogSegment.failed, live: selectedFlowLogSegment.live }"
+                        >
+                          {{ selectedFlowLogSegment.state }}
+                        </span>
+                        <span v-if="selectedFlowLogSegment.totalSize" class="flow-log-viewer-size">
+                          {{ formatKb(selectedFlowLogSegment.totalSize) }}
+                        </span>
+                        <span
+                          v-if="flowLogLoading || loadingSelectedFlowLogKey === selectedFlowLogKey"
+                          class="flow-log-viewer-loading"
+                        >
+                          <i class="ri-loader-4-line spin"></i>
+                          {{ flowLogLoading ? 'Updating…' : 'Loading log…' }}
+                        </span>
+                      </div>
+                      <div v-else class="flow-log-viewer-summary-row empty">
+                        <span class="flow-log-viewer-title">Current step</span>
+                        <span class="flow-log-viewer-tool">Select a step to inspect its output.</span>
+                      </div>
+                    </div>
+
+                    <div class="flow-log-viewer-actions">
+                      <button
+                        type="button"
+                        class="flow-log-steps-trigger"
+                        aria-controls="flow-log-step-chooser-dialog"
+                        :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
+                        aria-haspopup="dialog"
+                        :aria-label="isFlowLogStepChooserOpen ? 'Hide flow step chooser' : 'Show flow step chooser'"
+                        @click="toggleFlowLogStepChooserFromTrigger"
+                      >
+                        <i class="ri-list-check"></i>
+                        <span>Steps</span>
+                      </button>
+                      <button
+                        v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
+                        type="button"
+                        class="flow-log-jump-live-btn"
+                        @click="jumpToLiveStep"
+                      >
+                        <i class="ri-skip-right-line"></i>
+                        <span>Jump to live</span>
+                      </button>
+                      <button
+                        v-if="selectedFlowLogSegment?.truncated"
+                        type="button"
+                        class="flow-log-expand-btn"
+                        :disabled="expandingFlowLogKeys[selectedFlowLogKey || '']"
+                        :title="`Load full log (${formatKb(selectedFlowLogSegment.totalSize)})`"
+                        @click="onExpandFullLog(selectedFlowLogSegment)"
+                      >
+                        <i
+                          :class="[
+                            expandingFlowLogKeys[selectedFlowLogKey || '']
+                              ? 'ri-loader-4-line flow-log-expand-btn-spinner'
+                              : 'ri-expand-up-down-line',
+                          ]"
+                        ></i>
+                        <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']">Loading full log…</span>
+                        <span v-else>Show full log</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flow-log-viewer-shell">
+                    <FlowLogCodeViewer
+                      v-if="selectedFlowLogSegment"
+                      :key="`fullscreen-${selectedFlowLogKey ?? 'no-selection'}`"
+                      :content="selectedFlowLogContent"
+                      :live="Boolean(selectedFlowLogSegment.live)"
+                      :missing="selectedFlowLogSegment.missing"
+                      :loading="loadingSelectedFlowLogKey === selectedFlowLogKey"
+                    />
+                    <div v-else class="flow-log-placeholder">
+                      <i class="ri-terminal-line"></i>
+                      <p>No step selected</p>
+                      <span>Open Steps to inspect a log once a flow step is available.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="flowLogLoading" class="flow-log-loading">
+                <i class="ri-loader-4-line flow-log-loading-icon"></i>
+                <p>Loading flow step logs…</p>
+                <span>Reading flow.json and log files from the workspace. Steps will appear as they load.</span>
+              </div>
+              <div v-else class="flow-log-placeholder">
+                <i class="ri-terminal-line"></i>
+                <p>No flow step log yet</p>
+                <span>Unstarted steps are hidden. Logs show up here once a step begins or finishes.</span>
+              </div>
+            </div>
+          </section>
         </div>
       </Transition>
     </Teleport>
@@ -615,6 +762,13 @@ function toggleFlowLogStepChooser(): void {
   flowLogChooser.toggleFlowLogStepChooser()
 }
 
+function toggleFlowLogStepChooserFromTrigger(event: MouseEvent): void {
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    flowLogStepChooserTriggerRef.value = event.currentTarget
+  }
+  toggleFlowLogStepChooser()
+}
+
 function closeFlowLogStepChooser(): void {
   flowLogChooser.closeFlowLogStepChooser()
 }
@@ -727,6 +881,7 @@ const checklistCompletedCount = computed(() =>
 // ============ Layout 全屏 & 缩放平移 ============
 const layoutContentRef = ref<HTMLElement>()
 const isLayoutFullscreen = ref(false)
+const isFlowLogFullscreen = ref(false)
 
 // 缩放 & 平移状态
 const layoutScale = ref(1)
@@ -772,6 +927,14 @@ function closeLayoutFullscreen() {
   resetLayoutTransform()
 }
 
+function toggleFlowLogFullscreen() {
+  isFlowLogFullscreen.value = !isFlowLogFullscreen.value
+}
+
+function closeFlowLogFullscreen() {
+  isFlowLogFullscreen.value = false
+}
+
 function onFullscreenKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   flowLogChooser.onFlowLogChooserEscape(e)
@@ -783,6 +946,12 @@ function onFullscreenKeydown(e: KeyboardEvent) {
   }
   if (isLayoutFullscreen.value) {
     closeLayoutFullscreen()
+    e.preventDefault()
+    return
+  }
+  if (isFlowLogFullscreen.value) {
+    closeFlowLogFullscreen()
+    e.preventDefault()
   }
 }
 
@@ -1395,7 +1564,27 @@ function closeChartPreview() {
   box-sizing: border-box;
 }
 
+.flow-log-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 19995;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.78);
+  box-sizing: border-box;
+}
+
 .layout-fullscreen-card {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+  background: var(--bg-primary);
+}
+
+.flow-log-fullscreen-card {
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -2182,9 +2371,18 @@ html.dark .chart-card:hover {
   display: flex;
 }
 
+.flow-log-fullscreen-content {
+  padding: 10px;
+}
+
+.flow-log-fullscreen-layout {
+  border-radius: 4px;
+}
+
 .flow-log-steps-trigger,
 .flow-log-jump-live-btn,
-.flow-log-expand-btn {
+.flow-log-expand-btn,
+.flow-log-icon-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2203,7 +2401,8 @@ html.dark .chart-card:hover {
 
 .flow-log-steps-trigger:hover:not(:disabled),
 .flow-log-jump-live-btn:hover:not(:disabled),
-.flow-log-expand-btn:hover:not(:disabled) {
+.flow-log-expand-btn:hover:not(:disabled),
+.flow-log-icon-btn:hover:not(:disabled) {
   color: var(--text-primary);
   border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
@@ -2216,9 +2415,17 @@ html.dark .chart-card:hover {
 
 .flow-log-steps-trigger i,
 .flow-log-jump-live-btn i,
-.flow-log-expand-btn i {
+.flow-log-expand-btn i,
+.flow-log-icon-btn i {
   font-size: 12px;
   line-height: 1;
+}
+
+.flow-log-icon-btn {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
 }
 
 .flow-log-expand-btn-spinner {
@@ -2318,7 +2525,7 @@ html.dark .chart-card:hover {
 .flow-log-chooser-overlay {
   position: fixed;
   inset: 0;
-  z-index: 18000;
+  z-index: 20010;
   background: rgba(17, 24, 39, 0.12);
 }
 

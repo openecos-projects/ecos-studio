@@ -86,6 +86,15 @@ describe('HomeView current-step log viewer state', () => {
     expect(homeViewSource).not.toContain('flow-log-viewer-meta-row')
   })
 
+  it('adds a fullscreen control to the flow step log panel header', () => {
+    expect(homeViewSource).toContain('flow-log-fullscreen-toggle')
+    expect(homeViewSource).toContain('isFlowLogFullscreen')
+    expect(homeViewSource).toContain('toggleFlowLogFullscreen')
+    expect(homeViewSource).toContain('closeFlowLogFullscreen')
+    expect(homeViewSource).toContain('flow-log-fullscreen-card')
+    expect(homeViewSource).toContain('flow-log-fullscreen-active')
+  })
+
   it('lets the live watcher wait for a missing log instead of repeatedly reading on selection', () => {
     expect(homeViewSource).toContain('if (segment.live && !selectedFlowLogContent.value)')
     expect(homeViewSource).toContain('await ensureFlowLogSegmentContentLoaded(segment)')
