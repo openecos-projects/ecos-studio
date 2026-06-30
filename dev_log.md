@@ -10370,7 +10370,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户当前修复请求执行；未执行 merge、rebase、reset、clean。
 - 尚未真实访问 `https://luyoung0001.github.io/ecos-registry/...`，因为 fork 需要提交并由 GitHub Pages workflow 发布后 URL 才会生效。
 
 ## 已知后续风险
@@ -11193,3 +11193,40 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 该修复仅影响 GitHub Actions 的临时工作区，不改变 Surfer 仓库里的长期默认 feature 设计。
 - 如果后续 Surfer 修改 `Cargo.toml` default feature 行格式，workflow 的防呆检查会失败，需要同步更新替换逻辑。
+
+# 第 175 次 开发
+
+## 开发目标
+
+继续修复 `/home/luyoung/surfer` 的 ECOS Surfer assets GitHub Actions 构建失败问题：确认上一版只改 `default` feature 不够，因为 Trunk 的 `cargo metadata` 会读取 root manifest 中 optional path dependency 的 manifest，仍然进入 `spade/spade-compiler`。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 扩展 CI 临时 `Cargo.toml` 补丁逻辑。
+  - 除了把 `default = ["spade", "performance_plot"]` 改成 `default = ["performance_plot"]`，还删除 root manifest 中所有 `path = "spade/..."` 的 optional dependency 行。
+  - 将 `spade` feature 定义改成空数组，保留 feature 名称但不再引用已删除的 dependency。
+  - 增加防呆检查，若补丁后仍存在 `path = "spade/`，workflow 直接失败并给出明确错误。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次第三轮 Surfer Actions 构建修复。
+
+## 验证情况
+
+- 已查看 `/home/luyoung/surfer-web-assets-0.7.0-ecos.zip`，确认已有本地资产是最终 Web bundle，只包含 `index.html`、`surfer.js`、`surfer_bg.wasm`、`sw.js`、`integration.js`、license 和 README，不包含 Rust 源码。
+- 已查看 Trunk 0.18.7 `CargoMetadata::new()` 源码，确认它只设置 manifest path 后直接执行 `cargo metadata`，不会传入 `--no-default-features`。
+- 已确认 Actions 最新失败仍在 `spade -> tracing-tree`，说明必须让 metadata 阶段完全看不到 root manifest 的 Spade path dependencies。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/surfer` 当前存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
+- 如果未来 ECOS 需要 Spade translator，需要先修复 Surfer 上游 Spade 依赖链，而不是继续使用这个无 Spade 的 Web assets 构建变体。
