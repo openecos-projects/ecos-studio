@@ -3,7 +3,7 @@ mod raster_plane;
 mod render_surface;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -140,6 +140,12 @@ struct SelectionNameIndex {
     via_net_ids: BTreeMap<ViaKey, NetRef>,
 }
 
+#[derive(Debug, Default, Clone)]
+struct ViaLayerResolver {
+    cut_layers: BTreeSet<u16>,
+    via_master_cut_layers: BTreeMap<u32, Vec<u16>>,
+}
+
 impl SelectionNameIndex {
     fn load(package_root: &Path) -> Result<Self> {
         let Some(source_root) = source_root_for_package(package_root)? else {
@@ -165,19 +171,25 @@ impl SelectionNameIndex {
         index.io_pin_net_ids = read_net_ref_data_map(&source_root, &files, "io_pins")?;
         index.regular_wire_net_ids = read_net_ref_data_map(&source_root, &files, "regular_wires")?;
         index.special_wire_net_ids = read_net_ref_data_map(&source_root, &files, "special_wires")?;
+        let via_layers = read_via_layer_resolver(&source_root, &files)?;
         index.via_net_ids.extend(read_via_net_ref_data_map(
             &source_root,
             &files,
             "regular_wires",
+            &via_layers,
         )?);
         index.via_net_ids.extend(read_via_net_ref_data_map(
             &source_root,
             &files,
             "special_wires",
+            &via_layers,
         )?);
-        index
-            .via_net_ids
-            .extend(read_via_net_ref_data_map(&source_root, &files, "io_pins")?);
+        index.via_net_ids.extend(read_via_net_ref_data_map(
+            &source_root,
+            &files,
+            "io_pins",
+            &via_layers,
+        )?);
         Ok(index)
     }
 
@@ -313,6 +325,7 @@ fn read_via_net_ref_data_map(
     source_root: &Path,
     files: &serde_json::Map<String, Value>,
     key: &str,
+    via_layers: &ViaLayerResolver,
 ) -> Result<BTreeMap<ViaKey, NetRef>> {
     let Some(path) = source_file_path(source_root, files, key) else {
         return Ok(BTreeMap::new());
@@ -321,7 +334,68 @@ fn read_via_net_ref_data_map(
         return Ok(BTreeMap::new());
     }
     let value = read_json_value(&path)?;
-    Ok(via_net_ref_items_from_data(&value))
+    Ok(via_net_ref_items_from_data(&value, via_layers))
+}
+
+fn read_via_layer_resolver(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+) -> Result<ViaLayerResolver> {
+    let mut cut_layers = BTreeSet::new();
+    if let Some(path) = source_file_path(source_root, files, "layers").filter(|path| path.is_file())
+    {
+        let value = read_json_value(&path)?;
+        if let Some(layers) = value.get("data").and_then(Value::as_array) {
+            for layer in layers {
+                let Some(layer_id) = layer.get("id").and_then(Value::as_u64) else {
+                    continue;
+                };
+                if layer_id > u16::MAX as u64 {
+                    continue;
+                }
+                let is_cut = layer
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|layer_type| layer_type.eq_ignore_ascii_case("CUT"));
+                if is_cut {
+                    cut_layers.insert(layer_id as u16);
+                }
+            }
+        }
+    }
+    let mut via_master_cut_layers = BTreeMap::new();
+    if let Some(path) = source_file_path(source_root, files, "vias").filter(|path| path.is_file()) {
+        let value = read_json_value(&path)?;
+        if let Some(vias) = value.get("data").and_then(Value::as_array) {
+            for via in vias {
+                let Some(master_id) = source_id_value(via) else {
+                    continue;
+                };
+                let cut_shape_layers = via
+                    .get("shapes")
+                    .and_then(Value::as_array)
+                    .map(|shapes| {
+                        shapes
+                            .iter()
+                            .filter_map(|shape| shape.get("layer_id").and_then(Value::as_u64))
+                            .filter(|layer| *layer <= u16::MAX as u64)
+                            .map(|layer| layer as u16)
+                            .filter(|layer| cut_layers.contains(layer))
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if !cut_shape_layers.is_empty() {
+                    via_master_cut_layers.insert(master_id, cut_shape_layers);
+                }
+            }
+        }
+    }
+    Ok(ViaLayerResolver {
+        cut_layers,
+        via_master_cut_layers,
+    })
 }
 
 fn read_cell_master_pin_names(
@@ -443,7 +517,10 @@ fn net_ref_items_from_data(value: &Value) -> BTreeMap<u32, NetRef> {
     nets
 }
 
-fn via_net_ref_items_from_data(value: &Value) -> BTreeMap<ViaKey, NetRef> {
+fn via_net_ref_items_from_data(
+    value: &Value,
+    via_layers: &ViaLayerResolver,
+) -> BTreeMap<ViaKey, NetRef> {
     let mut nets = BTreeMap::new();
     let Some(items) = value.get("data").and_then(Value::as_array) else {
         return nets;
@@ -461,7 +538,7 @@ fn via_net_ref_items_from_data(value: &Value) -> BTreeMap<ViaKey, NetRef> {
         let Some(bbox) = bbox_value(item.get("bbox").unwrap_or(&Value::Null)) else {
             continue;
         };
-        for layer_id in via_layer_ids_value(item) {
+        for layer_id in via_layers.layers_for_item(item) {
             nets.insert(
                 ViaKey {
                     source_id,
@@ -491,29 +568,52 @@ fn net_ref_value(item: &Value) -> Option<NetRef> {
     }
 }
 
-fn via_layer_ids_value(item: &Value) -> Vec<u16> {
-    let layers = item
-        .get("layers")
-        .or_else(|| item.get("layer_ids"))
-        .and_then(Value::as_array)
-        .map(|layers| {
-            layers
-                .iter()
-                .filter_map(Value::as_u64)
-                .map(|layer| layer.min(u16::MAX as u64) as u16)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if layers.len() >= 3 {
-        vec![layers[layers.len() / 2]]
-    } else if let Some(layer_id) = layers.first().copied() {
-        vec![layer_id]
-    } else {
-        item.get("layer_id")
+impl ViaLayerResolver {
+    fn layers_for_item(&self, item: &Value) -> Vec<u16> {
+        if let Some(master_id) = source_id_for_key(item, "via_master_id") {
+            if let Some(layers) = self.via_master_cut_layers.get(&master_id) {
+                return layers.clone();
+            }
+        }
+        if let Some(layer_id) = item
+            .get("layer_id")
             .and_then(Value::as_u64)
-            .map(|layer| vec![layer.min(u16::MAX as u64) as u16])
-            .unwrap_or_default()
+            .map(|layer| layer.min(u16::MAX as u64) as u16)
+        {
+            return vec![layer_id];
+        }
+        let mut layers = item
+            .get("layers")
+            .or_else(|| item.get("layer_ids"))
+            .and_then(Value::as_array)
+            .map(|layers| {
+                layers
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .map(|layer| layer.min(u16::MAX as u64) as u16)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !self.cut_layers.is_empty() {
+            let cut_layers = layers
+                .iter()
+                .copied()
+                .filter(|layer| self.cut_layers.contains(layer))
+                .collect::<Vec<_>>();
+            if !cut_layers.is_empty() {
+                return cut_layers;
+            }
+        }
+        layers.sort_unstable();
+        layers.dedup();
+        layers
     }
+}
+
+fn source_id_for_key(item: &Value, key: &str) -> Option<u32> {
+    item.get(key)
+        .and_then(Value::as_u64)
+        .map(|id| id.min(u32::MAX as u64) as u32)
 }
 
 fn bbox_value(value: &Value) -> Option<[i32; 4]> {
@@ -3149,12 +3249,58 @@ mod tests {
             r#"{
                 "schema": "ieda.view.v1",
                 "files": {
+                    "layers": "tech/layers.json",
+                    "vias": "tech/vias.json",
                     "io_pins": "design/io_pins.json",
                     "regular_wires": "design/regular_wires.json",
                     "special_wires": "design/special_wires.json",
                     "regular_nets": "design/regular_nets.json",
                     "special_nets": "design/special_nets.json"
                 }
+            }"#,
+        )
+        .unwrap();
+        fs::create_dir_all(source_root.join("tech")).unwrap();
+        fs::write(
+            source_root.join("tech/layers.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "layers",
+                "data": [
+                    { "id": 1, "name": "M1", "type": "ROUTING" },
+                    { "id": 2, "name": "VIA1", "type": "CUT" },
+                    { "id": 3, "name": "M2", "type": "ROUTING" },
+                    { "id": 4, "name": "VIA2", "type": "CUT" },
+                    { "id": 5, "name": "M3", "type": "ROUTING" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("tech/vias.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "vias",
+                "data": [
+                    {
+                        "id": 10,
+                        "name": "M2_M1_VIA1",
+                        "shapes": [
+                            { "layer_id": 1, "rects": [[-50, -50, 50, 50]] },
+                            { "layer_id": 2, "rects": [[-40, -40, 40, 40]] },
+                            { "layer_id": 3, "rects": [[-50, -50, 50, 50]] }
+                        ]
+                    },
+                    {
+                        "id": 11,
+                        "name": "M3_M2_VIA2",
+                        "shapes": [
+                            { "layer_id": 3, "rects": [[-50, -50, 50, 50]] },
+                            { "layer_id": 4, "rects": [[-40, -40, 40, 40]] },
+                            { "layer_id": 5, "rects": [[-50, -50, 50, 50]] }
+                        ]
+                    }
+                ]
             }"#,
         )
         .unwrap();
@@ -3175,7 +3321,7 @@ mod tests {
                 "schema": "ieda.view.v1",
                 "kind": "regular_wires",
                 "data": [
-                    { "id": 4, "kind": "via", "net_id": 0, "bbox": [10, 10, 20, 20], "layers": [1, 2, 3] },
+                    { "id": 4, "kind": "via", "via_master_id": 10, "net_id": 0, "bbox": [10, 10, 20, 20], "layers": [1, 3, 2] },
                     { "id": 7, "kind": "path", "net_id": 1 }
                 ]
             }"#,
@@ -3188,7 +3334,7 @@ mod tests {
                 "kind": "special_wires",
                 "data": [
                     { "id": 0, "kind": "path", "special_net_id": 0 },
-                    { "id": 4, "kind": "via", "special_net_id": 0, "bbox": [30, 30, 40, 40], "layers": [3, 4, 5] }
+                    { "id": 4, "kind": "via", "via_master_id": 11, "special_net_id": 0, "bbox": [30, 30, 40, 40], "layers": [3, 5, 4] }
                 ]
             }"#,
         )

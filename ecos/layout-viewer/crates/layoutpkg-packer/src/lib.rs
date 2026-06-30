@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
@@ -475,6 +475,12 @@ struct GeometryDataset {
     source_files: BTreeMap<String, usize>,
     tracks: Vec<Value>,
     gcell_grids: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ViaLayerResolver {
+    cut_layers: BTreeSet<u16>,
+    via_master_cut_layers: BTreeMap<u32, Vec<u16>>,
 }
 
 impl DetailTileGrid {
@@ -1038,9 +1044,7 @@ fn kind_counts_json(rects: &[LayoutRectRecord]) -> Value {
 fn layer_counts_json(rects: &[LayoutRectRecord]) -> Value {
     let mut counts = BTreeMap::<u16, usize>::new();
     for rect in rects {
-        if rect.layer_id > 0 {
-            *counts.entry(rect.layer_id).or_default() += 1;
-        }
+        *counts.entry(rect.layer_id).or_default() += 1;
     }
     json!(counts)
 }
@@ -1315,6 +1319,60 @@ fn read_layers(root: &Path, manifest: &ViewJsonManifest) -> Result<Vec<LayoutLay
     Ok(layers)
 }
 
+fn read_via_layer_resolver(root: &Path, manifest: &ViewJsonManifest) -> Result<ViaLayerResolver> {
+    let layers = read_layers(root, manifest)?;
+    let cut_layers = layers
+        .iter()
+        .filter(|layer| {
+            layer
+                .layer_type
+                .as_deref()
+                .is_some_and(|layer_type| layer_type.eq_ignore_ascii_case("CUT"))
+        })
+        .map(|layer| layer.id)
+        .collect::<BTreeSet<_>>();
+    let Some(path) = package_file(root, manifest, "vias") else {
+        return Ok(ViaLayerResolver {
+            cut_layers,
+            via_master_cut_layers: BTreeMap::new(),
+        });
+    };
+    let value = read_json_file(&path)?;
+    let mut via_master_cut_layers = BTreeMap::new();
+    if let Some(vias) = value.get("data").and_then(Value::as_array) {
+        for via in vias {
+            let Some(master_id) = via.get("id").and_then(Value::as_u64) else {
+                continue;
+            };
+            if master_id > u32::MAX as u64 {
+                continue;
+            }
+            let cut_shape_layers = via
+                .get("shapes")
+                .and_then(Value::as_array)
+                .map(|shapes| {
+                    shapes
+                        .iter()
+                        .filter_map(|shape| shape.get("layer_id").and_then(Value::as_u64))
+                        .filter(|layer| *layer <= u16::MAX as u64)
+                        .map(|layer| layer as u16)
+                        .filter(|layer| cut_layers.contains(layer))
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !cut_shape_layers.is_empty() {
+                via_master_cut_layers.insert(master_id as u32, cut_shape_layers);
+            }
+        }
+    }
+    Ok(ViaLayerResolver {
+        cut_layers,
+        via_master_cut_layers,
+    })
+}
+
 fn build_hierarchy_document(
     root: &Path,
     manifest: &ViewJsonManifest,
@@ -1577,17 +1635,19 @@ fn collect_geometry_dataset(
     let mut source_files = BTreeMap::new();
     let mut tracks = Vec::new();
     let mut gcell_grids = Vec::new();
+    let via_layers = read_via_layer_resolver(root, manifest)?;
     let die_count = collect_die(root, manifest, &mut rects, world_bbox)?;
     source_files.insert("die".to_string(), die_count);
     let instances_count = collect_instances(root, manifest, &mut rects)?;
     source_files.insert("instances".to_string(), instances_count);
-    let io_pins_count = collect_io_pins(root, manifest, &mut rects, world_bbox)?;
+    let io_pins_count = collect_io_pins(root, manifest, &via_layers, &mut rects, world_bbox)?;
     source_files.insert("io_pins".to_string(), io_pins_count);
     let regular_wires_count = collect_wire_rects(
         root,
         manifest,
         "regular_wires",
         LayoutObjectKind::RegularWire,
+        &via_layers,
         &mut rects,
     )?;
     source_files.insert("regular_wires".to_string(), regular_wires_count);
@@ -1596,6 +1656,7 @@ fn collect_geometry_dataset(
         manifest,
         "special_wires",
         LayoutObjectKind::SpecialWire,
+        &via_layers,
         &mut rects,
     )?;
     source_files.insert("special_wires".to_string(), special_wires_count);
@@ -1736,6 +1797,7 @@ fn collect_wire_rects(
     manifest: &ViewJsonManifest,
     key: &str,
     kind: LayoutObjectKind,
+    via_layers: &ViaLayerResolver,
     rects: &mut Vec<LayoutRectRecord>,
 ) -> Result<usize> {
     for_each_data_item(root, manifest, key, |item| {
@@ -1744,7 +1806,7 @@ fn collect_wire_rects(
         let wire_kind = item.get("kind").and_then(Value::as_str).unwrap_or("");
         if wire_kind == "via" {
             if let Some(bbox) = item.get("bbox").and_then(parse_bbox) {
-                for via_layer in via_layers_for_item(&item, layer_id) {
+                for via_layer in via_layers.layers_for_item(&item, explicit_layer_id(&item)) {
                     push_bbox_rect(rects, bbox, via_layer, LayoutObjectKind::Via, source_id);
                 }
             }
@@ -1854,6 +1916,7 @@ fn io_pin_rect_to_die(
 fn collect_io_pins(
     root: &Path,
     manifest: &ViewJsonManifest,
+    via_layers: &ViaLayerResolver,
     rects: &mut Vec<LayoutRectRecord>,
     die_bbox: [i32; 4],
 ) -> Result<usize> {
@@ -1894,7 +1957,7 @@ fn collect_io_pins(
                 else {
                     continue;
                 };
-                for layer_id in via_layers_for_item(via, layer_id(via)) {
+                for layer_id in via_layers.layers_for_item(via, explicit_layer_id(via)) {
                     push_bbox_rect(rects, bbox, layer_id, LayoutObjectKind::Via, source_id);
                 }
             }
@@ -2058,6 +2121,13 @@ fn layer_id(item: &Value) -> u16 {
         .min(u16::MAX as u64) as u16
 }
 
+fn explicit_layer_id(item: &Value) -> u16 {
+    item.get("layer_id")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .min(u16::MAX as u64) as u16
+}
+
 fn layers_for_item(item: &Value) -> Vec<u16> {
     item.get("layers")
         .or_else(|| item.get("layer_ids"))
@@ -2072,16 +2142,35 @@ fn layers_for_item(item: &Value) -> Vec<u16> {
         .unwrap_or_default()
 }
 
-fn via_layers_for_item(item: &Value, fallback_layer_id: u16) -> Vec<u16> {
-    let layers = layers_for_item(item);
-    if layers.len() >= 3 {
-        vec![layers[layers.len() / 2]]
-    } else if let Some(layer_id) = layers.first().copied() {
-        vec![layer_id]
-    } else if fallback_layer_id > 0 {
-        vec![fallback_layer_id]
-    } else {
-        Vec::new()
+impl ViaLayerResolver {
+    fn layers_for_item(&self, item: &Value, fallback_layer_id: u16) -> Vec<u16> {
+        if let Some(master_id) = item
+            .get("via_master_id")
+            .and_then(Value::as_u64)
+            .filter(|id| *id <= u32::MAX as u64)
+            .map(|id| id as u32)
+        {
+            if let Some(layers) = self.via_master_cut_layers.get(&master_id) {
+                return layers.clone();
+            }
+        }
+        if fallback_layer_id > 0 {
+            return vec![fallback_layer_id];
+        }
+        let mut layers = layers_for_item(item);
+        if self.cut_layers.len() > 0 {
+            let cut_layers = layers
+                .iter()
+                .copied()
+                .filter(|layer| self.cut_layers.contains(layer))
+                .collect::<Vec<_>>();
+            if !cut_layers.is_empty() {
+                return cut_layers;
+            }
+        }
+        layers.sort_unstable();
+        layers.dedup();
+        layers
     }
 }
 
@@ -2186,6 +2275,7 @@ mod tests {
                 "files": {
                     "die": "design/die.json",
                     "layers": "design/layers.json",
+                    "vias": "tech/vias.json",
                     "cell_masters": "tech/cell_masters.json",
                     "instances": "design/instances.json",
                     "io_pins": "design/io_pins.json",
@@ -2219,6 +2309,14 @@ mod tests {
             }),
         );
         fs::create_dir_all(root.join("tech")).unwrap();
+        write_json(
+            root.join("tech/vias.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "vias",
+                "data": []
+            }),
+        );
         write_json(
             root.join("tech/cell_masters.json").as_path(),
             json!({
@@ -2994,7 +3092,7 @@ mod tests {
                             { "layer_id": 2, "rects": [[10, 500, 50, 540]] }
                         ],
                         "vias": [
-                            { "bbox": [20, 520, 40, 560], "layers": [2, 3] }
+                            { "bbox": [20, 520, 40, 560], "layer_id": 2, "layers": [2, 3] }
                         ],
                         "bbox": [10, 500, 50, 560]
                     }
@@ -3061,7 +3159,27 @@ mod tests {
     }
 
     #[test]
-    fn packer_assigns_via_records_to_cut_layer_from_layer_stack() {
+    fn packer_layer_statistics_include_layer_zero_context_records() {
+        let input = create_minimal_viewjson_package();
+        let output = input.path().join(".layoutpkg");
+
+        pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 1,
+            detail_grid_rows: 1,
+            max_tiles_per_object: 16,
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        let detail_index = read_index(&output, "detail/index.json");
+
+        assert_eq!(detail_index["statistics"]["by_layer"]["0"], 3);
+    }
+
+    #[test]
+    fn packer_assigns_via_records_to_cut_layer_from_via_master() {
         let input = create_minimal_viewjson_package();
         write_json(
             input.path().join("design/layers.json").as_path(),
@@ -3069,9 +3187,27 @@ mod tests {
                 "schema": "ieda.view.v1",
                 "kind": "layers",
                 "data": [
-                    { "id": 7, "name": "MET1", "type": "ROUTING", "direction": "HORIZONTAL" },
-                    { "id": 8, "name": "VIA1", "type": "CUT" },
-                    { "id": 9, "name": "MET2", "type": "ROUTING", "direction": "VERTICAL" }
+                    { "id": 10, "name": "VIA1", "type": "CUT" },
+                    { "id": 20, "name": "MET1", "type": "ROUTING", "direction": "HORIZONTAL" },
+                    { "id": 30, "name": "MET2", "type": "ROUTING", "direction": "VERTICAL" }
+                ]
+            }),
+        );
+        write_json(
+            input.path().join("tech/vias.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "vias",
+                "data": [
+                    {
+                        "id": 5,
+                        "name": "MET2_MET1_VIA1",
+                        "shapes": [
+                            { "layer_id": 20, "rects": [[-50, -50, 50, 50]] },
+                            { "layer_id": 10, "rects": [[-40, -40, 40, 40]] },
+                            { "layer_id": 30, "rects": [[-50, -50, 50, 50]] }
+                        ]
+                    }
                 ]
             }),
         );
@@ -3084,8 +3220,9 @@ mod tests {
                     {
                         "id": 91,
                         "kind": "via",
+                        "via_master_id": 5,
                         "bbox": [120, 120, 180, 180],
-                        "layers": [7, 8, 9]
+                        "layers": [20, 30, 10]
                     }
                 ]
             }),
@@ -3106,12 +3243,12 @@ mod tests {
         let tile = read_tile_from_entry(&output, &detail_index["tiles"][0]);
 
         assert!(tile.rects.iter().any(|rect| {
-            rect.source_id == 91 && rect.kind == LayoutObjectKind::Via && rect.layer_id == 8
+            rect.source_id == 91 && rect.kind == LayoutObjectKind::Via && rect.layer_id == 10
         }));
         assert!(!tile.rects.iter().any(|rect| {
             rect.source_id == 91
                 && rect.kind == LayoutObjectKind::Via
-                && (rect.layer_id == 7 || rect.layer_id == 9)
+                && (rect.layer_id == 20 || rect.layer_id == 30)
         }));
     }
 
