@@ -212,6 +212,33 @@ describe('pluginToolsRows', () => {
     expect(removalActionForRow(row)).toBe('remove_reference')
   })
 
+  it('maps local unmanaged tools with unknown versions to local rows', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: null,
+        available_versions: ['2026-05-13'],
+        active_version: null,
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['install', 'remove_reference'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.version).toBe('Local')
+    expect(row.statusText).toBe('Local')
+  })
+
   it('runs batch download for selected available PDKs and updateable tools', async () => {
     const installResource = vi.fn(async () => undefined)
     const updateResource = vi.fn(async () => undefined)

@@ -452,6 +452,10 @@ export class ResourceManagerService {
     if (!await pathExists(expectedPath)) {
       throw new Error(`Expected executable not found for ${name}`)
     }
+    const expectedStats = await stat(expectedPath)
+    if (!expectedStats.isFile()) {
+      throw new Error(`Expected executable is not a file for ${name}`)
+    }
     if (!await isUsableExecutable(expectedPath, process.platform)) {
       throw new Error(`Expected executable is not executable for ${name}`)
     }

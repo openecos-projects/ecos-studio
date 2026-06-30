@@ -51,7 +51,9 @@ export function formatResourceSize(size: number | null): { sizeLabel: string; si
 }
 
 function versionLabel(resource: ResourceItem): string {
-  const version = resource.active_version || resource.installed_version || resource.available_versions[0]
+  const version = resource.active_version
+    || resource.installed_version
+    || (resource.source === 'local' ? undefined : resource.available_versions[0])
   if (!version) {
     return resource.source === 'local' ? 'Local' : '-'
   }

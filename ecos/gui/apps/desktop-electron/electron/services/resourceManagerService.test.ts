@@ -692,6 +692,20 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('rejects a local tool import when the expected executable path is a directory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(localYosys, 'bin', 'yosys'), { recursive: true })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      ...dirs,
+    })
+
+    await expect(service.importLocalPath('tool:yosys', localYosys)).rejects.toThrow(
+      'Expected executable is not a file for yosys',
+    )
+  })
+
   it('imports a row-bound local PDK when the scanned PDK id matches', async () => {
     const root = await createTempDir('ecos-resources-')
     const pdkRoot = join(root, 'local', 'ics55')
