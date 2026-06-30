@@ -11078,3 +11078,48 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `openecos-projects/ecc-fe` 仓库必须配置 `ECOS_RELEASE_APP_ID` 和 `ECOS_RELEASE_APP_PRIVATE_KEY` secrets，且 GitHub App 必须安装到 `openecos-projects/ecos-resource-assets` 并拥有 `Contents: Read and write` 权限。
 - 第一次成功发布 `ecos-resource-assets` 的 `ecc-fe-latest` release 前，Resource Manager 下载 `tool:ecc-fe` 仍会 404。
+
+# 第 172 次 开发
+
+## 开发目标
+
+将 Surfer Web viewer 也纳入统一资源发布流程：基于 `/home/luyoung/surfer` 仓库构建 ECOS Studio 可安装的 Surfer Web assets，并通过 GitHub App 发布到 `openecos-projects/ecos-resource-assets`。
+
+## 新增文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 新增 Surfer ECOS assets 发布 workflow。
+  - push 到 `drawing_but_has_cool_features` 或 `main`，或手动触发时，使用 Trunk 构建 Surfer Web assets。
+  - 将 `index.html` 转成相对路径引用，加入 ECOS `integration.js`、license 和 README，打包为 `surfer-latest.zip`。
+  - 生成 `surfer-latest.zip.sha256` 和 `surfer-latest.metadata.json`。
+  - 使用 GitHub App secrets 生成短期 token，将 assets 发布到 `openecos-projects/ecos-resource-assets` 的 `surfer-latest` release。
+- `/home/luyoung/surfer/ecos/integration.js`
+  - 新增 ECOS Studio iframe bridge，支持 `LoadUrl`、`ToggleMenu`、`InjectMessage`，并通过 `surfer_notify_host()` 回传 host 消息。
+
+## 修改文件
+
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 将 `tool:surfer` 从固定 `0.7.0-ecos` 资源切换为 `version: "latest"`。
+  - URL 指向 `openecos-projects/ecos-resource-assets/releases/download/surfer-latest/surfer-latest.zip`。
+  - 增加 `metadata_url` 和 `sha256_url`，用于 Resource Manager 按远端 sha 判断 latest 更新。
+  - homepage 改为 `https://github.com/Luyoung0001/surfer`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer 资源发布流程接入。
+
+## 验证情况
+
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml')"`，通过。
+- 已用 Node 解析 `/home/luyoung/ecos-registry/tool-registry.json`，确认 `tool:surfer` 已切到 `latest` 且包含 `metadata_url/sha256_url`。
+- 已检查 ECOS Surfer 资源要求，确认 workflow 打包前校验 `index.html`、`integration.js`、`surfer.js`、`surfer_bg.wasm`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/surfer` 仓库必须配置 `ECOS_RELEASE_APP_ID` 和 `ECOS_RELEASE_APP_PRIVATE_KEY` secrets，且 GitHub App 必须安装到 `openecos-projects/ecos-resource-assets` 并拥有写 release asset 的权限。
+- 第一次成功发布 `surfer-latest` release 前，Resource Manager 下载 `tool:surfer` 会 404；registry 中保留的静态 sha/size 只是 metadata 暂不可用时的兜底。
+- Surfer upstream 的 message API 不是稳定 API，后续升级 Surfer 时需要验证 `integration.js` 中的 `LoadWaveformFileFromUrl` 消息仍可用。
