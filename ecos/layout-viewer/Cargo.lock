@@ -1808,10 +1808,12 @@ dependencies = [
  "clap",
  "eframe",
  "egui",
+ "flate2",
  "layout-display",
  "layout-render",
  "layoutdb",
  "layoutpkg-reader",
+ "serde_json",
 ]
 
 [[package]]

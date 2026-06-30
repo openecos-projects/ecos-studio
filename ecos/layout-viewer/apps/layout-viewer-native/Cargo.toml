@@ -9,7 +9,9 @@ anyhow.workspace = true
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
+flate2.workspace = true
 layout-display = { path = "../../crates/layout-display" }
 layout-render = { path = "../../crates/layout-render" }
 layoutdb = { path = "../../crates/layoutdb" }
 layoutpkg-reader = { path = "../../crates/layoutpkg-reader" }
+serde_json.workspace = true

@@ -2499,6 +2499,57 @@ mod tests {
     }
 
     #[test]
+    fn packer_derives_io_pin_geometry_from_ports_without_mutating_source_bbox() {
+        let input = create_minimal_viewjson_package();
+        write_json(
+            input.path().join("design/io_pins.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "io_pins",
+                "data": [
+                    {
+                        "id": 54,
+                        "name": "VDD",
+                        "location": [-1, -1],
+                        "orient": "N_R0",
+                        "ports": [
+                            { "layer_id": 1, "rects": [[-151, -301, 149, 299]] }
+                        ],
+                        "vias": [],
+                        "bbox": [-1, -1, -1, -1],
+                        "layers": [1]
+                    }
+                ]
+            }),
+        );
+        let output = input.path().join(".layoutpkg");
+
+        pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 1,
+            detail_grid_rows: 1,
+            max_tiles_per_object: 16,
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        let source_io_pins: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(input.path().join("design/io_pins.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(source_io_pins["data"][0]["bbox"], json!([-1, -1, -1, -1]));
+
+        let detail_index = read_index(&output, "detail/index.json");
+        let tile = read_tile_from_entry(&output, &detail_index["tiles"][0]);
+        assert!(tile.rects.iter().any(|rect| {
+            rect.kind == LayoutObjectKind::IoPin
+                && rect.source_id == 54
+                && [rect.x1, rect.y1, rect.x2, rect.y2] == [0, 0, 149, 299]
+        }));
+    }
+
+    #[test]
     fn packer_writes_klayout_like_hierarchy_cells_and_instances() {
         let input = create_minimal_viewjson_package();
         let output = input.path().join(".layoutpkg");
@@ -3062,6 +3113,68 @@ mod tests {
                 && rect.kind == LayoutObjectKind::Via
                 && (rect.layer_id == 7 || rect.layer_id == 9)
         }));
+    }
+
+    #[test]
+    fn packer_layer_statistics_ignore_source_layer_index_for_vias() {
+        let input = create_minimal_viewjson_package();
+        write_json(
+            input.path().join("design/layers.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "layers",
+                "data": [
+                    { "id": 7, "name": "MET1", "type": "ROUTING", "direction": "HORIZONTAL" },
+                    { "id": 8, "name": "VIA1", "type": "CUT" },
+                    { "id": 9, "name": "MET2", "type": "ROUTING", "direction": "VERTICAL" }
+                ]
+            }),
+        );
+        write_json(
+            input.path().join("design/regular_wires.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "regular_wires",
+                "data": [
+                    {
+                        "id": 91,
+                        "kind": "via",
+                        "bbox": [120, 120, 180, 180],
+                        "layers": [7, 8, 9]
+                    }
+                ]
+            }),
+        );
+        write_json(
+            input.path().join("design/layer_index.json").as_path(),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "layer_index",
+                "layers": [
+                    { "layer_id": 7, "regular_wires": [], "special_wires": [], "io_pins": [], "blockages": [], "fills": [] },
+                    { "layer_id": 8, "regular_wires": [], "special_wires": [], "io_pins": [], "blockages": [], "fills": [] },
+                    { "layer_id": 9, "regular_wires": [], "special_wires": [], "io_pins": [], "blockages": [], "fills": [] }
+                ]
+            }),
+        );
+        let output = input.path().join(".layoutpkg");
+
+        pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: input.path().to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 1,
+            detail_grid_rows: 1,
+            max_tiles_per_object: 16,
+            ..PackLayoutPackageOptions::new(input.path(), &output)
+        })
+        .unwrap();
+
+        let detail_index = read_index(&output, "detail/index.json");
+
+        assert_eq!(detail_index["statistics"]["by_kind"]["via"], 1);
+        assert_eq!(detail_index["statistics"]["by_layer"]["8"], 1);
+        assert!(detail_index["statistics"]["by_layer"].get("7").is_none());
+        assert!(detail_index["statistics"]["by_layer"].get("9").is_none());
     }
 
     #[test]
