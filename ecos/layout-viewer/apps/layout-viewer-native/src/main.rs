@@ -1143,8 +1143,8 @@ fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
 }
 
 #[cfg(test)]
-fn selection_summary_text(hit: &PickHit) -> String {
-    selection_inspector_rows(hit, None, None)
+fn selection_summary_text_with_layer(hit: &PickHit, layer_name: Option<&str>) -> String {
+    selection_inspector_rows(hit, None, None, layer_name)
         .into_iter()
         .map(|(label, value)| format!("{}: {value}", label.to_ascii_lowercase()))
         .collect::<Vec<_>>()
@@ -1155,6 +1155,7 @@ fn selection_inspector_rows(
     hit: &PickHit,
     source_name: Option<&str>,
     net_name: Option<&str>,
+    layer_name: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     let target = match hit.target {
         PickHitTarget::Shape => "shape".to_owned(),
@@ -1187,8 +1188,8 @@ fn selection_inspector_rows(
         rows.push(("Net Name", net_name.to_owned()));
     }
     rows.extend([
-        ("Display Layer", hit.display_layer_id.clone()),
-        ("Layer", hit.layer_id.to_string()),
+        ("Layer", layer_name.unwrap_or("Unknown").to_owned()),
+        ("Layer ID", hit.layer_id.to_string()),
         ("Shape Kind", shape_kind_label(hit.kind).to_owned()),
         ("Cell", hit.cell.raw().to_string()),
         ("Depth", hit.depth.to_string()),
@@ -1203,6 +1204,13 @@ fn selection_inspector_rows(
         ("Object Path", object_path_summary(&hit.object_path)),
     ]);
     rows
+}
+
+fn layer_name_for_id(layers: &[layoutdb::LayerInfo], layer_id: u16) -> Option<&str> {
+    layers
+        .iter()
+        .find(|layer| layer.id == layer_id)
+        .map(|layer| layer.name.as_str())
 }
 
 fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
@@ -2019,9 +2027,16 @@ impl LayoutViewerV2App {
                                         let source_name = loaded.selection_names.name_for_hit(&hit);
                                         let net_name =
                                             loaded.selection_names.net_name_for_hit(&hit);
-                                        for (label, value) in
-                                            selection_inspector_rows(&hit, source_name, net_name)
-                                        {
+                                        let layer_name = layer_name_for_id(
+                                            loaded.session.db().layers(),
+                                            hit.layer_id,
+                                        );
+                                        for (label, value) in selection_inspector_rows(
+                                            &hit,
+                                            source_name,
+                                            net_name,
+                                            layer_name,
+                                        ) {
                                             ui.label(label);
                                             ui.monospace(value);
                                             ui.end_row();
@@ -3032,7 +3047,7 @@ mod tests {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let rows = selection_inspector_rows(&hit, Some("wire_9"), Some("req_msg_12_"));
+        let rows = selection_inspector_rows(&hit, Some("wire_9"), Some("req_msg_12_"), Some("M1"));
 
         assert!(rows
             .iter()
@@ -3051,7 +3066,11 @@ mod tests {
             .any(|(label, value)| *label == "Net Name" && value == "req_msg_12_"));
         assert!(rows
             .iter()
-            .any(|(label, value)| *label == "Layer" && value == "1"));
+            .any(|(label, value)| *label == "Layer" && value == "M1"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer ID" && value == "1"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Display Layer"));
         assert!(rows
             .iter()
             .any(|(label, value)| *label == "Display BBox" && value == "2, 2, 8, 8"));
@@ -3069,7 +3088,7 @@ mod tests {
         let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
         hit.kind = ShapeKind::Via;
 
-        let rows = selection_inspector_rows(&hit, None, None);
+        let rows = selection_inspector_rows(&hit, None, None, Some("VIA1"));
 
         let source_file = rows
             .iter()
@@ -3089,7 +3108,7 @@ mod tests {
         hit.source_id = 564;
         hit.cell = leaf_view.target_cell();
 
-        let rows = selection_inspector_rows(&hit, Some("OAI21X0P5H7R/Y"), None);
+        let rows = selection_inspector_rows(&hit, Some("OAI21X0P5H7R/Y"), None, Some("MET1"));
 
         assert!(rows
             .iter()
@@ -3803,13 +3822,14 @@ mod tests {
         let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let text = super::selection_summary_text(&hit);
+        let text = super::selection_summary_text_with_layer(&hit, Some("M1"));
 
         assert!(text.contains("target: shape"));
         assert!(text.contains("depth: 2"));
         assert!(text.contains(&format!("cell: {}", db.cell_by_name("leaf").unwrap().raw())));
-        assert!(text.contains("layer: 1"));
-        assert!(text.contains("bbox: 2, 2, 8, 8"));
+        assert!(text.contains("layer: M1"));
+        assert!(text.contains("layer id: 1"));
+        assert!(text.contains("display bbox: 2, 2, 8, 8"));
     }
 
     #[test]
