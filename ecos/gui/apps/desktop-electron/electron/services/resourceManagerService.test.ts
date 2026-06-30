@@ -634,6 +634,115 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('imports a local tool reference from a row-bound resource id', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(localYosys, 'bin'), { recursive: true })
+    await writeFile(join(localYosys, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(localYosys, 'bin', 'yosys'), 0o755)
+    await writeYosysRegistry(registryPath)
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.importLocalPath('tool:yosys', localYosys)).resolves.toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      source: 'local',
+      path: localYosys,
+      actions: ['install', 'remove_reference'],
+      health: expect.objectContaining({
+        detected_executables: ['bin/yosys'],
+        executable: 'bin/yosys',
+        managed: false,
+      }),
+    })
+
+    await expect(readFile(join(localYosys, 'bin', 'yosys'), 'utf8')).resolves.toBe('#!/bin/sh\n')
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, unknown> }
+    expect(manifest.installed['tool:yosys']).toMatchObject({
+      type: 'tool',
+      name: 'yosys',
+      version: '',
+      path: localYosys,
+      sha256: '',
+      detected_executables: ['bin/yosys'],
+      executable: 'bin/yosys',
+      active: true,
+      managed: false,
+    })
+  })
+
+  it('rejects a local tool import when the expected executable is missing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(localYosys, 'bin'), { recursive: true })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      ...dirs,
+    })
+
+    await expect(service.importLocalPath('tool:yosys', localYosys)).rejects.toThrow(
+      'Expected executable not found for yosys',
+    )
+  })
+
+  it('imports a row-bound local PDK when the scanned PDK id matches', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const pdkRoot = join(root, 'local', 'ics55')
+    await mkdir(join(pdkRoot, 'IP'), { recursive: true })
+    await mkdir(join(pdkRoot, 'prtech'), { recursive: true })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      ...dirs,
+    })
+
+    await expect(service.importLocalPath('pdk:ics55', pdkRoot)).resolves.toMatchObject({
+      id: 'pdk:ics55',
+      status: 'installed',
+      source: 'local',
+      path: pdkRoot,
+      actions: ['validate', 'remove_reference'],
+      health: expect.objectContaining({
+        managed: false,
+        status: 'ok',
+      }),
+    })
+
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, unknown> }
+    expect(manifest.installed['pdk:ics55']).toMatchObject({
+      type: 'pdk',
+      id: 'ics55',
+      pdk_id: 'ics55',
+      canonical_path: pdkRoot,
+      path: pdkRoot,
+      active: true,
+      managed: false,
+      health: 'ok',
+    })
+  })
+
+  it('rejects row-bound local PDK import when the scanned PDK id differs', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const pdkRoot = join(root, 'local', 'otherpdk')
+    await mkdir(pdkRoot, { recursive: true })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      ...dirs,
+    })
+
+    await expect(service.importLocalPath('pdk:ics55', pdkRoot)).rejects.toThrow(
+      "Selected directory contains PDK 'otherpdk', expected 'ics55'",
+    )
+  })
+
   it('keeps managed tool update semantics on the update path', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createFixtureArchive(root)

@@ -90,6 +90,7 @@ function registerHandlers() {
       activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
+      importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
@@ -218,6 +219,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesValidatePdk,
       desktopApiIpcChannels.resourcesRemovePdkReference,
       desktopApiIpcChannels.resourcesImportPdkPath,
+      desktopApiIpcChannels.resourcesImportLocalPath,
       desktopApiIpcChannels.resourcesRefreshRegistry,
       desktopApiIpcChannels.layoutViewerOpen,
       desktopApiIpcChannels.systemOpenExternal,
@@ -288,6 +290,7 @@ describe('registerIpc', () => {
       resource_id: 'tool:yosys',
     })
     services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
+    services.resourceManagerService.importLocalPath.mockResolvedValue(resources.resources[0])
 
     await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
     await expect(
@@ -306,6 +309,12 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual(resources.resources[0])
     await expect(
+      handlers.get(desktopApiIpcChannels.resourcesImportLocalPath)?.(event, {
+        resourceId: 'pdk:ics55',
+        path: '/tmp/pdk',
+      }),
+    ).resolves.toEqual(resources.resources[0])
+    await expect(
       handlers.get(desktopApiIpcChannels.resourcesCancel)?.(event, 'tool:yosys'),
     ).resolves.toEqual({
       status: 'cancelled',
@@ -319,6 +328,7 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
+    expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith('pdk:ics55', '/tmp/pdk')
     expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
   })
 

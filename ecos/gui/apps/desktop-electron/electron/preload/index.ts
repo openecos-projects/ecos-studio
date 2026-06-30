@@ -16,6 +16,7 @@ import type {
   DesktopProjectLogTailEvent,
   RemoteContentReadJsonFileRequest,
   ResourceJob,
+  ResourceImportLocalRequest,
   ResourceInstallRequest,
   DesktopSettingsValue,
   DesktopShellDataEvent,
@@ -251,6 +252,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesRemovePdkReference, resourceId),
     importPdkPath: (request) =>
       invokeDesktop(desktopApiIpcChannels.resourcesImportPdkPath, request),
+    importLocalPath: (request: ResourceImportLocalRequest) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesImportLocalPath, request),
     refreshRegistry: () =>
       invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
     onProgress: (listener) =>

@@ -9,6 +9,7 @@ import type {
 } from '../types/designFiles.ts'
 import type {
   ResourceImportPdkRequest,
+  ResourceImportLocalRequest,
   ResourceInfo,
   ResourceInstallRequest,
   ResourceJob,
@@ -216,6 +217,7 @@ export interface DesktopApi {
     validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>
     removePdkReference(resourceId: string): Promise<ResourceOperationResult>
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
+    importLocalPath(request: ResourceImportLocalRequest): Promise<ResourceInfo>
     refreshRegistry(): Promise<{ status: string; tools_count: number }>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
