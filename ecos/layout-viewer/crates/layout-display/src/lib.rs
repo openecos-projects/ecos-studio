@@ -48,6 +48,7 @@ pub enum Pattern {
     Solid,
     Hollow,
     SparseDots,
+    DenseDots,
     DiagonalHatch,
     CrossHatch,
 }
@@ -410,13 +411,7 @@ fn core_style() -> LayerStyle {
 }
 
 fn instance_style() -> LayerStyle {
-    let mut style = layer_style(
-        Color::rgb(176, 155, 255),
-        34,
-        205,
-        220,
-        Pattern::DiagonalHatch,
-    );
+    let mut style = layer_style(Color::rgb(176, 155, 255), 34, 205, 220, Pattern::DenseDots);
     style.line_width_px = 1;
     style
 }
@@ -444,6 +439,7 @@ pub struct ObjectVisibility {
     pub instances: bool,
     pub pdn: bool,
     pub net: bool,
+    pub io_pin: bool,
 }
 
 impl Default for ObjectVisibility {
@@ -452,6 +448,7 @@ impl Default for ObjectVisibility {
             instances: true,
             pdn: true,
             net: true,
+            io_pin: true,
         }
     }
 }
@@ -462,6 +459,7 @@ impl ObjectVisibility {
             ShapeKind::Instance => self.instances,
             ShapeKind::SpecialWire => self.pdn,
             ShapeKind::RegularWire => self.net,
+            ShapeKind::IoPin => self.io_pin,
             _ => true,
         }
     }
@@ -707,6 +705,7 @@ mod tests {
         assert!(model.object_visibility().instances);
         assert!(model.object_visibility().pdn);
         assert!(model.object_visibility().net);
+        assert!(model.object_visibility().io_pin);
         assert!(layers.iter().any(|layer| layer.source
             == SourceSelector::ShapeKind(ShapeKind::Die)
             && !layer.visible
@@ -719,7 +718,7 @@ mod tests {
             == SourceSelector::ShapeKind(ShapeKind::Instance)
             && layer.visible
             && layer.name == "Instance"
-            && layer.style.fill_pattern != Pattern::Hollow
+            && layer.style.fill_pattern == Pattern::DenseDots
             && layer.style.fill_alpha > 0));
     }
 

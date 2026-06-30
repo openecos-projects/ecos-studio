@@ -517,6 +517,7 @@ impl RenderPlanner {
                     &mut occupancy,
                     cell_view,
                     policy,
+                    object_visibility,
                     if is_top_cell_view(db, cell_view) {
                         1
                     } else {
@@ -1093,8 +1094,12 @@ impl RenderPlanner {
         occupancy: &mut ScreenOccupancy,
         cell_view: &CellViewState,
         policy: &HierarchyPolicy,
+        object_visibility: ObjectVisibility,
         min_depth: usize,
     ) {
+        if !object_visibility.instances {
+            return;
+        }
         let visible = VisibleShapeSources::from_layers(layers);
         if visible.is_empty() {
             return;
@@ -2229,6 +2234,7 @@ fn render_cache_key(
         hash.write_u8(u8::from(layer.object_visibility.instances));
         hash.write_u8(u8::from(layer.object_visibility.pdn));
         hash.write_u8(u8::from(layer.object_visibility.net));
+        hash.write_u8(u8::from(layer.object_visibility.io_pin));
         hash.write_u8(layer.style.fill_color.r);
         hash.write_u8(layer.style.fill_color.g);
         hash.write_u8(layer.style.fill_color.b);
@@ -2322,8 +2328,9 @@ fn pattern_code(pattern: Pattern) -> u8 {
         Pattern::Solid => 1,
         Pattern::Hollow => 2,
         Pattern::SparseDots => 3,
-        Pattern::DiagonalHatch => 4,
-        Pattern::CrossHatch => 5,
+        Pattern::DenseDots => 4,
+        Pattern::DiagonalHatch => 5,
+        Pattern::CrossHatch => 6,
     }
 }
 
@@ -4301,6 +4308,28 @@ mod tests {
     }
 
     #[test]
+    fn object_visibility_hides_near_expanded_instance_master_shapes() {
+        let db = hierarchy_db();
+        let mut model = one_layer_display_model();
+        model.object_visibility_mut().instances = false;
+
+        let plan = RenderPlanner::new(RenderSettings {
+            hierarchy_bbox_units_per_pixel: 100.0,
+            ..Default::default()
+        })
+        .plan(
+            &db,
+            &model,
+            Viewport::new(Rect::new(990, 1990, 1120, 2100), 400.0, 400.0),
+        );
+
+        assert_eq!(plan.source, RenderPlanSource::HierarchyNear);
+        assert!(!plan_contains_source_id(&plan, 9));
+        assert!(plan_contains_source_id(&plan, 42));
+        assert!(hierarchy_item_bboxes(&plan).is_empty());
+    }
+
+    #[test]
     fn near_expand_skips_hidden_physical_layers_before_querying_shapes() {
         let db = hierarchy_db();
         let mut model = one_layer_display_model();
@@ -4652,6 +4681,25 @@ mod tests {
             .is_some());
 
         model.object_visibility_mut().pdn = false;
+
+        let hit = RenderPlanner::new(RenderSettings::default()).pick(
+            &db,
+            &model,
+            PickRequest::new(50, 50, 2),
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn picking_respects_io_pin_object_visibility() {
+        let db = one_shape_db_with_kind(Rect::new(10, 10, 110, 110), ShapeKind::IoPin);
+        let mut model = one_layer_display_model();
+        assert!(RenderPlanner::new(RenderSettings::default())
+            .pick(&db, &model, PickRequest::new(50, 50, 2))
+            .is_some());
+
+        model.object_visibility_mut().io_pin = false;
 
         let hit = RenderPlanner::new(RenderSettings::default()).pick(
             &db,
@@ -5296,7 +5344,7 @@ mod tests {
     }
 
     #[test]
-    fn object_visibility_filters_net_and_pdn_shapes_on_physical_layers() {
+    fn object_visibility_filters_net_pdn_and_io_pin_shapes_on_physical_layers() {
         let mut db = LayoutDb::new("unit", Rect::new(0, 0, 10_000, 10_000));
         db.add_layer(LayerInfo::new(1, "M1"));
         let top = db.top_cell();
@@ -5321,6 +5369,15 @@ mod tests {
         db.add_shape(
             top,
             ShapeRecord::new(
+                Rect::new(4_200, 4_200, 4_800, 4_800),
+                1,
+                ShapeKind::IoPin,
+                404,
+            ),
+        );
+        db.add_shape(
+            top,
+            ShapeRecord::new(
                 Rect::new(8_500, 8_500, 9_000, 9_000),
                 1,
                 ShapeKind::Via,
@@ -5330,6 +5387,7 @@ mod tests {
         let mut model = DisplayModel::from_layout_layers(db.layers());
         model.object_visibility_mut().net = false;
         model.object_visibility_mut().pdn = false;
+        model.object_visibility_mut().io_pin = false;
 
         let plan = RenderPlanner::new(RenderSettings::default()).plan(
             &db,
@@ -5349,6 +5407,7 @@ mod tests {
 
         assert!(!rendered_sources.contains(&101));
         assert!(!rendered_sources.contains(&202));
+        assert!(!rendered_sources.contains(&404));
         assert!(rendered_sources.contains(&303));
     }
 

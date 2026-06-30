@@ -2509,6 +2509,32 @@ mod tests {
     }
 
     #[test]
+    fn source_fingerprint_changes_when_same_size_same_mtime_content_changes() {
+        let input = create_minimal_viewjson_package();
+        let manifest: ViewJsonManifest =
+            serde_json::from_str(&fs::read_to_string(input.path().join("manifest.json")).unwrap())
+                .unwrap();
+        let wire_path = input.path().join("design/regular_wires.json");
+        fs::write(&wire_path, b"aaaaaaaa").unwrap();
+        let metadata = fs::metadata(&wire_path).unwrap();
+        let modified = metadata.modified().unwrap();
+
+        let before = source_fingerprint(input.path(), &manifest).unwrap();
+
+        fs::write(&wire_path, b"bbbbbbbb").unwrap();
+        filetime::set_file_mtime(&wire_path, filetime::FileTime::from_system_time(modified))
+            .unwrap();
+        let after = source_fingerprint(input.path(), &manifest).unwrap();
+
+        assert_eq!(fs::metadata(&wire_path).unwrap().len(), metadata.len());
+        assert_eq!(
+            fs::metadata(&wire_path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_ne!(after, before);
+    }
+
+    #[test]
     fn source_fingerprint_matches_read_all_reference_hash() {
         let input = create_minimal_viewjson_package();
         let manifest: ViewJsonManifest =

@@ -36,10 +36,12 @@ const DETAIL_LOAD_MAX_VIEWPORT_WORLD_AREA_RATIO: f64 = 0.15;
 const SIDEBAR_DEFAULT_WIDTH: f32 = 320.0;
 const SIDEBAR_MIN_WIDTH: f32 = 190.0;
 const SIDEBAR_MAX_WIDTH: f32 = 640.0;
+const SIDEBAR_VALUE_MIN_WIDTH: f32 = 80.0;
 const MAX_PATTERN_OPS_PER_RECT: usize = 512;
 const MAX_HATCH_OPS_PER_RECT: usize = 256;
 const PATTERN_TILE_PX: f32 = 10.0;
 const SPARSE_DOT_SPACING_PX: f32 = 9.0;
+const DENSE_DOT_SPACING_PX: f32 = 5.0;
 const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
 const NEAR_RASTER_OPS_THRESHOLD: usize = 6_000;
 const DIE_BOUNDARY_WIDTH: f32 = 2.0;
@@ -111,13 +113,17 @@ struct LayoutViewerV2App {
     last_paint_ops: usize,
     last_lod_stats: LodStats,
     layer_counts_cache: LayerCountsCache,
+    sidebar_had_selection: bool,
 }
 
 struct LoadedViewerState {
     session: LayoutSession,
     display: DisplayModel,
     cell_view: CellViewState,
+    package_root: PathBuf,
     selection_names: SelectionNameIndex,
+    selection_name_load: Option<SelectionNameLoadHandle>,
+    selection_names_loaded: bool,
     background_load: BackgroundLoadHandle,
 }
 
@@ -774,6 +780,10 @@ struct SessionLoadHandle {
     results: Receiver<Result<LoadedViewerState, String>>,
 }
 
+struct SelectionNameLoadHandle {
+    results: Receiver<Result<SelectionNameIndex, String>>,
+}
+
 impl SessionLoadHandle {
     fn spawn(package_root: PathBuf, cache_capacity: usize) -> Self {
         let (result_tx, result_rx) = mpsc::channel::<Result<LoadedViewerState, String>>();
@@ -795,15 +805,32 @@ fn load_viewer_state(package_root: PathBuf, cache_capacity: usize) -> Result<Loa
     let session = LayoutSession::from_source(source)?;
     let display = DisplayModel::from_layout_layers(session.db().layers());
     let cell_view = CellViewState::top(session.db());
-    let selection_names = SelectionNameIndex::load(&package_root).unwrap_or_default();
-    let background_load = BackgroundLoadHandle::spawn(package_root, cache_capacity);
+    let background_load = BackgroundLoadHandle::spawn(package_root.clone(), cache_capacity);
     Ok(LoadedViewerState {
         session,
         display,
         cell_view,
-        selection_names,
+        package_root,
+        selection_names: SelectionNameIndex::default(),
+        selection_name_load: None,
+        selection_names_loaded: false,
         background_load,
     })
+}
+
+impl SelectionNameLoadHandle {
+    fn spawn(package_root: PathBuf) -> Self {
+        let (result_tx, result_rx) = mpsc::channel::<Result<SelectionNameIndex, String>>();
+        std::thread::spawn(move || {
+            let result = SelectionNameIndex::load(&package_root).map_err(|error| error.to_string());
+            let _ = result_tx.send(result);
+        });
+        Self { results: result_rx }
+    }
+
+    fn try_recv(&self) -> Option<Result<SelectionNameIndex, String>> {
+        self.results.try_recv().ok()
+    }
 }
 
 impl BackgroundLoadHandle {
@@ -1138,7 +1165,7 @@ struct ObjectVisibilityRow {
     kind: ShapeKind,
 }
 
-fn object_visibility_rows() -> [ObjectVisibilityRow; 3] {
+fn object_visibility_rows() -> [ObjectVisibilityRow; 4] {
     [
         ObjectVisibilityRow {
             label: "Instances",
@@ -1151,6 +1178,10 @@ fn object_visibility_rows() -> [ObjectVisibilityRow; 3] {
         ObjectVisibilityRow {
             label: "Net",
             kind: ShapeKind::RegularWire,
+        },
+        ObjectVisibilityRow {
+            label: "IO Pin",
+            kind: ShapeKind::IoPin,
         },
     ]
 }
@@ -1469,6 +1500,18 @@ fn sidebar_title_text() -> Option<&'static str> {
     None
 }
 
+fn sidebar_value_width(available_width: f32, item_spacing_x: f32) -> f32 {
+    (available_width - item_spacing_x).max(SIDEBAR_VALUE_MIN_WIDTH)
+}
+
+fn should_reset_sidebar_width(had_selection: bool, has_selection: bool) -> bool {
+    had_selection && !has_selection
+}
+
+fn selection_row_value_width(available_width: f32) -> f32 {
+    available_width.max(SIDEBAR_VALUE_MIN_WIDTH)
+}
+
 fn draw_layer_visibility_row(
     ui: &mut egui::Ui,
     visible: &mut bool,
@@ -1492,6 +1535,7 @@ fn object_visibility_color(kind: ShapeKind) -> Color {
         ShapeKind::Instance => Color::rgb(176, 155, 255),
         ShapeKind::SpecialWire => Color::rgb(255, 214, 118),
         ShapeKind::RegularWire => Color::rgb(160, 218, 255),
+        ShapeKind::IoPin => Color::rgb(144, 208, 255),
         _ => Color::rgb(132, 146, 156),
     }
 }
@@ -1674,6 +1718,7 @@ impl LayoutViewerV2App {
             last_paint_ops: 0,
             last_lod_stats: LodStats::default(),
             layer_counts_cache: LayerCountsCache::default(),
+            sidebar_had_selection: false,
         })
     }
 
@@ -1698,6 +1743,35 @@ impl LayoutViewerV2App {
                 ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
             }
         }
+    }
+
+    fn poll_selection_name_load(&mut self, ctx: &egui::Context) {
+        let Some(loaded) = self.loaded.as_mut() else {
+            return;
+        };
+        if self.selected.is_some()
+            && !loaded.selection_names_loaded
+            && loaded.selection_name_load.is_none()
+        {
+            loaded.selection_name_load =
+                Some(SelectionNameLoadHandle::spawn(loaded.package_root.clone()));
+        }
+        let Some(result) = loaded
+            .selection_name_load
+            .as_ref()
+            .and_then(SelectionNameLoadHandle::try_recv)
+        else {
+            if loaded.selection_name_load.is_some() {
+                ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
+            }
+            return;
+        };
+        if let Ok(selection_names) = result {
+            loaded.selection_names = selection_names;
+        }
+        loaded.selection_name_load = None;
+        loaded.selection_names_loaded = true;
+        ctx.request_repaint();
     }
 
     fn draw_loading_canvas(&self, ui: &mut egui::Ui, rect: egui::Rect) {
@@ -2015,59 +2089,55 @@ impl LayoutViewerV2App {
     }
 
     fn draw_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("v2-display-panel-default-320")
+        let has_selection = self.selected.is_some();
+        let reset_width = should_reset_sidebar_width(self.sidebar_had_selection, has_selection);
+        self.sidebar_had_selection = has_selection;
+
+        let mut panel = egui::SidePanel::right("v2-display-panel-default-320")
             .resizable(true)
             .default_width(SIDEBAR_DEFAULT_WIDTH)
             .min_width(SIDEBAR_MIN_WIDTH)
-            .max_width(SIDEBAR_MAX_WIDTH)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("v2-display-panel-scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if let Some(mut loaded) = self.loaded.take() {
-                            self.draw_layers_panel(ui, &mut loaded);
+            .max_width(SIDEBAR_MAX_WIDTH);
+        if reset_width {
+            panel = panel.exact_width(SIDEBAR_DEFAULT_WIDTH);
+        }
+        panel.show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("v2-display-panel-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(mut loaded) = self.loaded.take() {
+                        self.draw_layers_panel(ui, &mut loaded);
+                        ui.separator();
+                        self.draw_objects_panel(ui, &mut loaded);
+                        #[cfg(debug_assertions)]
+                        if should_show_debug_panel() {
                             ui.separator();
-                            self.draw_objects_panel(ui, &mut loaded);
-                            #[cfg(debug_assertions)]
-                            if should_show_debug_panel() {
-                                ui.separator();
-                                self.draw_debug_panel(ui);
-                            }
-                            ui.separator();
-                            ui.label("Selection");
-                            if let Some(hit) = self.selected.clone() {
-                                egui::Grid::new("selection-inspector-grid")
-                                    .num_columns(2)
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        let source_name = loaded.selection_names.name_for_hit(&hit);
-                                        let net_name =
-                                            loaded.selection_names.net_name_for_hit(&hit);
-                                        let layer = selection_layer_metadata_for_id(
-                                            loaded.session.db().layers(),
-                                            hit.layer_id,
-                                        );
-                                        for (label, value) in selection_inspector_rows(
-                                            &hit,
-                                            source_name,
-                                            net_name,
-                                            layer,
-                                        ) {
-                                            ui.label(label);
-                                            ui.monospace(value);
-                                            ui.end_row();
-                                        }
-                                    });
-                            } else {
-                                ui.label("No object selected");
-                            }
-                            self.loaded = Some(loaded);
-                        } else {
-                            ui.label(self.last_error.as_deref().unwrap_or("Loading layout..."));
+                            self.draw_debug_panel(ui);
                         }
-                    });
-            });
+                        ui.separator();
+                        ui.label("Selection");
+                        if let Some(hit) = self.selected.clone() {
+                            let source_name = loaded.selection_names.name_for_hit(&hit);
+                            let net_name = loaded.selection_names.net_name_for_hit(&hit);
+                            let layer = selection_layer_metadata_for_id(
+                                loaded.session.db().layers(),
+                                hit.layer_id,
+                            );
+                            for (label, value) in
+                                selection_inspector_rows(&hit, source_name, net_name, layer)
+                            {
+                                Self::draw_selection_row(ui, label, value);
+                            }
+                        } else {
+                            ui.label("No object selected");
+                        }
+                        self.loaded = Some(loaded);
+                    } else {
+                        ui.label(self.last_error.as_deref().unwrap_or("Loading layout..."));
+                    }
+                });
+        });
     }
 
     #[cfg(debug_assertions)]
@@ -2096,6 +2166,20 @@ impl LayoutViewerV2App {
         }
     }
 
+    fn draw_selection_row(ui: &mut egui::Ui, label: &'static str, value: String) {
+        egui::Frame::NONE
+            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(egui::Margin::symmetric(4, 3))
+            .show(ui, |ui| {
+                ui.label(label);
+                let value_width = selection_row_value_width(ui.available_width());
+                ui.add_sized(
+                    egui::vec2(value_width, 0.0),
+                    egui::Label::new(egui::RichText::new(value).monospace()).wrap(),
+                );
+            });
+    }
+
     #[cfg(debug_assertions)]
     fn draw_debug_panel(&self, ui: &mut egui::Ui) {
         ui.label("Debug");
@@ -2106,7 +2190,7 @@ impl LayoutViewerV2App {
                 for (label, value) in debug_panel_rows(self.debug_panel_snapshot()) {
                     ui.label(label);
                     let value_width =
-                        (ui.available_width() - ui.spacing().item_spacing.x).max(80.0);
+                        sidebar_value_width(ui.available_width(), ui.spacing().item_spacing.x);
                     ui.add_sized(
                         egui::vec2(value_width, 0.0),
                         egui::Label::new(egui::RichText::new(value).monospace()).wrap(),
@@ -2155,6 +2239,7 @@ impl LayoutViewerV2App {
                 ShapeKind::Instance => &mut visibility.instances,
                 ShapeKind::SpecialWire => &mut visibility.pdn,
                 ShapeKind::RegularWire => &mut visibility.net,
+                ShapeKind::IoPin => &mut visibility.io_pin,
                 _ => unreachable!("object visibility row uses supported kinds"),
             };
             draw_layer_visibility_row(
@@ -2179,6 +2264,7 @@ impl LayoutViewerV2App {
 impl eframe::App for LayoutViewerV2App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_session_load(ctx);
+        self.poll_selection_name_load(ctx);
         self.draw_sidebar(ctx);
         let mut layout_active_frame = false;
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -2351,8 +2437,13 @@ fn draw_plan_vectors(
                 (RenderPlane::Fill, DrawItem::Rect(item)) => {
                     let draw_rect = world_rect_to_screen(item.world, view, rect);
                     if let Some(fill_rect) = clipped_screen_rect(draw_rect, rect) {
-                        paint_ops +=
-                            draw_fill_rect(painter, fill_rect, &batch.style, interaction_active);
+                        paint_ops += draw_fill_rect(
+                            painter,
+                            fill_rect,
+                            &batch.style,
+                            interaction_active,
+                            draw_rect.size(),
+                        );
                     }
                 }
                 (RenderPlane::Hierarchy, DrawItem::Rect(item)) => {
@@ -2396,6 +2487,7 @@ fn draw_plan_vectors(
                                 fill_rect,
                                 &batch.style,
                                 interaction_active,
+                                draw_rect.size(),
                             );
                         }
                         painter.rect_stroke(
@@ -2637,6 +2729,7 @@ enum FillDrawMode {
     None,
     Solid,
     SparseDots,
+    DenseDots,
     DiagonalHatch,
     CrossHatch,
 }
@@ -2645,12 +2738,13 @@ fn fill_draw_mode(pattern: Pattern, interaction_active: bool) -> FillDrawMode {
     match pattern {
         Pattern::Hollow => FillDrawMode::None,
         Pattern::Solid => FillDrawMode::Solid,
-        Pattern::SparseDots | Pattern::DiagonalHatch | Pattern::CrossHatch
+        Pattern::SparseDots | Pattern::DenseDots | Pattern::DiagonalHatch | Pattern::CrossHatch
             if interaction_active =>
         {
             FillDrawMode::Solid
         }
         Pattern::SparseDots => FillDrawMode::SparseDots,
+        Pattern::DenseDots => FillDrawMode::DenseDots,
         Pattern::DiagonalHatch => FillDrawMode::DiagonalHatch,
         Pattern::CrossHatch => FillDrawMode::CrossHatch,
     }
@@ -2661,6 +2755,7 @@ fn draw_fill_rect(
     rect: egui::Rect,
     style: &LayerStyle,
     interaction_active: bool,
+    orientation_size: egui::Vec2,
 ) -> usize {
     match fill_draw_mode(style.fill_pattern, interaction_active) {
         FillDrawMode::None => 0,
@@ -2679,9 +2774,14 @@ fn draw_fill_rect(
             );
             1
         }
-        FillDrawMode::SparseDots => draw_sparse_dots(painter, rect, style),
-        FillDrawMode::DiagonalHatch => draw_diagonal_hatch(painter, rect, style, false),
-        FillDrawMode::CrossHatch => draw_diagonal_hatch(painter, rect, style, true),
+        FillDrawMode::SparseDots => draw_dots(painter, rect, style, SPARSE_DOT_SPACING_PX),
+        FillDrawMode::DenseDots => draw_dots(painter, rect, style, DENSE_DOT_SPACING_PX),
+        FillDrawMode::DiagonalHatch => {
+            draw_diagonal_hatch(painter, rect, style, false, orientation_size)
+        }
+        FillDrawMode::CrossHatch => {
+            draw_diagonal_hatch(painter, rect, style, true, orientation_size)
+        }
     }
 }
 
@@ -2693,9 +2793,14 @@ fn interaction_fill_alpha(pattern: Pattern, alpha: u8, interaction_active: bool)
     }
 }
 
-fn draw_sparse_dots(painter: &egui::Painter, rect: egui::Rect, style: &LayerStyle) -> usize {
+fn draw_dots(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    style: &LayerStyle,
+    base_spacing: f32,
+) -> usize {
     let color = color_to_egui(style.fill_color, style.fill_alpha);
-    let spacing = dot_spacing_for_rect(rect, SPARSE_DOT_SPACING_PX);
+    let spacing = dot_spacing_for_rect(rect, base_spacing);
     let mut ops = 0;
     let mut y = snap_to_grid(rect.top(), spacing);
     while y <= rect.bottom() {
@@ -2722,29 +2827,39 @@ fn draw_diagonal_hatch(
     rect: egui::Rect,
     style: &LayerStyle,
     cross: bool,
+    orientation_size: egui::Vec2,
 ) -> usize {
     let color = color_to_egui(style.fill_color, style.fill_alpha);
     let stroke = egui::Stroke::new(1.0, color);
     let mut ops = 0;
-    for segment in hatch_segments(rect, cross) {
+    for segment in hatch_segments(rect, cross, orientation_size) {
         painter.line_segment(segment, stroke);
         ops += 1;
     }
     ops
 }
 
-fn hatch_segments(rect: egui::Rect, cross: bool) -> Vec<[egui::Pos2; 2]> {
+fn hatch_segments(
+    rect: egui::Rect,
+    cross: bool,
+    orientation_size: egui::Vec2,
+) -> Vec<[egui::Pos2; 2]> {
     let rect = rect.shrink(2.0);
     if rect.width() < 3.0 || rect.height() < 3.0 {
         return Vec::new();
     }
     let spacing = hatch_spacing_for_rect(rect, PATTERN_TILE_PX, cross);
     let mut segments = Vec::new();
-    append_hatch_segments(&mut segments, rect, spacing, false);
+    let reverse = !cross && use_reversed_diagonal_hatch(orientation_size.x, orientation_size.y);
+    append_hatch_segments(&mut segments, rect, spacing, reverse);
     if cross {
         append_hatch_segments(&mut segments, rect, spacing, true);
     }
     segments
+}
+
+fn use_reversed_diagonal_hatch(width: f32, height: f32) -> bool {
+    width > height
 }
 
 fn append_hatch_segments(
@@ -2903,6 +3018,7 @@ fn estimated_vector_paint_ops(plan: &layout_render::RenderPlan) -> usize {
             let item_cost = match (batch.plane, batch.style.fill_pattern) {
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::CrossHatch) => 4,
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::DiagonalHatch) => 3,
+                (RenderPlane::Fill | RenderPlane::Frame, Pattern::DenseDots) => 3,
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::SparseDots) => 2,
                 (RenderPlane::Frame, _) => 2,
                 _ => 1,
@@ -2944,10 +3060,23 @@ mod tests {
     use std::{
         collections::BTreeMap,
         fs,
+        path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     static HIERARCHY_TEST_PACKAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn hatch_segment_has_positive_slope(segment: &[egui::Pos2; 2]) -> bool {
+        let dx = segment[1].x - segment[0].x;
+        let dy = segment[1].y - segment[0].y;
+        dx.abs() >= f32::EPSILON && dy / dx > 0.0
+    }
+
+    fn hatch_segment_has_negative_slope(segment: &[egui::Pos2; 2]) -> bool {
+        let dx = segment[1].x - segment[0].x;
+        let dy = segment[1].y - segment[0].y;
+        dx.abs() >= f32::EPSILON && dy / dx < 0.0
+    }
 
     #[test]
     fn app_open_returns_before_package_io() {
@@ -3172,8 +3301,7 @@ mod tests {
         assert_eq!(missing_metadata.layer_type, None);
     }
 
-    #[test]
-    fn selection_name_index_reads_io_pin_names_from_source_root() {
+    fn name_index_test_package() -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "layout_viewer_native_name_index_test_{}_{}",
             std::process::id(),
@@ -3189,12 +3317,17 @@ mod tests {
             format!(
                 r#"{{
                     "schema": "ecos.layoutpkg.v1",
+                    "design_name": "unit",
+                    "world_bbox": [0, 0, 1000, 1000],
+                    "tilesets": {{ "detail": "detail/index.json" }},
                     "source": {{ "kind": "view-json", "root": "{}" }}
                 }}"#,
                 source_root.display()
             ),
         )
         .unwrap();
+        fs::create_dir_all(package_root.join("detail")).unwrap();
+        fs::write(package_root.join("detail/index.json"), r#"{ "tiles": [] }"#).unwrap();
         fs::write(
             source_root.join("manifest.json"),
             r#"{
@@ -3314,6 +3447,53 @@ mod tests {
             }"#,
         )
         .unwrap();
+
+        (root, package_root)
+    }
+
+    #[test]
+    fn load_viewer_state_defers_selection_name_index_loading() {
+        let (root, package_root) = name_index_test_package();
+
+        let loaded = super::load_viewer_state(package_root, 1).unwrap();
+
+        assert!(loaded.selection_names.io_pins.is_empty());
+        assert!(loaded.selection_name_load.is_none());
+        assert!(!loaded.selection_names_loaded);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn selection_name_load_handle_loads_io_pin_names_in_background() {
+        let (root, package_root) = name_index_test_package();
+
+        let load = super::SelectionNameLoadHandle::spawn(package_root);
+        let mut loaded_names = None;
+        for _ in 0..100 {
+            if let Some(result) = load.try_recv() {
+                loaded_names = Some(result.unwrap());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let names = loaded_names.expect("background selection name index load should finish");
+
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+        hit.kind = ShapeKind::IoPin;
+        hit.source_id = 14;
+        hit.instance_path = InstancePath::new();
+        hit.object_path.instance_path = InstancePath::new();
+
+        assert_eq!(names.name_for_hit(&hit), Some("req_msg_12_"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn selection_name_index_reads_io_pin_names_from_source_root() {
+        let (root, package_root) = name_index_test_package();
 
         let names = super::SelectionNameIndex::load(&package_root).unwrap();
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
@@ -3935,6 +4115,22 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_selection_values_wrap_within_default_width() {
+        let value_width = super::sidebar_value_width(super::SIDEBAR_DEFAULT_WIDTH, 8.0);
+
+        assert!(value_width > super::SIDEBAR_DEFAULT_WIDTH - 16.0);
+        assert!(value_width >= super::SIDEBAR_VALUE_MIN_WIDTH);
+    }
+
+    #[test]
+    fn sidebar_width_resets_when_selection_is_cleared() {
+        assert!(super::should_reset_sidebar_width(true, false));
+        assert!(!super::should_reset_sidebar_width(false, false));
+        assert!(!super::should_reset_sidebar_width(false, true));
+        assert!(!super::should_reset_sidebar_width(true, true));
+    }
+
+    #[test]
     fn sidebar_omits_redundant_display_title() {
         assert_eq!(super::sidebar_title_text(), None);
     }
@@ -3959,12 +4155,12 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_objects_panel_lists_instances_pdn_and_net() {
+    fn sidebar_objects_panel_lists_instances_pdn_net_and_io_pin() {
         let rows = super::object_visibility_rows();
 
         assert_eq!(
             rows.iter().map(|row| row.label).collect::<Vec<_>>(),
-            vec!["Instances", "PDN", "Net"]
+            vec!["Instances", "PDN", "Net", "IO Pin"]
         );
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
@@ -3972,6 +4168,7 @@ mod tests {
                 ShapeKind::Instance,
                 ShapeKind::SpecialWire,
                 ShapeKind::RegularWire,
+                ShapeKind::IoPin,
             ]
         );
     }
@@ -4493,7 +4690,7 @@ mod tests {
     fn hatch_pattern_uses_continuous_visible_segments() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 90.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(!segments.is_empty());
         assert!(segments.iter().any(|segment| {
@@ -4504,10 +4701,41 @@ mod tests {
     }
 
     #[test]
+    fn diagonal_hatch_reverses_for_horizontal_rects() {
+        let horizontal = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 20.0));
+        let vertical = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(20.0, 80.0));
+        let square = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(40.0, 40.0));
+
+        let horizontal_segments = super::hatch_segments(horizontal, false, horizontal.size());
+        let vertical_segments = super::hatch_segments(vertical, false, vertical.size());
+        let square_segments = super::hatch_segments(square, false, square.size());
+
+        assert!(horizontal_segments
+            .iter()
+            .any(hatch_segment_has_positive_slope));
+        assert!(vertical_segments
+            .iter()
+            .any(hatch_segment_has_negative_slope));
+        assert!(square_segments.iter().any(hatch_segment_has_negative_slope));
+    }
+
+    #[test]
+    fn diagonal_hatch_keeps_horizontal_direction_after_clipping() {
+        let clipped_visible_part =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(8.0, 20.0));
+        let original_size = egui::vec2(100.0, 20.0);
+
+        let segments = super::hatch_segments(clipped_visible_part, false, original_size);
+
+        assert!(segments.iter().any(hatch_segment_has_positive_slope));
+        assert!(!segments.iter().any(hatch_segment_has_negative_slope));
+    }
+
+    #[test]
     fn hatch_pattern_segments_scale_with_perimeter_not_area() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 180);
     }
@@ -4516,7 +4744,7 @@ mod tests {
     fn hatch_pattern_keeps_viewport_sized_rects_under_budget() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 1000.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 300);
     }
@@ -4525,7 +4753,7 @@ mod tests {
     fn hatch_pattern_caps_large_screen_rect_segments() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2400.0, 1600.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 512);
         assert!(!segments.is_empty());
@@ -4535,6 +4763,10 @@ mod tests {
     fn patterned_fills_degrade_to_solid_during_interaction() {
         assert_eq!(
             fill_draw_mode(Pattern::SparseDots, true),
+            FillDrawMode::Solid
+        );
+        assert_eq!(
+            fill_draw_mode(Pattern::DenseDots, true),
             FillDrawMode::Solid
         );
         assert_eq!(
@@ -4548,6 +4780,10 @@ mod tests {
         assert_eq!(fill_draw_mode(Pattern::Hollow, true), FillDrawMode::None);
 
         assert_eq!(
+            fill_draw_mode(Pattern::DenseDots, false),
+            FillDrawMode::DenseDots
+        );
+        assert_eq!(
             fill_draw_mode(Pattern::DiagonalHatch, false),
             FillDrawMode::DiagonalHatch
         );
@@ -4557,6 +4793,10 @@ mod tests {
     fn patterned_interaction_fill_uses_low_alpha_placeholder() {
         assert_eq!(
             super::interaction_fill_alpha(Pattern::SparseDots, 90, true),
+            40
+        );
+        assert_eq!(
+            super::interaction_fill_alpha(Pattern::DenseDots, 90, true),
             40
         );
         assert_eq!(

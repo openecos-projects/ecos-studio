@@ -100,6 +100,7 @@ fn rgba(color: Color, alpha: u8) -> [u8; 4] {
 const PATTERN_TILE_PX: i32 = 10;
 const PATTERN_INSET_PX: i32 = 2;
 const SPARSE_DOT_SPACING_PX: i32 = 9;
+const DENSE_DOT_SPACING_PX: i32 = 5;
 
 fn rasterize_fill_rect(
     plane: &mut crate::raster_plane::RasterPlane,
@@ -114,30 +115,32 @@ fn rasterize_fill_rect(
     match style.fill_pattern {
         Pattern::Hollow => {}
         Pattern::Solid => plane.fill_rect(rect, color),
-        Pattern::SparseDots => rasterize_sparse_dots(plane, rect, color),
+        Pattern::SparseDots => rasterize_dots(plane, rect, color, SPARSE_DOT_SPACING_PX),
+        Pattern::DenseDots => rasterize_dots(plane, rect, color, DENSE_DOT_SPACING_PX),
         Pattern::DiagonalHatch => rasterize_hatch(plane, rect, color, false),
         Pattern::CrossHatch => rasterize_hatch(plane, rect, color, true),
     }
 }
 
-fn rasterize_sparse_dots(
+fn rasterize_dots(
     plane: &mut crate::raster_plane::RasterPlane,
     rect: [i32; 4],
     color: [u8; 4],
+    spacing: i32,
 ) {
     let Some([x0, y0, x1, y1]) = clipped_screen_rect(plane, rect) else {
         return;
     };
-    let mut y = snap_down_to_grid(y0, SPARSE_DOT_SPACING_PX);
+    let mut y = snap_down_to_grid(y0, spacing);
     while y < y1 {
-        let mut x = snap_down_to_grid(x0, SPARSE_DOT_SPACING_PX);
+        let mut x = snap_down_to_grid(x0, spacing);
         while x < x1 {
             if x >= x0 && y >= y0 {
                 plane.fill_rect([x, y, x + 1, y + 1], color);
             }
-            x += SPARSE_DOT_SPACING_PX;
+            x += spacing;
         }
-        y += SPARSE_DOT_SPACING_PX;
+        y += spacing;
     }
 }
 
@@ -147,9 +150,11 @@ fn rasterize_hatch(
     color: [u8; 4],
     cross: bool,
 ) {
+    let [rect_x0, rect_y0, rect_x1, rect_y1] = rect;
     let Some([x0, y0, x1, y1]) = clipped_screen_rect(plane, rect) else {
         return;
     };
+    let reverse = !cross && use_reversed_diagonal_hatch(rect_x1 - rect_x0, rect_y1 - rect_y0);
     let mut y = snap_down_to_grid(y0, PATTERN_TILE_PX);
     while y < y1 {
         let mut x = snap_down_to_grid(x0, PATTERN_TILE_PX);
@@ -159,12 +164,21 @@ fn rasterize_hatch(
             let right = (x + PATTERN_TILE_PX).min(x1);
             let bottom = (y + PATTERN_TILE_PX).min(y1);
             if right - left >= 3 && bottom - top >= 3 {
-                rasterize_screen_line(
-                    plane,
-                    (left + PATTERN_INSET_PX, bottom - PATTERN_INSET_PX),
-                    (right - PATTERN_INSET_PX, top + PATTERN_INSET_PX),
-                    color,
-                );
+                if reverse {
+                    rasterize_screen_line(
+                        plane,
+                        (left + PATTERN_INSET_PX, top + PATTERN_INSET_PX),
+                        (right - PATTERN_INSET_PX, bottom - PATTERN_INSET_PX),
+                        color,
+                    );
+                } else {
+                    rasterize_screen_line(
+                        plane,
+                        (left + PATTERN_INSET_PX, bottom - PATTERN_INSET_PX),
+                        (right - PATTERN_INSET_PX, top + PATTERN_INSET_PX),
+                        color,
+                    );
+                }
                 if cross {
                     rasterize_screen_line(
                         plane,
@@ -178,6 +192,10 @@ fn rasterize_hatch(
         }
         y += PATTERN_TILE_PX;
     }
+}
+
+fn use_reversed_diagonal_hatch(width: i32, height: i32) -> bool {
+    width > height
 }
 
 fn clipped_screen_rect(
@@ -532,6 +550,62 @@ mod tests {
     }
 
     #[test]
+    fn rasterize_plan_reverses_diagonal_hatch_for_horizontal_rects() {
+        let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
+        style.fill_alpha = 123;
+        style.fill_pattern = Pattern::DiagonalHatch;
+        let plan = RenderPlan {
+            batches: vec![DrawBatch {
+                plane: RenderPlane::Fill,
+                display_layer_id: "m1".to_owned(),
+                style,
+                items: vec![DrawItem::Rect(DrawRect {
+                    world: Rect::new(0, 0, 20, 8),
+                    color: Color::rgb(200, 210, 220),
+                    source_id: 1,
+                    layer_id: 1,
+                    composition: layout_display::CompositionMode::MaskPattern,
+                })],
+            }],
+            source: RenderPlanSource::HierarchyMid,
+            ..Default::default()
+        };
+
+        let plane = rasterize_plan(&plan, 20, 8, rect_to_screen);
+
+        assert_eq!(pixel(&plane, 2, 2), [10, 20, 30, 123]);
+        assert_eq!(pixel(&plane, 2, 6), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn rasterize_plan_keeps_horizontal_hatch_direction_after_clipping() {
+        let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
+        style.fill_alpha = 123;
+        style.fill_pattern = Pattern::DiagonalHatch;
+        let plan = RenderPlan {
+            batches: vec![DrawBatch {
+                plane: RenderPlane::Fill,
+                display_layer_id: "m1".to_owned(),
+                style,
+                items: vec![DrawItem::Rect(DrawRect {
+                    world: Rect::new(-92, 0, 8, 20),
+                    color: Color::rgb(200, 210, 220),
+                    source_id: 1,
+                    layer_id: 1,
+                    composition: layout_display::CompositionMode::MaskPattern,
+                })],
+            }],
+            source: RenderPlanSource::HierarchyMid,
+            ..Default::default()
+        };
+
+        let plane = rasterize_plan(&plan, 8, 20, rect_to_screen);
+
+        assert_eq!(pixel(&plane, 2, 2), [10, 20, 30, 123]);
+        assert_eq!(pixel(&plane, 2, 16), [0, 0, 0, 0]);
+    }
+
+    #[test]
     fn rasterize_plan_applies_sparse_dot_patterns() {
         let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
         style.fill_alpha = 123;
@@ -558,6 +632,35 @@ mod tests {
         assert_eq!(pixel(&plane, 0, 0), [10, 20, 30, 123]);
         assert_eq!(pixel(&plane, 1, 1), [0, 0, 0, 0]);
         assert_eq!(pixel(&plane, 9, 9), [10, 20, 30, 123]);
+    }
+
+    #[test]
+    fn rasterize_plan_applies_dense_dot_patterns() {
+        let mut style = LayerStyle::new(Color::rgb(10, 20, 30), Color::rgb(200, 210, 220));
+        style.fill_alpha = 123;
+        style.fill_pattern = Pattern::DenseDots;
+        let plan = RenderPlan {
+            batches: vec![DrawBatch {
+                plane: RenderPlane::Fill,
+                display_layer_id: "instance".to_owned(),
+                style,
+                items: vec![DrawItem::Rect(DrawRect {
+                    world: Rect::new(0, 0, 12, 12),
+                    color: Color::rgb(200, 210, 220),
+                    source_id: 1,
+                    layer_id: 1,
+                    composition: layout_display::CompositionMode::MaskPattern,
+                })],
+            }],
+            source: RenderPlanSource::HierarchyMid,
+            ..Default::default()
+        };
+
+        let plane = rasterize_plan(&plan, 12, 12, rect_to_screen);
+
+        assert_eq!(pixel(&plane, 0, 0), [10, 20, 30, 123]);
+        assert_eq!(pixel(&plane, 5, 5), [10, 20, 30, 123]);
+        assert_eq!(pixel(&plane, 9, 9), [0, 0, 0, 0]);
     }
 
     #[test]
