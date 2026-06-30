@@ -153,6 +153,29 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyTools()
   }
 
+  function _missingDependenciesFor(resourceId: string): string[] {
+    const seen = new Set<string>()
+    const visit = (id: string): void => {
+      const resource = resources.value.find((item) => item.id === id)
+      for (const dependencyId of resource?.missing_requires ?? []) {
+        if (seen.has(dependencyId)) continue
+        seen.add(dependencyId)
+        visit(dependencyId)
+      }
+    }
+    visit(resourceId)
+    return [...seen]
+  }
+
+  function _markDependencyResourcesInstalling(resourceId: string): void {
+    for (const dependencyId of _missingDependenciesFor(resourceId)) {
+      delete resourceErrors.value[dependencyId]
+      _syncLegacyToolError(dependencyId)
+      _setResourceStatus(dependencyId, 'installing')
+      _subscribeResourceProgress(dependencyId)
+    }
+  }
+
   async function fetchTools(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent === true
     if (!silent) {
@@ -207,6 +230,7 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyToolError(resourceId)
     _setResourceStatus(resourceId, 'installing')
     _subscribeResourceProgress(resourceId)
+    _markDependencyResourcesInstalling(resourceId)
     try {
       await installResourceApi(resourceId, version)
       _cancelledResources.delete(resourceId)
@@ -233,6 +257,7 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyToolError(resourceId)
     _setResourceStatus(resourceId, 'installing')
     _subscribeResourceProgress(resourceId)
+    _markDependencyResourcesInstalling(resourceId)
     try {
       await updateResourceApi(resourceId)
       _cancelledResources.delete(resourceId)

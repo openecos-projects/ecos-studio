@@ -51,6 +51,7 @@ interface RegistryPostInstallStep {
 interface RegistryToolVersion {
   version: string
   platforms: Record<string, PlatformAsset>
+  requires: string[]
 }
 
 interface RegistryTool {
@@ -65,6 +66,7 @@ interface RegistryTool {
 interface RegistryPdkVersion {
   version: string
   platforms: Record<string, PlatformAsset>
+  requires: string[]
 }
 
 interface RegistryPdk {
@@ -194,11 +196,11 @@ export class ResourceManagerService {
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, installedTools))
+      resources.push(this.registryToolToResource(tool, installedTools, manifest))
     }
     for (const pdk of state.registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
-      if (!local) resources.push(this.registryPdkToResource(pdk))
+      if (!local) resources.push(this.registryPdkToResource(pdk, manifest))
     }
     for (const [name, entry] of Object.entries(installedTools)) {
       if (!resources.some((resource) => resource.id === `tool:${name}`)) {
@@ -206,7 +208,7 @@ export class ResourceManagerService {
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id)))
+      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest))
     }
 
     return {
@@ -344,26 +346,90 @@ export class ResourceManagerService {
     version?: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
-    if (resourceId.startsWith('tool:')) {
-      return await this.installTool(resourceId.slice('tool:'.length), version, 'install', listener)
+    return await this.installResourceWithDependencies(resourceId, version, 'install', listener, new Set())
+  }
+
+  private async installResourceWithDependencies(
+    resourceId: string,
+    version: string | undefined,
+    action: ResourceAction,
+    listener: ((event: ResourceJob) => void) | undefined,
+    visiting: Set<string>,
+  ): Promise<ResourceOperationResult> {
+    if (visiting.has(resourceId)) {
+      throw new Error(`Resource dependency cycle detected at ${resourceId}`)
     }
-    if (resourceId.startsWith('pdk:')) {
-      return await this.installPdk(resourceId.slice('pdk:'.length), version, 'install', listener)
+    visiting.add(resourceId)
+    try {
+      const state = await this.fetchRegistry()
+      const manifest = await this.readManifest()
+      const dependencies = this.registryRequiresForResource(state.registry, resourceId, version)
+      const missingDependencies = dependencies.filter((dependencyId) => {
+        return !isInstalledResource(manifest, dependencyId)
+      })
+
+      if (missingDependencies.length > 0) {
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'resolving_dependencies',
+          progress: 0,
+          message: `Installing ${missingDependencies.length} required resource${missingDependencies.length === 1 ? '' : 's'}...`,
+        })
+      }
+
+      for (const [index, dependencyId] of missingDependencies.entries()) {
+        const latestManifest = await this.readManifest()
+        if (isInstalledResource(latestManifest, dependencyId)) {
+          continue
+        }
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'installing_dependency',
+          progress: Math.min(0.2, (index / Math.max(missingDependencies.length, 1)) * 0.2),
+          message: `Installing required resource ${index + 1}/${missingDependencies.length}: ${resourceNameFromAnyId(dependencyId)}`,
+        })
+        await this.installResourceWithDependencies(dependencyId, undefined, 'install', listener, visiting)
+      }
+
+      if (resourceId.startsWith('tool:')) {
+        return await this.installTool(resourceId.slice('tool:'.length), version, action, listener)
+      }
+      if (resourceId.startsWith('pdk:')) {
+        return await this.installPdk(resourceId.slice('pdk:'.length), version, action, listener)
+      }
+      throw new Error(`Install is not implemented for ${resourceId}`)
+    } finally {
+      visiting.delete(resourceId)
     }
-    throw new Error(`Install is not implemented for ${resourceId}`)
   }
 
   async updateResource(
     resourceId: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
+    return await this.installResourceWithDependencies(resourceId, undefined, 'update', listener, new Set())
+  }
+
+  private registryRequiresForResource(
+    registry: ResourceRegistry | null,
+    resourceId: string,
+    requestedVersion?: string,
+  ): string[] {
     if (resourceId.startsWith('tool:')) {
-      return await this.installTool(resourceId.slice('tool:'.length), undefined, 'update', listener)
+      const toolName = resourceId.slice('tool:'.length)
+      const tool = registry?.tools.find((candidate) => candidate.name === toolName)
+      const version = selectRegistryVersion(tool?.versions, requestedVersion)
+      return version?.requires ?? []
     }
     if (resourceId.startsWith('pdk:')) {
-      return await this.installPdk(resourceId.slice('pdk:'.length), undefined, 'update', listener)
+      const pdkId = resourceId.slice('pdk:'.length)
+      const pdk = registry?.pdks.find((candidate) => candidate.id === pdkId)
+      const version = selectRegistryVersion(pdk?.versions, requestedVersion)
+      return version?.requires ?? []
     }
-    throw new Error(`Update is not implemented for ${resourceId}`)
+    return []
   }
 
   async cancelResource(resourceId: string): Promise<ResourceOperationResult> {
@@ -965,12 +1031,15 @@ export class ResourceManagerService {
   private registryToolToResource(
     tool: RegistryTool,
     installed: Record<string, ToolInventoryEntry>,
+    manifest: ResourceManifest,
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
+    const requirements = latest?.requires ?? []
+    const requirementState = dependencyStateFor(requirements, manifest)
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
 
@@ -1003,6 +1072,9 @@ export class ResourceManagerService {
       actions,
       health: local ? toolHealth(local) : {},
       error: null,
+      requires: requirements,
+      installed_requires: requirementState.installed,
+      missing_requires: requirementState.missing,
     }
   }
 
@@ -1029,14 +1101,19 @@ export class ResourceManagerService {
       actions: entry.managed ? ['uninstall'] : [],
       health: toolHealth(entry),
       error: null,
+      requires: [],
+      installed_requires: [],
+      missing_requires: [],
     }
   }
 
-  private registryPdkToResource(pdk: RegistryPdk): ResourceInfo {
+  private registryPdkToResource(pdk: RegistryPdk, manifest: ResourceManifest): ResourceInfo {
     const latest = pdk.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
     const resourceId = `pdk:${pdk.id}`
     const isActive = this.activeJobs.has(resourceId)
+    const requirements = latest?.requires ?? []
+    const requirementState = dependencyStateFor(requirements, manifest)
     return {
       id: resourceId,
       type: 'pdk',
@@ -1058,11 +1135,23 @@ export class ResourceManagerService {
       actions: isActive ? [] : ['install'],
       health: {},
       error: null,
+      requires: requirements,
+      installed_requires: requirementState.installed,
+      missing_requires: requirementState.missing,
     }
   }
 
-  private pdkEntryToResource(entry: PdkInventoryEntry, registryPdk?: RegistryPdk): ResourceInfo {
+  private pdkEntryToResource(
+    entry: PdkInventoryEntry,
+    registryPdk?: RegistryPdk,
+    manifest?: ResourceManifest,
+  ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
+    const registryVersion = selectRegistryVersion(registryPdk?.versions, entry.version) ?? registryPdk?.versions[0]
+    const requirements = registryVersion?.requires ?? []
+    const requirementState = manifest
+      ? dependencyStateFor(requirements, manifest)
+      : { installed: [], missing: [] }
     const hasUpdate = entry.managed
       && entry.health === 'ok'
       && Boolean(entry.version)
@@ -1106,6 +1195,9 @@ export class ResourceManagerService {
       actions,
       health: pdkHealth(entry),
       error: null,
+      requires: requirements,
+      installed_requires: requirementState.installed,
+      missing_requires: requirementState.missing,
     }
   }
 
@@ -1202,6 +1294,43 @@ function selectPlatformAsset(version: RegistryToolVersion | RegistryPdkVersion):
   }
 }
 
+function selectRegistryVersion<T extends { version: string }>(
+  versions: T[] | undefined,
+  requestedVersion?: string,
+): T | undefined {
+  if (!versions || versions.length === 0) return undefined
+  if (!requestedVersion) return versions[0]
+  return versions.find((candidate) => candidate.version === requestedVersion) ?? versions[0]
+}
+
+function dependencyStateFor(
+  dependencies: string[],
+  manifest: ResourceManifest,
+): { installed: string[]; missing: string[] } {
+  const installed: string[] = []
+  const missing: string[] = []
+  for (const dependencyId of dependencies) {
+    if (isInstalledResource(manifest, dependencyId)) installed.push(dependencyId)
+    else missing.push(dependencyId)
+  }
+  return { installed, missing }
+}
+
+function isInstalledResource(manifest: ResourceManifest, resourceId: string): boolean {
+  const entry = manifest.installed[resourceId]
+  if (isToolEntry(entry)) {
+    return entry.active !== false && Boolean(entry.path)
+  }
+  if (isPdkEntry(entry)) {
+    return entry.active === true && entry.health !== 'missing' && entry.health !== 'invalid'
+  }
+  return false
+}
+
+function resourceNameFromAnyId(resourceId: string): string {
+  return resourceId.replace(/^(tool|pdk):/, '')
+}
+
 function parseRegistry(value: unknown): ResourceRegistry {
   const record = readRecord(value)
   if (record.schema_version !== 2) {
@@ -1231,6 +1360,7 @@ function parseRegistryToolVersion(value: unknown): RegistryToolVersion {
   return {
     version: readString(record.version),
     platforms: parsePlatformAssets(record.platforms),
+    requires: parseResourceDependencyIds(record.requires),
   }
 }
 
@@ -1251,7 +1381,15 @@ function parseRegistryPdkVersion(value: unknown): RegistryPdkVersion {
   return {
     version: readString(record.version),
     platforms: parsePlatformAssets(record.platforms),
+    requires: parseResourceDependencyIds(record.requires),
   }
+}
+
+function parseResourceDependencyIds(value: unknown): string[] {
+  return readStringArray(value)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => item.includes(':') ? item : `tool:${item}`)
 }
 
 function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
@@ -1498,7 +1636,7 @@ function selectToolExecutable(name: string, detected: string[]): string {
     const match = detected.find((entry) => entry === candidate || entry.endsWith(`/${candidate}`))
     if (match) return match
   }
-  return detected[0] ?? `bin/${name}`
+  return detected[0] ?? ''
 }
 
 function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {

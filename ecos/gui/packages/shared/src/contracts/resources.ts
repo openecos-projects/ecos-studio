@@ -41,6 +41,9 @@ export interface ResourceInfo {
   actions: ResourceAction[]
   health: Record<string, unknown>
   error: string | null
+  requires?: string[]
+  installed_requires?: string[]
+  missing_requires?: string[]
 }
 
 export interface ResourceList {

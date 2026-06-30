@@ -96,6 +96,21 @@ async function createEccFeArchive(root: string): Promise<{ path: string; sha256:
   }
 }
 
+async function createEccFeSocArchive(root: string): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'ecc-fe-soc-source')
+  const sourceDir = join(sourceRoot, 'ecc-fe-soc-ysyx-am')
+  const archive = join(root, 'ecc-fe-soc.tar')
+  await mkdir(sourceDir, { recursive: true })
+  await writeFile(join(sourceDir, 'ecos_sim_top.v'), 'module ecos_sim_top; endmodule\n', 'utf8')
+  await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-soc-ysyx-am'])
+  const size = Buffer.byteLength(await readFile(archive))
+  return {
+    path: archive,
+    sha256: 'fixture-ecc-fe-soc-sha',
+    size,
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return await Promise.race([
     promise,
@@ -610,9 +625,10 @@ describe('ResourceManagerService', () => {
     expect(verifySha256).toHaveBeenCalledTimes(1)
   })
 
-  it('installs ecc-fe as a managed frontend CLI resource', async () => {
+  it('lists and installs ecc-fe with its managed frontend resource dependency', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
+    const socArchive = await createEccFeSocArchive(root)
     const registryPath = join(root, 'registry.json')
     await writeFile(registryPath, JSON.stringify({
       schema_version: 2,
@@ -634,6 +650,28 @@ describe('ResourceManagerService', () => {
                   strip_prefix: 'ecc-fe-runtime',
                 },
               },
+              requires: ['tool:ecc-fe-soc-ysyx-am'],
+            },
+          ],
+        },
+        {
+          name: 'ecc-fe-soc-ysyx-am',
+          display_name: 'ECC-FE YSYX AM SoC Harness',
+          description: 'Frontend SoC harness resource',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: '0.1.0-alpha.0-ecos',
+              platforms: {
+                'all-platform': {
+                  url: `file://${socArchive.path}`,
+                  sha256: socArchive.sha256,
+                  size: socArchive.size,
+                  strip_prefix: 'ecc-fe-soc-ysyx-am',
+                },
+              },
+              requires: [],
             },
           ],
         },
@@ -648,6 +686,16 @@ describe('ResourceManagerService', () => {
       pdksDir: join(root, 'data', 'pdks'),
       sha256Verifier: verifySha256,
     })
+    const listedBefore = await service.listResources()
+
+    expect(listedBefore.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'tool:ecc-fe',
+        requires: ['tool:ecc-fe-soc-ysyx-am'],
+        installed_requires: [],
+        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
+      }),
+    ]))
 
     await expect(service.installResource('tool:ecc-fe', '0.1.0-alpha.0-ecos')).resolves.toEqual({
       status: 'started',
@@ -656,8 +704,10 @@ describe('ResourceManagerService', () => {
     })
 
     const eccFeRoot = join(root, 'data', 'tools', 'ecc-fe', '0.1.0-alpha.0-ecos')
+    const eccFeSocRoot = join(root, 'data', 'tools', 'ecc-fe-soc-ysyx-am', '0.1.0-alpha.0-ecos')
     await expect(readFile(join(eccFeRoot, 'bin', 'ecc-fe'), 'utf8')).resolves.toContain('#!/bin/sh')
     await expect(readFile(join(eccFeRoot, 'fecompiler', '__init__.py'), 'utf8')).resolves.toBe('')
+    await expect(readFile(join(eccFeSocRoot, 'ecos_sim_top.v'), 'utf8')).resolves.toContain('module ecos_sim_top')
 
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
@@ -666,7 +716,20 @@ describe('ResourceManagerService', () => {
       executable: 'bin/ecc-fe',
       detected_executables: ['bin/ecc-fe'],
     })
-    expect(verifySha256).toHaveBeenCalledTimes(1)
+    expect(manifest.installed['tool:ecc-fe-soc-ysyx-am']).toMatchObject({
+      executable: '',
+      detected_executables: [],
+    })
+    expect(verifySha256).toHaveBeenCalledTimes(2)
+
+    const listedAfter = await service.listResources()
+    expect(listedAfter.resources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'tool:ecc-fe',
+        installed_requires: ['tool:ecc-fe-soc-ysyx-am'],
+        missing_requires: [],
+      }),
+    ]))
   })
 
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {

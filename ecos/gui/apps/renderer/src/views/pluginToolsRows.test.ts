@@ -34,6 +34,9 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
     actions: ['install'],
     health: {},
     error: null,
+    requires: [],
+    installed_requires: [],
+    missing_requires: [],
     ...overrides,
   }
 }
@@ -124,6 +127,8 @@ describe('pluginToolsRows', () => {
         status: 'available',
         available_versions: ['0.1.0-alpha.0-ecos'],
         managed_root: '/home/user/.local/share/ecos-studio/tools',
+        requires: ['tool:ecc-fe-soc-ysyx-am'],
+        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
       }),
       undefined,
     )
@@ -132,6 +137,7 @@ describe('pluginToolsRows', () => {
     expect(eccFe.isFrontendTool).toBe(true)
     expect(eccFe.flowTags).toEqual(['Frontend CLI'])
     expect(isEdaToolRow(eccFe)).toBe(false)
+    expect(eccFe.dependencyLabel).toBe('Installs 1 required: ecc-fe-soc-ysyx-am')
   })
 
   it('treats ecc-fe SoC harness resources as frontend resources instead of EDA tools', () => {
@@ -291,6 +297,53 @@ describe('pluginToolsRows', () => {
     expect(installResource).toHaveBeenCalledWith('pdk:ics55')
     expect(updateResource).toHaveBeenCalledTimes(1)
     expect(updateResource).toHaveBeenCalledWith('tool:yosys')
+  })
+
+  it('skips selected dependency rows when a selected parent installs them automatically', async () => {
+    const installResource = vi.fn(async () => undefined)
+    const updateResource = vi.fn(async () => undefined)
+
+    const eccFe = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe',
+        type: 'tool',
+        name: 'ecc-fe',
+        display_name: 'ECC-FE Frontend Flow',
+        description: 'Frontend flow runtime CLI.',
+        category: 'frontend',
+        status: 'available',
+        available_versions: ['0.1.0-alpha.0-ecos'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        actions: ['install'],
+        requires: ['tool:ecc-fe-soc-ysyx-am'],
+        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
+      }),
+      undefined,
+    )
+    const soc = resourceToRow(
+      resource({
+        id: 'tool:ecc-fe-soc-ysyx-am',
+        type: 'tool',
+        name: 'ecc-fe-soc-ysyx-am',
+        display_name: 'ECC-FE YSYX AM SoC Harness',
+        description: 'Frontend SoC harness resource.',
+        category: 'frontend',
+        status: 'available',
+        available_versions: ['0.1.0-alpha.0-ecos'],
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        actions: ['install'],
+      }),
+      undefined,
+    )
+
+    await runBatchDownload([eccFe, soc], {
+      installResource,
+      updateResource,
+    })
+
+    expect(installResource).toHaveBeenCalledTimes(1)
+    expect(installResource).toHaveBeenCalledWith('tool:ecc-fe')
+    expect(updateResource).not.toHaveBeenCalled()
   })
 
   it('derives managed install location from downloadable resource types', () => {

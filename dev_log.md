@@ -10739,3 +10739,57 @@ fatal error: driver/difftest.h: No such file or directory
 - 当前只拆出了 `ysyx-am-soc` SoC harness；其它 CPU adapter/RTL、difftest reference、更多测试资源后续仍应继续拆成独立资源。
 - `tool:ecc-fe` 的 registry URL 仍指向 `Luyoung0001/ecos-registry` fork；正式 PR 合并后需要切回上游 registry 地址。
 - `tool:ecc-fe` 的 `requires` 字段目前只是 registry 元数据，Resource Manager 尚未自动级联安装依赖；用户仍需要在 GUI 中安装 runtime 和 SoC resource 两个条目。
+
+# 第 164 次 开发
+
+## 开发目标
+
+完善 GUI Resource Manager，使它能理解 registry 里的资源依赖关系：用户安装 `ecc-fe` 时自动安装缺失的 `ecc-fe-soc-ysyx-am`，并在资源列表里清楚显示依赖状态。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/contracts/resources.ts`
+  - `ResourceInfo` 新增可选 `requires`、`installed_requires`、`missing_requires` 字段，允许 Resource Manager 向前端传递资源依赖信息。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - registry 解析支持每个 tool/PDK version 的 `requires` 字段。
+  - `listResources()` 返回每个资源的依赖、已安装依赖、缺失依赖。
+  - `installResource()` / `updateResource()` 增加依赖递归安装，带循环依赖保护。
+  - 纯资源包没有可执行文件时不再兜底写入 `bin/<name>`，避免 SoC harness 被误认为 CLI tool。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 `ecc-fe` 依赖 `ecc-fe-soc-ysyx-am` 的列表和安装测试。
+  - 验证级联安装后 manifest 同时包含 runtime 和 SoC resource。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 资源行模型新增依赖数组和简短依赖提示。
+  - 批量下载时跳过已由选中父资源自动安装的依赖行，避免重复启动安装任务。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加依赖提示和批量下载去重测试。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/PluginToolsView.vue`
+  - Resource Manager 列表展示依赖提示，例如 `Installs 1 required: ecc-fe-soc-ysyx-am`。
+  - 选中面板展示缺失依赖数量。
+  - 搜索支持匹配依赖资源 id。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/stores/pluginStore.ts`
+  - 安装或更新资源时，把缺失依赖同步标记为 installing 并订阅进度，减少用户看不到依赖下载状态的问题。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 依赖能力完善。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、15 个测试用例。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、14 个测试用例。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/api/plugin.test.ts src/stores/pluginStore.test.ts`，通过：2 个测试文件、20 个测试用例。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 本次未执行完整矩阵测试；改动集中在 GUI Resource Manager 的依赖解析、安装和展示。
+
+## 已知后续风险
+
+- 目前自动依赖安装按 registry `requires` 字段驱动，依赖资源本身若下载失败，父资源安装也会失败；这是预期行为，但 GUI 后续还可以做更细的失败分组展示。
+- 取消父资源安装时，只会取消当前 active job；如果依赖资源已经单独进入下载阶段，取消语义后续可以继续细化为链式取消。

@@ -26,6 +26,9 @@ export interface ResourceRow {
   accent: string
   flowTags: string[]
   isFrontendTool: boolean
+  requires: string[]
+  missingRequires: string[]
+  dependencyLabel: string
   progressPercent: number | null
   actions: ResourceAction[]
   resource: ResourceItem
@@ -265,6 +268,20 @@ export function createPrimaryActionTask(
   return null
 }
 
+function dependencyClosure(rowsById: Map<string, ResourceRow>, row: ResourceRow): Set<string> {
+  const dependencies = new Set<string>()
+  const visit = (candidate: ResourceRow): void => {
+    for (const dependencyId of candidate.missingRequires) {
+      if (dependencies.has(dependencyId)) continue
+      dependencies.add(dependencyId)
+      const dependency = rowsById.get(dependencyId)
+      if (dependency) visit(dependency)
+    }
+  }
+  visit(row)
+  return dependencies
+}
+
 export async function runPrimaryAction(
   row: ResourceRow,
   executor: ResourceActionExecutor,
@@ -281,7 +298,18 @@ export async function runBatchDownload(
   executor: ResourceActionExecutor,
   concurrency: number = 2,
 ): Promise<void> {
+  const rowsById = new Map(rows.map((row) => [row.id, row]))
+  const selectedIds = new Set(rows.map((row) => row.id))
+  const rowsCoveredBySelectedParents = new Set<string>()
+  for (const row of rows) {
+    for (const dependencyId of dependencyClosure(rowsById, row)) {
+      if (selectedIds.has(dependencyId)) {
+        rowsCoveredBySelectedParents.add(dependencyId)
+      }
+    }
+  }
   const tasks = rows
+    .filter((row) => !rowsCoveredBySelectedParents.has(row.id))
     .map((row) => createPrimaryActionTask(row, executor))
     .filter((task): task is Promise<void> => task !== null)
 
@@ -346,6 +374,21 @@ export function currentInstallLocation(rows: ResourceRow[]): string {
   return paths.join(', ')
 }
 
+function resourceDisplayNameFromId(resourceId: string): string {
+  return resourceId.replace(/^(tool|pdk):/, '')
+}
+
+function dependencyLabel(resource: ResourceItem): string {
+  const requirements = resource.requires ?? []
+  if (requirements.length === 0) return ''
+  const missing = resource.missing_requires ?? []
+  const names = requirements.map(resourceDisplayNameFromId)
+  if (missing.length > 0) {
+    return `Installs ${missing.length} required: ${missing.map(resourceDisplayNameFromId).join(', ')}`
+  }
+  return `Requires: ${names.join(', ')}`
+}
+
 export function resourceToRow(
   resource: ResourceItem,
   progress: InstallProgress | undefined,
@@ -371,6 +414,9 @@ export function resourceToRow(
     accent: accentFor(resource),
     flowTags,
     isFrontendTool: flowTags.length > 0,
+    requires: resource.requires ?? [],
+    missingRequires: resource.missing_requires ?? [],
+    dependencyLabel: dependencyLabel(resource),
     progressPercent,
     actions: resource.actions,
     resource,

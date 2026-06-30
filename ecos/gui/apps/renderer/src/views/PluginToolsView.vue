@@ -186,6 +186,10 @@
                       <span v-if="row.flowTags.length" class="resource-flow-tags">
                         <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{ tag }}</b>
                       </span>
+                      <span v-if="row.dependencyLabel" class="resource-dependency">
+                        <i class="ri-node-tree" aria-hidden="true"></i>
+                        <span>{{ row.dependencyLabel }}</span>
+                      </span>
                     </span>
                   </span>
 
@@ -329,6 +333,9 @@
                 <span v-if="row.flowTags.length" class="selected-flow-tags">
                   {{ row.flowTags.slice(0, 3).join(' · ') }}
                 </span>
+                <span v-if="row.missingRequires.length" class="selected-flow-tags dependency">
+                  +{{ row.missingRequires.length }} required
+                </span>
               </span>
               <em>{{ row.sizeLabel }}</em>
               <button type="button" aria-label="Remove selected resource" @click.stop="removeSelected(row.id)">
@@ -428,7 +435,7 @@ const filteredRows = computed(() => {
     if (statusFilter.value === 'updates' && row.statusKind !== 'update') return false
 
     if (!q) return true
-    return `${row.name} ${row.description} ${row.version}`.toLowerCase().includes(q)
+    return `${row.name} ${row.description} ${row.version} ${row.requires.join(' ')}`.toLowerCase().includes(q)
   })
 })
 
@@ -1334,6 +1341,29 @@ async function openDocs(): Promise<void> {
   line-height: 1.2;
 }
 
+.resource-dependency {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  gap: 4px;
+}
+
+.resource-dependency i {
+  flex: 0 0 auto;
+  color: var(--accent-color);
+  font-size: 12px;
+}
+
+.resource-dependency span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .resource-muted {
   color: var(--text-secondary);
   font-size: 12px;
@@ -1713,6 +1743,11 @@ async function openDocs(): Promise<void> {
   border-radius: 5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.selected-flow-tags.dependency {
+  color: var(--info-color);
+  background: var(--info-bg);
 }
 
 .selected-item em {
