@@ -52,7 +52,7 @@ const toolMeta: Record<string, { icon: string; accent: string }> = {
 }
 
 export function formatResourceSize(size: number | null): { sizeLabel: string; sizeMb: number } {
-  if (!size || size <= 0) return { sizeLabel: '0 MB', sizeMb: 0 }
+  if (!size || size <= 0) return { sizeLabel: '-', sizeMb: 0 }
 
   const sizeMb = Math.round(size / (1024 * 1024))
   if (sizeMb >= 1024) {

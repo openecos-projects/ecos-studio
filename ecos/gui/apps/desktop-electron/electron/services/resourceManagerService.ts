@@ -14,10 +14,11 @@ import type {
   ResourceStatus,
 } from '@ecos-studio/shared'
 
-const DEFAULT_REGISTRY_URL = 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/e281758aa4faebb9cce32edfc75c12d54ab0fb16/tool-registry.json'
+const DEFAULT_REGISTRY_URL = 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/tool-registry.json'
 const ALL_PLATFORM = 'all-platform'
 const TOP_LEVEL_ENTRY_LIMIT = 20
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
+const SURFER_RELEASE_ASSET_URL = 'https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip'
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry
 type ArchiveExtractor = (archivePath: string, destination: string, stripPrefix?: string | null) => Promise<void>
@@ -91,6 +92,7 @@ interface ToolInventoryEntry {
   path: string
   installed_at: string
   sha256: string
+  size?: number
   detected_executables: string[]
   executable: string
   active: boolean
@@ -104,6 +106,7 @@ interface PdkInventoryEntry {
   pdk_id: string
   version: string
   sha256: string
+  size?: number
   source: string
   source_url: string
   canonical_path: string
@@ -261,8 +264,10 @@ export class ResourceManagerService {
         continue
       }
 
-      const resolvedExecutable = await resolveRuntimeExecutable(entry, options.platform)
-      if (!resolvedExecutable) {
+      const pathExecutable = await resolveRuntimeExecutable(entry, options.platform)
+      const capabilities = detectToolCapabilities(entry)
+      const runtimeTools = await resolveRuntimeTools(entry, capabilities, options.platform)
+      if (!pathExecutable && runtimeTools.size === 0) {
         electronLogger.debug(
           '[resources] Skipping runtime tool %s: no usable executable found under %s',
           entry.name,
@@ -271,23 +276,30 @@ export class ResourceManagerService {
         continue
       }
 
-      toolBinDirs.push(dirname(resolvedExecutable))
-      const capabilities = detectToolCapabilities(entry)
-      if (toolKind === 'yosys' || toolKind === 'oss-cad-suite' || capabilities.has('yosys')) {
+      if (pathExecutable) {
+        toolBinDirs.push(dirname(pathExecutable))
+      }
+      for (const executable of runtimeTools.values()) {
+        toolBinDirs.push(dirname(executable))
+      }
+      if (runtimeTools.has('yosys')) {
         activeYosysRoot = entry.path
       }
-      if (toolKind === 'slang' || capabilities.has('slang')) {
-        env.ECOS_SLANG = resolvedExecutable
+      const slangExecutable = runtimeTools.get('slang')
+      if (slangExecutable) {
+        env.ECOS_SLANG = slangExecutable
       }
-      if (toolKind === 'verilator' || capabilities.has('verilator')) {
-        env.ECOS_VERILATOR = resolvedExecutable
-        env.VERILATOR_ROOT = entry.path
+      const verilatorExecutable = runtimeTools.get('verilator')
+      if (verilatorExecutable) {
+        env.ECOS_VERILATOR = verilatorExecutable
+        env.VERILATOR_ROOT = join(entry.path, 'share', 'verilator')
       }
-      if (toolKind === 'ecc-fe' || capabilities.has('ecc-fe')) {
-        env.ECOS_FE_CLI = resolvedExecutable
+      const eccFeExecutable = runtimeTools.get('ecc-fe')
+      if (eccFeExecutable) {
+        env.ECOS_FE_CLI = eccFeExecutable
         env.ECOS_FE_COMPILER_ROOT = entry.path
       }
-      if (toolKind === 'riscv-toolchain' || capabilities.has('riscv-toolchain')) {
+      if (runtimeTools.has('riscv-toolchain')) {
         const prefix = detectRiscvPrefix(entry.detected_executables, entry.executable)
         if (prefix) {
           env.RISCV_PREFIX = prefix
@@ -644,6 +656,7 @@ export class ResourceManagerService {
         path: destination,
         installed_at: utcNowIso(),
         sha256: asset.sha256,
+        size: asset.size,
         detected_executables: detected,
         executable,
         active: true,
@@ -798,6 +811,7 @@ export class ResourceManagerService {
         pdk_id: pdkId,
         version,
         sha256: asset.sha256,
+        size: asset.size,
         source: 'registry',
         source_url: asset.url,
         canonical_path: destination,
@@ -1095,7 +1109,7 @@ export class ResourceManagerService {
       path: entry.path,
       managed_root: this.toolsDir,
       platform: null,
-      size: null,
+      size: entry.size && entry.size > 0 ? entry.size : null,
       source: 'local',
       homepage: '',
       actions: entry.managed ? ['uninstall'] : [],
@@ -1148,6 +1162,9 @@ export class ResourceManagerService {
   ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
     const registryVersion = selectRegistryVersion(registryPdk?.versions, entry.version) ?? registryPdk?.versions[0]
+    const { platform, asset } = registryVersion
+      ? selectPlatformAsset(registryVersion)
+      : { platform: null, asset: null }
     const requirements = registryVersion?.requires ?? []
     const requirementState = manifest
       ? dependencyStateFor(requirements, manifest)
@@ -1188,8 +1205,8 @@ export class ResourceManagerService {
       active: entry.active,
       path: entry.canonical_path,
       managed_root: entry.managed ? this.pdksDir : null,
-      platform: null,
-      size: null,
+      platform,
+      size: entry.size && entry.size > 0 ? entry.size : asset?.size ?? null,
       source: entry.source || 'local',
       homepage: registryPdk?.homepage ?? '',
       actions,
@@ -1397,7 +1414,7 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
   for (const [platform, assetValue] of Object.entries(readRecord(value))) {
     const asset = readRecord(assetValue)
     assets[platform] = {
-      url: readString(asset.url),
+      url: normalizeRegistryAssetUrl(readString(asset.url)),
       sha256: readString(asset.sha256),
       size: readNumber(asset.size),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
@@ -1405,6 +1422,16 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
     }
   }
   return assets
+}
+
+function normalizeRegistryAssetUrl(url: string): string {
+  if (
+    url === 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/assets/surfer-web-assets-0.7.0-ecos.zip'
+    || url === 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/master/assets/surfer-web-assets-0.7.0-ecos.zip'
+  ) {
+    return SURFER_RELEASE_ASSET_URL
+  }
+  return url
 }
 
 function parsePostInstallSteps(value: unknown): RegistryPostInstallStep[] {
@@ -1453,6 +1480,7 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
       path: readString(record.path),
       installed_at: readString(record.installed_at),
       sha256: readString(record.sha256),
+      size: readOptionalPositiveNumber(record.size),
       detected_executables: readStringArray(record.detected_executables),
       executable: readString(record.executable),
       active: record.active !== false,
@@ -1468,6 +1496,7 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
       pdk_id: readString(record.pdk_id),
       version: readString(record.version),
       sha256: readString(record.sha256),
+      size: readOptionalPositiveNumber(record.size),
       source: readString(record.source),
       source_url: readString(record.source_url),
       canonical_path: readString(record.canonical_path),
@@ -1496,6 +1525,10 @@ function readString(value: unknown): string {
 
 function readNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function readOptionalPositiveNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 function readStringArray(value: unknown): string[] {
@@ -1642,7 +1675,10 @@ function selectToolExecutable(name: string, detected: string[]): string {
 function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
   const capabilities = new Set<string>()
   const normalized = normalizeToolName(entry.name)
-  if (normalized === 'yosys' || normalized === 'oss-cad-suite') capabilities.add('yosys')
+  if (normalized === 'yosys' || normalized === 'oss-cad-suite') {
+    capabilities.add('yosys')
+    capabilities.add('verilator')
+  }
   if (normalized === 'slang') capabilities.add('slang')
   if (normalized === 'verilator') capabilities.add('verilator')
   if (normalized === 'riscv-toolchain') capabilities.add('riscv-toolchain')
@@ -1661,6 +1697,21 @@ function detectToolCapabilities(entry: ToolInventoryEntry): Set<string> {
   return capabilities
 }
 
+async function resolveRuntimeTools(
+  entry: ToolInventoryEntry,
+  capabilities: Set<string>,
+  platform: NodeJS.Platform,
+): Promise<Map<string, string>> {
+  const tools = new Map<string, string>()
+  for (const capability of capabilities) {
+    const executable = await resolveRuntimeExecutable(entry, platform, capability)
+    if (executable) {
+      tools.set(capability, executable)
+    }
+  }
+  return tools
+}
+
 function isFrontendResourceTool(normalizedName: string): boolean {
   return normalizedName.startsWith('ecc-fe-soc-')
     || normalizedName.startsWith('ecc-fe-cpu-')
@@ -1671,15 +1722,27 @@ function isFrontendResourceTool(normalizedName: string): boolean {
 async function resolveRuntimeExecutable(
   entry: ToolInventoryEntry,
   platform: NodeJS.Platform,
+  capability?: string,
 ): Promise<string | null> {
-  const normalized = normalizeToolName(entry.name)
-  const candidates = [
-    entry.executable,
-    ...entry.detected_executables,
-    ...preferredExecutableNames(normalized),
-    `bin/${entry.name}`,
-    entry.name,
-  ].filter(Boolean)
+  const normalized = normalizeToolName(capability ?? entry.name)
+  const preferred = preferredExecutableNames(normalized)
+  const candidates = capability
+    ? [
+        ...preferred,
+        ...entry.detected_executables.filter((executable) => {
+          const name = basename(executable)
+          return preferred.some((candidate) => {
+            return executable === candidate || executable.endsWith(`/${candidate}`) || name === basename(candidate)
+          })
+        }),
+      ].filter(Boolean)
+    : [
+        entry.executable,
+        ...entry.detected_executables,
+        ...preferred,
+        `bin/${entry.name}`,
+        entry.name,
+      ].filter(Boolean)
   const seen = new Set<string>()
 
   for (const candidate of candidates) {

@@ -10793,3 +10793,89 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 目前自动依赖安装按 registry `requires` 字段驱动，依赖资源本身若下载失败，父资源安装也会失败；这是预期行为，但 GUI 后续还可以做更细的失败分组展示。
 - 取消父资源安装时，只会取消当前 active job；如果依赖资源已经单独进入下载阶段，取消语义后续可以继续细化为链式取消。
+
+# 第 165 次 开发
+
+## 开发目标
+
+修复 Resource Manager 资源运行环境和旧资源 URL 两个问题：`test0630a` 的 lint step 不应把 `ECOS_VERILATOR` 指向 Yosys；Surfer 资源不应再从 registry 仓库内的旧 zip 路径下载。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 默认 registry URL 更新为 `Luyoung0001/ecos-registry/main/tool-registry.json`，便于继续使用当前 fork 上的最新资源元数据。
+  - registry asset 解析新增旧 Surfer raw assets URL 迁移，把 `raw.githubusercontent.com/Luyoung0001/ecos-registry/.../assets/surfer-web-assets-0.7.0-ecos.zip` 映射到 `openecos-projects/ecos-resource-assets` release asset。
+  - Runtime env 按具体 capability 分别解析 executable，避免 OSS CAD Suite 资源同时包含 `yosys` 和 `verilator` 时把 `ECOS_VERILATOR` 错误设置为 `bin/yosys`。
+  - `VERILATOR_ROOT` 改为指向 `<tool-root>/share/verilator`，匹配 Verilator wrapper 的实际期望。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 OSS CAD Suite 中 Yosys/Verilator 分别解析测试。
+  - 增加旧 Surfer registry URL 迁移到 release asset URL 的安装测试。
+  - 更新 runtime env 期望，覆盖 Verilator root 解析。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager bug 修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、17 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已检查 `/home/luyoung/test0630a/lint_verilator/report/log.txt`，确认原失败为 Yosys 接收 Verilator `--lint-only` 参数导致。
+- 已检查 `/home/luyoung/.cache/ecos-studio/resource-registry.json`，确认本地旧缓存确实包含旧 Surfer raw assets URL；本次修复会在解析缓存时迁移该 URL。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 本次未重新跑 `test0630a` 完整 all steps；只完成了失败原因定位和 Resource Manager 定向测试。
+
+## 已知后续风险
+
+- 正式上游 registry PR 合并后，`DEFAULT_REGISTRY_URL` 应从 `Luyoung0001` fork 切回上游固定提交或正式发布地址。
+- 旧 GUI 进程如果已经加载了修复前的 dist/main，需要用户重启或重新构建后才能使用本次 TS 源码改动。
+
+# 第 166 次 开发
+
+## 开发目标
+
+修复 Resource Manager 中资源安装后大小显示为 `0 MB` 的问题，重点覆盖托管 PDK `pdk:ics55` 安装后从 inventory 行展示时丢失 registry asset size 的情况。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - `ToolInventoryEntry` 和 `PdkInventoryEntry` 支持可选 `size` 字段，新安装的托管 tool/PDK 会把 registry asset size 写入 manifest。
+  - `pdkEntryToResource()` 对已安装托管 PDK 优先使用 manifest size，缺失时从对应 registry version 的 platform asset 回填 size，避免 `pdk:ics55` 安装后显示 `0 MB`。
+  - `installedToolToResource()` 对无 registry 的本地/托管 tool 也会读取 manifest size；老 manifest 没有 size 时保持未知，不强行写成 0。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 tool/PDK 安装后 resource size 和 manifest size 的断言。
+  - 覆盖老 PDK manifest 没有 size 时仍能从 registry 回填大小的场景。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 未知资源大小不再显示为 `0 MB`，改为 `-`，避免把“未知大小”和“真实 0 字节”混淆。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 更新资源大小格式化测试，确认未知大小显示为 `-`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次资源大小显示修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、17 个测试用例。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：1 个测试文件、14 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已只读检查本机 resource manifest，确认当前已安装 `pdk:ics55` 缺少 size 字段；本次修复会通过 registry 回填显示大小，并让后续新安装写入 size。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未重新下载安装真实 `ics55` PDK；修复通过 Resource Manager 单元测试和本地 manifest/registry 结构检查验证。
+
+## 已知后续风险
+
+- 老 manifest 中已经安装的 tool/PDK 仍不会被原地补写 size，显示时会从 registry 回填；只有用户重新安装或更新后 manifest 才会持久记录 size。
+- 本地手动导入的 PDK 没有 archive 元数据，大小会显示为 `-`，这是预期行为。

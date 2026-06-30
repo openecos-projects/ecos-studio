@@ -211,7 +211,7 @@ describe('pluginToolsRows', () => {
   })
 
   it('formats resource sizes from bytes', () => {
-    expect(formatResourceSize(null)).toEqual({ sizeLabel: '0 MB', sizeMb: 0 })
+    expect(formatResourceSize(null)).toEqual({ sizeLabel: '-', sizeMb: 0 })
     expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '412 MB', sizeMb: 412 })
     expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({ sizeLabel: '2.00 GB', sizeMb: 2048 })
   })

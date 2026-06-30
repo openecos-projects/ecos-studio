@@ -245,6 +245,7 @@ describe('ResourceManagerService', () => {
     await mkdir(ics55Root, { recursive: true })
     await mkdir(resourcesDir, { recursive: true })
     await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(yosysRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
@@ -256,6 +257,7 @@ describe('ResourceManagerService', () => {
     await writeFile(join(duplicateRoot, 'bin', 'duplicate'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(inactiveRoot, 'bin', 'inactive'), '#!/bin/sh\n', 'utf8')
     await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
+    await chmod(join(yosysRoot, 'bin', 'verilator'), 0o755)
     await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
     await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
     await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
@@ -271,6 +273,7 @@ describe('ResourceManagerService', () => {
           version: '2026-05-13',
           path: yosysRoot,
           executable: 'bin/yosys',
+          detected_executables: ['bin/yosys', 'bin/verilator'],
           active: true,
           managed: true,
         },
@@ -411,7 +414,7 @@ describe('ResourceManagerService', () => {
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(yosysRoot)
     expect(env.ECOS_SLANG).toBe(join(slangRoot, 'bin', 'slang'))
     expect(env.ECOS_VERILATOR).toBe(join(verilatorRoot, 'bin', 'verilator'))
-    expect(env.VERILATOR_ROOT).toBe(verilatorRoot)
+    expect(env.VERILATOR_ROOT).toBe(join(verilatorRoot, 'share', 'verilator'))
     expect(env.ECOS_FE_CLI).toBe(join(eccFeRoot, 'bin', 'ecc-fe'))
     expect(env.ECOS_FE_COMPILER_ROOT).toBe(eccFeRoot)
     expect(env.ECOS_FE_RESOURCE_ROOTS).toBe(eccFeSocRoot)
@@ -425,6 +428,50 @@ describe('ResourceManagerService', () => {
     expect(env.KEEP_ME).toBe('yes')
     expect(env.PATH).not.toContain(join(inactiveRoot, 'bin'))
     expect(env.PATH).not.toContain(join(missingRoot, 'bin'))
+  })
+
+  it('resolves OSS CAD Suite Yosys and Verilator executables separately', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const pdksDir = join(root, 'data', 'pdks')
+    const ossRoot = join(toolsDir, 'yosys', '2026-05-13')
+    await mkdir(join(ossRoot, 'bin'), { recursive: true })
+    await mkdir(join(ossRoot, 'share', 'verilator'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(ossRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(ossRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(ossRoot, 'bin', 'yosys'), 0o755)
+    await chmod(join(ossRoot, 'bin', 'verilator'), 0o755)
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:yosys': {
+          type: 'tool',
+          name: 'yosys',
+          version: '2026-05-13',
+          path: ossRoot,
+          executable: 'bin/yosys',
+          detected_executables: ['bin/yosys', 'bin/verilator'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir,
+    })
+
+    const env = await service.createRuntimeEnv({ PATH: '/usr/bin' }, { platform: 'linux' })
+
+    expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBe(ossRoot)
+    expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBe(ossRoot)
+    expect(env.ECOS_VERILATOR).toBe(join(ossRoot, 'bin', 'verilator'))
+    expect(env.ECOS_VERILATOR).not.toBe(join(ossRoot, 'bin', 'yosys'))
+    expect(env.VERILATOR_ROOT).toBe(join(ossRoot, 'share', 'verilator'))
+    expect(env.PATH?.split(':')).toEqual([join(ossRoot, 'bin'), '/usr/bin'])
   })
 
   it('recovers runtime tools when an old manifest points at the wrong executable path', async () => {
@@ -540,6 +587,7 @@ describe('ResourceManagerService', () => {
       status: 'installed',
       installed_version: '0.61',
       path: join(root, 'data', 'tools', 'yosys', '0.61'),
+      size: archive.size,
       actions: ['uninstall'],
     })
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({
@@ -560,6 +608,7 @@ describe('ResourceManagerService', () => {
     expect(manifest.installed['tool:yosys']).toMatchObject({
       version: '0.61',
       managed: true,
+      size: archive.size,
       detected_executables: ['bin/yosys'],
       executable: 'bin/yosys',
     })
@@ -622,6 +671,60 @@ describe('ResourceManagerService', () => {
       executable: 'index.html',
       detected_executables: [],
     })
+    expect(verifySha256).toHaveBeenCalledTimes(1)
+  })
+
+  it('migrates old registry Surfer asset URLs to the release asset host', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createSurferAssetsZip(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'surfer',
+          display_name: 'Surfer',
+          description: 'Waveform viewer web assets',
+          category: 'viewer',
+          homepage: 'https://gitlab.com/surfer-project/surfer',
+          versions: [
+            {
+              version: '0.7.0-ecos',
+              platforms: {
+                'all-platform': {
+                  url: 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/assets/surfer-web-assets-0.7.0-ecos.zip',
+                  sha256: 'fixture-surfer-sha',
+                  size: 1035,
+                  strip_prefix: 'surfer-web-assets',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe('https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip')
+      return new Response(await readFile(archive.path), { status: 200 })
+    })
+    const verifySha256 = vi.fn(async () => true)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl: fetchImpl as typeof fetch,
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.installResource('tool:surfer', '0.7.0-ecos')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:surfer',
+      version: '0.7.0-ecos',
+    })
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(verifySha256).toHaveBeenCalledTimes(1)
   })
 
@@ -1077,6 +1180,7 @@ describe('ResourceManagerService', () => {
       active_version: '1.10.100',
       path: destination,
       managed_root: join(root, 'data', 'pdks'),
+      size: archive.size,
       source: 'registry',
       actions: ['validate', 'uninstall'],
       health: expect.objectContaining({
@@ -1113,6 +1217,7 @@ describe('ResourceManagerService', () => {
       pdk_id: 'ics55',
       version: '1.10.100',
       sha256: archive.sha256,
+      size: archive.size,
       source: 'registry',
       source_url: `file://${archive.path}`,
       canonical_path: destination,
@@ -1211,6 +1316,7 @@ describe('ResourceManagerService', () => {
       installed_version: '1.10.100',
       available_versions: ['1.10.101', '1.10.100'],
       active: true,
+      size: archive.size,
       actions: ['validate', 'update', 'uninstall'],
     })
     await expect(service.updateResource('pdk:ics55')).resolves.toEqual({
@@ -1223,6 +1329,7 @@ describe('ResourceManagerService', () => {
       installed_version: '1.10.101',
       active: true,
       active_version: '1.10.101',
+      size: archive.size,
       actions: ['validate', 'uninstall'],
     })
   })
