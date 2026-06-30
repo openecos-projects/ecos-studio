@@ -55,6 +55,11 @@ describe('PluginToolsView resource table layout', () => {
 
   it('aligns row metadata to the primary resource name line', () => {
     expect(pluginToolsViewSource).toContain('class="resource-status-cell"')
+    expect(pluginToolsViewSource).toContain('--resource-table-columns:')
+    expect(pluginToolsViewSource).toMatch(
+      /\.resource-table-head,\s*\.resource-row\s*\{[\s\S]*grid-template-columns:\s*var\(--resource-table-columns\);/,
+    )
+    expect(pluginToolsViewSource).not.toContain('minmax(70px, auto)')
     expect(pluginToolsViewSource).toMatch(
       /\.resource-row\s*\{[\s\S]*align-items:\s*start;/,
     )
@@ -66,6 +71,9 @@ describe('PluginToolsView resource table layout', () => {
     )
     expect(pluginToolsViewSource).toMatch(
       /\.resource-muted\s*\{[\s\S]*min-height:\s*var\(--resource-row-primary-line\);/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.row-actions\s*\{[\s\S]*justify-content:\s*flex-start;/,
     )
   })
 

@@ -1121,15 +1121,21 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-table {
+  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr) minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
   width: 100%;
 }
 
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(150px, 2fr) minmax(68px, 0.6fr) minmax(58px, 0.5fr) minmax(88px, 0.7fr) minmax(70px, auto);
+  grid-template-columns: var(--resource-table-columns);
   align-items: center;
   gap: 0;
+}
+
+.resource-table-head > *,
+.resource-row > * {
+  min-width: 0;
 }
 
 .resource-table-head {
@@ -1337,7 +1343,7 @@ async function openDocs(): Promise<void> {
 .row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -1919,7 +1925,7 @@ async function openDocs(): Promise<void> {
 
   .resource-table-head,
   .resource-row {
-    grid-template-columns: 28px minmax(130px, 1fr) minmax(74px, auto) minmax(68px, auto);
+    --resource-table-columns: 28px minmax(130px, 1fr) 84px 96px;
   }
 
   .resource-table-head span:nth-child(3),
