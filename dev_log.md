@@ -10456,7 +10456,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户当前修复请求执行；未执行 merge、rebase、reset、clean。
 - 未做真实 GUI 截图验证；需要用户启动 GUI 后确认 Resource Manager 在不同窗口尺寸下的观感。
 
 ## 已知后续风险
@@ -11230,3 +11230,39 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `/home/luyoung/surfer` 当前存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
 - 如果未来 ECOS 需要 Spade translator，需要先修复 Surfer 上游 Spade 依赖链，而不是继续使用这个无 Spade 的 Web assets 构建变体。
+
+# 第 176 次 开发
+
+## 开发目标
+
+继续修复 `/home/luyoung/surfer` 的 ECOS Surfer assets GitHub Actions 构建失败问题：Spade 依赖链已绕开后，新的失败点变为 `time v0.3.34` 在当前 GitHub runner 默认 Rust 上触发 E0282 类型推断错误。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 将 Rust 安装步骤改为固定安装并默认使用 `rustc 1.79.0`。
+  - 安装 `wasm32-unknown-unknown` target 时直接绑定到 `1.79.0` toolchain。
+  - 输出 `rustc -V` 和 `cargo -V`，方便后续 Actions 日志确认实际构建 toolchain。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Rust toolchain 固定修复。
+
+## 验证情况
+
+- 已阅读本次 Actions 失败日志，确认当前失败已经进入 `cargo build` 阶段，不再是之前的 `spade -> tracing-tree` metadata 失败。
+- 已确认失败 crate 为 Cargo.lock 中锁定的 `time v0.3.34`。
+- 已检查 `/home/luyoung/surfer/.gitlab-ci.yml`，上游 GitLab CI 使用 `rust:latest` 但该分支生成 lockfile 的时间早于当前 runner 默认 Rust；本次选择固定较旧 Rust toolchain，避免升级 Cargo.lock 引入更大变动。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/surfer` 当前仍存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
+- 如果后续依赖要求更高 MSRV，可能需要改为更新 `Cargo.lock` 中的 `time` 及相关依赖，而不是继续固定旧 toolchain。
