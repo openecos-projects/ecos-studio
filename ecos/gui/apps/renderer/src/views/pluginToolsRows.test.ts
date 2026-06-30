@@ -103,7 +103,7 @@ describe('pluginToolsRows', () => {
 
     expect(row.statusKind).toBe('installing')
     expect(row.statusText).toBe('Post-install')
-    expect(row.statusIcon).toBe('ri-settings-3-line')
+    expect(row.statusIcon).toBeNull()
   })
 
   it('formats resource sizes from bytes', () => {

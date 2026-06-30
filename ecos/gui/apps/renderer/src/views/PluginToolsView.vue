@@ -1308,6 +1308,9 @@ async function openDocs(): Promise<void> {
 }
 
 .status-pill.installing {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 7px;
   color: var(--info-color);
   background: var(--info-bg);
 }

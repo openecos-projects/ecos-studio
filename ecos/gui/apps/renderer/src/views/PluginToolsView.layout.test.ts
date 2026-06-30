@@ -78,6 +78,9 @@ describe('PluginToolsView resource table layout', () => {
       /\.row-actions\s*\{[\s\S]*justify-content:\s*flex-start;/,
     )
     expect(pluginToolsViewSource).toMatch(
+      /\.status-pill\.installing\s*\{[\s\S]*font-size:\s*10px;[\s\S]*padding:\s*0 7px;/,
+    )
+    expect(pluginToolsViewSource).toMatch(
       /@media \(max-width: 767px\)\s*\{[\s\S]*--resource-table-columns:\s*28px minmax\(88px,\s*1fr\) minmax\(96px,\s*auto\) minmax\(68px,\s*auto\);/,
     )
   })

@@ -120,7 +120,7 @@ function errorStatusText(resource: ResourceItem): string {
   return 'Error'
 }
 
-function progressStatus(progress: InstallProgress | undefined): { text: string; icon: string } {
+function progressStatus(progress: InstallProgress | undefined): { text: string; icon: string | null } {
   switch (progress?.phase) {
     case 'downloading':
       return { text: 'Downloading', icon: 'ri-download-line' }
@@ -129,7 +129,7 @@ function progressStatus(progress: InstallProgress | undefined): { text: string; 
     case 'extracting':
       return { text: 'Extracting', icon: 'ri-box-3-line' }
     case 'post_install':
-      return { text: 'Post-install', icon: 'ri-settings-3-line' }
+      return { text: 'Post-install', icon: null }
     case 'uninstalling':
       return { text: 'Removing', icon: 'ri-delete-bin-line' }
     case 'done':
