@@ -10967,3 +10967,37 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `ecc-fe-latest` workflow 仍依赖 `ecc-fe` 仓库中的 `ECOS_RESOURCE_ASSETS_TOKEN` secret；如果 secret 未配置或权限不足，latest release 不会被更新。
 - Resource Manager 在 release metadata/sha256 暂时不可达时仍会使用 registry 静态兜底值，因此短时间内可能无法发现最新包。
+
+# 第 169 次 开发
+
+## 开发目标
+
+修复 `ecc-fe` latest release GitHub Actions 在打包阶段失败的问题。失败原因是 `find` 命令把 `-prune` 和 `-delete` 放在同一条表达式里；GNU find 中 `-delete` 会隐式启用 `-depth`，导致 `-prune` 失效并直接报错。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 将目录清理和文件清理拆成两条 `find` 命令。
+  - 第一条只删除 `.git`、`.pytest_cache`、`__pycache__` 目录。
+  - 第二条只删除 `*.pyc` 和 `trace_hart_00.dasm` 文件，避免 `-prune` 与 `-delete` 冲突。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Actions 修复。
+
+## 验证情况
+
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git diff --check`，通过。
+- 已通过 diff 确认 workflow 修改只涉及失败的 `find` 清理命令。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行打包 workflow；需要 push 后由 GitHub Actions 重新运行。
+
+## 已知后续风险
+
+- 如果后续 Actions 进入发布阶段，仍需要 `ECOS_RESOURCE_ASSETS_TOKEN` secret 具备写入 `openecos-projects/ecos-resource-assets` release asset 的权限。
