@@ -172,6 +172,7 @@ const desktopBridge = {
     validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
     removePdkReference,
     importPdkPath,
+    importLocalPath: async () => { throw new Error('not implemented') },
     refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
     onProgress: () => () => undefined,
   },

@@ -33,6 +33,7 @@ export type {
 } from './contracts/desktopCli.ts';
 export type {
   ResourceAction,
+  ResourceImportLocalRequest,
   ResourceImportPdkRequest,
   ResourceInfo,
   ResourceInstallRequest,

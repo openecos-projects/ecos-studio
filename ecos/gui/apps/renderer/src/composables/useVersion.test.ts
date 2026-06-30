@@ -131,6 +131,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
       removePdkReference: async (resourceId) => ({ status: 'removed', resource_id: resourceId }),
       importPdkPath: async () => { throw new Error('not implemented') },
+      importLocalPath: async () => { throw new Error('not implemented') },
       refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
       onProgress: () => () => undefined,
     },

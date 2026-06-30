@@ -35,6 +35,7 @@ export {
 export {
   activatePdkApi,
   getToolStatusApi,
+  importLocalResourcePathApi,
   importPdkPathApi,
   installResourceApi,
   installToolApi,
