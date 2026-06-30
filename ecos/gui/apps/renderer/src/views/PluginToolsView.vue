@@ -1925,7 +1925,7 @@ async function openDocs(): Promise<void> {
 
   .resource-table-head,
   .resource-row {
-    --resource-table-columns: 28px minmax(130px, 1fr) 84px 96px;
+    --resource-table-columns: 28px minmax(88px, 1fr) minmax(96px, auto) minmax(68px, auto);
   }
 
   .resource-table-head span:nth-child(3),

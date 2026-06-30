@@ -75,6 +75,9 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).toMatch(
       /\.row-actions\s*\{[\s\S]*justify-content:\s*flex-start;/,
     )
+    expect(pluginToolsViewSource).toMatch(
+      /@media \(max-width: 767px\)\s*\{[\s\S]*--resource-table-columns:\s*28px minmax\(88px,\s*1fr\) minmax\(96px,\s*auto\) minmax\(68px,\s*auto\);/,
+    )
   })
 
   it('renders mini progress with a transform driven by the row progress percent', () => {
