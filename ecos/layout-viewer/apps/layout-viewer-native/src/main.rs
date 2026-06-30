@@ -16,13 +16,12 @@ use eframe::egui;
 use flate2::read::GzDecoder;
 use layout_display::{Color, DisplayModel, LayerStyle, Pattern, ResolvedDisplayLayer};
 use layout_render::{
-    classify_lod, DrawItem, LodHysteresisState, LodLevel, LodStats, PickHit, PickHitTarget,
-    PickRequest, RenderPlan, RenderPlanSource, RenderPlane, RenderPlanner, RenderSettings,
-    Viewport,
+    classify_lod, DrawItem, LodHysteresisState, LodLevel, LodStats, PickHit, PickRequest,
+    RenderPlan, RenderPlanSource, RenderPlane, RenderPlanner, RenderSettings, Viewport,
 };
 use layoutdb::{
-    CellViewState, HierarchyPolicy, InstancePath, LayoutSession, PackageLayoutSource, Rect,
-    ShapeKind, ViewportLoadBatch,
+    CellViewState, HierarchyPolicy, LayoutSession, PackageLayoutSource, Rect, ShapeKind,
+    ViewportLoadBatch,
 };
 use serde_json::Value;
 
@@ -1233,15 +1232,6 @@ fn sync_hierarchy_policy_from_tuning(policy: &mut HierarchyPolicy, tuning: LodTu
     policy.max_depth = tuning.hierarchy_expand_depth.max(1);
 }
 
-fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
-    if hit.instance_path.is_empty() {
-        return None;
-    }
-    match hit.target {
-        PickHitTarget::Shape | PickHitTarget::Instance { .. } => Some(hit.instance_path.clone()),
-    }
-}
-
 #[cfg(test)]
 fn selection_summary_text_with_layer(hit: &PickHit, layer: SelectionLayerMetadata<'_>) -> String {
     selection_inspector_rows(hit, None, None, layer)
@@ -1263,26 +1253,8 @@ fn selection_inspector_rows(
     net_name: Option<&str>,
     layer: SelectionLayerMetadata<'_>,
 ) -> Vec<(&'static str, String)> {
-    let target = match hit.target {
-        PickHitTarget::Shape => "shape".to_owned(),
-        PickHitTarget::Instance {
-            parent_cell,
-            child_cell,
-            instance_id,
-            array_column,
-            array_row,
-        } => format!(
-            "instance id={} parent={} child={} array={},{}",
-            instance_id,
-            parent_cell.raw(),
-            child_cell.raw(),
-            array_column,
-            array_row
-        ),
-    };
     let (source_kind, source_file) = source_trace_for_hit(hit);
     let mut rows = vec![
-        ("Target", target),
         ("Source Kind", source_kind.to_owned()),
         ("Source File", source_file.to_owned()),
         ("Source ID", hit.source_id.to_string()),
@@ -1300,9 +1272,6 @@ fn selection_inspector_rows(
             "Layer Type",
             layer.layer_type.unwrap_or("Unknown").to_owned(),
         ),
-        ("Shape Kind", shape_kind_label(hit.kind).to_owned()),
-        ("Cell", hit.cell.raw().to_string()),
-        ("Depth", hit.depth.to_string()),
         (
             "Display BBox",
             format!(
@@ -1310,8 +1279,6 @@ fn selection_inspector_rows(
                 hit.bbox.x1, hit.bbox.y1, hit.bbox.x2, hit.bbox.y2
             ),
         ),
-        ("Instance Path", instance_path_summary(&hit.instance_path)),
-        ("Object Path", object_path_summary(&hit.object_path)),
     ]);
     rows
 }
@@ -1342,7 +1309,7 @@ fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
             "design/regular_wires.json | design/special_wires.json | design/io_pins.json",
         ),
         ShapeKind::IoPin if is_hierarchy_cell_shape(hit) => {
-            ("cell_master_pin", "tech/cell_masters.json")
+            ("instance_pin", "tech/cell_masters.json")
         }
         ShapeKind::IoPin => ("io_pin", "design/io_pins.json"),
         ShapeKind::Blockage => ("blockage", "design/blockages.json"),
@@ -1375,73 +1342,6 @@ fn hierarchy_pin_shape_index(hit: &PickHit) -> Option<usize> {
         return None;
     };
     Some(shape.shape_index)
-}
-
-fn shape_kind_label(kind: ShapeKind) -> &'static str {
-    match kind {
-        ShapeKind::Die => "die",
-        ShapeKind::Core => "core",
-        ShapeKind::Instance => "instance",
-        ShapeKind::RegularWire => "regular_wire",
-        ShapeKind::SpecialWire => "special_wire",
-        ShapeKind::Via => "via",
-        ShapeKind::IoPin => "io_pin",
-        ShapeKind::Blockage => "blockage",
-        ShapeKind::Fill => "fill",
-        ShapeKind::Region => "region",
-        ShapeKind::Row => "row",
-        ShapeKind::Track => "track",
-        ShapeKind::GCellGrid => "gcell_grid",
-    }
-}
-
-fn instance_path_summary(path: &InstancePath) -> String {
-    if path.is_empty() {
-        return "top".to_owned();
-    }
-    path.elements()
-        .iter()
-        .map(|element| {
-            format!(
-                "{}:{}->{}[{},{}]",
-                element.instance_id,
-                element.parent_cell.raw(),
-                element.child_cell.raw(),
-                element.array_column,
-                element.array_row
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
-fn object_path_summary(path: &layoutdb::ObjectPath) -> String {
-    match &path.target {
-        layoutdb::ObjectPathTarget::Shape(shape) => {
-            format!(
-                "shape cell={} index={} source={}",
-                shape.cell.raw(),
-                shape.shape_index,
-                shape.source_id
-            )
-        }
-        layoutdb::ObjectPathTarget::Instance {
-            parent_cell,
-            instance_id,
-            source_id,
-            child_cell,
-            array_column,
-            array_row,
-        } => format!(
-            "instance id={} source={} parent={} child={} array={},{}",
-            instance_id,
-            source_id,
-            parent_cell.raw(),
-            child_cell.raw(),
-            array_column,
-            array_row
-        ),
-    }
 }
 
 fn canvas_interaction_sense() -> egui::Sense {
@@ -2159,15 +2059,6 @@ impl LayoutViewerV2App {
                                             ui.end_row();
                                         }
                                     });
-                                let enter_path = enter_path_for_hit(&hit);
-                                if ui
-                                    .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
-                                    .clicked()
-                                {
-                                    if let Some(path) = enter_path {
-                                        self.enter_instance_path(&mut loaded, path);
-                                    }
-                                }
                             } else {
                                 ui.label("No object selected");
                             }
@@ -2282,13 +2173,6 @@ impl LayoutViewerV2App {
         self.last_render_plan_interaction_coarse = false;
         self.last_plan_reused = false;
         self.layer_counts_cache.clear();
-    }
-
-    fn enter_instance_path(&mut self, loaded: &mut LoadedViewerState, path: InstancePath) {
-        loaded.cell_view = CellViewState::from_path(loaded.cell_view.context_cell(), path);
-        self.selected = None;
-        self.clear_render_history();
-        focus_view_on_cell_bbox(&mut self.view, loaded.session.db(), &loaded.cell_view);
     }
 }
 
@@ -3199,15 +3083,15 @@ mod tests {
             .iter()
             .any(|(label, value)| *label == "Layer Type" && value == "ROUTING"));
         assert!(!rows.iter().any(|(label, _value)| *label == "Display Layer"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Shape Kind"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Target"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Cell"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Depth"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Instance Path"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Object Path"));
         assert!(rows
             .iter()
             .any(|(label, value)| *label == "Display BBox" && value == "2, 2, 8, 8"));
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Instance Path" && value.contains("10") && value.contains("20")
-        }));
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Object Path" && value.contains("shape") && value.contains("source=9")
-        }));
     }
 
     #[test]
@@ -3259,7 +3143,7 @@ mod tests {
 
         assert!(rows
             .iter()
-            .any(|(label, value)| *label == "Source Kind" && value == "cell_master_pin"));
+            .any(|(label, value)| *label == "Source Kind" && value == "instance_pin"));
         assert!(rows.iter().any(|(label, value)| {
             *label == "Source File" && value == "tech/cell_masters.json"
         }));
@@ -4021,18 +3905,8 @@ mod tests {
     }
 
     #[test]
-    fn enter_path_for_shape_hit_uses_shape_instance_path() {
+    fn selection_summary_omits_internal_hierarchy_fields() {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
-        let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
-
-        let enter_path = super::enter_path_for_hit(&hit).expect("shape path should be enterable");
-
-        assert_eq!(enter_path, leaf_view.specific_path().clone());
-    }
-
-    #[test]
-    fn selection_summary_includes_target_and_path_depth() {
-        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
         let text = super::selection_summary_text_with_layer(
@@ -4043,9 +3917,11 @@ mod tests {
             },
         );
 
-        assert!(text.contains("target: shape"));
-        assert!(text.contains("depth: 2"));
-        assert!(text.contains(&format!("cell: {}", db.cell_by_name("leaf").unwrap().raw())));
+        assert!(!text.contains("target:"));
+        assert!(!text.contains("cell:"));
+        assert!(!text.contains("depth:"));
+        assert!(!text.contains("instance path:"));
+        assert!(!text.contains("object path:"));
         assert!(text.contains("layer: M1"));
         assert!(text.contains("layer id: 1"));
         assert!(text.contains("layer type: ROUTING"));
