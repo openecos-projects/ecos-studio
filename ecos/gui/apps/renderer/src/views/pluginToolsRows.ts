@@ -4,6 +4,7 @@ export type ResourceType = 'tool' | 'pdk'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
 export type RowAction = 'install' | 'update' | 'replace' | 'cancel' | 'uninstall' | 'remove_reference' | 'none'
 export type PrimaryRowAction = 'install' | 'update' | 'replace'
+export type RemovalRowAction = 'uninstall' | 'remove_reference'
 
 export interface ResourceActionExecutor {
   installResource(resourceId: string): Promise<void>
@@ -199,6 +200,17 @@ export function primaryActionForRow(row: ResourceRow): PrimaryRowAction | null {
   const action = rowActionForStatus(row.resource)
   if (action === 'install' || action === 'update' || action === 'replace') {
     return action
+  }
+  return null
+}
+
+export function removalActionForRow(row: ResourceRow): RemovalRowAction | null {
+  const action = rowActionForStatus(row.resource)
+  if (action === 'uninstall' || action === 'remove_reference') {
+    return action
+  }
+  if (action === 'replace' && row.resource.actions.includes('remove_reference')) {
+    return 'remove_reference'
   }
   return null
 }

@@ -6,6 +6,7 @@ import {
   managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
+  removalActionForRow,
   rowActionForStatus,
   selectedResourceMetaText,
   runBatchDownload,
@@ -162,7 +163,7 @@ describe('pluginToolsRows', () => {
         path: '/tmp/oss-cad-suite',
         managed_root: '/home/user/.local/share/ecos-studio/tools',
         source: 'local',
-        actions: ['install'],
+        actions: ['install', 'remove_reference'],
         health: { managed: false },
       }),
       undefined,
@@ -172,12 +173,42 @@ describe('pluginToolsRows', () => {
     expect(row.statusText).toBe('Local')
     expect(rowActionForStatus(row.resource)).toBe('replace')
     expect(primaryActionForRow(row)).toBe('replace')
+    expect(removalActionForRow(row)).toBe('remove_reference')
     expect(selectedResourceMetaText(row)).toBe('Replace with managed v2026-05-13')
 
     await createPrimaryActionTask(row, { installResource, updateResource })
 
     expect(installResource).toHaveBeenCalledWith('tool:yosys')
     expect(updateResource).not.toHaveBeenCalled()
+  })
+
+  it('maps local unmanaged tools without install action to removable local rows', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: '0.66+154',
+        available_versions: ['2026-05-13'],
+        active_version: '0.66+154',
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['remove_reference'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.statusText).toBe('Local')
+    expect(rowActionForStatus(row.resource)).toBe('remove_reference')
+    expect(primaryActionForRow(row)).toBeNull()
+    expect(removalActionForRow(row)).toBe('remove_reference')
   })
 
   it('runs batch download for selected available PDKs and updateable tools', async () => {

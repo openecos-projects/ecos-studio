@@ -188,6 +188,7 @@
                     <template
                       v-if="
                         rowActionForStatus(row.resource) !== 'none' ||
+                        removalActionForRow(row) !== null ||
                         (
                           row.statusKind !== 'installing' &&
                           (row.actions.includes('activate') || row.actions.includes('validate'))
@@ -258,14 +259,14 @@
                         <i class="ri-shield-check-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-if="['uninstall', 'remove_reference'].includes(rowActionForStatus(row.resource))"
+                        v-if="removalActionForRow(row) !== null"
                         type="button"
                         class="row-action-btn icon-only danger-outlined"
-                        :data-title="rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall'"
-                        @click.stop="handleRowUninstall(row)"
+                        :data-title="removalActionForRow(row) === 'remove_reference' ? 'Remove' : 'Uninstall'"
+                        @click.stop="handleRowRemove(row)"
                       >
                         <i
-                          :class="rowActionForStatus(row.resource) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
+                          :class="removalActionForRow(row) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
                           aria-hidden="true"
                         ></i>
                       </button>
@@ -357,6 +358,7 @@ import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platf
 import {
   primaryActionForRow,
   resourceToRow,
+  removalActionForRow,
   resolveRowInstallPath,
   rowActionForStatus,
   selectedResourceMetaText,
@@ -561,8 +563,9 @@ async function handlePdkValidate(row: ResourceRow): Promise<void> {
   }
 }
 
-async function handleRowUninstall(row: ResourceRow): Promise<void> {
-  const action = rowActionForStatus(row.resource)
+async function handleRowRemove(row: ResourceRow): Promise<void> {
+  const action = removalActionForRow(row)
+  if (!action) return
   const isDestructive = action === 'uninstall'
   const confirmMsg = isDestructive
     ? `Are you sure you want to uninstall "${row.name}"? This action cannot be undone.`
@@ -570,7 +573,11 @@ async function handleRowUninstall(row: ResourceRow): Promise<void> {
   if (!confirm(confirmMsg)) return
 
   if (action === 'remove_reference') {
-    await pluginStore.removePdkReference(row.id)
+    if (row.type === 'pdk') {
+      await pluginStore.removePdkReference(row.id)
+      return
+    }
+    await pluginStore.uninstallResource(row.id)
     return
   }
   await pluginStore.uninstallResource(row.id)

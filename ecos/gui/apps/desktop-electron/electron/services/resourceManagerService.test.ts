@@ -483,7 +483,7 @@ describe('ResourceManagerService', () => {
       active: true,
       active_version: '0.66+154',
       path: localYosys,
-      actions: ['install'],
+      actions: ['install', 'remove_reference'],
       health: expect.objectContaining({
         managed: false,
       }),
@@ -515,7 +515,7 @@ describe('ResourceManagerService', () => {
     await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
       status: 'installed',
       source: 'local',
-      actions: [],
+      actions: ['remove_reference'],
       health: expect.objectContaining({
         managed: false,
       }),
@@ -597,10 +597,40 @@ describe('ResourceManagerService', () => {
       source: 'local',
       installed_version: '0.66+154',
       path: localYosys,
-      actions: ['install'],
+      actions: ['install', 'remove_reference'],
       health: expect.objectContaining({
         managed: false,
       }),
+    })
+  })
+
+  it('removes an unmanaged local tool reference without deleting the local directory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(localYosys, 'bin'), { recursive: true })
+    await writeFile(join(localYosys, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeYosysRegistry(registryPath)
+    await writeTestManifest(root, {
+      'tool:yosys': localYosysEntry(localYosys),
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+    })
+
+    await expect(service.uninstallResource('tool:yosys')).resolves.toEqual({
+      status: 'removed',
+      resource_id: 'tool:yosys',
+    })
+
+    await expect(readFile(join(localYosys, 'bin', 'yosys'), 'utf8')).resolves.toBe('#!/bin/sh\n')
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'available',
+      source: 'registry',
+      installed_version: null,
+      actions: ['install'],
     })
   })
 

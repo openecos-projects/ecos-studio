@@ -334,7 +334,9 @@ export class ResourceManagerService {
       throw new Error(`Tool '${name}' is not installed`)
     }
     if (!entry.managed) {
-      throw new Error(`Tool '${name}' is unmanaged and cannot be uninstalled`)
+      delete manifest.installed[resourceId]
+      await this.writeManifest(manifest)
+      return { status: 'removed', resource_id: resourceId }
     }
     await rm(entry.path, { force: true, recursive: true })
     delete manifest.installed[resourceId]
@@ -926,7 +928,7 @@ export class ResourceManagerService {
         actions = status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']
       } else {
         status = 'installed'
-        actions = asset ? ['install'] : []
+        actions = asset ? ['install', 'remove_reference'] : ['remove_reference']
       }
     }
 
@@ -974,7 +976,7 @@ export class ResourceManagerService {
       size: null,
       source: 'local',
       homepage: '',
-      actions: entry.managed ? ['uninstall'] : [],
+      actions: entry.managed ? ['uninstall'] : ['remove_reference'],
       health: toolHealth(entry),
       error: null,
     }

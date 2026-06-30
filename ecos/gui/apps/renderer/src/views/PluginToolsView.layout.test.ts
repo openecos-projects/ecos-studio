@@ -82,6 +82,8 @@ describe('PluginToolsView resource table layout', () => {
   it('renders local tool replace controls and copy separately from updates', () => {
     expect(pluginToolsViewSource).toContain("rowActionForStatus(row.resource) === 'replace'")
     expect(pluginToolsViewSource).toContain('data-title="Replace"')
+    expect(pluginToolsViewSource).toContain('removalActionForRow(row)')
+    expect(pluginToolsViewSource).toContain('handleRowRemove(row)')
     expect(pluginToolsViewSource).toContain('selectedResourceMetaText(row)')
     expect(pluginToolsViewSource).toContain(
       'Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.',
