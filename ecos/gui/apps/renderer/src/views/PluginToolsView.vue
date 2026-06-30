@@ -167,7 +167,7 @@
 
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
-                  <span>
+                  <span class="resource-status-cell">
                     <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
                     <span
                       v-if="row.progressPercent !== null"
@@ -1144,6 +1144,7 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-row {
+  --resource-row-primary-line: 22px;
   width: 100%;
   min-height: 56px;
   padding: 8px 12px;
@@ -1152,6 +1153,7 @@ async function openDocs(): Promise<void> {
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
+  align-items: start;
   text-align: left;
   transition: background 0.15s ease;
 }
@@ -1173,6 +1175,7 @@ async function openDocs(): Promise<void> {
   display: grid;
   width: 18px;
   height: 18px;
+  margin-top: 7px;
   place-items: center;
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -1188,7 +1191,7 @@ async function openDocs(): Promise<void> {
 
 .resource-name-cell {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
 }
 
@@ -1224,6 +1227,7 @@ async function openDocs(): Promise<void> {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 750;
+  line-height: var(--resource-row-primary-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1232,16 +1236,26 @@ async function openDocs(): Promise<void> {
   display: block;
   overflow: hidden;
   max-width: min(260px, 100%);
-  margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.resource-row > .resource-muted,
+.resource-status-cell,
+.row-actions {
+  align-self: start;
+}
+
 .resource-muted {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--resource-row-primary-line);
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.2;
 }
 
 /* ---- Pills ---- */

@@ -53,6 +53,22 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).not.toContain('.resource-table {\n  min-width: 680px;')
   })
 
+  it('aligns row metadata to the primary resource name line', () => {
+    expect(pluginToolsViewSource).toContain('class="resource-status-cell"')
+    expect(pluginToolsViewSource).toMatch(
+      /\.resource-row\s*\{[\s\S]*align-items:\s*start;/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.resource-row\s*>\s*\.resource-muted,\s*\.resource-status-cell,\s*\.row-actions\s*\{[\s\S]*align-self:\s*start;/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.resource-copy strong\s*\{[\s\S]*line-height:\s*var\(--resource-row-primary-line\);/,
+    )
+    expect(pluginToolsViewSource).toMatch(
+      /\.resource-muted\s*\{[\s\S]*min-height:\s*var\(--resource-row-primary-line\);/,
+    )
+  })
+
   it('renders mini progress with a transform driven by the row progress percent', () => {
     expect(pluginToolsViewSource).toContain(
       ":style=\"{ '--progress': row.progressPercent / 100 }\"",
