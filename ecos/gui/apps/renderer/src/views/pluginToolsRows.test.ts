@@ -11,6 +11,7 @@ import {
   selectedResourceMetaText,
   runBatchDownload,
   createPrimaryActionTask,
+  canImportLocalResource,
 } from './pluginToolsRows'
 
 function resource(overrides: Partial<ResourceItem>): ResourceItem {
@@ -257,6 +258,41 @@ describe('pluginToolsRows', () => {
     expect(installResource).toHaveBeenCalledWith('pdk:ics55')
     expect(updateResource).toHaveBeenCalledTimes(1)
     expect(updateResource).toHaveBeenCalledWith('tool:yosys')
+  })
+
+  it('allows local import for tool and PDK rows that are not currently mutating', () => {
+    expect(
+      canImportLocalResource(resourceToRow(resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        status: 'available',
+        actions: ['install'],
+      }), undefined)),
+    ).toBe(true)
+    expect(
+      canImportLocalResource(resourceToRow(resource({
+        id: 'pdk:ics55',
+        type: 'pdk',
+        status: 'available',
+        actions: ['install'],
+      }), undefined)),
+    ).toBe(true)
+    expect(
+      canImportLocalResource(resourceToRow(resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        status: 'installing',
+        actions: [],
+      }), undefined)),
+    ).toBe(false)
+    expect(
+      canImportLocalResource(resourceToRow(resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        status: 'uninstalling',
+        actions: [],
+      }), undefined)),
+    ).toBe(false)
   })
 
   it('derives managed install location from downloadable resource types', () => {

@@ -4,6 +4,7 @@ const resourcesBridge = vi.hoisted(() => ({
   activatePdk: vi.fn(),
   cancel: vi.fn(),
   get: vi.fn(),
+  importLocalPath: vi.fn(),
   importPdkPath: vi.fn(),
   install: vi.fn(),
   list: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/platform/desktop', () => ({
 
 import {
   cancelResourceApi,
+  importLocalResourcePathApi,
   importPdkPathApi,
   resourceJobToInstallProgress,
   resourceListToResources,
@@ -232,6 +234,39 @@ describe('Resource Manager tool API adapter', () => {
 
     expect(resourcesBridge.importPdkPath).toHaveBeenCalledWith({
       path: '/tmp/pdks/local55',
+    })
+  })
+
+  it('imports row-bound local resource paths through the desktop resource bridge', async () => {
+    const imported = {
+      id: 'tool:yosys',
+      type: 'tool' as const,
+      name: 'yosys',
+      display_name: 'Yosys',
+      description: 'RTL synthesis',
+      category: 'synthesis',
+      status: 'installed' as const,
+      installed_version: '',
+      available_versions: ['2026-05-13'],
+      active_version: '',
+      active: true,
+      path: '/tmp/oss-cad-suite',
+      managed_root: null,
+      platform: null,
+      size: null,
+      source: 'local',
+      homepage: '',
+      actions: ['install' as const, 'remove_reference' as const],
+      health: { managed: false },
+      error: null,
+    }
+    resourcesBridge.importLocalPath.mockResolvedValue(imported)
+
+    await expect(importLocalResourcePathApi('tool:yosys', '/tmp/oss-cad-suite')).resolves.toEqual(imported)
+
+    expect(resourcesBridge.importLocalPath).toHaveBeenCalledWith({
+      resourceId: 'tool:yosys',
+      path: '/tmp/oss-cad-suite',
     })
   })
 

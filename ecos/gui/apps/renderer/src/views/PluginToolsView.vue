@@ -189,12 +189,26 @@
                       v-if="
                         rowActionForStatus(row.resource) !== 'none' ||
                         removalActionForRow(row) !== null ||
+                        canImportLocalResource(row) ||
                         (
                           row.statusKind !== 'installing' &&
                           (row.actions.includes('activate') || row.actions.includes('validate'))
                         )
                       "
                     >
+                      <button
+                        v-if="canImportLocalResource(row)"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Import Local"
+                        :disabled="importingResourceIds.has(row.id)"
+                        @click.stop="handleLocalImport(row)"
+                      >
+                        <i
+                          :class="importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
+                          aria-hidden="true"
+                        ></i>
+                      </button>
                       <button
                         v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
                         type="button"
@@ -356,6 +370,7 @@ import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
+  canImportLocalResource,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
@@ -389,6 +404,7 @@ const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
 const importingPdk = ref(false)
+const importingResourceIds = ref<Set<string>>(new Set())
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
@@ -548,6 +564,31 @@ async function handleImportPdk(): Promise<void> {
     }
   } finally {
     importingPdk.value = false
+  }
+}
+
+async function handleLocalImport(row: ResourceRow): Promise<void> {
+  if (importingResourceIds.value.has(row.id)) {
+    return
+  }
+
+  const desktopApi = await waitForDesktopApi()
+  const path = await desktopApi.dialog.pickDirectory({
+    title: `Select Local ${row.name} Directory`,
+  })
+  if (!path) {
+    return
+  }
+
+  const next = new Set(importingResourceIds.value)
+  next.add(row.id)
+  importingResourceIds.value = next
+  try {
+    await pluginStore.importLocalResource(row.id, path)
+  } finally {
+    const done = new Set(importingResourceIds.value)
+    done.delete(row.id)
+    importingResourceIds.value = done
   }
 }
 
@@ -1390,6 +1431,11 @@ async function openDocs(): Promise<void> {
 .row-action-btn.warn:disabled {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.row-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .row-action-btn.danger {

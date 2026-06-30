@@ -8,6 +8,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
     ...actual,
     activatePdkApi: vi.fn(),
     cancelResourceApi: vi.fn(),
+    importLocalResourcePathApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
 
 import {
   cancelResourceApi,
+  importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
   resourceListToTools,
@@ -103,6 +105,7 @@ describe('pluginStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(cancelResourceApi).mockReset()
+    vi.mocked(importLocalResourcePathApi).mockReset()
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
@@ -608,5 +611,52 @@ describe('pluginStore', () => {
     expect(subscribeResourceProgress).not.toHaveBeenCalled()
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
     expect(store.resources).toEqual([])
+  })
+
+  it('imports a local resource path, clears row errors, and refreshes resources', async () => {
+    const localTool = makeToolResource({
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/oss-cad-suite',
+      actions: ['install', 'remove_reference'],
+      health: { managed: false },
+    })
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([makeToolResource()])
+      .mockResolvedValueOnce([localTool])
+    vi.mocked(importLocalResourcePathApi).mockResolvedValue(localTool)
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.resourceErrors['tool:yosys'] = 'Previous error'
+
+    await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
+
+    expect(importLocalResourcePathApi).toHaveBeenCalledWith('tool:yosys', '/tmp/oss-cad-suite')
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    expect(store.resourceErrors['tool:yosys']).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/oss-cad-suite',
+    })
+  })
+
+  it('stores local import errors by resourceId and refreshes resources silently', async () => {
+    const availableTool = makeToolResource()
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availableTool])
+      .mockResolvedValueOnce([availableTool])
+    vi.mocked(importLocalResourcePathApi).mockRejectedValue(new Error('Expected executable not found for yosys'))
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
+
+    expect(store.resourceErrors['tool:yosys']).toBe('Expected executable not found for yosys')
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
   })
 })

@@ -215,6 +215,10 @@ export function removalActionForRow(row: ResourceRow): RemovalRowAction | null {
   return null
 }
 
+export function canImportLocalResource(row: ResourceRow): boolean {
+  return (row.type === 'tool' || row.type === 'pdk') && row.statusKind !== 'installing'
+}
+
 export function createPrimaryActionTask(
   row: ResourceRow,
   executor: ResourceActionExecutor,

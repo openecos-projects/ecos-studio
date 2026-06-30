@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   activatePdkApi,
   cancelResourceApi,
+  importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
   removePdkReferenceApi,
@@ -316,6 +317,21 @@ export const usePluginStore = defineStore('plugin', () => {
     await fetchTools({ silent: true })
   }
 
+  async function importLocalResource(resourceId: string, path: string): Promise<void> {
+    delete resourceErrors.value[resourceId]
+    _syncLegacyToolError(resourceId)
+    try {
+      await importLocalResourcePathApi(resourceId, path)
+      await fetchTools({ silent: true })
+    } catch (e) {
+      _setResourceError(
+        resourceId,
+        e instanceof Error ? e.message : `Failed to import ${_resourceName(resourceId)}`,
+      )
+      await fetchTools({ silent: true })
+    }
+  }
+
   async function refresh(): Promise<void> {
     refreshing.value = true
     error.value = null
@@ -360,6 +376,7 @@ export const usePluginStore = defineStore('plugin', () => {
     activatePdk,
     validatePdk,
     removePdkReference,
+    importLocalResource,
     refresh,
     cleanup,
   }

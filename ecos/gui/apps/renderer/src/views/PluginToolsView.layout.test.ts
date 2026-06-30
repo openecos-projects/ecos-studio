@@ -90,4 +90,16 @@ describe('PluginToolsView resource table layout', () => {
     )
     expect(pluginToolsViewSource).not.toContain('Updates will replace the existing installed versions.')
   })
+
+  it('renders the row local import button before the primary row action', () => {
+    const importButtonIndex = pluginToolsViewSource.indexOf('data-title="Import Local"')
+    const installButtonIndex = pluginToolsViewSource.indexOf('data-title="Install"')
+
+    expect(pluginToolsViewSource).toContain('canImportLocalResource(row)')
+    expect(pluginToolsViewSource).toContain('handleLocalImport(row)')
+    expect(pluginToolsViewSource).toContain("importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'")
+    expect(importButtonIndex).toBeGreaterThan(-1)
+    expect(installButtonIndex).toBeGreaterThan(-1)
+    expect(importButtonIndex).toBeLessThan(installButtonIndex)
+  })
 })
