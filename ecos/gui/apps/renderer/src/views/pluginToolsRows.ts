@@ -17,6 +17,7 @@ export interface ResourceRow {
   name: string
   resourceName: string
   description: string
+  descriptionTitle: string
   version: string
   sizeLabel: string
   sizeMb: number
@@ -92,6 +93,30 @@ function progressPercentFor(progress: InstallProgress | undefined): number | nul
   return Math.max(0, Math.min(100, Math.round((progress.progress || 0) * 100)))
 }
 
+export function compactResourceMessage(
+  message: string | null | undefined,
+  fallback: string = 'Resource operation failed',
+): string {
+  const text = message?.trim()
+  if (!text) return fallback
+
+  const lower = text.toLowerCase()
+  const hasUrl = /https?:\/\//i.test(text)
+  const isShortDisplayText = text.length <= 80 &&
+    !hasUrl &&
+    !text.includes('\n') &&
+    !lower.includes('fetch failed') &&
+    !lower.includes('und_err')
+
+  if (isShortDisplayText) return text
+  if (lower.includes('timeout') || lower.includes('und_err_connect_timeout')) return 'Connection timeout'
+  if (lower.includes('failed to download') || lower.includes('fetch failed') || hasUrl) return 'Download failed'
+  if (lower.includes('checksum') || lower.includes('hash') || lower.includes('integrity')) return 'Verification failed'
+  if (lower.includes('post-install') || lower.includes('post_install')) return 'Post-install failed'
+  if (lower.includes('not found') || lower.includes('missing')) return 'Resource not found'
+  return fallback
+}
+
 function installedStatusText(resource: ResourceItem): string {
   if (isLocalTool(resource)) {
     return 'Local'
@@ -117,6 +142,17 @@ function errorStatusText(resource: ResourceItem): string {
   if (resource.status === 'missing') return 'Missing'
   if (resource.status === 'invalid') return 'Invalid'
   return 'Error'
+}
+
+function rowDescription(resource: ResourceItem): { text: string; title: string } {
+  const text = resource.description || resource.path || ''
+  if (resource.error) {
+    return {
+      text: compactResourceMessage(resource.error),
+      title: resource.error,
+    }
+  }
+  return { text, title: text }
 }
 
 function progressStatusText(progress: InstallProgress | undefined): string {
@@ -341,13 +377,15 @@ export function resourceToRow(
   const progressPercent = progressPercentFor(progress)
   const size = formatResourceSize(resource.size)
   const status = mapStatus(resource, progress)
+  const description = rowDescription(resource)
 
   return {
     id: resource.id,
     type: resource.type,
     name: resource.display_name || resource.name,
     resourceName: resource.name,
-    description: resource.description || resource.path || resource.error || '',
+    description: description.text,
+    descriptionTitle: description.title,
     version: versionLabel(resource),
     sizeLabel: size.sizeLabel,
     sizeMb: size.sizeMb,

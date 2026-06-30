@@ -112,8 +112,15 @@ describe('PluginToolsView resource table layout', () => {
   })
 
   it('keeps long resource error details out of table rows', () => {
+    expect(pluginToolsViewSource).toContain(':title="row.descriptionTitle || undefined"')
     expect(pluginToolsViewSource).not.toContain('row-error-msg')
     expect(pluginToolsViewSource).not.toContain('rowError(row)')
+  })
+
+  it('uses compact text for global resource errors', () => {
+    expect(pluginToolsViewSource).toContain('managerErrorText')
+    expect(pluginToolsViewSource).toContain(':title="pluginStore.error ?? undefined"')
+    expect(pluginToolsViewSource).not.toContain('{{ pluginStore.error }}')
   })
 
   it('renders local tool replace controls and copy separately from updates', () => {

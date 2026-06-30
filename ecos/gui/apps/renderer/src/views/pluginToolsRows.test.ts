@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ResourceItem } from '@/api/plugin'
 import {
+  compactResourceMessage,
   formatResourceSize,
   managedInstallLocation,
   primaryActionForRow,
@@ -104,6 +105,52 @@ describe('pluginToolsRows', () => {
     expect(row.statusKind).toBe('installing')
     expect(row.statusText).toBe('Post-install')
     expect(row).not.toHaveProperty('statusIcon')
+  })
+
+  it('keeps backend error details compact in visible row copy', () => {
+    const error = 'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const row = resourceToRow(
+      resource({
+        status: 'error',
+        description: '',
+        path: null,
+        error,
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('error')
+    expect(row.statusText).toBe('Error')
+    expect(row.description).toBe('Connection timeout')
+    expect(row.description).not.toContain('https://')
+    expect(row.description).not.toContain('UND_ERR')
+    expect(row.descriptionTitle).toBe(error)
+  })
+
+  it('prefers compact error summaries over registry descriptions on failed rows', () => {
+    const error = 'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const row = resourceToRow(
+      resource({
+        status: 'error',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        path: null,
+        error,
+      }),
+      undefined,
+    )
+
+    expect(row.description).toBe('Connection timeout')
+    expect(row.descriptionTitle).toBe(error)
+  })
+
+  it('compacts verbose resource messages for visible alerts', () => {
+    expect(
+      compactResourceMessage(
+        'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)',
+      ),
+    ).toBe('Connection timeout')
+    expect(compactResourceMessage('Failed to download https://example.invalid/archive.tar.gz: fetch failed')).toBe('Download failed')
+    expect(compactResourceMessage('Checksum mismatch')).toBe('Checksum mismatch')
   })
 
   it('formats resource sizes from bytes', () => {

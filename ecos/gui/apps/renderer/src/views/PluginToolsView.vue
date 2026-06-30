@@ -117,8 +117,12 @@
             </div>
           </div>
 
-          <div v-if="pluginStore.error" class="resource-error">
-            {{ pluginStore.error }}
+          <div
+            v-if="managerErrorText"
+            class="resource-error"
+            :title="pluginStore.error ?? undefined"
+          >
+            {{ managerErrorText }}
           </div>
 
           <div class="resource-table-scroll">
@@ -161,7 +165,7 @@
                     <span class="resource-avatar">{{ row.icon }}</span>
                     <span class="resource-copy">
                       <strong>{{ row.name }}</strong>
-                      <small>{{ row.description }}</small>
+                      <small :title="row.descriptionTitle || undefined">{{ row.description }}</small>
                     </span>
                   </span>
 
@@ -372,6 +376,7 @@ import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
   canImportLocalResource,
+  compactResourceMessage,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
@@ -411,6 +416,10 @@ const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
     return resourceToRow(resource, pluginStore.resourceProgress[resource.id])
   })
+})
+
+const managerErrorText = computed(() => {
+  return pluginStore.error ? compactResourceMessage(pluginStore.error, 'Resource manager error') : null
 })
 
 const filteredRows = computed(() => {
