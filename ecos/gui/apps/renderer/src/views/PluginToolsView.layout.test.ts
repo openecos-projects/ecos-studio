@@ -55,6 +55,8 @@ describe('PluginToolsView resource table layout', () => {
 
   it('aligns row metadata to the primary resource name line', () => {
     expect(pluginToolsViewSource).toContain('class="resource-status-cell"')
+    expect(pluginToolsViewSource).toContain('v-if="row.statusIcon"')
+    expect(pluginToolsViewSource).toContain(':class="row.statusIcon"')
     expect(pluginToolsViewSource).toContain('--resource-table-columns:')
     expect(pluginToolsViewSource).toMatch(
       /\.resource-table-head,\s*\.resource-row\s*\{[\s\S]*grid-template-columns:\s*var\(--resource-table-columns\);/,

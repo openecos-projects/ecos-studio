@@ -82,11 +82,12 @@ describe('pluginToolsRows', () => {
       tool: 'ics55',
       phase: 'downloading',
       progress: 0.5,
-      message: 'Downloading...',
+      message: 'Downloading ICsprout 55nm PDK post-install asset 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
     })
 
     expect(row.statusKind).toBe('installing')
-    expect(row.statusText).toBe('Downloading 50%')
+    expect(row.statusText).toBe('Downloading')
+    expect(row.statusIcon).toBe('ri-download-line')
     expect(row.progressPercent).toBe(50)
   })
 
@@ -101,7 +102,8 @@ describe('pluginToolsRows', () => {
     })
 
     expect(row.statusKind).toBe('installing')
-    expect(row.statusText).toBe('Running PDK post-install steps...')
+    expect(row.statusText).toBe('Post-install')
+    expect(row.statusIcon).toBe('ri-settings-3-line')
   })
 
   it('formats resource sizes from bytes', () => {

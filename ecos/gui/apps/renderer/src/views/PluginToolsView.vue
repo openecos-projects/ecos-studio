@@ -168,7 +168,10 @@
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span class="resource-status-cell">
-                    <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
+                    <b class="status-pill" :class="row.statusKind">
+                      <i v-if="row.statusIcon" :class="row.statusIcon" aria-hidden="true"></i>
+                      <span>{{ row.statusText }}</span>
+                    </b>
                     <span
                       v-if="row.progressPercent !== null"
                       class="mini-progress"
@@ -1268,11 +1271,25 @@ async function openDocs(): Promise<void> {
 .status-pill {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
+  max-width: 100%;
   min-height: 22px;
   padding: 0 8px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-pill i {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.status-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-pill.installed {
@@ -1291,9 +1308,8 @@ async function openDocs(): Promise<void> {
 }
 
 .status-pill.installing {
-  color: var(--text-secondary);
-  background: transparent;
-  padding: 0;
+  color: var(--info-color);
+  background: var(--info-bg);
 }
 
 .status-pill.error {
