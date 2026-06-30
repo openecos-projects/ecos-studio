@@ -10879,3 +10879,91 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 老 manifest 中已经安装的 tool/PDK 仍不会被原地补写 size，显示时会从 registry 回填；只有用户重新安装或更新后 manifest 才会持久记录 size。
 - 本地手动导入的 PDK 没有 archive 元数据，大小会显示为 `-`，这是预期行为。
+
+# 第 167 次 开发
+
+## 开发目标
+
+把 `ecc-fe` 可下载 CLI 资源改成 mutable latest 通道：`ecc-fe` 仓库 push 到 main 后由 GitHub Actions 打包并更新 `ecos-resource-assets` 的 `ecc-fe-latest` release；ECOS Studio Resource Manager 下载时通过远端 metadata/sha256 判断 latest 是否需要更新。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 新增 `ecc-fe` latest runtime release workflow。
+  - push 到 `main` 或手动触发时打包 `bin/`、`fecompiler/`、`examples/`、`docs/` 和项目元数据文件。
+  - 生成 `ecc-fe-latest.tar.gz`、`ecc-fe-latest.tar.gz.sha256`、`ecc-fe-latest.metadata.json`。
+  - 通过 `softprops/action-gh-release` 发布到 `openecos-projects/ecos-resource-assets` 的 `ecc-fe-latest` release，并覆盖同名 assets。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - registry `PlatformAsset` 支持 `metadata_url` 和 `sha256_url`。
+  - Resource Manager 会读取 release metadata/sha256 文件，并用远端 sha256/size 覆盖 registry 静态兜底值。
+  - 对 `version: "latest"` 的 tool，不再只看 version，而是比较 manifest 中已安装 sha256 和远端 sha256，sha 不同即显示 `update_available`。
+  - 安装/更新时使用解析后的 sha256 和 size 进行下载进度与校验，并写回 manifest。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 latest metadata 测试，覆盖已安装 `latest` 但远端 sha256 变化时显示可更新，并在 update 后写入新 sha/size。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 latest release 通道和 Resource Manager 更新判断改造。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 将 `tool:ecc-fe` 的版本改为 `latest`。
+  - URL 指向 `ecos-resource-assets` 的 `ecc-fe-latest` release。
+  - 增加 `metadata_url` 和 `sha256_url`，静态 `sha256/size` 保留为 metadata 拉取失败时的兜底。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、18 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+- 已用 Node 解析 `/home/luyoung/ecos-registry/tool-registry.json`，确认 `tool:ecc-fe` 已切到 `version: "latest"` 且包含 `metadata_url/sha256_url`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未实际触发 GitHub Actions；workflow 需要 push 到远端后由 GitHub 执行。
+
+## 已知后续风险
+
+- `ecc-fe/.github/workflows/release-latest.yml` 跨仓库发布到 `openecos-projects/ecos-resource-assets`，需要在 `ecc-fe` 仓库配置 `ECOS_RESOURCE_ASSETS_TOKEN` secret，token 需要能写 `ecos-resource-assets` release contents。
+- `ecc-fe-latest` 是 mutable release；如果 GitHub release asset 暂时不可达，Resource Manager 会退回 registry 内的静态 sha/size 兜底，可能暂时看不到最新更新。
+- 当前只把 `ecc-fe` 改为 latest 通道，`ecc-fe-soc-ysyx-am` 仍是固定版本资源。
+
+# 第 168 次 开发
+
+## 开发目标
+
+补强 `ecc-fe` latest 可下载资源的更新判定：即使旧 manifest 里已经安装的是 `version: "latest"` 但没有记录 sha256，只要远端 metadata 有 sha256，也应该提示可更新，避免老安装状态被误判为已是最新。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 为 `resolvePlatformAsset()` 增加 overload，收紧非空 asset 调用路径的类型结果。
+  - 调整 `toolHasUpdate()`：`latest` tool 只要远端 sha256 存在，就与本地 manifest sha256 比较；本地缺失 sha256 时也会显示 `update_available`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加旧 manifest 缺少 sha256 时的 latest 更新判定回归测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 latest 更新判定补强。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：1 个测试文件、19 个测试用例。
+- 已执行 `git diff --check`，通过。
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未实际触发 GitHub Actions；workflow 需要 push 到远端后由 GitHub 执行。
+
+## 已知后续风险
+
+- `ecc-fe-latest` workflow 仍依赖 `ecc-fe` 仓库中的 `ECOS_RESOURCE_ASSETS_TOKEN` secret；如果 secret 未配置或权限不足，latest release 不会被更新。
+- Resource Manager 在 release metadata/sha256 暂时不可达时仍会使用 registry 静态兜底值，因此短时间内可能无法发现最新包。

@@ -39,9 +39,23 @@ interface DownloadProgress {
 interface PlatformAsset {
   url: string
   sha256: string
+  sha256_url?: string | null
   size: number
+  metadata_url?: string | null
   strip_prefix?: string | null
   post_install: RegistryPostInstallStep[]
+}
+
+interface ResolvedPlatformAsset extends PlatformAsset {
+  commit?: string | null
+  built_at?: string | null
+}
+
+interface ReleaseMetadata {
+  sha256: string
+  size: number
+  commit: string
+  built_at: string
 }
 
 interface RegistryPostInstallStep {
@@ -199,7 +213,7 @@ export class ResourceManagerService {
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, installedTools, manifest))
+      resources.push(await this.registryToolToResource(tool, installedTools, manifest))
     }
     for (const pdk of state.registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
@@ -588,9 +602,10 @@ export class ResourceManagerService {
       if (!versionEntry) throw new Error(`Version not found for ${name}`)
       const { platform, asset } = selectPlatformAsset(versionEntry)
       if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
+      const resolvedAsset = await this.resolvePlatformAsset(asset)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(asset.url)}`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`)
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -604,12 +619,12 @@ export class ResourceManagerService {
       electronLogger.debug(
         '[resources] Download source for %s: %s -> %s (%d bytes)',
         resourceId,
-        asset.url,
+        resolvedAsset.url,
         tempArchive,
-        asset.size,
+        resolvedAsset.size,
       )
       this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${name} v${version}...` })
-      await downloadAsset(asset.url, tempArchive, this.fetchImpl, asset.size, (progress) => {
+      await downloadAsset(resolvedAsset.url, tempArchive, this.fetchImpl, resolvedAsset.size, (progress) => {
         const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
         this.publish(listener, {
           resource_id: resourceId,
@@ -628,8 +643,8 @@ export class ResourceManagerService {
       }, controller.signal)
       throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
-      const verified = await this.sha256Verifier(tempArchive, asset.sha256)
+      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${name}`)
       }
@@ -637,7 +652,7 @@ export class ResourceManagerService {
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(resourceId, action, name, listener, async () => {
-        await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
+        await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
       })
       throwIfAborted(controller.signal)
       await rm(destination, { force: true, recursive: true })
@@ -655,8 +670,8 @@ export class ResourceManagerService {
         version,
         path: destination,
         installed_at: utcNowIso(),
-        sha256: asset.sha256,
-        size: asset.size,
+        sha256: resolvedAsset.sha256,
+        size: resolvedAsset.size,
         detected_executables: detected,
         executable,
         active: true,
@@ -1042,14 +1057,15 @@ export class ResourceManagerService {
     }
   }
 
-  private registryToolToResource(
+  private async registryToolToResource(
     tool: RegistryTool,
     installed: Record<string, ToolInventoryEntry>,
     manifest: ResourceManifest,
-  ): ResourceInfo {
+  ): Promise<ResourceInfo> {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
+    const resolvedAsset = await this.resolvePlatformAsset(asset)
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
     const requirements = latest?.requires ?? []
@@ -1061,7 +1077,7 @@ export class ResourceManagerService {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
+      status = toolHasUpdate(local, versions[0], resolvedAsset) ? 'update_available' : 'installed'
       actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
     }
 
@@ -1080,7 +1096,7 @@ export class ResourceManagerService {
       path: local?.path ?? null,
       managed_root: this.toolsDir,
       platform,
-      size: asset?.size ?? null,
+      size: resolvedAsset?.size ?? asset?.size ?? null,
       source: 'registry',
       homepage: tool.homepage,
       actions,
@@ -1089,6 +1105,58 @@ export class ResourceManagerService {
       requires: requirements,
       installed_requires: requirementState.installed,
       missing_requires: requirementState.missing,
+    }
+  }
+
+  private async resolvePlatformAsset(asset: PlatformAsset): Promise<ResolvedPlatformAsset>
+  private async resolvePlatformAsset(asset: null): Promise<null>
+  private async resolvePlatformAsset(asset: PlatformAsset | null): Promise<ResolvedPlatformAsset | null> {
+    if (asset === null) return null
+    const metadata = await this.fetchAssetMetadata(asset)
+    return {
+      ...asset,
+      sha256: metadata?.sha256 || await this.fetchAssetSha256(asset) || asset.sha256,
+      size: metadata?.size && metadata.size > 0 ? metadata.size : asset.size,
+      commit: metadata?.commit || null,
+      built_at: metadata?.built_at || null,
+    }
+  }
+
+  private async fetchAssetMetadata(asset: PlatformAsset): Promise<ReleaseMetadata | null> {
+    if (!asset.metadata_url) return null
+    try {
+      const response = await this.fetchImpl(asset.metadata_url)
+      if (!response.ok) {
+        electronLogger.debug('[resources] Metadata request failed with %d: %s', response.status, asset.metadata_url)
+        return null
+      }
+      return parseReleaseMetadata(await response.json())
+    } catch (error) {
+      electronLogger.debug(
+        '[resources] Failed to fetch metadata %s: %s',
+        asset.metadata_url,
+        error instanceof Error ? error.message : String(error),
+      )
+      return null
+    }
+  }
+
+  private async fetchAssetSha256(asset: PlatformAsset): Promise<string | null> {
+    if (!asset.sha256_url) return null
+    try {
+      const response = await this.fetchImpl(asset.sha256_url)
+      if (!response.ok) {
+        electronLogger.debug('[resources] SHA256 request failed with %d: %s', response.status, asset.sha256_url)
+        return null
+      }
+      return parseSha256Text(await response.text())
+    } catch (error) {
+      electronLogger.debug(
+        '[resources] Failed to fetch SHA256 %s: %s',
+        asset.sha256_url,
+        error instanceof Error ? error.message : String(error),
+      )
+      return null
     }
   }
 
@@ -1416,7 +1484,9 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
     assets[platform] = {
       url: normalizeRegistryAssetUrl(readString(asset.url)),
       sha256: readString(asset.sha256),
+      sha256_url: readOptionalString(asset.sha256_url),
       size: readNumber(asset.size),
+      metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
       post_install: parsePostInstallSteps(asset.post_install),
     }
@@ -1529,6 +1599,10 @@ function readNumber(value: unknown): number {
 
 function readOptionalPositiveNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+function readOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 function readStringArray(value: unknown): string[] {
@@ -1653,6 +1727,42 @@ function isToolEntry(entry: unknown): entry is ToolInventoryEntry {
 
 function isPdkEntry(entry: unknown): entry is PdkInventoryEntry {
   return readRecord(entry).type === 'pdk'
+}
+
+function parseReleaseMetadata(value: unknown): ReleaseMetadata | null {
+  const record = readRecord(value)
+  const sha256 = readSha256(record.sha256)
+  const size = readOptionalPositiveNumber(record.size)
+  if (!sha256 || !size) return null
+  return {
+    sha256,
+    size,
+    commit: readString(record.commit),
+    built_at: readString(record.built_at),
+  }
+}
+
+function parseSha256Text(value: string): string | null {
+  return readSha256(value.trim().split(/\s+/)[0] ?? '')
+}
+
+function readSha256(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase()
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : null
+}
+
+function toolHasUpdate(
+  entry: ToolInventoryEntry,
+  latestVersion: string | undefined,
+  latestAsset: ResolvedPlatformAsset | null,
+): boolean {
+  if (!latestVersion) return false
+  if (latestVersion !== entry.version) return true
+  if (latestVersion === 'latest' && latestAsset?.sha256) {
+    return latestAsset.sha256 !== entry.sha256
+  }
+  return false
 }
 
 function normalizeToolName(name: string): string {
