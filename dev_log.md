@@ -11001,3 +11001,41 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 如果后续 Actions 进入发布阶段，仍需要 `ECOS_RESOURCE_ASSETS_TOKEN` secret 具备写入 `openecos-projects/ecos-resource-assets` release asset 的权限。
+
+# 第 170 次 开发
+
+## 开发目标
+
+将 `ecc-fe` latest runtime 资源从跨仓库发布调整为发布到 `ecc-fe` 仓库自身的 release，避免 fine-grained PAT 需要组织批准或跨仓库写 release 的权限问题。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - workflow 权限从 `contents: read` 调整为 `contents: write`，允许当前仓库的 `GITHUB_TOKEN` 创建/更新本仓库 release。
+  - 移除 `repository: openecos-projects/ecos-resource-assets` 和 `token: ${{ secrets.ECOS_RESOURCE_ASSETS_TOKEN }}`，发布目标改为当前 `ecc-fe` 仓库。
+  - release 描述改为从当前 `main` 生成 latest runtime 包。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 将 `tool:ecc-fe` 的 `url`、`metadata_url`、`sha256_url` 改为 `openecos-projects/ecc-fe/releases/download/ecc-fe-latest/...`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 release 发布目标调整。
+
+## 验证情况
+
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+- 已用 Node 解析 `/home/luyoung/ecos-registry/tool-registry.json`，确认 `tool:ecc-fe` 的 latest URL 已指向 `openecos-projects/ecc-fe` release。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未实际触发 GitHub Actions；需要提交并 push `ecc-fe` 后由 GitHub 执行。
+
+## 已知后续风险
+
+- `ecc-fe` 仓库的 Actions 设置需要允许 workflow 使用 `GITHUB_TOKEN` 写 contents；如果 organization 禁用了该权限，发布 release 仍会失败。
+- registry 当前指向 `ecc-fe` 仓库 release；在第一次成功发布 `ecc-fe-latest` 前，下载地址可能暂时 404。
