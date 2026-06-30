@@ -379,6 +379,147 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('lists an unmanaged local registry tool as local with a replace install action', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(root, 'state', 'resources'), { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '2026-05-13',
+              platforms: {
+                'all-platform': {
+                  url: 'file:///tmp/yosys.tar',
+                  sha256: 'managed-sha',
+                  size: 12,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(root, 'state', 'resources', 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      resources_dir: join(root, 'state', 'resources'),
+      tools_dir: join(root, 'data', 'tools'),
+      pdks_dir: join(root, 'data', 'pdks'),
+      installed: {
+        'tool:yosys': {
+          type: 'tool',
+          name: 'yosys',
+          version: '0.66+154',
+          path: localYosys,
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: '',
+          detected_executables: ['bin/yosys'],
+          executable: 'bin/yosys',
+          active: true,
+          managed: false,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      id: 'tool:yosys',
+      type: 'tool',
+      status: 'installed',
+      source: 'local',
+      installed_version: '0.66+154',
+      available_versions: ['2026-05-13'],
+      active: true,
+      active_version: '0.66+154',
+      path: localYosys,
+      actions: ['install'],
+      health: expect.objectContaining({
+        managed: false,
+      }),
+    })
+  })
+
+  it('does not offer replace for an unmanaged local registry tool without a usable platform asset', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(root, 'state', 'resources'), { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '2026-05-13',
+              platforms: {
+                'unsupported-platform': {
+                  url: 'file:///tmp/yosys.tar',
+                  sha256: 'managed-sha',
+                  size: 12,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(root, 'state', 'resources', 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      resources_dir: join(root, 'state', 'resources'),
+      tools_dir: join(root, 'data', 'tools'),
+      pdks_dir: join(root, 'data', 'pdks'),
+      installed: {
+        'tool:yosys': {
+          type: 'tool',
+          name: 'yosys',
+          version: '0.66+154',
+          path: localYosys,
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: '',
+          detected_executables: ['bin/yosys'],
+          executable: 'bin/yosys',
+          active: true,
+          managed: false,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      source: 'local',
+      actions: [],
+      health: expect.objectContaining({
+        managed: false,
+      }),
+    })
+  })
+
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')

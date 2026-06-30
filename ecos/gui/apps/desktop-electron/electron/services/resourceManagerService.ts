@@ -915,13 +915,19 @@ export class ResourceManagerService {
     const resourceId = `tool:${tool.name}`
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
+    const source = local && !local.managed ? 'local' : 'registry'
 
     if (this.activeJobs.has(resourceId)) {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
-      actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
+      if (local.managed) {
+        status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
+        actions = status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']
+      } else {
+        status = 'installed'
+        actions = asset ? ['install'] : []
+      }
     }
 
     return {
@@ -940,7 +946,7 @@ export class ResourceManagerService {
       managed_root: this.toolsDir,
       platform,
       size: asset?.size ?? null,
-      source: 'registry',
+      source,
       homepage: tool.homepage,
       actions,
       health: local ? toolHealth(local) : {},
