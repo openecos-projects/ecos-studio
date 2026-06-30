@@ -641,6 +641,9 @@ describe('ResourceManagerService', () => {
     await mkdir(join(localYosys, 'bin'), { recursive: true })
     await writeFile(join(localYosys, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
     await chmod(join(localYosys, 'bin', 'yosys'), 0o755)
+    await mkdir(join(localYosys, 'share', 'tools'), { recursive: true })
+    await writeFile(join(localYosys, 'share', 'tools', 'helper'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(localYosys, 'share', 'tools', 'helper'), 0o755)
     await writeYosysRegistry(registryPath)
     const dirs = testResourceDirs(root)
     const service = new ResourceManagerService({

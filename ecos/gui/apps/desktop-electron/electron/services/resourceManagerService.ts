@@ -460,7 +460,7 @@ export class ResourceManagerService {
       throw new Error(`Expected executable is not executable for ${name}`)
     }
 
-    const detected = await detectExecutables(canonicalPath)
+    const detected = [expectedExecutable]
     const resourceId = `tool:${name}`
     const manifest = await this.readManifest()
     const entry: ToolInventoryEntry = {
