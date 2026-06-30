@@ -10263,7 +10263,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户上一轮明确要求执行；未执行 merge、rebase、reset、clean。
 - 未执行真实 Verilator/Slang/Yosys/RISC-V 工具链长流程或 CPU/SoC 矩阵仿真。
 
 ## 已知后续风险
@@ -11123,3 +11123,38 @@ fatal error: driver/difftest.h: No such file or directory
 - `/home/luyoung/surfer` 仓库必须配置 `ECOS_RELEASE_APP_ID` 和 `ECOS_RELEASE_APP_PRIVATE_KEY` secrets，且 GitHub App 必须安装到 `openecos-projects/ecos-resource-assets` 并拥有写 release asset 的权限。
 - 第一次成功发布 `surfer-latest` release 前，Resource Manager 下载 `tool:surfer` 会 404；registry 中保留的静态 sha/size 只是 metadata 暂不可用时的兜底。
 - Surfer upstream 的 message API 不是稳定 API，后续升级 Surfer 时需要验证 `integration.js` 中的 `LoadWaveformFileFromUrl` 消息仍可用。
+
+# 第 173 次 开发
+
+## 开发目标
+
+修复 `/home/luyoung/surfer` 的 ECOS Surfer assets GitHub Actions 构建失败问题，避免 Web 资源构建阶段启用不需要的 `spade` 默认 feature。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 为 ECOS assets 的 `trunk build` 增加 `--no-default-features`，关闭 Surfer 默认 feature 集。
+  - 显式保留 `--features performance_plot`，继续包含性能图相关 Web UI 功能。
+  - 避免默认启用 `spade`，从而绕开 `spade` 依赖的不可获取 `tracing-tree` git revision。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer Actions 构建修复。
+
+## 验证情况
+
+- 已确认 Actions 报错发生在 `cargo metadata` 解析默认 feature `spade` 时，而不是 ECOS 打包或 GitHub App 发布阶段。
+- 已参考 Trunk 0.18.7 源码，确认 `trunk build` 支持 `--no-default-features` 和 `--features`。
+- 已尝试本地执行 `cargo metadata --locked --no-default-features --features performance_plot`；该命令已不再触发 `spade/tracing-tree`，但本地 `/home/luyoung/surfer/f128` 子模块未初始化，Cargo 在读取可选 path dependency manifest 时提前失败。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 这次修复只关闭 ECOS Web assets 构建中的 `spade` feature；如果未来 ECOS 需要 Spade translator 功能，需要先修复或替换 Surfer 上游的 `spade` 依赖链。
