@@ -213,6 +213,15 @@
                         <i class="ri-refresh-line" aria-hidden="true"></i>
                       </button>
                       <button
+                        v-else-if="rowActionForStatus(row.resource) === 'replace'"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Replace"
+                        @click.stop="handleRowInstall(row)"
+                      >
+                        <i class="ri-loop-left-line" aria-hidden="true"></i>
+                      </button>
+                      <button
                         v-else-if="rowActionForStatus(row.resource) === 'cancel'"
                         type="button"
                         class="row-action-btn icon-only danger"
@@ -298,9 +307,7 @@
               <span class="selected-item-body">
                 <strong>{{ row.name }}</strong>
                 <small class="selected-item-meta" :title="resolveInstallPath(row)">
-                  <b v-if="row.statusKind === 'update'">Update</b>
-                  <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
-                  <span v-else>{{ row.version }}</span>
+                  <span>{{ selectedResourceMetaText(row) }}</span>
                 </small>
               </span>
               <em>{{ row.sizeLabel }}</em>
@@ -317,7 +324,7 @@
 
           <p class="manager-note">
             <i class="ri-information-line" aria-hidden="true"></i>
-            Updates will replace the existing installed versions.
+            Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.
           </p>
 
           <div class="selected-actions">
@@ -352,6 +359,7 @@ import {
   resourceToRow,
   resolveRowInstallPath,
   rowActionForStatus,
+  selectedResourceMetaText,
   runBatchDownload,
   runPrimaryAction,
 } from './pluginToolsRows'

@@ -2,8 +2,8 @@ import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin
 
 export type ResourceType = 'tool' | 'pdk'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
-export type RowAction = 'install' | 'update' | 'cancel' | 'uninstall' | 'remove_reference' | 'none'
-export type PrimaryRowAction = 'install' | 'update'
+export type RowAction = 'install' | 'update' | 'replace' | 'cancel' | 'uninstall' | 'remove_reference' | 'none'
+export type PrimaryRowAction = 'install' | 'update' | 'replace'
 
 export interface ResourceActionExecutor {
   installResource(resourceId: string): Promise<void>
@@ -90,10 +90,24 @@ function progressPercentFor(progress: InstallProgress | undefined): number | nul
 }
 
 function installedStatusText(resource: ResourceItem): string {
+  if (isLocalTool(resource)) {
+    return 'Local'
+  }
   if (resource.type === 'pdk' && resource.active) {
     return 'Active'
   }
   return 'Installed'
+}
+
+function isLocalTool(resource: ResourceItem): boolean {
+  return resource.type === 'tool' &&
+    resource.status === 'installed' &&
+    resource.source === 'local' &&
+    resource.health.managed === false
+}
+
+function isReplaceableLocalTool(resource: ResourceItem): boolean {
+  return isLocalTool(resource) && resource.actions.includes('install')
 }
 
 function errorStatusText(resource: ResourceItem): string {
@@ -165,6 +179,9 @@ export function rowActionForStatus(resource: ResourceItem): RowAction {
   ) {
     return 'update'
   }
+  if (isReplaceableLocalTool(resource)) {
+    return 'replace'
+  }
   if ((resource.status === 'available' || resource.status === 'error') && actions.has('install')) {
     return 'install'
   }
@@ -180,7 +197,7 @@ export function rowActionForStatus(resource: ResourceItem): RowAction {
 
 export function primaryActionForRow(row: ResourceRow): PrimaryRowAction | null {
   const action = rowActionForStatus(row.resource)
-  if (action === 'install' || action === 'update') {
+  if (action === 'install' || action === 'update' || action === 'replace') {
     return action
   }
   return null
@@ -194,7 +211,7 @@ export function createPrimaryActionTask(
   if (action === 'update') {
     return executor.updateResource(row.id)
   }
-  if (action === 'install') {
+  if (action === 'install' || action === 'replace') {
     return executor.installResource(row.id)
   }
   return null
@@ -227,10 +244,28 @@ export async function runBatchDownload(
 
 function targetVersionForRow(row: ResourceRow): string | null {
   const resource = row.resource
-  if (resource.status === 'update_available' || resource.status === 'available') {
+  if (
+    resource.status === 'update_available' ||
+    resource.status === 'available' ||
+    primaryActionForRow(row) === 'replace'
+  ) {
     return resource.available_versions[0] ?? null
   }
   return resource.installed_version ?? resource.active_version ?? resource.available_versions[0] ?? null
+}
+
+export function selectedResourceMetaText(row: ResourceRow): string {
+  if (primaryActionForRow(row) === 'replace') {
+    const version = row.resource.available_versions[0]
+    return version ? `Replace with managed v${String(version).replace(/^v/i, '')}` : 'Replace with managed version'
+  }
+  if (row.statusKind === 'update') {
+    return 'Update'
+  }
+  if (row.statusKind === 'installing') {
+    return row.statusText
+  }
+  return row.version
 }
 
 function joinInstallPath(root: string, segments: string[]): string {

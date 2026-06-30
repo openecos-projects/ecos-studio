@@ -7,7 +7,9 @@ import {
   primaryActionForRow,
   resourceToRow,
   rowActionForStatus,
+  selectedResourceMetaText,
   runBatchDownload,
+  createPrimaryActionTask,
 } from './pluginToolsRows'
 
 function resource(overrides: Partial<ResourceItem>): ResourceItem {
@@ -139,6 +141,43 @@ describe('pluginToolsRows', () => {
         ),
       ),
     ).toBeNull()
+  })
+
+  it('maps local unmanaged tools with install action to replace rows', async () => {
+    const installResource = vi.fn(async () => undefined)
+    const updateResource = vi.fn(async () => undefined)
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: '0.66+154',
+        available_versions: ['2026-05-13'],
+        active_version: '0.66+154',
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['install'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('installed')
+    expect(row.statusText).toBe('Local')
+    expect(rowActionForStatus(row.resource)).toBe('replace')
+    expect(primaryActionForRow(row)).toBe('replace')
+    expect(selectedResourceMetaText(row)).toBe('Replace with managed v2026-05-13')
+
+    await createPrimaryActionTask(row, { installResource, updateResource })
+
+    expect(installResource).toHaveBeenCalledWith('tool:yosys')
+    expect(updateResource).not.toHaveBeenCalled()
   })
 
   it('runs batch download for selected available PDKs and updateable tools', async () => {

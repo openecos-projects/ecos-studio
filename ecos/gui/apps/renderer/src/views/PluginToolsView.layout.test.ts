@@ -78,4 +78,14 @@ describe('PluginToolsView resource table layout', () => {
     )
     expect(pluginToolsViewSource).not.toContain('data-title="Installing"')
   })
+
+  it('renders local tool replace controls and copy separately from updates', () => {
+    expect(pluginToolsViewSource).toContain("rowActionForStatus(row.resource) === 'replace'")
+    expect(pluginToolsViewSource).toContain('data-title="Replace"')
+    expect(pluginToolsViewSource).toContain('selectedResourceMetaText(row)')
+    expect(pluginToolsViewSource).toContain(
+      'Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.',
+    )
+    expect(pluginToolsViewSource).not.toContain('Updates will replace the existing installed versions.')
+  })
 })
