@@ -10495,7 +10495,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户后续明确请求执行；未执行 merge、rebase、reset、clean。
 
 ## 已知后续风险
 
@@ -11299,3 +11299,50 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `/home/luyoung/surfer` 当前仍存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
+
+# 第 178 次 开发
+
+## 开发目标
+
+修复 `/home/luyoung/ecos-registry` 中 mutable `latest` 资源的静态兜底 `sha256/size` 与远端 release metadata 不一致问题，并加入可重复执行的 registry 资源审计。
+
+## 新增文件
+
+- `/home/luyoung/ecos-registry/scripts/audit-registry.mjs`
+  - 新增无第三方依赖的 Node 审计脚本。
+  - 检查 registry 中所有资源的下载 URL 可达性。
+  - 检查 `metadata_url` 和 `sha256_url` 与静态 `sha256/size` 字段一致，防止 latest release 更新后 registry fallback 漂移。
+  - 增加网络请求重试、超时控制、HEAD 失败后的 ranged GET 兜底，降低 GitHub release/CDN 瞬时抖动导致的误失败。
+  - 增加 registry/item/version/platform 结构防护，让坏数据以审计错误形式报告，而不是脚本异常崩溃。
+
+## 修改文件
+
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 同步 `ecc-fe@latest` 的 `sha256` 和 `size` 到当前 `ecc-fe-latest` release metadata。
+  - 同步 `surfer@latest` 的 `sha256` 和 `size` 到当前 `surfer-latest` release metadata。
+- `/home/luyoung/ecos-registry/README.md`
+  - 说明 mutable `latest` 资源的 `metadata_url/sha256_url` 是 ECOS Studio 的权威更新来源。
+  - 补充 `node scripts/audit-registry.mjs` 审计命令和可调重试/超时环境变量。
+- `/home/luyoung/ecos-registry/.github/workflows/pages.yml`
+  - 在 Pages 发布前执行 registry asset audit，避免错误 registry 发布。
+  - 固定 CI 使用 Node.js 24，并为联网审计设置更耐心的重试和超时参数。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 registry 鲁棒性修复。
+
+## 验证情况
+
+- 已执行 `python3 .github/scripts/validate_registry.py tool-registry.json`，通过。
+- 已执行 `node --check scripts/audit-registry.mjs`，通过。
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('.github/workflows/pages.yml')"`，通过。
+- 已执行 `node scripts/audit-registry.mjs tool-registry.json`，通过：7 个资源资产全部检查通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-studio diff --check -- dev_log.md`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `latest` release 每次重发后，registry 静态 fallback 仍需要同步；新增审计脚本和 CI 会阻止不一致的 registry 发布，但不会自动改写 registry。
