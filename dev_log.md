@@ -11260,9 +11260,42 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
 - 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户当前“继续”请求执行；未执行 merge、rebase、reset、clean。
 
 ## 已知后续风险
 
 - `/home/luyoung/surfer` 当前仍存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
 - 如果后续依赖要求更高 MSRV，可能需要改为更新 `Cargo.lock` 中的 `time` 及相关依赖，而不是继续固定旧 toolchain。
+
+# 第 177 次 开发
+
+## 开发目标
+
+修复 `/home/luyoung/surfer` 的 ECOS Surfer assets GitHub Actions 打包阶段失败：Surfer 已成功完成 Trunk 构建，但 workflow 试图复制不存在的 `LICENSE` 文件。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 将 license 复制源从不存在的 `LICENSE` 改为仓库实际存在的 `LICENSE-EUPL-1.2.txt`。
+  - 保持产物内文件名仍为 `LICENSE-EUPL-1.2.txt`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer assets 打包阶段修复。
+
+## 验证情况
+
+- 已确认 `/home/luyoung/surfer` 根目录存在 `LICENSE-EUPL-1.2.txt`，不存在 `LICENSE`。
+- 已确认最新 Actions 日志里 Trunk 构建已经成功，失败点是 `cp: cannot stat 'LICENSE': No such file or directory`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- commit/push 按用户当前“继续”请求执行；未执行 merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/surfer` 当前仍存在一批 `examples/*` 删除状态，本次修复不会处理或提交这些非本任务改动。
