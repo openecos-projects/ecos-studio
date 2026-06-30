@@ -10318,7 +10318,7 @@ fatal error: driver/difftest.h: No such file or directory
 ## 未执行项
 
 - 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
-- 本次未执行 commit、push、merge、rebase、reset、clean。
+- commit/push 按用户当前修复请求执行；未执行 merge、rebase、reset、clean。
 - 未执行真实 Resource Manager 大包下载安装测试；未下载完整 OSS CAD Suite 或完整 RISC-V toolchain。
 
 ## 已知后续风险
@@ -11158,3 +11158,38 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 这次修复只关闭 ECOS Web assets 构建中的 `spade` feature；如果未来 ECOS 需要 Spade translator 功能，需要先修复或替换 Surfer 上游的 `spade` 依赖链。
+
+# 第 174 次 开发
+
+## 开发目标
+
+继续修复 `/home/luyoung/surfer` 的 ECOS Surfer assets GitHub Actions 构建失败问题：上一版 `trunk build --no-default-features` 仍未影响 Trunk 前置 `cargo metadata` 阶段，metadata 继续解析 `spade` 默认 feature。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/surfer/.github/workflows/release-ecos-assets.yml`
+  - 在 CI 构建工作区内临时改写 `Cargo.toml`，把 `default = ["spade", "performance_plot"]` 改成 `default = ["performance_plot"]`。
+  - 保留 `trunk build --no-default-features --features performance_plot`，让实际 Cargo build 也不启用 `spade`。
+  - 这样 Trunk 的 `cargo metadata` 和后续 build 两个阶段都会避开 `spade/tracing-tree` 依赖链。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次二次修复。
+
+## 验证情况
+
+- 已查看 Trunk 0.18.7 源码，确认它有独立的 `cargo metadata` 阶段，上一版 CLI feature 参数没有传给 metadata 阶段。
+- 已确认 GitHub Actions 最新失败日志仍停在 `spade -> tracing-tree` 依赖解析，说明需要从 `Cargo.toml` default feature 源头绕开。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 Surfer Trunk release build；需要 push 后由 GitHub Actions 执行。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 该修复仅影响 GitHub Actions 的临时工作区，不改变 Surfer 仓库里的长期默认 feature 设计。
+- 如果后续 Surfer 修改 `Cargo.toml` default feature 行格式，workflow 的防呆检查会失败，需要同步更新替换逻辑。
