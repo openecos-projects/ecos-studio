@@ -11039,3 +11039,42 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `ecc-fe` 仓库的 Actions 设置需要允许 workflow 使用 `GITHUB_TOKEN` 写 contents；如果 organization 禁用了该权限，发布 release 仍会失败。
 - registry 当前指向 `ecc-fe` 仓库 release；在第一次成功发布 `ecc-fe-latest` 前，下载地址可能暂时 404。
+
+# 第 171 次 开发
+
+## 开发目标
+
+将 `ecc-fe` latest runtime 发布流程切换到 GitHub App 模式：`ecc-fe` 仓库负责打包，workflow 通过 App installation token 将产物发布到统一公开资源仓库 `openecos-projects/ecos-resource-assets`，从而支持多仓库统一资源发布。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 将 workflow 权限收回 `contents: read`。
+  - 新增 `actions/create-github-app-token@v2` 步骤，使用 `ECOS_RELEASE_APP_ID` 和 `ECOS_RELEASE_APP_PRIVATE_KEY` 生成只面向 `ecos-resource-assets` 的短期 token。
+  - `softprops/action-gh-release` 使用 GitHub App token 发布到 `openecos-projects/ecos-resource-assets` 的 `ecc-fe-latest` release。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 将 `tool:ecc-fe` 的 `url`、`metadata_url`、`sha256_url` 改回 `openecos-projects/ecos-resource-assets/releases/download/ecc-fe-latest/...`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GitHub App 发布模式切换。
+
+## 验证情况
+
+- 已执行 `git -C ecc-fe diff --check`，通过。
+- 已执行 `git -C /home/luyoung/ecos-registry diff --check`，通过。
+- 已执行 `git diff --check`，通过。
+- 已用 Node 解析 `/home/luyoung/ecos-registry/tool-registry.json`，确认 `tool:ecc-fe` latest URL 已指向 `openecos-projects/ecos-resource-assets`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未实际触发 GitHub Actions；需要提交并 push `ecc-fe` 后由 GitHub 执行。
+
+## 已知后续风险
+
+- `openecos-projects/ecc-fe` 仓库必须配置 `ECOS_RELEASE_APP_ID` 和 `ECOS_RELEASE_APP_PRIVATE_KEY` secrets，且 GitHub App 必须安装到 `openecos-projects/ecos-resource-assets` 并拥有 `Contents: Read and write` 权限。
+- 第一次成功发布 `ecos-resource-assets` 的 `ecc-fe-latest` release 前，Resource Manager 下载 `tool:ecc-fe` 仍会 404。
