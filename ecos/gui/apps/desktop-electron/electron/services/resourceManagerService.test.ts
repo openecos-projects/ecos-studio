@@ -74,6 +74,86 @@ function testRegistryCachePath(cacheDir: string, registryUrl: string): string {
   return join(cacheDir, `resource-registry-${key}.json`)
 }
 
+function testResourceDirs(root: string): {
+  resourcesDir: string
+  toolsDir: string
+  pdksDir: string
+} {
+  return {
+    resourcesDir: join(root, 'state', 'resources'),
+    toolsDir: join(root, 'data', 'tools'),
+    pdksDir: join(root, 'data', 'pdks'),
+  }
+}
+
+async function writeTestManifest(
+  root: string,
+  installed: Record<string, unknown>,
+): Promise<void> {
+  const dirs = testResourceDirs(root)
+  await mkdir(dirs.resourcesDir, { recursive: true })
+  await writeFile(join(dirs.resourcesDir, 'manifest.json'), JSON.stringify({
+    schema_version: 1,
+    resources_dir: dirs.resourcesDir,
+    tools_dir: dirs.toolsDir,
+    pdks_dir: dirs.pdksDir,
+    installed,
+  }), 'utf8')
+}
+
+async function writeYosysRegistry(
+  registryPath: string,
+  options: {
+    platforms?: Record<string, unknown>
+    sha256?: string
+    size?: number
+    url?: string
+    version?: string
+    versions?: unknown[]
+  } = {},
+): Promise<void> {
+  await writeFile(registryPath, JSON.stringify({
+    schema_version: 2,
+    tools: [
+      {
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        homepage: '',
+        versions: options.versions ?? [
+          {
+            version: options.version ?? '2026-05-13',
+            platforms: options.platforms ?? {
+              'all-platform': {
+                url: options.url ?? 'file:///tmp/yosys.tar',
+                sha256: options.sha256 ?? 'managed-sha',
+                size: options.size ?? 12,
+              },
+            },
+          },
+        ],
+      },
+    ],
+    pdks: [],
+  }), 'utf8')
+}
+
+function localYosysEntry(localYosys: string): Record<string, unknown> {
+  return {
+    type: 'tool',
+    name: 'yosys',
+    version: '0.66+154',
+    path: localYosys,
+    installed_at: '2026-06-30T00:00:00Z',
+    sha256: '',
+    detected_executables: ['bin/yosys'],
+    executable: 'bin/yosys',
+    active: true,
+    managed: false,
+  }
+}
+
 describe('ResourceManagerService', () => {
   afterEach(async () => {
     await Promise.all(
@@ -383,57 +463,14 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const localYosys = join(root, 'local', 'oss-cad-suite')
-    await mkdir(join(root, 'state', 'resources'), { recursive: true })
-    await writeFile(registryPath, JSON.stringify({
-      schema_version: 2,
-      tools: [
-        {
-          name: 'yosys',
-          display_name: 'Yosys',
-          description: 'RTL synthesis',
-          category: 'synthesis',
-          homepage: '',
-          versions: [
-            {
-              version: '2026-05-13',
-              platforms: {
-                'all-platform': {
-                  url: 'file:///tmp/yosys.tar',
-                  sha256: 'managed-sha',
-                  size: 12,
-                },
-              },
-            },
-          ],
-        },
-      ],
-      pdks: [],
-    }), 'utf8')
-    await writeFile(join(root, 'state', 'resources', 'manifest.json'), JSON.stringify({
-      schema_version: 1,
-      resources_dir: join(root, 'state', 'resources'),
-      tools_dir: join(root, 'data', 'tools'),
-      pdks_dir: join(root, 'data', 'pdks'),
-      installed: {
-        'tool:yosys': {
-          type: 'tool',
-          name: 'yosys',
-          version: '0.66+154',
-          path: localYosys,
-          installed_at: '2026-06-30T00:00:00Z',
-          sha256: '',
-          detected_executables: ['bin/yosys'],
-          executable: 'bin/yosys',
-          active: true,
-          managed: false,
-        },
-      },
-    }), 'utf8')
+    await writeYosysRegistry(registryPath)
+    await writeTestManifest(root, {
+      'tool:yosys': localYosysEntry(localYosys),
+    })
+    const dirs = testResourceDirs(root)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...dirs,
     })
 
     await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
@@ -457,57 +494,22 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const registryPath = join(root, 'registry.json')
     const localYosys = join(root, 'local', 'oss-cad-suite')
-    await mkdir(join(root, 'state', 'resources'), { recursive: true })
-    await writeFile(registryPath, JSON.stringify({
-      schema_version: 2,
-      tools: [
-        {
-          name: 'yosys',
-          display_name: 'Yosys',
-          description: 'RTL synthesis',
-          category: 'synthesis',
-          homepage: '',
-          versions: [
-            {
-              version: '2026-05-13',
-              platforms: {
-                'unsupported-platform': {
-                  url: 'file:///tmp/yosys.tar',
-                  sha256: 'managed-sha',
-                  size: 12,
-                },
-              },
-            },
-          ],
-        },
-      ],
-      pdks: [],
-    }), 'utf8')
-    await writeFile(join(root, 'state', 'resources', 'manifest.json'), JSON.stringify({
-      schema_version: 1,
-      resources_dir: join(root, 'state', 'resources'),
-      tools_dir: join(root, 'data', 'tools'),
-      pdks_dir: join(root, 'data', 'pdks'),
-      installed: {
-        'tool:yosys': {
-          type: 'tool',
-          name: 'yosys',
-          version: '0.66+154',
-          path: localYosys,
-          installed_at: '2026-06-30T00:00:00Z',
-          sha256: '',
-          detected_executables: ['bin/yosys'],
-          executable: 'bin/yosys',
-          active: true,
-          managed: false,
+    await writeYosysRegistry(registryPath, {
+      platforms: {
+        'unsupported-platform': {
+          url: 'file:///tmp/yosys.tar',
+          sha256: 'managed-sha',
+          size: 12,
         },
       },
-    }), 'utf8')
+    })
+    await writeTestManifest(root, {
+      'tool:yosys': localYosysEntry(localYosys),
+    })
+    const dirs = testResourceDirs(root)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
-      resourcesDir: join(root, 'state', 'resources'),
-      toolsDir: join(root, 'data', 'tools'),
-      pdksDir: join(root, 'data', 'pdks'),
+      ...dirs,
     })
 
     await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
@@ -517,6 +519,172 @@ describe('ResourceManagerService', () => {
       health: expect.objectContaining({
         managed: false,
       }),
+    })
+  })
+
+  it('replaces an unmanaged local tool with a managed registry install without deleting the local directory', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createFixtureArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(join(localYosys, 'bin'), { recursive: true })
+    await writeFile(join(localYosys, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    await writeTestManifest(root, {
+      'tool:yosys': localYosysEntry(localYosys),
+    })
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      await mkdir(join(destination, 'bin'), { recursive: true })
+      const executable = join(destination, 'bin', 'yosys')
+      await writeFile(executable, '#!/bin/sh\n', 'utf8')
+      await chmod(executable, 0o755)
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      archiveExtractor: extract,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(service.installResource('tool:yosys')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+
+    await expect(readFile(join(localYosys, 'bin', 'yosys'), 'utf8')).resolves.toBe('#!/bin/sh\n')
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      source: 'registry',
+      installed_version: '2026-05-13',
+      path: join(dirs.toolsDir, 'yosys', '2026-05-13'),
+      actions: ['uninstall'],
+      health: expect.objectContaining({
+        managed: true,
+      }),
+    })
+  })
+
+  it('preserves the local tool manifest entry when a replace install fails verification', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createFixtureArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const localYosys = join(root, 'local', 'oss-cad-suite')
+    await mkdir(localYosys, { recursive: true })
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+    })
+    await writeTestManifest(root, {
+      'tool:yosys': localYosysEntry(localYosys),
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      sha256Verifier: vi.fn(async () => false),
+    })
+
+    await expect(service.installResource('tool:yosys')).rejects.toThrow('SHA256 verification failed for yosys')
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      source: 'local',
+      installed_version: '0.66+154',
+      path: localYosys,
+      actions: ['install'],
+      health: expect.objectContaining({
+        managed: false,
+      }),
+    })
+  })
+
+  it('keeps managed tool update semantics on the update path', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createFixtureArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const oldManagedYosys = join(root, 'data', 'tools', 'yosys', '2026-04-01')
+    await writeYosysRegistry(registryPath, {
+      url: `file://${archive.path}`,
+      sha256: archive.sha256,
+      size: archive.size,
+      versions: [
+        {
+          version: '2026-05-13',
+          platforms: {
+            'all-platform': {
+              url: `file://${archive.path}`,
+              sha256: archive.sha256,
+              size: archive.size,
+            },
+          },
+        },
+        {
+          version: '2026-04-01',
+          platforms: {
+            'all-platform': {
+              url: `file://${archive.path}`,
+              sha256: 'old-sha',
+              size: archive.size,
+            },
+          },
+        },
+      ],
+    })
+    await writeTestManifest(root, {
+      'tool:yosys': {
+        type: 'tool',
+        name: 'yosys',
+        version: '2026-04-01',
+        path: oldManagedYosys,
+        installed_at: '2026-04-01T00:00:00Z',
+        sha256: 'old-sha',
+        detected_executables: ['bin/yosys'],
+        executable: 'bin/yosys',
+        active: true,
+        managed: true,
+      },
+    })
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      await mkdir(join(destination, 'bin'), { recursive: true })
+      const executable = join(destination, 'bin', 'yosys')
+      await writeFile(executable, '#!/bin/sh\n', 'utf8')
+      await chmod(executable, 0o755)
+    })
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      ...dirs,
+      archiveExtractor: extract,
+      sha256Verifier: vi.fn(async () => true),
+    })
+    const progress = vi.fn()
+
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'update_available',
+      source: 'registry',
+      installed_version: '2026-04-01',
+      available_versions: ['2026-05-13', '2026-04-01'],
+      actions: ['update', 'uninstall'],
+    })
+    await expect(service.updateResource('tool:yosys', progress)).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:yosys',
+      version: '2026-05-13',
+    })
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'update',
+      resource_id: 'tool:yosys',
+    }))
+    await expect(service.getResource('tool:yosys')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: '2026-05-13',
+      actions: ['uninstall'],
     })
   })
 
