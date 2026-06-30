@@ -1,9 +1,11 @@
 import { ref, toRaw } from 'vue'
 import type { DesktopApi, DesktopSettingsValue, ScannedPdkDirectory } from '@ecos-studio/shared'
-import { importPdkPathApi, removePdkReferenceApi } from '@/api/plugin'
+import { importLocalResourcePathApi, importPdkPathApi, removePdkReferenceApi } from '@/api/plugin'
 import { hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
+
+const INVALID_PDK_PATH_MESSAGE = 'PDK path cannot contain Chinese or spaces, please select a directory containing only English, numbers and common symbols.'
 
 /** 路径中是否包含中文或空格（不允许，会导致工具链异常） */
 function pathHasInvalidChars(path: string): boolean {
@@ -233,8 +235,35 @@ export function usePdkManager() {
     return await desktopApi.workspace.scanPdkDirectory(path)
   }
 
-  const syncImportedPdkReference = async (path: string): Promise<void> => {
+  const syncImportedPdkReference = async (path: string, resourceId?: string): Promise<void> => {
+    if (resourceId) {
+      await importLocalResourcePathApi(resourceId, path)
+      return
+    }
     await importPdkPathApi(path)
+  }
+
+  const saveDetectedPdk = async (
+    desktopApi: DesktopApi,
+    detected: ScannedPdkDirectory,
+    resourceId?: string,
+  ): Promise<ImportedPdk> => {
+    const normalizedPath = normalizePdkPath(detected.canonicalPath)
+    const existing = importedPdks.value.find(
+      p => normalizePdkPath(p.path) === normalizedPath
+    )
+    if (existing) {
+      await syncImportedPdkReference(detected.canonicalPath, resourceId)
+      return existing
+    }
+
+    await syncImportedPdkReference(detected.canonicalPath, resourceId)
+    const pdk = buildImportedPdk(detected)
+
+    importedPdks.value.push(pdk)
+    await savePdks(desktopApi)
+
+    return pdk
   }
 
   // ============ PDK 操作 ============
@@ -256,7 +285,7 @@ export function usePdkManager() {
 
       // 路径不允许包含中文或空格，避免工具链异常
       if (pathHasInvalidChars(path)) {
-        showToast({ severity: 'error', summary: 'Invalid PDK Path', detail: 'PDK path cannot contain Chinese or spaces, please select a directory containing only English, numbers and common symbols.' })
+        showToast({ severity: 'error', summary: 'Invalid PDK Path', detail: INVALID_PDK_PATH_MESSAGE })
         return null
       }
 
@@ -273,23 +302,7 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = normalizePdkPath(detected.canonicalPath)
-      const existing = importedPdks.value.find(
-        p => normalizePdkPath(p.path) === normalizedPath
-      )
-      if (existing) {
-        await syncImportedPdkReference(detected.canonicalPath)
-        console.warn('[usePdkManager] PDK already imported:', detected.canonicalPath)
-        return existing
-      }
-
-      await syncImportedPdkReference(detected.canonicalPath)
-      const pdk = buildImportedPdk(detected)
-
-      importedPdks.value.push(pdk)
-      await savePdks(desktopApi)
-
-      return pdk
+      return await saveDetectedPdk(desktopApi, detected)
     } catch (error) {
       console.error('[usePdkManager] Import PDK error:', error)
       showToast({
@@ -327,22 +340,7 @@ export function usePdkManager() {
         return null
       }
 
-      const normalizedPath = normalizePdkPath(detected.canonicalPath)
-      const existing = importedPdks.value.find(
-        p => normalizePdkPath(p.path) === normalizedPath
-      )
-      if (existing) {
-        await syncImportedPdkReference(detected.canonicalPath)
-        return existing
-      }
-
-      await syncImportedPdkReference(detected.canonicalPath)
-      const pdk = buildImportedPdk(detected)
-
-      importedPdks.value.push(pdk)
-      await savePdks(desktopApi)
-
-      return pdk
+      return await saveDetectedPdk(desktopApi, detected)
     } catch (error) {
       console.error('[usePdkManager] Import PDK by path error:', error)
       showToast({
@@ -352,6 +350,25 @@ export function usePdkManager() {
       })
       return null
     }
+  }
+
+  const importPdkForResource = async (resourceId: string, path: string): Promise<ImportedPdk> => {
+    const desktopApi = await waitForDesktopApi()
+
+    if (pathHasInvalidChars(path)) {
+      throw new Error(INVALID_PDK_PATH_MESSAGE)
+    }
+
+    let detected: ScannedPdkDirectory
+    try {
+      detected = await scanPdkDirectory(desktopApi, path)
+    } catch (error) {
+      throw Object.assign(new Error('The selected PDK directory could not be scanned.'), {
+        cause: error,
+      })
+    }
+
+    return await saveDetectedPdk(desktopApi, detected, resourceId)
   }
 
   /** 删除已导入的 PDK */
@@ -381,6 +398,7 @@ export function usePdkManager() {
     loadPdks,
     importPdk,
     importPdkByPath,
+    importPdkForResource,
     removePdk,
     getPdkById,
   }

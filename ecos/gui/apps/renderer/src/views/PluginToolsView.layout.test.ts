@@ -102,4 +102,15 @@ describe('PluginToolsView resource table layout', () => {
     expect(installButtonIndex).toBeGreaterThan(-1)
     expect(importButtonIndex).toBeLessThan(installButtonIndex)
   })
+
+  it('marks a row import busy before opening the native directory picker', () => {
+    const busyFlagIndex = pluginToolsViewSource.indexOf('importingResourceIds.value = next')
+    const directoryPickerIndex = pluginToolsViewSource.indexOf('desktopApi.dialog.pickDirectory')
+
+    expect(pluginToolsViewSource).toContain('importPdkForResource')
+    expect(pluginToolsViewSource).toContain("row.type === 'pdk' ? importPdkForResource : undefined")
+    expect(busyFlagIndex).toBeGreaterThan(-1)
+    expect(directoryPickerIndex).toBeGreaterThan(-1)
+    expect(busyFlagIndex).toBeLessThan(directoryPickerIndex)
+  })
 })

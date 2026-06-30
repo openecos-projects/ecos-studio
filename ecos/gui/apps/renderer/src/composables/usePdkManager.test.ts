@@ -32,6 +32,28 @@ const importPdkPath = vi.fn(async () => ({
   health: {},
   error: null,
 }))
+const importLocalPath = vi.fn(async () => ({
+  id: 'pdk:ics55',
+  type: 'pdk' as const,
+  name: 'ics55',
+  display_name: 'ics55',
+  description: '',
+  category: 'pdk',
+  status: 'installed' as const,
+  installed_version: null,
+  available_versions: [],
+  active_version: null,
+  active: false,
+  path: '/tmp/pdk',
+  managed_root: null,
+  platform: null,
+  size: null,
+  source: 'local',
+  homepage: '',
+  actions: ['validate' as const, 'activate' as const, 'remove_reference' as const],
+  health: {},
+  error: null,
+}))
 const removePdkReference = vi.fn(async (resourceId: string) => ({
   status: 'removed',
   resource_id: resourceId,
@@ -172,7 +194,7 @@ const desktopBridge = {
     validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
     removePdkReference,
     importPdkPath,
-    importLocalPath: async () => { throw new Error('not implemented') },
+    importLocalPath,
     refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
     onProgress: () => () => undefined,
   },
@@ -223,6 +245,7 @@ describe('usePdkManager', () => {
     settingsDelete.mockReset()
     pickDirectory.mockReset()
     importPdkPath.mockReset()
+    importLocalPath.mockReset()
     removePdkReference.mockReset()
     scanPdkDirectory.mockReset()
     localStorageState.clear()
@@ -243,6 +266,7 @@ describe('usePdkManager', () => {
     })
     pickDirectory.mockResolvedValue('/tmp/pdk')
     importPdkPath.mockResolvedValue({} as never)
+    importLocalPath.mockResolvedValue({} as never)
     removePdkReference.mockImplementation(async (resourceId: string) => ({
       status: 'removed',
       resource_id: resourceId,
@@ -318,6 +342,26 @@ describe('usePdkManager', () => {
 
     expect(importedPdks.value).toHaveLength(1)
     expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdks/ics55' })
+  })
+
+  it('imports a row-bound PDK through the local resource API and persists it for project creation', async () => {
+    const { importPdkForResource, importedPdks } = usePdkManager()
+
+    const imported = await importPdkForResource('pdk:ics55', '/tmp/pdk')
+
+    expect(imported).toMatchObject({
+      path: '/tmp/pdk',
+      pdkId: 'ics55',
+    })
+    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdk')
+    expect(importLocalPath).toHaveBeenCalledWith({
+      resourceId: 'pdk:ics55',
+      path: '/tmp/pdk',
+    })
+    expect(importPdkPath).not.toHaveBeenCalled()
+    expect(importedPdks.value).toHaveLength(1)
+    expect(settingsSet).toHaveBeenCalledWith('imported_pdks', expect.any(Array))
+    expect(showToast).not.toHaveBeenCalled()
   })
 
   it('removes the resource manager PDK reference before deleting a local PDK entry', async () => {
