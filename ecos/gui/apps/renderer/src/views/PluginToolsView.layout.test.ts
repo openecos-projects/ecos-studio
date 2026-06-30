@@ -111,6 +111,11 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).not.toContain('data-title="Installing"')
   })
 
+  it('keeps long resource error details out of table rows', () => {
+    expect(pluginToolsViewSource).not.toContain('row-error-msg')
+    expect(pluginToolsViewSource).not.toContain('rowError(row)')
+  })
+
   it('renders local tool replace controls and copy separately from updates', () => {
     expect(pluginToolsViewSource).toContain("rowActionForStatus(row.resource) === 'replace'")
     expect(pluginToolsViewSource).toContain('data-title="Replace"')

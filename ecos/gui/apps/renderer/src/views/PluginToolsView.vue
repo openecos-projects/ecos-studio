@@ -183,7 +183,6 @@
                     >
                       <span></span>
                     </span>
-                    <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
                   </span>
 
                   <span class="row-actions">
@@ -539,10 +538,6 @@ function clearFilters(): void {
   searchQuery.value = ''
   categoryFilter.value = 'all'
   statusFilter.value = 'all'
-}
-
-function rowError(row: ResourceRow): string | undefined {
-  return pluginStore.resourceErrors[row.id] || row.resource.error || undefined
 }
 
 async function handleRowInstall(row: ResourceRow): Promise<void> {
@@ -1340,14 +1335,6 @@ async function openDocs(): Promise<void> {
   transform-origin: left center;
   transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
-}
-
-.row-error-msg {
-  display: block;
-  margin-top: 4px;
-  color: var(--danger-color);
-  font-size: 11px;
-  line-height: 1.3;
 }
 
 /* ---- Row actions ---- */
