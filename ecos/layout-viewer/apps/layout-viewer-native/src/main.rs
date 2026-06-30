@@ -1243,19 +1243,25 @@ fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
 }
 
 #[cfg(test)]
-fn selection_summary_text_with_layer(hit: &PickHit, layer_name: Option<&str>) -> String {
-    selection_inspector_rows(hit, None, None, layer_name)
+fn selection_summary_text_with_layer(hit: &PickHit, layer: SelectionLayerMetadata<'_>) -> String {
+    selection_inspector_rows(hit, None, None, layer)
         .into_iter()
         .map(|(label, value)| format!("{}: {value}", label.to_ascii_lowercase()))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct SelectionLayerMetadata<'a> {
+    name: Option<&'a str>,
+    layer_type: Option<&'a str>,
+}
+
 fn selection_inspector_rows(
     hit: &PickHit,
     source_name: Option<&str>,
     net_name: Option<&str>,
-    layer_name: Option<&str>,
+    layer: SelectionLayerMetadata<'_>,
 ) -> Vec<(&'static str, String)> {
     let target = match hit.target {
         PickHitTarget::Shape => "shape".to_owned(),
@@ -1288,8 +1294,12 @@ fn selection_inspector_rows(
         rows.push(("Net Name", net_name.to_owned()));
     }
     rows.extend([
-        ("Layer", layer_name.unwrap_or("Unknown").to_owned()),
+        ("Layer", layer.name.unwrap_or("Unknown").to_owned()),
         ("Layer ID", hit.layer_id.to_string()),
+        (
+            "Layer Type",
+            layer.layer_type.unwrap_or("Unknown").to_owned(),
+        ),
         ("Shape Kind", shape_kind_label(hit.kind).to_owned()),
         ("Cell", hit.cell.raw().to_string()),
         ("Depth", hit.depth.to_string()),
@@ -1306,11 +1316,18 @@ fn selection_inspector_rows(
     rows
 }
 
-fn layer_name_for_id(layers: &[layoutdb::LayerInfo], layer_id: u16) -> Option<&str> {
+fn selection_layer_metadata_for_id(
+    layers: &[layoutdb::LayerInfo],
+    layer_id: u16,
+) -> SelectionLayerMetadata<'_> {
     layers
         .iter()
         .find(|layer| layer.id == layer_id)
-        .map(|layer| layer.name.as_str())
+        .map(|layer| SelectionLayerMetadata {
+            name: Some(layer.name.as_str()),
+            layer_type: layer.layer_type.as_deref(),
+        })
+        .unwrap_or_default()
 }
 
 fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
@@ -2127,7 +2144,7 @@ impl LayoutViewerV2App {
                                         let source_name = loaded.selection_names.name_for_hit(&hit);
                                         let net_name =
                                             loaded.selection_names.net_name_for_hit(&hit);
-                                        let layer_name = layer_name_for_id(
+                                        let layer = selection_layer_metadata_for_id(
                                             loaded.session.db().layers(),
                                             hit.layer_id,
                                         );
@@ -2135,7 +2152,7 @@ impl LayoutViewerV2App {
                                             &hit,
                                             source_name,
                                             net_name,
-                                            layer_name,
+                                            layer,
                                         ) {
                                             ui.label(label);
                                             ui.monospace(value);
@@ -3028,7 +3045,7 @@ mod tests {
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
         should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect, Args,
         AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState, LayoutViewerV2App,
-        LoadRequest, LodTuningState,
+        LoadRequest, LodTuningState, SelectionLayerMetadata,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{Color, DisplayLayer, DisplayModel, LayerStyle, Pattern};
@@ -3147,7 +3164,15 @@ mod tests {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let rows = selection_inspector_rows(&hit, Some("wire_9"), Some("req_msg_12_"), Some("M1"));
+        let rows = selection_inspector_rows(
+            &hit,
+            Some("wire_9"),
+            Some("req_msg_12_"),
+            SelectionLayerMetadata {
+                name: Some("M1"),
+                layer_type: Some("ROUTING"),
+            },
+        );
 
         assert!(rows
             .iter()
@@ -3170,6 +3195,9 @@ mod tests {
         assert!(rows
             .iter()
             .any(|(label, value)| *label == "Layer ID" && value == "1"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer Type" && value == "ROUTING"));
         assert!(!rows.iter().any(|(label, _value)| *label == "Display Layer"));
         assert!(rows
             .iter()
@@ -3188,7 +3216,15 @@ mod tests {
         let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
         hit.kind = ShapeKind::Via;
 
-        let rows = selection_inspector_rows(&hit, None, None, Some("VIA1"));
+        let rows = selection_inspector_rows(
+            &hit,
+            None,
+            None,
+            SelectionLayerMetadata {
+                name: Some("VIA1"),
+                layer_type: Some("CUT"),
+            },
+        );
 
         let source_file = rows
             .iter()
@@ -3198,6 +3234,9 @@ mod tests {
         assert!(source_file.contains("design/regular_wires.json"));
         assert!(source_file.contains("design/special_wires.json"));
         assert!(source_file.contains("design/io_pins.json"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer Type" && value == "CUT"));
     }
 
     #[test]
@@ -3208,7 +3247,15 @@ mod tests {
         hit.source_id = 564;
         hit.cell = leaf_view.target_cell();
 
-        let rows = selection_inspector_rows(&hit, Some("OAI21X0P5H7R/Y"), None, Some("MET1"));
+        let rows = selection_inspector_rows(
+            &hit,
+            Some("OAI21X0P5H7R/Y"),
+            None,
+            SelectionLayerMetadata {
+                name: Some("MET1"),
+                layer_type: Some("ROUTING"),
+            },
+        );
 
         assert!(rows
             .iter()
@@ -3219,6 +3266,26 @@ mod tests {
         assert!(rows
             .iter()
             .any(|(label, value)| *label == "Name" && value == "OAI21X0P5H7R/Y"));
+    }
+
+    #[test]
+    fn selection_layer_metadata_reads_layer_type_from_layer_info() {
+        let mut routing = LayerInfo::new(15, "MET5");
+        routing.layer_type = Some("ROUTING".to_owned());
+        let mut cut = LayerInfo::new(14, "VIA4");
+        cut.layer_type = Some("CUT".to_owned());
+        let layers = vec![routing, cut];
+
+        let routing_metadata = super::selection_layer_metadata_for_id(&layers, 15);
+        let cut_metadata = super::selection_layer_metadata_for_id(&layers, 14);
+        let missing_metadata = super::selection_layer_metadata_for_id(&layers, 99);
+
+        assert_eq!(routing_metadata.name, Some("MET5"));
+        assert_eq!(routing_metadata.layer_type, Some("ROUTING"));
+        assert_eq!(cut_metadata.name, Some("VIA4"));
+        assert_eq!(cut_metadata.layer_type, Some("CUT"));
+        assert_eq!(missing_metadata.name, None);
+        assert_eq!(missing_metadata.layer_type, None);
     }
 
     #[test]
@@ -3968,13 +4035,20 @@ mod tests {
         let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let text = super::selection_summary_text_with_layer(&hit, Some("M1"));
+        let text = super::selection_summary_text_with_layer(
+            &hit,
+            SelectionLayerMetadata {
+                name: Some("M1"),
+                layer_type: Some("ROUTING"),
+            },
+        );
 
         assert!(text.contains("target: shape"));
         assert!(text.contains("depth: 2"));
         assert!(text.contains(&format!("cell: {}", db.cell_by_name("leaf").unwrap().raw())));
         assert!(text.contains("layer: M1"));
         assert!(text.contains("layer id: 1"));
+        assert!(text.contains("layer type: ROUTING"));
         assert!(text.contains("display bbox: 2, 2, 8, 8"));
     }
 
