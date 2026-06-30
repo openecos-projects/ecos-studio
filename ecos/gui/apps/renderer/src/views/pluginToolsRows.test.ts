@@ -87,7 +87,7 @@ describe('pluginToolsRows', () => {
 
     expect(row.statusKind).toBe('installing')
     expect(row.statusText).toBe('Downloading')
-    expect(row.statusIcon).toBe('ri-download-line')
+    expect(row).not.toHaveProperty('statusIcon')
     expect(row.progressPercent).toBe(50)
   })
 
@@ -103,7 +103,7 @@ describe('pluginToolsRows', () => {
 
     expect(row.statusKind).toBe('installing')
     expect(row.statusText).toBe('Post-install')
-    expect(row.statusIcon).toBeNull()
+    expect(row).not.toHaveProperty('statusIcon')
   })
 
   it('formats resource sizes from bytes', () => {

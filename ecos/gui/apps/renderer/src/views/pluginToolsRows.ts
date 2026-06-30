@@ -23,7 +23,6 @@ export interface ResourceRow {
   platform: string
   statusText: string
   statusKind: StatusKind
-  statusIcon: string | null
   icon: string
   accent: string
   progressPercent: number | null
@@ -120,53 +119,51 @@ function errorStatusText(resource: ResourceItem): string {
   return 'Error'
 }
 
-function progressStatus(progress: InstallProgress | undefined): { text: string; icon: string | null } {
+function progressStatusText(progress: InstallProgress | undefined): string {
   switch (progress?.phase) {
     case 'downloading':
-      return { text: 'Downloading', icon: 'ri-download-line' }
+      return 'Downloading'
     case 'verifying':
-      return { text: 'Verifying', icon: 'ri-shield-check-line' }
+      return 'Verifying'
     case 'extracting':
-      return { text: 'Extracting', icon: 'ri-box-3-line' }
+      return 'Extracting'
     case 'post_install':
-      return { text: 'Post-install', icon: null }
+      return 'Post-install'
     case 'uninstalling':
-      return { text: 'Removing', icon: 'ri-delete-bin-line' }
+      return 'Removing'
     case 'done':
-      return { text: 'Installed', icon: 'ri-check-line' }
+      return 'Installed'
     case 'cancelled':
-      return { text: 'Cancelled', icon: 'ri-close-line' }
+      return 'Cancelled'
     case 'error':
-      return { text: 'Error', icon: 'ri-alert-line' }
+      return 'Error'
     default:
-      return { text: 'Installing', icon: 'ri-loader-4-line spin' }
+      return 'Installing'
   }
 }
 
 function mapStatus(
   resource: ResourceItem,
   progress: InstallProgress | undefined,
-): { kind: StatusKind; text: string; icon: string | null } {
+): { kind: StatusKind; text: string } {
   if (progress || resource.status === 'installing' || resource.status === 'uninstalling' || resource.status === 'removing') {
-    const status = progressStatus(progress)
     return {
       kind: 'installing',
-      text: status.text,
-      icon: status.icon,
+      text: progressStatusText(progress),
     }
   }
 
   switch (resource.status) {
     case 'installed':
-      return { kind: 'installed', text: installedStatusText(resource), icon: null }
+      return { kind: 'installed', text: installedStatusText(resource) }
     case 'update_available':
-      return { kind: 'update', text: 'Update', icon: null }
+      return { kind: 'update', text: 'Update' }
     case 'error':
     case 'missing':
     case 'invalid':
-      return { kind: 'error', text: errorStatusText(resource), icon: null }
+      return { kind: 'error', text: errorStatusText(resource) }
     default:
-      return { kind: 'available', text: 'Available', icon: null }
+      return { kind: 'available', text: 'Available' }
   }
 }
 
@@ -357,7 +354,6 @@ export function resourceToRow(
     platform: resource.platform || (resource.source === 'local' ? 'Local' : ''),
     statusText: status.text,
     statusKind: status.kind,
-    statusIcon: status.icon,
     icon: iconFor(resource),
     accent: accentFor(resource),
     progressPercent,

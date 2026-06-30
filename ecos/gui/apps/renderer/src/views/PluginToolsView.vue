@@ -169,7 +169,6 @@
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span class="resource-status-cell">
                     <b class="status-pill" :class="row.statusKind">
-                      <i v-if="row.statusIcon" :class="row.statusIcon" aria-hidden="true"></i>
                       <span>{{ row.statusText }}</span>
                     </b>
                     <span
@@ -1271,7 +1270,6 @@ async function openDocs(): Promise<void> {
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   max-width: 100%;
   min-height: 22px;
   padding: 0 8px;
@@ -1279,12 +1277,6 @@ async function openDocs(): Promise<void> {
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
-}
-
-.status-pill i {
-  flex: 0 0 auto;
-  font-size: 13px;
-  line-height: 1;
 }
 
 .status-pill span {
