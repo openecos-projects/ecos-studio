@@ -2,11 +2,15 @@ pre-commit:
   parallel: true
   jobs:
     - name: gui lint
-      glob: "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
+      glob:
+        - "ecos/gui/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
+        - "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
       run: pnpm --dir ecos/gui run lint
     - name: gui format
-      glob: "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
-      run: pnpm --dir ecos/gui run fmt:check
+      glob:
+        - "ecos/gui/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc,md,yaml,yml,css,html}"
+        - "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc,md,yaml,yml,css,html}"
+      run: pnpm --dir ecos/gui exec node scripts/fmt-staged.mjs {staged_files}
 
 commit-msg:
   jobs:

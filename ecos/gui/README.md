@@ -100,9 +100,10 @@ and a key IPC call can reach the main process. It is not part of `check`,
 `test`, `make build`, or CI.
 
 Git hooks are managed with Lefthook from the repository root. The pre-commit
-hook runs lightweight GUI lint and format checks only for staged `ecos/gui`
-JavaScript, TypeScript, Vue, and JSON changes. The commit-message hook runs
-commitlint against every commit message, regardless of which files changed.
+hook runs lightweight GUI lint checks and staged-file format checks for
+supported `ecos/gui` source, config, style, and docs changes. The
+commit-message hook runs commitlint against every commit message, regardless of
+which files changed.
 
 ## Stack
 
@@ -116,23 +117,23 @@ commitlint against every commit message, regardless of which files changed.
 
 ## Source layout (overview)
 
-| Path | Description |
-|------|-------------|
-| `apps/desktop-electron/` | Electron main/preload process code, package config, and release metadata |
-| `apps/renderer/src/applications/editor/` | Canvas editor core, layout rendering, plugins, tile logic |
-| `apps/renderer/src/components/` | Reusable UI (toolbar, sidebars, panels, etc.) |
-| `apps/renderer/src/views/` | Routed pages |
-| `apps/renderer/src/composables/` | Composables (workspace state, menus, desktop integration wrappers, etc.) |
-| `apps/renderer/src/stores/` | Pinia state |
-| `apps/renderer/src/api/` | Desktop runtime bridge wrappers and event-stream helpers |
-| `packages/` | Shared internal workspace packages (desktop bridge, tile helper, shared contracts) |
+| Path                                     | Description                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| `apps/desktop-electron/`                 | Electron main/preload process code, package config, and release metadata           |
+| `apps/renderer/src/applications/editor/` | Canvas editor core, layout rendering, plugins, tile logic                          |
+| `apps/renderer/src/components/`          | Reusable UI (toolbar, sidebars, panels, etc.)                                      |
+| `apps/renderer/src/views/`               | Routed pages                                                                       |
+| `apps/renderer/src/composables/`         | Composables (workspace state, menus, desktop integration wrappers, etc.)           |
+| `apps/renderer/src/stores/`              | Pinia state                                                                        |
+| `apps/renderer/src/api/`                 | Desktop runtime bridge wrappers and event-stream helpers                           |
+| `packages/`                              | Shared internal workspace packages (desktop bridge, tile helper, shared contracts) |
 
 ## Related docs
 
 - [ECOS package README](../README.md) — overall quick start and release notes for ECOS Studio
-- [ECOS Studio user guide](../docs/user-guide.md) — product usage  
-- [Repository root README](../../README.md) — monorepo overview  
-- [ECC development](../../ecc/docs/development.md), [ECC architecture](../../ecc/docs/architecture.md) — ECC toolchain docs  
+- [ECOS Studio user guide](../docs/user-guide.md) — product usage
+- [Repository root README](../../README.md) — monorepo overview
+- [ECC development](../../ecc/docs/development.md), [ECC architecture](../../ecc/docs/architecture.md) — ECC toolchain docs
 
 ---
 
