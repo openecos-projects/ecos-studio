@@ -5,7 +5,7 @@ import { aboutVersionRows, buildAboutVersionText } from './aboutDialogVersions'
 describe('aboutDialogVersions', () => {
   it('shows ECC and ECC-Tools as distinct component versions', () => {
     const versions: VersionInfo = {
-      gui: '0.1.0-alpha.5',
+      gui: '0.1.0-alpha.6',
       runtime: 'ECC CLI',
       ecc: '0.1.0a5',
       dreamplace: '0.1.0a3',
@@ -13,7 +13,7 @@ describe('aboutDialogVersions', () => {
     }
 
     expect(aboutVersionRows(versions)).toEqual([
-      { key: 'gui', label: 'GUI', version: '0.1.0-alpha.5' },
+      { key: 'gui', label: 'GUI', version: '0.1.0-alpha.6' },
       { key: 'runtime', label: 'Runtime', version: 'ECC CLI' },
       { key: 'ecc', label: 'ECC', version: '0.1.0a5' },
       { key: 'eccTools', label: 'ECC-Tools', version: '0.1.0a2' },
@@ -23,7 +23,7 @@ describe('aboutDialogVersions', () => {
 
   it('does not use legacy bridge version fields as runtime data', () => {
     const versions = {
-      gui: '0.1.0-alpha.5',
+      gui: '0.1.0-alpha.6',
       legacyRuntime: 'legacy runtime',
       ecc: '0.1.0a5',
       dreamplace: '0.1.0a3',
@@ -38,7 +38,7 @@ describe('aboutDialogVersions', () => {
 
   it('copies the same rows shown in the dialog', () => {
     const versions: VersionInfo = {
-      gui: '0.1.0-alpha.5',
+      gui: '0.1.0-alpha.6',
       runtime: 'ECC CLI',
       ecc: '0.1.0a5',
       dreamplace: '0.1.0a3',
@@ -47,7 +47,7 @@ describe('aboutDialogVersions', () => {
 
     expect(buildAboutVersionText(versions)).toBe([
       'ECOS Studio',
-      'GUI: 0.1.0-alpha.5',
+      'GUI: 0.1.0-alpha.6',
       'Runtime: ECC CLI',
       'ECC: 0.1.0a5',
       'ECC-Tools: 0.1.0a2',

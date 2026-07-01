@@ -29,7 +29,7 @@ describe('AppInfoService', () => {
   it('returns local GUI and structured ECC component versions through the CLI', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       env: { PATH: '/usr/bin' },
       spawn: harness.spawn,
     })
@@ -52,7 +52,7 @@ describe('AppInfoService', () => {
       dreamplace: '0.1.0a3',
       ecc: '0.1.0a5',
       eccTools: '0.1.0a2',
-      gui: '0.1.0-alpha.5',
+      gui: '0.1.0-alpha.6',
       runtime: 'ECC CLI',
     })
   })
@@ -60,7 +60,7 @@ describe('AppInfoService', () => {
   it('falls back to legacy ecc --version when structured discovery fails', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       spawn: harness.spawn,
     })
     const promise = service.getVersions()
@@ -84,7 +84,7 @@ describe('AppInfoService', () => {
   it('falls back to legacy ecc --version when structured stdout is invalid JSON', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       spawn: harness.spawn,
     })
     const promise = service.getVersions()
@@ -107,7 +107,7 @@ describe('AppInfoService', () => {
   it('falls back to legacy ecc --version when structured stdout is not an object', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       spawn: harness.spawn,
     })
     const promise = service.getVersions()
@@ -130,7 +130,7 @@ describe('AppInfoService', () => {
   it('defaults missing structured fields without rejecting version discovery', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       spawn: harness.spawn,
     })
     const promise = service.getVersions()
@@ -145,7 +145,7 @@ describe('AppInfoService', () => {
       dreamplace: 'unknown',
       ecc: '0.1.0a5',
       eccTools: 'unknown',
-      gui: '0.1.0-alpha.5',
+      gui: '0.1.0-alpha.6',
       runtime: 'ECC CLI',
     })
   })
@@ -153,7 +153,7 @@ describe('AppInfoService', () => {
   it('returns unknown component versions when structured and legacy discovery fail', async () => {
     const harness = createSpawnHarness()
     const service = new AppInfoService({
-      appVersionProvider: () => '0.1.0-alpha.5',
+      appVersionProvider: () => '0.1.0-alpha.6',
       spawn: harness.spawn,
     })
     const promise = service.getVersions()

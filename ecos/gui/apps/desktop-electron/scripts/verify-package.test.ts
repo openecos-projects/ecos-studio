@@ -19,8 +19,8 @@ async function createReleaseFixture() {
   const releaseDir = join(packageRoot, 'release')
   const binariesDir = join(releaseDir, 'linux-unpacked/resources/binaries')
   await mkdir(binariesDir, { recursive: true })
-  await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.5_x86_64.AppImage'), 'appimage')
-  await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.5_amd64.deb'), 'deb')
+  await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.6_x86_64.AppImage'), 'appimage')
+  await writeFile(join(releaseDir, 'ECOS-Studio_0.1.0-alpha.6_amd64.deb'), 'deb')
   await writeFile(join(binariesDir, 'ecos-layout-packer'), 'packer')
   await writeFile(join(binariesDir, 'layout-viewer-native'), 'viewer')
   await writeFile(join(binariesDir, 'ecc'), 'ecc')
@@ -37,8 +37,8 @@ describe('verifyPackageArtifacts', () => {
 
     await expect(verifyPackageArtifacts({ packageRoot: fixture.packageRoot }))
       .resolves.toEqual({
-        appImages: ['ECOS-Studio_0.1.0-alpha.5_x86_64.AppImage'],
-        debs: ['ECOS-Studio_0.1.0-alpha.5_amd64.deb'],
+        appImages: ['ECOS-Studio_0.1.0-alpha.6_x86_64.AppImage'],
+        debs: ['ECOS-Studio_0.1.0-alpha.6_amd64.deb'],
         nativeBinaries: ['ecos-layout-packer', 'layout-viewer-native', 'ecc'],
       })
   })
@@ -53,7 +53,7 @@ describe('verifyPackageArtifacts', () => {
 
   it('rejects release directories that are missing Debian artifacts', async () => {
     const fixture = await createReleaseFixture()
-    await import('node:fs/promises').then(({ rm }) => rm(join(fixture.releaseDir, 'ECOS-Studio_0.1.0-alpha.5_amd64.deb')))
+    await import('node:fs/promises').then(({ rm }) => rm(join(fixture.releaseDir, 'ECOS-Studio_0.1.0-alpha.6_amd64.deb')))
 
     await expect(verifyPackageArtifacts({ packageRoot: fixture.packageRoot }))
       .rejects.toThrow('No Debian package artifacts found')

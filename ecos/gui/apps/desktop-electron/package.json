@@ -1,6 +1,6 @@
 {
   "name": "@ecos-studio/desktop-electron",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "description": "ECOS Studio desktop shell built with Electron.",
   "homepage": "https://github.com/openecos-projects/ecos-studio",
