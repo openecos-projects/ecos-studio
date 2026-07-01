@@ -213,7 +213,7 @@ export class ResourceManagerService {
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
-      resources.push(await this.registryToolToResource(tool, installedTools, manifest))
+      resources.push(this.registryToolToResource(tool, installedTools, manifest))
     }
     for (const pdk of state.registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
@@ -1057,15 +1057,14 @@ export class ResourceManagerService {
     }
   }
 
-  private async registryToolToResource(
+  private registryToolToResource(
     tool: RegistryTool,
     installed: Record<string, ToolInventoryEntry>,
     manifest: ResourceManifest,
-  ): Promise<ResourceInfo> {
+  ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
-    const resolvedAsset = await this.resolvePlatformAsset(asset)
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
     const requirements = latest?.requires ?? []
@@ -1077,7 +1076,7 @@ export class ResourceManagerService {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = toolHasUpdate(local, versions[0], resolvedAsset) ? 'update_available' : 'installed'
+      status = toolHasUpdate(local, versions[0], asset) ? 'update_available' : 'installed'
       actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
     }
 
@@ -1096,7 +1095,7 @@ export class ResourceManagerService {
       path: local?.path ?? null,
       managed_root: this.toolsDir,
       platform,
-      size: resolvedAsset?.size ?? asset?.size ?? null,
+      size: asset?.size ?? null,
       source: 'registry',
       homepage: tool.homepage,
       actions,

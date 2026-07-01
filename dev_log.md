@@ -11445,3 +11445,44 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 现在 Review 严格依赖 Yosys；用户若未通过 Resource Manager 安装 Yosys，或未在 PATH/环境变量中提供 Yosys，Review 会按预期保持 `Incomplete`。
+
+# 第 182 次 开发
+
+## 开发目标
+
+优化 Resource Manager 资源列表加载速度，并避免本地导入的 PDK 引用在界面上被误读为“已经下载的托管资源”。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - `listResources()` 生成工具列表时不再解析 release `metadata_url` / `sha256_url`，避免资源列表阶段对每个滚动资源发起远端 sidecar 请求。
+  - 保留安装和更新路径中的远端 metadata/sha 解析，下载校验行为不变。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加列表阶段不访问滚动 release sidecar 的回归测试。
+  - 将 ecc-fe 最新 release 校验测试聚焦到安装/更新阶段的 metadata/sha 使用。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 将本地导入且可移除引用的资源状态文案显示为 `Local reference` 或 `Active local`，避免显示为普通 `Installed`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加本地 PDK 引用状态文案测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 加载和本地引用展示调整。
+
+## 验证情况
+
+- 已执行 `pnpm --dir ecos/gui/apps/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：20 个测试全部通过。
+- 已执行 `pnpm --dir ecos/gui/apps/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：15 个测试全部通过。
+- 已执行 `git diff --check -- ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts ecos/gui/apps/renderer/src/views/pluginToolsRows.ts ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 如果本地没有 registry 缓存且网络很慢，第一次打开 Resource Manager 仍需要等待 registry 主 JSON 获取；已有缓存时会走本地缓存并后台刷新。
+- 当前 `ics55` 的本地记录仍然存在于用户本机 manifest 中，它表示本地 PDK 引用而不是下载包；若要测试全新下载流程，需要先在 UI 中移除该引用。

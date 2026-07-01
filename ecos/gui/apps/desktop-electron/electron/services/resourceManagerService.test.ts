@@ -835,7 +835,84 @@ describe('ResourceManagerService', () => {
     ]))
   })
 
-  it('uses latest release metadata to detect ecc-fe updates and verify downloads', async () => {
+  it('does not fetch rolling release sidecars while listing resources', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+    const shaUrl = 'https://example.com/ecc-fe-latest.tar.gz.sha256'
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  metadata_url: metadataUrl,
+                  sha256_url: shaUrl,
+                  sha256: 'b'.repeat(64),
+                  size: 1,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: join(toolsDir, 'ecc-fe', 'latest'),
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: 'c'.repeat(64),
+          size: 1,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      installed_version: 'latest',
+      available_versions: ['latest'],
+      size: 1,
+      actions: ['update', 'uninstall'],
+    })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('uses latest release metadata to verify ecc-fe downloads', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const registryPath = join(root, 'registry.json')
@@ -917,14 +994,6 @@ describe('ResourceManagerService', () => {
       sha256Verifier: verifySha256,
     })
 
-    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
-      status: 'update_available',
-      installed_version: 'latest',
-      available_versions: ['latest'],
-      size: archive.size,
-      actions: ['update', 'uninstall'],
-    })
-
     await expect(service.updateResource('tool:ecc-fe')).resolves.toEqual({
       status: 'started',
       resource_id: 'tool:ecc-fe',
@@ -942,13 +1011,14 @@ describe('ResourceManagerService', () => {
     expect(verifySha256).toHaveBeenCalledWith(expect.any(String), latestSha)
   })
 
-  it('marks latest tools without a recorded sha as updateable when remote metadata has a sha', async () => {
+  it('uses only registry static sha when listing latest tools', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const registryPath = join(root, 'registry.json')
     const resourcesDir = join(root, 'state', 'resources')
     const toolsDir = join(root, 'data', 'tools')
     const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+    const registrySha = 'b'.repeat(64)
     const latestSha = 'd'.repeat(64)
     await mkdir(resourcesDir, { recursive: true })
     await writeFile(registryPath, JSON.stringify({
@@ -967,7 +1037,7 @@ describe('ResourceManagerService', () => {
                 'all-platform': {
                   url: `file://${archive.path}`,
                   metadata_url: metadataUrl,
-                  sha256: 'b'.repeat(64),
+                  sha256: registrySha,
                   size: 1,
                   strip_prefix: 'ecc-fe-runtime',
                 },
@@ -988,6 +1058,7 @@ describe('ResourceManagerService', () => {
           version: 'latest',
           path: join(toolsDir, 'ecc-fe', 'latest'),
           installed_at: '2026-06-30T00:00:00Z',
+          sha256: registrySha,
           size: 1,
           executable: 'bin/ecc-fe',
           detected_executables: ['bin/ecc-fe'],
@@ -1011,12 +1082,13 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
-      status: 'update_available',
+      status: 'installed',
       installed_version: 'latest',
       available_versions: ['latest'],
-      size: archive.size,
-      actions: ['update', 'uninstall'],
+      size: 1,
+      actions: ['uninstall'],
     })
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {

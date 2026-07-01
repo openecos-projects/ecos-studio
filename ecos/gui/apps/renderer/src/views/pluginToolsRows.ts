@@ -135,6 +135,9 @@ function progressPercentFor(progress: InstallProgress | undefined): number | nul
 }
 
 function installedStatusText(resource: ResourceItem): string {
+  if (resource.source === 'local' && resource.actions.includes('remove_reference')) {
+    return resource.active ? 'Active local' : 'Local reference'
+  }
   if (resource.type === 'pdk' && resource.active) {
     return 'Active'
   }

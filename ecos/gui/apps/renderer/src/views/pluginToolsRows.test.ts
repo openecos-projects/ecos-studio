@@ -181,6 +181,40 @@ describe('pluginToolsRows', () => {
     expect(row.version).toBe('v1.01')
   })
 
+  it('labels imported local PDK references without implying a managed download', () => {
+    const inactive = resourceToRow(
+      resource({
+        status: 'installed',
+        source: 'local',
+        active: false,
+        active_version: null,
+        installed_version: null,
+        available_versions: [],
+        path: '/home/user/pdk/ics55',
+        actions: ['validate', 'remove_reference'],
+      }),
+      undefined,
+    )
+    const active = resourceToRow(
+      resource({
+        status: 'installed',
+        source: 'local',
+        active: true,
+        active_version: null,
+        installed_version: null,
+        available_versions: [],
+        path: '/home/user/pdk/ics55',
+        actions: ['validate', 'remove_reference'],
+      }),
+      undefined,
+    )
+
+    expect(inactive.statusKind).toBe('installed')
+    expect(inactive.statusText).toBe('Local reference')
+    expect(inactive.version).toBe('Local')
+    expect(active.statusText).toBe('Active local')
+  })
+
   it('maps progress to installing state', () => {
     const row = resourceToRow(resource({ status: 'installing' }), {
       resourceId: 'pdk:ics55',
