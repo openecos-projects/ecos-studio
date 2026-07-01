@@ -84,6 +84,9 @@ pnpm run test
 pnpm run doctor
 ```
 
+`fmt` and `fmt:check` run across the full GUI workspace while respecting the GUI
+`.gitignore`.
+
 `doctor` is a local environment diagnostic. It checks Node.js, pnpm, installed
 GUI dependencies, optional ECC/Nix availability, and the native resources used
 by the desktop app. It does not start Electron.

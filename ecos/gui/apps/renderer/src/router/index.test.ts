@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import routerSource from './index.ts?raw'
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -43,12 +42,6 @@ describe('router SoC welcome routes', () => {
     const galleryResolvedPath = '/src/views/SoCTemplateGalleryView.vue'
     const detailResolvedPath = '/src/views/SoCTemplateDetailView.vue'
 
-    expect(routerSource).toContain(
-      `{ path: 'soc', name: 'SoCGallery', component: () => import('${galleryImportPath}') }`,
-    )
-    expect(routerSource).toContain(
-      `{ path: 'soc/:templateId', name: 'SoCTemplateDetail', component: () => import('${detailImportPath}'), props: true }`,
-    )
     expect(String(galleryRecord?.components?.default)).toContain(galleryResolvedPath)
     expect(String(detailRecord?.components?.default)).toContain(detailResolvedPath)
     expect(existsSync(resolve(routerDir, galleryImportPath))).toBe(true)
@@ -68,8 +61,8 @@ describe('router workspace Tech Library route', () => {
 
     const techRecord = router.getRoutes().find((record) => record.name === 'TechLibrary')
     expect(techRecord?.components?.default).toBeTypeOf('function')
-    expect(routerSource).toContain(
-      `{ path: 'tech', name: 'TechLibrary', component: () => import('../views/TechLibraryView.vue') }`,
+    expect(String(techRecord?.components?.default)).toContain(
+      '/src/views/TechLibraryView.vue',
     )
   })
 })

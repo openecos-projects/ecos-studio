@@ -53,7 +53,7 @@ describe('ECOSTerminal', () => {
       /<div\s+class="app-main"[\s\S]*>\s*<div\s+class="app-content"[\s\S]*>\s*<router-view\s*\/>\s*<\/div>\s*<ECOSTerminal[^>]*\/>\s*<\/div>\s*<StatusBar/,
     )
     expect(appSource).toMatch(
-      /:style="terminalExpanded \? \{ '--terminal-panel-height': terminalPanelHeight \} : undefined"/,
+      /:style="\s*terminalExpanded\s*\?\s*\{\s*'--terminal-panel-height': terminalPanelHeight\s*\}\s*:\s*undefined\s*"/,
     )
     expect(appSource).toMatch(/const terminalPanelHeight = ref\('min\(300px, 42vh\)'\)/)
     expect(appSource).toContain(':maximized="terminalPanelMaximized"')
