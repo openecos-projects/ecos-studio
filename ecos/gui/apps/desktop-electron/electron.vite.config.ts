@@ -28,7 +28,7 @@ export default defineConfig(({ command, mode }) => {
         emptyOutDir: true,
         lib: {
           entry: resolve(packageRoot, 'electron/main/index.ts'),
-          formats: ['cjs'],
+          formats: ['es'],
         },
         rollupOptions: {
           external: ['electron', /^node:.*/],

@@ -9,7 +9,7 @@
     "email": "openecos-projects@users.noreply.github.com"
   },
   "type": "module",
-  "main": "./dist/main/index.cjs",
+  "main": "./dist/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

@@ -30,7 +30,7 @@ describe('desktop electron build config', () => {
     })
   })
 
-  it('builds the Electron main bundle as CommonJS for Electron runtime compatibility', () => {
+  it('keeps the Electron main bundle as ESM', () => {
     const resolvedConfig =
       typeof electronViteConfig === 'function'
         ? electronViteConfig({
@@ -42,7 +42,7 @@ describe('desktop electron build config', () => {
 
     expect(resolvedConfig.main?.build?.lib).toEqual(
       expect.objectContaining({
-        formats: ['cjs'],
+        formats: ['es'],
       }),
     )
   })

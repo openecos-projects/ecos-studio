@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import electronPath from 'electron'
 
 const packageRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-const mainEntry = join(packageRoot, 'dist/main/index.cjs')
+const mainEntry = join(packageRoot, 'dist/main/index.js')
 const preloadEntry = join(packageRoot, 'dist/preload/index.cjs')
 const SMOKE_TIMEOUT_MS = 30_000
 
