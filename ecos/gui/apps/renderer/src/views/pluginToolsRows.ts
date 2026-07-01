@@ -122,6 +122,9 @@ export function frontendFlowTagsFor(resource: ResourceItem): string[] {
   if (haystack.includes('soc harness')) {
     tags.push('SoC Harness')
   }
+  if (haystack.includes('example')) {
+    tags.push('Examples')
+  }
   if (haystack.includes('cpu adapter')) {
     tags.push('CPU Adapter')
   }

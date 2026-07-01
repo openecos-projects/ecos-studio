@@ -111,6 +111,21 @@ async function createEccFeSocArchive(root: string): Promise<{ path: string; sha2
   }
 }
 
+async function createEccFeExamplesArchive(root: string): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'ecc-fe-examples-source')
+  const sourceDir = join(sourceRoot, 'ecc-fe-examples')
+  const archive = join(root, 'ecc-fe-examples.tar')
+  await mkdir(join(sourceDir, 'examples', 'cl3'), { recursive: true })
+  await writeFile(join(sourceDir, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
+  await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-examples'])
+  const size = Buffer.byteLength(await readFile(archive))
+  return {
+    path: archive,
+    sha256: 'fixture-ecc-fe-examples-sha',
+    size,
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return await Promise.race([
     promise,
@@ -227,6 +242,7 @@ describe('ResourceManagerService', () => {
     const verilatorRoot = join(toolsDir, 'verilator', '5.046')
     const eccFeRoot = join(toolsDir, 'ecc-fe', '0.1.0-alpha.0-ecos')
     const eccFeSocRoot = join(toolsDir, 'ecc-fe-soc-ysyx-am', '0.1.0-alpha.0-ecos')
+    const eccFeExamplesRoot = join(toolsDir, 'ecc-fe-examples', '0.1.0-alpha.0-ecos')
     const riscvRoot = join(toolsDir, 'riscv-toolchain', 'rv32')
     const surferRoot = join(toolsDir, 'surfer', '0.4.0')
     const duplicateRoot = join(toolsDir, 'duplicate', '1.0')
@@ -238,6 +254,7 @@ describe('ResourceManagerService', () => {
     await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
     await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
     await mkdir(eccFeSocRoot, { recursive: true })
+    await mkdir(eccFeExamplesRoot, { recursive: true })
     await mkdir(join(riscvRoot, 'bin'), { recursive: true })
     await mkdir(surferRoot, { recursive: true })
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
@@ -319,6 +336,16 @@ describe('ResourceManagerService', () => {
           name: 'ecc-fe-soc-ysyx-am',
           version: '0.1.0-alpha.0-ecos',
           path: eccFeSocRoot,
+          executable: '',
+          detected_executables: [],
+          active: true,
+          managed: true,
+        },
+        'tool:ecc-fe-examples': {
+          type: 'tool',
+          name: 'ecc-fe-examples',
+          version: '0.1.0-alpha.0-ecos',
+          path: eccFeExamplesRoot,
           executable: '',
           detected_executables: [],
           active: true,
@@ -417,7 +444,7 @@ describe('ResourceManagerService', () => {
     expect(env.VERILATOR_ROOT).toBe(join(verilatorRoot, 'share', 'verilator'))
     expect(env.ECOS_FE_CLI).toBe(join(eccFeRoot, 'bin', 'ecc-fe'))
     expect(env.ECOS_FE_COMPILER_ROOT).toBe(eccFeRoot)
-    expect(env.ECOS_FE_RESOURCE_ROOTS).toBe(eccFeSocRoot)
+    expect(env.ECOS_FE_RESOURCE_ROOTS).toBe(`${eccFeSocRoot}:${eccFeExamplesRoot}`)
     expect(env.ECOS_FE_SOC_ROOT).toBe(eccFeSocRoot)
     expect(env.RISCV_PREFIX).toBe('riscv32-unknown-elf-')
     expect(env.RISCV).toBe(riscvRoot)
@@ -732,6 +759,7 @@ describe('ResourceManagerService', () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const socArchive = await createEccFeSocArchive(root)
+    const examplesArchive = await createEccFeExamplesArchive(root)
     const registryPath = join(root, 'registry.json')
     await writeFile(registryPath, JSON.stringify({
       schema_version: 2,
@@ -753,7 +781,7 @@ describe('ResourceManagerService', () => {
                   strip_prefix: 'ecc-fe-runtime',
                 },
               },
-              requires: ['tool:ecc-fe-soc-ysyx-am'],
+              requires: ['tool:ecc-fe-soc-ysyx-am', 'tool:ecc-fe-examples'],
             },
           ],
         },
@@ -778,6 +806,27 @@ describe('ResourceManagerService', () => {
             },
           ],
         },
+        {
+          name: 'ecc-fe-examples',
+          display_name: 'ECC-FE Examples',
+          description: 'Frontend example projects',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: '0.1.0-alpha.0-ecos',
+              platforms: {
+                'all-platform': {
+                  url: `file://${examplesArchive.path}`,
+                  sha256: examplesArchive.sha256,
+                  size: examplesArchive.size,
+                  strip_prefix: 'ecc-fe-examples',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
       ],
       pdks: [],
     }), 'utf8')
@@ -794,9 +843,9 @@ describe('ResourceManagerService', () => {
     expect(listedBefore.resources).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'tool:ecc-fe',
-        requires: ['tool:ecc-fe-soc-ysyx-am'],
+        requires: ['tool:ecc-fe-soc-ysyx-am', 'tool:ecc-fe-examples'],
         installed_requires: [],
-        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
+        missing_requires: ['tool:ecc-fe-soc-ysyx-am', 'tool:ecc-fe-examples'],
       }),
     ]))
 
@@ -808,9 +857,11 @@ describe('ResourceManagerService', () => {
 
     const eccFeRoot = join(root, 'data', 'tools', 'ecc-fe', '0.1.0-alpha.0-ecos')
     const eccFeSocRoot = join(root, 'data', 'tools', 'ecc-fe-soc-ysyx-am', '0.1.0-alpha.0-ecos')
+    const eccFeExamplesRoot = join(root, 'data', 'tools', 'ecc-fe-examples', '0.1.0-alpha.0-ecos')
     await expect(readFile(join(eccFeRoot, 'bin', 'ecc-fe'), 'utf8')).resolves.toContain('#!/bin/sh')
     await expect(readFile(join(eccFeRoot, 'fecompiler', '__init__.py'), 'utf8')).resolves.toBe('')
     await expect(readFile(join(eccFeSocRoot, 'ecos_sim_top.v'), 'utf8')).resolves.toContain('module ecos_sim_top')
+    await expect(readFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'utf8')).resolves.toContain('CL3Top.sv')
 
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
@@ -823,13 +874,17 @@ describe('ResourceManagerService', () => {
       executable: '',
       detected_executables: [],
     })
-    expect(verifySha256).toHaveBeenCalledTimes(2)
+    expect(manifest.installed['tool:ecc-fe-examples']).toMatchObject({
+      executable: '',
+      detected_executables: [],
+    })
+    expect(verifySha256).toHaveBeenCalledTimes(3)
 
     const listedAfter = await service.listResources()
     expect(listedAfter.resources).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'tool:ecc-fe',
-        installed_requires: ['tool:ecc-fe-soc-ysyx-am'],
+        installed_requires: ['tool:ecc-fe-soc-ysyx-am', 'tool:ecc-fe-examples'],
         missing_requires: [],
       }),
     ]))

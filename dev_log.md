@@ -11486,3 +11486,89 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 如果本地没有 registry 缓存且网络很慢，第一次打开 Resource Manager 仍需要等待 registry 主 JSON 获取；已有缓存时会走本地缓存并后台刷新。
 - 当前 `ics55` 的本地记录仍然存在于用户本机 manifest 中，它表示本地 PDK 引用而不是下载包；若要测试全新下载流程，需要先在 UI 中移除该引用。
+
+# 第 183 次 开发
+
+## 开发目标
+
+将 ECC-FE release 包继续向独立 CLI 工具形态瘦身：runtime 包只保留 CLI 运行代码和基础元数据，不再携带 examples、docs，也不再重复携带已独立发布的 SoC harness。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - `ecc-fe-latest.tar.gz` 打包列表移除 `examples` 和 `docs`。
+  - 在生成 runtime 包前删除 `${ROOT}/fecompiler/thirdparty/SoC`，避免与独立的 `ecc-fe-soc-ysyx-am-latest.tar.gz` 资源重复。
+  - 保留 SoC harness 独立 release 的生成和发布逻辑。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 ECC-FE CLI runtime 包瘦身调整。
+
+## 验证情况
+
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('ecc-fe/.github/workflows/release-latest.yml'); puts 'ok'"`，通过。
+- 已执行 `git -C ecc-fe diff --check -- .github/workflows/release-latest.yml`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未在本地执行 release 打包命令或 GitHub Actions；实际包体变化需要 commit/push 后由远端 workflow 生成。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 如果 ECC-FE CLI runtime 中仍有代码硬编码访问 `examples`、`docs` 或 `fecompiler/thirdparty/SoC` 的相对路径，瘦身后的 release 包会暴露这类隐式依赖；后续应通过下载新 release 后跑 GUI 前端流程来验证。
+- `fecompiler/thirdparty` 中除 SoC 外仍包含多个 CPU/第三方目录，是否继续拆分需要下一轮按运行时依赖逐项审查。
+
+# 第 184 次 开发
+
+## 开发目标
+
+将 ECC-FE examples 从 runtime 包中剥离后，补成独立的 Resource Manager release 资源，并让安装 `ecc-fe` 时自动安装 examples 资源。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 新增 `ecc-fe-examples-latest.tar.gz` 和 `ecc-fe-examples-latest.tar.gz.sha256` 的打包产物。
+  - 新增 `ecc-fe-examples-latest` release 发布步骤，发布到 `openecos-projects/ecos-resource-assets`。
+  - 将 runtime、SoC harness、examples 三类包复用同一套缓存/pyc 清理逻辑。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 新增 `tool:ecc-fe-examples`，采用 `url + sha256_url + strip_prefix` 的 rolling release 描述。
+  - 将 `tool:ecc-fe-examples` 加入 `tool:ecc-fe` 的 `requires`，安装 ECC-FE CLI 时自动安装 examples。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 将 `ecc-fe-examples` 识别为 ECC-FE 前端资源根，安装后注入 `ECOS_FE_RESOURCE_ROOTS`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加 examples 资源 fixture。
+  - 覆盖 `ecc-fe` 自动安装 SoC harness 与 examples 两个依赖资源。
+  - 覆盖 runtime 环境中 `ECOS_FE_RESOURCE_ROOTS` 同时包含 SoC harness 与 examples 根目录。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - 为 examples 类资源增加 `Examples` flow tag 展示。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 examples release 与 registry/GUI 接入调整。
+
+## 验证情况
+
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('ecc-fe/.github/workflows/release-latest.yml'); puts 'workflow ok'"`，通过。
+- 已执行 `python3 .github/scripts/validate_registry.py tool-registry.json`，通过。
+- 已执行 `python3 -m unittest tests/test_validate_registry.py`，通过：18 个测试全部通过。
+- 已执行 `pnpm --dir ecos/gui/apps/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：20 个测试全部通过。
+- 已执行 `pnpm --dir ecos/gui/apps/renderer exec vitest run src/views/pluginToolsRows.test.ts`，通过：15 个测试全部通过。
+- 已执行 `git diff --check` 覆盖本次修改文件，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未执行 GitHub Actions；`ecc-fe-examples-latest` release 需要 commit/push 后由远端 workflow 生成。
+- 未执行 registry 在线 `--check-urls`，因为 `ecc-fe-examples-latest` release 生成前 URL 会按预期返回 404。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- registry 合入或发布前，应先让 `ecc-fe` workflow 成功发布 `ecc-fe-examples-latest`，否则 registry 的在线 URL 检查会因为新 release 尚不存在而失败。
+- GUI 安装 `tool:ecc-fe` 后会同时安装 SoC harness 和 examples；如果未来 examples 包继续变大，可再拆成多个更细粒度资源。

@@ -1823,6 +1823,7 @@ async function resolveRuntimeTools(
 
 function isFrontendResourceTool(normalizedName: string): boolean {
   return normalizedName.startsWith('ecc-fe-soc-')
+    || normalizedName === 'ecc-fe-examples'
     || normalizedName.startsWith('ecc-fe-cpu-')
     || normalizedName.startsWith('ecc-fe-test-')
     || normalizedName === 'ecc-fe-difftest-ref'
