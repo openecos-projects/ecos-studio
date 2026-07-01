@@ -350,10 +350,7 @@
                     :key="key"
                     class="mode-menu-item"
                     :class="{ active: activeRunMode === key }"
-                    @click="
-                      selectRunMode(key)
-                      showModeMenu = false
-                    "
+                    @click="handleRunModeSelect(key)"
                   >
                     <i :class="mode.icon" class="mode-item-icon"></i>
                     <span class="mode-item-label">{{ mode.label }}</span>
@@ -615,10 +612,7 @@
                     :key="key"
                     class="mode-menu-item"
                     :class="{ active: activeRunMode === key }"
-                    @click="
-                      selectRunMode(key)
-                      showModeMenu = false
-                    "
+                    @click="handleRunModeSelect(key)"
                   >
                     <i :class="mode.icon" class="mode-item-icon"></i>
                     <span class="mode-item-label">{{ mode.label }}</span>
@@ -738,6 +732,12 @@ const showModeMenu = ref(false)
 const closeMenu = () => {
   showModeMenu.value = false
 }
+
+const handleRunModeSelect = (mode: string) => {
+  selectRunMode(mode)
+  closeMenu()
+}
+
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 
