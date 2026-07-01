@@ -11716,3 +11716,73 @@ fatal error: driver/difftest.h: No such file or directory
 - Electron 侧 update-check cache 当前按 registry URL hash 落盘；如果远端 release 频繁变更，UI 状态依赖后台/手动检查完成后刷新。
 - Python 后端 update-check cache 当前为进程内存缓存；服务重启后需要重新检查才能显示 `latest` update 状态。
 - 工作区仍存在既有 `ecc` 子模块 dirty 状态，本次没有处理或回退。
+
+# 第 187 次 开发
+
+## 开发目标
+
+继续推进 ECC-FE 资源切分：将 runtime 包中的 CPU RTL/RT-Thread 资源和 difftest reference 从主 runtime/SoC harness 中剥离，新增对应 latest release 声明，并同步更新 ecos-registry 依赖关系。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 新增 `ecc-fe-cpu-rtl-latest` 和 `ecc-fe-difftest-ref-latest` 两个资源包的打包、sha256 sidecar 生成和发布步骤。
+  - runtime 包删除整个 `fecompiler/thirdparty`，SoC harness 包删除 `tools/riscv32-spike-so`。
+  - CPU RTL 包保存 `thirdparty/{cv32e40p,cva6,darkriscv,ibex,learn-fpga,picorv32,rt-thread-am,scr1,serv,vexriscv}` 和 `rtthread_prepare.py`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/resources.py`
+  - 新增外置 `thirdparty` 资源根解析、CPU RTL 路径补救解析、difftest reference 解析、RT-Thread AM BSP/helper 解析。
+  - 外置 `ECOS_FE_RESOURCE_ROOTS` 优先，源码仓内置 thirdparty 作为兜底。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - filelist 中 RTL、incdir、嵌套 filelist 路径在原路径不存在时可从外置 CPU RTL 资源包解析。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+  - catalog contract 静态检查支持外置 CPU RTL 资源路径，避免瘦身 runtime 后误报缺 RTL。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - catalog payload 展开的 `directory` 和 `cpu_filelist` 支持外置 CPU RTL 资源路径。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 默认 CPU tests、RT-Thread、CoreMark difftest 参数使用统一 reference resolver，支持外置 `ecc-fe-difftest-ref`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - RT-Thread 默认 difftest ref 支持外置资源包。
+  - RT-Thread 构建 preflight 和执行环境支持从外置 CPU RTL 包解析 `rt-thread-am` 和 `rtthread_prepare.py`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/build_test.sh`
+  - `RTTHREAD_PREPARE` 支持环境变量覆盖，配合外置 CPU RTL/RT-Thread 资源包。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 新增 filelist 从外置 `ecc-fe-cpu-rtl/thirdparty` 解析 RTL/incdir 的回归测试。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 新增外置 difftest reference、外置 CPU RTL/RT-Thread helper 的回归测试。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 新增 `tool:ecc-fe-cpu-rtl` 和 `tool:ecc-fe-difftest-ref`。
+  - `tool:ecc-fe` 依赖补齐 CPU RTL、SoC harness、difftest ref、examples。
+  - `tool:ecc-fe-soc-ysyx-am` 依赖补齐 CPU RTL 和 difftest ref，避免单独安装 SoC 包时缺资源。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 ECC-FE 资源切分开发。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile fecompiler/resources.py fecompiler/tools/prepare/runner.py fecompiler/catalog/contract.py fecompiler/catalog/registry.py fecompiler/tools/verilator/runner.py fecompiler/cli/workspace.py test/test_catalog_contract.py test/test_engine_flow.py`，通过。
+- 已执行 `bash -n fecompiler/thirdparty/SoC/scripts/build_test.sh`，通过。
+- 已执行 `.github/workflows/release-latest.yml` 的 YAML 解析检查，程序返回 `ok`。
+- 已执行 `python3 -m pytest test/test_catalog_contract.py::test_prepare_filelist_resolves_external_thirdparty_resource test/test_engine_flow.py::test_rtthread_program_uses_external_difftest_ref_when_soc_ref_is_split test/test_engine_flow.py::test_rtthread_build_preflight_resolves_external_cpu_rtl_resource -q`，通过：3 个测试全部通过。
+- 已执行 `python3 -m pytest test/test_engine_flow.py::test_workspace_create_discovers_external_soc_resource_root test/test_engine_flow.py::test_soc_runtime_options_discovers_external_soc_root test/test_engine_flow.py::test_soc_filelist_script_discovers_examples_resource_root -q`，通过：3 个测试全部通过。
+- 已执行 `python3 -m pytest test/test_catalog_contract.py::test_sim_ready_catalog_entries_have_adapter_collateral test/test_catalog_contract.py::test_workspace_catalog_check_cli_returns_contract_summary test/test_catalog_contract.py::test_prepare_filelist_resolves_external_thirdparty_resource -q`，通过：3 个测试全部通过。
+- 已执行 `python3 -m pytest test/test_engine_flow.py::test_rtthread_program_enables_default_difftest_args test/test_engine_flow.py::test_rtthread_program_uses_external_difftest_ref_when_soc_ref_is_split test/test_engine_flow.py::test_rtthread_build_preflight_allows_fallback_helper_without_scons test/test_engine_flow.py::test_rtthread_build_preflight_resolves_external_cpu_rtl_resource -q`，通过：4 个测试全部通过。
+- 已执行 `python3 .github/scripts/validate_registry.py tool-registry.json`，通过。
+- 已执行 `python3 -m json.tool tool-registry.json >/dev/null`，通过。
+- 已执行 `git diff --check`，ECC-FE 与 ecos-registry 均通过。
+- 已检查源目录体量：`fecompiler/thirdparty` 约 415M，`SoC/tools/riscv32-spike-so` 约 51M，本轮 release 瘦身会从 runtime 移出整个 thirdparty，并从 SoC harness 移出 reference `.so`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 新增 release 还未由 GitHub Actions 生成；需要后续 commit/push ECC-FE 后由 workflow 发布到 `openecos-projects/ecos-resource-assets`。
+
+## 已知后续风险
+
+- 在 ECC-FE workflow 成功发布 `ecc-fe-cpu-rtl-latest` 和 `ecc-fe-difftest-ref-latest` 前，ecos-registry 如果执行 `--check-urls` 会因为新 URL 尚未存在而 404。
+- 已安装旧版 `ecc-fe` 的本地环境需要通过 Resource Manager 更新/重装，才能拿到新增的 CPU RTL 与 difftest reference 资源。
+- SoC harness release 不再内置 `riscv32-spike-so`，运行 difftest 依赖 `ecc-fe-difftest-ref` 被正确安装并注入 `ECOS_FE_RESOURCE_ROOTS`。
+- 工作区仍存在既有 `ecc` 子模块 dirty 状态，本次没有处理或回退。
