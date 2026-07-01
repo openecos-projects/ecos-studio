@@ -74,8 +74,8 @@ jobs:
       - name: Check version
         uses: ./.github/actions/check-version
 
-  vue-tsc:
-    name: Vue Typecheck
+  gui-checks:
+    name: GUI Checks
     runs-on: ubuntu-22.04
     needs: changes
     if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
@@ -92,50 +92,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck Vue
+      - name: Run GUI typecheck
         run: pnpm run typecheck
-
-  gui-quality:
-    name: GUI Quality
-    runs-on: ubuntu-22.04
-    needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
-    defaults:
-      run:
-        working-directory: ecos/gui
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: ./.github/actions/setup-node-pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Run GUI lint
         run: pnpm run lint
 
       - name: Check GUI formatting
         run: pnpm run fmt:check
-
-  gui-tests:
-    name: GUI Tests
-    runs-on: ubuntu-22.04
-    needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
-    defaults:
-      run:
-        working-directory: ecos/gui
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: ./.github/actions/setup-node-pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Run GUI tests
         run: pnpm run test
@@ -165,7 +129,7 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, vue-tsc, gui-quality, gui-tests, layout-viewer-rust]
+    needs: [changes, check-version, gui-checks, layout-viewer-rust]
     if: >-
       ${{
         always() &&
@@ -175,9 +139,7 @@ jobs:
          needs.changes.outputs.build == 'true' ||
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
-        needs.vue-tsc.result != 'failure' &&
-        needs.gui-quality.result != 'failure' &&
-        needs.gui-tests.result != 'failure' &&
+        needs.gui-checks.result != 'failure' &&
         needs.layout-viewer-rust.result != 'failure'
       }}
     runs-on: ubuntu-22.04
