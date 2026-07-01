@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - "MODULE.bazel"
       - "ecos/gui/default.nix"
       - "ecos/gui/package.json"
       - "ecos/gui/apps/*/package.json"

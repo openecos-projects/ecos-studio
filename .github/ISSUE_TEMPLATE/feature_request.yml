@@ -29,7 +29,7 @@ body:
         - GUI
         - ECC
         - Resource management
-        - Build, packaging, Bazel, Nix, or release workflow
+        - Build, packaging, Nix, or release workflow
         - CI
         - Documentation only
         - Not sure
