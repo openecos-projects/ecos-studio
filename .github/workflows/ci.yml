@@ -53,7 +53,7 @@ jobs:
               - 'Makefile'
               - 'ecos/scripts/**'
             ci:
-              - '.github/**'
+              - '.github/workflows/**'
             docs_only:
               - 'README.md'
               - 'docs/**'

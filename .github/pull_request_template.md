@@ -1,6 +1,6 @@
 ## Summary
 
--
+
 
 ## Scope
 
@@ -12,10 +12,6 @@ Select the areas touched by this PR:
 - [ ] Build, packaging, Nix, or release workflow - build inputs, AppImage packaging, or release metadata.
 - [ ] CI - GitHub Actions workflows, reusable actions, triggers, path filters, or automated checks.
 - [ ] Documentation only - README, guides, templates, or docs with no runtime behavior change.
-
-## What Changed
-
--
 
 ## Validation
 
