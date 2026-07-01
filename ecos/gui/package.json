@@ -5,10 +5,14 @@
   "type": "module",
   "packageManager": "pnpm@11.0.9",
   "scripts": {
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run fmt:check && pnpm run test",
     "dev": "pnpm run desktop:dev",
     "dev:vm": "LIBGL_ALWAYS_SOFTWARE=1 ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_OPEN_DEVTOOLS=1 pnpm run desktop:dev",
     "build": "pnpm --filter @ecos-studio/renderer run typecheck && pnpm run desktop:build",
     "preview": "pnpm run desktop:preview",
+    "lint": "oxlint -c .oxlintrc.json apps packages --deny-warnings",
+    "fmt": "oxfmt --write .oxlintrc.json .oxfmtrc.json package.json packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
+    "fmt:check": "oxfmt --check .oxlintrc.json .oxfmtrc.json package.json packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
     "test": "pnpm -r --if-present run test",
     "typecheck": "pnpm -r --if-present run typecheck",
     "desktop:dev": "pnpm --filter @ecos-studio/desktop-electron run dev",
@@ -22,5 +26,9 @@
     "renderer:preview": "pnpm --filter @ecos-studio/renderer run preview",
     "renderer:test": "pnpm --filter @ecos-studio/renderer run test",
     "renderer:typecheck": "pnpm --filter @ecos-studio/renderer run typecheck"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.57.0",
+    "oxlint": "^1.72.0"
   }
 }

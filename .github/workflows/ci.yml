@@ -43,6 +43,8 @@ jobs:
             gui:
               - 'ecos/gui/apps/**'
               - 'ecos/gui/packages/**'
+              - 'ecos/gui/.oxfmtrc.json'
+              - 'ecos/gui/.oxlintrc.json'
               - 'ecos/gui/package.json'
               - 'ecos/gui/pnpm-lock.yaml'
               - 'ecos/gui/pnpm-workspace.yaml'
@@ -93,6 +95,30 @@ jobs:
       - name: Typecheck Vue
         run: pnpm run typecheck
 
+  gui-quality:
+    name: GUI Quality
+    runs-on: ubuntu-22.04
+    needs: changes
+    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    defaults:
+      run:
+        working-directory: ecos/gui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node-pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run GUI lint
+        run: pnpm run lint
+
+      - name: Check GUI formatting
+        run: pnpm run fmt:check
+
   gui-tests:
     name: GUI Tests
     runs-on: ubuntu-22.04
@@ -139,7 +165,7 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, vue-tsc, gui-tests, layout-viewer-rust]
+    needs: [changes, check-version, vue-tsc, gui-quality, gui-tests, layout-viewer-rust]
     if: >-
       ${{
         always() &&
@@ -150,6 +176,7 @@ jobs:
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
         needs.vue-tsc.result != 'failure' &&
+        needs.gui-quality.result != 'failure' &&
         needs.gui-tests.result != 'failure' &&
         needs.layout-viewer-rust.result != 'failure'
       }}

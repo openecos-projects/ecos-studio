@@ -98,10 +98,14 @@ describe('remoteContentClient', () => {
     vi.useFakeTimers()
     restoreWindow()
 
-    const result = listRemoteContentFiles({ source: 'socTemplateCatalog' })
-    const expectation = expect(result).rejects.toThrow(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE)
+    const result = listRemoteContentFiles({ source: 'socTemplateCatalog' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
     await vi.advanceTimersByTimeAsync(3100)
+    const error = await result
 
-    await expectation
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe(DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE)
   })
 })

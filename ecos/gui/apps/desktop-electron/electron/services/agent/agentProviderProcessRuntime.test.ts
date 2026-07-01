@@ -21,7 +21,7 @@ class FakeChild extends EventEmitter {
 
 function createSpawnHarness() {
   const children: FakeChild[] = []
-  const spawn = vi.fn((command: string, args: string[], options: unknown) => {
+  const spawn = vi.fn((_command: string, _args: string[], _options: unknown) => {
     const child = new FakeChild()
     children.push(child)
     return child as never

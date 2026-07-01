@@ -95,6 +95,7 @@ export function sanitizeUrl(value: string, attr: 'href' | 'src'): string | null 
   const trimmed = value.trim()
   if (!trimmed) return null
 
+  // oxlint-disable-next-line no-control-regex -- URLs must strip ASCII control characters.
   const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, '').toLowerCase()
   if (
     normalized.startsWith('javascript:') ||

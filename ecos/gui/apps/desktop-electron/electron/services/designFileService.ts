@@ -1,5 +1,5 @@
 import { access, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, relative } from 'node:path'
+import { basename, relative } from 'node:path'
 import type {
   WorkspaceDesignFileAddResult,
   WorkspaceDesignFileEntry,

@@ -85,8 +85,6 @@ async function findProjectFileWatchDirectory(
   return rootPath
 }
 
-type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
-
 interface LogTailSubscriptionState {
   subscriptionId: string
   canonicalPath: string

@@ -201,7 +201,7 @@ describe('runtimeLocks', () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     try {
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
-      await expect(stat(root)).rejects.toThrow()
+      await expect(stat(root)).rejects.toThrow('ENOENT')
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -235,11 +235,16 @@ describe('runtimeLocks', () => {
       const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
       expect(lock).not.toBeNull()
 
-      await expect(writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stalled-job',
-        pid: process.pid,
-        scope: '/work/demo',
-      }))).rejects.toThrow()
+      await expect(
+        writeFile(
+          path.join(lockDirectory, 'owner.json'),
+          JSON.stringify({
+            jobId: 'stalled-job',
+            pid: process.pid,
+            scope: '/work/demo',
+          }),
+        ),
+      ).rejects.toThrow('EACCES')
       await expect(readRuntimeLockOwner(lockDirectory)).resolves.toMatchObject({
         jobId: 'job-1',
       })
@@ -461,7 +466,7 @@ describe('runtimeLocks', () => {
         'permission denied',
       )
       expect(ownerWriteAttempts).toBe(1)
-      await expect(stat(lockDirectory)).rejects.toThrow()
+      await expect(stat(lockDirectory)).rejects.toThrow('ENOENT')
     } finally {
       vi.doUnmock('node:fs/promises')
       vi.resetModules()

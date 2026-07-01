@@ -7,7 +7,6 @@ import type {
 import {
   SharedRuntimeManager,
   type RuntimeScope,
-  type SharedRuntimeAdapterContext,
 } from './runtime/sharedRuntimeManager'
 import {
   globalRuntimeScopeRecord,

@@ -24,6 +24,7 @@ function createConsoleSink() {
 }
 
 function stripAnsi(value: string): string {
+  // oxlint-disable-next-line no-control-regex -- ANSI escape sequences contain ESC.
   return value.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
