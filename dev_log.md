@@ -11410,3 +11410,38 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 在 `ecc-fe` workflow 首次成功发布 `ecc-fe-soc-ysyx-am-latest` 之前，registry 的该资源 URL 在线检查会因为 release 尚不存在而失败。
+
+# 第 181 次 开发
+
+## 开发目标
+
+将 ECC-FE RTL Review 中的 Yosys precheck 从可选增强项改为必需检查，让未安装 Yosys 时 Review/RTL Preview 不能误判为通过。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/review/runner.py`
+  - `_review_is_blocked_by_yosys_precheck()` 现在会在 Yosys precheck 状态为 `unavailable`、`skipped` 或空状态时阻塞 Review。
+  - 未安装 Yosys 时，Review 输出变为 `Incomplete`，`review.rpt` 中 `review` 变为 `fail`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_rtl_review.py`
+  - 将原先 “structural probe optional” 测试改为 “requires Yosys precheck”。
+  - 为不关注 Yosys 缺失的 Review 报告测试增加成功 precheck mock，避免测试依赖宿主机是否安装 Yosys。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 RTL Review 严格化调整。
+
+## 验证情况
+
+- 已执行 `python3 -m pytest test/test_rtl_review.py`，通过：10 个测试全部通过。
+- 已对 `/home/luyoung/test0701a` 重新执行轻量 `review` step 验证，当前未安装 Yosys 时返回 `StateEnum.Incomplete`，`review.rpt` 显示 `review: fail` 且 `yosys_precheck.status: unavailable`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 现在 Review 严格依赖 Yosys；用户若未通过 Resource Manager 安装 Yosys，或未在 PATH/环境变量中提供 Yosys，Review 会按预期保持 `Incomplete`。
