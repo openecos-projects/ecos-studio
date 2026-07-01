@@ -96,14 +96,14 @@ onUnmounted(() => {
       </div>
       <button
         type="button"
-        :disabled="pluginStore.refreshing"
+        :disabled="pluginStore.refreshing || pluginStore.updateChecking"
         class="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-(--accent-color) hover:bg-(--accent-color)/10 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         @click="pluginStore.refresh()"
       >
         <i
           :class="[
             'text-sm',
-            pluginStore.refreshing ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line',
+            pluginStore.refreshing || pluginStore.updateChecking ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line',
           ]"
           aria-hidden="true"
         />

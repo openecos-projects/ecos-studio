@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .asset_resolution import resolve_asset
 from .installer import InstallerService
 from .inventory import InventoryService, PdkInventoryEntry
 from .schemas import PlatformAsset, ResourceAction, ResourceJob
@@ -177,6 +178,7 @@ class PdkResourceService:
         on_progress: Callable[[ResourceJob], None] | None = None,
     ) -> PdkInventoryEntry:
         """Download, verify, extract, scan, and register a managed PDK."""
+        asset = await resolve_asset(asset)
         dest_dir = self._inventory.pdks_dir / pdk_id / version
         staging_dir = dest_dir.parent / f".staging-{dest_dir.name}"
         existing_entry = self._inventory.get_pdk(pdk_id)

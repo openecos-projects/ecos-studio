@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from ecos_server.sse import event_manager
 
+from .asset_resolution import fetch_asset_sha256
 from .inventory import InventoryService, PdkInventoryEntry, ToolInventoryEntry
 from .jobs import JobTracker
 from .pdks import PdkResourceService
@@ -40,6 +42,46 @@ _registry_service: RegistryService | None = None
 _TOOL_PREFIX = "tool:"
 _PDK_PREFIX = "pdk:"
 _ALL_PLATFORM = "all-platform"
+_update_check_cache: dict[str, dict[str, object]] = {}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _with_update_check_health(
+    health: dict[str, object], resource_id: str
+) -> dict[str, object]:
+    check = _update_check_cache.get(resource_id)
+    if check is None:
+        return health
+    return {
+        **health,
+        "update_check": check,
+    }
+
+
+def _latest_has_update(
+    installed_sha256: str,
+    latest_version: str | None,
+    installed_version: str,
+    asset,
+    resource_id: str,
+) -> bool:
+    if not latest_version:
+        return False
+    if latest_version != installed_version:
+        return True
+    if latest_version == "latest" and asset is not None and asset.sha256_url:
+        check = _update_check_cache.get(resource_id)
+        return (
+            check is not None
+            and check.get("status") == "checked"
+            and check.get("sha256_url") == asset.sha256_url
+            and bool(check.get("sha256"))
+            and check.get("sha256") != installed_sha256
+        )
+    return False
 
 
 def _tool_health(entry: ToolInventoryEntry) -> dict[str, object]:
@@ -97,6 +139,7 @@ def _managed_pdk_reference_error(entry: PdkInventoryEntry) -> str | None:
 def init_registry(registry_url: str) -> None:
     global _registry_service
     _registry_service = RegistryService(registry_url=registry_url)
+    _update_check_cache.clear()
 
 
 def _require_registry() -> RegistryService:
@@ -115,7 +158,10 @@ def _tool_to_resource(
     versions = [v.version for v in reg_tool.versions]
     platform_id = ToolResourceService.current_platform()
     latest = reg_tool.versions[0] if reg_tool.versions else None
-    platform_asset = latest.platforms.get(platform_id) if latest else None
+    selected_platform = platform_id
+    platform_asset = None
+    if latest is not None:
+        selected_platform, platform_asset = _select_platform_asset(latest)
     inst = installed.get(name)
     resource_id = f"{_TOOL_PREFIX}{name}"
 
@@ -123,7 +169,13 @@ def _tool_to_resource(
         status = ResourceStatus.installing
         actions = []
     elif inst:
-        if versions and versions[0] != inst.version:
+        if _latest_has_update(
+            inst.sha256,
+            versions[0] if versions else None,
+            inst.version,
+            platform_asset,
+            resource_id,
+        ):
             status = ResourceStatus.update_available
         else:
             status = ResourceStatus.installed
@@ -150,12 +202,12 @@ def _tool_to_resource(
         active=inst.active if inst else False,
         path=inst.path if inst else None,
         managed_root=str(_inventory.tools_dir),
-        platform=platform_id,
+        platform=selected_platform,
         size=platform_asset.size if platform_asset else None,
         source="registry",
         homepage=reg_tool.homepage,
         actions=actions,
-        health=_tool_health(inst) if inst else {},
+        health=_with_update_check_health(_tool_health(inst), resource_id) if inst else {},
     )
 
 
@@ -214,7 +266,7 @@ def _pdk_to_resource(entry: PdkInventoryEntry) -> ResourceInfo:
         managed_root=str(_inventory.pdks_dir) if entry.managed else None,
         source=entry.source or "local",
         actions=actions,
-        health=_pdk_health(entry),
+        health=_with_update_check_health(_pdk_health(entry), f"{_PDK_PREFIX}{entry.id}"),
     )
 
 
@@ -241,8 +293,14 @@ def _registry_pdk_to_resource(
             inst.managed
             and bool(inst.version)
             and latest is not None
-            and latest.version != inst.version
             and platform_asset is not None
+            and _latest_has_update(
+                inst.sha256,
+                latest.version,
+                inst.version,
+                platform_asset,
+                resource_id,
+            )
         )
         status = _pdk_status(inst, update_available=actionable_update)
         actions = [ResourceAction.validate]
@@ -283,7 +341,7 @@ def _registry_pdk_to_resource(
         source="registry",
         homepage=reg_pdk.homepage,
         actions=actions,
-        health=_pdk_health(inst) if inst else {},
+        health=_with_update_check_health(_pdk_health(inst), resource_id) if inst else {},
         error=error,
     )
 
@@ -382,6 +440,83 @@ async def refresh_registry():
     return {"status": "ok", "tools_count": count, "diagnostics": state.diagnostics}
 
 
+@router.post("/check-updates")
+async def check_resource_updates(body: dict | None = None):
+    """Check installed rolling-release resources against remote .sha256 sidecars."""
+    refresh_registry_first = bool((body or {}).get("refresh_registry"))
+    registry_svc = _require_registry()
+    state = await (registry_svc.refresh() if refresh_registry_first else registry_svc.fetch())
+    diagnostics = list(state.diagnostics)
+    if state.registry is None:
+        return {
+            "status": "degraded",
+            "checked_count": 0,
+            "update_count": 0,
+            "diagnostics": diagnostics or ["Registry unavailable"],
+            "resources": [],
+        }
+
+    installed_tools = _tool_service.get_installed()
+    installed_pdks = _pdk_service.list_pdks()
+    checked_at = _utc_now_iso()
+    results: list[dict[str, object]] = []
+
+    async def check_one(resource_id: str, installed_sha256: str, asset) -> None:
+        sha256 = await fetch_asset_sha256(asset)
+        if not sha256:
+            item = {
+                "resource_id": resource_id,
+                "checked_at": checked_at,
+                "sha256": None,
+                "status": "error",
+                "update_available": False,
+                "error": f"Unable to fetch SHA256 from {asset.sha256_url}",
+                "sha256_url": asset.sha256_url,
+            }
+        else:
+            item = {
+                "resource_id": resource_id,
+                "checked_at": checked_at,
+                "sha256": sha256,
+                "status": "checked",
+                "update_available": sha256 != installed_sha256,
+                "error": None,
+                "sha256_url": asset.sha256_url,
+            }
+        _update_check_cache[resource_id] = item
+        results.append(item)
+
+    for tool in state.registry.tools:
+        latest = tool.versions[0] if tool.versions else None
+        inst = installed_tools.get(tool.name)
+        if latest is None or inst is None or latest.version != inst.version:
+            continue
+        _, asset = _select_platform_asset(latest)
+        if asset is None or not asset.sha256_url:
+            continue
+        await check_one(f"{_TOOL_PREFIX}{tool.name}", inst.sha256, asset)
+
+    for pdk in state.registry.pdks:
+        latest = pdk.versions[0] if pdk.versions else None
+        inst = installed_pdks.get(pdk.id)
+        if latest is None or inst is None or latest.version != inst.version:
+            continue
+        _, asset = _select_platform_asset(latest)
+        if asset is None or not asset.sha256_url:
+            continue
+        await check_one(f"{_PDK_PREFIX}{pdk.id}", inst.sha256, asset)
+
+    checked_count = sum(1 for item in results if item["status"] == "checked")
+    update_count = sum(1 for item in results if item["update_available"])
+    return {
+        "status": "degraded" if diagnostics else "ok",
+        "checked_count": checked_count,
+        "update_count": update_count,
+        "diagnostics": diagnostics,
+        "resources": results,
+    }
+
+
 # ── Batch operation helpers ────────────────────────────────────────────
 
 
@@ -433,8 +568,7 @@ async def _batch_install(rid: str, action: ResourceAction = ResourceAction.insta
         }
 
     version_entry = reg_tool.versions[0]
-    plat = ToolResourceService.current_platform()
-    asset = version_entry.platforms.get(plat)
+    plat, asset = _select_platform_asset(version_entry)
     if asset is None:
         _job_tracker.finish(rid)
         return {
@@ -1043,8 +1177,7 @@ async def _start_tool_install_or_update(
                 detail=f"Tool '{name}' v{requested_version} not found",
             )
 
-    plat = ToolResourceService.current_platform()
-    asset = version_entry.platforms.get(plat)
+    plat, asset = _select_platform_asset(version_entry)
     if asset is None:
         _job_tracker.finish(resource_id)
         raise HTTPException(

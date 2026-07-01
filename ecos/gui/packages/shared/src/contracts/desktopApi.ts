@@ -10,6 +10,7 @@ import type {
   ResourceJob,
   ResourceList,
   ResourceOperationResult,
+  ResourceUpdateCheckResult,
 } from './resources.ts'
 import type { RemoteContentApi } from './remoteContent.ts'
 import type {
@@ -193,6 +194,7 @@ export interface DesktopApi {
     removePdkReference(resourceId: string): Promise<ResourceOperationResult>
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
     refreshRegistry(): Promise<{ status: string; tools_count: number }>
+    checkUpdates(options?: { force?: boolean; refreshRegistry?: boolean }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
   cli: {

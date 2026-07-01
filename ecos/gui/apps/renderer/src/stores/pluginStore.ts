@@ -3,10 +3,10 @@ import { computed, ref } from 'vue'
 import {
   activatePdkApi,
   cancelResourceApi,
+  checkResourceUpdatesApi,
   installResourceApi,
   listResourcesApi,
   removePdkReferenceApi,
-  refreshRegistryApi,
   resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
@@ -28,11 +28,13 @@ export const usePluginStore = defineStore('plugin', () => {
   const installProgress = ref<Record<string, InstallProgress>>({})
   const resourceErrors = ref<Record<string, string>>({})
   const resourceProgress = ref<Record<string, InstallProgress>>({})
+  const updateChecking = ref(false)
 
   const _sseConnections = new Map<string, { close: () => void }>()
   const _pendingProgress = new Map<string, InstallProgress>()
   const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _cancelledResources = new Set<string>()
+  let _backgroundUpdateCheckStarted = false
 
   const categories = computed(() => {
     const cats = new Set(tools.value.map((t) => t.category))
@@ -186,12 +188,46 @@ export const usePluginStore = defineStore('plugin', () => {
       const nextResources = await listResourcesApi()
       resources.value = nextResources
       _syncLegacyTools()
+      if (!_backgroundUpdateCheckStarted) {
+        _backgroundUpdateCheckStarted = true
+        void checkForUpdates({ background: true })
+      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
     } finally {
       if (!silent) {
         loading.value = false
       }
+    }
+  }
+
+  async function checkForUpdates(options?: {
+    background?: boolean
+    force?: boolean
+    refreshRegistry?: boolean
+  }): Promise<void> {
+    if (updateChecking.value) {
+      return
+    }
+    _backgroundUpdateCheckStarted = true
+    updateChecking.value = true
+    if (!options?.background) {
+      error.value = null
+    }
+    try {
+      const result = await checkResourceUpdatesApi({
+        force: options?.force ?? !options?.background,
+        refreshRegistry: options?.refreshRegistry ?? false,
+      })
+      if (!options?.background || result.checked_count > 0 || result.update_count > 0) {
+        await fetchTools({ silent: true })
+      }
+    } catch (e) {
+      if (!options?.background) {
+        error.value = e instanceof Error ? e.message : 'Failed to check resource updates'
+      }
+    } finally {
+      updateChecking.value = false
     }
   }
 
@@ -345,8 +381,7 @@ export const usePluginStore = defineStore('plugin', () => {
     refreshing.value = true
     error.value = null
     try {
-      await refreshRegistryApi()
-      await fetchTools({ silent: true })
+      await checkForUpdates({ force: true, refreshRegistry: true })
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to refresh registry'
     } finally {
@@ -374,8 +409,10 @@ export const usePluginStore = defineStore('plugin', () => {
     installProgress,
     resourceErrors,
     resourceProgress,
+    updateChecking,
     categories,
     fetchTools,
+    checkForUpdates,
     installResource,
     updateResource,
     cancelResource,

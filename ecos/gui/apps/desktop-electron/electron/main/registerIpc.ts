@@ -137,6 +137,7 @@ export interface DesktopBridgeServices {
     removePdkReference(resourceId: string): Promise<unknown>
     importPdkPath(path: string): Promise<unknown>
     refreshRegistry(): Promise<unknown>
+    checkResourceUpdates(options?: { force?: boolean; refreshRegistry?: boolean }): Promise<unknown>
   }
   desktopRuntimeManager: {
     execute(
@@ -713,6 +714,12 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.resourcesRefreshRegistry, async () => {
     return await services.resourceManagerService.refreshRegistry()
+  })
+
+  handle(desktopApiIpcChannels.resourcesCheckUpdates, async (_event, options) => {
+    return await services.resourceManagerService.checkResourceUpdates(
+      options as { force?: boolean; refreshRegistry?: boolean } | undefined,
+    )
   })
 
   handle(

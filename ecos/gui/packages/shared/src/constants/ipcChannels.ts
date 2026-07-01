@@ -46,6 +46,7 @@ export const desktopApiIpcChannels = {
   resourcesRemovePdkReference: 'resources:remove-pdk-reference',
   resourcesImportPdkPath: 'resources:import-pdk-path',
   resourcesRefreshRegistry: 'resources:refresh-registry',
+  resourcesCheckUpdates: 'resources:check-updates',
   layoutViewerOpen: 'layout-viewer:open',
   cliExecute: 'cli:execute',
   cliCancel: 'cli:cancel',

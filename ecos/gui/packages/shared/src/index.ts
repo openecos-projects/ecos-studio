@@ -38,6 +38,8 @@ export type {
   ResourceOperationResult,
   ResourceStatus,
   ResourceType,
+  ResourceUpdateCheckItem,
+  ResourceUpdateCheckResult,
 } from './contracts/resources.ts';
 export type {
   RemoteContentApi,

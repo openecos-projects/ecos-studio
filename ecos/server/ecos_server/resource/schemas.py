@@ -88,8 +88,10 @@ class PostInstallStep(BaseModel):
 
 class PlatformAsset(BaseModel):
     url: str
-    sha256: str
-    size: int
+    sha256: str = ""
+    sha256_url: str | None = None
+    metadata_url: str | None = None
+    size: int | None = None
     strip_prefix: str | None = None
     post_install: list[PostInstallStep] = Field(default_factory=list)
 

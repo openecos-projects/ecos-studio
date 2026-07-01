@@ -80,6 +80,7 @@ function registerHandlers() {
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
+      checkResourceUpdates: vi.fn(),
       refreshRegistry: vi.fn(),
       removePdkReference: vi.fn(),
       uninstallResource: vi.fn(),
@@ -186,6 +187,7 @@ describe('registerIpc', () => {
       desktopApiIpcChannels.resourcesRemovePdkReference,
       desktopApiIpcChannels.resourcesImportPdkPath,
       desktopApiIpcChannels.resourcesRefreshRegistry,
+      desktopApiIpcChannels.resourcesCheckUpdates,
       desktopApiIpcChannels.layoutViewerOpen,
       desktopApiIpcChannels.systemOpenExternal,
       desktopApiIpcChannels.cliCancel,
@@ -255,6 +257,13 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
+    services.resourceManagerService.checkResourceUpdates.mockResolvedValue({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      diagnostics: [],
+      resources: [],
+    })
     services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
 
     await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
@@ -279,6 +288,18 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesCheckUpdates)?.(event, {
+        force: true,
+        refreshRegistry: true,
+      }),
+    ).resolves.toEqual({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      diagnostics: [],
+      resources: [],
+    })
 
     expect(services.resourceManagerService.listResources).toHaveBeenCalledTimes(1)
     expect(services.resourceManagerService.installResource).toHaveBeenCalledWith(
@@ -288,6 +309,10 @@ describe('registerIpc', () => {
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
     expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
+    expect(services.resourceManagerService.checkResourceUpdates).toHaveBeenCalledWith({
+      force: true,
+      refreshRegistry: true,
+    })
   })
 
   it('delegates remote content requests to the remote content service', async () => {

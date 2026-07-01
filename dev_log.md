@@ -11616,3 +11616,103 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 在 `ecc-fe` workflow 重新发布 SoC release 之前，当前远端 `ecc-fe-soc-ysyx-am-latest` 仍是旧嵌套结构；此时新安装的 SoC resource 可能无法被 ECC-FE manifest 扫描直接识别。
+
+# 第 186 次 开发
+
+## 开发目标
+
+给 Resource Manager 增加后台/手动更新检查能力：对 `latest` rolling release 资源使用远端 `.sha256` sidecar 判断是否有更新，同时确保资源列表首屏加载不被 `.sha256` 网络请求阻塞。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/asset_resolution.py`
+  - 新增 Python 后端资源解析 helper，支持解析 `.sha256` 文本、拉取 `sha256_url`、安装前补齐资源校验值。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/contracts/resources.ts`
+  - 新增 `ResourceUpdateCheckItem`、`ResourceUpdateCheckResult` 类型。
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/contracts/desktopApi.ts`
+  - 在 desktop resources API 中新增 `checkUpdates(options)`。
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/constants/ipcChannels.ts`
+  - 新增 `resources:check-updates` IPC channel。
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/index.ts`
+  - 导出新增 Resource Update Check 类型。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/preload/index.ts`
+  - 将 `resources.checkUpdates` 暴露给 renderer。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/main/registerIpc.ts`
+  - 注册 `resources:check-updates` handler，转发到 Resource Manager service。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/main/registerIpc.test.ts`
+  - 覆盖新增 IPC handler 的注册和参数转发。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 新增 `checkResourceUpdates()`，后台/手动拉取远端 `.sha256` 并写入 update-check cache。
+  - `listResources()` 只读取本地 manifest/registry/cache，不主动访问 `.sha256`，避免首屏阻塞。
+  - `latest` 更新判断改为“远端 sidecar sha 与本地 manifest sha 不同”。
+  - update-check health 中暴露最近检查状态、远端 sha、sha256_url、错误信息。
+  - 安装 tool/PDK 时支持通过 `metadata_url` 或 `sha256_url` 补齐校验值，registry 缺少静态 `size` 时列表显示未知大小而不是 0。
+  - PDK registry 平台选择统一支持 `all-platform` fallback。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 覆盖列表不拉 sidecar、不误报 latest update。
+  - 覆盖手动检查 `.sha256` 后标记 `update_available`。
+  - 覆盖安装时使用远端 metadata/sha256 进行校验。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/plugin.ts`
+  - 新增 `checkResourceUpdatesApi()`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/index.ts`
+  - 导出 `checkResourceUpdatesApi()`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/plugin.test.ts`
+  - 覆盖 `checkResourceUpdatesApi()` 到 desktop bridge 的转发。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/stores/pluginStore.ts`
+  - `fetchTools()` 首屏加载完成后启动一次后台更新检查。
+  - Refresh 按钮改为手动 `checkForUpdates({ force: true, refreshRegistry: true })`。
+  - 新增 `updateChecking` 状态，避免重复检查并驱动 UI loading。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/stores/pluginStore.test.ts`
+  - 覆盖资源列表先展示、后台 `.sha256` 检查完成后再刷新状态。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/PluginToolsView.vue`
+  - 手动刷新/检查更新期间禁用 Refresh 并显示 loading 图标。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/PluginToolsPanel.vue`
+  - 同步 Resource Manager 面板中的 Refresh loading/disabled 状态。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/composables/useDesktopRuntime.test.ts`
+  - 同步测试 desktop API mock，补齐 `resources.checkUpdates`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/composables/usePdkManager.test.ts`
+  - 同步测试 desktop API mock，补齐 `resources.checkUpdates`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/composables/useVersion.test.ts`
+  - 同步测试 desktop API mock，补齐 `resources.checkUpdates`。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/schemas.py`
+  - 允许 registry asset 只提供 `url + sha256_url`，`sha256` 默认为空，`size` 可选。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/tools.py`
+  - 工具安装前解析 asset，必要时从 `sha256_url` 获取校验值。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/pdks.py`
+  - PDK 安装前解析 asset，必要时从 `sha256_url` 获取校验值。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/router.py`
+  - 新增 `POST /api/resources/check-updates`。
+  - `GET /api/resources` 仅读取 update-check cache，不拉远端 `.sha256`。
+  - `latest` update 判断要求 cache 中的 `sha256_url` 与当前 registry asset 匹配，避免旧缓存误报。
+  - `init_registry()` 时清空 update-check cache，避免切 registry 后串状态。
+  - 工具/PDK 平台选择支持 `all-platform` fallback。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_router.py`
+  - 覆盖资源列表不阻塞 sidecar、不直接标 latest update。
+  - 覆盖手动 check-updates 拉取 `.sha256` 后列表标记 `update_available`。
+  - 覆盖 `refresh_registry` 参数会走 registry refresh。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 后台/手动更新检查开发。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile ecos/server/ecos_server/resource/asset_resolution.py ecos/server/ecos_server/resource/schemas.py ecos/server/ecos_server/resource/tools.py ecos/server/ecos_server/resource/pdks.py ecos/server/ecos_server/resource/router.py`，通过。
+- 已执行 `uv run pytest tests/resource/test_router.py tests/resource/test_schemas.py tests/resource/test_tools.py tests/resource/test_pdks.py -q`，通过：196 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts electron/main/registerIpc.test.ts`，通过：45 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/stores/pluginStore.test.ts src/api/plugin.test.ts src/composables/useDesktopRuntime.test.ts src/composables/usePdkManager.test.ts src/composables/useVersion.test.ts`，通过：33 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec tsc --noEmit -p tsconfig.json`，通过。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vue-tsc --noEmit`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动/打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- Electron 侧 update-check cache 当前按 registry URL hash 落盘；如果远端 release 频繁变更，UI 状态依赖后台/手动检查完成后刷新。
+- Python 后端 update-check cache 当前为进程内存缓存；服务重启后需要重新检查才能显示 `latest` update 状态。
+- 工作区仍存在既有 `ecc` 子模块 dirty 状态，本次没有处理或回退。

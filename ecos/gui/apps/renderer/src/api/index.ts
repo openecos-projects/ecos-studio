@@ -43,6 +43,7 @@ export {
 
 export {
   activatePdkApi,
+  checkResourceUpdatesApi,
   getToolStatusApi,
   importPdkPathApi,
   installResourceApi,

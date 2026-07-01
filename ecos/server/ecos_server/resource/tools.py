@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from .asset_resolution import resolve_asset
 from .installer import InstallerService
 from .inventory import InventoryService
 from .paths import default_tools_dir
@@ -87,6 +88,7 @@ class ToolResourceService:
         Progress events are emitted via the on_progress callback only;
         the caller (router) owns SSE publication through JobTracker.
         """
+        asset = await resolve_asset(asset)
         tools_dir = self._inventory.tools_dir
         dest_dir = tools_dir / name / version
         extract_dir = dest_dir.parent / f".extract-{version}-{uuid.uuid4().hex}"

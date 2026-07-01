@@ -105,11 +105,11 @@
               </button>
               <button
                 type="button"
-                :disabled="pluginStore.refreshing"
+                :disabled="pluginStore.refreshing || pluginStore.updateChecking"
                 @click="pluginStore.refresh()"
               >
                 <i
-                  :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
+                  :class="pluginStore.refreshing || pluginStore.updateChecking ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
                   aria-hidden="true"
                 ></i>
                 Refresh

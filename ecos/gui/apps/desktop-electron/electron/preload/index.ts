@@ -242,6 +242,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesImportPdkPath, request),
     refreshRegistry: () =>
       invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
+    checkUpdates: (options) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesCheckUpdates, options),
     onProgress: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.resourcesProgress,

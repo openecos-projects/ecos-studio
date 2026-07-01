@@ -8,6 +8,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
     ...actual,
     activatePdkApi: vi.fn(),
     cancelResourceApi: vi.fn(),
+    checkResourceUpdatesApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
 
 import {
   cancelResourceApi,
+  checkResourceUpdatesApi,
   installResourceApi,
   listResourcesApi,
   resourceListToTools,
@@ -103,11 +105,81 @@ describe('pluginStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(cancelResourceApi).mockReset()
+    vi.mocked(checkResourceUpdatesApi).mockReset()
+    vi.mocked(checkResourceUpdatesApi).mockResolvedValue({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      diagnostics: [],
+      resources: [],
+    })
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
+  })
+
+  it('loads resources before the background sha256 update check finishes', async () => {
+    const installedTool = makeToolResource({
+      status: 'installed',
+      installed_version: 'latest',
+      available_versions: ['latest'],
+      actions: ['uninstall'],
+    })
+    const updatedTool = makeToolResource({
+      status: 'update_available',
+      installed_version: 'latest',
+      available_versions: ['latest'],
+      actions: ['update', 'uninstall'],
+    })
+    let resolveCheck: (() => void) | undefined
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([installedTool])
+      .mockResolvedValue([updatedTool])
+    vi.mocked(checkResourceUpdatesApi).mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        resolveCheck = resolve
+      })
+      return {
+        status: 'ok',
+        checked_count: 1,
+        update_count: 1,
+        diagnostics: [],
+        resources: [
+          {
+            resource_id: 'tool:yosys',
+            checked_at: '2026-07-01T00:00:00Z',
+            sha256: 'a'.repeat(64),
+            status: 'checked',
+            update_available: true,
+            error: null,
+          },
+        ],
+      }
+    })
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    expect(store.loading).toBe(false)
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+    })
+    expect(checkResourceUpdatesApi).toHaveBeenCalledWith({
+      force: false,
+      refreshRegistry: false,
+    })
+
+    resolveCheck?.()
+    await flushPromises()
+
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'update_available',
+    })
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
   })
 
   it('fetches unified resources while keeping tools as the legacy tool projection', async () => {

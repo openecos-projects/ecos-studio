@@ -40,7 +40,7 @@ interface PlatformAsset {
   url: string
   sha256: string
   sha256_url?: string | null
-  size: number
+  size: number | null
   metadata_url?: string | null
   strip_prefix?: string | null
   post_install: RegistryPostInstallStep[]
@@ -56,6 +56,34 @@ interface ReleaseMetadata {
   size: number
   commit: string
   built_at: string
+}
+
+interface ResourceUpdateCheckItem {
+  resource_id: string
+  checked_at: string | null
+  sha256: string | null
+  status: 'checked' | 'skipped' | 'error'
+  update_available: boolean
+  error: string | null
+}
+
+interface ResourceUpdateCheckResult {
+  status: string
+  checked_count: number
+  update_count: number
+  diagnostics: string[]
+  resources: ResourceUpdateCheckItem[]
+}
+
+interface ResourceUpdateCheckOptions {
+  force?: boolean
+  refreshRegistry?: boolean
+}
+
+interface ResourceUpdateCheckCache {
+  schema_version: 1
+  checked_at: string
+  resources: Record<string, ResourceUpdateCheckItem & { sha256_url: string | null }>
 }
 
 interface RegistryPostInstallStep {
@@ -190,6 +218,8 @@ export class ResourceManagerService {
 
   private registryMemory: ResourceRegistry | null = null
   private registryRefreshPromise: Promise<void> | null = null
+  private updateCheckMemory: ResourceUpdateCheckCache | null = null
+  private updateCheckPromise: Promise<ResourceUpdateCheckResult> | null = null
   private activeJobs = new Map<string, ActiveResourceJob>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
@@ -208,12 +238,13 @@ export class ResourceManagerService {
   async listResources(): Promise<ResourceList> {
     const state = await this.fetchRegistry()
     const manifest = await this.readManifest()
+    const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
     const installedPdks = getInstalledPdks(manifest)
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, installedTools, manifest))
+      resources.push(this.registryToolToResource(tool, installedTools, manifest, updateChecks))
     }
     for (const pdk of state.registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
@@ -225,7 +256,7 @@ export class ResourceManagerService {
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest))
+      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest, updateChecks))
     }
 
     return {
@@ -577,6 +608,101 @@ export class ResourceManagerService {
     }
   }
 
+  async checkResourceUpdates(options: ResourceUpdateCheckOptions = {}): Promise<ResourceUpdateCheckResult> {
+    if (this.updateCheckPromise && !options.force) {
+      return await this.updateCheckPromise
+    }
+
+    const task = this.runResourceUpdateCheck(options)
+    this.updateCheckPromise = task
+    try {
+      return await task
+    } finally {
+      if (this.updateCheckPromise === task) {
+        this.updateCheckPromise = null
+      }
+    }
+  }
+
+  private async runResourceUpdateCheck(options: ResourceUpdateCheckOptions): Promise<ResourceUpdateCheckResult> {
+    const state = await this.fetchRegistry(options.refreshRegistry === true)
+    const diagnostics = [...state.diagnostics]
+    if (!state.registry) {
+      return {
+        status: 'degraded',
+        checked_count: 0,
+        update_count: 0,
+        diagnostics: diagnostics.length ? diagnostics : ['Registry unavailable'],
+        resources: [],
+      }
+    }
+
+    const manifest = await this.readManifest()
+    const checkedAt = utcNowIso()
+    const resources: ResourceUpdateCheckItem[] = []
+    const cacheResources: ResourceUpdateCheckCache['resources'] = {}
+
+    for (const candidate of collectUpdateCheckCandidates(state.registry, manifest)) {
+      const sha256Url = candidate.asset.sha256_url ?? null
+      if (!sha256Url) {
+        const item: ResourceUpdateCheckItem = {
+          resource_id: candidate.resourceId,
+          checked_at: checkedAt,
+          sha256: null,
+          status: 'skipped',
+          update_available: false,
+          error: 'No sha256_url in registry asset',
+        }
+        resources.push(item)
+        cacheResources[candidate.resourceId] = { ...item, sha256_url: null }
+        continue
+      }
+
+      const sha256 = await this.fetchAssetSha256(candidate.asset)
+      if (!sha256) {
+        const item: ResourceUpdateCheckItem = {
+          resource_id: candidate.resourceId,
+          checked_at: checkedAt,
+          sha256: null,
+          status: 'error',
+          update_available: false,
+          error: `Unable to fetch SHA256 from ${sha256Url}`,
+        }
+        resources.push(item)
+        cacheResources[candidate.resourceId] = { ...item, sha256_url: sha256Url }
+        continue
+      }
+
+      const item: ResourceUpdateCheckItem = {
+        resource_id: candidate.resourceId,
+        checked_at: checkedAt,
+        sha256,
+        status: 'checked',
+        update_available: sha256 !== candidate.installedSha256,
+        error: null,
+      }
+      resources.push(item)
+      cacheResources[candidate.resourceId] = { ...item, sha256_url: sha256Url }
+    }
+
+    const cache: ResourceUpdateCheckCache = {
+      schema_version: 1,
+      checked_at: checkedAt,
+      resources: cacheResources,
+    }
+    await this.writeUpdateCheckCache(cache)
+
+    const checkedCount = resources.filter((item) => item.status === 'checked').length
+    const updateCount = resources.filter((item) => item.update_available).length
+    return {
+      status: diagnostics.length ? 'degraded' : 'ok',
+      checked_count: checkedCount,
+      update_count: updateCount,
+      diagnostics,
+      resources,
+    }
+  }
+
   private async installTool(
     name: string,
     requestedVersion: string | undefined,
@@ -664,19 +790,22 @@ export class ResourceManagerService {
       const detected = await detectExecutables(destination)
       const executable = selectToolExecutable(name, detected)
       const manifest = await this.readManifest()
-      manifest.installed[resourceId] = {
+      const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
         name,
         version,
         path: destination,
         installed_at: utcNowIso(),
         sha256: resolvedAsset.sha256,
-        size: resolvedAsset.size,
         detected_executables: detected,
         executable,
         active: true,
         managed: true,
       }
+      if (resolvedAsset.size && resolvedAsset.size > 0) {
+        manifestEntry.size = resolvedAsset.size
+      }
+      manifest.installed[resourceId] = manifestEntry
       await this.writeManifest(manifest)
       this.publish(listener, {
         resource_id: resourceId,
@@ -744,10 +873,11 @@ export class ResourceManagerService {
       if (!versionEntry) throw new Error(`Version not found for ${pdkId}`)
       const { platform, asset } = selectPlatformAsset(versionEntry)
       if (!asset) throw new Error(`No asset for ${pdkId} on ${platform}`)
+      const resolvedAsset = await this.resolvePlatformAsset(asset)
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(asset.url)}`)
+      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`)
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -761,12 +891,12 @@ export class ResourceManagerService {
       electronLogger.debug(
         '[resources] Download source for %s: %s -> %s (%d bytes)',
         resourceId,
-        asset.url,
+        resolvedAsset.url,
         tempArchive,
-        asset.size,
+        resolvedAsset.size,
       )
       this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${displayName} v${version}...` })
-      await downloadAsset(asset.url, tempArchive, this.fetchImpl, asset.size, (progress) => {
+      await downloadAsset(resolvedAsset.url, tempArchive, this.fetchImpl, resolvedAsset.size, (progress) => {
         const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
         this.publish(listener, {
           resource_id: resourceId,
@@ -785,8 +915,8 @@ export class ResourceManagerService {
       }, controller.signal)
       throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
-      const verified = await this.sha256Verifier(tempArchive, asset.sha256)
+      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
       }
@@ -794,15 +924,15 @@ export class ResourceManagerService {
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
       await this.withExtractProgress(resourceId, action, displayName, listener, async () => {
-        await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
+        await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
       })
       throwIfAborted(controller.signal)
       await rm(destination, { force: true, recursive: true })
       await mkdir(dirname(destination), { recursive: true })
       await rename(tempExtract, destination)
-      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, asset, listener, controller.signal)
+      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, resolvedAsset, listener, controller.signal)
       throwIfAborted(controller.signal)
-      await this.runPostInstallSteps(resourceId, action, displayName, destination, asset.post_install, listener)
+      await this.runPostInstallSteps(resourceId, action, displayName, destination, resolvedAsset.post_install, listener)
       throwIfAborted(controller.signal)
 
       const scanned = await scanPdkDirectory(destination)
@@ -819,16 +949,15 @@ export class ResourceManagerService {
           }
         }
       }
-      manifest.installed[resourceId] = {
+      const manifestEntry: PdkInventoryEntry = {
         type: 'pdk',
         id: pdkId,
         name: scanned.name || displayName,
         pdk_id: pdkId,
         version,
-        sha256: asset.sha256,
-        size: asset.size,
+        sha256: resolvedAsset.sha256,
         source: 'registry',
-        source_url: asset.url,
+        source_url: resolvedAsset.url,
         canonical_path: destination,
         path: destination,
         detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
@@ -838,6 +967,10 @@ export class ResourceManagerService {
         managed: true,
         health: 'ok',
       }
+      if (resolvedAsset.size && resolvedAsset.size > 0) {
+        manifestEntry.size = resolvedAsset.size
+      }
+      manifest.installed[resourceId] = manifestEntry
       await this.writeManifest(manifest)
       this.publish(listener, {
         resource_id: resourceId,
@@ -1015,6 +1148,31 @@ export class ResourceManagerService {
     })()
   }
 
+  private updateCheckCachePath(): string {
+    const key = createHash('sha256').update(this.registryUrl).digest('hex').slice(0, 12)
+    return join(this.cacheDir, `resource-update-checks-${key}.json`)
+  }
+
+  private async readUpdateCheckCache(): Promise<ResourceUpdateCheckCache | null> {
+    if (this.updateCheckMemory) {
+      return this.updateCheckMemory
+    }
+    try {
+      const cache = parseUpdateCheckCache(JSON.parse(await readFile(this.updateCheckCachePath(), 'utf8')))
+      this.updateCheckMemory = cache
+      return cache
+    } catch {
+      return null
+    }
+  }
+
+  private async writeUpdateCheckCache(cache: ResourceUpdateCheckCache): Promise<void> {
+    this.updateCheckMemory = cache
+    const cachePath = this.updateCheckCachePath()
+    await mkdir(dirname(cachePath), { recursive: true })
+    await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8')
+  }
+
   private async readManifest(): Promise<ResourceManifest> {
     try {
       return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
@@ -1061,6 +1219,7 @@ export class ResourceManagerService {
     tool: RegistryTool,
     installed: Record<string, ToolInventoryEntry>,
     manifest: ResourceManifest,
+    updateChecks: ResourceUpdateCheckCache | null,
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
@@ -1076,7 +1235,7 @@ export class ResourceManagerService {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = toolHasUpdate(local, versions[0], asset) ? 'update_available' : 'installed'
+      status = toolHasUpdate(local, versions[0], asset, getUpdateCheck(updateChecks, resourceId)) ? 'update_available' : 'installed'
       actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
     }
 
@@ -1099,7 +1258,7 @@ export class ResourceManagerService {
       source: 'registry',
       homepage: tool.homepage,
       actions,
-      health: local ? toolHealth(local) : {},
+      health: local ? withUpdateCheckHealth(toolHealth(local), getUpdateCheck(updateChecks, resourceId)) : {},
       error: null,
       requires: requirements,
       installed_requires: requirementState.installed,
@@ -1226,6 +1385,7 @@ export class ResourceManagerService {
     entry: PdkInventoryEntry,
     registryPdk?: RegistryPdk,
     manifest?: ResourceManifest,
+    updateChecks?: ResourceUpdateCheckCache | null,
   ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
     const registryVersion = selectRegistryVersion(registryPdk?.versions, entry.version) ?? registryPdk?.versions[0]
@@ -1240,7 +1400,7 @@ export class ResourceManagerService {
       && entry.health === 'ok'
       && Boolean(entry.version)
       && Boolean(registryPdk?.versions[0]?.version)
-      && registryPdk?.versions[0]?.version !== entry.version
+      && pdkHasUpdate(entry, registryPdk?.versions[0]?.version, asset, getUpdateCheck(updateChecks ?? null, resourceId))
     const status: ResourceStatus = this.activeJobs.has(resourceId)
       ? 'installing'
       : entry.health === 'missing'
@@ -1277,7 +1437,7 @@ export class ResourceManagerService {
       source: entry.source || 'local',
       homepage: registryPdk?.homepage ?? '',
       actions,
-      health: pdkHealth(entry),
+      health: withUpdateCheckHealth(pdkHealth(entry), getUpdateCheck(updateChecks ?? null, resourceId)),
       error: null,
       requires: requirements,
       installed_requires: requirementState.installed,
@@ -1484,7 +1644,7 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       url: normalizeRegistryAssetUrl(readString(asset.url)),
       sha256: readString(asset.sha256),
       sha256_url: readOptionalString(asset.sha256_url),
-      size: readNumber(asset.size),
+      size: readOptionalPositiveNumber(asset.size) ?? null,
       metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
       post_install: parsePostInstallSteps(asset.post_install),
@@ -1728,6 +1888,92 @@ function isPdkEntry(entry: unknown): entry is PdkInventoryEntry {
   return readRecord(entry).type === 'pdk'
 }
 
+function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
+  const record = readRecord(value)
+  if (record.schema_version !== 1) {
+    throw new Error(`Unsupported update check cache schema: ${String(record.schema_version)}`)
+  }
+  const resources: ResourceUpdateCheckCache['resources'] = {}
+  for (const [resourceId, itemValue] of Object.entries(readRecord(record.resources))) {
+    const item = readRecord(itemValue)
+    const status = readString(item.status)
+    const normalizedStatus: ResourceUpdateCheckItem['status'] =
+      status === 'checked' || status === 'skipped' || status === 'error' ? status : 'error'
+    resources[resourceId] = {
+      resource_id: readString(item.resource_id) || resourceId,
+      checked_at: readOptionalString(item.checked_at),
+      sha256: readSha256(item.sha256),
+      status: normalizedStatus,
+      update_available: item.update_available === true,
+      error: readOptionalString(item.error),
+      sha256_url: readOptionalString(item.sha256_url),
+    }
+  }
+  return {
+    schema_version: 1,
+    checked_at: readString(record.checked_at),
+    resources,
+  }
+}
+
+function getUpdateCheck(
+  cache: ResourceUpdateCheckCache | null,
+  resourceId: string,
+): (ResourceUpdateCheckItem & { sha256_url: string | null }) | null {
+  return cache?.resources[resourceId] ?? null
+}
+
+function collectUpdateCheckCandidates(
+  registry: ResourceRegistry,
+  manifest: ResourceManifest,
+): {
+  resourceId: string
+  asset: PlatformAsset
+  installedSha256: string
+}[] {
+  const candidates: {
+    resourceId: string
+    asset: PlatformAsset
+    installedSha256: string
+  }[] = []
+
+  for (const tool of registry.tools) {
+    const latest = tool.versions[0]
+    const entry = manifest.installed[`tool:${tool.name}`]
+    if (!latest || !isToolEntry(entry) || !entry.managed || latest.version !== entry.version) {
+      continue
+    }
+    const { asset } = selectPlatformAsset(latest)
+    if (!asset || !asset.sha256_url) {
+      continue
+    }
+    candidates.push({
+      resourceId: `tool:${tool.name}`,
+      asset,
+      installedSha256: entry.sha256,
+    })
+  }
+
+  for (const pdk of registry.pdks) {
+    const latest = pdk.versions[0]
+    const entry = manifest.installed[`pdk:${pdk.id}`]
+    if (!latest || !isPdkEntry(entry) || !entry.managed || latest.version !== entry.version) {
+      continue
+    }
+    const { asset } = selectPlatformAsset(latest)
+    if (!asset || !asset.sha256_url) {
+      continue
+    }
+    candidates.push({
+      resourceId: `pdk:${pdk.id}`,
+      asset,
+      installedSha256: entry.sha256,
+    })
+  }
+
+  return candidates
+}
+
 function parseReleaseMetadata(value: unknown): ReleaseMetadata | null {
   const record = readRecord(value)
   const sha256 = readSha256(record.sha256)
@@ -1754,12 +2000,29 @@ function readSha256(value: unknown): string | null {
 function toolHasUpdate(
   entry: ToolInventoryEntry,
   latestVersion: string | undefined,
-  latestAsset: ResolvedPlatformAsset | null,
+  latestAsset: PlatformAsset | null,
+  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
 ): boolean {
   if (!latestVersion) return false
   if (latestVersion !== entry.version) return true
-  if (latestVersion === 'latest' && latestAsset?.sha256) {
-    return latestAsset.sha256 !== entry.sha256
+  if (latestVersion === 'latest' && latestAsset?.sha256_url && updateCheck?.status === 'checked') {
+    if (updateCheck.sha256_url && updateCheck.sha256_url !== latestAsset.sha256_url) return false
+    return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
+  }
+  return false
+}
+
+function pdkHasUpdate(
+  entry: PdkInventoryEntry,
+  latestVersion: string | undefined,
+  latestAsset: PlatformAsset | null,
+  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
+): boolean {
+  if (!latestVersion) return false
+  if (latestVersion !== entry.version) return true
+  if (latestVersion === 'latest' && latestAsset?.sha256_url && updateCheck?.status === 'checked') {
+    if (updateCheck.sha256_url && updateCheck.sha256_url !== latestAsset.sha256_url) return false
+    return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
   }
   return false
 }
@@ -1941,6 +2204,26 @@ function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
     sha256: entry.sha256,
     source: entry.source,
     source_url: entry.source_url,
+  }
+}
+
+function withUpdateCheckHealth(
+  health: Record<string, unknown>,
+  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
+): Record<string, unknown> {
+  if (!updateCheck) {
+    return health
+  }
+  return {
+    ...health,
+    update_check: {
+      checked_at: updateCheck.checked_at,
+      sha256: updateCheck.sha256,
+      sha256_url: updateCheck.sha256_url ?? null,
+      status: updateCheck.status,
+      update_available: updateCheck.update_available,
+      error: updateCheck.error,
+    },
   }
 }
 

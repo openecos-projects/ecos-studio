@@ -958,13 +958,115 @@ describe('ResourceManagerService', () => {
     })
 
     await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
-      status: 'update_available',
+      status: 'installed',
       installed_version: 'latest',
       available_versions: ['latest'],
       size: 1,
-      actions: ['update', 'uninstall'],
+      actions: ['uninstall'],
     })
     expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('checks rolling release sha256 sidecars manually and then marks latest tools as updatable', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const shaUrl = 'https://example.com/ecc-fe-latest.tar.gz.sha256'
+    const installedSha = 'c'.repeat(64)
+    const latestSha = 'd'.repeat(64)
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256_url: shaUrl,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: join(toolsDir, 'ecc-fe', 'latest'),
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: installedSha,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (requestUrl === shaUrl) {
+        return new Response(`${latestSha}  ecc-fe-latest.tar.gz\n`, { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      cacheDir: join(root, 'cache'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: latestSha,
+          status: 'checked',
+          update_available: true,
+        }),
+      ],
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      actions: ['update', 'uninstall'],
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: latestSha,
+          sha256_url: shaUrl,
+          status: 'checked',
+        }),
+      }),
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('uses latest release metadata to verify ecc-fe downloads', async () => {
@@ -1066,7 +1168,7 @@ describe('ResourceManagerService', () => {
     expect(verifySha256).toHaveBeenCalledWith(expect.any(String), latestSha)
   })
 
-  it('uses only registry static sha when listing latest tools', async () => {
+  it('does not use registry static sha to decide rolling latest updates while listing', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const registryPath = join(root, 'registry.json')

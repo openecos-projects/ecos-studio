@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 const resourcesBridge = vi.hoisted(() => ({
   activatePdk: vi.fn(),
   cancel: vi.fn(),
+  checkUpdates: vi.fn(),
   get: vi.fn(),
   importPdkPath: vi.fn(),
   install: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/platform/desktop', () => ({
 
 import {
   cancelResourceApi,
+  checkResourceUpdatesApi,
   importPdkPathApi,
   resourceJobToInstallProgress,
   resourceListToResources,
@@ -247,6 +249,29 @@ describe('Resource Manager tool API adapter', () => {
     })
 
     expect(resourcesBridge.cancel).toHaveBeenCalledWith('tool:yosys')
+  })
+
+  it('checks resource updates through the desktop resource bridge', async () => {
+    resourcesBridge.checkUpdates.mockResolvedValue({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 0,
+      diagnostics: [],
+      resources: [],
+    })
+
+    await expect(checkResourceUpdatesApi({ force: true, refreshRegistry: true })).resolves.toEqual({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 0,
+      diagnostics: [],
+      resources: [],
+    })
+
+    expect(resourcesBridge.checkUpdates).toHaveBeenCalledWith({
+      force: true,
+      refreshRegistry: true,
+    })
   })
 
   it('subscribes to resource progress through the desktop event bridge', () => {

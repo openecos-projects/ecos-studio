@@ -84,6 +84,23 @@ def _mock_registry_data_with_versions() -> dict:
     return data
 
 
+def _mock_registry_data_with_latest_sha_sidecar() -> dict:
+    data = _mock_registry_data()
+    data["tools"][0]["versions"] = [
+        {
+            "version": "latest",
+            "platforms": {
+                "linux-x86_64": {
+                    "url": "https://example.com/yosys-latest.tar.gz",
+                    "sha256_url": "https://example.com/yosys-latest.tar.gz.sha256",
+                }
+            },
+            "requires": [],
+        }
+    ]
+    return data
+
+
 def _mock_registry_data_with_pdk() -> dict:
     data = _mock_registry_data()
     data["pdks"] = [
@@ -554,6 +571,31 @@ class TestListResources:
             "sha256": "abc123",
             "executable": "bin/yosys",
         }
+
+    def test_list_does_not_block_on_latest_sha_sidecar(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data_with_latest_sha_sidecar())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="latest",
+            path="/tmp/ecos/tools/yosys/latest",
+            sha256="a" * 64,
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        with patch("ecos_server.resource.router.fetch_asset_sha256") as fetch_sha:
+            resp = client.get("/api/resources")
+
+        assert resp.status_code == 200
+        fetch_sha.assert_not_called()
+        tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
+        assert tool["status"] == "installed"
+        assert tool["size"] is None
+        assert "update" not in tool["actions"]
+        assert "update_check" not in tool["health"]
 
     def test_list_marks_registry_tool_installing_when_job_active(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
@@ -1127,6 +1169,81 @@ class TestRegistryRefresh:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["tools_count"] == 1
+
+
+class TestResourceUpdateChecks:
+    def test_check_updates_uses_remote_sha_sidecar_then_marks_latest_update(
+        self, client: TestClient
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        latest_sha = "b" * 64
+        _patch_registry(client, _mock_registry_data_with_latest_sha_sidecar())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="latest",
+            path="/tmp/ecos/tools/yosys/latest",
+            sha256="a" * 64,
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        with patch(
+            "ecos_server.resource.router.fetch_asset_sha256",
+            AsyncMock(return_value=latest_sha),
+        ) as fetch_sha:
+            resp = client.post("/api/resources/check-updates")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["checked_count"] == 1
+        assert data["update_count"] == 1
+        assert data["resources"] == [
+            {
+                "resource_id": "tool:yosys",
+                "checked_at": data["resources"][0]["checked_at"],
+                "sha256": latest_sha,
+                "status": "checked",
+                "update_available": True,
+                "error": None,
+                "sha256_url": "https://example.com/yosys-latest.tar.gz.sha256",
+            }
+        ]
+        fetch_sha.assert_awaited_once()
+
+        resp = client.get("/api/resources")
+        assert resp.status_code == 200
+        tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
+        assert tool["status"] == "update_available"
+        assert "update" in tool["actions"]
+        assert tool["health"]["update_check"]["sha256"] == latest_sha
+
+    def test_check_updates_refreshes_registry_when_requested(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        _patch_registry(client, _mock_registry_data_with_latest_sha_sidecar())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="latest",
+            path="/tmp/ecos/tools/yosys/latest",
+            sha256="a" * 64,
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        with patch(
+            "ecos_server.resource.router.fetch_asset_sha256",
+            AsyncMock(return_value="a" * 64),
+        ):
+            resp = client.post("/api/resources/check-updates", json={"refresh_registry": True})
+
+        assert resp.status_code == 200
+        router_mod._registry_service.refresh.assert_awaited_once()
+        router_mod._registry_service.fetch.assert_not_awaited()
+        assert resp.json()["update_count"] == 0
 
 
 class TestBatch:

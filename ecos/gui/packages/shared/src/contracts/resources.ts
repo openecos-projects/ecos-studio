@@ -51,6 +51,23 @@ export interface ResourceList {
   diagnostics: string[]
 }
 
+export interface ResourceUpdateCheckItem {
+  resource_id: string
+  checked_at: string | null
+  sha256: string | null
+  status: 'checked' | 'skipped' | 'error'
+  update_available: boolean
+  error: string | null
+}
+
+export interface ResourceUpdateCheckResult {
+  status: string
+  checked_count: number
+  update_count: number
+  diagnostics: string[]
+  resources: ResourceUpdateCheckItem[]
+}
+
 export interface ResourceJob {
   id: string
   resource_id: string
