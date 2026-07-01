@@ -8,16 +8,19 @@ import {
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
 
-const props = withDefaults(defineProps<{
-  content: string
-  live?: boolean
-  missing?: boolean
-  loading?: boolean
-}>(), {
-  live: false,
-  missing: false,
-  loading: false,
-})
+const props = withDefaults(
+  defineProps<{
+    content: string
+    live?: boolean
+    missing?: boolean
+    loading?: boolean
+  }>(),
+  {
+    live: false,
+    missing: false,
+    loading: false,
+  },
+)
 
 const rootRef = ref<HTMLElement | null>(null)
 const isViewerEmpty = computed(() => !props.content)
@@ -85,11 +88,16 @@ function syncViewerContent(nextContent: string): void {
   if (lastSyncedContent === nextContent) return
 
   const scrollDOM = view.scrollDOM
-  const shouldFollowTail = props.live && isFlowLogViewerNearTail({
-    scrollHeight: scrollDOM.scrollHeight,
-    scrollTop: scrollDOM.scrollTop,
-    clientHeight: scrollDOM.clientHeight,
-  }, FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX)
+  const shouldFollowTail =
+    props.live &&
+    isFlowLogViewerNearTail(
+      {
+        scrollHeight: scrollDOM.scrollHeight,
+        scrollTop: scrollDOM.scrollTop,
+        clientHeight: scrollDOM.clientHeight,
+      },
+      FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
+    )
 
   const docLength = view.state.doc.length
   const changes = nextContent.startsWith(lastSyncedContent)
@@ -121,19 +129,31 @@ onMounted(() => {
   ensureViewerState()
 })
 
-watch(() => props.content, (nextContent) => {
-  scheduleViewerContentSync(nextContent)
-}, { flush: 'post' })
+watch(
+  () => props.content,
+  (nextContent) => {
+    scheduleViewerContentSync(nextContent)
+  },
+  { flush: 'post' },
+)
 
-watch([rootRef, isViewerEmpty], () => {
-  ensureViewerState()
-}, { flush: 'post' })
+watch(
+  [rootRef, isViewerEmpty],
+  () => {
+    ensureViewerState()
+  },
+  { flush: 'post' },
+)
 
-watch(() => props.live, (isLive) => {
-  if (isLive) {
-    scheduleScrollViewerToTail()
-  }
-}, { flush: 'post' })
+watch(
+  () => props.live,
+  (isLive) => {
+    if (isLive) {
+      scheduleScrollViewerToTail()
+    }
+  },
+  { flush: 'post' },
+)
 
 onUnmounted(() => {
   destroyViewer()
@@ -144,9 +164,19 @@ onUnmounted(() => {
   <div class="flow-log-viewer-shell">
     <div v-if="isViewerEmpty" class="flow-log-viewer-empty">
       <i class="ri-file-list-3-line"></i>
-      <p>{{ loading ? 'Loading log content…' : missing ? 'Log file not found' : 'No log content yet' }}</p>
+      <p>
+        {{
+          loading
+            ? 'Loading log content…'
+            : missing
+              ? 'Log file not found'
+              : 'No log content yet'
+        }}
+      </p>
       <span v-if="loading">Reading the selected step log on demand.</span>
-      <span v-else-if="missing">The selected step did not produce a readable log file.</span>
+      <span v-else-if="missing"
+        >The selected step did not produce a readable log file.</span
+      >
       <span v-else>Select a started step or wait for the current step to emit logs.</span>
     </div>
     <div v-else class="flow-log-viewer-editor-wrap" :class="{ 'is-live': live }">

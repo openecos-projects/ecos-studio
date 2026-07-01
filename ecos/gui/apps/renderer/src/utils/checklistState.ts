@@ -1,4 +1,10 @@
-export type ChecklistStateKind = 'success' | 'failed' | 'warning' | 'ongoing' | 'pending' | 'unstart'
+export type ChecklistStateKind =
+  | 'success'
+  | 'failed'
+  | 'warning'
+  | 'ongoing'
+  | 'pending'
+  | 'unstart'
 
 export function normalizeChecklistState(state: string): ChecklistStateKind {
   switch (state) {

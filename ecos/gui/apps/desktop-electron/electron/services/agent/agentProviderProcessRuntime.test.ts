@@ -33,7 +33,10 @@ function createSpawnHarness() {
   }
 }
 
-function readProtocolRequest(child: FakeChild, callIndex = 0): AgentProviderProtocolRequest {
+function readProtocolRequest(
+  child: FakeChild,
+  callIndex = 0,
+): AgentProviderProtocolRequest {
   const raw = String(child.stdin.write.mock.calls[callIndex][0]).trim()
   return JSON.parse(raw) as AgentProviderProtocolRequest
 }
@@ -74,10 +77,13 @@ describe('AgentProviderProcessRuntime', () => {
       },
     })
 
-    child.stdout.emit('data', `${JSON.stringify({
-      id: request.id,
-      result: { sessionId: 'session-1' },
-    })}\n`)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: request.id,
+        result: { sessionId: 'session-1' },
+      })}\n`,
+    )
 
     await expect(response).resolves.toEqual({
       sessionId: 'session-1',
@@ -97,22 +103,23 @@ describe('AgentProviderProcessRuntime', () => {
       spawn: harness.spawn,
     })
     const manager = new AgentRuntimeManager({
-      providers: [
-        { providerId: 'local', runtime },
-      ],
+      providers: [{ providerId: 'local', runtime }],
     })
     const listener = vi.fn()
     manager.onEvent(listener)
 
     void runtime.getStatus({ providerId: 'local' })
     const child = harness.children[0]
-    child.stdout.emit('data', `${JSON.stringify({
-      event: {
-        text: 'working',
-        type: 'message',
-      },
-      type: 'event',
-    })}\n`)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          text: 'working',
+          type: 'message',
+        },
+        type: 'event',
+      })}\n`,
+    )
 
     expect(listener).toHaveBeenCalledWith({
       providerId: 'local',
@@ -137,9 +144,7 @@ describe('AgentProviderProcessRuntime', () => {
     const response = runtime.getStatus({ providerId: 'codex' })
     harness.children[0].emit('close', 1, null)
 
-    await expect(response).rejects.toThrow(
-      'Agent provider codex exited with code 1',
-    )
+    await expect(response).rejects.toThrow('Agent provider codex exited with code 1')
   })
 
   it('rejects pending requests when provider stdin writes fail', async () => {
@@ -191,13 +196,16 @@ describe('AgentProviderProcessRuntime', () => {
     const nextResponse = runtime.getStatus({ providerId: 'codex' })
     expect(harness.children).toHaveLength(2)
     const secondRequest = readProtocolRequest(harness.children[1])
-    harness.children[1].stdout.emit('data', `${JSON.stringify({
-      id: secondRequest.id,
-      result: {
-        providerId: 'codex',
-        state: 'ready',
-      },
-    })}\n`)
+    harness.children[1].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: secondRequest.id,
+        result: {
+          providerId: 'codex',
+          state: 'ready',
+        },
+      })}\n`,
+    )
 
     await expect(nextResponse).resolves.toEqual({
       providerId: 'codex',
@@ -231,13 +239,16 @@ describe('AgentProviderProcessRuntime', () => {
       harness.children[0].stdout.emit('data', 'not json\n')
     }).not.toThrow()
 
-    harness.children[1].stdout.emit('data', `${JSON.stringify({
-      id: secondRequest.id,
-      result: {
-        providerId: 'codex',
-        state: 'ready',
-      },
-    })}\n`)
+    harness.children[1].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: secondRequest.id,
+        result: {
+          providerId: 'codex',
+          state: 'ready',
+        },
+      })}\n`,
+    )
 
     await expect(secondResponse).resolves.toEqual({
       providerId: 'codex',
@@ -261,20 +272,21 @@ describe('AgentProviderProcessRuntime', () => {
     const firstResponse = runtime.getStatus({ providerId: 'codex' })
     harness.children[0].stdout.emit('data', '{"id":')
     harness.children[0].emit('close', 1, null)
-    await expect(firstResponse).rejects.toThrow(
-      'Agent provider codex exited with code 1',
-    )
+    await expect(firstResponse).rejects.toThrow('Agent provider codex exited with code 1')
 
     const secondResponse = runtime.getStatus({ providerId: 'codex' })
     const secondChild = harness.children[1]
     const secondRequest = readProtocolRequest(secondChild)
-    secondChild.stdout.emit('data', `${JSON.stringify({
-      id: secondRequest.id,
-      result: {
-        providerId: 'codex',
-        state: 'ready',
-      },
-    })}\n`)
+    secondChild.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: secondRequest.id,
+        result: {
+          providerId: 'codex',
+          state: 'ready',
+        },
+      })}\n`,
+    )
 
     await expect(secondResponse).resolves.toEqual({
       providerId: 'codex',
@@ -317,9 +329,7 @@ describe('AgentProviderProcessRuntime', () => {
       harness.children[0].stdout.emit('data', 'not json\n')
     }).not.toThrow()
 
-    await expect(response).rejects.toThrow(
-      'Invalid JSON from agent provider codex',
-    )
+    await expect(response).rejects.toThrow('Invalid JSON from agent provider codex')
   })
 
   it('does not reject pending requests when a provider event listener throws', async () => {
@@ -335,9 +345,7 @@ describe('AgentProviderProcessRuntime', () => {
       spawn: harness.spawn,
     })
     const manager = new AgentRuntimeManager({
-      providers: [
-        { providerId: 'codex', runtime },
-      ],
+      providers: [{ providerId: 'codex', runtime }],
     })
     manager.onEvent(() => {
       throw new Error('listener failed')
@@ -348,22 +356,28 @@ describe('AgentProviderProcessRuntime', () => {
     const request = readProtocolRequest(child)
 
     expect(() => {
-      child.stdout.emit('data', `${JSON.stringify({
-        event: {
-          text: 'working',
-          type: 'message',
-        },
-        type: 'event',
-      })}\n`)
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({
+          event: {
+            text: 'working',
+            type: 'message',
+          },
+          type: 'event',
+        })}\n`,
+      )
     }).toThrow('listener failed')
 
-    child.stdout.emit('data', `${JSON.stringify({
-      id: request.id,
-      result: {
-        providerId: 'codex',
-        state: 'ready',
-      },
-    })}\n`)
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        id: request.id,
+        result: {
+          providerId: 'codex',
+          state: 'ready',
+        },
+      })}\n`,
+    )
 
     await expect(response).resolves.toEqual({
       providerId: 'codex',
@@ -384,9 +398,7 @@ describe('AgentProviderProcessRuntime', () => {
       spawn: harness.spawn,
     })
     const manager = new AgentRuntimeManager({
-      providers: [
-        { providerId: 'codex', runtime },
-      ],
+      providers: [{ providerId: 'codex', runtime }],
     })
     manager.onEvent(() => {
       throw new Error('listener failed')
@@ -397,27 +409,32 @@ describe('AgentProviderProcessRuntime', () => {
     const request = readProtocolRequest(child)
 
     expect(() => {
-      child.stdout.emit('data', `${JSON.stringify({
-        event: {
-          text: 'working',
-          type: 'message',
-        },
-        type: 'event',
-      })}\n${JSON.stringify({
-        id: request.id,
-        result: {
-          providerId: 'codex',
-          state: 'ready',
-        },
-      })}\n`)
+      child.stdout.emit(
+        'data',
+        `${JSON.stringify({
+          event: {
+            text: 'working',
+            type: 'message',
+          },
+          type: 'event',
+        })}\n${JSON.stringify({
+          id: request.id,
+          result: {
+            providerId: 'codex',
+            state: 'ready',
+          },
+        })}\n`,
+      )
     }).toThrow('listener failed')
 
-    await expect(Promise.race([
-      response,
-      new Promise((resolve) => {
-        setTimeout(() => resolve({ timedOut: true }), 25)
-      }),
-    ])).resolves.toEqual({
+    await expect(
+      Promise.race([
+        response,
+        new Promise((resolve) => {
+          setTimeout(() => resolve({ timedOut: true }), 25)
+        }),
+      ]),
+    ).resolves.toEqual({
       providerId: 'codex',
       state: 'ready',
     })

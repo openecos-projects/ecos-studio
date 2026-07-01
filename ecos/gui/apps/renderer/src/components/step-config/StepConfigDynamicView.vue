@@ -10,10 +10,18 @@ const draft = defineModel<unknown>({ required: true })
 const props = defineProps<{
   step: StepEnum
 }>()
-const CtsStepConfigView = defineAsyncComponent(() => import('./views/CtsStepConfigView.vue'))
-const RtStepConfigView = defineAsyncComponent(() => import('./views/RtStepConfigView.vue'))
-const DrcStepConfigView = defineAsyncComponent(() => import('./views/DrcStepConfigView.vue'))
-const PlStepConfigView = defineAsyncComponent(() => import('./views/PlStepConfigView.vue'))
+const CtsStepConfigView = defineAsyncComponent(
+  () => import('./views/CtsStepConfigView.vue'),
+)
+const RtStepConfigView = defineAsyncComponent(
+  () => import('./views/RtStepConfigView.vue'),
+)
+const DrcStepConfigView = defineAsyncComponent(
+  () => import('./views/DrcStepConfigView.vue'),
+)
+const PlStepConfigView = defineAsyncComponent(
+  () => import('./views/PlStepConfigView.vue'),
+)
 
 const VIEW_MAP: Partial<Record<StepEnum, Component>> = {
   [StepEnum.FLOORPLAN]: FloorplanStepConfigView,

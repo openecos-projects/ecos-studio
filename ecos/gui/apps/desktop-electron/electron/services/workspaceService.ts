@@ -50,16 +50,15 @@ function boundedTextCharCount(maxChars: number): number {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = relative(rootPath, candidatePath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function isSamePath(path: string, otherPath: string): boolean {
@@ -68,7 +67,9 @@ function isSamePath(path: string, otherPath: string): boolean {
 
 function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
   const relativePath = relative(path, descendantPath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -79,11 +80,14 @@ function normalizeRelativePathForMatch(path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-function isRuntimeProtectedProjectPath(canonicalPath: string, projectRoot: string): boolean {
+function isRuntimeProtectedProjectPath(
+  canonicalPath: string,
+  projectRoot: string,
+): boolean {
   const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
   return (
-    relativePath === 'home/parameters.json'
-    || (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
+    relativePath === 'home/parameters.json' ||
+    (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
   )
 }
 
@@ -133,14 +137,13 @@ function getRawEventPath(
 ): string {
   if (isAbsolute(rawPath)) return rawPath
 
-  const watchedPath = (
-    typeof details === 'object'
-    && details !== null
-    && 'watchedPath' in details
-    && typeof details.watchedPath === 'string'
-  )
-    ? details.watchedPath
-    : watchDirectory
+  const watchedPath =
+    typeof details === 'object' &&
+    details !== null &&
+    'watchedPath' in details &&
+    typeof details.watchedPath === 'string'
+      ? details.watchedPath
+      : watchDirectory
 
   if (isSamePath(watchedPath, targetPath)) return targetPath
   return join(watchedPath, rawPath)
@@ -272,14 +275,14 @@ export class WorkspaceService {
       const fileWasTruncated = normalizedOffset > fileStats.size
       const unreadBytes = Math.max(0, fileStats.size - normalizedOffset)
       const tooMuchUnread = unreadBytes > readBytes
-      const start = fileWasTruncated || tooMuchUnread
-        ? Math.max(0, fileStats.size - readBytes)
-        : normalizedOffset
+      const start =
+        fileWasTruncated || tooMuchUnread
+          ? Math.max(0, fileStats.size - readBytes)
+          : normalizedOffset
       const length = fileStats.size - start
       const buffer = Buffer.alloc(length)
-      const result = length > 0
-        ? await handle.read(buffer, 0, length, start)
-        : { bytesRead: 0 }
+      const result =
+        length > 0 ? await handle.read(buffer, 0, length, start) : { bytesRead: 0 }
       const raw = buffer.subarray(0, result.bytesRead).toString('utf8')
       const decodedTooLong = raw.length > boundedMaxChars
       const truncated = fileWasTruncated || tooMuchUnread || decodedTooLong
@@ -374,11 +377,11 @@ export class WorkspaceService {
 
     watcher.on('all', (eventType, changedPath) => {
       if (
-        eventType !== 'add'
-        && eventType !== 'addDir'
-        && eventType !== 'change'
-        && eventType !== 'unlink'
-        && eventType !== 'unlinkDir'
+        eventType !== 'add' &&
+        eventType !== 'addDir' &&
+        eventType !== 'change' &&
+        eventType !== 'unlink' &&
+        eventType !== 'unlinkDir'
       ) {
         return
       }
@@ -445,7 +448,9 @@ export class WorkspaceService {
     return await addWorkspaceDesignFiles(projectRoot, sourcePaths)
   }
 
-  async removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null> {
+  async removeDesignFile(
+    filelistEntry: string,
+  ): Promise<WorkspaceDesignFileEntry | null> {
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
     const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
       getWorkspaceFilelistPath(projectRoot),

@@ -11,8 +11,16 @@ function indexWithTech(): WorkspaceResourceIndex {
     home: {
       homeJson: { path: '/workspace/demo/home/home.json', exists: true, kind: 'home' },
       flowJson: { path: '/workspace/demo/home/flow.json', exists: true, kind: 'flow' },
-      parametersJson: { path: '/workspace/demo/home/parameters.json', exists: true, kind: 'parameters' },
-      checklistJson: { path: '/workspace/demo/home/checklist.json', exists: false, kind: 'checklist' },
+      parametersJson: {
+        path: '/workspace/demo/home/parameters.json',
+        exists: true,
+        kind: 'parameters',
+      },
+      checklistJson: {
+        path: '/workspace/demo/home/checklist.json',
+        exists: false,
+        kind: 'checklist',
+      },
     },
     homeData: null,
     parameters: null,
@@ -20,11 +28,31 @@ function indexWithTech(): WorkspaceResourceIndex {
     tech: {
       packageRoot: '/workspace/demo/gcd_view',
       source: 'view-package',
-      manifest: { path: '/workspace/demo/gcd_view/manifest.json', exists: true, kind: 'tech-json' },
-      layers: { path: '/workspace/demo/gcd_view/tech/layers.json', exists: true, kind: 'tech-json' },
-      sites: { path: '/workspace/demo/gcd_view/tech/sites.json', exists: true, kind: 'tech-json' },
-      vias: { path: '/workspace/demo/gcd_view/tech/vias.json', exists: true, kind: 'tech-json' },
-      cellMasters: { path: '/workspace/demo/gcd_view/tech/cell_masters.json', exists: true, kind: 'tech-json' },
+      manifest: {
+        path: '/workspace/demo/gcd_view/manifest.json',
+        exists: true,
+        kind: 'tech-json',
+      },
+      layers: {
+        path: '/workspace/demo/gcd_view/tech/layers.json',
+        exists: true,
+        kind: 'tech-json',
+      },
+      sites: {
+        path: '/workspace/demo/gcd_view/tech/sites.json',
+        exists: true,
+        kind: 'tech-json',
+      },
+      vias: {
+        path: '/workspace/demo/gcd_view/tech/vias.json',
+        exists: true,
+        kind: 'tech-json',
+      },
+      cellMasters: {
+        path: '/workspace/demo/gcd_view/tech/cell_masters.json',
+        exists: true,
+        kind: 'tech-json',
+      },
     },
     status: 'available',
     messages: [],
@@ -49,7 +77,14 @@ describe('loadTechLibrary', () => {
         kind: 'sites',
         count: 1,
         data: [
-          { id: 1, name: 'core7', class: 'CORE', size: [200, 1400], orient: 'N_R0', symmetry: [] },
+          {
+            id: 1,
+            name: 'core7',
+            class: 'CORE',
+            size: [200, 1400],
+            orient: 'N_R0',
+            symmetry: [],
+          },
         ],
       },
       '/workspace/demo/gcd_view/tech/vias.json': {
@@ -114,8 +149,11 @@ describe('loadTechLibrary', () => {
   })
 
   it('rejects unsupported tech schema with a clear error', async () => {
-    await expect(loadTechLibrary(indexWithTech(), {
-      readText: async () => JSON.stringify({ schema: 'unknown', kind: 'layers', data: [] }),
-    })).rejects.toThrow('Unsupported layers tech file')
+    await expect(
+      loadTechLibrary(indexWithTech(), {
+        readText: async () =>
+          JSON.stringify({ schema: 'unknown', kind: 'layers', data: [] }),
+      }),
+    ).rejects.toThrow('Unsupported layers tech file')
   })
 })

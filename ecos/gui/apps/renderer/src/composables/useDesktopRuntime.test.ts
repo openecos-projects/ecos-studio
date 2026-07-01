@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopApi } from '@ecos-studio/shared'
-import { DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE, getDesktopApi, hasDesktopApi } from '@/platform/desktop'
-import { isDesktopRuntime, requireDesktopRuntime, useDesktopRuntime } from './useDesktopRuntime'
+import {
+  DESKTOP_BRIDGE_UNAVAILABLE_MESSAGE,
+  getDesktopApi,
+  hasDesktopApi,
+} from '@/platform/desktop'
+import {
+  isDesktopRuntime,
+  requireDesktopRuntime,
+  useDesktopRuntime,
+} from './useDesktopRuntime'
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 const originalAlert = Object.getOwnPropertyDescriptor(globalThis, 'alert')
@@ -146,16 +154,32 @@ const desktopBridge = {
   },
   resources: {
     list: async () => ({ diagnostics: [], resources: [] }),
-    get: async () => { throw new Error('not found') },
-    install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
+    get: async () => {
+      throw new Error('not found')
+    },
+    install: async (request) => ({
+      status: 'started',
+      resource_id: request.resourceId,
+      version: request.version,
+    }),
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
     cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
     activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
-    validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
-    removePdkReference: async (resourceId) => ({ status: 'removed', resource_id: resourceId }),
-    importPdkPath: async () => { throw new Error('not implemented') },
-    importLocalPath: async () => { throw new Error('not implemented') },
+    validatePdk: async (resourceId) => ({
+      resource_id: resourceId,
+      health: { status: 'ok' },
+    }),
+    removePdkReference: async (resourceId) => ({
+      status: 'removed',
+      resource_id: resourceId,
+    }),
+    importPdkPath: async () => {
+      throw new Error('not implemented')
+    },
+    importLocalPath: async () => {
+      throw new Error('not implemented')
+    },
     refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
     onProgress: () => () => undefined,
   },

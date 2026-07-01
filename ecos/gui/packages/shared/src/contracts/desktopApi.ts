@@ -152,7 +152,9 @@ export interface DesktopApi {
     openExternal(url: string): Promise<void>
   }
   settings: {
-    get<T extends DesktopSettingsValue = DesktopSettingsValue>(key: string): Promise<T | null>
+    get<T extends DesktopSettingsValue = DesktopSettingsValue>(
+      key: string,
+    ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
     delete(key: string): Promise<void>
   }
@@ -160,7 +162,9 @@ export interface DesktopApi {
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
-    pickRtlSources(options?: DesktopRtlSourceDialogOptions): Promise<PickedRtlSources | null>
+    pickRtlSources(
+      options?: DesktopRtlSourceDialogOptions,
+    ): Promise<PickedRtlSources | null>
   }
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
@@ -214,7 +218,9 @@ export interface DesktopApi {
     cancel(resourceId: string): Promise<ResourceOperationResult>
     uninstall(resourceId: string): Promise<ResourceOperationResult>
     activatePdk(resourceId: string): Promise<ResourceOperationResult>
-    validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>
+    validatePdk(
+      resourceId: string,
+    ): Promise<{ resource_id: string; health: { status: string } }>
     removePdkReference(resourceId: string): Promise<ResourceOperationResult>
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
     importLocalPath(request: ResourceImportLocalRequest): Promise<ResourceInfo>

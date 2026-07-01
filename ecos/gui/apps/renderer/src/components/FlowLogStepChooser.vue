@@ -55,7 +55,11 @@ const SCROLLER_HEIGHT = '18rem'
         <button
           type="button"
           class="flow-log-step-chooser-item"
-          :class="{ selected: item.key === props.selectedKey, failed: item.failed, live: item.live }"
+          :class="{
+            selected: item.key === props.selectedKey,
+            failed: item.failed,
+            live: item.live,
+          }"
           @click="emit('select', item.key)"
         >
           <span class="flow-log-step-chooser-name">{{ item.stepName }}</span>

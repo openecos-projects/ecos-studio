@@ -69,7 +69,9 @@ const workspaceLifecycle = useWorkspaceLifecycle()
 /** 准备工作区就绪时由 App 层显示全屏加载遮罩 */
 const runtimeBackendConnecting = ref(false)
 const runtimeBackendTitle = ref('Preparing your workspace')
-const runtimeBackendSubtitle = ref('First load or restoring your project may take a moment')
+const runtimeBackendSubtitle = ref(
+  'First load or restoring your project may take a moment',
+)
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -132,20 +134,25 @@ export function useWorkspace() {
         severity: options.severity ?? 'info',
         summary: options.summary,
         detail: options.detail,
-        life: options.life ?? 4000
+        life: options.life ?? 4000,
       })
     } else {
-      console.warn('[useWorkspace] Toast not initialized — called outside component context?')
+      console.warn(
+        '[useWorkspace] Toast not initialized — called outside component context?',
+      )
     }
   }
 
   /**
    * Wait until the desktop runtime bridge is available.
    */
-  const ensureApiReady = async (options: { keepLoading?: boolean } = {}): Promise<boolean> => {
+  const ensureApiReady = async (
+    options: { keepLoading?: boolean } = {},
+  ): Promise<boolean> => {
     runtimeBackendConnecting.value = true
     runtimeBackendTitle.value = 'Preparing your workspace'
-    runtimeBackendSubtitle.value = 'First load or restoring your project may take a moment'
+    runtimeBackendSubtitle.value =
+      'First load or restoring your project may take a moment'
     try {
       await waitForRuntimeReady({ timeoutMs: 180_000 })
       return true
@@ -155,7 +162,7 @@ export function useWorkspace() {
         summary: 'Desktop runtime unavailable',
         detail:
           'The desktop runtime bridge is not available. Restart the application and try again.',
-        life: 8000
+        life: 8000,
       })
       return false
     } finally {
@@ -185,7 +192,7 @@ export function useWorkspace() {
     return {
       ...project,
       path: normalizePath(project.path),
-      lastOpened: project.lastOpened.toISOString()
+      lastOpened: project.lastOpened.toISOString(),
     }
   }
 
@@ -195,7 +202,7 @@ export function useWorkspace() {
   const deserializeProject = (serialized: SerializedProject): Project => {
     return {
       ...serialized,
-      lastOpened: new Date(serialized.lastOpened)
+      lastOpened: new Date(serialized.lastOpened),
     }
   }
 
@@ -234,7 +241,7 @@ export function useWorkspace() {
 
   /**
    * loadRecentProjects 从本地加载最近项目，并异步标记 workspace 识别状态。
-   * 
+   *
    * 设计原则：
    * - **不自动删除**任何记录（避免因权限/网络等临时问题导致误删）
    * - 通过 `project.workspaceRecognized` 标记当前路径是否仍像一个 ECOS workspace，供 UI 做差异化展示
@@ -268,13 +275,15 @@ export function useWorkspace() {
         if (savedCurrentPath) {
           // 精确匹配上次打开的项目
           restored = projects.find(
-            p => normalizePath(p.path) === savedCurrentPath && p.workspaceRecognized !== false
+            (p) =>
+              normalizePath(p.path) === savedCurrentPath &&
+              p.workspaceRecognized !== false,
           )
         }
 
         // 如果精确匹配失败，回退到第一个有效项目
         if (!restored) {
-          restored = projects.find(p => p.workspaceRecognized !== false)
+          restored = projects.find((p) => p.workspaceRecognized !== false)
         }
 
         if (restored) {
@@ -292,7 +301,9 @@ export function useWorkspace() {
               const response = await loadWorkspaceApi(restored.path)
               if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
               if (response.response === 'success') {
-                const resolvedPath = normalizePath(response.data.directory || restored.path)
+                const resolvedPath = normalizePath(
+                  response.data.directory || restored.path,
+                )
                 const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
                 if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
                 if (!canonicalProjectRoot) {
@@ -301,7 +312,7 @@ export function useWorkspace() {
                 }
                 currentProject.value = {
                   ...restored,
-                  path: canonicalProjectRoot
+                  path: canonicalProjectRoot,
                 }
                 messageStore.clearMessages()
                 await updateWindowTitle(restored.name)
@@ -330,7 +341,7 @@ export function useWorkspace() {
    * 从最近项目列表中移除指定项目（用户主动操作）
    */
   const removeRecentProject = async (projectId: string) => {
-    recentProjects.value = recentProjects.value.filter(p => p.id !== projectId)
+    recentProjects.value = recentProjects.value.filter((p) => p.id !== projectId)
     const serialized = recentProjects.value.map(serializeProject)
     await setSetting('recent_projects', serialized)
   }
@@ -343,12 +354,12 @@ export function useWorkspace() {
       // 标准化路径
       const normalizedProject = {
         ...project,
-        path: normalizePath(project.path)
+        path: normalizePath(project.path),
       }
 
       // 去重：如果路径已存在，先删掉旧的
       const filtered = recentProjects.value.filter(
-        p => normalizePath(p.path) !== normalizedProject.path
+        (p) => normalizePath(p.path) !== normalizedProject.path,
       )
 
       // 置顶：把最新的放到第一位
@@ -366,7 +377,8 @@ export function useWorkspace() {
   }
   const openProject = async (project?: Project) => {
     const openProjectRequestId = ++openProjectRequestSequence
-    const isLatestOpenProjectRequest = () => openProjectRequestId === openProjectRequestSequence
+    const isLatestOpenProjectRequest = () =>
+      openProjectRequestId === openProjectRequestSequence
     let sessionId: string | null = null
     try {
       let selectedPath: string | null = null
@@ -385,7 +397,7 @@ export function useWorkspace() {
         showToast({
           severity: 'error',
           summary: 'Not an ECOS Workspace',
-          detail: 'Please select a directory created by ECOS Studio.'
+          detail: 'Please select a directory created by ECOS Studio.',
         })
         return false
       }
@@ -393,9 +405,9 @@ export function useWorkspace() {
 
       const normalizedSelectedPath = normalizePath(selectedPath)
       if (
-        project
-        && currentProject.value
-        && normalizePath(currentProject.value.path) === normalizedSelectedPath
+        project &&
+        currentProject.value &&
+        normalizePath(currentProject.value.path) === normalizedSelectedPath
       ) {
         return true
       }
@@ -417,7 +429,8 @@ export function useWorkspace() {
       }
 
       runtimeBackendTitle.value = 'Loading your workspace'
-      runtimeBackendSubtitle.value = 'Opening project data and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Opening project data and preparing the workspace view'
       runtimeBackendConnecting.value = true
 
       if (!(await ensureApiReady({ keepLoading: true }))) {
@@ -428,7 +441,8 @@ export function useWorkspace() {
       if (!isLatestOpenProjectRequest()) return false
 
       runtimeBackendTitle.value = 'Loading your workspace'
-      runtimeBackendSubtitle.value = 'Opening project data and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Opening project data and preparing the workspace view'
       if (session) workspaceLifecycle.setSessionLoading(session.sessionId)
 
       if (currentProject.value) {
@@ -453,19 +467,21 @@ export function useWorkspace() {
         const resolvedPath = normalizePath(response.data.directory || selectedPath)
         const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
         if (!isLatestOpenProjectRequest()) return false
-        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
         if (!canonicalProjectRoot) {
           if (session) workspaceLifecycle.failSession(session.sessionId)
           showToast({
             severity: 'error',
             summary: 'Permission Setup Failed',
-            detail: 'The project directory could not be registered for local file access.'
+            detail:
+              'The project directory could not be registered for local file access.',
           })
           return false
         }
 
         const existingProject = recentProjects.value.find(
-          p => normalizePath(p.path) === resolvedPath
+          (p) => normalizePath(p.path) === resolvedPath,
         )
         const fallbackName = resolvedPath.split('/').filter(Boolean).pop() || resolvedPath
         const resolvedName = project?.name || existingProject?.name || fallbackName
@@ -474,7 +490,7 @@ export function useWorkspace() {
           id: canonicalProjectRoot,
           name: resolvedName,
           path: canonicalProjectRoot,
-          lastOpened: new Date()
+          lastOpened: new Date(),
         }
 
         const activeSession = ensureOpenSession(canonicalProjectRoot)
@@ -504,13 +520,21 @@ export function useWorkspace() {
       } else {
         if (session) workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to load project:', response.message)
-        showToast({ severity: 'error', summary: 'Failed to Open Project', detail: response.message?.join('; ') || 'Unknown error' })
+        showToast({
+          severity: 'error',
+          summary: 'Failed to Open Project',
+          detail: response.message?.join('; ') || 'Unknown error',
+        })
         return false
       }
     } catch (error) {
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('Open project error:', error)
-      showToast({ severity: 'error', summary: 'Failed to Open Project', detail: String(error) })
+      showToast({
+        severity: 'error',
+        summary: 'Failed to Open Project',
+        detail: String(error),
+      })
       return false
     } finally {
       if (isLatestOpenProjectRequest()) {
@@ -527,7 +551,8 @@ export function useWorkspace() {
     let sessionId: string | null = null
     try {
       runtimeBackendTitle.value = 'Creating your workspace'
-      runtimeBackendSubtitle.value = 'Writing project files and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Writing project files and preparing the workspace view'
       runtimeBackendConnecting.value = true
 
       if (currentProject.value) {
@@ -558,7 +583,8 @@ export function useWorkspace() {
       }
 
       runtimeBackendTitle.value = 'Creating your workspace'
-      runtimeBackendSubtitle.value = 'Writing project files and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
       // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
@@ -567,19 +593,20 @@ export function useWorkspace() {
       const pdkName = config?.pdk || 'ics55'
       const backendParameters = {
         // 基本设计信息 (必需)
-        'Design': frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+        Design:
+          frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
         'Top module': frontendParams.top_module || 'top',
-        'Clock': frontendParams.clock || 'clk',
+        Clock: frontendParams.clock || 'clk',
         'Frequency max [MHz]': frontendParams.frequency_max || 100,
         // PDK 信息
-        'PDK': pdkName,
+        PDK: pdkName,
         // 核心配置
-        'Core': {
-          'Utilitization': frontendParams.core_utilization || 0.5
+        Core: {
+          Utilitization: frontendParams.core_utilization || 0.5,
         },
         // 布局参数
         'Target density': frontendParams.target_density || 0.6,
-        'Max fanout': frontendParams.max_fanout || 20
+        'Max fanout': frontendParams.max_fanout || 20,
       }
 
       const resolvedPdkRoot = config?.pdk_root || ''
@@ -591,7 +618,7 @@ export function useWorkspace() {
         parameters: backendParameters,
         origin_def: config?.origin_def,
         origin_verilog: config?.origin_verilog,
-        rtl_list: config?.rtl_list || []
+        rtl_list: config?.rtl_list || [],
       })
       console.log(response)
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
@@ -604,7 +631,8 @@ export function useWorkspace() {
           showToast({
             severity: 'error',
             summary: 'Permission Setup Failed',
-            detail: 'The project directory could not be registered for local file access.'
+            detail:
+              'The project directory could not be registered for local file access.',
           })
           return false
         }
@@ -612,7 +640,7 @@ export function useWorkspace() {
           id: canonicalProjectRoot,
           name: backendParameters['Design'] as string,
           path: canonicalProjectRoot,
-          lastOpened: new Date()
+          lastOpened: new Date(),
         }
 
         currentProject.value = createdProject
@@ -639,13 +667,21 @@ export function useWorkspace() {
       } else {
         workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to create project:', response.message)
-        showToast({ severity: 'error', summary: 'Failed to Create Project', detail: response.message?.join('; ') || 'Unknown error' })
+        showToast({
+          severity: 'error',
+          summary: 'Failed to Create Project',
+          detail: response.message?.join('; ') || 'Unknown error',
+        })
         return false
       }
     } catch (error) {
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('New project error:', error)
-      showToast({ severity: 'error', summary: 'Failed to Create Project', detail: String(error) })
+      showToast({
+        severity: 'error',
+        summary: 'Failed to Create Project',
+        detail: String(error),
+      })
       return false
     } finally {
       runtimeBackendConnecting.value = false
@@ -660,12 +696,14 @@ export function useWorkspace() {
   /**
    * 从磁盘读取 workspace 数据，生成项目摘要快照
    */
-  async function snapshotCurrentProject(isCurrent: () => boolean = () => true): Promise<void> {
+  async function snapshotCurrentProject(
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> {
     const project = currentProject.value
     if (!project) return
 
     const projectPath = normalizePath(project.path)
-    if (!recentProjects.value.some(p => normalizePath(p.path) === projectPath)) return
+    if (!recentProjects.value.some((p) => normalizePath(p.path) === projectPath)) return
 
     const snapshot: Partial<Project> = {}
 
@@ -675,17 +713,24 @@ export function useWorkspace() {
       if (isRecord(flowData) && Array.isArray(flowData.steps)) {
         const steps = flowData.steps
         const hasMalformedStep = steps.some(
-          step => !isRecord(step) || asString(step.name) === undefined || asString(step.state) === undefined
+          (step) =>
+            !isRecord(step) ||
+            asString(step.name) === undefined ||
+            asString(step.state) === undefined,
         )
         if (hasMalformedStep) {
           throw new Error('Malformed flow steps in snapshot payload')
         }
 
-        const completedSteps = steps.filter(s => asString(s.state) === 'Success').length
+        const completedSteps = steps.filter((s) => asString(s.state) === 'Success').length
         const totalSteps = steps.length
-        const failedStep = steps.find(s => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid')
-        const ongoingStep = steps.find(s => asString(s.state) === 'Ongoing')
-        const firstPending = steps.find(s => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending')
+        const failedStep = steps.find(
+          (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
+        )
+        const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
+        const firstPending = steps.find(
+          (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
+        )
 
         let status: ProjectStatus = 'not_started'
         if (ongoingStep) status = 'running'
@@ -699,9 +744,12 @@ export function useWorkspace() {
           const runtime = asString(step.runtime)
           if (runtime) {
             const parts = runtime.split(':')
-            const numericParts = parts.map(part => part.trim() === '' ? Number.NaN : Number(part))
+            const numericParts = parts.map((part) =>
+              part.trim() === '' ? Number.NaN : Number(part),
+            )
             if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
-              totalSeconds += numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
+              totalSeconds +=
+                numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
               hasValidRuntime = true
             }
           }
@@ -710,9 +758,10 @@ export function useWorkspace() {
         const m = Math.floor((totalSeconds % 3600) / 60)
         const s = totalSeconds % 60
         const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
-        const currentStep = asString(ongoingStep?.name)
-          || asString(failedStep?.name)
-          || asString(firstPending?.name)
+        const currentStep =
+          asString(ongoingStep?.name) ||
+          asString(failedStep?.name) ||
+          asString(firstPending?.name)
 
         snapshot.status = status
         snapshot.totalSteps = totalSteps
@@ -763,15 +812,23 @@ export function useWorkspace() {
       console.warn('Failed to read home.json for snapshot')
     }
 
-    const currentIdx = recentProjects.value.findIndex(p => normalizePath(p.path) === projectPath)
+    const currentIdx = recentProjects.value.findIndex(
+      (p) => normalizePath(p.path) === projectPath,
+    )
     if (currentIdx === -1) return
     if (!isCurrent()) return
 
     Object.assign(recentProjects.value[currentIdx], snapshot)
-    if (Object.prototype.hasOwnProperty.call(snapshot, 'currentStep') && snapshot.currentStep === undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(snapshot, 'currentStep') &&
+      snapshot.currentStep === undefined
+    ) {
       delete recentProjects.value[currentIdx].currentStep
     }
-    if (Object.prototype.hasOwnProperty.call(snapshot, 'totalRuntime') && snapshot.totalRuntime === undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(snapshot, 'totalRuntime') &&
+      snapshot.totalRuntime === undefined
+    ) {
       delete recentProjects.value[currentIdx].totalRuntime
     }
     if (!isCurrent()) return
@@ -805,7 +862,10 @@ export function useWorkspace() {
   /**
    * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
-  function connectRuntimeEvents(workspaceId: string, sessionId = workspaceLifecycle.session.value.sessionId) {
+  function connectRuntimeEvents(
+    workspaceId: string,
+    sessionId = workspaceLifecycle.session.value.sessionId,
+  ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
 
@@ -818,9 +878,10 @@ export function useWorkspace() {
       if (response.data?.type !== 'heartbeat') {
         runtimeEvents.value.push(response)
         if (isRtl2gdsRerunStartEvent(response)) {
-          const resetProjectPath = asString(response.data.workspaceId)
-            ?? asString(response.data.directory)
-            ?? currentProject.value?.path
+          const resetProjectPath =
+            asString(response.data.workspaceId) ??
+            asString(response.data.directory) ??
+            currentProject.value?.path
           if (resetProjectPath) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
@@ -832,15 +893,18 @@ export function useWorkspace() {
 
     client.connect()
     runtimeEventClient.value = client
-    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(() => {
-      if (runtimeEventClient.value === client) {
-        runtimeEventClient.value = null
-      }
-      client.close()
-    }, {
-      sessionId,
-      label: 'runtime event client',
-    })
+    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(
+      () => {
+        if (runtimeEventClient.value === client) {
+          runtimeEventClient.value = null
+        }
+        client.close()
+      },
+      {
+        sessionId,
+        label: 'runtime event client',
+      },
+    )
     console.log(`Runtime events connected for workspace: ${workspaceId}`)
   }
 
@@ -858,10 +922,15 @@ export function useWorkspace() {
     handledRefreshRuntimeEvents.clear()
   }
 
-  function runtimeEventInvalidationScopes(response: RuntimeEventResponse): WorkspaceInvalidationScope[] | null {
+  function runtimeEventInvalidationScopes(
+    response: RuntimeEventResponse,
+  ): WorkspaceInvalidationScope[] | null {
     const event = response.data
     const eventType = event?.type as string | undefined
-    if (!eventType || !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)) {
+    if (
+      !eventType ||
+      !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)
+    ) {
       return null
     }
 
@@ -870,12 +939,7 @@ export function useWorkspace() {
       return null
     }
 
-    const refreshKey = [
-      event.jobId,
-      eventType,
-      event.step,
-      cmd,
-    ]
+    const refreshKey = [event.jobId, eventType, event.step, cmd]
       .filter((part): part is string => typeof part === 'string' && part.length > 0)
       .join('|')
 
@@ -884,9 +948,7 @@ export function useWorkspace() {
     }
 
     const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds'
-        ? ['all']
-        : ['flow', 'step', 'maps', 'logs'],
+      cmd === 'rtl2gds' ? ['all'] : ['flow', 'step', 'maps', 'logs'],
     )
 
     const info = event.info
@@ -897,7 +959,10 @@ export function useWorkspace() {
         scopes.add('parameters')
       }
       if (typeof payload.log_file === 'string') scopes.add('logs')
-      if (typeof payload.subflow_path === 'string' || typeof payload.step_path === 'string') {
+      if (
+        typeof payload.subflow_path === 'string' ||
+        typeof payload.step_path === 'string'
+      ) {
         scopes.add('step')
         scopes.add('maps')
       }
@@ -922,12 +987,13 @@ export function useWorkspace() {
 
   function isRtl2gdsRerunStartEvent(response: RuntimeEventResponse): boolean {
     const event = response.data
-    return event?.cmd === 'rtl2gds'
-      && event.type === 'message'
-      && event.rerun === true
+    return event?.cmd === 'rtl2gds' && event.type === 'message' && event.rerun === true
   }
 
-  function invalidateResourcesForRuntimeEvent(response: RuntimeEventResponse, sessionId: string): void {
+  function invalidateResourcesForRuntimeEvent(
+    response: RuntimeEventResponse,
+    sessionId: string,
+  ): void {
     const scopes = runtimeEventInvalidationScopes(response)
     if (!scopes) return
     workspaceLifecycle.invalidate(scopes, {

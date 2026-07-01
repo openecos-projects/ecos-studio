@@ -20,7 +20,12 @@
     <div class="manager-scrim" aria-hidden="true"></div>
 
     <section class="manager-dialog" aria-labelledby="resource-manager-title">
-      <button type="button" class="manager-close" aria-label="Close resource manager" @click="goHome">
+      <button
+        type="button"
+        class="manager-close"
+        aria-label="Close resource manager"
+        @click="goHome"
+      >
         <i class="ri-close-line" aria-hidden="true"></i>
       </button>
 
@@ -74,7 +79,11 @@
               />
             </label>
 
-            <div class="resource-tabs" role="tablist" aria-label="Resource status filters">
+            <div
+              class="resource-tabs"
+              role="tablist"
+              aria-label="Resource status filters"
+            >
               <button
                 v-for="tab in tabItems"
                 :key="tab.id"
@@ -98,7 +107,9 @@
                 @click="pluginStore.refresh()"
               >
                 <i
-                  :class="pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
+                  :class="
+                    pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'
+                  "
                   aria-hidden="true"
                 ></i>
                 Refresh
@@ -147,21 +158,31 @@
                     :class="{ checked: isSelected(row.id) }"
                     @click.stop="toggleResource(row.id)"
                   >
-                    <i v-if="isSelected(row.id)" class="ri-check-line" aria-hidden="true"></i>
+                    <i
+                      v-if="isSelected(row.id)"
+                      class="ri-check-line"
+                      aria-hidden="true"
+                    ></i>
                   </span>
 
                   <span class="resource-name-cell">
                     <span class="resource-avatar">{{ row.icon }}</span>
                     <span class="resource-copy">
                       <strong>{{ row.name }}</strong>
-                      <small :title="row.descriptionTitle || undefined">{{ row.description }}</small>
+                      <small :title="row.descriptionTitle || undefined">{{
+                        row.description
+                      }}</small>
                     </span>
                   </span>
 
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span class="resource-status-cell">
-                    <b class="status-pill" :class="row.statusKind" :title="row.statusTitle || undefined">
+                    <b
+                      class="status-pill"
+                      :class="row.statusKind"
+                      :title="row.statusTitle || undefined"
+                    >
                       <span>{{ row.statusText }}</span>
                     </b>
                     <span
@@ -184,10 +205,9 @@
                         rowActionForStatus(row.resource) !== 'none' ||
                         removalActionForRow(row) !== null ||
                         canImportLocalResource(row) ||
-                        (
-                          row.statusKind !== 'installing' &&
-                          (row.actions.includes('activate') || row.actions.includes('validate'))
-                        )
+                        (row.statusKind !== 'installing' &&
+                          (row.actions.includes('activate') ||
+                            row.actions.includes('validate')))
                       "
                     >
                       <button
@@ -199,12 +219,19 @@
                         @click.stop="handleLocalImport(row)"
                       >
                         <i
-                          :class="importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
+                          :class="
+                            importingResourceIds.has(row.id)
+                              ? 'ri-loader-4-line spin'
+                              : 'ri-folder-add-line'
+                          "
                           aria-hidden="true"
                         ></i>
                       </button>
                       <button
-                        v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
+                        v-if="
+                          rowActionForStatus(row.resource) === 'install' &&
+                          row.statusKind !== 'error'
+                        "
                         type="button"
                         class="row-action-btn icon-only primary"
                         data-title="Install"
@@ -213,7 +240,10 @@
                         <i class="ri-download-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="rowActionForStatus(row.resource) === 'update' && row.statusKind !== 'error'"
+                        v-else-if="
+                          rowActionForStatus(row.resource) === 'update' &&
+                          row.statusKind !== 'error'
+                        "
                         type="button"
                         class="row-action-btn icon-only info"
                         data-title="Update"
@@ -249,7 +279,10 @@
                         <i class="ri-restart-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('activate')"
+                        v-else-if="
+                          row.statusKind !== 'installing' &&
+                          row.actions.includes('activate')
+                        "
                         type="button"
                         class="row-action-btn icon-only primary"
                         data-title="Activate"
@@ -258,7 +291,10 @@
                         <i class="ri-check-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('validate')"
+                        v-else-if="
+                          row.statusKind !== 'installing' &&
+                          row.actions.includes('validate')
+                        "
                         type="button"
                         class="row-action-btn icon-only info"
                         data-title="Validate"
@@ -270,11 +306,19 @@
                         v-if="removalActionForRow(row) !== null"
                         type="button"
                         class="row-action-btn icon-only danger-outlined"
-                        :data-title="removalActionForRow(row) === 'remove_reference' ? 'Remove' : 'Uninstall'"
+                        :data-title="
+                          removalActionForRow(row) === 'remove_reference'
+                            ? 'Remove'
+                            : 'Uninstall'
+                        "
                         @click.stop="handleRowRemove(row)"
                       >
                         <i
-                          :class="removalActionForRow(row) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
+                          :class="
+                            removalActionForRow(row) === 'remove_reference'
+                              ? 'ri-link-unlink'
+                              : 'ri-delete-bin-line'
+                          "
                           aria-hidden="true"
                         ></i>
                       </button>
@@ -283,7 +327,10 @@
                 </div>
               </template>
 
-              <div v-if="!pluginStore.loading && filteredRows.length === 0" class="resource-empty">
+              <div
+                v-if="!pluginStore.loading && filteredRows.length === 0"
+                class="resource-empty"
+              >
                 <i class="ri-search-2-line" aria-hidden="true"></i>
                 <strong>No resources found</strong>
                 <p>Try adjusting your search or filters.</p>
@@ -297,13 +344,17 @@
         </main>
 
         <aside class="selected-panel" aria-label="Selected resources">
-          <h2>Selected Resources <span>({{ selectedResources.length }})</span></h2>
+          <h2>
+            Selected Resources <span>({{ selectedResources.length }})</span>
+          </h2>
 
           <div class="selected-list">
             <div v-if="selectedResources.length === 0" class="selected-empty">
               <i class="ri-checkbox-multiple-line" aria-hidden="true"></i>
               <span>No resources selected</span>
-              <small>Click rows in the table to select resources for batch operations.</small>
+              <small
+                >Click rows in the table to select resources for batch operations.</small
+              >
             </div>
 
             <div
@@ -320,7 +371,11 @@
                 </small>
               </span>
               <em>{{ row.sizeLabel }}</em>
-              <button type="button" aria-label="Remove selected resource" @click.stop="removeSelected(row.id)">
+              <button
+                type="button"
+                aria-label="Remove selected resource"
+                @click.stop="removeSelected(row.id)"
+              >
                 <i class="ri-close-line" aria-hidden="true"></i>
               </button>
             </div>
@@ -333,7 +388,8 @@
 
           <p class="manager-note">
             <i class="ri-information-line" aria-hidden="true"></i>
-            Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.
+            Updates apply to managed installs. Replace switches a local tool to the
+            registry-managed version without deleting the original local directory.
           </p>
 
           <div class="selected-actions">
@@ -362,7 +418,11 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import {
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from '@/platform/desktop'
 import {
   canImportLocalResource,
   compactResourceMessage,
@@ -407,7 +467,9 @@ const resourceRows = computed<ResourceRow[]>(() => {
 })
 
 const managerErrorText = computed(() => {
-  return pluginStore.error ? compactResourceMessage(pluginStore.error, 'Resource manager error') : null
+  return pluginStore.error
+    ? compactResourceMessage(pluginStore.error, 'Resource manager error')
+    : null
 })
 
 const filteredRows = computed(() => {
@@ -442,7 +504,9 @@ const totalSizeMb = computed(() => {
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
 
-const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
+const updatesCount = computed(
+  () => resourceRows.value.filter((row) => row.statusKind === 'update').length,
+)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
 
 const sidebarItems = computed(() => [
@@ -480,15 +544,27 @@ const tabItems = computed(() => [
     icon: 'ri-download-line',
     badge: resourceRows.value.filter((row) => row.statusKind === 'available').length,
   },
-  { id: 'installed' as const, label: 'Installed', icon: 'ri-check-line', badge: installedCount.value },
-  { id: 'updates' as const, label: 'Updates', icon: 'ri-arrow-up-circle-line', badge: updatesCount.value },
+  {
+    id: 'installed' as const,
+    label: 'Installed',
+    icon: 'ri-check-line',
+    badge: installedCount.value,
+  },
+  {
+    id: 'updates' as const,
+    label: 'Updates',
+    icon: 'ri-arrow-up-circle-line',
+    badge: updatesCount.value,
+  },
 ])
 
 watch(
   resourceRows,
   (rows) => {
     const rowIds = new Set(rows.map((row) => row.id))
-    const nextSelected = new Set([...selectedResourceIds.value].filter((id) => rowIds.has(id)))
+    const nextSelected = new Set(
+      [...selectedResourceIds.value].filter((id) => rowIds.has(id)),
+    )
 
     if (nextSelected.size === 0) {
       const defaults = rows
@@ -625,10 +701,11 @@ function goHome(): void {
 }
 
 async function openDocs(): Promise<void> {
-  const docsUrl = 'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
+  const docsUrl =
+    'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
   try {
     if (hasDesktopApi()) {
-      const desktopApi = getOptionalDesktopApi() ?? await waitForDesktopApi()
+      const desktopApi = getOptionalDesktopApi() ?? (await waitForDesktopApi())
       await desktopApi.system.openExternal(docsUrl)
       return
     }
@@ -672,11 +749,26 @@ async function openDocs(): Promise<void> {
   transform: translateZ(0) scale(1.006);
   transform-origin: center;
   background:
-    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%),
-    linear-gradient(color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent-color) 12%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
     var(--bg-secondary);
-  background-size: auto, 52px 52px, 52px 52px, auto;
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
 }
 
 .blurred-brand {
@@ -779,7 +871,9 @@ async function openDocs(): Promise<void> {
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .manager-close:hover {
@@ -855,7 +949,9 @@ async function openDocs(): Promise<void> {
   cursor: pointer;
   font-size: 13px;
   text-align: left;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .resource-nav-item i {
@@ -1015,7 +1111,7 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-tabs button + button::before {
-  content: "";
+  content: '';
   position: absolute;
   left: -1px;
   width: 1px;
@@ -1099,7 +1195,8 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-table {
-  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr) minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
+  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr)
+    minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
   width: 100%;
 }
 
@@ -1187,9 +1284,14 @@ async function openDocs(): Promise<void> {
   place-items: center;
   border-radius: 8px;
   color: #fff;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--row-accent) 92%, white), color-mix(in srgb, var(--row-accent) 76%, black));
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 6px 14px rgba(15, 23, 42, 0.12);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--row-accent) 92%, white),
+    color-mix(in srgb, var(--row-accent) 76%, black)
+  );
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.35),
+    0 6px 14px rgba(15, 23, 42, 0.12);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
@@ -1340,7 +1442,9 @@ async function openDocs(): Promise<void> {
   font-weight: 650;
   cursor: pointer;
   white-space: nowrap;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
 
 .row-action-btn.icon-only {
@@ -1370,7 +1474,9 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   z-index: 10;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -1388,7 +1494,9 @@ async function openDocs(): Promise<void> {
   border-top: 4px solid var(--border-color);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   z-index: 10;
 }
 
@@ -1706,7 +1814,11 @@ async function openDocs(): Promise<void> {
   justify-content: center;
   border: 0;
   color: var(--accent-text);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 85%, white), var(--accent-color));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-color) 85%, white),
+    var(--accent-color)
+  );
 }
 
 .download-button:disabled {
@@ -1776,11 +1888,26 @@ async function openDocs(): Promise<void> {
 
 :global(.dark) .blurred-home {
   background:
-    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 28%),
-    linear-gradient(color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent-color) 14%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 40%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 40%, transparent) 1px,
+      transparent 1px
+    ),
     var(--bg-primary);
-  background-size: auto, 52px 52px, 52px 52px, auto;
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
 }
 
 :global(.dark) .blurred-brand {

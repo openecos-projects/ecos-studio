@@ -62,16 +62,15 @@ function createService(options: {
   resourcesPath?: string
 }) {
   const files = new Map(Object.entries(options.files ?? {}))
-  const execFile = options.execFile ?? vi.fn(async () => ({
-    stderr: '',
-    stdout: '',
-  }))
+  const execFile =
+    options.execFile ??
+    vi.fn(async () => ({
+      stderr: '',
+      stdout: '',
+    }))
   const unref = vi.fn()
   const spawnProcess = vi.fn(() => ({ unref }))
-  const existingPaths = new Set([
-    ...(options.existingPaths ?? []),
-    ...files.keys(),
-  ])
+  const existingPaths = new Set([...(options.existingPaths ?? []), ...files.keys()])
   const service = new LayoutViewerService({
     appPath: options.appPath ?? '/repo/ecos/gui/apps/desktop-electron',
     cwd: options.cwd ?? '/repo/ecos/gui/apps/desktop-electron',
@@ -105,11 +104,7 @@ describe('LayoutViewerService', () => {
     const devBinaries = devLayoutViewerPaths()
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
     const { execFile, service, spawnProcess, unref } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.packer,
-        devBinaries.viewer,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.packer, devBinaries.viewer],
     })
 
     const result = await service.open({
@@ -117,7 +112,10 @@ describe('LayoutViewerService', () => {
       viewJsonPackageRoot: 'output/gcd_route_view',
     })
 
-    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [packageRoot, layoutPackagePath])
+    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [
+      packageRoot,
+      layoutPackagePath,
+    ])
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       [layoutPackagePath],
@@ -159,11 +157,7 @@ describe('LayoutViewerService', () => {
       files: {
         [manifestPath]: layoutPackageManifest(),
       },
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.packer,
-        devBinaries.viewer,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.packer, devBinaries.viewer],
     })
 
     await service.open({
@@ -171,11 +165,15 @@ describe('LayoutViewerService', () => {
       viewJsonPackageRoot: packageRoot,
     })
 
-    expect(execFile).toHaveBeenCalledWith(
-      devBinaries.packer,
-      ['--fingerprint', '--json', packageRoot],
-    )
-    expect(execFile).not.toHaveBeenCalledWith(devBinaries.packer, [packageRoot, layoutPackagePath])
+    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [
+      '--fingerprint',
+      '--json',
+      packageRoot,
+    ])
+    expect(execFile).not.toHaveBeenCalledWith(devBinaries.packer, [
+      packageRoot,
+      layoutPackagePath,
+    ])
     expect(spawnProcess).toHaveBeenCalledWith(
       devBinaries.viewer,
       [layoutPackagePath],
@@ -208,11 +206,7 @@ describe('LayoutViewerService', () => {
       files: {
         [manifestPath]: layoutPackageManifest('stale-source-fingerprint'),
       },
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.packer,
-        devBinaries.viewer,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.packer, devBinaries.viewer],
     })
 
     await service.open({
@@ -220,11 +214,15 @@ describe('LayoutViewerService', () => {
       viewJsonPackageRoot: packageRoot,
     })
 
-    expect(execFile).toHaveBeenCalledWith(
-      devBinaries.packer,
-      ['--fingerprint', '--json', packageRoot],
-    )
-    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [packageRoot, layoutPackagePath])
+    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [
+      '--fingerprint',
+      '--json',
+      packageRoot,
+    ])
+    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [
+      packageRoot,
+      layoutPackagePath,
+    ])
   })
 
   it('rebuilds an existing .layoutpkg when the packer build id changes', async () => {
@@ -252,11 +250,7 @@ describe('LayoutViewerService', () => {
       files: {
         [manifestPath]: layoutPackageManifest(undefined, 'stale-packer-build-id'),
       },
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.packer,
-        devBinaries.viewer,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.packer, devBinaries.viewer],
     })
 
     await service.open({
@@ -264,10 +258,10 @@ describe('LayoutViewerService', () => {
       viewJsonPackageRoot: packageRoot,
     })
 
-    expect(execFile).toHaveBeenCalledWith(
-      devBinaries.packer,
-      [packageRoot, layoutPackagePath],
-    )
+    expect(execFile).toHaveBeenCalledWith(devBinaries.packer, [
+      packageRoot,
+      layoutPackagePath,
+    ])
   })
 
   it('throws a build hint when the dev wrappers are missing', async () => {
@@ -280,9 +274,7 @@ describe('LayoutViewerService', () => {
         projectPath: '/project',
         viewJsonPackageRoot: '/project/output/gcd_route_view',
       }),
-    ).rejects.toThrow(
-      'Layout viewer wrappers were not found',
-    )
+    ).rejects.toThrow('Layout viewer wrappers were not found')
   })
 
   it('launches packaged binaries from electron resources', async () => {
@@ -293,10 +285,7 @@ describe('LayoutViewerService', () => {
     const viewer = join(binaryDir, 'layout-viewer-native')
     const layoutPackagePath = join(packageRoot, '.layoutpkg')
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        packer,
-        viewer,
-      ],
+      existingPaths: [packer, viewer],
       isPackaged: true,
       resourcesPath,
     })
@@ -328,10 +317,7 @@ describe('LayoutViewerService', () => {
       env: {
         PATH: `${nixBin}:/usr/bin`,
       },
-      existingPaths: [
-        packer,
-        viewer,
-      ],
+      existingPaths: [packer, viewer],
       isPackaged: true,
       resourcesPath: '/nix/store/ecos-studio/share/ecos-studio/resources',
     })

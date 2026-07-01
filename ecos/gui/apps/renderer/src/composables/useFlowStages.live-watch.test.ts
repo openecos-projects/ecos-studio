@@ -20,11 +20,7 @@ const testState = vi.hoisted(() => ({
   }> | null,
   watchProjectFile: vi.fn(),
   projectFileWatchers: [] as Array<{
-    listener: (event: {
-      subscriptionId: string
-      path: string
-      eventType: string
-    }) => void
+    listener: (event: { subscriptionId: string; path: string; eventType: string }) => void
     path: string
     unwatch: ReturnType<typeof vi.fn>
   }>,
@@ -121,14 +117,20 @@ describe('useFlowStages live project file watchers', () => {
     testState.readWorkspaceFlowResourceApi.mockImplementation(async () =>
       JSON.parse(await testState.readProjectTextFile('/workspace/a/home/flow.json')),
     )
-    testState.watchProjectFile.mockImplementation(async (
-      path: string,
-      listener: (event: { subscriptionId: string; path: string; eventType: string }) => void,
-    ) => {
-      const unwatch = vi.fn()
-      testState.projectFileWatchers.push({ path, listener, unwatch })
-      return unwatch
-    })
+    testState.watchProjectFile.mockImplementation(
+      async (
+        path: string,
+        listener: (event: {
+          subscriptionId: string
+          path: string
+          eventType: string
+        }) => void,
+      ) => {
+        const unwatch = vi.fn()
+        testState.projectFileWatchers.push({ path, listener, unwatch })
+        return unwatch
+      },
+    )
   })
 
   it('refreshes flow stage states when home/flow.json changes', async () => {
@@ -145,14 +147,15 @@ describe('useFlowStages live project file watchers', () => {
 
     const flow = useFlowStages()
     const findStageState = (path: string) =>
-      flow.dynamicFlowStages.value.find((stage) => stage.path.toLowerCase() === path)?.state
+      flow.dynamicFlowStages.value.find((stage) => stage.path.toLowerCase() === path)
+        ?.state
 
     await vi.waitFor(() => {
       expect(findStageState('synthesis')).toBe('Ongoing')
     })
 
-    const flowWatch = testState.projectFileWatchers.find((entry) =>
-      entry.path === '/workspace/a/home/flow.json'
+    const flowWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/flow.json',
     )
     expect(flowWatch).toBeDefined()
 
@@ -176,10 +179,12 @@ describe('useFlowStages live project file watchers', () => {
   it('reports that a workspace flow is running when any run stage is ongoing', async () => {
     const { useFlowStages } = await importFreshFlowStagesModule()
     await startLifecycleSession('/workspace/a')
-    testState.readProjectTextFile.mockResolvedValue(flowJsonFor({
-      Synthesis: 'Success',
-      Floorplan: 'Ongoing',
-    }))
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        Synthesis: 'Success',
+        Floorplan: 'Ongoing',
+      }),
+    )
 
     const flow = useFlowStages()
 
@@ -193,12 +198,18 @@ describe('useFlowStages live project file watchers', () => {
     await startLifecycleSession('/workspace/a')
     let resolveFirstFlow: ((value: unknown) => void) | undefined
     testState.readWorkspaceFlowResourceApi
-      .mockReturnValueOnce(new Promise((resolve) => {
-        resolveFirstFlow = resolve
-      }))
-      .mockResolvedValueOnce(JSON.parse(flowJsonFor({
-        Floorplan: 'Ongoing',
-      })))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstFlow = resolve
+        }),
+      )
+      .mockResolvedValueOnce(
+        JSON.parse(
+          flowJsonFor({
+            Floorplan: 'Ongoing',
+          }),
+        ),
+      )
     testState.readProjectTextFile.mockResolvedValue('{}')
 
     const flow = useFlowStages()
@@ -211,24 +222,36 @@ describe('useFlowStages live project file watchers', () => {
     testState.currentProject!.value = { path: '/workspace/b' }
 
     await vi.waitFor(() => {
-      expect(flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase())).toContain('floorplan')
+      expect(
+        flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase()),
+      ).toContain('floorplan')
     })
 
-    resolveFirstFlow?.(JSON.parse(flowJsonFor({
-      Synthesis: 'Success',
-    })))
+    resolveFirstFlow?.(
+      JSON.parse(
+        flowJsonFor({
+          Synthesis: 'Success',
+        }),
+      ),
+    )
     await nextTick()
 
-    expect(flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase())).toContain('floorplan')
-    expect(flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase())).not.toContain('synthesis')
+    expect(
+      flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase()),
+    ).toContain('floorplan')
+    expect(
+      flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase()),
+    ).not.toContain('synthesis')
   })
 
   it('registers the flow.json watcher with the active lifecycle cleanup', async () => {
     const { useFlowStages } = await importFreshFlowStagesModule()
     const lifecycle = await startLifecycleSession('/workspace/a')
-    testState.readProjectTextFile.mockResolvedValue(flowJsonFor({
-      Synthesis: 'Ongoing',
-    }))
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        Synthesis: 'Ongoing',
+      }),
+    )
 
     useFlowStages()
 
@@ -245,10 +268,12 @@ describe('useFlowStages live project file watchers', () => {
   it('resets run stage states when a full-flow rerun reset is requested for the current workspace', async () => {
     const { useFlowStages } = await importFreshFlowStagesModule()
     await startLifecycleSession('/workspace/a')
-    testState.readProjectTextFile.mockResolvedValue(flowJsonFor({
-      Synthesis: 'Success',
-      Floorplan: 'Ongoing',
-    }))
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        Synthesis: 'Success',
+        Floorplan: 'Ongoing',
+      }),
+    )
 
     const flow = useFlowStages()
 
@@ -261,7 +286,9 @@ describe('useFlowStages live project file watchers', () => {
 
     ;(await import('./homeRunArtifacts')).requestHomeRunArtifactReset('/workspace/a')
     await nextTick()
-    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset('/workspace/a')
+    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset(
+      '/workspace/a',
+    )
 
     expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
       'Unstart',
@@ -292,7 +319,9 @@ describe('useFlowStages live project file watchers', () => {
 
     ;(await import('./homeRunArtifacts')).requestHomeRunArtifactReset('/workspace/a')
     await nextTick()
-    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset('/workspace/a')
+    ;(await import('./homeRunArtifacts')).consumePendingHomeRunArtifactReset(
+      '/workspace/a',
+    )
 
     expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
       'Unstart',
@@ -321,8 +350,8 @@ describe('useFlowStages live project file watchers', () => {
       Synthesis: 'Ongoing',
       Floorplan: 'Unstart',
     }
-    const flowWatch = testState.projectFileWatchers.find((entry) =>
-      entry.path === '/workspace/a/home/flow.json'
+    const flowWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/flow.json',
     )
     expect(flowWatch).toBeDefined()
     flowWatch!.listener({

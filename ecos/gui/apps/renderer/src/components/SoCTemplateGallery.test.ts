@@ -359,8 +359,13 @@ type ButtonQueryContainer = {
   querySelectorAll(selector: string): ArrayLike<FakeElement>
 }
 
-function findButton(container: ButtonQueryContainer, label: string): FakeElement | undefined {
-  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.trim().includes(label))
+function findButton(
+  container: ButtonQueryContainer,
+  label: string,
+): FakeElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) =>
+    button.textContent?.trim().includes(label),
+  )
 }
 
 describe('SoCTemplateGallery', () => {

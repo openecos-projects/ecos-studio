@@ -1,4 +1,9 @@
-export type DesktopAgentStatusState = 'stopped' | 'starting' | 'ready' | 'running' | 'error'
+export type DesktopAgentStatusState =
+  | 'stopped'
+  | 'starting'
+  | 'ready'
+  | 'running'
+  | 'error'
 
 export interface DesktopAgentProviderRequest {
   providerId?: string
@@ -66,12 +71,7 @@ export interface DesktopAgentResumeSessionResponse {
   sessionId: string
 }
 
-export type DesktopAgentEventType =
-  | 'status'
-  | 'session'
-  | 'message'
-  | 'tool'
-  | 'error'
+export type DesktopAgentEventType = 'status' | 'session' | 'message' | 'tool' | 'error'
 
 export interface DesktopAgentEvent {
   providerId?: string

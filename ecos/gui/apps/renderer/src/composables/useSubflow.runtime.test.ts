@@ -7,16 +7,18 @@ const testState = vi.hoisted(() => ({
     path: '/workspace/Floorplan',
   },
   runtimeEvents: null as import('vue').Ref<unknown[]> | null,
-  resourceVersions: null as import('vue').Ref<{
-    home: number
-    flow: number
-    parameters: number
-    step: number
-    'step-config': number
-    maps: number
-    logs: number
-    all: number
-  }> | null,
+  resourceVersions: null as
+    | import('vue').Ref<{
+        home: number
+        flow: number
+        parameters: number
+        step: number
+        'step-config': number
+        maps: number
+        logs: number
+        all: number
+      }>
+    | null,
 }))
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -95,18 +97,20 @@ describe('useSubflow runtime refresh', () => {
       id: 'subflow',
       step: 'Floorplan',
     })
-    testState.readProjectTextFile.mockResolvedValue(JSON.stringify({
-      path: '/workspace/demo/Floorplan/subflow.json',
-      steps: [
-        {
-          name: 'floorplan',
-          state: 'Success',
-          runtime: '1.0s',
-          'peak memory (mb)': 12,
-          info: {},
-        },
-      ],
-    }))
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        path: '/workspace/demo/Floorplan/subflow.json',
+        steps: [
+          {
+            name: 'floorplan',
+            state: 'Success',
+            runtime: '1.0s',
+            'peak memory (mb)': 12,
+            info: {},
+          },
+        ],
+      }),
+    )
   })
 
   it('reloads the current subflow when the workspace step resource version changes', async () => {
@@ -130,21 +134,25 @@ describe('useSubflow runtime refresh', () => {
   it('ignores a stale subflow read after the workspace session changes', async () => {
     let resolveFirstRead: ((content: string) => void) | undefined
     testState.readProjectTextFile
-      .mockReturnValueOnce(new Promise((resolve) => {
-        resolveFirstRead = resolve
-      }))
-      .mockResolvedValueOnce(JSON.stringify({
-        path: '/workspace/other/Floorplan/subflow.json',
-        steps: [
-          {
-            name: 'current-floorplan',
-            state: 'Success',
-            runtime: '1.0s',
-            'peak memory (mb)': 10,
-            info: {},
-          },
-        ],
-      }))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstRead = resolve
+        }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          path: '/workspace/other/Floorplan/subflow.json',
+          steps: [
+            {
+              name: 'current-floorplan',
+              state: 'Success',
+              runtime: '1.0s',
+              'peak memory (mb)': 10,
+              info: {},
+            },
+          ],
+        }),
+      )
 
     const subflow = useSubflow()
 
@@ -166,23 +174,29 @@ describe('useSubflow runtime refresh', () => {
     await nextTick()
 
     await vi.waitFor(() => {
-      expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual(['current-floorplan'])
+      expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual([
+        'current-floorplan',
+      ])
     })
 
-    resolveFirstRead?.(JSON.stringify({
-      path: '/workspace/demo/Floorplan/subflow.json',
-      steps: [
-        {
-          name: 'stale-floorplan',
-          state: 'Success',
-          runtime: '1.0s',
-          'peak memory (mb)': 10,
-          info: {},
-        },
-      ],
-    }))
+    resolveFirstRead?.(
+      JSON.stringify({
+        path: '/workspace/demo/Floorplan/subflow.json',
+        steps: [
+          {
+            name: 'stale-floorplan',
+            state: 'Success',
+            runtime: '1.0s',
+            'peak memory (mb)': 10,
+            info: {},
+          },
+        ],
+      }),
+    )
     await nextTick()
 
-    expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual(['current-floorplan'])
+    expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual([
+      'current-floorplan',
+    ])
   })
 })

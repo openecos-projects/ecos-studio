@@ -34,7 +34,9 @@ export async function discoverAgentProviderManifests(
     }
   }
 
-  return manifests.sort((first, second) => first.providerId.localeCompare(second.providerId))
+  return manifests.sort((first, second) =>
+    first.providerId.localeCompare(second.providerId),
+  )
 }
 
 async function manifestPathsForRoot(root: string): Promise<string[]> {
@@ -108,7 +110,7 @@ function validateAgentProviderManifest(
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readOptionalString(value: unknown): string | undefined {

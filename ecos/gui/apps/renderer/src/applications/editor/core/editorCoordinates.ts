@@ -16,11 +16,11 @@ export interface Vec2 {
 export function worldPointFromDisplay(
   displayX: number,
   displayY: number,
-  worldHeight: number
+  worldHeight: number,
 ): Vec2 {
   return {
     x: displayX,
-    y: worldHeight - displayY
+    y: worldHeight - displayY,
   }
 }
 
@@ -28,11 +28,11 @@ export function worldPointFromDisplay(
 export function displayPointFromWorld(
   worldX: number,
   worldY: number,
-  worldHeight: number
+  worldHeight: number,
 ): Vec2 {
   return {
     x: worldX,
-    y: worldHeight - worldY
+    y: worldHeight - worldY,
   }
 }
 
@@ -46,12 +46,12 @@ export function worldTopLeftFromDisplayBottomLeft(
   displayY: number,
   _contentWidth: number,
   contentHeight: number,
-  worldHeight: number
+  worldHeight: number,
 ): Vec2 {
   const bottomWorldY = worldHeight - displayY
   return {
     x: displayX,
-    y: bottomWorldY - contentHeight
+    y: bottomWorldY - contentHeight,
   }
 }
 

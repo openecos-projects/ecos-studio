@@ -1,4 +1,7 @@
-import { execFile as execFileCallback, spawn as spawnProcessCallback } from 'node:child_process'
+import {
+  execFile as execFileCallback,
+  spawn as spawnProcessCallback,
+} from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -105,7 +108,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isLayoutPackageSourceMetadata(value: unknown): value is LayoutPackageSourceMetadata {
+function isLayoutPackageSourceMetadata(
+  value: unknown,
+): value is LayoutPackageSourceMetadata {
   if (!isRecord(value) || !isRecord(value.generator) || !isRecord(value.source)) {
     return false
   }
@@ -119,7 +124,9 @@ function isLayoutPackageSourceMetadata(value: unknown): value is LayoutPackageSo
   )
 }
 
-function isLayoutPackageCacheManifest(value: unknown): value is LayoutPackageCacheManifest {
+function isLayoutPackageCacheManifest(
+  value: unknown,
+): value is LayoutPackageCacheManifest {
   if (!isRecord(value)) {
     return false
   }
@@ -239,16 +246,24 @@ export class LayoutViewerService {
     packerPath: string,
     packageRoot: string,
   ): Promise<LayoutPackageSourceMetadata> {
-    const result = await this.execFile(packerPath, ['--fingerprint', '--json', packageRoot])
+    const result = await this.execFile(packerPath, [
+      '--fingerprint',
+      '--json',
+      packageRoot,
+    ])
     let parsed: unknown
     try {
       parsed = JSON.parse(result.stdout)
     } catch {
-      throw new Error(`Failed to parse layout package fingerprint output from ${packerPath}.`)
+      throw new Error(
+        `Failed to parse layout package fingerprint output from ${packerPath}.`,
+      )
     }
 
     if (!isLayoutPackageSourceMetadata(parsed)) {
-      throw new Error(`Layout package fingerprint output from ${packerPath} is not supported.`)
+      throw new Error(
+        `Layout package fingerprint output from ${packerPath} is not supported.`,
+      )
     }
 
     return parsed
@@ -264,8 +279,14 @@ export class LayoutViewerService {
 
   private resolvePackagedBinaries(): LayoutViewerBinaries | null {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
-    const packerPath = join(binaryDir, executableName('ecos-layout-packer', this.platform))
-    const viewerPath = join(binaryDir, executableName('layout-viewer-native', this.platform))
+    const packerPath = join(
+      binaryDir,
+      executableName('ecos-layout-packer', this.platform),
+    )
+    const viewerPath = join(
+      binaryDir,
+      executableName('layout-viewer-native', this.platform),
+    )
 
     if (this.fileExists(packerPath) && this.fileExists(viewerPath)) {
       return { packerPath, viewerPath }
@@ -307,7 +328,10 @@ export class LayoutViewerService {
       return this.resolvePathBinaries()
     }
     const packerWrapperPath = join(repoRoot, 'ecos/scripts/ecos-layout-packer-wrapper.sh')
-    const viewerWrapperPath = join(repoRoot, 'ecos/scripts/layout-viewer-native-wrapper.sh')
+    const viewerWrapperPath = join(
+      repoRoot,
+      'ecos/scripts/layout-viewer-native-wrapper.sh',
+    )
 
     if (!this.fileExists(packerWrapperPath) || !this.fileExists(viewerWrapperPath)) {
       throw new Error(
@@ -330,6 +354,8 @@ export class LayoutViewerService {
       }
     }
 
-    throw new Error(`Unable to locate ecos/layout-viewer from ${this.appPath}. ${BUILD_HINT}`)
+    throw new Error(
+      `Unable to locate ecos/layout-viewer from ${this.appPath}. ${BUILD_HINT}`,
+    )
   }
 }

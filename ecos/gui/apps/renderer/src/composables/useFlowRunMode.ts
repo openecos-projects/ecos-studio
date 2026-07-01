@@ -19,7 +19,7 @@ export function useFlowRunMode(currentStage: Ref<string | undefined | null>) {
   const isFullFlowContext = computed(() => isHomeStage(currentStage.value))
 
   const activeRunMode = computed({
-    get: () => isFullFlowContext.value ? fullFlowRunMode.value : stepRunMode.value,
+    get: () => (isFullFlowContext.value ? fullFlowRunMode.value : stepRunMode.value),
     set: (mode: FlowRunModeKey) => {
       if (isFullFlowContext.value) {
         fullFlowRunMode.value = mode

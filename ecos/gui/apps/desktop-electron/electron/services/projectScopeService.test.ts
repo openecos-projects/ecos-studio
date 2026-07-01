@@ -15,9 +15,9 @@ async function createTempDir(prefix: string): Promise<string> {
 describe('ProjectScopeService', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -70,7 +70,9 @@ describe('ProjectScopeService', () => {
     await service.registerProjectRoot(root)
 
     await expect(
-      service.requestProjectPathAccess(join(root, 'Synthesis_yosys', 'log', 'Synthesis.log')),
+      service.requestProjectPathAccess(
+        join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'),
+      ),
     ).resolves.toBe(join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'))
   })
 

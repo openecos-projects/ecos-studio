@@ -62,7 +62,9 @@ export function useCurrentStage() {
   const isHome = computed(() => getWorkspaceStageFlags(currentStage.value).isHome)
 
   /** 是否在配置页 */
-  const isConfigure = computed(() => getWorkspaceStageFlags(currentStage.value).isConfigure)
+  const isConfigure = computed(
+    () => getWorkspaceStageFlags(currentStage.value).isConfigure,
+  )
 
   /** 是否在 Tech Library 页 */
   const isTech = computed(() => getWorkspaceStageFlags(currentStage.value).isTech)
@@ -99,6 +101,6 @@ export function useCurrentStage() {
 
     // 方法
     getStagePath,
-    isCurrentStage
+    isCurrentStage,
   }
 }

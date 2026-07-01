@@ -33,7 +33,9 @@ watch(
 )
 
 onMounted(() => {
-  containerRef.value?.addEventListener('contextmenu', preventContextMenu, { passive: false })
+  containerRef.value?.addEventListener('contextmenu', preventContextMenu, {
+    passive: false,
+  })
   initPreview()
 })
 

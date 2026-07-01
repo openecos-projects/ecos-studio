@@ -87,7 +87,7 @@ function escapeHtml(text: string): string {
 export function sanitizeClassList(value: string): string {
   return value
     .split(/\s+/)
-    .filter(token => /^[A-Za-z0-9:_-]+$/.test(token))
+    .filter((token) => /^[A-Za-z0-9:_-]+$/.test(token))
     .join(' ')
 }
 
@@ -178,11 +178,7 @@ function sanitizeAttribute(
   return [name, value]
 }
 
-function sanitizeNode(
-  node: Node,
-  doc: Document,
-  parent: Node,
-): void {
+function sanitizeNode(node: Node, doc: Document, parent: Node): void {
   if (node.nodeType === Node.TEXT_NODE) {
     parent.appendChild(doc.createTextNode(node.textContent ?? ''))
     return

@@ -15,12 +15,14 @@ watchEffect(() => {
   if (!isObj(draft.value.PDN)) draft.value.PDN = {}
   const fp = draft.value.Floorplan as Record<string, unknown>
   const ap = fp['Auto place pin']
-  if (!isObj(ap)) fp['Auto place pin'] = { layer: 'MET1', width: 0, height: 0, sides: [] as unknown[] }
+  if (!isObj(ap))
+    fp['Auto place pin'] = { layer: 'MET1', width: 0, height: 0, sides: [] as unknown[] }
   if (!Array.isArray(fp.Tracks)) fp.Tracks = []
   const pdn = draft.value.PDN as Record<string, unknown>
   if (!Array.isArray(pdn.IO)) pdn.IO = []
   if (!Array.isArray(pdn['Global connect'])) pdn['Global connect'] = []
-  if (!isObj(pdn.Grid)) pdn.Grid = { layer: '', 'power net': '', 'power ground': '', width: 0, offset: 0 }
+  if (!isObj(pdn.Grid))
+    pdn.Grid = { layer: '', 'power net': '', 'power ground': '', width: 0, offset: 0 }
   if (!Array.isArray(pdn.Stripe)) pdn.Stripe = []
   if (!Array.isArray(pdn['Connect layers'])) pdn['Connect layers'] = []
 })
@@ -85,7 +87,10 @@ function removeConnectLayer(i: number): void {
   ;(pdn()['Connect layers'] as unknown[]).splice(i, 1)
 }
 
-function setConnectLayersFromText(item: Record<string, unknown>, raw: string | undefined): void {
+function setConnectLayersFromText(
+  item: Record<string, unknown>,
+  raw: string | undefined,
+): void {
   const s = raw ?? ''
   item.layers = s
     .split(',')
@@ -100,7 +105,11 @@ function tableNumStr(n: unknown): string {
   return Number.isFinite(x) ? String(x) : ''
 }
 
-function setStripeNum(row: Record<string, unknown>, key: 'width' | 'pitch' | 'offset', raw: string | undefined): void {
+function setStripeNum(
+  row: Record<string, unknown>,
+  key: 'width' | 'pitch' | 'offset',
+  raw: string | undefined,
+): void {
   const s = (raw ?? '').trim()
   if (s === '') {
     row[key] = 0
@@ -133,15 +142,20 @@ function setTrackNum(
       <div class="sc-pro-hero__accent" />
       <div class="sc-pro-hero__body">
         <div class="sc-pro-hero__label">Tap distance</div>
-        <div class="field mb-0 mt-1 w-full min-w-0 max-w-xs">
+        <div class="field mt-1 mb-0 w-full max-w-xs min-w-0">
           <InputNumber
-            v-model="(draft.Floorplan as Record<string, unknown>)['Tap distance'] as number"
+            v-model="
+              (draft.Floorplan as Record<string, unknown>)['Tap distance'] as number
+            "
             size="small"
             fluid
             :use-grouping="false"
-            class="w-full min-w-0" />
+            class="w-full min-w-0"
+          />
         </div>
-        <p class="sc-pro-hero__hint">Global tap distance (same as template Floorplan section)</p>
+        <p class="sc-pro-hero__hint">
+          Global tap distance (same as template Floorplan section)
+        </p>
       </div>
     </div>
 
@@ -151,7 +165,10 @@ function setTrackNum(
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">Layout · Auto place pin</div>
-          <div class="sc-pro-section__desc">Pin layer and dimensions; maintain sides as a string array in JSON editing below</div>
+          <div class="sc-pro-section__desc">
+            Pin layer and dimensions; maintain sides as a string array in JSON editing
+            below
+          </div>
         </div>
       </div>
       <div class="sc-pro-section__body">
@@ -162,7 +179,8 @@ function setTrackNum(
               v-model="(autoPin() as Record<string, string>).layer"
               size="small"
               fluid
-              class="min-w-0 w-full" />
+              class="w-full min-w-0"
+            />
           </div>
           <div class="field">
             <label>width</label>
@@ -171,7 +189,8 @@ function setTrackNum(
               size="small"
               fluid
               :use-grouping="false"
-              class="w-full min-w-0" />
+              class="w-full min-w-0"
+            />
           </div>
           <div class="field">
             <label>height</label>
@@ -180,7 +199,8 @@ function setTrackNum(
               size="small"
               fluid
               :use-grouping="false"
-              class="w-full min-w-0" />
+              class="w-full min-w-0"
+            />
           </div>
         </div>
       </div>
@@ -212,44 +232,73 @@ function setTrackNum(
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, i) in (fp().Tracks as Record<string, string | number>[])" :key="i">
+              <tr
+                v-for="(row, i) in fp().Tracks as Record<string, string | number>[]"
+                :key="i"
+              >
                 <td>
-                  <InputText v-model="(row as Record<string, string>).layer" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>).layer"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
                   <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>)['x start'])"
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>)['x start'])
+                    "
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setTrackNum(row as Record<string, unknown>, 'x start', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setTrackNum(row as Record<string, unknown>, 'x start', $event)
+                    "
+                  />
                 </td>
                 <td>
                   <InputText
                     :model-value="tableNumStr((row as Record<string, unknown>)['x step'])"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setTrackNum(row as Record<string, unknown>, 'x step', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setTrackNum(row as Record<string, unknown>, 'x step', $event)
+                    "
+                  />
                 </td>
                 <td>
                   <InputText
-                    :model-value="tableNumStr((row as Record<string, unknown>)['y start'])"
+                    :model-value="
+                      tableNumStr((row as Record<string, unknown>)['y start'])
+                    "
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setTrackNum(row as Record<string, unknown>, 'y start', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setTrackNum(row as Record<string, unknown>, 'y start', $event)
+                    "
+                  />
                 </td>
                 <td>
                   <InputText
                     :model-value="tableNumStr((row as Record<string, unknown>)['y step'])"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setTrackNum(row as Record<string, unknown>, 'y step', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setTrackNum(row as Record<string, unknown>, 'y step', $event)
+                    "
+                  />
                 </td>
                 <td>
-                  <button type="button" class="sc-pro-btn sc-pro-btn--danger" title="Remove" @click="removeTrack(i)">
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    title="Remove"
+                    @click="removeTrack(i)"
+                  >
                     <i class="ri-delete-bin-line"></i>
                   </button>
                 </td>
@@ -293,18 +342,35 @@ function setTrackNum(
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, i) in (pdn().IO as Record<string, unknown>[])" :key="i">
+              <tr v-for="(row, i) in pdn().IO as Record<string, unknown>[]" :key="i">
                 <td>
-                  <InputText v-model="(row as Record<string, string>)['net name']" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>)['net name']"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
-                  <InputText v-model="(row as Record<string, string>).direction" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>).direction"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
-                  <Checkbox v-model="(row as Record<string, boolean>)['is power']" binary />
+                  <Checkbox
+                    v-model="(row as Record<string, boolean>)['is power']"
+                    binary
+                  />
                 </td>
                 <td>
-                  <button type="button" class="sc-pro-btn sc-pro-btn--danger" @click="removeIo(i)">
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    @click="removeIo(i)"
+                  >
                     <i class="ri-delete-bin-line"></i>
                   </button>
                 </td>
@@ -313,7 +379,9 @@ function setTrackNum(
           </table>
         </div>
         <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addIo"><i class="ri-add-line"></i> Add IO</button>
+          <button type="button" class="sc-pro-btn" @click="addIo">
+            <i class="ri-add-line"></i> Add IO
+          </button>
         </div>
       </div>
     </section>
@@ -344,22 +412,38 @@ function setTrackNum(
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, i) in (pdn()['Global connect'] as Record<string, unknown>[])" :key="i">
+              <tr
+                v-for="(row, i) in pdn()['Global connect'] as Record<string, unknown>[]"
+                :key="i"
+              >
                 <td>
-                  <InputText v-model="(row as Record<string, string>)['net name']" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>)['net name']"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
                   <InputText
                     v-model="(row as Record<string, string>)['instance pin name']"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono" />
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
-                  <Checkbox v-model="(row as Record<string, boolean>)['is power']" binary />
+                  <Checkbox
+                    v-model="(row as Record<string, boolean>)['is power']"
+                    binary
+                  />
                 </td>
                 <td>
-                  <button type="button" class="sc-pro-btn sc-pro-btn--danger" @click="removeGc(i)">
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    @click="removeGc(i)"
+                  >
                     <i class="ri-delete-bin-line"></i>
                   </button>
                 </td>
@@ -368,7 +452,9 @@ function setTrackNum(
           </table>
         </div>
         <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addGc"><i class="ri-add-line"></i> Add rule</button>
+          <button type="button" class="sc-pro-btn" @click="addGc">
+            <i class="ri-add-line"></i> Add rule
+          </button>
         </div>
       </div>
     </section>
@@ -387,7 +473,8 @@ function setTrackNum(
             v-model="(pdn().Grid as Record<string, string>).layer"
             size="small"
             fluid
-            class="w-full min-w-0 sc-mono" />
+            class="sc-mono w-full min-w-0"
+          />
         </div>
         <div class="field min-w-0">
           <label>power net</label>
@@ -395,7 +482,8 @@ function setTrackNum(
             v-model="(pdn().Grid as Record<string, string>)['power net']"
             size="small"
             fluid
-            class="w-full min-w-0 sc-mono" />
+            class="sc-mono w-full min-w-0"
+          />
         </div>
         <div class="field min-w-0">
           <label>power ground</label>
@@ -403,7 +491,8 @@ function setTrackNum(
             v-model="(pdn().Grid as Record<string, string>)['power ground']"
             size="small"
             fluid
-            class="w-full min-w-0 sc-mono" />
+            class="sc-mono w-full min-w-0"
+          />
         </div>
         <div class="field min-w-0">
           <label>width</label>
@@ -412,7 +501,8 @@ function setTrackNum(
             size="small"
             fluid
             :use-grouping="false"
-            class="w-full min-w-0" />
+            class="w-full min-w-0"
+          />
         </div>
         <div class="field sc-pro-grid__full min-w-0">
           <label>offset</label>
@@ -421,7 +511,8 @@ function setTrackNum(
             size="small"
             fluid
             :use-grouping="false"
-            class="w-full min-w-0" />
+            class="w-full min-w-0"
+          />
         </div>
       </div>
     </section>
@@ -452,42 +543,70 @@ function setTrackNum(
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, i) in (pdn().Stripe as Record<string, unknown>[])" :key="i">
+              <tr v-for="(row, i) in pdn().Stripe as Record<string, unknown>[]" :key="i">
                 <td>
-                  <InputText v-model="(row as Record<string, string>).layer" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>).layer"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
-                  <InputText v-model="(row as Record<string, string>)['power net']" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>)['power net']"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
-                  <InputText v-model="(row as Record<string, string>)['ground net']" size="small" fluid class="w-full min-w-0 sc-mono" />
+                  <InputText
+                    v-model="(row as Record<string, string>)['ground net']"
+                    size="small"
+                    fluid
+                    class="sc-mono w-full min-w-0"
+                  />
                 </td>
                 <td>
                   <InputText
                     :model-value="tableNumStr((row as Record<string, unknown>).width)"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setStripeNum(row as Record<string, unknown>, 'width', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setStripeNum(row as Record<string, unknown>, 'width', $event)
+                    "
+                  />
                 </td>
                 <td>
                   <InputText
                     :model-value="tableNumStr((row as Record<string, unknown>).pitch)"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setStripeNum(row as Record<string, unknown>, 'pitch', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setStripeNum(row as Record<string, unknown>, 'pitch', $event)
+                    "
+                  />
                 </td>
                 <td>
                   <InputText
                     :model-value="tableNumStr((row as Record<string, unknown>).offset)"
                     size="small"
                     fluid
-                    class="w-full min-w-0 sc-mono"
-                    @update:model-value="setStripeNum(row as Record<string, unknown>, 'offset', $event)" />
+                    class="sc-mono w-full min-w-0"
+                    @update:model-value="
+                      setStripeNum(row as Record<string, unknown>, 'offset', $event)
+                    "
+                  />
                 </td>
                 <td>
-                  <button type="button" class="sc-pro-btn sc-pro-btn--danger" @click="removeStripe(i)">
+                  <button
+                    type="button"
+                    class="sc-pro-btn sc-pro-btn--danger"
+                    @click="removeStripe(i)"
+                  >
                     <i class="ri-delete-bin-line"></i>
                   </button>
                 </td>
@@ -496,7 +615,9 @@ function setTrackNum(
           </table>
         </div>
         <div class="sc-pro-inline-actions">
-          <button type="button" class="sc-pro-btn" @click="addStripe"><i class="ri-add-line"></i> Add stripe</button>
+          <button type="button" class="sc-pro-btn" @click="addStripe">
+            <i class="ri-add-line"></i> Add stripe
+          </button>
         </div>
       </div>
     </section>
@@ -509,29 +630,36 @@ function setTrackNum(
           <div class="sc-pro-section__desc">Layer pairs; layers is a string array</div>
         </div>
       </div>
-      <div class="sc-pro-section__body space-y-2 min-w-0">
+      <div class="sc-pro-section__body min-w-0 space-y-2">
         <div
-          v-for="(item, i) in (pdn()['Connect layers'] as Record<string, unknown>[])"
+          v-for="(item, i) in pdn()['Connect layers'] as Record<string, unknown>[]"
           :key="i"
-          class="sc-pro-subpanel min-w-0 max-w-full">
-          <div class="flex items-center justify-between gap-2 mb-2 min-w-0">
-            <span class="text-[10px] font-bold uppercase text-(--text-secondary) truncate min-w-0"
-              >Pair {{ i + 1 }}</span>
+          class="sc-pro-subpanel max-w-full min-w-0"
+        >
+          <div class="mb-2 flex min-w-0 items-center justify-between gap-2">
+            <span
+              class="min-w-0 truncate text-[10px] font-bold text-(--text-secondary) uppercase"
+              >Pair {{ i + 1 }}</span
+            >
             <button
               type="button"
               class="sc-pro-btn sc-pro-btn--danger shrink-0"
-              @click="removeConnectLayer(i)">
+              @click="removeConnectLayer(i)"
+            >
               <i class="ri-delete-bin-line"></i>
             </button>
           </div>
-          <div class="field mb-0 min-w-0 max-w-full">
+          <div class="field mb-0 max-w-full min-w-0">
             <label>layers (comma-separated)</label>
             <InputText
               :model-value="(item.layers as string[] | undefined)?.join(', ') ?? ''"
               size="small"
               fluid
-              class="w-full min-w-0 max-w-full sc-mono"
-              @update:model-value="setConnectLayersFromText(item as Record<string, unknown>, $event)" />
+              class="sc-mono w-full max-w-full min-w-0"
+              @update:model-value="
+                setConnectLayersFromText(item as Record<string, unknown>, $event)
+              "
+            />
           </div>
         </div>
         <button type="button" class="sc-pro-btn" @click="addConnectLayer">

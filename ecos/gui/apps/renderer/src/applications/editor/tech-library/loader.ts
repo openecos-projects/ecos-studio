@@ -27,7 +27,11 @@ function parseJson<T>(text: string, label: string): T {
 }
 
 function validateTechFile<T>(raw: TechJsonFile, expectedKind: string): T[] {
-  if (raw.schema !== 'ecc.view.v1' || raw.kind !== expectedKind || !Array.isArray(raw.data)) {
+  if (
+    raw.schema !== 'ecc.view.v1' ||
+    raw.kind !== expectedKind ||
+    !Array.isArray(raw.data)
+  ) {
     throw new Error(`Unsupported ${expectedKind.replace(/_/g, ' ')} tech file.`)
   }
   return raw.data as T[]
@@ -51,8 +55,9 @@ export async function loadTechLibrary(
     throw new Error('Workspace has no Tech Library resources.')
   }
 
-  const readText = options.readText
-    ?? ((path: string) => readProjectTextFile(path, { projectPath: options.projectPath }))
+  const readText =
+    options.readText ??
+    ((path: string) => readProjectTextFile(path, { projectPath: options.projectPath }))
 
   const [layers, sites, vias, cellMasters] = await Promise.all([
     readTechArray<TechLayer>(readText, tech.layers.path, 'layers'),

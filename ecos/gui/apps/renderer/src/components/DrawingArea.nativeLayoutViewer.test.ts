@@ -15,10 +15,16 @@ describe('DrawingArea native layout viewer bridge', () => {
 
   it('shows a canvas transition while the native viewer package is prepared', () => {
     expect(source).toContain('isPreparingNativeLayoutViewer')
-    expect(source).toContain("const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'")
-    expect(source).toContain('loadingMessage.value = NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE')
+    expect(source).toContain(
+      "const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'",
+    )
+    expect(source).toContain(
+      'loadingMessage.value = NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE',
+    )
     expect(source).toContain('data-testid="native-layout-viewer-loading"')
     expect(source).toContain('Preparing Native Layout Viewer')
-    expect(source).toMatch(/finally \{[\s\S]*?nativeLayoutViewerBusy\.value = false[\s\S]*?resetLoadingState\(\)/)
+    expect(source).toMatch(
+      /finally \{[\s\S]*?nativeLayoutViewerBusy\.value = false[\s\S]*?resetLoadingState\(\)/,
+    )
   })
 })

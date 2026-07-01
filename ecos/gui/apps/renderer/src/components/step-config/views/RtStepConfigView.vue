@@ -31,7 +31,9 @@ function setRtKey(k: string, val: string | undefined): void {
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">Router engine flags</div>
-          <div class="sc-pro-section__desc">CLI-style flags: parameter name on the left, value on the right</div>
+          <div class="sc-pro-section__desc">
+            CLI-style flags: parameter name on the left, value on the right
+          </div>
         </div>
       </div>
       <div class="sc-pro-section__body flex flex-col gap-2">
@@ -43,7 +45,8 @@ function setRtKey(k: string, val: string | undefined): void {
               size="small"
               fluid
               class="w-full min-w-0"
-              @update:model-value="setRtKey(k, $event)" />
+              @update:model-value="setRtKey(k, $event)"
+            />
           </div>
         </div>
       </div>

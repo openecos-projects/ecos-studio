@@ -34,9 +34,21 @@ describe('workspace resource API desktop bridge payloads', () => {
       pdk: 'ics55',
       home: {
         homeJson: { path: '/workspace/demo/.home.json', exists: true, kind: 'home' },
-        flowJson: { path: '/workspace/demo/workspace.flow.json', exists: true, kind: 'flow' },
-        parametersJson: { path: '/workspace/demo/parameters.json', exists: true, kind: 'parameters' },
-        checklistJson: { path: '/workspace/demo/checklist.json', exists: false, kind: 'checklist' },
+        flowJson: {
+          path: '/workspace/demo/workspace.flow.json',
+          exists: true,
+          kind: 'flow',
+        },
+        parametersJson: {
+          path: '/workspace/demo/parameters.json',
+          exists: true,
+          kind: 'parameters',
+        },
+        checklistJson: {
+          path: '/workspace/demo/checklist.json',
+          exists: false,
+          kind: 'checklist',
+        },
       },
       homeData: { design: 'demo' },
       parameters: { clock: 'clk' },

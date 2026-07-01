@@ -1,8 +1,13 @@
 <template>
-  <div :class="['home-view', {
-    'layout-fullscreen-active': isLayoutFullscreen,
-    'flow-log-fullscreen-active': isFlowLogFullscreen,
-  }]">
+  <div
+    :class="[
+      'home-view',
+      {
+        'layout-fullscreen-active': isLayoutFullscreen,
+        'flow-log-fullscreen-active': isFlowLogFullscreen,
+      },
+    ]"
+  >
     <!-- 背景装饰 -->
     <div class="bg-grid"></div>
 
@@ -21,77 +26,87 @@
           @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-      <section class="section-card chip-info-area">
-        <div class="section-header">
-          <div class="header-icon"><i class="ri-cpu-line"></i></div>
-          <h2>Chip Basic Info</h2>
-          <span class="header-badge" v-if="config.pdk">{{ config.pdk }}</span>
-        </div>
-        <div class="chip-info-content">
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-label">Design</span>
-              <span class="info-value highlight">{{ config.design || '--' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Top Module</span>
-              <span class="info-value mono">{{ config.topModule || '--' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Die Size</span>
-              <span class="info-value mono">{{ config.die?.Size.join(' x ') || '--' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Core Size</span>
-              <span class="info-value mono">{{ config.core?.Size.join(' x ') || '--' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Target Frequency</span>
-              <span class="info-value">{{ config.frequencyMax || '--' }} <small>MHz</small></span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Utilization</span>
-              <span class="info-value">{{ ((config.core?.utilization || 0) * 100).toFixed(0) }}%</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Clock</span>
-              <span class="info-value">{{ config.clock || '--' }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Layers</span>
-              <span class="info-value">{{ config.bottomLayer }} - {{ config.topLayer }}</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
+            <section class="section-card chip-info-area">
+              <div class="section-header">
+                <div class="header-icon"><i class="ri-cpu-line"></i></div>
+                <h2>Chip Basic Info</h2>
+                <span class="header-badge" v-if="config.pdk">{{ config.pdk }}</span>
+              </div>
+              <div class="chip-info-content">
+                <div class="info-grid">
+                  <div class="info-item">
+                    <span class="info-label">Design</span>
+                    <span class="info-value highlight">{{ config.design || '--' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Top Module</span>
+                    <span class="info-value mono">{{ config.topModule || '--' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Die Size</span>
+                    <span class="info-value mono">{{
+                      config.die?.Size.join(' x ') || '--'
+                    }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Core Size</span>
+                    <span class="info-value mono">{{
+                      config.core?.Size.join(' x ') || '--'
+                    }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Target Frequency</span>
+                    <span class="info-value"
+                      >{{ config.frequencyMax || '--' }} <small>MHz</small></span
+                    >
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Utilization</span>
+                    <span class="info-value"
+                      >{{ ((config.core?.utilization || 0) * 100).toFixed(0) }}%</span
+                    >
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Clock</span>
+                    <span class="info-value">{{ config.clock || '--' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <span class="info-label">Layers</span>
+                    <span class="info-value"
+                      >{{ config.bottomLayer }} - {{ config.topLayer }}</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </section>
           </SplitterPanel>
 
           <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-      <!-- ========== Row 1 Right: 运行时监控 ========== -->
-      <section class="section-card monitor-area">
-        <div class="section-header">
-          <div class="header-icon monitor"><i class="ri-pulse-line"></i></div>
-          <h2>Runtime Monitoring</h2>
-        </div>
-        <div class="monitor-content" v-if="monitorData">
-          <div v-for="cfg in chartConfigs" :key="cfg.key" class="monitor-row">
-            <span class="monitor-label">{{ cfg.label }}</span>
-            <div class="monitor-chart-wrap">
-              <div :ref="setChartRef(cfg.key)" class="monitor-chart"></div>
-            </div>
-            <span class="monitor-value">{{ getMetricMax(cfg.key) }}</span>
-          </div>
-        </div>
-        <div v-else class="monitor-content">
-          <div class="monitor-placeholder">
-            <i class="ri-pulse-line"></i>
-            <p>No monitor data</p>
-            <span>After running the flow, the monitoring data will be displayed.</span>
-          </div>
-        </div>
-      </section>
-
+            <!-- ========== Row 1 Right: 运行时监控 ========== -->
+            <section class="section-card monitor-area">
+              <div class="section-header">
+                <div class="header-icon monitor"><i class="ri-pulse-line"></i></div>
+                <h2>Runtime Monitoring</h2>
+              </div>
+              <div class="monitor-content" v-if="monitorData">
+                <div v-for="cfg in chartConfigs" :key="cfg.key" class="monitor-row">
+                  <span class="monitor-label">{{ cfg.label }}</span>
+                  <div class="monitor-chart-wrap">
+                    <div :ref="setChartRef(cfg.key)" class="monitor-chart"></div>
+                  </div>
+                  <span class="monitor-value">{{ getMetricMax(cfg.key) }}</span>
+                </div>
+              </div>
+              <div v-else class="monitor-content">
+                <div class="monitor-placeholder">
+                  <i class="ri-pulse-line"></i>
+                  <p>No monitor data</p>
+                  <span
+                    >After running the flow, the monitoring data will be displayed.</span
+                  >
+                </div>
+              </div>
+            </section>
           </SplitterPanel>
         </Splitter>
       </SplitterPanel>
@@ -104,65 +119,94 @@
           @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-      <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
-      <section class="section-card layout-area">
-        <div class="section-header">
-          <div class="header-icon layout"><i class="ri-layout-masonry-line"></i></div>
-          <h2>Layout</h2>
-          <span class="header-hint">Displays the final step of the layout after the run is completed.</span>
-          <div class="header-actions">
-            <button class="action-btn" @click="toggleLayoutFullscreen"
-              :title="isLayoutFullscreen ? 'Exit full screen' : 'full screen'">
-              <i :class="isLayoutFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
-            </button>
-          </div>
-        </div>
-        <div class="layout-content">
-          <img v-if="layoutBlobUrl" :src="layoutBlobUrl" alt="Layout Preview" class="layout-image" draggable="false" />
-          <!-- 科技感扫描线 -->
-          <!-- <div v-if="layoutBlobUrl && !isLayoutFullscreen" class="scanner-line"></div> -->
-          <div v-else-if="!layoutBlobUrl" class="layout-placeholder">
-            <i class="ri-image-2-line"></i>
-            <p>Layout Preview</p>
-            <span>Waiting for layout data...</span>
-          </div>
-        </div>
-      </section>
-
+            <!-- ========== Row 2 Left+Center: Layout Preview ========== -->
+            <section class="section-card layout-area">
+              <div class="section-header">
+                <div class="header-icon layout">
+                  <i class="ri-layout-masonry-line"></i>
+                </div>
+                <h2>Layout</h2>
+                <span class="header-hint"
+                  >Displays the final step of the layout after the run is completed.</span
+                >
+                <div class="header-actions">
+                  <button
+                    class="action-btn"
+                    @click="toggleLayoutFullscreen"
+                    :title="isLayoutFullscreen ? 'Exit full screen' : 'full screen'"
+                  >
+                    <i
+                      :class="
+                        isLayoutFullscreen
+                          ? 'ri-fullscreen-exit-line'
+                          : 'ri-fullscreen-line'
+                      "
+                    ></i>
+                  </button>
+                </div>
+              </div>
+              <div class="layout-content">
+                <img
+                  v-if="layoutBlobUrl"
+                  :src="layoutBlobUrl"
+                  alt="Layout Preview"
+                  class="layout-image"
+                  draggable="false"
+                />
+                <!-- 科技感扫描线 -->
+                <!-- <div v-if="layoutBlobUrl && !isLayoutFullscreen" class="scanner-line"></div> -->
+                <div v-else-if="!layoutBlobUrl" class="layout-placeholder">
+                  <i class="ri-image-2-line"></i>
+                  <p>Layout Preview</p>
+                  <span>Waiting for layout data...</span>
+                </div>
+              </div>
+            </section>
           </SplitterPanel>
 
           <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-      <!-- ========== Row 2 Right: 指标分析 ========== -->
-      <section class="section-card analysis-area">
-        <div class="section-header">
-          <div class="header-icon analysis"><i class="ri-pie-chart-line"></i></div>
-          <h2>Indicator Analysis</h2>
-        </div>
-        <div class="analysis-content">
-          <div class="charts-grid" v-if="analysisCharts.length > 0">
-            <div class="chart-card" v-for="chart in analysisCharts" :key="chart.label"
-              :title="chart.label"
-              role="button"
-              tabindex="0"
-              @click="onAnalysisChartClick(chart)"
-              @keydown.enter.prevent="onAnalysisChartClick(chart)"
-              @keydown.space.prevent="onAnalysisChartClick(chart)">
-              <div class="chart-visual">
-                <img v-if="chart.imageBlobUrl" :src="chart.imageBlobUrl" :alt="chart.label" class="chart-image"
-                  draggable="false" />
-                <i v-else class="ri-image-2-line"></i>
+            <!-- ========== Row 2 Right: 指标分析 ========== -->
+            <section class="section-card analysis-area">
+              <div class="section-header">
+                <div class="header-icon analysis"><i class="ri-pie-chart-line"></i></div>
+                <h2>Indicator Analysis</h2>
               </div>
-              <span class="chart-label">{{ chart.label }}</span>
-            </div>
-          </div>
-          <div v-else class="analysis-placeholder">
-            <i class="ri-pie-chart-line"></i>
-            <p>No metrics data</p>
-            <span>After running the flow, the indicator analysis will be displayed.</span>
-          </div>
-        </div>
-      </section>
-
+              <div class="analysis-content">
+                <div class="charts-grid" v-if="analysisCharts.length > 0">
+                  <div
+                    class="chart-card"
+                    v-for="chart in analysisCharts"
+                    :key="chart.label"
+                    :title="chart.label"
+                    role="button"
+                    tabindex="0"
+                    @click="onAnalysisChartClick(chart)"
+                    @keydown.enter.prevent="onAnalysisChartClick(chart)"
+                    @keydown.space.prevent="onAnalysisChartClick(chart)"
+                  >
+                    <div class="chart-visual">
+                      <img
+                        v-if="chart.imageBlobUrl"
+                        :src="chart.imageBlobUrl"
+                        :alt="chart.label"
+                        class="chart-image"
+                        draggable="false"
+                      />
+                      <i v-else class="ri-image-2-line"></i>
+                    </div>
+                    <span class="chart-label">{{ chart.label }}</span>
+                  </div>
+                </div>
+                <div v-else class="analysis-placeholder">
+                  <i class="ri-pie-chart-line"></i>
+                  <p>No metrics data</p>
+                  <span
+                    >After running the flow, the indicator analysis will be
+                    displayed.</span
+                  >
+                </div>
+              </div>
+            </section>
           </SplitterPanel>
         </Splitter>
       </SplitterPanel>
@@ -175,148 +219,196 @@
           @resizeend="onDashboardSplitterResizeEnd"
         >
           <SplitterPanel :size="45" :minSize="15" class="dashboard-cell">
-      <!-- ========== Row 3 Left: Flow step log ========== -->
-      <section class="section-card gds-area">
-        <div class="section-header">
-          <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
-          <h2>Flow Step Log</h2>
-          <span v-if="flowLogStepName" class="header-badge">{{ flowLogStepName }}</span>
-          <div class="header-actions">
-            <button
-              type="button"
-              class="action-btn flow-log-fullscreen-toggle"
-              :title="isFlowLogFullscreen ? 'Exit full screen' : 'Full screen'"
-              :aria-label="isFlowLogFullscreen ? 'Exit flow step log full screen' : 'View flow step log full screen'"
-              @click="toggleFlowLogFullscreen"
-            >
-              <i :class="isFlowLogFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
-            </button>
-          </div>
-        </div>
-        <div class="flow-log-content">
-          <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
-          <div v-else-if="flowLogListItems.length" class="flow-log-layout">
-            <div class="flow-log-viewer-panel">
-              <div class="flow-log-viewer-header">
-                <div class="flow-log-viewer-header-main">
-                  <div v-if="selectedFlowLogSegment" class="flow-log-viewer-summary-row">
-                    <span class="flow-log-viewer-title">{{ selectedFlowLogSegment.stepName }}</span>
-                    <span class="flow-log-viewer-tool">{{ selectedFlowLogSegment.tool }}</span>
-                    <span
-                      class="flow-log-viewer-state"
-                      :class="{ failed: selectedFlowLogSegment.failed, live: selectedFlowLogSegment.live }"
-                    >
-                      {{ selectedFlowLogSegment.state }}
-                    </span>
-                    <span v-if="selectedFlowLogSegment.totalSize" class="flow-log-viewer-size">
-                      {{ formatKb(selectedFlowLogSegment.totalSize) }}
-                    </span>
-                    <span
-                      v-if="flowLogLoading || loadingSelectedFlowLogKey === selectedFlowLogKey"
-                      class="flow-log-viewer-loading"
-                    >
-                      <i class="ri-loader-4-line spin"></i>
-                      {{ flowLogLoading ? 'Updating…' : 'Loading log…' }}
-                    </span>
-                  </div>
-                  <div v-else class="flow-log-viewer-summary-row empty">
-                    <span class="flow-log-viewer-title">Current step</span>
-                    <span class="flow-log-viewer-tool">Select a step to inspect its output.</span>
-                  </div>
-                </div>
-
-                <div class="flow-log-viewer-actions">
+            <!-- ========== Row 3 Left: Flow step log ========== -->
+            <section class="section-card gds-area">
+              <div class="section-header">
+                <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
+                <h2>Flow Step Log</h2>
+                <span v-if="flowLogStepName" class="header-badge">{{
+                  flowLogStepName
+                }}</span>
+                <div class="header-actions">
                   <button
-                    ref="flowLogStepChooserTriggerRef"
                     type="button"
-                    class="flow-log-steps-trigger"
-                    aria-controls="flow-log-step-chooser-dialog"
-                    :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
-                    aria-haspopup="dialog"
-                    :aria-label="isFlowLogStepChooserOpen ? 'Hide flow step chooser' : 'Show flow step chooser'"
-                    @click="toggleFlowLogStepChooserFromTrigger"
-                  >
-                    <i class="ri-list-check"></i>
-                    <span>Steps</span>
-                  </button>
-                  <button
-                    v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
-                    type="button"
-                    class="flow-log-jump-live-btn"
-                    @click="jumpToLiveStep"
-                  >
-                    <i class="ri-skip-right-line"></i>
-                    <span>Jump to live</span>
-                  </button>
-                  <button
-                    v-if="selectedFlowLogSegment?.truncated"
-                    type="button"
-                    class="flow-log-expand-btn"
-                    :disabled="expandingFlowLogKeys[selectedFlowLogKey || '']"
-                    :title="`Load full log (${formatKb(selectedFlowLogSegment.totalSize)})`"
-                    @click="onExpandFullLog(selectedFlowLogSegment)"
+                    class="action-btn flow-log-fullscreen-toggle"
+                    :title="isFlowLogFullscreen ? 'Exit full screen' : 'Full screen'"
+                    :aria-label="
+                      isFlowLogFullscreen
+                        ? 'Exit flow step log full screen'
+                        : 'View flow step log full screen'
+                    "
+                    @click="toggleFlowLogFullscreen"
                   >
                     <i
-                      :class="[
-                        expandingFlowLogKeys[selectedFlowLogKey || '']
-                          ? 'ri-loader-4-line flow-log-expand-btn-spinner'
-                          : 'ri-expand-up-down-line',
-                      ]"
+                      :class="
+                        isFlowLogFullscreen
+                          ? 'ri-fullscreen-exit-line'
+                          : 'ri-fullscreen-line'
+                      "
                     ></i>
-                    <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']">Loading full log…</span>
-                    <span v-else>Show full log</span>
                   </button>
                 </div>
               </div>
+              <div class="flow-log-content">
+                <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
+                <div v-else-if="flowLogListItems.length" class="flow-log-layout">
+                  <div class="flow-log-viewer-panel">
+                    <div class="flow-log-viewer-header">
+                      <div class="flow-log-viewer-header-main">
+                        <div
+                          v-if="selectedFlowLogSegment"
+                          class="flow-log-viewer-summary-row"
+                        >
+                          <span class="flow-log-viewer-title">{{
+                            selectedFlowLogSegment.stepName
+                          }}</span>
+                          <span class="flow-log-viewer-tool">{{
+                            selectedFlowLogSegment.tool
+                          }}</span>
+                          <span
+                            class="flow-log-viewer-state"
+                            :class="{
+                              failed: selectedFlowLogSegment.failed,
+                              live: selectedFlowLogSegment.live,
+                            }"
+                          >
+                            {{ selectedFlowLogSegment.state }}
+                          </span>
+                          <span
+                            v-if="selectedFlowLogSegment.totalSize"
+                            class="flow-log-viewer-size"
+                          >
+                            {{ formatKb(selectedFlowLogSegment.totalSize) }}
+                          </span>
+                          <span
+                            v-if="
+                              flowLogLoading ||
+                              loadingSelectedFlowLogKey === selectedFlowLogKey
+                            "
+                            class="flow-log-viewer-loading"
+                          >
+                            <i class="ri-loader-4-line spin"></i>
+                            {{ flowLogLoading ? 'Updating…' : 'Loading log…' }}
+                          </span>
+                        </div>
+                        <div v-else class="flow-log-viewer-summary-row empty">
+                          <span class="flow-log-viewer-title">Current step</span>
+                          <span class="flow-log-viewer-tool"
+                            >Select a step to inspect its output.</span
+                          >
+                        </div>
+                      </div>
 
-              <div class="flow-log-viewer-shell">
-                <FlowLogCodeViewer
-                  v-if="selectedFlowLogSegment"
-                  :key="selectedFlowLogKey ?? 'no-selection'"
-                  :content="selectedFlowLogContent"
-                  :live="Boolean(selectedFlowLogSegment.live)"
-                  :missing="selectedFlowLogSegment.missing"
-                  :loading="loadingSelectedFlowLogKey === selectedFlowLogKey"
-                />
+                      <div class="flow-log-viewer-actions">
+                        <button
+                          ref="flowLogStepChooserTriggerRef"
+                          type="button"
+                          class="flow-log-steps-trigger"
+                          aria-controls="flow-log-step-chooser-dialog"
+                          :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
+                          aria-haspopup="dialog"
+                          :aria-label="
+                            isFlowLogStepChooserOpen
+                              ? 'Hide flow step chooser'
+                              : 'Show flow step chooser'
+                          "
+                          @click="toggleFlowLogStepChooserFromTrigger"
+                        >
+                          <i class="ri-list-check"></i>
+                          <span>Steps</span>
+                        </button>
+                        <button
+                          v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
+                          type="button"
+                          class="flow-log-jump-live-btn"
+                          @click="jumpToLiveStep"
+                        >
+                          <i class="ri-skip-right-line"></i>
+                          <span>Jump to live</span>
+                        </button>
+                        <button
+                          v-if="selectedFlowLogSegment?.truncated"
+                          type="button"
+                          class="flow-log-expand-btn"
+                          :disabled="expandingFlowLogKeys[selectedFlowLogKey || '']"
+                          :title="`Load full log (${formatKb(selectedFlowLogSegment.totalSize)})`"
+                          @click="onExpandFullLog(selectedFlowLogSegment)"
+                        >
+                          <i
+                            :class="[
+                              expandingFlowLogKeys[selectedFlowLogKey || '']
+                                ? 'ri-loader-4-line flow-log-expand-btn-spinner'
+                                : 'ri-expand-up-down-line',
+                            ]"
+                          ></i>
+                          <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']"
+                            >Loading full log…</span
+                          >
+                          <span v-else>Show full log</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="flow-log-viewer-shell">
+                      <FlowLogCodeViewer
+                        v-if="selectedFlowLogSegment"
+                        :key="selectedFlowLogKey ?? 'no-selection'"
+                        :content="selectedFlowLogContent"
+                        :live="Boolean(selectedFlowLogSegment.live)"
+                        :missing="selectedFlowLogSegment.missing"
+                        :loading="loadingSelectedFlowLogKey === selectedFlowLogKey"
+                      />
+                      <div v-else class="flow-log-placeholder">
+                        <i class="ri-terminal-line"></i>
+                        <p>No step selected</p>
+                        <span
+                          >Open Steps to inspect a log once a flow step is
+                          available.</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="flowLogLoading" class="flow-log-loading">
+                  <i class="ri-loader-4-line flow-log-loading-icon"></i>
+                  <p>Loading flow step logs…</p>
+                  <span
+                    >Reading flow.json and log files from the workspace. Steps will appear
+                    as they load.</span
+                  >
+                </div>
                 <div v-else class="flow-log-placeholder">
                   <i class="ri-terminal-line"></i>
-                  <p>No step selected</p>
-                  <span>Open Steps to inspect a log once a flow step is available.</span>
+                  <p>No flow step log yet</p>
+                  <span
+                    >Unstarted steps are hidden. Logs show up here once a step begins or
+                    finishes.</span
+                  >
                 </div>
               </div>
-            </div>
-          </div>
-          <div v-else-if="flowLogLoading" class="flow-log-loading">
-            <i class="ri-loader-4-line flow-log-loading-icon"></i>
-            <p>Loading flow step logs…</p>
-            <span>Reading flow.json and log files from the workspace. Steps will appear as they load.</span>
-          </div>
-          <div v-else class="flow-log-placeholder">
-            <i class="ri-terminal-line"></i>
-            <p>No flow step log yet</p>
-            <span>Unstarted steps are hidden. Logs show up here once a step begins or finishes.</span>
-          </div>
-        </div>
-      </section>
-
+            </section>
           </SplitterPanel>
 
           <SplitterPanel :size="55" :minSize="15" class="dashboard-cell">
-      <!-- ========== Row 3 Right: Checklist Table ========== -->
-      <section class="section-card checklist-area">
-        <div class="section-header">
-          <div class="header-icon checklist"><i class="ri-checkbox-multiple-line"></i></div>
-          <h2>Checklist Table</h2>
-          <span class="header-count">{{ checklistCompletedCount }}/{{ checklistItems.length }}</span>
-        </div>
-        <div class="checklist-content">
-          <ChecklistTable
-            :items="checklistItems"
-            :show-summary="false"
-            empty-hint="After running the flow, the checklist will be displayed."
-          />
-        </div>
-      </section>
+            <!-- ========== Row 3 Right: Checklist Table ========== -->
+            <section class="section-card checklist-area">
+              <div class="section-header">
+                <div class="header-icon checklist">
+                  <i class="ri-checkbox-multiple-line"></i>
+                </div>
+                <h2>Checklist Table</h2>
+                <span class="header-count"
+                  >{{ checklistCompletedCount }}/{{ checklistItems.length }}</span
+                >
+              </div>
+              <div class="checklist-content">
+                <ChecklistTable
+                  :items="checklistItems"
+                  :show-summary="false"
+                  empty-hint="After running the flow, the checklist will be displayed."
+                />
+              </div>
+            </section>
           </SplitterPanel>
         </Splitter>
       </SplitterPanel>
@@ -366,7 +458,9 @@
             <div class="section-header">
               <div class="header-icon gds"><i class="ri-terminal-line"></i></div>
               <h2>Flow Step Log</h2>
-              <span v-if="flowLogStepName" class="header-badge">{{ flowLogStepName }}</span>
+              <span v-if="flowLogStepName" class="header-badge">{{
+                flowLogStepName
+              }}</span>
               <div class="header-actions">
                 <button
                   type="button"
@@ -381,24 +475,43 @@
             </div>
             <div class="flow-log-content flow-log-fullscreen-content">
               <div v-if="flowLogError" class="flow-log-error">{{ flowLogError }}</div>
-              <div v-else-if="flowLogListItems.length" class="flow-log-layout flow-log-fullscreen-layout">
+              <div
+                v-else-if="flowLogListItems.length"
+                class="flow-log-layout flow-log-fullscreen-layout"
+              >
                 <div class="flow-log-viewer-panel">
                   <div class="flow-log-viewer-header">
                     <div class="flow-log-viewer-header-main">
-                      <div v-if="selectedFlowLogSegment" class="flow-log-viewer-summary-row">
-                        <span class="flow-log-viewer-title">{{ selectedFlowLogSegment.stepName }}</span>
-                        <span class="flow-log-viewer-tool">{{ selectedFlowLogSegment.tool }}</span>
+                      <div
+                        v-if="selectedFlowLogSegment"
+                        class="flow-log-viewer-summary-row"
+                      >
+                        <span class="flow-log-viewer-title">{{
+                          selectedFlowLogSegment.stepName
+                        }}</span>
+                        <span class="flow-log-viewer-tool">{{
+                          selectedFlowLogSegment.tool
+                        }}</span>
                         <span
                           class="flow-log-viewer-state"
-                          :class="{ failed: selectedFlowLogSegment.failed, live: selectedFlowLogSegment.live }"
+                          :class="{
+                            failed: selectedFlowLogSegment.failed,
+                            live: selectedFlowLogSegment.live,
+                          }"
                         >
                           {{ selectedFlowLogSegment.state }}
                         </span>
-                        <span v-if="selectedFlowLogSegment.totalSize" class="flow-log-viewer-size">
+                        <span
+                          v-if="selectedFlowLogSegment.totalSize"
+                          class="flow-log-viewer-size"
+                        >
                           {{ formatKb(selectedFlowLogSegment.totalSize) }}
                         </span>
                         <span
-                          v-if="flowLogLoading || loadingSelectedFlowLogKey === selectedFlowLogKey"
+                          v-if="
+                            flowLogLoading ||
+                            loadingSelectedFlowLogKey === selectedFlowLogKey
+                          "
                           class="flow-log-viewer-loading"
                         >
                           <i class="ri-loader-4-line spin"></i>
@@ -407,7 +520,9 @@
                       </div>
                       <div v-else class="flow-log-viewer-summary-row empty">
                         <span class="flow-log-viewer-title">Current step</span>
-                        <span class="flow-log-viewer-tool">Select a step to inspect its output.</span>
+                        <span class="flow-log-viewer-tool"
+                          >Select a step to inspect its output.</span
+                        >
                       </div>
                     </div>
 
@@ -418,7 +533,11 @@
                         aria-controls="flow-log-step-chooser-dialog"
                         :aria-expanded="isFlowLogStepChooserOpen ? 'true' : 'false'"
                         aria-haspopup="dialog"
-                        :aria-label="isFlowLogStepChooserOpen ? 'Hide flow step chooser' : 'Show flow step chooser'"
+                        :aria-label="
+                          isFlowLogStepChooserOpen
+                            ? 'Hide flow step chooser'
+                            : 'Show flow step chooser'
+                        "
                         @click="toggleFlowLogStepChooserFromTrigger"
                       >
                         <i class="ri-list-check"></i>
@@ -448,7 +567,9 @@
                               : 'ri-expand-up-down-line',
                           ]"
                         ></i>
-                        <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']">Loading full log…</span>
+                        <span v-if="expandingFlowLogKeys[selectedFlowLogKey || '']"
+                          >Loading full log…</span
+                        >
                         <span v-else>Show full log</span>
                       </button>
                     </div>
@@ -466,7 +587,9 @@
                     <div v-else class="flow-log-placeholder">
                       <i class="ri-terminal-line"></i>
                       <p>No step selected</p>
-                      <span>Open Steps to inspect a log once a flow step is available.</span>
+                      <span
+                        >Open Steps to inspect a log once a flow step is available.</span
+                      >
                     </div>
                   </div>
                 </div>
@@ -474,12 +597,18 @@
               <div v-else-if="flowLogLoading" class="flow-log-loading">
                 <i class="ri-loader-4-line flow-log-loading-icon"></i>
                 <p>Loading flow step logs…</p>
-                <span>Reading flow.json and log files from the workspace. Steps will appear as they load.</span>
+                <span
+                  >Reading flow.json and log files from the workspace. Steps will appear
+                  as they load.</span
+                >
               </div>
               <div v-else class="flow-log-placeholder">
                 <i class="ri-terminal-line"></i>
                 <p>No flow step log yet</p>
-                <span>Unstarted steps are hidden. Logs show up here once a step begins or finishes.</span>
+                <span
+                  >Unstarted steps are hidden. Logs show up here once a step begins or
+                  finishes.</span
+                >
               </div>
             </div>
           </section>
@@ -490,14 +619,24 @@
     <!-- ===== Layout Fullscreen Overlay ===== -->
     <Teleport to="body">
       <Transition name="lightbox">
-        <div v-if="isLayoutFullscreen" class="layout-fullscreen-overlay" @click="closeLayoutFullscreen">
+        <div
+          v-if="isLayoutFullscreen"
+          class="layout-fullscreen-overlay"
+          @click="closeLayoutFullscreen"
+        >
           <section class="section-card layout-fullscreen-card" @click.stop>
             <div class="section-header">
               <div class="header-icon layout"><i class="ri-layout-masonry-line"></i></div>
               <h2>Layout</h2>
-              <span class="header-hint">Displays the final step of the layout after the run is completed.</span>
+              <span class="header-hint"
+                >Displays the final step of the layout after the run is completed.</span
+              >
               <div class="header-actions">
-                <button class="action-btn" @click="closeLayoutFullscreen" title="Exit full screen">
+                <button
+                  class="action-btn"
+                  @click="closeLayoutFullscreen"
+                  title="Exit full screen"
+                >
                   <i class="ri-fullscreen-exit-line"></i>
                 </button>
               </div>
@@ -536,7 +675,11 @@
     <!-- ===== 图表预览 Lightbox ===== -->
     <Teleport to="body">
       <Transition name="lightbox">
-        <div v-if="chartPreview.visible" class="chart-lightbox-overlay" @click="closeChartPreview">
+        <div
+          v-if="chartPreview.visible"
+          class="chart-lightbox-overlay"
+          @click="closeChartPreview"
+        >
           <div class="chart-lightbox-content" @click.stop>
             <div class="chart-lightbox-header">
               <span class="chart-lightbox-title">{{ chartPreview.label }}</span>
@@ -570,7 +713,9 @@ export interface FlowLogChooserController {
   onFlowLogChooserEscape: (event: FlowLogChooserEscapeEvent) => void
 }
 
-export function createFlowLogChooserController(initialSelectedKey: string | null = null): FlowLogChooserController {
+export function createFlowLogChooserController(
+  initialSelectedKey: string | null = null,
+): FlowLogChooserController {
   const controller: FlowLogChooserController = {
     selectedFlowLogKey: initialSelectedKey,
     isFlowLogStepChooserOpen: false,
@@ -589,7 +734,10 @@ export function createFlowLogChooserController(initialSelectedKey: string | null
       this.selectedFlowLogKey = liveKey
       this.closeFlowLogStepChooser()
     },
-    onFlowLogChooserEscape(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent) {
+    onFlowLogChooserEscape(
+      this: FlowLogChooserController,
+      event: FlowLogChooserEscapeEvent,
+    ) {
       if (event.key !== 'Escape' || !this.isFlowLogStepChooserOpen) return
       if (typeof event.preventDefault === 'function') {
         event.preventDefault()
@@ -638,18 +786,31 @@ export function computeFlowLogChooserAnchorStyle(
 ): FlowLogChooserAnchorStyle {
   const width = chooserSize.width || FLOW_LOG_CHOOSER_FALLBACK_WIDTH_PX
   const height = chooserSize.height || FLOW_LOG_CHOOSER_FALLBACK_HEIGHT_PX
-  const maxLeft = Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, viewport.width - width - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX)
+  const maxLeft = Math.max(
+    FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
+    viewport.width - width - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
+  )
   const preferredLeft = triggerRect.right - width
-  const left = Math.min(Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredLeft), maxLeft)
+  const left = Math.min(
+    Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredLeft),
+    maxLeft,
+  )
 
-  const spaceBelow = viewport.height - triggerRect.bottom - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX
+  const spaceBelow =
+    viewport.height - triggerRect.bottom - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX
   const spaceAbove = triggerRect.top - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX
   const placeBelow = spaceBelow >= height || spaceBelow >= spaceAbove
   const preferredTop = placeBelow
     ? triggerRect.bottom + FLOW_LOG_CHOOSER_GAP_PX
     : triggerRect.top - height - FLOW_LOG_CHOOSER_GAP_PX
-  const maxTop = Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, viewport.height - height - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX)
-  const top = Math.min(Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredTop), maxTop)
+  const maxTop = Math.max(
+    FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
+    viewport.height - height - FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX,
+  )
+  const top = Math.min(
+    Math.max(FLOW_LOG_CHOOSER_VIEWPORT_PADDING_PX, preferredTop),
+    maxTop,
+  )
 
   return {
     left: `${Math.round(left)}px`,
@@ -660,7 +821,16 @@ export function computeFlowLogChooserAnchorStyle(
 </script>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, toRef } from 'vue'
+import {
+  ref,
+  reactive,
+  computed,
+  onMounted,
+  onUnmounted,
+  watch,
+  nextTick,
+  toRef,
+} from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
@@ -672,7 +842,11 @@ import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import FlowLogStepChooser from '@/components/FlowLogStepChooser.vue'
 import ChecklistTable from '@/components/ChecklistTable.vue'
 import { useParameters } from '@/composables/useParameters'
-import { useHomeData, type AnalysisChartItem, type FlowLogSegment } from '@/composables/useHomeData'
+import {
+  useHomeData,
+  type AnalysisChartItem,
+  type FlowLogSegment,
+} from '@/composables/useHomeData'
 import { isChecklistPassed } from '@/utils/checklistState'
 import { isWindowResizing } from '@/composables/useWindowResizeState'
 import {
@@ -725,7 +899,9 @@ async function onExpandFullLog(seg: FlowLogSegment): Promise<void> {
 }
 
 const flowLogListItems = computed(() => toFlowLogListItems(flowLogSegments.value))
-const flowLogChooser = reactive(createFlowLogChooserController(getDefaultSelectedFlowLogKey(flowLogSegments.value)))
+const flowLogChooser = reactive(
+  createFlowLogChooserController(getDefaultSelectedFlowLogKey(flowLogSegments.value)),
+)
 const selectedFlowLogKey = toRef(flowLogChooser, 'selectedFlowLogKey')
 const isFlowLogStepChooserOpen = toRef(flowLogChooser, 'isFlowLogStepChooserOpen')
 const flowLogChooserDialogRef = ref<HTMLElement | null>(null)
@@ -742,7 +918,11 @@ const liveFlowLogKey = computed(() => {
 })
 const selectedFlowLogSegment = computed(() => {
   if (!selectedFlowLogKey.value) return null
-  return flowLogSegments.value.find((segment) => flowLogStepKey(segment) === selectedFlowLogKey.value) ?? null
+  return (
+    flowLogSegments.value.find(
+      (segment) => flowLogStepKey(segment) === selectedFlowLogKey.value,
+    ) ?? null
+  )
 })
 const selectedFlowLogContent = computed(() => {
   if (!selectedFlowLogKey.value) return ''
@@ -750,11 +930,9 @@ const selectedFlowLogContent = computed(() => {
 })
 const flowLogSelectionSignature = computed(() =>
   flowLogSegments.value
-    .map((segment) => [
-      flowLogStepKey(segment),
-      segment.state,
-      segment.live ? '1' : '0',
-    ].join(':'))
+    .map((segment) =>
+      [flowLogStepKey(segment), segment.state, segment.live ? '1' : '0'].join(':'),
+    )
     .join('\u001e'),
 )
 
@@ -817,28 +995,25 @@ watch(
   { immediate: true },
 )
 
-watch(
-  isFlowLogStepChooserOpen,
-  async (isOpen, wasOpen) => {
-    await nextTick()
-    if (isOpen) {
-      requestAnimationFrame(() => {
-        updateFlowLogChooserAnchorPosition()
-        flowLogChooserDialogRef.value?.focus()
-      })
-      if (typeof window !== 'undefined') {
-        window.addEventListener('resize', updateFlowLogChooserAnchorPosition)
-      }
-      return
-    }
+watch(isFlowLogStepChooserOpen, async (isOpen, wasOpen) => {
+  await nextTick()
+  if (isOpen) {
+    requestAnimationFrame(() => {
+      updateFlowLogChooserAnchorPosition()
+      flowLogChooserDialogRef.value?.focus()
+    })
     if (typeof window !== 'undefined') {
-      window.removeEventListener('resize', updateFlowLogChooserAnchorPosition)
+      window.addEventListener('resize', updateFlowLogChooserAnchorPosition)
     }
-    if (wasOpen) {
-      flowLogStepChooserTriggerRef.value?.focus()
-    }
-  },
-)
+    return
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateFlowLogChooserAnchorPosition)
+  }
+  if (wasOpen) {
+    flowLogStepChooserTriggerRef.value?.focus()
+  }
+})
 
 watch(
   selectedFlowLogSegment,
@@ -874,8 +1049,8 @@ watch(
 )
 
 // checklist 完成计数
-const checklistCompletedCount = computed(() =>
-  checklistItems.value.filter(item => isChecklistPassed(item.state)).length
+const checklistCompletedCount = computed(
+  () => checklistItems.value.filter((item) => isChecklistPassed(item.state)).length,
 )
 
 // ============ Layout 全屏 & 缩放平移 ============
@@ -900,7 +1075,7 @@ const layoutImageTransform = computed(() => {
   return {
     transform: `translate(${layoutTranslateX.value}px, ${layoutTranslateY.value}px) scale(${layoutScale.value})`,
     transformOrigin: 'center center',
-    cursor: isDragging.value ? 'grabbing' : (layoutScale.value > 1 ? 'grab' : 'default'),
+    cursor: isDragging.value ? 'grabbing' : layoutScale.value > 1 ? 'grab' : 'default',
     // 拖动时关闭 transition：每帧 mousemove 都会设置新 transform，
     // 留着 transition 反而让手感"延迟一帧"
     transition: isDragging.value ? 'none' : undefined,
@@ -1011,14 +1186,20 @@ let pendingDashboardSettleRaf: number | null = null
 
 /** 预置配色盘 —— 按 key 出现顺序循环取色 */
 const COLOR_PALETTE = [
-  '#ef4444', '#3b82f6', '#10b981', '#a855f7',
-  '#f59e0b', '#06b6d4', '#ec4899', '#84cc16',
+  '#ef4444',
+  '#3b82f6',
+  '#10b981',
+  '#a855f7',
+  '#f59e0b',
+  '#06b6d4',
+  '#ec4899',
+  '#84cc16',
 ]
 
 /** 从 monitorData 动态提取除 step 以外的所有指标 key */
 const monitorKeys = computed<string[]>(() => {
   if (!monitorData.value) return []
-  return Object.keys(monitorData.value).filter(k => k !== 'step')
+  return Object.keys(monitorData.value).filter((k) => k !== 'step')
 })
 
 /** 动态生成图表配置列表 */
@@ -1051,7 +1232,9 @@ function parseTimeToSeconds(val: string): number {
 
 /** 判断一个值数组是否全部为 "h:m:s" 格式的时间字符串 */
 function isTimeFormatArray(arr: any[]): boolean {
-  return arr.length > 0 && arr.every(v => typeof v === 'string' && /^\d+:\d+:\d+$/.test(v))
+  return (
+    arr.length > 0 && arr.every((v) => typeof v === 'string' && /^\d+:\d+:\d+$/.test(v))
+  )
 }
 
 /** 获取某个维度的数值数组（自动检测字符串/数字） */
@@ -1096,14 +1279,16 @@ function buildSharedTooltipFormatter(params: any): string {
   const stepName = steps[idx] || `Step #${idx}`
 
   const configs = chartConfigs.value
-  const rows = configs.map(cfg => {
-    const value = getMetricDisplay(cfg.key, idx)
-    return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
+  const rows = configs
+    .map((cfg) => {
+      const value = getMetricDisplay(cfg.key, idx)
+      return `<div style="display:flex;align-items:center;gap:6px;margin-top:3px">
        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${cfg.color}"></span>
        <span style="flex:1;color:#aaa">${cfg.label}</span>
        <span style="font-weight:600;color:#e5e5e5;font-family:'JetBrains Mono',monospace">${value}</span>
      </div>`
-  }).join('')
+    })
+    .join('')
 
   return `<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:#fff;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:4px">${stepName}</div>
           <div style="font-size:10px">${rows}</div>`
@@ -1425,7 +1610,6 @@ function onAnalysisChartClick(chart: AnalysisChartItem) {
 function closeChartPreview() {
   chartPreview.value.visible = false
 }
-
 </script>
 
 <style scoped>
@@ -1442,7 +1626,11 @@ function closeChartPreview() {
   inset: 0;
   background-image:
     linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--accent-rgb, 59, 130, 246), 0.03) 1px, transparent 1px);
+    linear-gradient(
+      90deg,
+      rgba(var(--accent-rgb, 59, 130, 246), 0.03) 1px,
+      transparent 1px
+    );
   background-size: 32px 32px;
   pointer-events: none;
 }
@@ -1538,12 +1726,12 @@ function closeChartPreview() {
 }
 
 .dashboard-splitter :deep(.p-splitter-gutter:hover),
-.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing="true"]) {
+.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true']) {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
 }
 
 .dashboard-splitter :deep(.p-splitter-gutter:hover::after),
-.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing="true"]::after) {
+.dashboard-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true']::after) {
   background: var(--accent-color);
   box-shadow: 0 0 8px rgba(var(--accent-rgb, 59, 130, 246), 0.45);
 }
@@ -1750,7 +1938,10 @@ function closeChartPreview() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
   font-size: 11px;
 }
 
@@ -1935,7 +2126,11 @@ html.dark .monitor-value {
   background-color: var(--bg-primary);
   background-image:
     linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--accent-rgb, 59, 130, 246), 0.08) 1px, transparent 1px);
+    linear-gradient(
+      90deg,
+      rgba(var(--accent-rgb, 59, 130, 246), 0.08) 1px,
+      transparent 1px
+    );
   background-size: 20px 20px;
   background-position: center center;
   margin: 8px;
@@ -1952,7 +2147,9 @@ html.dark .monitor-value {
   right: 0;
   height: 2px;
   background: var(--accent-color);
-  box-shadow: 0 0 15px 3px rgba(var(--accent-rgb, 59, 130, 246), 0.4), 0 0 30px 6px rgba(var(--accent-rgb, 59, 130, 246), 0.2);
+  box-shadow:
+    0 0 15px 3px rgba(var(--accent-rgb, 59, 130, 246), 0.4),
+    0 0 30px 6px rgba(var(--accent-rgb, 59, 130, 246), 0.2);
   opacity: 0.8;
   animation: scan-animation 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   will-change: transform, opacity;
@@ -1961,10 +2158,20 @@ html.dark .monitor-value {
 }
 
 @keyframes scan-animation {
-  0% { transform: translateY(-10px); opacity: 0; }
-  10% { opacity: 0.8; }
-  90% { opacity: 0.8; }
-  100% { transform: translateY(100vh); opacity: 0; }
+  0% {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
 }
 
 .layout-placeholder {
@@ -1977,7 +2184,11 @@ html.dark .monitor-value {
   border: 2px dashed var(--border-color);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, rgba(var(--accent-rgb, 59, 130, 246), 0.02) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      rgba(var(--accent-rgb, 59, 130, 246), 0.02) 1px,
+      transparent 1px
+    ),
     linear-gradient(rgba(var(--accent-rgb, 59, 130, 246), 0.02) 1px, transparent 1px);
   background-size: 16px 16px;
 }
@@ -2057,7 +2268,10 @@ html.dark .monitor-value {
   padding: 8px;
   min-width: 0;
   min-height: 0;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
   cursor: pointer;
   overflow: hidden;
   /* 指标图表卡片内容不影响外部，resize 时也不会牵连兄弟卡片重排 */
@@ -2395,7 +2609,10 @@ html.dark .chart-card:hover {
   font-weight: 600;
   letter-spacing: 0.02em;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
   line-height: 1.3;
 }
 
@@ -2433,8 +2650,12 @@ html.dark .chart-card:hover {
 }
 
 @keyframes flow-log-expand-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .flow-log-error {
@@ -2542,7 +2763,9 @@ html.dark .chart-card:hover {
 
 .flow-log-chooser-enter-active .flow-log-chooser-anchor,
 .flow-log-chooser-leave-active .flow-log-chooser-anchor {
-  transition: transform 140ms ease, opacity 140ms ease;
+  transition:
+    transform 140ms ease,
+    opacity 140ms ease;
 }
 
 .flow-log-chooser-enter-from,

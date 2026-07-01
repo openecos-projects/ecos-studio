@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { desktopApiEventChannels } from '@ecos-studio/shared'
-import { bindWindowEvents, confirmWindowClose, toggleMaximizeWindow } from './windowService'
+import {
+  bindWindowEvents,
+  confirmWindowClose,
+  toggleMaximizeWindow,
+} from './windowService'
 
 type WindowListener = () => void
 type CloseListener = (event: { preventDefault: () => void }) => void

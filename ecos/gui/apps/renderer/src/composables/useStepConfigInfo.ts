@@ -56,7 +56,10 @@ function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | und
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
-function firstResponseMessage(response: { message?: string[] } | undefined, fallback: string): string {
+function firstResponseMessage(
+  response: { message?: string[] } | undefined,
+  fallback: string,
+): string {
   return response?.message?.[0] || fallback
 }
 
@@ -89,7 +92,9 @@ export function useStepConfigInfo() {
   const isSavingStepConfig = ref(false)
   const activeStepConfigSave = ref<symbol | null>(null)
   const stepConfigSaveError = ref<string | null>(null)
-  const isMutationLocked = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
+  const isMutationLocked = computed(() =>
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  )
   let activeRefetchToken: symbol | null = null
   let lastLoadedStep: StepEnum | null = null
 
@@ -128,9 +133,8 @@ export function useStepConfigInfo() {
     }
 
     try {
-      const response = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveWorkspaceStepInfoApi({
+      const response = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveWorkspaceStepInfoApi({
           step: stepEnum,
           id: InfoEnum.config,
         }),
@@ -169,7 +173,8 @@ export function useStepConfigInfo() {
 
       responseKind.value = 'error'
       info.value = null
-      error.value = (response.message && response.message[0]) || 'Failed to load step configuration'
+      error.value =
+        (response.message && response.message[0]) || 'Failed to load step configuration'
       clearFileState()
     } catch (e) {
       if (!canApply()) return
@@ -259,9 +264,8 @@ export function useStepConfigInfo() {
     }
 
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(localPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(localPath),
       )
       if (!canApply()) return
       if (!resolvedPath) {
@@ -269,9 +273,8 @@ export function useStepConfigInfo() {
         stepConfigReadError.value = `No file-system access to ${localPath}`
         return
       }
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
       if (!canApply() || fileContent === undefined) return
       stepConfigRaw.value = fileContent
@@ -292,10 +295,7 @@ export function useStepConfigInfo() {
   )
 
   watch(
-    () => [
-      resourceVersions.value['step-config'],
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value['step-config'], resourceVersions.value.all],
     () => {
       void refetch()
     },
@@ -374,7 +374,8 @@ export function useStepConfigInfo() {
     const step = currentStep.value
     const saveToken = Symbol('step-config-save')
     const isCurrentSave = () => activeStepConfigSave.value === saveToken
-    const canApply = () => workspaceLifecycle.isCurrentSession(sessionId) && isCurrentSave()
+    const canApply = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) && isCurrentSave()
     const setSavingForToken = (value: boolean) => {
       if (activeStepConfigSave.value === saveToken) {
         isSavingStepConfig.value = value
@@ -394,13 +395,13 @@ export function useStepConfigInfo() {
     }
     const rawBeforeSave = stepConfigRaw.value
     const textDraftBeforeSave = stepConfigTextDraft.value
-    const draftBeforeSave = stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
+    const draftBeforeSave =
+      stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
     activeStepConfigSave.value = saveToken
     isSavingStepConfig.value = true
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(path),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(path),
       )
       if (!canApply()) return false
       if (!resolvedPath) {
@@ -417,9 +418,8 @@ export function useStepConfigInfo() {
           stepConfigSaveError.value = 'No workspace is open'
           return false
         }
-        const syncResult = await workspaceLifecycle.runForSession(
-          sessionId,
-          () => syncConfigApi({
+        const syncResult = await workspaceLifecycle.runForSession(sessionId, () =>
+          syncConfigApi({
             cmd: CMDEnum.sync_config,
             data: {
               config_path: resolvedPath,
@@ -444,7 +444,10 @@ export function useStepConfigInfo() {
         }
 
         if (syncResult?.response !== ResponseEnum.success) {
-          stepConfigSaveError.value = firstResponseMessage(syncResult, 'Sync workspace config failed')
+          stepConfigSaveError.value = firstResponseMessage(
+            syncResult,
+            'Sync workspace config failed',
+          )
           return false
         }
 
@@ -471,13 +474,10 @@ export function useStepConfigInfo() {
         return false
       }
       text = JSON.stringify(draftBeforeSave, null, 4)
-      const writeResult = await workspaceLifecycle.runForSession(
-        sessionId,
-        async () => {
-          await writeProjectTextFile(resolvedPath, text)
-          return true
-        },
-      )
+      const writeResult = await workspaceLifecycle.runForSession(sessionId, async () => {
+        await writeProjectTextFile(resolvedPath, text)
+        return true
+      })
       if (!canApply() || writeResult !== true) return false
       stepConfigRaw.value = text
       stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)

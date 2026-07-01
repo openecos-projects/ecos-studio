@@ -16,13 +16,21 @@ import type {
 
 export interface AgentProviderRuntime {
   start(request?: DesktopAgentStartRequest): Promise<void>
-  startSession(request: DesktopAgentStartSessionRequest): Promise<DesktopAgentStartSessionResponse>
-  sendMessage(request: DesktopAgentSendMessageRequest): Promise<DesktopAgentSendMessageResponse>
+  startSession(
+    request: DesktopAgentStartSessionRequest,
+  ): Promise<DesktopAgentStartSessionResponse>
+  sendMessage(
+    request: DesktopAgentSendMessageRequest,
+  ): Promise<DesktopAgentSendMessageResponse>
   interrupt(request?: DesktopAgentProviderRequest): Promise<void>
   getStatus(request?: DesktopAgentProviderRequest): Promise<DesktopAgentStatus>
   setMode(request: DesktopAgentSetModeRequest): Promise<DesktopAgentStatus>
-  listSessions(request: DesktopAgentListSessionsRequest): Promise<DesktopAgentListSessionsResponse>
-  resumeSession(request: DesktopAgentResumeSessionRequest): Promise<DesktopAgentResumeSessionResponse>
+  listSessions(
+    request: DesktopAgentListSessionsRequest,
+  ): Promise<DesktopAgentListSessionsResponse>
+  resumeSession(
+    request: DesktopAgentResumeSessionRequest,
+  ): Promise<DesktopAgentResumeSessionResponse>
   stop(request?: DesktopAgentProviderRequest): Promise<void>
   onEvent(listener: (event: DesktopAgentEvent) => void): () => void
 }

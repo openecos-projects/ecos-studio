@@ -32,15 +32,17 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-export async function readRuntimeLockOwner(lockDirectory: string): Promise<RuntimeLockOwner | null> {
+export async function readRuntimeLockOwner(
+  lockDirectory: string,
+): Promise<RuntimeLockOwner | null> {
   try {
     const raw = await readLockOwnerText(lockDirectory)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<RuntimeLockOwner>
     if (
-      typeof parsed.jobId === 'string'
-      && typeof parsed.pid === 'number'
-      && typeof parsed.scope === 'string'
+      typeof parsed.jobId === 'string' &&
+      typeof parsed.pid === 'number' &&
+      typeof parsed.scope === 'string'
     ) {
       return {
         jobId: parsed.jobId,
@@ -144,7 +146,10 @@ async function acquireRuntimeReclaimLock(
 ): Promise<RuntimeLockHandle | null> {
   await mkdir(rootDirectory, { recursive: true })
   const reclaimScope = `${scope}:reclaim`
-  const reclaimPath = path.join(rootDirectory, `${runtimeLockName(reclaimScope)}.reclaim.lock`)
+  const reclaimPath = path.join(
+    rootDirectory,
+    `${runtimeLockName(reclaimScope)}.reclaim.lock`,
+  )
   const owner: RuntimeLockOwner = {
     jobId: `${jobId}:reclaim`,
     pid: process.pid,
@@ -169,17 +174,17 @@ async function acquireOwnerDirectoryLock(
   try {
     await mkdir(lockPath)
     lockDirectoryCreated = true
-    if (!await writeRuntimeLockOwnerFile(lockPath, owner)) return null
+    if (!(await writeRuntimeLockOwnerFile(lockPath, owner))) return null
   } catch (error) {
     if (lockDirectoryCreated) {
       await removeFailedRuntimeLockDirectory(lockPath, owner)
     }
     const code = (error as NodeJS.ErrnoException).code
     if (
-      code === 'EEXIST'
-      || code === 'EISDIR'
-      || code === 'ENOTDIR'
-      || code === 'ENOTEMPTY'
+      code === 'EEXIST' ||
+      code === 'EISDIR' ||
+      code === 'ENOTDIR' ||
+      code === 'ENOTEMPTY'
     ) {
       return null
     }
@@ -209,9 +214,13 @@ export async function isRuntimeScopeActive(
   const lockPath = path.join(rootDirectory, `${runtimeLockName(scope)}.lock`)
   const active = await isRuntimeLockPathActive(lockPath, scope)
   if (active) return true
-  if (!await runtimeLockPathExists(lockPath)) return false
+  if (!(await runtimeLockPathExists(lockPath))) return false
 
-  const reclaimLock = await acquireRuntimeReclaimLock(rootDirectory, scope, `observer-${process.pid}`)
+  const reclaimLock = await acquireRuntimeReclaimLock(
+    rootDirectory,
+    scope,
+    `observer-${process.pid}`,
+  )
   if (!reclaimLock) {
     return isRuntimeLockPathActive(lockPath, scope)
   }
@@ -258,9 +267,11 @@ function isSameRuntimeLockOwner(
   actual: RuntimeLockOwner | null,
   expected: RuntimeLockOwner,
 ): boolean {
-  return actual?.jobId === expected.jobId
-    && actual.pid === expected.pid
-    && actual.scope === expected.scope
+  return (
+    actual?.jobId === expected.jobId &&
+    actual.pid === expected.pid &&
+    actual.scope === expected.scope
+  )
 }
 
 async function writeRuntimeLockOwnerFile(
@@ -270,7 +281,10 @@ async function writeRuntimeLockOwnerFile(
   const ownerPath = path.join(lockPath, 'owner.json')
   let ownerWritten = false
   try {
-    await writeFile(ownerPath, JSON.stringify(owner, null, 2), { flag: 'wx', mode: 0o444 })
+    await writeFile(ownerPath, JSON.stringify(owner, null, 2), {
+      flag: 'wx',
+      mode: 0o444,
+    })
     ownerWritten = true
     await chmod(ownerPath, 0o444)
     return true
@@ -282,8 +296,8 @@ async function writeRuntimeLockOwnerFile(
     }
     if (code === 'EEXIST') return false
     if (
-      (code === 'EACCES' || code === 'EPERM')
-      && await readRuntimeLockOwner(lockPath) !== null
+      (code === 'EACCES' || code === 'EPERM') &&
+      (await readRuntimeLockOwner(lockPath)) !== null
     ) {
       return false
     }

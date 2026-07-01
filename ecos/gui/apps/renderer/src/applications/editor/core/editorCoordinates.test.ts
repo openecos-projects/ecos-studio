@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { edaBBoxToWorldRect, displayPointFromWorld } from '@/applications/editor/core/editorCoordinates'
+import {
+  edaBBoxToWorldRect,
+  displayPointFromWorld,
+} from '@/applications/editor/core/editorCoordinates'
 
 describe('edaBBoxToWorldRect', () => {
   it('maps EDA lower-left / upper-right to Pixi top-left rect', () => {

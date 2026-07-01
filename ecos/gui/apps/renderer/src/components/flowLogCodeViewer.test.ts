@@ -101,26 +101,29 @@ function loadFlowLogCodeViewerComponent(vue: typeof import('vue')) {
 
         destroy = vi.fn()
 
-        dispatch = vi.fn((transaction: { changes?: { from: number, to?: number, insert: string } }) => {
-          const changes = transaction.changes
-          if (!changes) return
+        dispatch = vi.fn(
+          (transaction: { changes?: { from: number; to?: number; insert: string } }) => {
+            const changes = transaction.changes
+            if (!changes) return
 
-          const current = this.docText
-          const next = changes.from === 0 && changes.to === current.length
-            ? changes.insert
-            : `${current.slice(0, changes.from)}${changes.insert}${current.slice(changes.to ?? changes.from)}`
-          this.docText = next
+            const current = this.docText
+            const next =
+              changes.from === 0 && changes.to === current.length
+                ? changes.insert
+                : `${current.slice(0, changes.from)}${changes.insert}${current.slice(changes.to ?? changes.from)}`
+            this.docText = next
 
-          this.state = {
-            ...this.state,
-            doc: {
-              length: next.length,
-              toString: () => next,
-            },
-          }
-        })
+            this.state = {
+              ...this.state,
+              doc: {
+                length: next.length,
+                toString: () => next,
+              },
+            }
+          },
+        )
 
-        constructor(config: { parent: HTMLElement, state: any }) {
+        constructor(config: { parent: HTMLElement; state: any }) {
           this.parent = config.parent
           this.state = config.state
           this.docText = config.state.doc.toString()
@@ -161,7 +164,10 @@ vi.mock('@codemirror/state', () => ({
 }))
 
 vi.mock('@codemirror/search', () => ({
-  search: codemirrorMocks.search.mockImplementation((options: unknown) => ({ type: 'search', options })),
+  search: codemirrorMocks.search.mockImplementation((options: unknown) => ({
+    type: 'search',
+    options,
+  })),
   searchKeymap: [{ key: 'Mod-f' }],
 }))
 
@@ -173,7 +179,10 @@ vi.mock('@codemirror/view', () => {
 
     static lineWrapping = { type: 'lineWrapping' }
 
-    static theme = codemirrorMocks.editorTheme.mockImplementation((theme: unknown) => ({ type: 'theme', theme }))
+    static theme = codemirrorMocks.editorTheme.mockImplementation((theme: unknown) => ({
+      type: 'theme',
+      theme,
+    }))
 
     parent: any
 
@@ -194,26 +203,29 @@ vi.mock('@codemirror/view', () => {
 
     destroy = vi.fn()
 
-    dispatch = vi.fn((transaction: { changes?: { from: number, to?: number, insert: string } }) => {
-      const changes = transaction.changes
-      if (!changes) return
+    dispatch = vi.fn(
+      (transaction: { changes?: { from: number; to?: number; insert: string } }) => {
+        const changes = transaction.changes
+        if (!changes) return
 
-      const current = this.docText
-      const next = changes.from === 0 && changes.to === current.length
-        ? changes.insert
-        : `${current.slice(0, changes.from)}${changes.insert}${current.slice(changes.to ?? changes.from)}`
-      this.docText = next
+        const current = this.docText
+        const next =
+          changes.from === 0 && changes.to === current.length
+            ? changes.insert
+            : `${current.slice(0, changes.from)}${changes.insert}${current.slice(changes.to ?? changes.from)}`
+        this.docText = next
 
-      this.state = {
-        ...this.state,
-        doc: {
-          length: next.length,
-          toString: () => next,
-        },
-      }
-    })
+        this.state = {
+          ...this.state,
+          doc: {
+            length: next.length,
+            toString: () => next,
+          },
+        }
+      },
+    )
 
-    constructor(config: { parent: HTMLElement, state: any }) {
+    constructor(config: { parent: HTMLElement; state: any }) {
       this.parent = config.parent
       this.state = config.state
       this.docText = config.state.doc.toString()
@@ -228,9 +240,14 @@ vi.mock('@codemirror/view', () => {
   return {
     EditorView: MockEditorView,
     keymap: {
-      of: codemirrorMocks.keymapOf.mockImplementation((value: unknown) => ({ type: 'keymap', value })),
+      of: codemirrorMocks.keymapOf.mockImplementation((value: unknown) => ({
+        type: 'keymap',
+        value,
+      })),
     },
-    lineNumbers: codemirrorMocks.lineNumbers.mockImplementation(() => ({ type: 'lineNumbers' })),
+    lineNumbers: codemirrorMocks.lineNumbers.mockImplementation(() => ({
+      type: 'lineNumbers',
+    })),
   }
 })
 
@@ -379,7 +396,9 @@ class FakeElement extends FakeNode {
         this.className = [...new Set([...read(), ...tokens])].join(' ')
       },
       remove: (...tokens: string[]) => {
-        this.className = read().filter((token) => !tokens.includes(token)).join(' ')
+        this.className = read()
+          .filter((token) => !tokens.includes(token))
+          .join(' ')
       },
     }
   }
@@ -579,17 +598,27 @@ describe('flowLogCodeViewer helpers', () => {
   })
 
   it('treats only near-tail scroll positions as pinned', () => {
-    expect(isFlowLogViewerNearTail({
-      scrollHeight: 1000,
-      scrollTop: 686,
-      clientHeight: 300,
-    }, 16)).toBe(true)
+    expect(
+      isFlowLogViewerNearTail(
+        {
+          scrollHeight: 1000,
+          scrollTop: 686,
+          clientHeight: 300,
+        },
+        16,
+      ),
+    ).toBe(true)
 
-    expect(isFlowLogViewerNearTail({
-      scrollHeight: 1000,
-      scrollTop: 600,
-      clientHeight: 300,
-    }, 16)).toBe(false)
+    expect(
+      isFlowLogViewerNearTail(
+        {
+          scrollHeight: 1000,
+          scrollTop: 600,
+          clientHeight: 300,
+        },
+        16,
+      ),
+    ).toBe(false)
   })
 
   it('keeps the viewer full-height while reducing empty-state framing', () => {
@@ -630,12 +659,13 @@ describe('FlowLogCodeViewer async content behavior', () => {
 
     const Host = vue.defineComponent({
       setup() {
-        return () => vue.h(FlowLogCodeViewer, {
-          content: state.content,
-          live: false,
-          missing: false,
-          loading: false,
-        })
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: state.content,
+            live: false,
+            missing: false,
+            loading: false,
+          })
       },
     })
 
@@ -672,12 +702,13 @@ describe('FlowLogCodeViewer async content behavior', () => {
     })
     const Host = vue.defineComponent({
       setup() {
-        return () => vue.h(FlowLogCodeViewer, {
-          content: state.content,
-          live: true,
-          missing: false,
-          loading: false,
-        })
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: state.content,
+            live: true,
+            missing: false,
+            loading: false,
+          })
       },
     })
     const container = document.createElement('div')
@@ -710,12 +741,13 @@ describe('FlowLogCodeViewer async content behavior', () => {
 
     const Host = vue.defineComponent({
       setup() {
-        return () => vue.h(FlowLogCodeViewer, {
-          content: 'first line\nsecond line',
-          live: true,
-          missing: false,
-          loading: false,
-        })
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: 'first line\nsecond line',
+            live: true,
+            missing: false,
+            loading: false,
+          })
       },
     })
     const container = document.createElement('div')
@@ -745,12 +777,13 @@ describe('FlowLogCodeViewer async content behavior', () => {
     })
     const Host = vue.defineComponent({
       setup() {
-        return () => vue.h(FlowLogCodeViewer, {
-          content: state.content,
-          live: true,
-          missing: false,
-          loading: false,
-        })
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: state.content,
+            live: true,
+            missing: false,
+            loading: false,
+          })
       },
     })
     const container = document.createElement('div')
@@ -789,12 +822,13 @@ describe('FlowLogCodeViewer async content behavior', () => {
     })
     const Host = vue.defineComponent({
       setup() {
-        return () => vue.h(FlowLogCodeViewer, {
-          content: state.content,
-          live: true,
-          missing: false,
-          loading: false,
-        })
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: state.content,
+            live: true,
+            missing: false,
+            loading: false,
+          })
       },
     })
     const container = document.createElement('div')

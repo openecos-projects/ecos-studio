@@ -1,12 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { DesktopProjectFileChangedEvent } from '@ecos-studio/shared'
 import { WorkspaceService } from './workspaceService'
 
 const tempDirectories: string[] = []
-type ProjectScopeProviderDouble = ConstructorParameters<typeof WorkspaceService>[0]['projectScopeProvider']
+type ProjectScopeProviderDouble = ConstructorParameters<
+  typeof WorkspaceService
+>[0]['projectScopeProvider']
 
 async function createTempDir(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix))
@@ -32,7 +42,9 @@ function createWorkspaceService(
   rootPath: string,
   canonicalPath: string,
   options: {
-    runtimeMutationGuard?: ConstructorParameters<typeof WorkspaceService>[0]['runtimeMutationGuard']
+    runtimeMutationGuard?: ConstructorParameters<
+      typeof WorkspaceService
+    >[0]['runtimeMutationGuard']
   } = {},
 ): {
   projectScopeProvider: ProjectScopeProviderDouble
@@ -54,9 +66,12 @@ async function waitForProjectFileEvent(
   listener: ReturnType<typeof vi.fn>,
   event: Partial<DesktopProjectFileChangedEvent>,
 ): Promise<void> {
-  await vi.waitFor(() => {
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining(event))
-  }, { timeout: 3000 })
+  await vi.waitFor(
+    () => {
+      expect(listener).toHaveBeenCalledWith(expect.objectContaining(event))
+    },
+    { timeout: 3000 },
+  )
 }
 
 async function delay(ms: number): Promise<void> {
@@ -68,9 +83,9 @@ async function delay(ms: number): Promise<void> {
 describe('WorkspaceService', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -132,7 +147,10 @@ describe('WorkspaceService', () => {
     const { service } = createWorkspaceService(directory, filePath)
 
     await expect(
-      service.readOptionalProjectTextFileTail('/workspace/Synthesis_yosys/log/Synthesis.log', 10),
+      service.readOptionalProjectTextFileTail(
+        '/workspace/Synthesis_yosys/log/Synthesis.log',
+        10,
+      ),
     ).resolves.toEqual({
       content: 'third line',
       truncated: true,
@@ -150,7 +168,11 @@ describe('WorkspaceService', () => {
     const offset = Buffer.byteLength('alpha')
 
     await expect(
-      service.readOptionalProjectTextFileUpdate('/workspace/Route_openroad/log/Route.log', offset, 32),
+      service.readOptionalProjectTextFileUpdate(
+        '/workspace/Route_openroad/log/Route.log',
+        offset,
+        32,
+      ),
     ).resolves.toMatchObject({
       content: '\nbeta',
       fromOffsetBytes: offset,
@@ -170,7 +192,11 @@ describe('WorkspaceService', () => {
     const { service } = createWorkspaceService(directory, filePath)
 
     await expect(
-      service.readOptionalProjectTextFileUpdate('/workspace/Route_openroad/log/Route.log', 0, 10),
+      service.readOptionalProjectTextFileUpdate(
+        '/workspace/Route_openroad/log/Route.log',
+        0,
+        10,
+      ),
     ).resolves.toMatchObject({
       content: 'qrstuvwxyz',
       nextOffsetBytes: Buffer.byteLength('0123456789abcdefghijklmnopqrstuvwxyz'),
@@ -260,7 +286,10 @@ describe('WorkspaceService', () => {
     })
 
     await expect(
-      service.writeProjectTextFile('/workspace/config/cts_default_config.json', '{"skew_bound":0.1}'),
+      service.writeProjectTextFile(
+        '/workspace/config/cts_default_config.json',
+        '{"skew_bound":0.1}',
+      ),
     ).rejects.toThrow('workspace flow is running')
 
     await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
@@ -275,7 +304,10 @@ describe('WorkspaceService', () => {
     const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
 
     const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile('/workspace/home/flow.json', listener)
+    const subscriptionId = await service.watchProjectFile(
+      '/workspace/home/flow.json',
+      listener,
+    )
 
     expect(subscriptionId).toMatch(/^project-file-watch-/)
     expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
@@ -292,7 +324,10 @@ describe('WorkspaceService', () => {
 
     const { service } = createWorkspaceService(directory, filePath)
     const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile('/workspace/home/flow.json', listener)
+    const subscriptionId = await service.watchProjectFile(
+      '/workspace/home/flow.json',
+      listener,
+    )
 
     try {
       await writeFile(join(directory, 'unrelated.log'), 'noise', 'utf8')
@@ -326,7 +361,10 @@ describe('WorkspaceService', () => {
     const { projectScopeProvider, service } = createWorkspaceService(directory, filePath)
 
     const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile('/workspace/CTS_ecc/log/CTS.log', listener)
+    const subscriptionId = await service.watchProjectFile(
+      '/workspace/CTS_ecc/log/CTS.log',
+      listener,
+    )
 
     try {
       expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
@@ -381,22 +419,30 @@ describe('WorkspaceService', () => {
 
     const { service } = createWorkspaceService(directory, filePath)
     const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile('/workspace/home/flow.json', listener)
+    const subscriptionId = await service.watchProjectFile(
+      '/workspace/home/flow.json',
+      listener,
+    )
 
     try {
       await writeFile(replacementPath, '{"steps":[{"state":"complete"}]}', 'utf8')
       await rename(replacementPath, filePath)
 
-      await vi.waitFor(() => {
-        expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-          subscriptionId,
-          path: filePath,
-        }))
-        const events = listener.mock.calls.map(([event]) => event.eventType)
-        expect(events.some((eventType) => eventType === 'change' || eventType === 'rename')).toBe(
-          true,
-        )
-      }, { timeout: 3000 })
+      await vi.waitFor(
+        () => {
+          expect(listener).toHaveBeenCalledWith(
+            expect.objectContaining({
+              subscriptionId,
+              path: filePath,
+            }),
+          )
+          const events = listener.mock.calls.map(([event]) => event.eventType)
+          expect(
+            events.some((eventType) => eventType === 'change' || eventType === 'rename'),
+          ).toBe(true)
+        },
+        { timeout: 3000 },
+      )
     } finally {
       await service.unwatchProjectFile(subscriptionId)
     }
@@ -409,7 +455,10 @@ describe('WorkspaceService', () => {
 
     const { service } = createWorkspaceService(directory, filePath)
     const listener = vi.fn()
-    const subscriptionId = await service.watchProjectFile('/workspace/home/flow.json', listener)
+    const subscriptionId = await service.watchProjectFile(
+      '/workspace/home/flow.json',
+      listener,
+    )
 
     await service.unwatchProjectFile(subscriptionId)
     await writeFile(filePath, '{"steps":[{"state":"ongoing"}]}', 'utf8')

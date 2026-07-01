@@ -69,14 +69,16 @@ describe('createWorkspaceApi desktop bridge payload', () => {
     await expect(createWorkspaceApi(options)).resolves.toMatchObject({
       response: 'success',
     })
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'create_workspace',
-      data: expect.objectContaining({
-        parameters: expect.objectContaining({
-          design: 'demo',
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'create_workspace',
+        data: expect.objectContaining({
+          parameters: expect.objectContaining({
+            design: 'demo',
+          }),
+          rtl_list: ['/rtl/top.v'],
         }),
-        rtl_list: ['/rtl/top.v'],
       }),
-    }))
+    )
   })
 })

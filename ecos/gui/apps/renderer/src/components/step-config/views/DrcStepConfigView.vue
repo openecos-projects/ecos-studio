@@ -27,34 +27,39 @@ ensure()
         <div class="sc-pro-section__stripe" />
         <div class="sc-pro-section__titles">
           <div class="sc-pro-section__title">DRC input</div>
-          <div class="sc-pro-section__desc">Technology and layout file paths (absolute paths recommended)</div>
+          <div class="sc-pro-section__desc">
+            Technology and layout file paths (absolute paths recommended)
+          </div>
         </div>
       </div>
-      <div class="sc-pro-section__body space-y-3 sc-pro-path-field">
-        <div class="field min-w-0 max-w-full">
+      <div class="sc-pro-section__body sc-pro-path-field space-y-3">
+        <div class="field max-w-full min-w-0">
           <label>tech_lef_path</label>
           <InputText
             v-model="(draft.INPUT as Record<string, string>).tech_lef_path"
             size="small"
             fluid
-            class="min-w-0 max-w-full" />
+            class="max-w-full min-w-0"
+          />
         </div>
-        <div class="field min-w-0 max-w-full">
+        <div class="field max-w-full min-w-0">
           <label>lef_paths</label>
           <Textarea
             v-model="(draft.INPUT as Record<string, string>).lef_paths"
             auto-resize
             rows="3"
             fluid
-            class="w-full min-w-0 max-w-full" />
+            class="w-full max-w-full min-w-0"
+          />
         </div>
-        <div class="field min-w-0 max-w-full">
+        <div class="field max-w-full min-w-0">
           <label>def_path</label>
           <InputText
             v-model="(draft.INPUT as Record<string, string>).def_path"
             size="small"
             fluid
-            class="min-w-0 max-w-full" />
+            class="max-w-full min-w-0"
+          />
         </div>
       </div>
     </section>
@@ -67,13 +72,14 @@ ensure()
         </div>
       </div>
       <div class="sc-pro-section__body sc-pro-path-field">
-        <div class="field min-w-0 max-w-full">
+        <div class="field max-w-full min-w-0">
           <label>output_dir_path</label>
           <InputText
             v-model="(draft.OUTPUT as Record<string, string>).output_dir_path"
             size="small"
             fluid
-            class="min-w-0 max-w-full" />
+            class="max-w-full min-w-0"
+          />
         </div>
       </div>
     </section>

@@ -11,9 +11,16 @@
       <!-- 页面内容 -->
       <div
         class="app-main"
-        :style="terminalExpanded ? { '--terminal-panel-height': terminalPanelHeight } : undefined"
+        :style="
+          terminalExpanded
+            ? { '--terminal-panel-height': terminalPanelHeight }
+            : undefined
+        "
       >
-        <div class="app-content" :class="{ 'app-content--terminal-safe-area': terminalExpanded }">
+        <div
+          class="app-content"
+          :class="{ 'app-content--terminal-safe-area': terminalExpanded }"
+        >
           <router-view />
         </div>
         <ECOSTerminal
@@ -36,7 +43,11 @@
     <Toast position="top-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
-    <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
+    <NewProjectWizard
+      v-if="showNewProjectWizard"
+      @close="showNewProjectWizard = false"
+      @create="handleWizardCreate"
+    />
 
     <AboutDialog v-model="showAboutDialog" />
 
@@ -73,7 +84,11 @@ import { useAppWindowClose } from '@/composables/useAppWindowClose'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import {
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
@@ -99,15 +114,11 @@ const {
   runtimeBackendConnecting,
   runtimeBackendTitle,
   runtimeBackendSubtitle,
-} =
-  useWorkspace()
+} = useWorkspace()
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
-const {
-  showManageDialog,
-  openManageDialog,
-} = useDesignFiles()
+const { showManageDialog, openManageDialog } = useDesignFiles()
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
@@ -127,7 +138,9 @@ function handleTerminalHeightChange(height: string) {
 
 function toggleTerminalMaximized() {
   terminalPanelMaximized.value = !terminalPanelMaximized.value
-  terminalPanelHeight.value = terminalPanelMaximized.value ? '100%' : terminalPanelRestoredHeight.value
+  terminalPanelHeight.value = terminalPanelMaximized.value
+    ? '100%'
+    : terminalPanelRestoredHeight.value
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
@@ -139,7 +152,7 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
 const openDocumentation = async () => {
   try {
     if (desktopApi.value ?? hasDesktopApi()) {
-      const api = desktopApi.value ?? await waitForDesktopApi()
+      const api = desktopApi.value ?? (await waitForDesktopApi())
       desktopApi.value = api
       await api.system.openExternal(documentationUrl)
     } else {
@@ -151,7 +164,7 @@ const openDocumentation = async () => {
       severity: 'error',
       summary: 'Error',
       detail: `Failed to open documentation because of ${error instanceof Error ? error.message : String(error)}`,
-      life: 3000
+      life: 3000,
     })
   }
 }
@@ -287,9 +300,11 @@ onMounted(async () => {
   unlistenWindowResized = desktopApi.value.window.onResized(() => {
     markResizing()
   })
-  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged((isMaximized) => {
-    document.body.classList.toggle('window-maximized', isMaximized)
-  })
+  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
+    (isMaximized) => {
+      document.body.classList.toggle('window-maximized', isMaximized)
+    },
+  )
 })
 
 onUnmounted(() => {
@@ -368,7 +383,9 @@ onUnmounted(() => {
 
 .runtime-backend-overlay-enter-active .runtime-backend-panel,
 .runtime-backend-overlay-leave-active .runtime-backend-panel {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition:
+    transform 0.22s ease,
+    opacity 0.22s ease;
 }
 
 .runtime-backend-overlay-enter-from,

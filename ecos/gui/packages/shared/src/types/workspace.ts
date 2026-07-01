@@ -1,4 +1,9 @@
-export type WorkspaceStatus = 'success' | 'failed' | 'running' | 'in_progress' | 'not_started'
+export type WorkspaceStatus =
+  | 'success'
+  | 'failed'
+  | 'running'
+  | 'in_progress'
+  | 'not_started'
 
 export interface WorkspaceSummary {
   id: string

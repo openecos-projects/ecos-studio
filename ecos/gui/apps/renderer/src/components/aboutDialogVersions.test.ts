@@ -45,13 +45,15 @@ describe('aboutDialogVersions', () => {
       eccTools: '0.1.0a2',
     }
 
-    expect(buildAboutVersionText(versions)).toBe([
-      'ECOS Studio',
-      'GUI: 0.1.0-alpha.6',
-      'Runtime: ECC CLI',
-      'ECC: 0.1.0a5',
-      'ECC-Tools: 0.1.0a2',
-      'ECC-DreamPlace: 0.1.0a3',
-    ].join('\n'))
+    expect(buildAboutVersionText(versions)).toBe(
+      [
+        'ECOS Studio',
+        'GUI: 0.1.0-alpha.6',
+        'Runtime: ECC CLI',
+        'ECC: 0.1.0a5',
+        'ECC-Tools: 0.1.0a2',
+        'ECC-DreamPlace: 0.1.0a3',
+      ].join('\n'),
+    )
   })
 })

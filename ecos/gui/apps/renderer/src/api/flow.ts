@@ -1,16 +1,16 @@
 import { toDesktopCliData } from './desktopPayload'
-import { RequestData, ResponseData, StepEnum, InfoEnum, StateEnum } from './type';
+import { RequestData, ResponseData, StepEnum, InfoEnum, StateEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
 
 export interface GetInfoRequest {
-  step: StepEnum;
-  id: InfoEnum;
+  step: StepEnum
+  id: InfoEnum
 }
 
 export interface GetInfoResponse {
-  step: string;
-  id: InfoEnum;
-  info: any;
+  step: string
+  id: InfoEnum
+  info: any
 }
 
 export function getInfoApi(request: RequestData<GetInfoRequest>) {
@@ -21,15 +21,13 @@ export function getInfoApi(request: RequestData<GetInfoRequest>) {
   }) as unknown as Promise<ResponseData<GetInfoResponse>>
 }
 
-
-
 export interface RTL2GDSRequest {
-  directory: string;
-  rerun: boolean;
+  directory: string
+  rerun: boolean
 }
 
 export interface RTL2GDSResponse {
-  rerun: boolean;
+  rerun: boolean
 }
 
 export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
@@ -41,14 +39,14 @@ export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
 }
 
 export interface RunStepRequest {
-  directory: string;
-  step: StepEnum;
-  rerun: boolean;
+  directory: string
+  step: StepEnum
+  rerun: boolean
 }
 
 export interface RunStepResponse {
-  step: StepEnum;
-  state: StateEnum;
+  step: StepEnum
+  state: StateEnum
 }
 
 export function runStepApi(request: RequestData<RunStepRequest>) {

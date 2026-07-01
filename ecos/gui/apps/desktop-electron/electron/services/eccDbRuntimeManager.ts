@@ -1,15 +1,14 @@
-import {
-  SharedRuntimeManager,
-  type RuntimeScope,
-} from './runtime/sharedRuntimeManager'
-import {
-  normalizeDirectoryScope,
-  workspaceRuntimeScope,
-} from './runtime/runtimeScopes'
+import { SharedRuntimeManager, type RuntimeScope } from './runtime/sharedRuntimeManager'
+import { normalizeDirectoryScope, workspaceRuntimeScope } from './runtime/runtimeScopes'
 
 export type EccDbRuntimeOperation = 'cleanup' | 'export' | 'initialize' | 'refresh'
 export type EccDbRuntimeResultStatus = 'error' | 'success' | 'warning'
-export type EccDbRuntimeEventType = 'completed' | 'failed' | 'progress' | 'queued' | 'started'
+export type EccDbRuntimeEventType =
+  | 'completed'
+  | 'failed'
+  | 'progress'
+  | 'queued'
+  | 'started'
 
 export interface EccDbRuntimeRequest {
   directory: string
@@ -38,7 +37,12 @@ export interface EccDbRuntimeEvent {
 }
 
 export interface EccDbRuntimeAdapterContext {
-  emit(event: Omit<EccDbRuntimeEvent, 'directory' | 'jobId' | 'operation' | 'step' | 'workspaceId'>): void
+  emit(
+    event: Omit<
+      EccDbRuntimeEvent,
+      'directory' | 'jobId' | 'operation' | 'step' | 'workspaceId'
+    >,
+  ): void
 }
 
 export interface EccDbRuntimeAdapter {
@@ -82,7 +86,10 @@ function scopeForRequest(request: EccDbRuntimeRequest): RuntimeScope {
 }
 
 function withRequestMetadata(
-  event: Omit<EccDbRuntimeEvent, 'directory' | 'jobId' | 'operation' | 'step' | 'workspaceId'>,
+  event: Omit<
+    EccDbRuntimeEvent,
+    'directory' | 'jobId' | 'operation' | 'step' | 'workspaceId'
+  >,
   request: EccDbRuntimeRequest,
   jobId: string,
   scope: RuntimeScope,
@@ -105,11 +112,16 @@ function lifecycleEvent(
   message?: string,
   result?: EccDbRuntimeResult,
 ): EccDbRuntimeEvent {
-  return withRequestMetadata({
-    ...(message ? { message } : {}),
-    ...(result ? { result } : {}),
-    type,
-  }, request, jobId, scope)
+  return withRequestMetadata(
+    {
+      ...(message ? { message } : {}),
+      ...(result ? { result } : {}),
+      type,
+    },
+    request,
+    jobId,
+    scope,
+  )
 }
 
 export class EccDbRuntimeManager {
@@ -128,7 +140,8 @@ export class EccDbRuntimeManager {
           context.emit(event as EccDbRuntimeEvent)
         },
       }),
-      createBlockedResult: (request, message) => createResult(request, 'warning', message),
+      createBlockedResult: (request, message) =>
+        createResult(request, 'warning', message),
       createFailedResult: (request, message) => createResult(request, 'error', message),
       getRequestLabel: (request) => `ECC DB ${request.operation}`,
       isFailedResult: (result) => !result.ok,
@@ -140,9 +153,21 @@ export class EccDbRuntimeManager {
       toFailedEvent: (request, jobId, scope, result) =>
         lifecycleEvent(request, jobId, scope, 'failed', result.message, result),
       toQueuedEvent: (request, jobId, scope) =>
-        lifecycleEvent(request, jobId, scope, 'queued', `Queued ECC DB ${request.operation}`),
+        lifecycleEvent(
+          request,
+          jobId,
+          scope,
+          'queued',
+          `Queued ECC DB ${request.operation}`,
+        ),
       toStartedEvent: (request, jobId, scope) =>
-        lifecycleEvent(request, jobId, scope, 'started', `Started ECC DB ${request.operation}`),
+        lifecycleEvent(
+          request,
+          jobId,
+          scope,
+          'started',
+          `Started ECC DB ${request.operation}`,
+        ),
       withJobMetadata: (event, request, jobId, scope) =>
         withRequestMetadata(event, request, jobId, scope),
     })

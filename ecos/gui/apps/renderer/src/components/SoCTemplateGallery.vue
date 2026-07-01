@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { importSocTemplateFromJsonText, removeImportedSocTemplate } from '@/composables/socTemplateCatalog'
+import {
+  importSocTemplateFromJsonText,
+  removeImportedSocTemplate,
+} from '@/composables/socTemplateCatalog'
 import type { SocTemplateSummary } from '@/composables/socTemplateMapper'
 
 defineProps<{
@@ -70,44 +73,65 @@ function sourceBadgeTitle(sourceLabel: string): string {
 <template>
   <section class="soc-gallery flex flex-col gap-10" aria-label="SoC template catalog">
     <!-- Hero -->
-    <header class="soc-gallery__hero relative overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary)/85 p-6 shadow-[0_1px_0_0_color-mix(in_srgb,var(--border-color)_80%,transparent)] sm:p-8">
+    <header
+      class="soc-gallery__hero relative overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary)/85 p-6 shadow-[0_1px_0_0_color-mix(in_srgb,var(--border-color)_80%,transparent)] sm:p-8"
+    >
       <div class="soc-gallery__hero-accent pointer-events-none" aria-hidden="true" />
-      <div class="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+      <div
+        class="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between"
+      >
         <div class="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-start sm:gap-6">
           <button
             type="button"
             class="group inline-flex w-max shrink-0 items-center gap-2 rounded-xl border border-(--border-color) bg-(--bg-primary) px-4 py-2.5 text-sm font-medium text-(--text-primary) shadow-sm transition-all duration-200 hover:border-(--accent-color) hover:text-(--accent-color) hover:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-color)_35%,transparent)]"
             @click="$emit('back')"
           >
-            <i class="ri-arrow-left-line text-lg transition-transform duration-200 group-hover:-translate-x-0.5" aria-hidden="true"></i>
+            <i
+              class="ri-arrow-left-line text-lg transition-transform duration-200 group-hover:-translate-x-0.5"
+              aria-hidden="true"
+            ></i>
             Back
           </button>
 
           <div class="min-w-0 pl-0 sm:border-l sm:border-(--border-color) sm:pl-7">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="soc-gallery__mono text-[10px] font-semibold uppercase tracking-[0.22em] text-(--text-secondary)">RetroSoC</span>
+              <span
+                class="soc-gallery__mono text-[10px] font-semibold tracking-[0.22em] text-(--text-secondary) uppercase"
+                >RetroSoC</span
+              >
               <span class="h-3 w-px bg-(--border-color)" aria-hidden="true" />
-              <span class="rounded-md bg-(--accent-color)/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-(--accent-color)">
+              <span
+                class="rounded-md bg-(--accent-color)/12 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-(--accent-color) uppercase"
+              >
                 Floorplan catalog
               </span>
             </div>
-            <h1 class="mt-3 font-bold tracking-tight text-(--text-primary) sm:text-4xl sm:leading-[1.08]" style="font-size: clamp(1.65rem, 4vw, 2.35rem)">
+            <h1
+              class="mt-3 font-bold tracking-tight text-(--text-primary) sm:text-4xl sm:leading-[1.08]"
+              style="font-size: clamp(1.65rem, 4vw, 2.35rem)"
+            >
               Templates
             </h1>
-            <p class="mt-3 max-w-lg text-sm leading-relaxed text-(--text-secondary) sm:text-[15px]">
-              Inspect floorplans and core bounding boxes from the remote SoC catalog, with local JSON imports available for private drafts.
+            <p
+              class="mt-3 max-w-lg text-sm leading-relaxed text-(--text-secondary) sm:text-[15px]"
+            >
+              Inspect floorplans and core bounding boxes from the remote SoC catalog, with
+              local JSON imports available for private drafts.
             </p>
             <p
               class="mt-4 max-w-2xl rounded-xl border border-(--accent-color)/22 bg-(--accent-color)/[0.06] px-4 py-3 text-xs leading-relaxed text-(--text-secondary)"
               role="note"
             >
               <span class="font-semibold text-(--text-primary)">Catalog-backed:</span>
-              remote entries are cached by the desktop app, while imported files stay on this device.
+              remote entries are cached by the desktop app, while imported files stay on
+              this device.
             </p>
           </div>
         </div>
 
-        <div class="flex w-full flex-col gap-3 sm:max-w-md sm:self-end lg:w-auto lg:max-w-none">
+        <div
+          class="flex w-full flex-col gap-3 sm:max-w-md sm:self-end lg:w-auto lg:max-w-none"
+        >
           <input
             ref="fileInputRef"
             type="file"
@@ -131,8 +155,17 @@ function sourceBadgeTitle(sourceLabel: string): string {
               class="inline-flex items-center gap-3 rounded-2xl border border-(--border-color) bg-(--bg-primary) px-4 py-2.5 text-xs font-medium text-(--text-secondary) shadow-inner"
               aria-label="catalog summary"
             >
-              <span class="flex h-2 w-2 animate-pulse rounded-full bg-(--accent-color) shadow-[0_0_10px_color-mix(in_srgb,var(--accent-color)_55%,transparent)]" aria-hidden="true" />
-              <span><strong class="soc-gallery__mono text-base font-semibold tabular-nums text-(--text-primary)">{{ items.length }}</strong> templates</span>
+              <span
+                class="flex h-2 w-2 animate-pulse rounded-full bg-(--accent-color) shadow-[0_0_10px_color-mix(in_srgb,var(--accent-color)_55%,transparent)]"
+                aria-hidden="true"
+              />
+              <span
+                ><strong
+                  class="soc-gallery__mono text-base font-semibold text-(--text-primary) tabular-nums"
+                  >{{ items.length }}</strong
+                >
+                templates</span
+              >
             </div>
           </div>
         </div>
@@ -140,7 +173,11 @@ function sourceBadgeTitle(sourceLabel: string): string {
     </header>
 
     <Transition name="soc-gallery-fade">
-      <p v-if="importError" class="rounded-xl border border-red-500/25 bg-red-500/[0.06] px-4 py-3 text-sm text-red-600 dark:text-red-400" role="alert">
+      <p
+        v-if="importError"
+        class="rounded-xl border border-red-500/25 bg-red-500/[0.06] px-4 py-3 text-sm text-red-600 dark:text-red-400"
+        role="alert"
+      >
         {{ importError }}
       </p>
     </Transition>
@@ -158,7 +195,9 @@ function sourceBadgeTitle(sourceLabel: string): string {
         </div>
         <div class="soc-gallery__bone h-36 rounded-xl" />
         <div class="soc-gallery__bone h-24 rounded-xl opacity-80" />
-        <p class="text-center text-sm font-medium text-(--text-secondary)">Loading templates…</p>
+        <p class="text-center text-sm font-medium text-(--text-secondary)">
+          Loading templates…
+        </p>
       </div>
     </div>
 
@@ -175,12 +214,14 @@ function sourceBadgeTitle(sourceLabel: string): string {
         !
       </div>
       <div class="min-w-0 flex-1">
-        <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">Catalog load failed</h2>
+        <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">
+          Catalog load failed
+        </h2>
         <p class="mt-2 text-sm leading-relaxed text-(--text-secondary)">{{ error }}</p>
       </div>
       <button
         type="button"
-        class="inline-flex shrink-0 items-center justify-center rounded-xl bg-(--accent-color) px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-(--accent-color)/25 transition-opacity hover:opacity-92"
+        class="inline-flex shrink-0 items-center justify-center rounded-xl bg-(--accent-color) px-5 py-3 text-sm font-semibold text-white shadow-(--accent-color)/25 shadow-lg transition-opacity hover:opacity-92"
         @click="$emit('retry')"
       >
         Retry
@@ -198,25 +239,41 @@ function sourceBadgeTitle(sourceLabel: string): string {
       >
         ∅
       </div>
-      <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">No templates yet</h2>
+      <h2 class="text-lg font-semibold tracking-tight text-(--text-primary)">
+        No templates yet
+      </h2>
       <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-(--text-secondary)">
-        Refresh the catalog or import a <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style file to inspect floorplans on this machine.
+        Refresh the catalog or import a
+        <span class="soc-gallery__mono text-(--text-primary)/90">soc.json</span>-style
+        file to inspect floorplans on this machine.
       </p>
     </div>
 
     <!-- Grid -->
     <div v-else class="flex flex-col gap-6">
-      <div class="flex flex-wrap items-end justify-between gap-4 border-b border-(--border-color) pb-4">
+      <div
+        class="flex flex-wrap items-end justify-between gap-4 border-b border-(--border-color) pb-4"
+      >
         <div>
-          <p class="soc-gallery__mono text-[10px] font-semibold uppercase tracking-[0.2em] text-(--text-secondary)">Registry</p>
-          <p class="mt-1 text-sm text-(--text-secondary)">Selectable templates in this workspace.</p>
+          <p
+            class="soc-gallery__mono text-[10px] font-semibold tracking-[0.2em] text-(--text-secondary) uppercase"
+          >
+            Registry
+          </p>
+          <p class="mt-1 text-sm text-(--text-secondary)">
+            Selectable templates in this workspace.
+          </p>
         </div>
-        <span class="soc-gallery__mono rounded-lg border border-(--border-color) bg-(--bg-primary) px-3 py-1.5 text-[11px] font-medium tabular-nums text-(--text-secondary)">
+        <span
+          class="soc-gallery__mono rounded-lg border border-(--border-color) bg-(--bg-primary) px-3 py-1.5 text-[11px] font-medium text-(--text-secondary) tabular-nums"
+        >
           {{ items.length }} entries
         </span>
       </div>
 
-      <ul class="soc-gallery__list grid list-none gap-5 p-0 sm:grid-cols-1 lg:grid-cols-2">
+      <ul
+        class="soc-gallery__list grid list-none gap-5 p-0 sm:grid-cols-1 lg:grid-cols-2"
+      >
         <li v-for="item in items" :key="item.id" class="soc-gallery__li">
           <article
             class="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-secondary)/95 p-5 shadow-[0_2px_12px_-4px_rgba(0,0,0,0.06)] transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1 hover:border-(--accent-color)/45 hover:shadow-[0_16px_40px_-24px_color-mix(in_srgb,var(--accent-color)_28%,transparent)] dark:shadow-[0_2px_12px_-4px_rgba(0,0,0,0.35)]"
@@ -231,7 +288,10 @@ function sourceBadgeTitle(sourceLabel: string): string {
                 class="soc-gallery__thumb relative h-[92px] w-[92px] shrink-0 overflow-hidden rounded-2xl border border-(--border-color) bg-(--bg-primary) shadow-inner"
                 aria-hidden="true"
               >
-                <div class="soc-gallery__die-pattern pointer-events-none absolute inset-0 opacity-[0.35]" aria-hidden="true" />
+                <div
+                  class="soc-gallery__die-pattern pointer-events-none absolute inset-0 opacity-[0.35]"
+                  aria-hidden="true"
+                />
                 <template v-if="item.thumbnail">
                   <div class="pointer-events-none absolute inset-0">
                     <div
@@ -274,7 +334,7 @@ function sourceBadgeTitle(sourceLabel: string): string {
               <div class="min-w-0 flex-1 pt-0.5">
                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   <span
-                    class="rounded-md bg-(--text-secondary)/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--text-secondary)"
+                    class="rounded-md bg-(--text-secondary)/10 px-2 py-0.5 text-[10px] font-bold tracking-wider text-(--text-secondary) uppercase"
                     :title="sourceBadgeTitle(item.sourceLabel)"
                   >
                     {{ sourceBadgeLabel(item.sourceLabel) }}
@@ -283,16 +343,32 @@ function sourceBadgeTitle(sourceLabel: string): string {
                     class="inline-flex items-baseline gap-1 rounded-lg border border-(--border-color)/85 bg-(--bg-primary) px-2 py-0.5 shadow-[inset_0_1px_0_0_color-mix(in_srgb,var(--border-color)_35%,transparent)]"
                     :title="`${item.coreCount} cores`"
                   >
-                    <span class="soc-gallery__mono text-sm font-bold tabular-nums leading-none text-(--text-primary)">{{ item.coreCount }}</span>
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-(--text-secondary)">cores</span>
+                    <span
+                      class="soc-gallery__mono text-sm leading-none font-bold text-(--text-primary) tabular-nums"
+                      >{{ item.coreCount }}</span
+                    >
+                    <span
+                      class="text-[10px] font-medium tracking-wide text-(--text-secondary) uppercase"
+                      >cores</span
+                    >
                   </span>
                 </div>
-                <h2 class="mt-2.5 text-lg font-bold leading-snug tracking-tight text-(--text-primary) sm:text-xl">{{ item.name }}</h2>
-                <p class="mt-1.5 line-clamp-2 text-sm leading-relaxed text-(--text-secondary)">{{ item.info }}</p>
+                <h2
+                  class="mt-2.5 text-lg leading-snug font-bold tracking-tight text-(--text-primary) sm:text-xl"
+                >
+                  {{ item.name }}
+                </h2>
+                <p
+                  class="mt-1.5 line-clamp-2 text-sm leading-relaxed text-(--text-secondary)"
+                >
+                  {{ item.info }}
+                </p>
               </div>
             </div>
 
-            <div class="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-(--border-color)/80 pt-4">
+            <div
+              class="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-(--border-color)/80 pt-4"
+            >
               <button
                 type="button"
                 class="inline-flex items-center gap-1.5 rounded-xl border border-(--border-color) px-3.5 py-2 text-sm font-medium text-(--text-secondary) transition-colors hover:border-red-500/45 hover:bg-red-500/[0.07] hover:text-red-600"
@@ -319,7 +395,8 @@ function sourceBadgeTitle(sourceLabel: string): string {
 
 <style scoped>
 .soc-gallery__mono {
-  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
 }
 
 .soc-gallery__die-pattern {
@@ -440,7 +517,9 @@ function sourceBadgeTitle(sourceLabel: string): string {
 
 .soc-gallery-fade-enter-active,
 .soc-gallery-fade-leave-active {
-  transition: opacity 0.22s ease, transform 0.22s ease;
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
 }
 
 .soc-gallery-fade-enter-from,

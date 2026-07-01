@@ -80,7 +80,7 @@ class FakeNode {
   }
 
   get textContent(): string {
-    return this.childNodes.map(child => child.textContent).join('')
+    return this.childNodes.map((child) => child.textContent).join('')
   }
 
   set textContent(value: string) {
@@ -153,7 +153,9 @@ class FakeElement extends FakeNode {
         this.className = [...new Set([...read(), ...tokens])].join(' ')
       },
       remove: (...tokens: string[]) => {
-        this.className = read().filter(token => !tokens.includes(token)).join(' ')
+        this.className = read()
+          .filter((token) => !tokens.includes(token))
+          .join(' ')
       },
     }
   }
@@ -203,7 +205,7 @@ class FakeElement extends FakeNode {
   }
 
   dispatchEvent(event: { type: string }) {
-    this.listeners.get(event.type)?.forEach(listener => listener(event))
+    this.listeners.get(event.type)?.forEach((listener) => listener(event))
     return true
   }
 
@@ -395,7 +397,7 @@ function createTemplate(cores: SocTemplateDetail['cores']): SocTemplateDetail {
 function getRenderedCoreIds(container: FakeElement): string[] {
   return container
     .querySelectorAll('.soc-template-preview-canvas__core')
-    .map(button => button.getAttribute('data-soc-core-id') ?? '')
+    .map((button) => button.getAttribute('data-soc-core-id') ?? '')
 }
 
 async function mountPreviewCanvas(props: {
@@ -567,7 +569,9 @@ describe('SoCTemplatePreviewCanvas', () => {
       onSelectCore,
     })
 
-    expect(container.querySelectorAll('.soc-template-preview-canvas__core')).toHaveLength(0)
+    expect(container.querySelectorAll('.soc-template-preview-canvas__core')).toHaveLength(
+      0,
+    )
     expect(onSelectCore).not.toHaveBeenCalled()
 
     app.unmount()

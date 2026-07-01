@@ -1,32 +1,39 @@
 <template>
-  <div class="flex flex-col h-full w-full text-(--text-primary) relative overflow-hidden">
-    <div class="relative z-10 flex flex-col w-full max-w-5xl mx-auto px-8 py-6 h-full">
-
+  <div class="relative flex h-full w-full flex-col overflow-hidden text-(--text-primary)">
+    <div class="relative z-10 mx-auto flex h-full w-full max-w-5xl flex-col px-8 py-6">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-6 shrink-0">
+      <div class="mb-6 flex shrink-0 items-center justify-between">
         <div class="flex items-center gap-4">
-          <button @click="goBack"
-            class="flex items-center gap-2 px-3 py-2 rounded-lg bg-(--bg-secondary) border border-(--border-color) hover:border-(--accent-color) text-(--text-secondary) hover:text-(--accent-color) transition-all duration-200 cursor-pointer text-sm">
+          <button
+            @click="goBack"
+            class="flex cursor-pointer items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-secondary) px-3 py-2 text-sm text-(--text-secondary) transition-all duration-200 hover:border-(--accent-color) hover:text-(--accent-color)"
+          >
             <i class="ri-arrow-left-line"></i>
             <span>ECOS</span>
           </button>
           <h1 class="text-xl font-semibold">Project Management</h1>
-          <span class="text-sm text-(--text-secondary)">{{ filteredProjects.length }} projects</span>
+          <span class="text-sm text-(--text-secondary)"
+            >{{ filteredProjects.length }} projects</span
+          >
         </div>
       </div>
 
       <!-- Filter & Sort bar -->
-      <div class="flex items-center gap-3 mb-4 shrink-0 flex-wrap">
+      <div class="mb-4 flex shrink-0 flex-wrap items-center gap-3">
         <!-- PDK filter -->
-        <select v-model="filterPdk"
-          class="px-3 py-2 text-sm bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) cursor-pointer focus:border-(--accent-color) focus:outline-none transition-colors">
+        <select
+          v-model="filterPdk"
+          class="cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-secondary) px-3 py-2 text-sm text-(--text-primary) transition-colors focus:border-(--accent-color) focus:outline-none"
+        >
           <option value="">All PDKs</option>
           <option v-for="pdk in availablePdks" :key="pdk" :value="pdk">{{ pdk }}</option>
         </select>
 
         <!-- Status filter -->
-        <select v-model="filterStatus"
-          class="px-3 py-2 text-sm bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) cursor-pointer focus:border-(--accent-color) focus:outline-none transition-colors">
+        <select
+          v-model="filterStatus"
+          class="cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-secondary) px-3 py-2 text-sm text-(--text-primary) transition-colors focus:border-(--accent-color) focus:outline-none"
+        >
           <option value="">All Status</option>
           <option value="success">Success</option>
           <option value="failed">Failed</option>
@@ -36,15 +43,23 @@
         </select>
 
         <!-- Search -->
-        <div class="flex-1 relative min-w-[200px]">
-          <i class="ri-search-line absolute left-3 top-1/2 -translate-y-1/2 text-(--text-secondary) text-sm"></i>
-          <input v-model="searchQuery" type="text" placeholder="Search projects..."
-            class="w-full pl-9 pr-3 py-2 text-sm bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) placeholder:text-(--text-secondary)/50 focus:border-(--accent-color) focus:outline-none transition-colors" />
+        <div class="relative min-w-[200px] flex-1">
+          <i
+            class="ri-search-line absolute top-1/2 left-3 -translate-y-1/2 text-sm text-(--text-secondary)"
+          ></i>
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Search projects..."
+            class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary) py-2 pr-3 pl-9 text-sm text-(--text-primary) transition-colors placeholder:text-(--text-secondary)/50 focus:border-(--accent-color) focus:outline-none"
+          />
         </div>
 
         <!-- Sort -->
-        <select v-model="sortBy"
-          class="px-3 py-2 text-sm bg-(--bg-secondary) border border-(--border-color) rounded-lg text-(--text-primary) cursor-pointer focus:border-(--accent-color) focus:outline-none transition-colors">
+        <select
+          v-model="sortBy"
+          class="cursor-pointer rounded-lg border border-(--border-color) bg-(--bg-secondary) px-3 py-2 text-sm text-(--text-primary) transition-colors focus:border-(--accent-color) focus:outline-none"
+        >
           <option value="lastModified">Last Modified</option>
           <option value="name">Name</option>
           <option value="status">Status</option>
@@ -53,42 +68,68 @@
       </div>
 
       <!-- Project list -->
-      <div class="flex-1 overflow-y-auto space-y-3 scrollbar-thin pb-4" v-if="filteredProjects.length > 0">
-        <div v-for="project in filteredProjects" :key="project.id"
-          class="flex items-start gap-4 px-5 py-4 bg-(--bg-secondary) rounded-xl border transition-all duration-200 group"
-          :class="project.workspaceRecognized === false
-            ? 'border-(--border-color) opacity-50 cursor-default'
-            : 'border-(--border-color) hover:border-(--accent-color) hover:shadow-md cursor-pointer'"
-          @click="project.workspaceRecognized !== false && handleOpen(project)">
-
+      <div
+        class="scrollbar-thin flex-1 space-y-3 overflow-y-auto pb-4"
+        v-if="filteredProjects.length > 0"
+      >
+        <div
+          v-for="project in filteredProjects"
+          :key="project.id"
+          class="group flex items-start gap-4 rounded-xl border bg-(--bg-secondary) px-5 py-4 transition-all duration-200"
+          :class="
+            project.workspaceRecognized === false
+              ? 'cursor-default border-(--border-color) opacity-50'
+              : 'cursor-pointer border-(--border-color) hover:border-(--accent-color) hover:shadow-md'
+          "
+          @click="project.workspaceRecognized !== false && handleOpen(project)"
+        >
           <!-- Status icon -->
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-            :class="statusIconBgClass(project.status)">
-            <i :class="[statusIcon(project.status), statusIconColorClass(project.status), 'text-lg']"
-              :style="project.status === 'running' ? 'animation: spin 2s linear infinite' : ''"></i>
+          <div
+            class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+            :class="statusIconBgClass(project.status)"
+          >
+            <i
+              :class="[
+                statusIcon(project.status),
+                statusIconColorClass(project.status),
+                'text-lg',
+              ]"
+              :style="
+                project.status === 'running' ? 'animation: spin 2s linear infinite' : ''
+              "
+            ></i>
           </div>
 
           <!-- Project info -->
-          <div class="flex-1 min-w-0">
+          <div class="min-w-0 flex-1">
             <!-- Row 1: Name + badges -->
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-medium text-(--text-primary) truncate">{{ project.name }}</span>
-              <span v-if="project.status" :class="statusBadgeClass(project.status)"
-                class="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="truncate font-medium text-(--text-primary)">{{
+                project.name
+              }}</span>
+              <span
+                v-if="project.status"
+                :class="statusBadgeClass(project.status)"
+                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+              >
                 {{ statusLabel(project.status) }}
               </span>
-              <span v-if="project.pdk"
-                class="text-[10px] px-1.5 py-0.5 rounded bg-(--accent-color)/10 text-(--accent-color) font-medium shrink-0">
+              <span
+                v-if="project.pdk"
+                class="shrink-0 rounded bg-(--accent-color)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-color)"
+              >
                 {{ project.pdk }}
               </span>
-              <span v-if="project.workspaceRecognized === false"
-                class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-medium shrink-0">
+              <span
+                v-if="project.workspaceRecognized === false"
+                class="shrink-0 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400"
+              >
                 Workspace not recognized
               </span>
             </div>
 
             <!-- Row 2: Parameters -->
-            <div class="flex items-center gap-4 mt-1.5 text-xs text-(--text-secondary)">
+            <div class="mt-1.5 flex items-center gap-4 text-xs text-(--text-secondary)">
               <span v-if="project.topModule" class="flex items-center gap-1">
                 <i class="ri-code-s-slash-line text-[11px]"></i>
                 {{ project.topModule }}
@@ -112,59 +153,80 @@
             </div>
 
             <!-- Row 3: Progress bar + path -->
-            <div class="flex items-center gap-3 mt-2">
-              <div v-if="project.totalSteps && project.totalSteps > 0"
-                class="flex items-center gap-2 flex-1 min-w-0">
-                <div class="flex-1 h-1.5 bg-(--bg-primary) rounded-full overflow-hidden max-w-[200px]">
-                  <div class="h-full rounded-full transition-all duration-300"
+            <div class="mt-2 flex items-center gap-3">
+              <div
+                v-if="project.totalSteps && project.totalSteps > 0"
+                class="flex min-w-0 flex-1 items-center gap-2"
+              >
+                <div
+                  class="h-1.5 max-w-[200px] flex-1 overflow-hidden rounded-full bg-(--bg-primary)"
+                >
+                  <div
+                    class="h-full rounded-full transition-all duration-300"
                     :class="progressBarColor(project.status)"
-                    :style="{ width: `${((project.completedSteps || 0) / project.totalSteps) * 100}%` }">
-                  </div>
+                    :style="{
+                      width: `${((project.completedSteps || 0) / project.totalSteps) * 100}%`,
+                    }"
+                  ></div>
                 </div>
-                <span class="text-[11px] text-(--text-secondary) shrink-0">
+                <span class="shrink-0 text-[11px] text-(--text-secondary)">
                   {{ project.completedSteps || 0 }}/{{ project.totalSteps }}
                 </span>
               </div>
-              <span class="text-[11px] text-(--text-secondary) font-mono truncate">{{ project.path }}</span>
+              <span class="truncate font-mono text-[11px] text-(--text-secondary)">{{
+                project.path
+              }}</span>
             </div>
           </div>
 
           <!-- Right: time + actions -->
-          <div class="flex items-center gap-2 shrink-0 mt-1">
-            <span class="text-xs text-(--text-secondary) whitespace-nowrap">{{ formatDate(project.lastOpened) }}</span>
-            <button @click.stop="handleRemove(project.id)"
-              class="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all cursor-pointer"
-              title="Remove from list">
-              <i class="ri-close-line text-sm text-(--text-secondary) hover:text-red-500"></i>
+          <div class="mt-1 flex shrink-0 items-center gap-2">
+            <span class="text-xs whitespace-nowrap text-(--text-secondary)">{{
+              formatDate(project.lastOpened)
+            }}</span>
+            <button
+              @click.stop="handleRemove(project.id)"
+              class="cursor-pointer rounded-lg p-1.5 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-500/10"
+              title="Remove from list"
+            >
+              <i
+                class="ri-close-line text-sm text-(--text-secondary) hover:text-red-500"
+              ></i>
             </button>
           </div>
         </div>
       </div>
 
       <!-- Empty state -->
-      <div v-else class="flex-1 flex flex-col items-center justify-center text-center">
-        <i class="ri-folder-2-line text-6xl text-(--text-secondary) opacity-20 mb-4"></i>
-        <p class="text-lg font-medium text-(--text-primary) mb-2">
+      <div v-else class="flex flex-1 flex-col items-center justify-center text-center">
+        <i class="ri-folder-2-line mb-4 text-6xl text-(--text-secondary) opacity-20"></i>
+        <p class="mb-2 text-lg font-medium text-(--text-primary)">
           {{ recentProjects.length === 0 ? 'No projects yet' : 'No matching projects' }}
         </p>
-        <p class="text-sm text-(--text-secondary) mb-6">
-          {{ recentProjects.length === 0
-            ? 'Create your first project from the Backend Design tool'
-            : 'Try adjusting your filters or search query'
+        <p class="mb-6 text-sm text-(--text-secondary)">
+          {{
+            recentProjects.length === 0
+              ? 'Create your first project from the Backend Design tool'
+              : 'Try adjusting your filters or search query'
           }}
         </p>
-        <button v-if="recentProjects.length === 0" @click="router.push('/ecc')"
-          class="flex items-center gap-2 px-5 py-2.5 bg-(--accent-color)/10 text-(--accent-color) rounded-lg hover:bg-(--accent-color)/20 transition-colors cursor-pointer text-sm font-medium">
+        <button
+          v-if="recentProjects.length === 0"
+          @click="router.push('/ecc')"
+          class="flex cursor-pointer items-center gap-2 rounded-lg bg-(--accent-color)/10 px-5 py-2.5 text-sm font-medium text-(--accent-color) transition-colors hover:bg-(--accent-color)/20"
+        >
           <i class="ri-cpu-line"></i>
           Go to Backend Design
         </button>
-        <button v-else @click="clearFilters"
-          class="flex items-center gap-2 px-5 py-2.5 bg-(--bg-secondary) text-(--text-secondary) rounded-lg hover:text-(--text-primary) transition-colors cursor-pointer text-sm">
+        <button
+          v-else
+          @click="clearFilters"
+          class="flex cursor-pointer items-center gap-2 rounded-lg bg-(--bg-secondary) px-5 py-2.5 text-sm text-(--text-secondary) transition-colors hover:text-(--text-primary)"
+        >
           <i class="ri-filter-off-line"></i>
           Clear Filters
         </button>
       </div>
-
     </div>
   </div>
 </template>
@@ -176,7 +238,8 @@ import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
 
 const router = useRouter()
-const { recentProjects, openProject, removeRecentProject, loadRecentProjects } = useWorkspace()
+const { recentProjects, openProject, removeRecentProject, loadRecentProjects } =
+  useWorkspace()
 
 const filterPdk = ref('')
 const filterStatus = ref('')
@@ -199,17 +262,18 @@ const filteredProjects = computed(() => {
   let result = [...recentProjects.value]
 
   if (filterPdk.value) {
-    result = result.filter(p => p.pdk === filterPdk.value)
+    result = result.filter((p) => p.pdk === filterPdk.value)
   }
   if (filterStatus.value) {
-    result = result.filter(p => p.status === filterStatus.value)
+    result = result.filter((p) => p.status === filterStatus.value)
   }
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
-    result = result.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.path.toLowerCase().includes(q) ||
-      (p.topModule && p.topModule.toLowerCase().includes(q))
+    result = result.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.path.toLowerCase().includes(q) ||
+        (p.topModule && p.topModule.toLowerCase().includes(q)),
     )
   }
 
@@ -218,8 +282,17 @@ const filteredProjects = computed(() => {
       case 'name':
         return a.name.localeCompare(b.name)
       case 'status': {
-        const order: Record<string, number> = { success: 0, running: 1, in_progress: 2, failed: 3, not_started: 4 }
-        return (order[a.status || 'not_started'] ?? 5) - (order[b.status || 'not_started'] ?? 5)
+        const order: Record<string, number> = {
+          success: 0,
+          running: 1,
+          in_progress: 2,
+          failed: 3,
+          not_started: 4,
+        }
+        return (
+          (order[a.status || 'not_started'] ?? 5) -
+          (order[b.status || 'not_started'] ?? 5)
+        )
       }
       case 'progress': {
         const pa = a.totalSteps ? (a.completedSteps || 0) / a.totalSteps : 0
@@ -337,7 +410,11 @@ function formatDate(date: Date): string {
 
 <style scoped>
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

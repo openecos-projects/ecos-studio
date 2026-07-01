@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildTechPreviewRenderGroups,
-  colorForTechLayer,
-} from './previewRendering'
+import { buildTechPreviewRenderGroups, colorForTechLayer } from './previewRendering'
 import type { TechLayer, TechPreviewGeometry } from './types'
 
 const layers: TechLayer[] = [

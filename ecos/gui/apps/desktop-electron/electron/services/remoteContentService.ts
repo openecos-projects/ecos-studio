@@ -8,7 +8,10 @@ import type {
   RemoteContentReadTextFileRequest,
   RemoteContentSourceId,
 } from '@ecos-studio/shared'
-import { remoteContentSources, type RemoteContentSourceConfig } from './remoteContentSources'
+import {
+  remoteContentSources,
+  type RemoteContentSourceConfig,
+} from './remoteContentSources'
 
 type FetchLike = typeof fetch
 const SOC_TEMPLATE_CACHE_ENV = 'ECOS_STUDIO_SOC_TEMPLATE_CACHE_DIR'
@@ -48,7 +51,7 @@ export class RemoteContentService {
         'X-GitHub-Api-Version': '2022-11-28',
       },
     })
-    const body = await response.json() as GitHubTreeResponse
+    const body = (await response.json()) as GitHubTreeResponse
 
     if (body.truncated) {
       throw new Error(`GitHub tree response for ${request.source} is truncated.`)
@@ -62,7 +65,10 @@ export class RemoteContentService {
         entry,
         relativePath: this.toRelativeSourcePath(source, entry.path!),
       }))
-      .filter((row): row is { entry: GitHubTreeEntry; relativePath: string } => row.relativePath !== null)
+      .filter(
+        (row): row is { entry: GitHubTreeEntry; relativePath: string } =>
+          row.relativePath !== null,
+      )
       .filter((row) => matchesRemotePattern(row.relativePath, pattern))
       .slice(0, maxFiles)
       .map(({ entry, relativePath }) => ({
@@ -139,7 +145,10 @@ export class RemoteContentService {
     return path.startsWith(prefix) ? path.slice(prefix.length) : null
   }
 
-  private resolveRepositoryPath(source: RemoteContentSourceConfig, relativePath: string): string {
+  private resolveRepositoryPath(
+    source: RemoteContentSourceConfig,
+    relativePath: string,
+  ): string {
     const normalizedRelativePath = normalizeRelativeRemotePath(relativePath)
     return `${normalizeRemotePath(source.rootPath)}/${normalizedRelativePath}`
   }
@@ -150,7 +159,9 @@ export class RemoteContentService {
     return join(getSocTemplateCacheDir(), ...normalizedRelativePath.split('/'))
   }
 
-  private async readTextCache(request: RemoteContentReadTextFileRequest): Promise<string | null> {
+  private async readTextCache(
+    request: RemoteContentReadTextFileRequest,
+  ): Promise<string | null> {
     const cachePath = this.getTextCachePath(request)
     if (!cachePath) return null
 
@@ -163,7 +174,10 @@ export class RemoteContentService {
     }
   }
 
-  private async writeTextCache(request: RemoteContentReadTextFileRequest, text: string): Promise<void> {
+  private async writeTextCache(
+    request: RemoteContentReadTextFileRequest,
+    text: string,
+  ): Promise<void> {
     const cachePath = this.getTextCachePath(request)
     if (!cachePath) return
 
@@ -180,7 +194,10 @@ function normalizeRemotePath(path: string): string {
 
 function normalizeRelativeRemotePath(path: string): string {
   const normalized = normalizeRemotePath(path)
-  if (!normalized || normalized.split('/').some((part) => part === '..' || part === '.')) {
+  if (
+    !normalized ||
+    normalized.split('/').some((part) => part === '..' || part === '.')
+  ) {
     throw new Error('Remote content path must be relative to its source root.')
   }
   return normalized
@@ -206,7 +223,9 @@ export function matchesRemotePattern(path: string, pattern: string): boolean {
     return normalizedPath.endsWith(normalizedPattern.slice(4))
   }
   if (normalizedPattern.startsWith('*.')) {
-    return !normalizedPath.includes('/') && normalizedPath.endsWith(normalizedPattern.slice(1))
+    return (
+      !normalizedPath.includes('/') && normalizedPath.endsWith(normalizedPattern.slice(1))
+    )
   }
   return normalizedPath === normalizedPattern
 }

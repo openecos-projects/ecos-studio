@@ -2,7 +2,10 @@
 import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SoCTemplateDetail from '@/components/SoCTemplateDetail.vue'
-import { loadSocTemplateDetail, selectSocTemplateCore } from '@/composables/socTemplateCatalog'
+import {
+  loadSocTemplateDetail,
+  selectSocTemplateCore,
+} from '@/composables/socTemplateCatalog'
 import type { SocTemplateDetail as SocTemplateDetailModel } from '@/composables/socTemplateMapper'
 import { getDefaultSocCoreId } from '@/composables/socTemplatePreviewSelection'
 
@@ -47,7 +50,9 @@ watch(() => props.templateId, loadDetail, { immediate: true })
 </script>
 
 <template>
-  <div class="soc-view relative min-h-full w-full overflow-x-hidden overflow-y-auto text-(--text-primary)">
+  <div
+    class="soc-view relative min-h-full w-full overflow-x-hidden overflow-y-auto text-(--text-primary)"
+  >
     <div class="soc-view__wash" aria-hidden="true" />
     <div class="soc-view__grid" aria-hidden="true" />
     <div class="soc-view__orb soc-view__orb--tr" aria-hidden="true" />
@@ -56,20 +61,30 @@ watch(() => props.templateId, loadDetail, { immediate: true })
 
     <div class="relative z-10 mx-auto max-w-[1680px] px-5 py-8 sm:px-7 lg:px-10 lg:py-12">
       <!-- Loading -->
-      <div v-if="loading" class="soc-detail-loading rounded-2xl border border-(--border-color) bg-(--bg-secondary)/90 p-8 sm:p-10" aria-busy="true">
+      <div
+        v-if="loading"
+        class="soc-detail-loading rounded-2xl border border-(--border-color) bg-(--bg-secondary)/90 p-8 sm:p-10"
+        aria-busy="true"
+      >
         <div class="soc-detail-loading__shimmer mx-auto max-w-4xl space-y-6">
           <div class="flex flex-wrap gap-4">
             <div class="soc-detail-loading__bone h-11 w-36 rounded-xl" />
             <div class="soc-detail-loading__bone h-11 flex-1 rounded-xl opacity-75" />
           </div>
           <div class="grid gap-5 lg:grid-cols-[1fr_320px]">
-            <div class="space-y-4 rounded-2xl border border-(--border-color) bg-(--bg-primary)/80 p-5">
+            <div
+              class="space-y-4 rounded-2xl border border-(--border-color) bg-(--bg-primary)/80 p-5"
+            >
               <div class="soc-detail-loading__bone h-10 w-full rounded-lg" />
               <div class="soc-detail-loading__bone min-h-[380px] rounded-xl" />
             </div>
             <div class="soc-detail-loading__bone min-h-[300px] rounded-2xl" />
           </div>
-          <p class="text-center text-sm font-medium tracking-wide text-(--text-secondary)">Loading template detail…</p>
+          <p
+            class="text-center text-sm font-medium tracking-wide text-(--text-secondary)"
+          >
+            Loading template detail…
+          </p>
         </div>
       </div>
 
@@ -86,14 +101,19 @@ watch(() => props.templateId, loadDetail, { immediate: true })
           !
         </div>
         <div class="min-w-0 flex-1">
-          <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-red-600/90">Read error</p>
-          <h1 class="mt-2 text-xl font-bold tracking-tight text-(--text-primary)">Could not load template</h1>
+          <p class="text-[10px] font-bold tracking-[0.2em] text-red-600/90 uppercase">
+            Read error
+          </p>
+          <h1 class="mt-2 text-xl font-bold tracking-tight text-(--text-primary)">
+            Could not load template
+          </h1>
           <p class="mt-2 text-sm leading-relaxed text-(--text-secondary)">{{ error }}</p>
           <p
             v-if="error.includes('Unknown SoC template')"
             class="mt-4 rounded-xl border border-(--border-color) bg-(--bg-primary)/90 px-4 py-3 text-sm leading-relaxed text-(--text-secondary)"
           >
-            This template is not in the remote SoC catalog. Open the gallery, refresh the catalog, or pick a template from the list.
+            This template is not in the remote SoC catalog. Open the gallery, refresh the
+            catalog, or pick a template from the list.
           </p>
         </div>
         <button
@@ -126,9 +146,22 @@ watch(() => props.templateId, loadDetail, { immediate: true })
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 120% 80% at 15% -10%, color-mix(in srgb, var(--accent-color) 14%, transparent) 0%, transparent 55%),
-    radial-gradient(ellipse 90% 60% at 100% 0%, color-mix(in srgb, var(--text-secondary) 8%, transparent) 0%, transparent 45%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary)) 0%, var(--bg-primary) 38%, var(--bg-primary) 100%);
+    radial-gradient(
+      ellipse 120% 80% at 15% -10%,
+      color-mix(in srgb, var(--accent-color) 14%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 90% 60% at 100% 0%,
+      color-mix(in srgb, var(--text-secondary) 8%, transparent) 0%,
+      transparent 45%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary)) 0%,
+      var(--bg-primary) 38%,
+      var(--bg-primary) 100%
+    );
 }
 
 .soc-view__grid {
@@ -137,8 +170,15 @@ watch(() => props.templateId, loadDetail, { immediate: true })
   pointer-events: none;
   opacity: 0.5;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--border-color) 70%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 70%, transparent) 1px, transparent 1px);
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 70%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 70%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 20px 20px;
   mask-image: linear-gradient(180deg, black 0%, black 48%, transparent 82%);
 }
@@ -155,7 +195,11 @@ watch(() => props.templateId, loadDetail, { immediate: true })
   height: min(48vw, 360px);
   right: -6%;
   top: -4%;
-  background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent-color) 20%, transparent) 0%, transparent 68%);
+  background: radial-gradient(
+    circle at 30% 30%,
+    color-mix(in srgb, var(--accent-color) 20%, transparent) 0%,
+    transparent 68%
+  );
 }
 
 .soc-view__orb--bl {
@@ -163,7 +207,11 @@ watch(() => props.templateId, loadDetail, { immediate: true })
   height: min(42vw, 300px);
   left: -8%;
   bottom: 10%;
-  background: radial-gradient(circle at 70% 70%, color-mix(in srgb, var(--text-secondary) 11%, transparent) 0%, transparent 70%);
+  background: radial-gradient(
+    circle at 70% 70%,
+    color-mix(in srgb, var(--text-secondary) 11%, transparent) 0%,
+    transparent 70%
+  );
 }
 
 .soc-view__edge {

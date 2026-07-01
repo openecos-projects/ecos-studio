@@ -4,10 +4,7 @@ import type {
   DesktopCliCommandRequest,
   DesktopCliCommandResult,
 } from '@ecos-studio/shared'
-import {
-  SharedRuntimeManager,
-  type RuntimeScope,
-} from './runtime/sharedRuntimeManager'
+import { SharedRuntimeManager, type RuntimeScope } from './runtime/sharedRuntimeManager'
 import {
   globalRuntimeScopeRecord,
   normalizeDirectoryScope,
@@ -84,7 +81,9 @@ function workspaceScopeForRequest(request: DesktopCliCommandRequest): RuntimeSco
   return workspaceRuntimeScope(directory)
 }
 
-function eventWorkspaceForScope(scope: RuntimeScope): Pick<DesktopCliCommandEvent, 'directory' | 'workspaceId'> {
+function eventWorkspaceForScope(
+  scope: RuntimeScope,
+): Pick<DesktopCliCommandEvent, 'directory' | 'workspaceId'> {
   return scope.directory
     ? {
         directory: scope.directory,
@@ -106,9 +105,8 @@ function resultLifecycleEvent(
     result,
     stream: result.ok ? 'system' : result.response === 'warning' ? 'system' : 'stderr',
     text: result.message.join('\n'),
-    type: result.response === 'cancelled'
-      ? 'cancelled'
-      : result.ok ? 'completed' : 'failed',
+    type:
+      result.response === 'cancelled' ? 'cancelled' : result.ok ? 'completed' : 'failed',
   }
 }
 
@@ -132,7 +130,9 @@ export class DesktopRuntimeManager {
       adapter: {
         execute: async (request, context) => {
           if (request.cmd === 'help') {
-            return createResult(request.cmd, 'success', ['Type "ecos help" to list available commands.'])
+            return createResult(request.cmd, 'success', [
+              'Type "ecos help" to list available commands.',
+            ])
           }
           if (request.cmd === 'clear') {
             return createResult(request.cmd, 'success', [])
@@ -150,7 +150,8 @@ export class DesktopRuntimeManager {
         result.ok = false
         return result
       },
-      createFailedResult: (request, message) => createResult(request.cmd, 'error', [message]),
+      createFailedResult: (request, message) =>
+        createResult(request.cmd, 'error', [message]),
       getRequestLabel: () => 'ECOS command',
       isFailedResult: (result) => !result.ok && result.response !== 'cancelled',
       isLongRunning: (request) => longRunningCommands.has(request.cmd),

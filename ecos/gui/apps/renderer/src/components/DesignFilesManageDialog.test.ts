@@ -15,6 +15,8 @@ describe('DesignFilesManageDialog RTL browsing', () => {
   it('shows a clear prompt when a folder is submitted through the file upload action', () => {
     expect(source).toContain('showDirectoryUploadFailurePrompt')
     expect(source).toContain('Folder Upload Failed')
-    expect(source).toContain('Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.')
+    expect(source).toContain(
+      'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.',
+    )
   })
 })

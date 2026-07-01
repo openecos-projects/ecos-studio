@@ -2,7 +2,14 @@ import type { InstallProgress, ResourceAction, ResourceItem } from '@/api/plugin
 
 export type ResourceType = 'tool' | 'pdk'
 export type StatusKind = 'available' | 'installed' | 'update' | 'installing' | 'error'
-export type RowAction = 'install' | 'update' | 'replace' | 'cancel' | 'uninstall' | 'remove_reference' | 'none'
+export type RowAction =
+  | 'install'
+  | 'update'
+  | 'replace'
+  | 'cancel'
+  | 'uninstall'
+  | 'remove_reference'
+  | 'none'
 export type PrimaryRowAction = 'install' | 'update' | 'replace'
 export type RemovalRowAction = 'uninstall' | 'remove_reference'
 
@@ -42,7 +49,10 @@ const toolMeta: Record<string, { icon: string; accent: string }> = {
   iverilog: { icon: 'I', accent: '#4f7f75' },
 }
 
-export function formatResourceSize(size: number | null): { sizeLabel: string; sizeMb: number } {
+export function formatResourceSize(size: number | null): {
+  sizeLabel: string
+  sizeMb: number
+} {
   if (!size || size <= 0) return { sizeLabel: '0 MB', sizeMb: 0 }
 
   const sizeMb = Math.round(size / (1024 * 1024))
@@ -53,9 +63,10 @@ export function formatResourceSize(size: number | null): { sizeLabel: string; si
 }
 
 function versionLabel(resource: ResourceItem): string {
-  const version = resource.active_version
-    || resource.installed_version
-    || (resource.source === 'local' ? undefined : resource.available_versions[0])
+  const version =
+    resource.active_version ||
+    resource.installed_version ||
+    (resource.source === 'local' ? undefined : resource.available_versions[0])
   if (!version) {
     return resource.source === 'local' ? 'Local' : '-'
   }
@@ -103,18 +114,24 @@ export function compactResourceMessage(
 
   const lower = text.toLowerCase()
   const hasUrl = /https?:\/\//i.test(text)
-  const isShortDisplayText = text.length <= 80 &&
+  const isShortDisplayText =
+    text.length <= 80 &&
     !hasUrl &&
     !text.includes('\n') &&
     !lower.includes('fetch failed') &&
     !lower.includes('und_err')
 
   if (isShortDisplayText) return text
-  if (lower.includes('timeout') || lower.includes('und_err_connect_timeout')) return 'Connection timeout'
-  if (lower.includes('failed to download') || lower.includes('fetch failed') || hasUrl) return 'Download failed'
-  if (lower.includes('checksum') || lower.includes('hash') || lower.includes('integrity')) return 'Verification failed'
-  if (lower.includes('post-install') || lower.includes('post_install')) return 'Post-install failed'
-  if (lower.includes('not found') || lower.includes('missing')) return 'Resource not found'
+  if (lower.includes('timeout') || lower.includes('und_err_connect_timeout'))
+    return 'Connection timeout'
+  if (lower.includes('failed to download') || lower.includes('fetch failed') || hasUrl)
+    return 'Download failed'
+  if (lower.includes('checksum') || lower.includes('hash') || lower.includes('integrity'))
+    return 'Verification failed'
+  if (lower.includes('post-install') || lower.includes('post_install'))
+    return 'Post-install failed'
+  if (lower.includes('not found') || lower.includes('missing'))
+    return 'Resource not found'
   return fallback
 }
 
@@ -129,10 +146,12 @@ function installedStatusText(resource: ResourceItem): string {
 }
 
 function isLocalTool(resource: ResourceItem): boolean {
-  return resource.type === 'tool' &&
+  return (
+    resource.type === 'tool' &&
     resource.status === 'installed' &&
     resource.source === 'local' &&
     resource.health.managed === false
+  )
 }
 
 function isReplaceableLocalTool(resource: ResourceItem): boolean {
@@ -183,7 +202,12 @@ function mapStatus(
   resource: ResourceItem,
   progress: InstallProgress | undefined,
 ): { kind: StatusKind; text: string } {
-  if (progress || resource.status === 'installing' || resource.status === 'uninstalling' || resource.status === 'removing') {
+  if (
+    progress ||
+    resource.status === 'installing' ||
+    resource.status === 'uninstalling' ||
+    resource.status === 'removing'
+  ) {
     return {
       kind: 'installing',
       text: progressStatusText(progress),
@@ -222,7 +246,10 @@ export function rowActionForStatus(resource: ResourceItem): RowAction {
   if (isReplaceableLocalTool(resource)) {
     return 'replace'
   }
-  if ((resource.status === 'available' || resource.status === 'error') && actions.has('install')) {
+  if (
+    (resource.status === 'available' || resource.status === 'error') &&
+    actions.has('install')
+  ) {
     return 'install'
   }
   if (actions.has('uninstall')) {
@@ -306,13 +333,20 @@ function targetVersionForRow(row: ResourceRow): string | null {
   ) {
     return resource.available_versions[0] ?? null
   }
-  return resource.installed_version ?? resource.active_version ?? resource.available_versions[0] ?? null
+  return (
+    resource.installed_version ??
+    resource.active_version ??
+    resource.available_versions[0] ??
+    null
+  )
 }
 
 export function selectedResourceMetaText(row: ResourceRow): string {
   if (primaryActionForRow(row) === 'replace') {
     const version = row.resource.available_versions[0]
-    return version ? `Replace with managed v${String(version).replace(/^v/i, '')}` : 'Replace with managed version'
+    return version
+      ? `Replace with managed v${String(version).replace(/^v/i, '')}`
+      : 'Replace with managed version'
   }
   if (row.statusKind === 'update') {
     return 'Update'
@@ -324,7 +358,10 @@ export function selectedResourceMetaText(row: ResourceRow): string {
 }
 
 function joinInstallPath(root: string, segments: string[]): string {
-  return [root.replace(/\/+$/, ''), ...segments.map((segment) => segment.replace(/^\/+|\/+$/g, ''))].join('/')
+  return [
+    root.replace(/\/+$/, ''),
+    ...segments.map((segment) => segment.replace(/^\/+|\/+$/g, '')),
+  ].join('/')
 }
 
 export function resolveRowInstallPath(row: ResourceRow): string {

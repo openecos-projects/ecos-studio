@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import homeViewSource from './HomeView.vue?raw'
 
 function loadFlowLogChooserController() {
-  const helperScript = homeViewSource.match(/<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/)
+  const helperScript = homeViewSource.match(
+    /<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/,
+  )
 
   expect(helperScript?.[1]).toBeTruthy()
 
@@ -17,17 +19,35 @@ function loadFlowLogChooserController() {
       'function computeFlowLogChooserAnchorStyle(triggerRect, viewport, chooserSize)',
     )
     .replace(/const controller: FlowLogChooserController =/, 'const controller =')
-    .replace(/toggleFlowLogStepChooser\(this: FlowLogChooserController\)/, 'toggleFlowLogStepChooser()')
-    .replace(/closeFlowLogStepChooser\(this: FlowLogChooserController\)/, 'closeFlowLogStepChooser()')
-    .replace(/onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /toggleFlowLogStepChooser\(this: FlowLogChooserController\)/,
+      'toggleFlowLogStepChooser()',
+    )
+    .replace(
+      /closeFlowLogStepChooser\(this: FlowLogChooserController\)/,
+      'closeFlowLogStepChooser()',
+    )
+    .replace(
+      /onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/,
+      'onSelectFlowLogStep(key)',
+    )
+    .replace(
+      /jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/,
+      'jumpToLiveStep(liveKey)',
+    )
+    .replace(
+      /onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/,
+      'onFlowLogChooserEscape(event)',
+    )
     .replace(/onSelectFlowLogStep\(key: string\)/, 'onSelectFlowLogStep(key)')
     .replace(/jumpToLiveStep\(liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/,
+      'onFlowLogChooserEscape(event)',
+    )
 
   return new Function(`${normalizedScript}\nreturn createFlowLogChooserController`)() as (
-    initialSelectedKey?: string | null
+    initialSelectedKey?: string | null,
   ) => {
     isFlowLogStepChooserOpen: boolean
     toggleFlowLogStepChooser: () => void
@@ -36,7 +56,9 @@ function loadFlowLogChooserController() {
 }
 
 function loadFlowLogChooserAnchorHelper() {
-  const helperScript = homeViewSource.match(/<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/)
+  const helperScript = homeViewSource.match(
+    /<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/,
+  )
 
   expect(helperScript?.[1]).toBeTruthy()
 
@@ -51,17 +73,44 @@ function loadFlowLogChooserAnchorHelper() {
       'function computeFlowLogChooserAnchorStyle(triggerRect, viewport, chooserSize)',
     )
     .replace(/const controller: FlowLogChooserController =/, 'const controller =')
-    .replace(/toggleFlowLogStepChooser\(this: FlowLogChooserController\)/, 'toggleFlowLogStepChooser()')
-    .replace(/closeFlowLogStepChooser\(this: FlowLogChooserController\)/, 'closeFlowLogStepChooser()')
-    .replace(/onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /toggleFlowLogStepChooser\(this: FlowLogChooserController\)/,
+      'toggleFlowLogStepChooser()',
+    )
+    .replace(
+      /closeFlowLogStepChooser\(this: FlowLogChooserController\)/,
+      'closeFlowLogStepChooser()',
+    )
+    .replace(
+      /onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/,
+      'onSelectFlowLogStep(key)',
+    )
+    .replace(
+      /jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/,
+      'jumpToLiveStep(liveKey)',
+    )
+    .replace(
+      /onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/,
+      'onFlowLogChooserEscape(event)',
+    )
     .replace(/onSelectFlowLogStep\(key: string\)/, 'onSelectFlowLogStep(key)')
     .replace(/jumpToLiveStep\(liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/,
+      'onFlowLogChooserEscape(event)',
+    )
 
-  return new Function(`${normalizedScript}\nreturn computeFlowLogChooserAnchorStyle`)() as (
-    triggerRect: { top: number; left: number; right: number; bottom: number; width: number; height: number },
+  return new Function(
+    `${normalizedScript}\nreturn computeFlowLogChooserAnchorStyle`,
+  )() as (
+    triggerRect: {
+      top: number
+      left: number
+      right: number
+      bottom: number
+      width: number
+      height: number
+    },
     viewport: { width: number; height: number },
     chooserSize: { width: number; height: number },
   ) => {

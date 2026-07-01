@@ -3,7 +3,9 @@ import topBarSource from './TopBar.vue?raw'
 
 function getCssDeclaration(selector: string, property: string): string | null {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const blockMatch = topBarSource.match(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\}`))
+  const blockMatch = topBarSource.match(
+    new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\}`),
+  )
   if (!blockMatch) return null
 
   const declarationMatch = blockMatch[1].match(new RegExp(`${property}\\s*:\\s*([^;]+);`))
@@ -18,7 +20,9 @@ describe('TopBar drag region layout', () => {
 
   it('uses a dedicated drag spacer instead of making the centered overlay draggable', () => {
     expect(topBarSource).toContain('class="topbar-drag-spacer" data-window-drag-region')
-    expect(topBarSource).not.toContain('<div class="topbar-center" data-window-drag-region>')
+    expect(topBarSource).not.toContain(
+      '<div class="topbar-center" data-window-drag-region>',
+    )
   })
 
   it('keeps the centered title overlay pointer-transparent', () => {

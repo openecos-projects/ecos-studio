@@ -1,11 +1,20 @@
 import { ref, toRaw } from 'vue'
-import type { DesktopApi, DesktopSettingsValue, ScannedPdkDirectory } from '@ecos-studio/shared'
-import { importLocalResourcePathApi, importPdkPathApi, removePdkReferenceApi } from '@/api/plugin'
+import type {
+  DesktopApi,
+  DesktopSettingsValue,
+  ScannedPdkDirectory,
+} from '@ecos-studio/shared'
+import {
+  importLocalResourcePathApi,
+  importPdkPathApi,
+  removePdkReferenceApi,
+} from '@/api/plugin'
 import { hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from './useWorkspace'
 import type { ImportedPdk } from '../types'
 
-const INVALID_PDK_PATH_MESSAGE = 'PDK path cannot contain Chinese or spaces, please select a directory containing only English, numbers and common symbols.'
+const INVALID_PDK_PATH_MESSAGE =
+  'PDK path cannot contain Chinese or spaces, please select a directory containing only English, numbers and common symbols.'
 
 /** 路径中是否包含中文或空格（不允许，会导致工具链异常） */
 function pathHasInvalidChars(path: string): boolean {
@@ -168,7 +177,10 @@ export function usePdkManager() {
           desktopApi = await waitForDesktopApi()
           saved = await getSetting<ImportedPdk[]>(desktopApi, 'imported_pdks')
         } catch (error) {
-          console.warn('[usePdkManager] Desktop settings unavailable during load, falling back to localStorage:', error)
+          console.warn(
+            '[usePdkManager] Desktop settings unavailable during load, falling back to localStorage:',
+            error,
+          )
         }
       }
 
@@ -185,7 +197,11 @@ export function usePdkManager() {
             try {
               await syncImportedPdkReference(pdk.path)
             } catch (error) {
-              console.warn('[usePdkManager] Failed to sync imported PDK to backend manifest:', pdk.path, error)
+              console.warn(
+                '[usePdkManager] Failed to sync imported PDK to backend manifest:',
+                pdk.path,
+                error,
+              )
             }
           }),
         )
@@ -210,7 +226,10 @@ export function usePdkManager() {
         await setSetting(desktopApi, 'imported_pdks', serialized)
       } catch (error) {
         desktopError = error
-        console.warn('[usePdkManager] Desktop settings unavailable during save, falling back to localStorage:', error)
+        console.warn(
+          '[usePdkManager] Desktop settings unavailable during save, falling back to localStorage:',
+          error,
+        )
       }
     }
 
@@ -235,7 +254,10 @@ export function usePdkManager() {
     return await desktopApi.workspace.scanPdkDirectory(path)
   }
 
-  const syncImportedPdkReference = async (path: string, resourceId?: string): Promise<void> => {
+  const syncImportedPdkReference = async (
+    path: string,
+    resourceId?: string,
+  ): Promise<void> => {
     if (resourceId) {
       await importLocalResourcePathApi(resourceId, path)
       return
@@ -250,7 +272,7 @@ export function usePdkManager() {
   ): Promise<ImportedPdk> => {
     const normalizedPath = normalizePdkPath(detected.canonicalPath)
     const existing = importedPdks.value.find(
-      p => normalizePdkPath(p.path) === normalizedPath
+      (p) => normalizePdkPath(p.path) === normalizedPath,
     )
     if (existing) {
       await syncImportedPdkReference(detected.canonicalPath, resourceId)
@@ -276,7 +298,7 @@ export function usePdkManager() {
     try {
       const desktopApi = await waitForDesktopApi()
       const result = await desktopApi.dialog.pickDirectory({
-        title: 'Select PDK Root Directory'
+        title: 'Select PDK Root Directory',
       })
 
       if (!result) return null
@@ -285,7 +307,11 @@ export function usePdkManager() {
 
       // 路径不允许包含中文或空格，避免工具链异常
       if (pathHasInvalidChars(path)) {
-        showToast({ severity: 'error', summary: 'Invalid PDK Path', detail: INVALID_PDK_PATH_MESSAGE })
+        showToast({
+          severity: 'error',
+          summary: 'Invalid PDK Path',
+          detail: INVALID_PDK_PATH_MESSAGE,
+        })
         return null
       }
 
@@ -323,7 +349,10 @@ export function usePdkManager() {
       const desktopApi = await waitForDesktopApi()
 
       if (pathHasInvalidChars(path)) {
-        console.warn('[usePdkManager] 无效的 PDK 路径：路径不能包含中文或空格，请选择仅含英文、数字及常见符号的目录。path:', path)
+        console.warn(
+          '[usePdkManager] 无效的 PDK 路径：路径不能包含中文或空格，请选择仅含英文、数字及常见符号的目录。path:',
+          path,
+        )
         return null
       }
 
@@ -352,7 +381,10 @@ export function usePdkManager() {
     }
   }
 
-  const importPdkForResource = async (resourceId: string, path: string): Promise<ImportedPdk> => {
+  const importPdkForResource = async (
+    resourceId: string,
+    path: string,
+  ): Promise<ImportedPdk> => {
     const desktopApi = await waitForDesktopApi()
 
     if (pathHasInvalidChars(path)) {
@@ -374,7 +406,7 @@ export function usePdkManager() {
   /** 删除已导入的 PDK */
   const removePdk = async (id: string) => {
     const desktopApi = hasDesktopApi() ? await waitForDesktopApi() : undefined
-    const pdk = importedPdks.value.find(p => p.id === id)
+    const pdk = importedPdks.value.find((p) => p.id === id)
     if (pdk) {
       try {
         await removePdkReferenceApi(`pdk:${pdk.pdkId}`)
@@ -384,13 +416,13 @@ export function usePdkManager() {
         }
       }
     }
-    importedPdks.value = importedPdks.value.filter(p => p.id !== id)
+    importedPdks.value = importedPdks.value.filter((p) => p.id !== id)
     await savePdks(desktopApi)
   }
 
   /** 根据 ID 查找 PDK */
   const getPdkById = (id: string): ImportedPdk | undefined => {
-    return importedPdks.value.find(p => p.id === id)
+    return importedPdks.value.find((p) => p.id === id)
   }
 
   return {

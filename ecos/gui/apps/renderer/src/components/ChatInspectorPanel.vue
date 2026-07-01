@@ -2,7 +2,7 @@
   <Teleport to="body" :disabled="!isAnyPanelFullscreen">
     <div
       :class="[
-        'chat-inspector-panel flex flex-col h-full w-full min-w-0 max-w-full bg-(--bg-primary) overflow-hidden',
+        'chat-inspector-panel flex h-full w-full max-w-full min-w-0 flex-col overflow-hidden bg-(--bg-primary)',
         {
           'is-panel-fullscreen panel-fullscreen-card': isAnyPanelFullscreen,
           'is-chat-fullscreen': isChatFullscreen,
@@ -10,9 +10,16 @@
         },
       ]"
     >
-      <div class="chat-inspector-topbar h-10 shrink-0 flex items-center gap-2 px-3 border-b border-(--border-color)">
-        <div class="chat-inspector-tabs flex items-center gap-2 min-w-0">
-          <button type="button" @click="selectTab('chat')" :class="tabClass(activeTab === 'chat')" title="AI Chat">
+      <div
+        class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
+      >
+        <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            @click="selectTab('chat')"
+            :class="tabClass(activeTab === 'chat')"
+            title="AI Chat"
+          >
             <i class="ri-chat-3-line text-base"></i>
           </button>
           <button
@@ -30,24 +37,37 @@
           type="button"
           class="chat-inspector-fullscreen-toggle"
           :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
-          :aria-label="activePanelFullscreen
-            ? (activeTab === 'chat' ? 'Exit AI Chat full screen' : 'Exit step configuration full screen')
-            : (activeTab === 'chat' ? 'View AI Chat full screen' : 'View step configuration full screen')"
+          :aria-label="
+            activePanelFullscreen
+              ? activeTab === 'chat'
+                ? 'Exit AI Chat full screen'
+                : 'Exit step configuration full screen'
+              : activeTab === 'chat'
+                ? 'View AI Chat full screen'
+                : 'View step configuration full screen'
+          "
           @click="toggleActivePanelFullscreen"
         >
-          <i :class="activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"></i>
+          <i
+            :class="
+              activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+            "
+          ></i>
         </button>
       </div>
 
-      <div class="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <!-- KeepAlive：避免 v-if 销毁聊天导致 blob 图重新加载/裂图；状态与滚动由子组件 onActivated 恢复 -->
         <KeepAlive>
-          <AIChatPanel v-if="activeTab === 'chat'" class="flex-1 min-h-0 h-full min-w-0 w-full max-w-full overflow-hidden" />
+          <AIChatPanel
+            v-if="activeTab === 'chat'"
+            class="h-full min-h-0 w-full max-w-full min-w-0 flex-1 overflow-hidden"
+          />
         </KeepAlive>
 
         <StepConfigPanel
           v-if="activeTab === 'inspector' && showStepConfigInspector"
-          class="flex-1 min-h-0 flex flex-col h-full min-w-0 overflow-hidden"
+          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         />
       </div>
     </div>
@@ -86,7 +106,9 @@ const activeTab = ref<'chat' | 'inspector'>('chat')
 const isChatFullscreen = ref(false)
 const isStepConfigFullscreen = ref(false)
 
-const isAnyPanelFullscreen = computed(() => isChatFullscreen.value || isStepConfigFullscreen.value)
+const isAnyPanelFullscreen = computed(
+  () => isChatFullscreen.value || isStepConfigFullscreen.value,
+)
 const activePanelFullscreen = computed(() =>
   activeTab.value === 'chat' ? isChatFullscreen.value : isStepConfigFullscreen.value,
 )

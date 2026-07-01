@@ -2,10 +2,7 @@
  * API module exports
  */
 
-export {
-  waitForRuntimeReady,
-  type WaitForRuntimeReadyOptions
-} from './client'
+export { waitForRuntimeReady, type WaitForRuntimeReadyOptions } from './client'
 
 export {
   loadWorkspaceApi,
@@ -24,7 +21,7 @@ export {
   type RuntimeEventHandler,
   type RuntimeEventClientConfig,
   type RuntimeEventClientState,
-  type RuntimeResponseType
+  type RuntimeResponseType,
 } from './runtimeEvents'
 
 export {

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { SocTemplateDetail } from './socTemplateMapper'
-import { buildSocIoPinRects, buildSocPreviewRects, formatSocArea, formatSocBoundingBox } from './socTemplatePreviewRenderer'
+import {
+  buildSocIoPinRects,
+  buildSocPreviewRects,
+  formatSocArea,
+  formatSocBoundingBox,
+} from './socTemplatePreviewRenderer'
 
 const template = {
   id: 'demo',
@@ -13,22 +18,32 @@ const template = {
   die: { llx: 0, lly: 0, urx: 300, ury: 300, width: 300, height: 300 },
   coreArea: { llx: 50, lly: 20, urx: 250, ury: 220, width: 200, height: 200 },
   cores: [
-    { id: 1, name: 'u_GEN/u_GEN_1/core1', info: 'No info provided', align: 'left', orient: 'N', selected: 0, boundingBox: { llx: 70, lly: 140, urx: 110, ury: 180, width: 40, height: 40 } },
+    {
+      id: 1,
+      name: 'u_GEN/u_GEN_1/core1',
+      info: 'No info provided',
+      align: 'left',
+      orient: 'N',
+      selected: 0,
+      boundingBox: { llx: 70, lly: 140, urx: 110, ury: 180, width: 40, height: 40 },
+    },
   ],
   ioPins: [],
 } satisfies SocTemplateDetail
 
 describe('socTemplatePreviewRenderer', () => {
   it('projects core boxes into percentage-based preview rects', () => {
-    expect(buildSocPreviewRects({
-      ...template,
-      cores: [
-        {
-          ...template.cores[0]!,
-          name: 'u_GEN/u_GEN_1/core15',
-        },
-      ],
-    })).toEqual([
+    expect(
+      buildSocPreviewRects({
+        ...template,
+        cores: [
+          {
+            ...template.cores[0]!,
+            name: 'u_GEN/u_GEN_1/core15',
+          },
+        ],
+      }),
+    ).toEqual([
       expect.objectContaining({
         coreId: 1,
         label: 'core1',
@@ -41,10 +56,12 @@ describe('socTemplatePreviewRenderer', () => {
   })
 
   it('returns stable zero percentages when the core area cannot be projected safely', () => {
-    expect(buildSocPreviewRects({
-      ...template,
-      coreArea: { llx: 50, lly: 20, urx: 50, ury: 20, width: 0, height: 0 },
-    })).toEqual([
+    expect(
+      buildSocPreviewRects({
+        ...template,
+        coreArea: { llx: 50, lly: 20, urx: 50, ury: 20, width: 0, height: 0 },
+      }),
+    ).toEqual([
       expect.objectContaining({
         coreId: 1,
         leftPct: 0,
@@ -70,8 +87,16 @@ describe('socTemplatePreviewRenderer', () => {
           info: '',
           boundingBox: { llx: 5, lly: 275, urx: 25, ury: 295, width: 20, height: 20 },
         },
-        { name: 'ghost_a', info: '', boundingBox: { llx: 0, lly: 0, urx: 0, ury: 0, width: 0, height: 0 } },
-        { name: 'ghost_b', info: '', boundingBox: { llx: 0, lly: 0, urx: 0, ury: 0, width: 0, height: 0 } },
+        {
+          name: 'ghost_a',
+          info: '',
+          boundingBox: { llx: 0, lly: 0, urx: 0, ury: 0, width: 0, height: 0 },
+        },
+        {
+          name: 'ghost_b',
+          info: '',
+          boundingBox: { llx: 0, lly: 0, urx: 0, ury: 0, width: 0, height: 0 },
+        },
       ],
     } satisfies SocTemplateDetail
 

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildCellPreviewGeometry,
-  buildViaPreviewGeometry,
-} from './previewGeometry'
+import { buildCellPreviewGeometry, buildViaPreviewGeometry } from './previewGeometry'
 import type { TechCellMaster, TechViaMaster } from './types'
 
 describe('tech preview geometry', () => {

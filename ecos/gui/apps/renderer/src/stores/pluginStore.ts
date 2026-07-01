@@ -110,14 +110,17 @@ export const usePluginStore = defineStore('plugin', () => {
     const resourceId = progress.resourceId
     if (!_progressTimers.has(resourceId)) {
       _applyResourceProgress(progress)
-      _progressTimers.set(resourceId, setTimeout(() => {
-        _progressTimers.delete(resourceId)
-        const pending = _pendingProgress.get(resourceId)
-        _pendingProgress.delete(resourceId)
-        if (pending) {
-          _queueResourceProgress(pending)
-        }
-      }, PROGRESS_UPDATE_INTERVAL_MS))
+      _progressTimers.set(
+        resourceId,
+        setTimeout(() => {
+          _progressTimers.delete(resourceId)
+          const pending = _pendingProgress.get(resourceId)
+          _pendingProgress.delete(resourceId)
+          if (pending) {
+            _queueResourceProgress(pending)
+          }
+        }, PROGRESS_UPDATE_INTERVAL_MS),
+      )
       return
     }
 
@@ -180,7 +183,11 @@ export const usePluginStore = defineStore('plugin', () => {
     const conn = subscribeResourceProgress(
       resourceId,
       (progress) => {
-        if (progress.phase === 'done' || progress.phase === 'error' || progress.phase === 'cancelled') {
+        if (
+          progress.phase === 'done' ||
+          progress.phase === 'error' ||
+          progress.phase === 'cancelled'
+        ) {
           conn.close()
           _sseConnections.delete(resourceId)
           _clearResourceProgress(progress.resourceId)
@@ -188,7 +195,10 @@ export const usePluginStore = defineStore('plugin', () => {
             delete resourceErrors.value[progress.resourceId]
             _syncLegacyToolError(progress.resourceId)
           } else {
-            _setResourceError(progress.resourceId, progress.message || 'Installation failed')
+            _setResourceError(
+              progress.resourceId,
+              progress.message || 'Installation failed',
+            )
           }
           void fetchTools({ silent: true })
           return
@@ -224,7 +234,9 @@ export const usePluginStore = defineStore('plugin', () => {
       } else {
         _setResourceError(
           resourceId,
-          e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
+          e instanceof Error
+            ? e.message
+            : `Failed to install ${_resourceName(resourceId)}`,
         )
       }
     }
@@ -250,7 +262,9 @@ export const usePluginStore = defineStore('plugin', () => {
       } else {
         _setResourceError(
           resourceId,
-          e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
+          e instanceof Error
+            ? e.message
+            : `Failed to update ${_resourceName(resourceId)}`,
         )
       }
     }
@@ -284,7 +298,9 @@ export const usePluginStore = defineStore('plugin', () => {
     } catch (e) {
       _setResourceError(
         resourceId,
-        e instanceof Error ? e.message : `Failed to uninstall ${_resourceName(resourceId)}`,
+        e instanceof Error
+          ? e.message
+          : `Failed to uninstall ${_resourceName(resourceId)}`,
       )
       if (resource && prevStatus) {
         resource.status = prevStatus

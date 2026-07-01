@@ -4,11 +4,7 @@ import type {
   WorkspaceDesignFileAddResult,
   WorkspaceDesignFileEntry,
 } from '@ecos-studio/shared'
-import {
-  isHdlFilePath,
-  joinLocalPath,
-  normalizeLocalPath,
-} from '@ecos-studio/shared'
+import { isHdlFilePath, joinLocalPath, normalizeLocalPath } from '@ecos-studio/shared'
 import {
   appendFilelistEntry,
   parseFilelistContent,
@@ -40,9 +36,11 @@ async function pathExists(path: string): Promise<boolean> {
 function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
   const normalizedRoot = normalizeLocalPath(rootPath).replace(/[\\/]+$/, '')
   const normalizedCandidate = normalizeLocalPath(candidatePath)
-  return normalizedCandidate === normalizedRoot
-    || normalizedCandidate.startsWith(`${normalizedRoot}/`)
-    || normalizedCandidate.startsWith(`${normalizedRoot}\\`)
+  return (
+    normalizedCandidate === normalizedRoot ||
+    normalizedCandidate.startsWith(`${normalizedRoot}/`) ||
+    normalizedCandidate.startsWith(`${normalizedRoot}\\`)
+  )
 }
 
 function toOriginFilelistPath(path: string, originDir: string): string {
@@ -152,7 +150,7 @@ export async function addWorkspaceDesignFiles(
       continue
     }
 
-    if (!sourceInOrigin && await pathExists(managedPath)) {
+    if (!sourceInOrigin && (await pathExists(managedPath))) {
       skipped.push({
         path: rawPath,
         reason: `${basename(normalizedSource)} already exists in workspace/origin.`,
@@ -168,7 +166,10 @@ export async function addWorkspaceDesignFiles(
     existingResolved.add(managedPath)
 
     added.push({
-      filelistEntry: lines[lines.length - 1]?.kind === 'file' ? lines[lines.length - 1]!.raw : filelistPath,
+      filelistEntry:
+        lines[lines.length - 1]?.kind === 'file'
+          ? lines[lines.length - 1]!.raw
+          : filelistPath,
       basename: basename(managedPath),
       resolvedPath: managedPath,
       exists: true,
@@ -193,7 +194,9 @@ export async function removeWorkspaceDesignFile(
 
   const existingContent = await readFile(filelistPath, 'utf8')
   const lines = parseFilelistContent(existingContent)
-  const targetLine = lines.find((line) => line.kind === 'file' && line.raw === filelistEntry)
+  const targetLine = lines.find(
+    (line) => line.kind === 'file' && line.raw === filelistEntry,
+  )
   if (!targetLine || targetLine.kind !== 'file') {
     return null
   }
@@ -202,7 +205,7 @@ export async function removeWorkspaceDesignFile(
   const nextLines = removeFilelistEntry(lines, filelistEntry)
   await writeFile(filelistPath, serializeFilelistLines(nextLines), 'utf8')
 
-  if (isPathWithinRoot(resolvedPath, originDir) && await pathExists(resolvedPath)) {
+  if (isPathWithinRoot(resolvedPath, originDir) && (await pathExists(resolvedPath))) {
     const resolvedStat = await stat(resolvedPath)
     if (resolvedStat.isFile()) {
       await rm(resolvedPath, { force: true })
@@ -218,7 +221,9 @@ export async function removeWorkspaceDesignFile(
   }
 }
 
-export async function readWorkspaceFilelistPath(projectRoot: string): Promise<string | null> {
+export async function readWorkspaceFilelistPath(
+  projectRoot: string,
+): Promise<string | null> {
   const filelistPath = getWorkspaceFilelistPath(projectRoot)
-  return await pathExists(filelistPath) ? filelistPath : null
+  return (await pathExists(filelistPath)) ? filelistPath : null
 }

@@ -35,17 +35,24 @@ describe('AppInfoService', () => {
     })
     const promise = service.getVersions()
 
-    expect(harness.spawn).toHaveBeenCalledWith('ecc', ['version', '--json'], expect.objectContaining({
-      env: { PATH: '/usr/bin' },
-    }))
+    expect(harness.spawn).toHaveBeenCalledWith(
+      'ecc',
+      ['version', '--json'],
+      expect.objectContaining({
+        env: { PATH: '/usr/bin' },
+      }),
+    )
 
-    harness.children[0].stdout.emit('data', JSON.stringify({
-      schema_version: 1,
-      runtime: 'ECC CLI',
-      ecc: '0.1.0a5',
-      dreamplace: '0.1.0a3',
-      ecc_tools: '0.1.0a2',
-    }))
+    harness.children[0].stdout.emit(
+      'data',
+      JSON.stringify({
+        schema_version: 1,
+        runtime: 'ECC CLI',
+        ecc: '0.1.0a5',
+        dreamplace: '0.1.0a3',
+        ecc_tools: '0.1.0a2',
+      }),
+    )
     harness.children[0].emit('close', 0, null)
 
     await expect(promise).resolves.toEqual({
@@ -68,7 +75,11 @@ describe('AppInfoService', () => {
     harness.children[0].emit('close', 2, null)
     await flushAsyncWork()
 
-    expect(harness.spawn).toHaveBeenLastCalledWith('ecc', ['--version'], expect.any(Object))
+    expect(harness.spawn).toHaveBeenLastCalledWith(
+      'ecc',
+      ['--version'],
+      expect.any(Object),
+    )
 
     harness.children[1].stdout.emit('data', 'ecc 0.1.0a5\n')
     harness.children[1].emit('close', 0, null)
@@ -93,7 +104,11 @@ describe('AppInfoService', () => {
     harness.children[0].emit('close', 0, null)
     await flushAsyncWork()
 
-    expect(harness.spawn).toHaveBeenLastCalledWith('ecc', ['--version'], expect.any(Object))
+    expect(harness.spawn).toHaveBeenLastCalledWith(
+      'ecc',
+      ['--version'],
+      expect.any(Object),
+    )
 
     harness.children[1].stdout.emit('data', 'ecc 0.1.0a5\n')
     harness.children[1].emit('close', 0, null)
@@ -116,7 +131,11 @@ describe('AppInfoService', () => {
     harness.children[0].emit('close', 0, null)
     await flushAsyncWork()
 
-    expect(harness.spawn).toHaveBeenLastCalledWith('ecc', ['--version'], expect.any(Object))
+    expect(harness.spawn).toHaveBeenLastCalledWith(
+      'ecc',
+      ['--version'],
+      expect.any(Object),
+    )
 
     harness.children[1].stdout.emit('data', 'ecc 0.1.0a5\n')
     harness.children[1].emit('close', 0, null)
@@ -135,10 +154,13 @@ describe('AppInfoService', () => {
     })
     const promise = service.getVersions()
 
-    harness.children[0].stdout.emit('data', JSON.stringify({
-      schema_version: 1,
-      ecc: '0.1.0a5',
-    }))
+    harness.children[0].stdout.emit(
+      'data',
+      JSON.stringify({
+        schema_version: 1,
+        ecc: '0.1.0a5',
+      }),
+    )
     harness.children[0].emit('close', 0, null)
 
     await expect(promise).resolves.toEqual({

@@ -138,7 +138,10 @@ describe('pluginStore', () => {
       resources: unifiedResources,
       diagnostics: [],
     })
-    expect(store.resources.map((resource) => resource.id)).toEqual(['tool:yosys', 'pdk:ics55'])
+    expect(store.resources.map((resource) => resource.id)).toEqual([
+      'tool:yosys',
+      'pdk:ics55',
+    ])
     expect(store.tools).toEqual([
       {
         name: 'yosys',
@@ -262,7 +265,9 @@ describe('pluginStore', () => {
     await store.installResource('pdk:ics55', '1.01')
     await flushPromises()
 
-    expect(subscribeResourceProgress).toHaveBeenCalledBefore(vi.mocked(installResourceApi))
+    expect(subscribeResourceProgress).toHaveBeenCalledBefore(
+      vi.mocked(installResourceApi),
+    )
     expect(close).toHaveBeenCalledTimes(1)
     expect(store.resources[0]).toMatchObject({
       id: 'pdk:ics55',
@@ -427,9 +432,12 @@ describe('pluginStore', () => {
       .mockResolvedValueOnce([availableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
-    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectInstall = reject
-    }))
+    vi.mocked(installResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectInstall = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -488,9 +496,12 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([availableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
-    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectInstall = reject
-    }))
+    vi.mocked(installResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectInstall = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -534,9 +545,12 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([updateAvailableTool])
       .mockResolvedValueOnce([refreshedUpdateAvailableTool])
-    vi.mocked(updateResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectUpdate = reject
-    }))
+    vi.mocked(updateResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectUpdate = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -633,7 +647,10 @@ describe('pluginStore', () => {
 
     await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
 
-    expect(importLocalResourcePathApi).toHaveBeenCalledWith('tool:yosys', '/tmp/oss-cad-suite')
+    expect(importLocalResourcePathApi).toHaveBeenCalledWith(
+      'tool:yosys',
+      '/tmp/oss-cad-suite',
+    )
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
     expect(store.resourceErrors['tool:yosys']).toBeUndefined()
     expect(store.resources[0]).toMatchObject({
@@ -681,14 +698,18 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([availableTool])
       .mockResolvedValueOnce([availableTool])
-    vi.mocked(importLocalResourcePathApi).mockRejectedValue(new Error('Expected executable not found for yosys'))
+    vi.mocked(importLocalResourcePathApi).mockRejectedValue(
+      new Error('Expected executable not found for yosys'),
+    )
 
     const store = usePluginStore()
     await store.fetchTools()
 
     await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
 
-    expect(store.resourceErrors['tool:yosys']).toBe('Expected executable not found for yosys')
+    expect(store.resourceErrors['tool:yosys']).toBe(
+      'Expected executable not found for yosys',
+    )
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
   })
 })

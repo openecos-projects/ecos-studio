@@ -3,7 +3,7 @@ export {
   desktopApiIpcChannels,
   type DesktopApiEventChannel,
   type DesktopApiIpcChannel,
-} from './constants/ipcChannels.ts';
+} from './constants/ipcChannels.ts'
 export type {
   DesktopApi,
   DesktopDirectoryDialogOptions,
@@ -21,7 +21,7 @@ export type {
   ScannedPdkDirectory,
   ScannedRtlDirectory,
   VersionInfo,
-} from './contracts/desktopApi.ts';
+} from './contracts/desktopApi.ts'
 export type {
   DesktopCliCommandEvent,
   DesktopCliCommandEventType,
@@ -30,7 +30,7 @@ export type {
   DesktopCliCommandResponse,
   DesktopCliCommandResult,
   DesktopCliCommandSource,
-} from './contracts/desktopCli.ts';
+} from './contracts/desktopCli.ts'
 export type {
   ResourceAction,
   ResourceImportLocalRequest,
@@ -42,7 +42,7 @@ export type {
   ResourceOperationResult,
   ResourceStatus,
   ResourceType,
-} from './contracts/resources.ts';
+} from './contracts/resources.ts'
 export type {
   RemoteContentApi,
   RemoteContentFile,
@@ -50,13 +50,13 @@ export type {
   RemoteContentReadJsonFileRequest,
   RemoteContentReadTextFileRequest,
   RemoteContentSourceId,
-} from './contracts/remoteContent.ts';
+} from './contracts/remoteContent.ts'
 export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSession,
   DesktopShellSessionOptions,
-} from './contracts/desktopShell.ts';
+} from './contracts/desktopShell.ts'
 export type {
   DesktopAgentEvent,
   DesktopAgentEventType,
@@ -74,7 +74,7 @@ export type {
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
   DesktopAgentStatusState,
-} from './contracts/desktopAgent.ts';
+} from './contracts/desktopAgent.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,
@@ -85,15 +85,25 @@ export {
   type AppMenuAction,
   type DesktopEventUnsubscribe,
   type DesktopMenuEventId,
-} from './contracts/desktopEvents.ts';
-export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts';
-export type { DesktopFailure, DesktopResult, DesktopSuccess, VoidDesktopResult } from './types/desktop.ts';
-export type { WorkspaceConfig, WorkspaceParameters, WorkspaceStatus, WorkspaceSummary } from './types/workspace.ts';
+} from './contracts/desktopEvents.ts'
+export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts'
+export type {
+  DesktopFailure,
+  DesktopResult,
+  DesktopSuccess,
+  VoidDesktopResult,
+} from './types/desktop.ts'
+export type {
+  WorkspaceConfig,
+  WorkspaceParameters,
+  WorkspaceStatus,
+  WorkspaceSummary,
+} from './types/workspace.ts'
 export type {
   WorkspaceDesignFileAddResult,
   WorkspaceDesignFileEntry,
   WorkspaceDesignFileSkip,
-} from './types/designFiles.ts';
+} from './types/designFiles.ts'
 export type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -102,7 +112,7 @@ export type {
   WorkspaceStepInfoResult,
   WorkspaceStepResource,
   WorkspaceTechResources,
-} from './types/workspaceResources.ts';
+} from './types/workspaceResources.ts'
 export {
   isAbsoluteLocalPath,
   isWindowsDrivePath,
@@ -111,5 +121,5 @@ export {
   normalizeLocalPath,
   resolveContainedLocalPath,
   resolveProjectFileAbsolutePath,
-} from './utils/localPath.ts';
-export { isHdlFilePath } from './utils/hdlPath.ts';
+} from './utils/localPath.ts'
+export { isHdlFilePath } from './utils/hdlPath.ts'

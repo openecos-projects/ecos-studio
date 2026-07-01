@@ -1,6 +1,11 @@
 import { displayPointFromWorld } from '@/applications/editor/core/editorCoordinates'
 import { RULER_THICKNESS } from '@/applications/editor/core/rulerConfig'
-import { darkTheme, themes, type EditorTheme, type ThemeName } from '@/applications/editor/core/Theme'
+import {
+  darkTheme,
+  themes,
+  type EditorTheme,
+  type ThemeName,
+} from '@/applications/editor/core/Theme'
 import { colorNumberToCss } from './themeUtils'
 import { drawRulers } from './rulerDrawing'
 import type { ViewportTransform } from './types'
@@ -15,7 +20,9 @@ export interface FitToWorldOptions {
   worldCenter?: { x: number; y: number }
 }
 
-const DEFAULT_OPTIONS: Required<Omit<ImagePreviewControllerOptions, 'theme'>> & { theme: ThemeName } = {
+const DEFAULT_OPTIONS: Required<Omit<ImagePreviewControllerOptions, 'theme'>> & {
+  theme: ThemeName
+} = {
   worldWidth: 4000,
   worldHeight: 4000,
   theme: 'dark',
@@ -28,7 +35,9 @@ export class ImagePreviewController {
 
   private container: HTMLElement | null = null
   private ctx: CanvasRenderingContext2D | null = null
-  private options: Required<Omit<ImagePreviewControllerOptions, 'theme'>> & { theme: ThemeName }
+  private options: Required<Omit<ImagePreviewControllerOptions, 'theme'>> & {
+    theme: ThemeName
+  }
   private theme: EditorTheme
   private transform: ViewportTransform = { x: 0, y: 0, scale: 1 }
   private transformListeners = new Set<(t: ViewportTransform) => void>()
@@ -43,7 +52,13 @@ export class ImagePreviewController {
   private devicePixelRatio = 1
   private _screenSizeForResize: { w: number; h: number } | null = null
   private _resizeUsesCenteredUnderflowRule = false
-  private dragState: { pointerId: number; startX: number; startY: number; originX: number; originY: number } | null = null
+  private dragState: {
+    pointerId: number
+    startX: number
+    startY: number
+    originX: number
+    originY: number
+  } | null = null
   private boundPointerDown: (event: PointerEvent) => void
   private boundPointerMove: (event: PointerEvent) => void
   private boundPointerUp: (event: PointerEvent) => void
@@ -296,7 +311,7 @@ export class ImagePreviewController {
     const sh = this.screenHeight
     const wh = this.options.worldHeight
     this.transform.x = RULER_THICKNESS
-    this.transform.y = (sh - RULER_THICKNESS) - wh * scale
+    this.transform.y = sh - RULER_THICKNESS - wh * scale
     this._resizeUsesCenteredUnderflowRule = false
     this._screenSizeForResize = { w: this.screenWidth, h: this.screenHeight }
     return this
@@ -317,7 +332,10 @@ export class ImagePreviewController {
     this.screenHeight = Math.max(1, Math.floor(height))
     this.devicePixelRatio = window.devicePixelRatio || 1
     this.canvas.width = Math.max(1, Math.floor(this.screenWidth * this.devicePixelRatio))
-    this.canvas.height = Math.max(1, Math.floor(this.screenHeight * this.devicePixelRatio))
+    this.canvas.height = Math.max(
+      1,
+      Math.floor(this.screenHeight * this.devicePixelRatio),
+    )
     this.render()
   }
 
@@ -382,7 +400,7 @@ export class ImagePreviewController {
   private onWheel(event: WheelEvent): void {
     event.preventDefault()
     const step = 0.1
-    const factor = event.deltaY < 0 ? (1 + step) : (1 / (1 + step))
+    const factor = event.deltaY < 0 ? 1 + step : 1 / (1 + step)
     this.setZoomAt(this.transform.scale * factor, event.offsetX, event.offsetY)
   }
 

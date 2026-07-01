@@ -10,8 +10,38 @@ const raw = {
   cores: {
     number: 2,
     list: [
-      { core_id: 4, name: 'core4', info: '', io_align: 'left', orient: 'FN', bounding_box: { llx: 10, lly: 10, urx: 30, ury: 30, width: 20, height: 20, area: 400 } },
-      { core_id: 5, name: 'core5', info: 'ok', io_align: 'right', orient: 'N', bounding_box: { llx: 50, lly: 50, urx: 70, ury: 70, width: 20, height: 20, area: 400 } },
+      {
+        core_id: 4,
+        name: 'core4',
+        info: '',
+        io_align: 'left',
+        orient: 'FN',
+        bounding_box: {
+          llx: 10,
+          lly: 10,
+          urx: 30,
+          ury: 30,
+          width: 20,
+          height: 20,
+          area: 400,
+        },
+      },
+      {
+        core_id: 5,
+        name: 'core5',
+        info: 'ok',
+        io_align: 'right',
+        orient: 'N',
+        bounding_box: {
+          llx: 50,
+          lly: 50,
+          urx: 70,
+          ury: 70,
+          width: 20,
+          height: 20,
+          area: 400,
+        },
+      },
     ],
   },
 }
@@ -24,7 +54,13 @@ describe('socTemplateMapper', () => {
     expect(detail.ioPinsCount).toBe(58)
     expect(detail.ioPins).toEqual([])
     expect(detail.coreCount).toBe(2)
-    expect(detail.cores[0]).toMatchObject({ id: 4, align: 'left', orient: 'FN', info: 'No info provided', selected: 0 })
+    expect(detail.cores[0]).toMatchObject({
+      id: 4,
+      align: 'left',
+      orient: 'FN',
+      info: 'No info provided',
+      selected: 0,
+    })
   })
 
   it('normalizes per-core selected flags from soc template JSON', () => {
@@ -42,7 +78,9 @@ describe('socTemplateMapper', () => {
       'Fixed JSON',
     )
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 4, selected: 0 },
       { id: 5, selected: 1 },
     ])
@@ -60,7 +98,9 @@ describe('socTemplateMapper', () => {
       'Fixed JSON',
     )
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 4, selected: 0 },
       { id: 5, selected: 1 },
     ])
@@ -78,7 +118,9 @@ describe('socTemplateMapper', () => {
       'Fixed JSON',
     )
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 4, selected: 0 },
       { id: 5, selected: 1 },
     ])
@@ -101,7 +143,9 @@ describe('socTemplateMapper', () => {
       'Fixed JSON',
     )
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 4, selected: 0 },
       { id: 5, selected: 1 },
     ])
@@ -119,7 +163,9 @@ describe('socTemplateMapper', () => {
       'Fixed JSON',
     )
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 4, selected: 0 },
       { id: 5, selected: 0 },
     ])
@@ -141,7 +187,15 @@ describe('socTemplateMapper', () => {
       {
         design_name: 'drifted-template',
         dbu: '2000',
-        die: { llx: '1', lly: undefined, urx: '50.5', ury: null, width: '100', height: 'bad', area: '2500' },
+        die: {
+          llx: '1',
+          lly: undefined,
+          urx: '50.5',
+          ury: null,
+          width: '100',
+          height: 'bad',
+          area: '2500',
+        },
         core: { llx: '10', lly: '20', urx: {}, ury: 40, width: '30', height: undefined },
         io_pins: { number: '7' },
         cores: {
@@ -153,7 +207,15 @@ describe('socTemplateMapper', () => {
               info: 'ok',
               io_align: 'left',
               orient: 'N',
-              bounding_box: { llx: '5', lly: '6', urx: '15', ury: '16', width: '10', height: null, area: '100' },
+              bounding_box: {
+                llx: '5',
+                lly: '6',
+                urx: '15',
+                ury: '16',
+                width: '10',
+                height: null,
+                area: '100',
+              },
             },
           ],
         },
@@ -162,8 +224,32 @@ describe('socTemplateMapper', () => {
     )
 
     expect(detail.dbu).toBe(2000)
-    expect(detail.die).toEqual({ llx: 1, lly: 0, urx: 50.5, ury: 0, width: 100, height: 0, area: 2500 })
-    expect(detail.coreArea).toEqual({ llx: 10, lly: 20, urx: 0, ury: 40, width: 30, height: 0, area: 0 })
-    expect(detail.cores[0]?.boundingBox).toEqual({ llx: 5, lly: 6, urx: 15, ury: 16, width: 10, height: 0, area: 100 })
+    expect(detail.die).toEqual({
+      llx: 1,
+      lly: 0,
+      urx: 50.5,
+      ury: 0,
+      width: 100,
+      height: 0,
+      area: 2500,
+    })
+    expect(detail.coreArea).toEqual({
+      llx: 10,
+      lly: 20,
+      urx: 0,
+      ury: 40,
+      width: 30,
+      height: 0,
+      area: 0,
+    })
+    expect(detail.cores[0]?.boundingBox).toEqual({
+      llx: 5,
+      lly: 6,
+      urx: 15,
+      ury: 16,
+      width: 10,
+      height: 0,
+      area: 100,
+    })
   })
 })

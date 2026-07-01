@@ -27,12 +27,7 @@ function unionBbox(rects: TechBBox[]): TechBBox | null {
 }
 
 function normalizeRect(rect: TechBBox, bbox: TechBBox): TechBBox {
-  return [
-    rect[0] - bbox[0],
-    rect[1] - bbox[1],
-    rect[2] - bbox[0],
-    rect[3] - bbox[1],
-  ]
+  return [rect[0] - bbox[0], rect[1] - bbox[1], rect[2] - bbox[0], rect[3] - bbox[1]]
 }
 
 export function buildCellPreviewGeometry(cell: TechCellMaster): TechPreviewGeometry {

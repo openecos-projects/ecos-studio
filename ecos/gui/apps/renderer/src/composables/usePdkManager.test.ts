@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DesktopApi, DesktopSettingsValue, ScannedPdkDirectory } from '@ecos-studio/shared'
+import type {
+  DesktopApi,
+  DesktopSettingsValue,
+  ScannedPdkDirectory,
+} from '@ecos-studio/shared'
 
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 
 const showToast = vi.fn()
-const settingsGet = vi.fn(async (_key: string): Promise<DesktopSettingsValue | null> => null)
+const settingsGet = vi.fn(
+  async (_key: string): Promise<DesktopSettingsValue | null> => null,
+)
 const settingsSet = vi.fn(async (_key: string, value: DesktopSettingsValue) => {
   structuredClone(value)
 })
@@ -185,13 +191,22 @@ const desktopBridge = {
   },
   resources: {
     list: async () => ({ diagnostics: [], resources: [] }),
-    get: async () => { throw new Error('not found') },
-    install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
+    get: async () => {
+      throw new Error('not found')
+    },
+    install: async (request) => ({
+      status: 'started',
+      resource_id: request.resourceId,
+      version: request.version,
+    }),
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
     cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
     activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
-    validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
+    validatePdk: async (resourceId) => ({
+      resource_id: resourceId,
+      health: { status: 'ok' },
+    }),
     removePdkReference,
     importPdkPath,
     importLocalPath,

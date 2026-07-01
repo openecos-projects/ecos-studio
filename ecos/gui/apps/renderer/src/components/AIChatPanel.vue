@@ -1,54 +1,87 @@
 <template>
-  <div class="h-full flex flex-col min-w-0">
+  <div class="flex h-full min-w-0 flex-col">
     <!-- 消息列表 -->
-    <div ref="scrollContainerRef"
-      class="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-4 custom-scrollbar">
-      <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center py-12">
-        <div class="w-16 h-16 rounded-full bg-(--bg-secondary) flex items-center justify-center mb-4">
+    <div
+      ref="scrollContainerRef"
+      class="custom-scrollbar min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4"
+    >
+      <div
+        v-if="messages.length === 0"
+        class="flex h-full flex-col items-center justify-center py-12 text-center"
+      >
+        <div
+          class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-(--bg-secondary)"
+        >
           <i class="ri-robot-2-line text-4xl text-(--text-secondary) opacity-50"></i>
         </div>
-        <p class="text-[13px] text-(--text-secondary) leading-relaxed">
+        <p class="text-[13px] leading-relaxed text-(--text-secondary)">
           No messages, please enter instructions to start chatting.
         </p>
       </div>
-      <div v-else class="messages-container py-4 space-y-4 min-w-0 w-full max-w-full overflow-hidden">
-        <MessageItem v-for="msg in messages" :key="msg.id" :message="msg" @img-load="onImageLoad"
-          @close="messageStore.removeMessage(msg.id)" class="message-item w-full min-w-0 max-w-full" />
+      <div
+        v-else
+        class="messages-container w-full max-w-full min-w-0 space-y-4 overflow-hidden py-4"
+      >
+        <MessageItem
+          v-for="msg in messages"
+          :key="msg.id"
+          :message="msg"
+          @img-load="onImageLoad"
+          @close="messageStore.removeMessage(msg.id)"
+          class="message-item w-full max-w-full min-w-0"
+        />
       </div>
     </div>
 
     <!-- 输入区域 -->
-    <div class="shrink-0 p-4 bg-(--bg-primary) border-t border-(--border-color)">
-      <div class="bg-(--bg-secondary) rounded-xl border border-(--border-color) p-2">
-        <textarea v-model="inputValue" placeholder=""
-          class="w-full bg-transparent border-none focus:ring-0 focus:outline-none text-[13px] text-(--text-primary) min-h-[80px] p-2 resize-none"
-          @keydown="handleKeyDown"></textarea>
+    <div class="shrink-0 border-t border-(--border-color) bg-(--bg-primary) p-4">
+      <div class="rounded-xl border border-(--border-color) bg-(--bg-secondary) p-2">
+        <textarea
+          v-model="inputValue"
+          placeholder=""
+          class="min-h-[80px] w-full resize-none border-none bg-transparent p-2 text-[13px] text-(--text-primary) focus:ring-0 focus:outline-none"
+          @keydown="handleKeyDown"
+        ></textarea>
 
-        <div class="flex items-center justify-between mt-2 px-1">
+        <div class="mt-2 flex items-center justify-between px-1">
           <div class="flex items-center gap-3">
             <!-- 模式选择器 - Cursor 风格 -->
             <div class="relative" ref="modeSelectRef">
-              <button @click="toggleModeMenu"
-                class="mode-selector flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-(--border-color) bg-(--bg-primary) hover:border-(--text-secondary)/50 transition-colors duration-150">
+              <button
+                @click="toggleModeMenu"
+                class="mode-selector flex items-center gap-1.5 rounded-full border border-(--border-color) bg-(--bg-primary) px-2 py-0.5 transition-colors duration-150 hover:border-(--text-secondary)/50"
+              >
                 <i :class="[currentMode.icon, 'text-sm text-(--text-secondary)']"></i>
-                <i class="ri-arrow-down-s-line text-xs text-(--text-secondary) transition-transform duration-200"
-                  :class="{ 'rotate-180': showModeMenu }"></i>
+                <i
+                  class="ri-arrow-down-s-line text-xs text-(--text-secondary) transition-transform duration-200"
+                  :class="{ 'rotate-180': showModeMenu }"
+                ></i>
               </button>
 
               <!-- 上拉菜单 -->
               <Transition name="popup">
-                <div v-if="showModeMenu"
-                  class="absolute bottom-full left-0 mb-2 min-w-[140px] bg-(--bg-tertiary) border border-(--border-color)/50 rounded-xl shadow-xl overflow-hidden z-50">
+                <div
+                  v-if="showModeMenu"
+                  class="absolute bottom-full left-0 z-50 mb-2 min-w-[140px] overflow-hidden rounded-xl border border-(--border-color)/50 bg-(--bg-tertiary) shadow-xl"
+                >
                   <div class="py-1">
-                    <div v-for="mode in modes" :key="mode.id" @click="selectMode(mode.id)" :class="[
-                      'flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors duration-150',
-                      currentModeId === mode.id
-                        ? 'text-(--text-primary) bg-(--bg-secondary)'
-                        : 'text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-secondary)/50'
-                    ]">
+                    <div
+                      v-for="mode in modes"
+                      :key="mode.id"
+                      @click="selectMode(mode.id)"
+                      :class="[
+                        'flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors duration-150',
+                        currentModeId === mode.id
+                          ? 'bg-(--bg-secondary) text-(--text-primary)'
+                          : 'text-(--text-secondary) hover:bg-(--bg-secondary)/50 hover:text-(--text-primary)',
+                      ]"
+                    >
                       <i :class="[mode.icon, 'text-sm']"></i>
-                      <span class="text-xs font-medium flex-1">{{ mode.label }}</span>
-                      <i v-if="currentModeId === mode.id" class="ri-check-line text-xs text-(--accent-color)"></i>
+                      <span class="flex-1 text-xs font-medium">{{ mode.label }}</span>
+                      <i
+                        v-if="currentModeId === mode.id"
+                        class="ri-check-line text-xs text-(--accent-color)"
+                      ></i>
                     </div>
                   </div>
                 </div>
@@ -56,7 +89,11 @@
             </div>
           </div>
 
-          <button @click="handleSubmit" class="send-btn" :class="{ 'send-btn-active': inputValue.trim() }">
+          <button
+            @click="handleSubmit"
+            class="send-btn"
+            :class="{ 'send-btn-active': inputValue.trim() }"
+          >
             <i class="ri-send-plane-2-fill"></i>
           </button>
         </div>
@@ -90,7 +127,7 @@ const modes = [
 
 // 当前选中的模式
 const currentMode = computed(() => {
-  return modes.find(m => m.id === currentModeId.value) || modes[0]
+  return modes.find((m) => m.id === currentModeId.value) || modes[0]
 })
 
 // 切换菜单显示
@@ -141,7 +178,7 @@ const scrollToBottom = (smooth = true) => {
   if (smooth) {
     el.scrollTo({
       top: el.scrollHeight,
-      behavior: 'smooth'
+      behavior: 'smooth',
     })
   } else {
     el.scrollTop = el.scrollHeight
@@ -183,12 +220,15 @@ const onImageLoad = () => {
 }
 
 // 监听消息变化，自动滚动到底部
-watch(() => messages.value.length, (newLength, oldLength) => {
-  // 新消息到来时强制滚动到底部；删除消息时保持用户当前浏览位置
-  if (newLength > oldLength) {
-    scrollToBottomIfNeeded(true)
-  }
-})
+watch(
+  () => messages.value.length,
+  (newLength, oldLength) => {
+    // 新消息到来时强制滚动到底部；删除消息时保持用户当前浏览位置
+    if (newLength > oldLength) {
+      scrollToBottomIfNeeded(true)
+    }
+  },
+)
 
 const handleSubmit = () => {
   if (inputValue.value.trim()) {
@@ -294,7 +334,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
 /* 上拉菜单动画 */
 .popup-enter-active,
 .popup-leave-active {
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
 }
 
 .popup-enter-from,

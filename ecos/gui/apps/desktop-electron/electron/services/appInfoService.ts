@@ -2,7 +2,10 @@ import { spawn as spawnChild } from 'node:child_process'
 import type { VersionInfo } from '@ecos-studio/shared'
 
 type SpawnLike = typeof spawnChild
-type EccComponentVersions = Pick<VersionInfo, 'runtime' | 'ecc' | 'dreamplace' | 'eccTools'>
+type EccComponentVersions = Pick<
+  VersionInfo,
+  'runtime' | 'ecc' | 'dreamplace' | 'eccTools'
+>
 
 export interface AppInfoServiceOptions {
   appVersionProvider: () => string

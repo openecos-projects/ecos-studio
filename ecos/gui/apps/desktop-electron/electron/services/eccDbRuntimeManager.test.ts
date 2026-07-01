@@ -11,7 +11,9 @@ import {
 import { WorkspaceService } from './workspaceService'
 
 const tempDirectories: string[] = []
-type ProjectScopeProviderDouble = ConstructorParameters<typeof WorkspaceService>[0]['projectScopeProvider']
+type ProjectScopeProviderDouble = ConstructorParameters<
+  typeof WorkspaceService
+>[0]['projectScopeProvider']
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void
@@ -44,9 +46,9 @@ function createProjectScopeProvider(
 describe('EccDbRuntimeManager', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -80,35 +82,46 @@ describe('EccDbRuntimeManager', () => {
     })
     const listener = vi.fn()
 
-    const run = manager.execute({
-      directory: workspaceRoot,
-      operation: 'initialize',
-      step: 'floorplan',
-    }, listener)
+    const run = manager.execute(
+      {
+        directory: workspaceRoot,
+        operation: 'initialize',
+        step: 'floorplan',
+      },
+      listener,
+    )
 
     await vi.waitFor(async () => {
       expect(adapter.execute).toHaveBeenCalledTimes(1)
       await expect(manager.isWorkspaceRuntimeActive(workspaceRoot)).resolves.toBe(true)
     })
     await expect(
-      workspaceService.writeProjectTextFile('/workspace/home/parameters.json', '{"PDK":"ics55"}'),
+      workspaceService.writeProjectTextFile(
+        '/workspace/home/parameters.json',
+        '{"PDK":"ics55"}',
+      ),
     ).rejects.toThrow('workspace flow is running')
 
     pendingDb.resolve(dbResult)
     await expect(run).resolves.toEqual(dbResult)
     await expect(manager.isWorkspaceRuntimeActive(workspaceRoot)).resolves.toBe(false)
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      directory: workspaceRoot,
-      operation: 'initialize',
-      step: 'floorplan',
-      type: 'progress',
-      workspaceId: workspaceRoot,
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: workspaceRoot,
+        operation: 'initialize',
+        step: 'floorplan',
+        type: 'progress',
+        workspaceId: workspaceRoot,
+      }),
+    )
     const jobIds = listener.mock.calls.map(([event]) => event.jobId)
     expect(new Set(jobIds).size).toBe(1)
 
     await expect(
-      workspaceService.writeProjectTextFile('/workspace/home/parameters.json', '{"PDK":"ics55"}'),
+      workspaceService.writeProjectTextFile(
+        '/workspace/home/parameters.json',
+        '{"PDK":"ics55"}',
+      ),
     ).resolves.toBeUndefined()
     await expect(readFile(filePath, 'utf8')).resolves.toBe('{"PDK":"ics55"}')
   })
@@ -142,7 +155,10 @@ describe('EccDbRuntimeManager', () => {
       await expect(manager.isWorkspaceRuntimeActive(workspaceRoot)).resolves.toBe(false)
     })
     await expect(
-      workspaceService.writeProjectTextFile('/workspace/config/db_default_config.json', '{}'),
+      workspaceService.writeProjectTextFile(
+        '/workspace/config/db_default_config.json',
+        '{}',
+      ),
     ).resolves.toBeUndefined()
 
     pendingDb.resolve({

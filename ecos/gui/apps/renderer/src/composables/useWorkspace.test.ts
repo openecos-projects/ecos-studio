@@ -79,7 +79,8 @@ vi.mock('@/stores/messageStore', () => ({
 
 vi.mock('./homeRunArtifacts', () => ({
   requestHomeRunArtifactReset: requestHomeRunArtifactResetMock,
-  clearHomeRunArtifactResetAwaitingBackendStart: clearHomeRunArtifactResetAwaitingBackendStartMock,
+  clearHomeRunArtifactResetAwaitingBackendStart:
+    clearHomeRunArtifactResetAwaitingBackendStartMock,
 }))
 
 import { useWorkspace } from './useWorkspace'
@@ -235,10 +236,12 @@ describe('useWorkspace openProject', () => {
     workspace.recentProjects.value = [{ ...activeProject }]
     settingsData.set('current_project_path', '/work/demo')
 
-    await expect(workspace.openProject({
-      ...activeProject,
-      path: '/work/demo/',
-    })).resolves.toBe(true)
+    await expect(
+      workspace.openProject({
+        ...activeProject,
+        path: '/work/demo/',
+      }),
+    ).resolves.toBe(true)
 
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
     expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
@@ -432,7 +435,9 @@ describe('useWorkspace openProject', () => {
       topModule: 'new_top',
     }
     let resolveFlow:
-      | ((value: { steps: Array<{ name: string; state: string; runtime: string }> }) => void)
+      | ((value: {
+          steps: Array<{ name: string; state: string; runtime: string }>
+        }) => void)
       | undefined
 
     workspace.currentProject.value = oldProject
@@ -440,7 +445,7 @@ describe('useWorkspace openProject', () => {
     readWorkspaceFlowResourceApiMock.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveFlow = resolve
-      })
+      }),
     )
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce({
       PDK: 'old-pdk',
@@ -463,7 +468,10 @@ describe('useWorkspace openProject', () => {
       expect(readWorkspaceFlowResourceApiMock).toHaveBeenCalledTimes(1)
     })
 
-    workspace.recentProjects.value = [{ ...newProject }, ...workspace.recentProjects.value]
+    workspace.recentProjects.value = [
+      { ...newProject },
+      ...workspace.recentProjects.value,
+    ]
     resolveFlow?.({
       steps: [
         { name: 'synthesis', state: 'Success', runtime: '00:01:00' },
@@ -512,20 +520,22 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'success',
-      totalSteps: 8,
-      completedSteps: 8,
-      currentStep: 'signoff',
-      totalRuntime: '14m 2s',
-      pdk: 'existing-pdk',
-      topModule: 'existing-top',
-      frequencyTarget: 250,
-      coreUtilization: 0.71,
-      cellCount: 12345,
-      frequency: 241.5,
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'success',
+        totalSteps: 8,
+        completedSteps: 8,
+        currentStep: 'signoff',
+        totalRuntime: '14m 2s',
+        pdk: 'existing-pdk',
+        topModule: 'existing-top',
+        frequencyTarget: 250,
+        coreUtilization: 0.71,
+        cellCount: 12345,
+        frequency: 241.5,
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
       steps: { synthesis: { state: 'Success' } },
     })
@@ -575,20 +585,18 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
-      steps: [
-        'bad',
-        { name: 'synthesis' },
-        { runtime: '00:01:05' },
-      ],
+      steps: ['bad', { name: 'synthesis' }, { runtime: '00:01:05' }],
     })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
     readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
@@ -620,14 +628,16 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
       steps: [
         { name: 'synthesis', state: 'Success', runtime: '00:01:00' },
@@ -663,14 +673,16 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({ steps: [] })
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
     readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
@@ -704,14 +716,16 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
       steps: [{ state: 'Success' }],
     })
@@ -745,14 +759,16 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
       steps: [
         { name: 'synthesis', state: 'Success', runtime: '00:01:05' },
@@ -792,14 +808,16 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 2,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '14m 2s',
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 2,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '14m 2s',
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce({
       steps: [
         { name: 'synthesis', state: 'Success', runtime: 'aa:bb:cc' },
@@ -836,20 +854,22 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-01T00:00:00.000Z'),
     }
     workspace.currentProject.value = project
-    workspace.recentProjects.value = [{
-      ...project,
-      status: 'running',
-      totalSteps: 3,
-      completedSteps: 1,
-      currentStep: 'floorplan',
-      totalRuntime: '1m 35s',
-      pdk: 'ics55',
-      topModule: 'top',
-      frequencyTarget: 125,
-      coreUtilization: 0.62,
-      cellCount: 42,
-      frequency: 118.5,
-    }]
+    workspace.recentProjects.value = [
+      {
+        ...project,
+        status: 'running',
+        totalSteps: 3,
+        completedSteps: 1,
+        currentStep: 'floorplan',
+        totalRuntime: '1m 35s',
+        pdk: 'ics55',
+        topModule: 'top',
+        frequencyTarget: 125,
+        coreUtilization: 0.62,
+        cellCount: 42,
+        frequency: 118.5,
+      },
+    ]
     readWorkspaceFlowResourceApiMock.mockResolvedValueOnce(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValueOnce(null)
     readWorkspaceHomeResourceApiMock.mockResolvedValueOnce(null)
@@ -1010,10 +1030,12 @@ describe('useWorkspace openProject', () => {
 
     workspace.currentProject.value = currentProject
     workspace.recentProjects.value = [{ ...currentProject }]
-    settingsData.set('recent_projects', [{
-      ...currentProject,
-      lastOpened: currentProject.lastOpened.toISOString(),
-    }])
+    settingsData.set('recent_projects', [
+      {
+        ...currentProject,
+        lastOpened: currentProject.lastOpened.toISOString(),
+      },
+    ])
     settingsData.set('current_project_path', '/work/current')
     loadWorkspaceApiMock.mockImplementation((path: string) => {
       if (path === '/work/a') {
@@ -1054,11 +1076,13 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
     const recentProjects = readRecentProjectsSetting()
-    expect(recentProjects[0]).toEqual(expect.objectContaining({
-      id: '/work/b',
-      name: 'b',
-      path: '/work/b',
-    }))
+    expect(recentProjects[0]).toEqual(
+      expect.objectContaining({
+        id: '/work/b',
+        name: 'b',
+        path: '/work/b',
+      }),
+    )
     expect(recentProjects).not.toEqual([
       expect.objectContaining({
         id: '/work/a',
@@ -1089,21 +1113,26 @@ describe('useWorkspace openProject', () => {
       lastOpened: new Date('2026-01-03T00:00:00.000Z'),
     }
     let resolveProjectASnapshot:
-      | ((value: { steps: Array<{ name: string; state: string; runtime: string }> }) => void)
+      | ((value: {
+          steps: Array<{ name: string; state: string; runtime: string }>
+        }) => void)
       | undefined
 
     workspace.currentProject.value = currentProject
     workspace.recentProjects.value = [{ ...currentProject }]
-    settingsData.set('recent_projects', [{
-      ...currentProject,
-      lastOpened: currentProject.lastOpened.toISOString(),
-    }])
+    settingsData.set('recent_projects', [
+      {
+        ...currentProject,
+        lastOpened: currentProject.lastOpened.toISOString(),
+      },
+    ])
     settingsData.set('current_project_path', '/work/current')
     readWorkspaceFlowResourceApiMock
       .mockImplementationOnce(
-        () => new Promise((resolve) => {
-          resolveProjectASnapshot = resolve
-        })
+        () =>
+          new Promise((resolve) => {
+            resolveProjectASnapshot = resolve
+          }),
       )
       .mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
@@ -1129,9 +1158,7 @@ describe('useWorkspace openProject', () => {
     })
 
     resolveProjectASnapshot?.({
-      steps: [
-        { name: 'synthesis', state: 'Success', runtime: '00:01:00' },
-      ],
+      steps: [{ name: 'synthesis', state: 'Success', runtime: '00:01:00' }],
     })
 
     await expect(openProjectB).resolves.toBe(true)
@@ -1140,11 +1167,13 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
     const recentProjects = readRecentProjectsSetting()
-    expect(recentProjects[0]).toEqual(expect.objectContaining({
-      id: '/work/b',
-      name: 'b',
-      path: '/work/b',
-    }))
+    expect(recentProjects[0]).toEqual(
+      expect.objectContaining({
+        id: '/work/b',
+        name: 'b',
+        path: '/work/b',
+      }),
+    )
   })
 
   it('does not let a stale stalled switch snapshot persist mixed resources after a newer switch wins', async () => {
@@ -1186,10 +1215,12 @@ describe('useWorkspace openProject', () => {
 
     workspace.currentProject.value = oldProject
     workspace.recentProjects.value = [{ ...oldSummary }]
-    settingsData.set('recent_projects', [{
-      ...oldSummary,
-      lastOpened: oldSummary.lastOpened.toISOString(),
-    }])
+    settingsData.set('recent_projects', [
+      {
+        ...oldSummary,
+        lastOpened: oldSummary.lastOpened.toISOString(),
+      },
+    ])
     settingsData.set('current_project_path', '/work/old')
 
     readWorkspaceFlowResourceApiMock.mockImplementation(async () => {
@@ -1259,25 +1290,29 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
     const recentProjects = readRecentProjectsSetting()
-    expect(recentProjects[0]).toEqual(expect.objectContaining({
-      id: '/work/b',
-      name: 'b',
-      path: '/work/b',
-    }))
-    expect(recentProjects[1]).toEqual(expect.objectContaining({
-      id: '/work/old',
-      name: 'old',
-      path: '/work/old',
-      status: 'success',
-      totalSteps: 2,
-      completedSteps: 2,
-      pdk: 'old-pdk',
-      topModule: 'old_top',
-      frequencyTarget: 100,
-      coreUtilization: 0.5,
-      cellCount: 11,
-      frequency: 95,
-    }))
+    expect(recentProjects[0]).toEqual(
+      expect.objectContaining({
+        id: '/work/b',
+        name: 'b',
+        path: '/work/b',
+      }),
+    )
+    expect(recentProjects[1]).toEqual(
+      expect.objectContaining({
+        id: '/work/old',
+        name: 'old',
+        path: '/work/old',
+        status: 'success',
+        totalSteps: 2,
+        completedSteps: 2,
+        pdk: 'old-pdk',
+        topModule: 'old_top',
+        frequencyTarget: 100,
+        coreUtilization: 0.5,
+        cellCount: 11,
+        frequency: 95,
+      }),
+    )
   })
 
   it('does not let a stale snapshot settings write overwrite a newer project switch', async () => {
@@ -1305,10 +1340,12 @@ describe('useWorkspace openProject', () => {
 
     workspace.currentProject.value = oldProject
     workspace.recentProjects.value = [{ ...oldProject }]
-    settingsData.set('recent_projects', [{
-      ...oldProject,
-      lastOpened: oldProject.lastOpened.toISOString(),
-    }])
+    settingsData.set('recent_projects', [
+      {
+        ...oldProject,
+        lastOpened: oldProject.lastOpened.toISOString(),
+      },
+    ])
     settingsData.set('current_project_path', '/work/old')
     readWorkspaceFlowResourceApiMock.mockResolvedValue(null)
     readWorkspaceParametersResourceApiMock.mockResolvedValue(null)
@@ -1320,17 +1357,19 @@ describe('useWorkspace openProject', () => {
         workspace_id: path,
       },
     }))
-    vi.mocked(desktopApi.settings.set).mockImplementation(async (key: string, value: unknown) => {
-      if (key === 'recent_projects') {
-        recentProjectsSetCount += 1
-        if (recentProjectsSetCount === 1) {
-          await new Promise<void>((resolve) => {
-            releaseStaleSnapshotWrite = resolve
-          })
+    vi.mocked(desktopApi.settings.set).mockImplementation(
+      async (key: string, value: unknown) => {
+        if (key === 'recent_projects') {
+          recentProjectsSetCount += 1
+          if (recentProjectsSetCount === 1) {
+            await new Promise<void>((resolve) => {
+              releaseStaleSnapshotWrite = resolve
+            })
+          }
         }
-      }
-      settingsData.set(key, value)
-    })
+        settingsData.set(key, value)
+      },
+    )
 
     const openProjectA = workspace.openProject(projectA)
 
@@ -1351,11 +1390,13 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
     const recentProjects = readRecentProjectsSetting()
-    expect(recentProjects[0]).toEqual(expect.objectContaining({
-      id: '/work/b',
-      name: 'b',
-      path: '/work/b',
-    }))
+    expect(recentProjects[0]).toEqual(
+      expect.objectContaining({
+        id: '/work/b',
+        name: 'b',
+        path: '/work/b',
+      }),
+    )
     expect(recentProjects).not.toEqual([
       expect.objectContaining({
         id: '/work/old',
@@ -1422,8 +1463,9 @@ describe('useWorkspace openProject', () => {
     expect(await workspace.openProject(existingProject)).toBe(true)
 
     vi.mocked(desktopApi.dialog.pickDirectory).mockResolvedValueOnce('/work/new')
-    vi.mocked(desktopApi.workspace.registerProjectRoot)
-      .mockRejectedValueOnce(new Error('permission denied'))
+    vi.mocked(desktopApi.workspace.registerProjectRoot).mockRejectedValueOnce(
+      new Error('permission denied'),
+    )
     loadWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',
       data: {
@@ -1461,7 +1503,7 @@ describe('useWorkspace openProject', () => {
     loadWorkspaceApiMock.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveLoadWorkspace = resolve
-      })
+      }),
     )
 
     const project: Project = {
@@ -1675,7 +1717,7 @@ describe('useWorkspace openProject', () => {
     createWorkspaceApiMock.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveCreateWorkspace = resolve
-      })
+      }),
     )
 
     const createPromise = workspace.newProject({

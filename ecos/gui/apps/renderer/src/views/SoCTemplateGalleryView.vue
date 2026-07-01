@@ -31,7 +31,9 @@ onMounted(loadCatalog)
 </script>
 
 <template>
-  <div class="soc-view relative min-h-full w-full overflow-x-hidden overflow-y-auto text-(--text-primary)">
+  <div
+    class="soc-view relative min-h-full w-full overflow-x-hidden overflow-y-auto text-(--text-primary)"
+  >
     <div class="soc-view__wash" aria-hidden="true" />
     <div class="soc-view__grid" aria-hidden="true" />
     <div class="soc-view__orb soc-view__orb--tr" aria-hidden="true" />
@@ -63,9 +65,22 @@ onMounted(loadCatalog)
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 120% 80% at 15% -10%, color-mix(in srgb, var(--accent-color) 14%, transparent) 0%, transparent 55%),
-    radial-gradient(ellipse 90% 60% at 100% 0%, color-mix(in srgb, var(--text-secondary) 8%, transparent) 0%, transparent 45%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary)) 0%, var(--bg-primary) 38%, var(--bg-primary) 100%);
+    radial-gradient(
+      ellipse 120% 80% at 15% -10%,
+      color-mix(in srgb, var(--accent-color) 14%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 90% 60% at 100% 0%,
+      color-mix(in srgb, var(--text-secondary) 8%, transparent) 0%,
+      transparent 45%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary)) 0%,
+      var(--bg-primary) 38%,
+      var(--bg-primary) 100%
+    );
 }
 
 /* 蓝图细网格：仅上半屏可见，仿 floorplan 读图 */
@@ -75,8 +90,15 @@ onMounted(loadCatalog)
   pointer-events: none;
   opacity: 0.55;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--border-color) 70%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 70%, transparent) 1px, transparent 1px);
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 70%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 70%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 20px 20px;
   mask-image: linear-gradient(180deg, black 0%, black 42%, transparent 78%);
 }
@@ -93,7 +115,11 @@ onMounted(loadCatalog)
   height: min(52vw, 380px);
   right: -8%;
   top: -6%;
-  background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent-color) 22%, transparent) 0%, transparent 68%);
+  background: radial-gradient(
+    circle at 30% 30%,
+    color-mix(in srgb, var(--accent-color) 22%, transparent) 0%,
+    transparent 68%
+  );
 }
 
 .soc-view__orb--bl {
@@ -101,7 +127,11 @@ onMounted(loadCatalog)
   height: min(44vw, 320px);
   left: -10%;
   bottom: 8%;
-  background: radial-gradient(circle at 70% 70%, color-mix(in srgb, var(--text-secondary) 12%, transparent) 0%, transparent 70%);
+  background: radial-gradient(
+    circle at 70% 70%,
+    color-mix(in srgb, var(--text-secondary) 12%, transparent) 0%,
+    transparent 70%
+  );
 }
 
 /* 左侧工艺边线：像图纸装订边 */

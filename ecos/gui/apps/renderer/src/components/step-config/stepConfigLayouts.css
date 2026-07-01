@@ -445,7 +445,8 @@
 /* Nested sub-panels (PL) */
 .step-config-root .sc-pro-subpanel {
   border-radius: 8px;
-  border: 1px dashed color-mix(in srgb, var(--border-color) 90%, var(--sc-accent, #f59e0b));
+  border: 1px dashed
+    color-mix(in srgb, var(--border-color) 90%, var(--sc-accent, #f59e0b));
   background: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-secondary));
   padding: 10px;
   margin-bottom: 10px;

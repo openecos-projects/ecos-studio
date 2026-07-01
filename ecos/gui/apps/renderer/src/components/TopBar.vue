@@ -21,8 +21,12 @@
       <!-- 菜单项（带下拉菜单） -->
       <div class="menu-items" ref="menuBarRef">
         <div v-for="menu in menus" :key="menu.label" class="menu-wrapper">
-          <button @click="toggleMenu(menu.action)" @mouseenter="handleMenuHover(menu.action)" class="menu-btn"
-            :class="{ 'menu-btn-active': activeMenu === menu.action }">
+          <button
+            @click="toggleMenu(menu.action)"
+            @mouseenter="handleMenuHover(menu.action)"
+            class="menu-btn"
+            :class="{ 'menu-btn-active': activeMenu === menu.action }"
+          >
             {{ menu.label }}
           </button>
           <!-- 下拉菜单 -->
@@ -30,10 +34,17 @@
             <div v-if="activeMenu === menu.action && menu.children" class="dropdown-menu">
               <template v-for="(item, idx) in menu.children" :key="idx">
                 <div v-if="item.separator" class="dropdown-separator" />
-                <button v-else @click="handleItemClick(item.event)" class="dropdown-item" :disabled="item.disabled">
+                <button
+                  v-else
+                  @click="handleItemClick(item.event)"
+                  class="dropdown-item"
+                  :disabled="item.disabled"
+                >
                   <i v-if="item.icon" :class="item.icon" class="item-icon" />
                   <span class="item-label">{{ item.label }}</span>
-                  <span v-if="item.shortcut" class="item-shortcut">{{ item.shortcut }}</span>
+                  <span v-if="item.shortcut" class="item-shortcut">{{
+                    item.shortcut
+                  }}</span>
                 </button>
               </template>
             </div>
@@ -41,7 +52,7 @@
         </div>
       </div>
     </div>
- 
+
     <div class="topbar-drag-spacer" data-window-drag-region aria-hidden="true"></div>
 
     <div class="topbar-center">
@@ -50,8 +61,11 @@
 
     <!-- 右侧：窗口控制按钮 -->
     <div class="topbar-right" @mousedown.stop>
-      <button  @click="toggleTheme" class="window-btn theme-btn"
-        :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'">
+      <button
+        @click="toggleTheme"
+        class="window-btn theme-btn"
+        :title="isDark ? 'Switch to light theme' : 'Switch to dark theme'"
+      >
         <i :class="isDark ? 'ri-sun-line' : 'ri-moon-line'" class="text-base"></i>
       </button>
       <template v-if="desktopApi">
@@ -68,19 +82,58 @@
           :aria-label="isMaximized ? 'Restore window' : 'Maximize window'"
         >
           <!-- 最大化：单框 -->
-          <svg v-if="!isMaximized" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="2.5" y="2.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
+          <svg
+            v-if="!isMaximized"
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+          >
+            <rect
+              x="2.5"
+              y="2.5"
+              width="9"
+              height="9"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1"
+            />
           </svg>
           <!-- 还原：重叠双框 -->
           <svg v-else width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="4.5" y="4.5" width="7.5" height="7.5" fill="none" stroke="currentColor" stroke-width="1" />
-            <rect x="2.5" y="2.5" width="7.5" height="7.5" fill="none" stroke="currentColor" stroke-width="1" />
+            <rect
+              x="4.5"
+              y="4.5"
+              width="7.5"
+              height="7.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1"
+            />
+            <rect
+              x="2.5"
+              y="2.5"
+              width="7.5"
+              height="7.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1"
+            />
           </svg>
         </button>
         <!-- 关闭 -->
-        <button @click="handleClose" class="window-btn window-btn-close" aria-label="Close window">
+        <button
+          @click="handleClose"
+          class="window-btn window-btn-close"
+          aria-label="Close window"
+        >
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+            <path
+              d="M3 3L9 9M9 3L3 9"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linecap="round"
+            />
           </svg>
         </button>
       </template>
@@ -143,22 +196,44 @@ const menus = computed<Menu[]>(() => [
     label: 'File',
     action: 'file',
     children: [
-      { label: 'New Workspace', icon: 'ri-add-line', shortcut: '⌘N', event: appMenuActionIds.newProject },
-      { label: 'Open Workspace', icon: 'ri-folder-open-line', shortcut: '⌘O', event: appMenuActionIds.openProject },
+      {
+        label: 'New Workspace',
+        icon: 'ri-add-line',
+        shortcut: '⌘N',
+        event: appMenuActionIds.newProject,
+      },
+      {
+        label: 'Open Workspace',
+        icon: 'ri-folder-open-line',
+        shortcut: '⌘O',
+        event: appMenuActionIds.openProject,
+      },
     ],
   },
-  ...(props.hasWorkspace ? [{
-    label: 'Design',
-    action: 'design',
-    children: [
-      { label: 'Manage RTL Files...', icon: 'ri-file-code-line', event: appMenuActionIds.manageDesignFiles },
-    ],
-  }] : []),
+  ...(props.hasWorkspace
+    ? [
+        {
+          label: 'Design',
+          action: 'design',
+          children: [
+            {
+              label: 'Manage RTL Files...',
+              icon: 'ri-file-code-line',
+              event: appMenuActionIds.manageDesignFiles,
+            },
+          ],
+        },
+      ]
+    : []),
   {
     label: 'Help',
     action: 'help',
     children: [
-      { label: 'Documentation', icon: 'ri-book-open-line', event: appMenuActionIds.documentation },
+      {
+        label: 'Documentation',
+        icon: 'ri-book-open-line',
+        event: appMenuActionIds.documentation,
+      },
       { separator: true },
       { label: 'About', icon: 'ri-information-line', event: appMenuActionIds.about },
     ],
@@ -232,9 +307,11 @@ onMounted(async () => {
   }
 
   void syncMaximizedState()
-  unlistenMaximizedChanged = desktopApi.value.window.onMaximizedChanged((nextIsMaximized) => {
-    isMaximized.value = nextIsMaximized
-  })
+  unlistenMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
+    (nextIsMaximized) => {
+      isMaximized.value = nextIsMaximized
+    },
+  )
 })
 
 onUnmounted(() => {
@@ -245,17 +322,17 @@ onUnmounted(() => {
 
 // ---- 窗口控制 ----
 const handleMinimize = async () => {
-  const api = desktopApi.value ?? await waitForDesktopApi()
+  const api = desktopApi.value ?? (await waitForDesktopApi())
   await api.window.minimize()
 }
 
 const handleMaximize = async () => {
-  const api = desktopApi.value ?? await waitForDesktopApi()
+  const api = desktopApi.value ?? (await waitForDesktopApi())
   await api.window.toggleMaximize()
 }
 
 const handleClose = async () => {
-  const api = desktopApi.value ?? await waitForDesktopApi()
+  const api = desktopApi.value ?? (await waitForDesktopApi())
   await api.window.close()
 }
 </script>
@@ -309,7 +386,9 @@ const handleClose = async () => {
   border-radius: 4px;
   cursor: pointer;
   font-size: 16px;
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
 
 .home-btn:hover {
@@ -353,7 +432,9 @@ const handleClose = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
   border-radius: 4px;
 }
 
@@ -373,7 +454,9 @@ const handleClose = async () => {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000;
 }
 
@@ -445,11 +528,15 @@ const handleClose = async () => {
 
 /* 下拉菜单过渡动画 */
 .dropdown-enter-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .dropdown-leave-active {
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  transition:
+    opacity 0.1s ease,
+    transform 0.1s ease;
 }
 
 .dropdown-enter-from {
@@ -514,7 +601,9 @@ const handleClose = async () => {
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: background-color 0.15s, color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
 
 .window-btn:hover {

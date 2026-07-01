@@ -20,7 +20,7 @@ export const useMessageStore = defineStore('messages', () => {
       role: 'user',
       content,
       type: 'text',
-      status: 'done'
+      status: 'done',
     })
     return id
   }
@@ -28,14 +28,17 @@ export const useMessageStore = defineStore('messages', () => {
   /**
    * 添加 AI 助手消息（支持流式更新）
    */
-  const addAssistantMessage = (content: string = '', status: 'loading' | 'done' | 'error' = 'loading'): string => {
+  const addAssistantMessage = (
+    content: string = '',
+    status: 'loading' | 'done' | 'error' = 'loading',
+  ): string => {
     const id = generateId()
     messages.value.push({
       id,
       role: 'assistant',
       content,
       type: 'text',
-      status
+      status,
     })
     return id
   }
@@ -43,8 +46,11 @@ export const useMessageStore = defineStore('messages', () => {
   /**
    * 更新消息内容或状态（用于流式更新）
    */
-  const updateMessage = (id: string, partial: Partial<Pick<Message, 'content' | 'status'>>): void => {
-    const message = messages.value.find(m => m.id === id)
+  const updateMessage = (
+    id: string,
+    partial: Partial<Pick<Message, 'content' | 'status'>>,
+  ): void => {
+    const message = messages.value.find((m) => m.id === id)
     if (message) {
       if (partial.content !== undefined) {
         message.content = partial.content
@@ -59,7 +65,7 @@ export const useMessageStore = defineStore('messages', () => {
    * 追加内容到消息（用于流式更新）
    */
   const appendToMessage = (id: string, content: string): void => {
-    const message = messages.value.find(m => m.id === id)
+    const message = messages.value.find((m) => m.id === id)
     if (message) {
       message.content += content
     }
@@ -81,8 +87,8 @@ export const useMessageStore = defineStore('messages', () => {
         label: thumbnail.label,
         description: thumbnail.description,
         dimensions: thumbnail.dimensions,
-        thumbnailId: thumbnail.id
-      }
+        thumbnailId: thumbnail.id,
+      },
     })
     return id
   }
@@ -98,7 +104,7 @@ export const useMessageStore = defineStore('messages', () => {
       content: `${infoData.title} - ${infoData.step}`,
       type: 'info',
       status: 'done',
-      infoData
+      infoData,
     })
     return id
   }
@@ -114,7 +120,7 @@ export const useMessageStore = defineStore('messages', () => {
       content: `${mapData.title} - ${mapData.step}`,
       type: 'map',
       status: 'done',
-      mapData
+      mapData,
     })
     return id
   }
@@ -130,7 +136,7 @@ export const useMessageStore = defineStore('messages', () => {
    * 删除单条消息
    */
   const removeMessage = (id: string): void => {
-    const index = messages.value.findIndex(message => message.id === id)
+    const index = messages.value.findIndex((message) => message.id === id)
     if (index !== -1) {
       messages.value.splice(index, 1)
     }
@@ -146,6 +152,6 @@ export const useMessageStore = defineStore('messages', () => {
     addInfoMessage,
     addMapMessage,
     removeMessage,
-    clearMessages
+    clearMessages,
   }
 })

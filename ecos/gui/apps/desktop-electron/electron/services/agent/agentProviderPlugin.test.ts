@@ -13,13 +13,16 @@ describe('agent provider plugin manifests', () => {
     try {
       const pluginRoot = path.join(root, 'codex')
       await mkdir(pluginRoot)
-      await writeFile(path.join(pluginRoot, 'agent-provider.json'), JSON.stringify({
-        args: ['--stdio'],
-        command: './bin/codex-provider',
-        displayName: 'Codex',
-        providerId: 'codex',
-        protocolVersion: supportedAgentProviderProtocolVersion,
-      }))
+      await writeFile(
+        path.join(pluginRoot, 'agent-provider.json'),
+        JSON.stringify({
+          args: ['--stdio'],
+          command: './bin/codex-provider',
+          displayName: 'Codex',
+          providerId: 'codex',
+          protocolVersion: supportedAgentProviderProtocolVersion,
+        }),
+      )
 
       await expect(discoverAgentProviderManifests([root])).resolves.toEqual([
         {
@@ -40,11 +43,14 @@ describe('agent provider plugin manifests', () => {
   it('rejects provider manifests with unsupported protocol versions', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ecos-agent-provider-'))
     try {
-      await writeFile(path.join(root, 'agent-provider.json'), JSON.stringify({
-        command: 'codex-provider',
-        providerId: 'codex',
-        protocolVersion: supportedAgentProviderProtocolVersion + 1,
-      }))
+      await writeFile(
+        path.join(root, 'agent-provider.json'),
+        JSON.stringify({
+          command: 'codex-provider',
+          providerId: 'codex',
+          protocolVersion: supportedAgentProviderProtocolVersion + 1,
+        }),
+      )
 
       await expect(discoverAgentProviderManifests([root])).rejects.toThrow(
         'Unsupported agent provider protocol version',

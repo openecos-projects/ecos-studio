@@ -30,10 +30,17 @@ interface PreparedCommand {
   cleanup?: () => void
 }
 
-type CliEventType = 'queued' | 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled'
+type CliEventType =
+  | 'queued'
+  | 'started'
+  | 'stdout'
+  | 'stderr'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readString(value: unknown): string {
@@ -53,11 +60,11 @@ function readMessage(value: unknown): string[] {
 }
 
 function readResponse(value: unknown): DesktopCliCommandResponse {
-  return value === 'success'
-    || value === 'failed'
-    || value === 'error'
-    || value === 'warning'
-    || value === 'cancelled'
+  return value === 'success' ||
+    value === 'failed' ||
+    value === 'error' ||
+    value === 'warning' ||
+    value === 'cancelled'
     ? value
     : 'error'
 }
@@ -96,12 +103,10 @@ function normalizeCliResult(
   payload: unknown,
 ): DesktopCliCommandResult {
   const record = readRecord(payload)
-  const resultRecord = record.type === 'result'
-    ? record
-    : record
+  const resultRecord = record.type === 'result' ? record : record
   const response = readResponse(resultRecord.response)
   const rawCmd = readString(resultRecord.cmd)
-  const cmd = rawCmd ? rawCmd as DesktopCliCommandName : request.cmd
+  const cmd = rawCmd ? (rawCmd as DesktopCliCommandName) : request.cmd
 
   return {
     cmd,
@@ -115,11 +120,8 @@ function normalizeCliResult(
 function isResultPayload(value: unknown): boolean {
   const record = readRecord(value)
   return (
-    record.type === 'result'
-    || (
-      typeof record.response === 'string'
-      && typeof record.cmd === 'string'
-    )
+    record.type === 'result' ||
+    (typeof record.response === 'string' && typeof record.cmd === 'string')
   )
 }
 
@@ -133,13 +135,13 @@ function responseFromEventType(eventType: CliEventType): DesktopCliCommandRespon
 
 function normalizeEventType(value: unknown): CliEventType | null {
   if (
-    value === 'queued'
-    || value === 'started'
-    || value === 'stdout'
-    || value === 'stderr'
-    || value === 'completed'
-    || value === 'failed'
-    || value === 'cancelled'
+    value === 'queued' ||
+    value === 'started' ||
+    value === 'stdout' ||
+    value === 'stderr' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
   ) {
     return value
   }
@@ -159,17 +161,14 @@ function directoryFromRequest(
   return directory || activeWorkspace || ''
 }
 
-function requiredString(
-  request: DesktopCliCommandRequest,
-  field: string,
-): string {
+function requiredString(request: DesktopCliCommandRequest, field: string): string {
   return readString(request.data[field]).trim()
 }
 
 function configPathFromRequest(request: DesktopCliCommandRequest): string {
   return (
-    readString(request.data.config_path).trim()
-    || readString(request.data.configPath).trim()
+    readString(request.data.config_path).trim() ||
+    readString(request.data.configPath).trim()
   )
 }
 
@@ -199,9 +198,10 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
     return existsSync(command) ? command : '(not found)'
   }
 
-  const candidates = process.platform === 'win32'
-    ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
-    : [command]
+  const candidates =
+    process.platform === 'win32'
+      ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
+      : [command]
 
   for (const directory of pathEntriesForEnv(env)) {
     for (const candidate of candidates) {
@@ -222,15 +222,11 @@ function resolveEccWrapperFallback(): string | null {
 
 function timestampForFile(date = new Date()): string {
   const pad = (value: number): string => String(value).padStart(2, '0')
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join('') + '-' + [
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join('')
+  return (
+    [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('') +
+    '-' +
+    [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join('')
+  )
 }
 
 function safeLogToken(value: string): string {
@@ -286,9 +282,10 @@ class CliCommandLog {
     const workspaceDirectory = directoryFromRequest(request, activeWorkspace)
     const filename = `ecc-cli-${timestampForFile()}-${safeLogToken(request.cmd)}-${randomUUID().slice(0, 8)}.log`
     const fallbackLogDir = join(tempDir, 'ecos-ecc-cli-logs')
-    const canUseWorkspaceLog = request.cmd !== 'create_workspace'
-      && Boolean(workspaceDirectory)
-      && existsSync(workspaceDirectory)
+    const canUseWorkspaceLog =
+      request.cmd !== 'create_workspace' &&
+      Boolean(workspaceDirectory) &&
+      existsSync(workspaceDirectory)
     const logDirs = canUseWorkspaceLog
       ? [join(workspaceDirectory, 'log'), fallbackLogDir]
       : [fallbackLogDir]
@@ -372,11 +369,11 @@ export class EccCliAdapter {
     try {
       const cliResult = await this.spawnCommand(request, prepared, context)
       if (
-        cliResult.response === 'success'
-        && (request.cmd === 'create_workspace' || request.cmd === 'load_workspace')
+        cliResult.response === 'success' &&
+        (request.cmd === 'create_workspace' || request.cmd === 'load_workspace')
       ) {
-        const directory = readString(cliResult.data.directory)
-          || readString(request.data.directory)
+        const directory =
+          readString(cliResult.data.directory) || readString(request.data.directory)
         if (directory) {
           this.activeWorkspace = directory
         }
@@ -505,7 +502,10 @@ export class EccCliAdapter {
         }
       }
       default:
-        return error(request, `Command "${request.cmd}" cannot be sent to the ECC CLI adapter.`)
+        return error(
+          request,
+          `Command "${request.cmd}" cannot be sent to the ECC CLI adapter.`,
+        )
     }
   }
 
@@ -524,11 +524,10 @@ export class EccCliAdapter {
       let failureLogAnnounced = false
       const start = Date.now()
       const resolvedCommand = resolveCommandFromPath(this.command, env)
-      const fallbackCommand = !this.isPackaged
-        && this.command === 'ecc'
-        && resolvedCommand === '(not found)'
-        ? resolveEccWrapperFallback()
-        : null
+      const fallbackCommand =
+        !this.isPackaged && this.command === 'ecc' && resolvedCommand === '(not found)'
+          ? resolveEccWrapperFallback()
+          : null
       const spawnCommand = fallbackCommand ?? this.command
       const commandLog = new CliCommandLog(
         request,
@@ -597,7 +596,7 @@ export class EccCliAdapter {
           const eventType = normalizeEventType(record.phase ?? record.event)
           if (eventType) {
             const rawCmd = readString(record.cmd)
-            const cmd = rawCmd ? rawCmd as DesktopCliCommandName : request.cmd
+            const cmd = rawCmd ? (rawCmd as DesktopCliCommandName) : request.cmd
             const response = responseFromEventType(eventType)
             context.emit({
               result: {
@@ -607,11 +606,12 @@ export class EccCliAdapter {
                 ok: response === 'success' || response === 'warning',
                 response,
               },
-              stream: eventType === 'stderr'
-                ? 'stderr'
-                : eventType === 'stdout'
-                  ? 'stdout'
-                  : 'system',
+              stream:
+                eventType === 'stderr'
+                  ? 'stderr'
+                  : eventType === 'stdout'
+                    ? 'stdout'
+                    : 'system',
               text: readString(record.text),
               type: eventType,
             })
@@ -658,13 +658,11 @@ export class EccCliAdapter {
       })
 
       child.once('error', (spawnError) => {
-        const message = spawnError instanceof Error ? spawnError.message : String(spawnError)
+        const message =
+          spawnError instanceof Error ? spawnError.message : String(spawnError)
         commandLog.append('error', message)
         announceCliLogFailure()
-        resolveAfterLogFlush(withCliLogFile(error(
-          request,
-          message,
-        ), commandLog.path))
+        resolveAfterLogFlush(withCliLogFile(error(request, message), commandLog.path))
       })
 
       child.once('close', (code, signal) => {
@@ -734,7 +732,7 @@ export class EccCliAdapter {
 
   private async resolveProvidedEnv(): Promise<NodeJS.ProcessEnv> {
     try {
-      return await this.envProvider?.() ?? this.env
+      return (await this.envProvider?.()) ?? this.env
     } catch (error) {
       electronLogger.debug(
         '[ECC CLI] env provider failed: %s',
@@ -743,5 +741,4 @@ export class EccCliAdapter {
       return this.env
     }
   }
-
 }

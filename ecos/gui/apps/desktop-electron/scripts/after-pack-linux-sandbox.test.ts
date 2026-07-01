@@ -7,9 +7,13 @@ import afterPackLinuxSandbox from './after-pack-linux-sandbox.mjs'
 const tempDirs: string[] = []
 
 afterEach(async () => {
-  await Promise.all(tempDirs.map(async (dir) => {
-    await import('node:fs/promises').then(({ rm }) => rm(dir, { force: true, recursive: true }))
-  }))
+  await Promise.all(
+    tempDirs.map(async (dir) => {
+      await import('node:fs/promises').then(({ rm }) =>
+        rm(dir, { force: true, recursive: true }),
+      )
+    }),
+  )
   tempDirs.length = 0
 })
 

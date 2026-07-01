@@ -3,9 +3,12 @@
     <div class="design-files-dialog">
       <div class="design-files-dialog-header">
         <div>
-          <h3 class="text-lg font-semibold text-(--text-primary)">Manage RTL Design Files</h3>
-          <p class="text-xs text-(--text-secondary) mt-1">
-            Browse folders or files, then use the transfer panel to add or remove RTL from this workspace.
+          <h3 class="text-lg font-semibold text-(--text-primary)">
+            Manage RTL Design Files
+          </h3>
+          <p class="mt-1 text-xs text-(--text-secondary)">
+            Browse folders or files, then use the transfer panel to add or remove RTL from
+            this workspace.
           </p>
         </div>
         <button type="button" class="dialog-close" @click="handleCancel">
@@ -14,7 +17,7 @@
       </div>
 
       <div class="design-files-dialog-body">
-        <p v-if="loading" class="text-sm text-(--text-secondary) flex items-center gap-2">
+        <p v-if="loading" class="flex items-center gap-2 text-sm text-(--text-secondary)">
           <i class="ri-loader-4-line animate-spin"></i>
           Loading workspace RTL files...
         </p>
@@ -22,38 +25,48 @@
 
         <template v-else>
           <div
-            class="relative border-2 border-dashed rounded-2xl p-6 text-center transition-colors duration-200"
-            :class="isDraggingFiles
-              ? 'border-(--accent-color) bg-(--accent-color)/5'
-              : 'border-(--border-color) bg-(--bg-secondary)/20'"
+            class="relative rounded-2xl border-2 border-dashed p-6 text-center transition-colors duration-200"
+            :class="
+              isDraggingFiles
+                ? 'border-(--accent-color) bg-(--accent-color)/5'
+                : 'border-(--border-color) bg-(--bg-secondary)/20'
+            "
             @dragover.prevent="isDraggingFiles = true"
             @dragleave.prevent="isDraggingFiles = false"
             @drop.prevent="handleFileDrop"
           >
             <div class="flex flex-col items-center">
-              <div class="w-14 h-14 rounded-2xl bg-(--bg-secondary)/50 border border-(--border-color) flex items-center justify-center mb-4">
+              <div
+                class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-(--border-color) bg-(--bg-secondary)/50"
+              >
                 <i class="ri-upload-cloud-2-line text-3xl text-(--text-secondary)"></i>
               </div>
-              <h4 class="text-base font-semibold text-(--text-primary) mb-1">Add RTL Design Files</h4>
-              <p class="text-sm text-(--text-secondary) mb-4 max-w-md">
-                Browse individual HDL files or scan a design folder to populate the transfer panel.
+              <h4 class="mb-1 text-base font-semibold text-(--text-primary)">
+                Add RTL Design Files
+              </h4>
+              <p class="mb-4 max-w-md text-sm text-(--text-secondary)">
+                Browse individual HDL files or scan a design folder to populate the
+                transfer panel.
               </p>
               <div class="relative">
                 <button
                   type="button"
-                  class="px-6 py-2.5 bg-(--accent-color) text-white rounded-xl hover:opacity-90 font-medium inline-flex items-center gap-2"
+                  class="inline-flex items-center gap-2 rounded-xl bg-(--accent-color) px-6 py-2.5 font-medium text-white hover:opacity-90"
                   @click="toggleBrowseMenu"
                 >
                   Browse
-                  <i class="ri-arrow-down-s-line transition-transform duration-200" :class="{ 'rotate-180': showBrowseMenu }"></i>
+                  <i
+                    class="ri-arrow-down-s-line transition-transform duration-200"
+                    :class="{ 'rotate-180': showBrowseMenu }"
+                  ></i>
                 </button>
                 <div
                   v-if="showBrowseMenu"
-                  class="absolute left-1/2 top-[calc(100%+0.5rem)] z-20 w-56 -translate-x-1/2 rounded-xl border border-(--border-color) bg-(--bg-primary) shadow-lg overflow-hidden"
+                  class="absolute top-[calc(100%+0.5rem)] left-1/2 z-20 w-56 -translate-x-1/2 overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-primary) shadow-lg"
                 >
                   <button
                     type="button"
-                    class="w-full px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60 flex items-center gap-2"
+                    class="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60"
                     @click="browseRtlFiles"
                   >
                     <i class="ri-file-code-line text-blue-500"></i>
@@ -61,7 +74,7 @@
                   </button>
                   <button
                     type="button"
-                    class="w-full px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60 flex items-center gap-2 border-t border-(--border-color)/60"
+                    class="flex w-full items-center gap-2 border-t border-(--border-color)/60 px-4 py-3 text-left text-sm text-(--text-primary) hover:bg-(--bg-secondary)/60"
                     @click="browseRtlFolder"
                   >
                     <i class="ri-folder-open-line text-yellow-500/80"></i>
@@ -70,12 +83,19 @@
                 </div>
               </div>
 
-              <div v-if="isScanningDirectory" class="mt-4 flex items-center justify-center gap-2 text-sm text-(--text-secondary)">
+              <div
+                v-if="isScanningDirectory"
+                class="mt-4 flex items-center justify-center gap-2 text-sm text-(--text-secondary)"
+              >
                 <i class="ri-loader-4-line animate-spin"></i>
                 Scanning RTL files in the selected directory...
               </div>
-              <p v-else-if="manualFilePickError" class="mt-4 text-xs text-red-500">{{ manualFilePickError }}</p>
-              <p v-else-if="directoryScanError" class="mt-4 text-xs text-red-500">{{ directoryScanError }}</p>
+              <p v-else-if="manualFilePickError" class="mt-4 text-xs text-red-500">
+                {{ manualFilePickError }}
+              </p>
+              <p v-else-if="directoryScanError" class="mt-4 text-xs text-red-500">
+                {{ directoryScanError }}
+              </p>
             </div>
           </div>
 
@@ -89,8 +109,10 @@
           />
 
           <p
-            v-else-if="rtlSourceDirectory && !isScanningDirectory && scannedRtlFiles.length === 0"
-            class="mt-4 text-xs text-(--text-secondary) flex items-center gap-1"
+            v-else-if="
+              rtlSourceDirectory && !isScanningDirectory && scannedRtlFiles.length === 0
+            "
+            class="mt-4 flex items-center gap-1 text-xs text-(--text-secondary)"
           >
             <i class="ri-information-line"></i>
             No RTL files were found in the selected directory.
@@ -100,28 +122,38 @@
             <div class="flex items-center justify-between">
               <h4 class="text-sm font-semibold text-(--text-primary)">
                 Workspace RTL Files
-                <span class="bg-(--bg-secondary) px-2 py-0.5 rounded-full text-xs ml-2">{{ workingPaths.length }}</span>
+                <span class="ml-2 rounded-full bg-(--bg-secondary) px-2 py-0.5 text-xs">{{
+                  workingPaths.length
+                }}</span>
               </h4>
             </div>
-            <p v-if="workingPaths.length === 0" class="text-sm text-(--text-secondary) px-1">
-              No RTL files in this workspace yet. Browse files or a folder above to add some.
+            <p
+              v-if="workingPaths.length === 0"
+              class="px-1 text-sm text-(--text-secondary)"
+            >
+              No RTL files in this workspace yet. Browse files or a folder above to add
+              some.
             </p>
-            <div v-else class="max-h-52 overflow-y-auto custom-scrollbar pr-1 space-y-2">
+            <div v-else class="custom-scrollbar max-h-52 space-y-2 overflow-y-auto pr-1">
               <div
                 v-for="file in workingPaths"
                 :key="file"
-                class="flex items-center justify-between px-4 py-3 bg-(--bg-secondary)/30 rounded-xl border border-(--border-color) group hover:bg-(--bg-secondary)/60 transition-colors duration-200"
+                class="group flex items-center justify-between rounded-xl border border-(--border-color) bg-(--bg-secondary)/30 px-4 py-3 transition-colors duration-200 hover:bg-(--bg-secondary)/60"
               >
-                <div class="flex items-center gap-3 min-w-0">
-                  <i class="ri-file-code-line text-blue-500 shrink-0"></i>
+                <div class="flex min-w-0 items-center gap-3">
+                  <i class="ri-file-code-line shrink-0 text-blue-500"></i>
                   <div class="min-w-0">
-                    <p class="font-medium text-(--text-primary) truncate text-sm">{{ basename(file) }}</p>
-                    <p class="text-xs text-(--text-secondary) truncate opacity-70">{{ file }}</p>
+                    <p class="truncate text-sm font-medium text-(--text-primary)">
+                      {{ basename(file) }}
+                    </p>
+                    <p class="truncate text-xs text-(--text-secondary) opacity-70">
+                      {{ file }}
+                    </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  class="w-8 h-8 flex items-center justify-center rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-(--text-secondary) hover:text-red-500 shrink-0"
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-(--text-secondary) opacity-0 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500"
                   title="Remove from workspace"
                   @click="removeWorkspaceFile(file)"
                 >
@@ -134,7 +166,12 @@
       </div>
 
       <div class="design-files-dialog-footer">
-        <button type="button" class="dialog-btn dialog-btn-secondary" :disabled="saving" @click="handleCancel">
+        <button
+          type="button"
+          class="dialog-btn dialog-btn-secondary"
+          :disabled="saving"
+          @click="handleCancel"
+        >
           Cancel
         </button>
         <button
@@ -143,7 +180,7 @@
           :disabled="loading || saving || !hasChanges"
           @click="handleSave"
         >
-          <i v-if="saving" class="ri-loader-4-line animate-spin mr-1"></i>
+          <i v-if="saving" class="ri-loader-4-line mr-1 animate-spin"></i>
           Save Changes
         </button>
       </div>
@@ -151,14 +188,18 @@
 
     <div v-if="showRunResultsConfirm" class="design-files-confirm-overlay">
       <div class="design-files-confirm-dialog">
-        <h4 class="text-base font-semibold text-(--text-primary)">Keep Current Run Results?</h4>
-        <p class="text-sm text-(--text-secondary) mt-2 leading-relaxed">
-          RTL design files were updated. Do you want to keep the existing flow run results and artifacts
-          in this workspace?
+        <h4 class="text-base font-semibold text-(--text-primary)">
+          Keep Current Run Results?
+        </h4>
+        <p class="mt-2 text-sm leading-relaxed text-(--text-secondary)">
+          RTL design files were updated. Do you want to keep the existing flow run results
+          and artifacts in this workspace?
         </p>
-        <p class="text-xs text-(--text-secondary) mt-3 leading-relaxed">
-          Choosing <span class="font-medium text-(--text-primary)">Clear and Reset</span> reuses the same
-          cleanup logic as ReRun: step outputs are removed and home/flow state is reset.
+        <p class="mt-3 text-xs leading-relaxed text-(--text-secondary)">
+          Choosing
+          <span class="font-medium text-(--text-primary)">Clear and Reset</span> reuses
+          the same cleanup logic as ReRun: step outputs are removed and home/flow state is
+          reset.
         </p>
         <div class="design-files-confirm-actions">
           <button
@@ -175,7 +216,7 @@
             :disabled="clearingRunResults"
             @click="handleClearRunResults"
           >
-            <i v-if="clearingRunResults" class="ri-loader-4-line animate-spin mr-1"></i>
+            <i v-if="clearingRunResults" class="ri-loader-4-line mr-1 animate-spin"></i>
             Clear and Reset
           </button>
         </div>
@@ -186,7 +227,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { isHdlFilePath, type PickedRtlSources, type WorkspaceDesignFileEntry } from '@ecos-studio/shared'
+import {
+  isHdlFilePath,
+  type PickedRtlSources,
+  type WorkspaceDesignFileEntry,
+} from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { resetFlowApi } from '@/api/flow'
@@ -261,9 +306,8 @@ async function loadWorkspaceFiles() {
     initialEntries.value = entries
     workingPaths.value = entries.map((entry) => entry.resolvedPath)
   } catch (error) {
-    loadError.value = error instanceof Error
-      ? error.message
-      : 'Failed to load workspace RTL files.'
+    loadError.value =
+      error instanceof Error ? error.message : 'Failed to load workspace RTL files.'
     initialEntries.value = []
     workingPaths.value = []
   } finally {
@@ -298,7 +342,9 @@ function addPathsToWorkspace(paths: string[]) {
 
 function removeWorkspaceFile(path: string) {
   workingPaths.value = workingPaths.value.filter((entry) => entry !== path)
-  directorySelectedFiles.value = directorySelectedFiles.value.filter((entry) => entry !== path)
+  directorySelectedFiles.value = directorySelectedFiles.value.filter(
+    (entry) => entry !== path,
+  )
 }
 
 function updateDirectorySelectedFiles(files: string[]) {
@@ -337,9 +383,8 @@ async function browseRtlFiles() {
       return
     }
 
-    manualFilePickError.value = error instanceof Error
-      ? error.message
-      : 'Failed to select RTL design files.'
+    manualFilePickError.value =
+      error instanceof Error ? error.message : 'Failed to select RTL design files.'
     return
   }
 
@@ -354,7 +399,8 @@ async function browseRtlFiles() {
 
   const hdlFiles = picked.files.filter((path) => isHdlFilePath(path))
   if (hdlFiles.length === 0) {
-    manualFilePickError.value = 'Please select RTL design files only (.v, .sv, .vhd, .vhdl).'
+    manualFilePickError.value =
+      'Please select RTL design files only (.v, .sv, .vhd, .vhdl).'
     return
   }
 
@@ -372,9 +418,8 @@ async function browseRtlFolder() {
       title: 'Select RTL Design Folder',
     })
   } catch (error) {
-    directoryScanError.value = error instanceof Error
-      ? error.message
-      : 'Please select a folder, not a file.'
+    directoryScanError.value =
+      error instanceof Error ? error.message : 'Please select a folder, not a file.'
     return
   }
 
@@ -388,11 +433,12 @@ async function browseRtlFolder() {
     const scanned = await getDesktopApi().workspace.scanRtlDirectory(directoryPath)
     rtlSourceDirectory.value = scanned.rootPath
     scannedRtlFiles.value = scanned.files
-    directorySelectedFiles.value = scanned.files.filter((file) => workingPaths.value.includes(file))
+    directorySelectedFiles.value = scanned.files.filter((file) =>
+      workingPaths.value.includes(file),
+    )
   } catch (error) {
-    directoryScanError.value = error instanceof Error
-      ? error.message
-      : 'Failed to scan the selected directory.'
+    directoryScanError.value =
+      error instanceof Error ? error.message : 'Failed to scan the selected directory.'
   } finally {
     isScanningDirectory.value = false
   }
@@ -412,7 +458,8 @@ function handleFileDrop(event: DragEvent) {
     .filter((path) => isHdlFilePath(path))
 
   if (paths.length === 0) {
-    manualFilePickError.value = 'Only RTL design files can be dropped here. Use Browse to select a folder.'
+    manualFilePickError.value =
+      'Only RTL design files can be dropped here. Use Browse to select a folder.'
     return
   }
 
@@ -467,7 +514,8 @@ async function handleClearRunResults() {
     showToast({
       severity: 'error',
       summary: 'Reset Failed',
-      detail: error instanceof Error ? error.message : 'Failed to clear workspace run results.',
+      detail:
+        error instanceof Error ? error.message : 'Failed to clear workspace run results.',
       life: 4000,
     })
   } finally {
@@ -483,12 +531,16 @@ async function handleSave() {
   saving.value = true
   const initialSet = new Set(initialEntries.value.map((entry) => entry.resolvedPath))
   const workingSet = new Set(workingPaths.value)
-  const toRemove = initialEntries.value.filter((entry) => !workingSet.has(entry.resolvedPath))
+  const toRemove = initialEntries.value.filter(
+    (entry) => !workingSet.has(entry.resolvedPath),
+  )
   const toAdd = workingPaths.value.filter((path) => !initialSet.has(path))
 
   try {
     for (const entry of toRemove) {
-      const removed = await getDesktopApi().workspace.removeDesignFile(entry.filelistEntry)
+      const removed = await getDesktopApi().workspace.removeDesignFile(
+        entry.filelistEntry,
+      )
       if (!removed) {
         throw new Error(`Failed to remove ${entry.basename} from the workspace filelist.`)
       }
@@ -500,7 +552,9 @@ async function handleSave() {
         showToast({
           severity: 'warn',
           summary: 'Some Files Skipped',
-          detail: result.skipped.map((entry) => `${entry.path}: ${entry.reason}`).join('\n'),
+          detail: result.skipped
+            .map((entry) => `${entry.path}: ${entry.reason}`)
+            .join('\n'),
           life: 5000,
         })
       }
@@ -517,7 +571,8 @@ async function handleSave() {
     showToast({
       severity: 'error',
       summary: 'Save RTL Files Failed',
-      detail: error instanceof Error ? error.message : 'Failed to update workspace filelist.',
+      detail:
+        error instanceof Error ? error.message : 'Failed to update workspace filelist.',
       life: 4000,
     })
   } finally {

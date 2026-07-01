@@ -16,7 +16,10 @@ type ResourceBucketName = keyof WorkspaceStepResource['resources']
 type StepFileBuckets = WorkspaceStepResource['resources']
 
 interface WorkspaceResourceServiceOptions {
-  projectScopeProvider: Pick<ProjectScopeProvider, 'getProjectRoot' | 'requestProjectPathAccess'>
+  projectScopeProvider: Pick<
+    ProjectScopeProvider,
+    'getProjectRoot' | 'requestProjectPathAccess'
+  >
 }
 
 interface FlowStepInput {
@@ -50,11 +53,15 @@ export class WorkspaceResourceService {
   }
 
   async readHome(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(join(await this.projectScopeProvider.getProjectRoot(), 'home', 'home.json'))
+    return await this.readJsonOrNull(
+      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'home.json'),
+    )
   }
 
   async readFlow(): Promise<Record<string, unknown> | null> {
-    return await this.readJsonOrNull(join(await this.projectScopeProvider.getProjectRoot(), 'home', 'flow.json'))
+    return await this.readJsonOrNull(
+      join(await this.projectScopeProvider.getProjectRoot(), 'home', 'flow.json'),
+    )
   }
 
   async readParameters(): Promise<Record<string, unknown> | null> {
@@ -63,7 +70,9 @@ export class WorkspaceResourceService {
     )
   }
 
-  async resolveStepInfo(request: WorkspaceStepInfoRequest): Promise<WorkspaceStepInfoResult> {
+  async resolveStepInfo(
+    request: WorkspaceStepInfoRequest,
+  ): Promise<WorkspaceStepInfoResult> {
     try {
       const { index, statErrors } = await this.buildIndex()
       if (index.status === 'error') {
@@ -77,8 +86,8 @@ export class WorkspaceResourceService {
         }
       }
 
-      const step = index.flow.steps.find((candidate) =>
-        candidate.name.toLowerCase() === request.step.toLowerCase(),
+      const step = index.flow.steps.find(
+        (candidate) => candidate.name.toLowerCase() === request.step.toLowerCase(),
       )
       if (!step) {
         return {
@@ -94,9 +103,12 @@ export class WorkspaceResourceService {
       const stepInfoResult = await this.buildStepInfoResponse(request.id, step)
       const info = stepInfoResult.info
       const requiredFiles = this.requiredFilesForStepInfo(request.id, step)
-      const missing = requiredFiles.filter((file) => !file.exists).map((file) => file.path)
+      const missing = requiredFiles
+        .filter((file) => !file.exists)
+        .map((file) => file.path)
       const messages = [...statErrors, ...stepInfoResult.errors]
-      const response = messages.length > 0 ? 'error' : missing.length > 0 ? 'missing' : 'available'
+      const response =
+        messages.length > 0 ? 'error' : missing.length > 0 ? 'missing' : 'available'
 
       return {
         step: step.name,
@@ -138,17 +150,23 @@ export class WorkspaceResourceService {
     const parameters = await this.readJsonForIndex(parametersPath, messages)
     const flowData = await this.readJsonForIndex(flowPath, messages)
 
-    if (!parametersJson.exists) messages.push(`Missing workspace parameters: ${parametersPath}`)
+    if (!parametersJson.exists)
+      messages.push(`Missing workspace parameters: ${parametersPath}`)
     if (!flowJson.exists) messages.push(`Missing workspace flow: ${flowPath}`)
 
     const design = stringValue(parameters, 'Design')
     const topModule = stringValue(parameters, 'Top module')
     const pdk = stringValue(parameters, 'PDK')
-    const steps = isRecord(flowData) && Array.isArray(flowData.steps)
-      ? flowData.steps.map(readFlowStep).filter((step): step is FlowStepInput => step !== null)
-      : []
+    const steps =
+      isRecord(flowData) && Array.isArray(flowData.steps)
+        ? flowData.steps
+            .map(readFlowStep)
+            .filter((step): step is FlowStepInput => step !== null)
+        : []
     const flowSteps = await Promise.all(
-      steps.map((step) => this.buildStepResource(root, design, topModule, step, statErrors)),
+      steps.map((step) =>
+        this.buildStepResource(root, design, topModule, step, statErrors),
+      ),
     )
     const tech = await this.discoverTechResources(root, design, flowSteps, statErrors)
     const status = resolveIndexStatus({
@@ -201,7 +219,10 @@ export class WorkspaceResourceService {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
     } else if (toolKey === 'dreamplace') {
       addEccLikeResources(resources, root, directory, design, topModule, step.name)
-      resources.config.dreamplace = createFile(join(root, 'config', 'dreamplace.json'), 'config')
+      resources.config.dreamplace = createFile(
+        join(root, 'config', 'dreamplace.json'),
+        'config',
+      )
     } else {
       addUnknownResources(resources, directory, step.name)
     }
@@ -229,7 +250,9 @@ export class WorkspaceResourceService {
 
     const candidateRoots = uniqueStrings([
       join(root, `${design}_view`),
-      ...flowSteps.map((step) => join(step.directory, 'output', `${design}_${step.name}_view`)),
+      ...flowSteps.map((step) =>
+        join(step.directory, 'output', `${design}_${step.name}_view`),
+      ),
     ])
 
     for (const packageRoot of candidateRoots) {
@@ -258,10 +281,26 @@ export class WorkspaceResourceService {
     const metaPath = filePath('meta', 'meta.json')
     const meta = await this.describeFile(join(packageRoot, metaPath), 'tech-json', errors)
     const [layers, sites, vias, cellMasters] = await Promise.all([
-      this.describeFile(join(packageRoot, filePath('layers', 'tech/layers.json')), 'tech-json', errors),
-      this.describeFile(join(packageRoot, filePath('sites', 'tech/sites.json')), 'tech-json', errors),
-      this.describeFile(join(packageRoot, filePath('vias', 'tech/vias.json')), 'tech-json', errors),
-      this.describeFile(join(packageRoot, filePath('cell_masters', 'tech/cell_masters.json')), 'tech-json', errors),
+      this.describeFile(
+        join(packageRoot, filePath('layers', 'tech/layers.json')),
+        'tech-json',
+        errors,
+      ),
+      this.describeFile(
+        join(packageRoot, filePath('sites', 'tech/sites.json')),
+        'tech-json',
+        errors,
+      ),
+      this.describeFile(
+        join(packageRoot, filePath('vias', 'tech/vias.json')),
+        'tech-json',
+        errors,
+      ),
+      this.describeFile(
+        join(packageRoot, filePath('cell_masters', 'tech/cell_masters.json')),
+        'tech-json',
+        errors,
+      ),
     ])
 
     return {
@@ -276,12 +315,17 @@ export class WorkspaceResourceService {
     }
   }
 
-  private async describeBuckets(resources: StepFileBuckets, errors: string[]): Promise<void> {
+  private async describeBuckets(
+    resources: StepFileBuckets,
+    errors: string[],
+  ): Promise<void> {
     const files = collectFiles(resources)
-    await Promise.all(files.map(async (file) => {
-      const described = await this.describeFile(file.path, file.kind, errors)
-      Object.assign(file, described)
-    }))
+    await Promise.all(
+      files.map(async (file) => {
+        const described = await this.describeFile(file.path, file.kind, errors)
+        Object.assign(file, described)
+      }),
+    )
   }
 
   private async describeFile(
@@ -371,31 +415,41 @@ export class WorkspaceResourceService {
     }
   }
 
-  private async buildDensityMapInfo(step: WorkspaceStepResource): Promise<StepInfoBuildResult> {
+  private async buildDensityMapInfo(
+    step: WorkspaceStepResource,
+  ): Promise<StepInfoBuildResult> {
     const directory = join(step.directory, 'feature', 'density_map')
 
     try {
-      const canonicalDirectory = await this.projectScopeProvider.requestProjectPathAccess(directory)
+      const canonicalDirectory =
+        await this.projectScopeProvider.requestProjectPathAccess(directory)
       const entries = await readdir(canonicalDirectory, { withFileTypes: true })
       const pngEntries = entries
         .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
         .sort((a, b) => a.name.localeCompare(b.name))
 
-      return stepInfo(Object.fromEntries(
-        pngEntries.map((entry) => [
-          stripPngExtension(entry.name),
-          {
-            path: join(canonicalDirectory, entry.name),
-            info: [],
-          },
-        ]),
-      ))
+      return stepInfo(
+        Object.fromEntries(
+          pngEntries.map((entry) => [
+            stripPngExtension(entry.name),
+            {
+              path: join(canonicalDirectory, entry.name),
+              info: [],
+            },
+          ]),
+        ),
+      )
     } catch (error) {
       if (isNodeErrorWithCode(error, 'ENOENT')) return stepInfo({})
 
       return {
         info: {},
-        errors: [formatErrorMessage(`Failed to read workspace density maps: ${directory}`, error)],
+        errors: [
+          formatErrorMessage(
+            `Failed to read workspace density maps: ${directory}`,
+            error,
+          ),
+        ],
       }
     }
   }
@@ -435,7 +489,10 @@ export class WorkspaceResourceService {
   }
 }
 
-function createFile(path: string, kind: WorkspaceResourceFileKind): WorkspaceResourceFile {
+function createFile(
+  path: string,
+  kind: WorkspaceResourceFileKind,
+): WorkspaceResourceFile {
   return { path, exists: false, kind }
 }
 
@@ -467,37 +524,94 @@ function addEccLikeResources(
   stepName: string,
 ): void {
   resources.output.dir = createFile(join(directory, 'output'), 'output')
-  resources.output.def = createFile(join(directory, 'output', `${design}_${stepName}.def.gz`), 'output')
-  resources.output.verilog = createFile(join(directory, 'output', `${design}_${stepName}.v`), 'output')
-  resources.output.gds = createFile(join(directory, 'output', `${design}_${stepName}.gds`), 'output')
-  resources.output.db = createFile(join(directory, 'output', `${design}_${stepName}_db`), 'output')
-  resources.output.image = createFile(join(directory, 'output', `${design}_${stepName}.png`), 'layout-image')
-  resources.output.json = createFile(join(directory, 'output', `${design}_${stepName}.json`), 'layout-json')
-  resources.output.viewJson = createFile(join(directory, 'output', `${design}_${stepName}_view`), 'view-json')
-  resources.output.lef = createFile(join(directory, 'output', `${design}_${stepName}.lef`), 'output')
-  resources.output.lib = createFile(join(directory, 'output', `${design}_${stepName}.lib`), 'output')
+  resources.output.def = createFile(
+    join(directory, 'output', `${design}_${stepName}.def.gz`),
+    'output',
+  )
+  resources.output.verilog = createFile(
+    join(directory, 'output', `${design}_${stepName}.v`),
+    'output',
+  )
+  resources.output.gds = createFile(
+    join(directory, 'output', `${design}_${stepName}.gds`),
+    'output',
+  )
+  resources.output.db = createFile(
+    join(directory, 'output', `${design}_${stepName}_db`),
+    'output',
+  )
+  resources.output.image = createFile(
+    join(directory, 'output', `${design}_${stepName}.png`),
+    'layout-image',
+  )
+  resources.output.json = createFile(
+    join(directory, 'output', `${design}_${stepName}.json`),
+    'layout-json',
+  )
+  resources.output.viewJson = createFile(
+    join(directory, 'output', `${design}_${stepName}_view`),
+    'view-json',
+  )
+  resources.output.lef = createFile(
+    join(directory, 'output', `${design}_${stepName}.lef`),
+    'output',
+  )
+  resources.output.lib = createFile(
+    join(directory, 'output', `${design}_${stepName}.lib`),
+    'output',
+  )
   resources.data.dir = createFile(join(directory, 'data'), 'unknown')
   resources.data.sta = createFile(join(directory, 'data', 'sta'), 'unknown')
   resources.feature.dir = createFile(join(directory, 'feature'), 'analysis')
-  resources.feature.db = createFile(join(directory, 'feature', `${stepName}.db.json`), 'analysis')
-  resources.feature.step = createFile(join(directory, 'feature', `${stepName}.step.json`), 'analysis')
-  resources.feature.map = createFile(join(directory, 'feature', `${stepName}.map.json`), 'analysis')
-  resources.feature.timing = createFile(join(directory, 'data', 'sta', `${topModule}.rpt.json`), 'analysis')
+  resources.feature.db = createFile(
+    join(directory, 'feature', `${stepName}.db.json`),
+    'analysis',
+  )
+  resources.feature.step = createFile(
+    join(directory, 'feature', `${stepName}.step.json`),
+    'analysis',
+  )
+  resources.feature.map = createFile(
+    join(directory, 'feature', `${stepName}.map.json`),
+    'analysis',
+  )
+  resources.feature.timing = createFile(
+    join(directory, 'data', 'sta', `${topModule}.rpt.json`),
+    'analysis',
+  )
   resources.report.dir = createFile(join(directory, 'report'), 'report')
-  resources.report.db = createFile(join(directory, 'report', `${stepName}.db.rpt`), 'report')
-  resources.report.step = createFile(join(directory, 'report', `${stepName}.rpt`), 'report')
+  resources.report.db = createFile(
+    join(directory, 'report', `${stepName}.db.rpt`),
+    'report',
+  )
+  resources.report.step = createFile(
+    join(directory, 'report', `${stepName}.rpt`),
+    'report',
+  )
   resources.report.sta = {
     timing: createFile(join(directory, 'data', 'sta', `${topModule}.rpt`), 'report'),
     hold: createFile(join(directory, 'data', 'sta', `${topModule}_hold.skew`), 'report'),
-    setup: createFile(join(directory, 'data', 'sta', `${topModule}_setup.skew`), 'report'),
+    setup: createFile(
+      join(directory, 'data', 'sta', `${topModule}_setup.skew`),
+      'report',
+    ),
     cap: createFile(join(directory, 'data', 'sta', `${topModule}.cap`), 'report'),
     fanout: createFile(join(directory, 'data', 'sta', `${topModule}.fanout`), 'report'),
     trans: createFile(join(directory, 'data', 'sta', `${topModule}.trans`), 'report'),
   }
   resources.log.file = createFile(join(directory, 'log', `${stepName}.log`), 'log')
-  resources.script.main = createFile(join(directory, 'script', `${stepName}_main.tcl`), 'script')
-  resources.analysis.metrics = createFile(join(directory, 'analysis', `${stepName}_metrics.json`), 'metrics')
-  resources.analysis.statis_csv = createFile(join(directory, 'analysis', `${stepName}_statis.csv`), 'analysis')
+  resources.script.main = createFile(
+    join(directory, 'script', `${stepName}_main.tcl`),
+    'script',
+  )
+  resources.analysis.metrics = createFile(
+    join(directory, 'analysis', `${stepName}_metrics.json`),
+    'metrics',
+  )
+  resources.analysis.statis_csv = createFile(
+    join(directory, 'analysis', `${stepName}_statis.csv`),
+    'analysis',
+  )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
   addEccConfigResources(resources, root, stepName)
@@ -511,19 +625,55 @@ function addYosysResources(
   stepName: string,
 ): void {
   resources.output.dir = createFile(join(directory, 'output'), 'output')
-  resources.output.def = createFile(join(directory, 'output', `${design}_${stepName}.def.gz`), 'output')
-  resources.output.verilog = createFile(join(directory, 'output', `${design}_${stepName}.v`), 'output')
-  resources.output.fixed_verilog = createFile(join(directory, 'output', `${design}_${stepName}_fixed.v`), 'output')
-  resources.output.json = createFile(join(directory, 'output', `${design}_${stepName}.json`), 'layout-json')
-  resources.output.report = createFile(join(directory, 'output', `${design}_${stepName}.rpt`), 'report')
-  resources.output.image = createFile(join(directory, 'output', `${design}_${stepName}.png`), 'layout-image')
-  resources.feature.generic_stat = createFile(join(directory, 'feature', `${stepName}_generic_stat.json`), 'analysis')
-  resources.feature.stat = createFile(join(directory, 'feature', `${stepName}_stat.json`), 'analysis')
-  resources.report.stat = createFile(join(directory, 'report', `${stepName}_stat.json`), 'report')
-  resources.report.check = createFile(join(directory, 'report', `${stepName}_check.rpt`), 'report')
+  resources.output.def = createFile(
+    join(directory, 'output', `${design}_${stepName}.def.gz`),
+    'output',
+  )
+  resources.output.verilog = createFile(
+    join(directory, 'output', `${design}_${stepName}.v`),
+    'output',
+  )
+  resources.output.fixed_verilog = createFile(
+    join(directory, 'output', `${design}_${stepName}_fixed.v`),
+    'output',
+  )
+  resources.output.json = createFile(
+    join(directory, 'output', `${design}_${stepName}.json`),
+    'layout-json',
+  )
+  resources.output.report = createFile(
+    join(directory, 'output', `${design}_${stepName}.rpt`),
+    'report',
+  )
+  resources.output.image = createFile(
+    join(directory, 'output', `${design}_${stepName}.png`),
+    'layout-image',
+  )
+  resources.feature.generic_stat = createFile(
+    join(directory, 'feature', `${stepName}_generic_stat.json`),
+    'analysis',
+  )
+  resources.feature.stat = createFile(
+    join(directory, 'feature', `${stepName}_stat.json`),
+    'analysis',
+  )
+  resources.report.stat = createFile(
+    join(directory, 'report', `${stepName}_stat.json`),
+    'report',
+  )
+  resources.report.check = createFile(
+    join(directory, 'report', `${stepName}_check.rpt`),
+    'report',
+  )
   resources.log.file = createFile(join(directory, 'log', `${stepName}.log`), 'log')
-  resources.script.main = createFile(join(directory, 'script', `${stepName}_main.tcl`), 'script')
-  resources.analysis.metrics = createFile(join(directory, 'analysis', `${stepName}_metrics.json`), 'metrics')
+  resources.script.main = createFile(
+    join(directory, 'script', `${stepName}_main.tcl`),
+    'script',
+  )
+  resources.analysis.metrics = createFile(
+    join(directory, 'analysis', `${stepName}_metrics.json`),
+    'metrics',
+  )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')
   resources.checklist.path = createFile(join(directory, 'checklist.json'), 'checklist')
   resources.config.path = createFile(join(root, 'config', 'flow_config.json'), 'config')
@@ -536,20 +686,59 @@ function addEccConfigResources(
 ): void {
   resources.config.dir = createFile(join(root, 'config'), 'config')
   resources.config.flow = createFile(join(root, 'config', 'flow_config.json'), 'config')
-  resources.config.db = createFile(join(root, 'config', 'db_default_config.json'), 'config')
-  resources.config.cts = createFile(join(root, 'config', 'cts_default_config.json'), 'config')
-  resources.config.drc = createFile(join(root, 'config', 'drc_default_config.json'), 'config')
-  resources.config.floorplan = createFile(join(root, 'config', 'fp_default_config.json'), 'config')
-  resources.config.netlist_opt = createFile(join(root, 'config', 'no_default_config_fixfanout.json'), 'config')
-  resources.config.placement = createFile(join(root, 'config', 'pl_default_config.json'), 'config')
-  resources.config.pnp = createFile(join(root, 'config', 'pnp_default_config.json'), 'config')
-  resources.config.routing = createFile(join(root, 'config', 'rt_default_config.json'), 'config')
+  resources.config.db = createFile(
+    join(root, 'config', 'db_default_config.json'),
+    'config',
+  )
+  resources.config.cts = createFile(
+    join(root, 'config', 'cts_default_config.json'),
+    'config',
+  )
+  resources.config.drc = createFile(
+    join(root, 'config', 'drc_default_config.json'),
+    'config',
+  )
+  resources.config.floorplan = createFile(
+    join(root, 'config', 'fp_default_config.json'),
+    'config',
+  )
+  resources.config.netlist_opt = createFile(
+    join(root, 'config', 'no_default_config_fixfanout.json'),
+    'config',
+  )
+  resources.config.placement = createFile(
+    join(root, 'config', 'pl_default_config.json'),
+    'config',
+  )
+  resources.config.pnp = createFile(
+    join(root, 'config', 'pnp_default_config.json'),
+    'config',
+  )
+  resources.config.routing = createFile(
+    join(root, 'config', 'rt_default_config.json'),
+    'config',
+  )
   resources.config.rcx = createFile(join(root, 'config', 'rcx.json'), 'config')
-  resources.config.timing_opt_drv = createFile(join(root, 'config', 'to_default_config_drv.json'), 'config')
-  resources.config.timing_opt_hold = createFile(join(root, 'config', 'to_default_config_hold.json'), 'config')
-  resources.config.timing_opt_setup = createFile(join(root, 'config', 'to_default_config_setup.json'), 'config')
-  resources.config.legalization = createFile(join(root, 'config', 'pl_default_config.json'), 'config')
-  resources.config.filler = createFile(join(root, 'config', 'pl_default_config.json'), 'config')
+  resources.config.timing_opt_drv = createFile(
+    join(root, 'config', 'to_default_config_drv.json'),
+    'config',
+  )
+  resources.config.timing_opt_hold = createFile(
+    join(root, 'config', 'to_default_config_hold.json'),
+    'config',
+  )
+  resources.config.timing_opt_setup = createFile(
+    join(root, 'config', 'to_default_config_setup.json'),
+    'config',
+  )
+  resources.config.legalization = createFile(
+    join(root, 'config', 'pl_default_config.json'),
+    'config',
+  )
+  resources.config.filler = createFile(
+    join(root, 'config', 'pl_default_config.json'),
+    'config',
+  )
   resources.config.config = configResourceForEccStep(resources.config, stepName)
 }
 
@@ -613,7 +802,9 @@ function collectBucketFiles(
 }
 
 function isWorkspaceResourceFile(value: unknown): value is WorkspaceResourceFile {
-  return isRecord(value) && typeof value.path === 'string' && typeof value.exists === 'boolean'
+  return (
+    isRecord(value) && typeof value.path === 'string' && typeof value.exists === 'boolean'
+  )
 }
 
 function readFlowStep(value: unknown): FlowStepInput | null {
@@ -641,7 +832,10 @@ function resolveIndexStatus(input: {
   parametersExists: boolean
   flowExists: boolean
 }): WorkspaceResourceStatus {
-  if (input.messages.some((message) => message.startsWith('Failed to parse')) || input.statErrors.length > 0) {
+  if (
+    input.messages.some((message) => message.startsWith('Failed to parse')) ||
+    input.statErrors.length > 0
+  ) {
     return 'error'
   }
   if (!input.parametersExists || !input.flowExists) return 'missing'
@@ -708,7 +902,8 @@ function stripPngExtension(filename: string): string {
 function configFiles(step: WorkspaceStepResource): WorkspaceResourceFile[] {
   const tool = step.tool.toLowerCase()
   if (tool === 'yosys') return existingResourceRefs([step.resources.config.path])
-  if (tool === 'dreamplace') return existingResourceRefs([step.resources.config.dreamplace])
+  if (tool === 'dreamplace')
+    return existingResourceRefs([step.resources.config.dreamplace])
   return existingResourceRefs([step.resources.config.config])
 }
 
@@ -733,13 +928,17 @@ function nestedResourcePath(
   return nestedResource(bucket, key)?.path
 }
 
-function nestedResourcePaths(value: unknown): Record<string, string> | string | undefined {
+function nestedResourcePaths(
+  value: unknown,
+): Record<string, string> | string | undefined {
   if (isWorkspaceResourceFile(value)) return value.path
   if (!isRecord(value)) return undefined
 
   return Object.fromEntries(
     Object.entries(value)
-      .filter((entry): entry is [string, WorkspaceResourceFile] => isWorkspaceResourceFile(entry[1]))
+      .filter((entry): entry is [string, WorkspaceResourceFile] =>
+        isWorkspaceResourceFile(entry[1]),
+      )
       .map(([key, file]) => [key, file.path]),
   )
 }
@@ -756,10 +955,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 

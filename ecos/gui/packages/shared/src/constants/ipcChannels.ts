@@ -22,8 +22,10 @@ export const desktopApiIpcChannels = {
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',
   workspaceReadOptionalProjectTextFile: 'workspace:read-optional-project-text-file',
   workspaceReadProjectTextFileTail: 'workspace:read-project-text-file-tail',
-  workspaceReadOptionalProjectTextFileTail: 'workspace:read-optional-project-text-file-tail',
-  workspaceReadOptionalProjectTextFileUpdate: 'workspace:read-optional-project-text-file-update',
+  workspaceReadOptionalProjectTextFileTail:
+    'workspace:read-optional-project-text-file-tail',
+  workspaceReadOptionalProjectTextFileUpdate:
+    'workspace:read-optional-project-text-file-update',
   workspaceSubscribeProjectLogTail: 'workspace:subscribe-project-log-tail',
   workspaceUnsubscribeProjectLogTail: 'workspace:unsubscribe-project-log-tail',
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',

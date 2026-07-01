@@ -157,7 +157,16 @@ export function drawRulers(
   const thickness = RULER_THICKNESS
   const tickInterval = calculateTickInterval(transform.scale)
 
-  drawHorizontalRuler(ctx, screenWidth, screenHeight, transform, tickInterval, thickness, theme, fontSize)
+  drawHorizontalRuler(
+    ctx,
+    screenWidth,
+    screenHeight,
+    transform,
+    tickInterval,
+    thickness,
+    theme,
+    fontSize,
+  )
   drawVerticalRuler(
     ctx,
     screenHeight,

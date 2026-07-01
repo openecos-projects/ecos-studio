@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { buildSocIoPinRects, buildSocPreviewRects, getSocDisplayCoreLabel } from '@/composables/socTemplatePreviewRenderer'
+import {
+  buildSocIoPinRects,
+  buildSocPreviewRects,
+  getSocDisplayCoreLabel,
+} from '@/composables/socTemplatePreviewRenderer'
 import type { SocTemplateDetail } from '@/composables/socTemplateMapper'
 
 const props = defineProps<{
@@ -39,7 +43,7 @@ const activeCore = computed(() => {
     return null
   }
 
-  return props.template.cores.find(core => core.id === coreId) ?? null
+  return props.template.cores.find((core) => core.id === coreId) ?? null
 })
 const validCoreCount = computed(() => renderedRects.value.length)
 const activeStatusKind = computed(() => {
@@ -54,7 +58,9 @@ const activeStatusLabel = computed(() => {
     return hoveredIoName.value
   }
 
-  return activeCore.value ? getSocDisplayCoreLabel(activeCore.value.id, activeCore.value.name) : 'No core selected'
+  return activeCore.value
+    ? getSocDisplayCoreLabel(activeCore.value.id, activeCore.value.name)
+    : 'No core selected'
 })
 
 const coreSlotStyle = computed(() => {
@@ -92,7 +98,12 @@ function toggleLabels(): void {
   showLabels.value = !showLabels.value
 }
 
-function coreTitle(rect: { label: string; coreId: number; align: string; orient: string }): string {
+function coreTitle(rect: {
+  label: string
+  coreId: number
+  align: string
+  orient: string
+}): string {
   return `${rect.label} · id ${rect.coreId} · align ${rect.align} · orient ${rect.orient}`
 }
 
@@ -135,7 +146,11 @@ function selectCore(coreId: number): void {
         </div>
       </div>
 
-      <div class="soc-template-preview-canvas__actions" role="group" aria-label="Preview layers">
+      <div
+        class="soc-template-preview-canvas__actions"
+        role="group"
+        aria-label="Preview layers"
+      >
         <button
           type="button"
           class="soc-template-preview-canvas__toggle"
@@ -189,7 +204,10 @@ function selectCore(coreId: number): void {
           </div>
         </div>
 
-        <div class="soc-template-preview-canvas__core-area soc-preview-die__cores" :style="coreSlotStyle">
+        <div
+          class="soc-template-preview-canvas__core-area soc-preview-die__cores"
+          :style="coreSlotStyle"
+        >
           <button
             v-for="rect in renderedRects"
             :key="rect.renderKey"
@@ -225,7 +243,11 @@ function selectCore(coreId: number): void {
             />
           </button>
 
-          <div v-if="validCoreCount === 0" class="soc-template-preview-canvas__empty" role="status">
+          <div
+            v-if="validCoreCount === 0"
+            class="soc-template-preview-canvas__empty"
+            role="status"
+          >
             <i class="ri-cpu-line" aria-hidden="true"></i>
             <strong>No selectable cores</strong>
           </div>
@@ -297,8 +319,7 @@ function selectCore(coreId: number): void {
   border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-secondary) 84%, var(--bg-primary));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 72%, transparent);
 }
 
 .soc-template-preview-canvas__identity {
@@ -332,7 +353,8 @@ function selectCore(coreId: number): void {
 .soc-template-preview-canvas__identity-copy span,
 .soc-template-preview-canvas__status-main span,
 .soc-template-preview-canvas__status-grid dt {
-  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -419,11 +441,31 @@ function selectCore(coreId: number): void {
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
   background:
-    linear-gradient(color-mix(in srgb, var(--border-color) 18%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 18%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent-color) 12%, transparent) 0%, transparent 42%),
-    linear-gradient(145deg, color-mix(in srgb, var(--bg-primary) 94%, var(--accent-color)) 0%, var(--bg-secondary) 58%, var(--bg-primary) 100%);
-  background-size: 22px 22px, 22px 22px, auto, auto;
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 18%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 18%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--accent-color) 12%, transparent) 0%,
+      transparent 42%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-primary) 94%, var(--accent-color)) 0%,
+      var(--bg-secondary) 58%,
+      var(--bg-primary) 100%
+    );
+  background-size:
+    22px 22px,
+    22px 22px,
+    auto,
+    auto;
   box-shadow:
     0 1px 0 color-mix(in srgb, var(--border-color) 64%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 70%, transparent),
@@ -445,7 +487,7 @@ function selectCore(coreId: number): void {
 
 .soc-preview-die__corners::before,
 .soc-preview-die__corners::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: -1px;
   border-radius: inherit;
@@ -454,10 +496,30 @@ function selectCore(coreId: number): void {
 
 .soc-preview-die__corners::before {
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px, transparent 22px) left top / 62px 1px no-repeat,
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px, transparent 22px) left top / 1px 62px no-repeat,
-    linear-gradient(270deg, color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px, transparent 22px) right bottom / 62px 1px no-repeat,
-    linear-gradient(0deg, color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px, transparent 22px) right bottom / 1px 62px no-repeat;
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px,
+        transparent 22px
+      )
+      left top / 62px 1px no-repeat,
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px,
+        transparent 22px
+      )
+      left top / 1px 62px no-repeat,
+    linear-gradient(
+        270deg,
+        color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px,
+        transparent 22px
+      )
+      right bottom / 62px 1px no-repeat,
+    linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--accent-color) 64%, transparent) 0 22px,
+        transparent 22px
+      )
+      right bottom / 1px 62px no-repeat;
 }
 
 .soc-preview-die__io {
@@ -566,15 +628,30 @@ function selectCore(coreId: number): void {
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
   background:
-    linear-gradient(color-mix(in srgb, var(--border-color) 12%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 12%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 45% 35%, color-mix(in srgb, var(--accent-color) 10%, transparent) 0%, transparent 42%),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 12%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 12%, transparent) 1px,
+      transparent 1px
+    ),
+    radial-gradient(
+      circle at 45% 35%,
+      color-mix(in srgb, var(--accent-color) 10%, transparent) 0%,
+      transparent 42%
+    ),
     linear-gradient(
       145deg,
       color-mix(in srgb, var(--bg-secondary) 96%, var(--accent-color)) 0%,
       color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary)) 100%
     );
-  background-size: 16px 16px, 16px 16px, auto, auto;
+  background-size:
+    16px 16px,
+    16px 16px,
+    auto,
+    auto;
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 12%, transparent),
     inset 0 18px 48px -28px color-mix(in srgb, var(--text-primary) 8%, transparent);
@@ -592,7 +669,11 @@ function selectCore(coreId: number): void {
   border-radius: 7px;
   border: 1px solid color-mix(in srgb, var(--accent-color) 42%, var(--border-color));
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 22%, transparent), transparent),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-primary) 22%, transparent),
+      transparent
+    ),
     color-mix(in srgb, var(--accent-color) 15%, var(--bg-secondary));
   color: var(--text-primary);
   font: inherit;
@@ -634,7 +715,11 @@ function selectCore(coreId: number): void {
   z-index: 5;
   border-color: color-mix(in srgb, var(--accent-color) 95%, var(--border-color));
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 24%, transparent), transparent),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-primary) 24%, transparent),
+      transparent
+    ),
     color-mix(in srgb, var(--accent-color) 28%, var(--bg-primary));
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent),
@@ -662,7 +747,8 @@ function selectCore(coreId: number): void {
 }
 
 .soc-template-preview-canvas__core-id {
-  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
   font-size: 9px;
   font-weight: 800;
   line-height: 1;
@@ -783,7 +869,8 @@ function selectCore(coreId: number): void {
 
 .soc-template-preview-canvas__status-grid dd {
   margin: 1px 0 0;
-  font-family: ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'SFMono-Regular', 'IBM Plex Mono', Menlo, monospace;
   font-size: 12px;
   font-weight: 800;
   line-height: 1.1;

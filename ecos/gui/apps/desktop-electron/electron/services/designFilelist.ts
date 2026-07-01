@@ -1,4 +1,9 @@
-import { isAbsoluteLocalPath, isHdlFilePath, joinLocalPath, normalizeLocalPath } from '@ecos-studio/shared'
+import {
+  isAbsoluteLocalPath,
+  isHdlFilePath,
+  joinLocalPath,
+  normalizeLocalPath,
+} from '@ecos-studio/shared'
 
 export type FilelistLine =
   | { kind: 'file'; raw: string; path: string }
@@ -16,11 +21,7 @@ export function parseFilelistContent(content: string): FilelistLine[] {
       continue
     }
 
-    if (
-      trimmed.startsWith('#')
-      || trimmed.startsWith('//')
-      || trimmed.startsWith('`')
-    ) {
+    if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('`')) {
       lines.push({ kind: 'other', raw: rawLine })
       continue
     }
@@ -49,9 +50,8 @@ export function parseFilelistContent(content: string): FilelistLine[] {
 
 export function serializeFilelistLines(lines: FilelistLine[]): string {
   const serialized = lines.map((line) => line.raw)
-  const trailingNewline = serialized.length > 0 && serialized[serialized.length - 1] !== ''
-    ? '\n'
-    : ''
+  const trailingNewline =
+    serialized.length > 0 && serialized[serialized.length - 1] !== '' ? '\n' : ''
   return `${serialized.join('\n')}${trailingNewline}`
 }
 
@@ -70,7 +70,10 @@ export function formatFilelistEntry(relativePath: string): string {
   return relativePath
 }
 
-export function appendFilelistEntry(lines: FilelistLine[], relativePath: string): FilelistLine[] {
+export function appendFilelistEntry(
+  lines: FilelistLine[],
+  relativePath: string,
+): FilelistLine[] {
   const entry = formatFilelistEntry(relativePath)
   const next = [...lines]
   if (next.length > 0 && next[next.length - 1]?.raw !== '') {
@@ -80,7 +83,10 @@ export function appendFilelistEntry(lines: FilelistLine[], relativePath: string)
   return next
 }
 
-export function removeFilelistEntry(lines: FilelistLine[], filelistEntry: string): FilelistLine[] {
+export function removeFilelistEntry(
+  lines: FilelistLine[],
+  filelistEntry: string,
+): FilelistLine[] {
   return lines.filter((line) => !(line.kind === 'file' && line.raw === filelistEntry))
 }
 
@@ -89,7 +95,7 @@ function extractPathValue(line: string): string {
   if (!withoutComment) return ''
 
   const quote = withoutComment[0]
-  if (quote === '"' || quote === '\'') {
+  if (quote === '"' || quote === "'") {
     const closingIndex = withoutComment.indexOf(quote, 1)
     if (closingIndex > 1) {
       return withoutComment.slice(1, closingIndex)

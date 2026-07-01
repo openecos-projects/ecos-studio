@@ -1,4 +1,7 @@
-export function convertRemoteToLocalPath(remotePath: string, projectPath: string): string {
+export function convertRemoteToLocalPath(
+  remotePath: string,
+  projectPath: string,
+): string {
   if (!remotePath || !remotePath.includes('/nfs/')) return remotePath
   if (!projectPath) return remotePath
 
@@ -11,7 +14,8 @@ export function convertRemoteToLocalPath(remotePath: string, projectPath: string
   const relativePath = remotePath.slice(projectNameIndex + projectName.length + 2)
   const separator = projectPath.includes('\\') ? '\\' : '/'
   const normalizedProjectPath = projectPath.replace(/[/\\]+$/, '')
-  const normalizedRelativePath = separator === '\\' ? relativePath.replace(/\//g, '\\') : relativePath
+  const normalizedRelativePath =
+    separator === '\\' ? relativePath.replace(/\//g, '\\') : relativePath
 
   return `${normalizedProjectPath}${separator}${normalizedRelativePath}`
 }

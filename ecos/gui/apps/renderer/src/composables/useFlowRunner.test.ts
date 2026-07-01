@@ -272,10 +272,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-1' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-1',
+    })
   })
 
   it('still invalidates Home and parameters when runtime events only updated flow resources', async () => {
@@ -297,10 +296,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-1' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-1',
+    })
   })
 
   it('does not duplicate fallback invalidations when runtime events already updated Home and parameters', async () => {
@@ -332,14 +330,18 @@ describe('useFlowRunner desktop-only guard', () => {
       sessionId: 'session-a',
     }
     currentProject.value = { path: '/work/a' }
-    let resolveRunStep: ((value: {
-      data: { state: StateEnum; step: StepEnum }
-      message: string[]
-      response: string
-    }) => void) | undefined
-    runStepApi.mockReturnValue(new Promise((resolve) => {
-      resolveRunStep = resolve
-    }))
+    let resolveRunStep:
+      | ((value: {
+          data: { state: StateEnum; step: StepEnum }
+          message: string[]
+          response: string
+        }) => void)
+      | undefined
+    runStepApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRunStep = resolve
+      }),
+    )
 
     const { runFlow } = useFlowRunner()
     const runPromise = runFlow()
@@ -359,10 +361,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runPromise
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-a' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-a',
+    })
   })
 
   it('tracks running flow state per workspace', () => {

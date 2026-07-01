@@ -32,7 +32,9 @@ describe('designFileService', () => {
 
     expect(result.added).toHaveLength(1)
     expect(result.skipped).toEqual([])
-    expect(await readFile(getWorkspaceFilelistPath(workspaceRoot), 'utf8')).toBe('top.v\n')
+    expect(await readFile(getWorkspaceFilelistPath(workspaceRoot), 'utf8')).toBe(
+      'top.v\n',
+    )
 
     const listed = await listWorkspaceDesignFiles(workspaceRoot)
     expect(listed).toHaveLength(1)
@@ -57,10 +59,12 @@ describe('designFileService', () => {
     const result = await addWorkspaceDesignFiles(workspaceRoot, [externalFile])
 
     expect(result.added).toEqual([])
-    expect(result.skipped).toEqual([{
-      path: externalFile,
-      reason: 'top.v already exists in workspace/origin.',
-    }])
+    expect(result.skipped).toEqual([
+      {
+        path: externalFile,
+        reason: 'top.v already exists in workspace/origin.',
+      },
+    ])
     expect(await readFile(join(originDir, 'top.v'), 'utf8')).toContain('module existing')
     await expect(access(getWorkspaceFilelistPath(workspaceRoot))).rejects.toMatchObject({
       code: 'ENOENT',

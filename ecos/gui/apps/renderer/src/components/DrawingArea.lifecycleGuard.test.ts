@@ -3,7 +3,9 @@ import source from './DrawingArea.vue?raw'
 
 describe('DrawingArea lifecycle guards', () => {
   it('captures workspace session identity before asynchronous stage loads mutate preview state', () => {
-    expect(source).toContain('const { currentProject, resourceVersions, workspaceSession } = useWorkspace()')
+    expect(source).toContain(
+      'const { currentProject, resourceVersions, workspaceSession } = useWorkspace()',
+    )
     expect(source).toContain('function createDrawingAsyncGuard(')
     expect(source).toMatch(
       /const handleStageChange = async \(stage: string\) => \{[\s\S]*?const guard = createDrawingAsyncGuard\(stage\)[\s\S]*?const layoutResponse = await resolveWorkspaceStepInfoApi\(/,

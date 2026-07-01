@@ -45,12 +45,14 @@ function request(
 function createSpawnHarness() {
   const children: FakeChild[] = []
   const calls: SpawnCall[] = []
-  const spawn = vi.fn((command: string, args: string[], options: SpawnCall['options']) => {
-    const child = new FakeChild()
-    calls.push({ args, command, options })
-    children.push(child)
-    return child as never
-  })
+  const spawn = vi.fn(
+    (command: string, args: string[], options: SpawnCall['options']) => {
+      const child = new FakeChild()
+      calls.push({ args, command, options })
+      children.push(child)
+      return child as never
+    },
+  )
 
   return {
     calls,
@@ -59,16 +61,15 @@ function createSpawnHarness() {
   }
 }
 
-function complete(
-  child: FakeChild,
-  payload: unknown,
-  exitCode = 0,
-): void {
+function complete(child: FakeChild, payload: unknown, exitCode = 0): void {
   child.stdout.emit('data', `${JSON.stringify(payload)}\n`)
   child.emit('close', exitCode, null)
 }
 
-async function waitForSpawn(harness: ReturnType<typeof createSpawnHarness>, index: number): Promise<void> {
+async function waitForSpawn(
+  harness: ReturnType<typeof createSpawnHarness>,
+  index: number,
+): Promise<void> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     if (harness.children[index]) return
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -104,12 +105,15 @@ describe('EccCliAdapter', () => {
       spawn: harness.spawn,
       tempDir,
     })
-    const createPromise = adapter.execute(request('create_workspace', {
-      directory: '/work/demo',
-      pdk: 'ics55',
-      parameters: { Design: 'demo' },
-      rtl_list: ['/rtl/top.v'],
-    }), { emit: vi.fn() })
+    const createPromise = adapter.execute(
+      request('create_workspace', {
+        directory: '/work/demo',
+        pdk: 'ics55',
+        parameters: { Design: 'demo' },
+        rtl_list: ['/rtl/top.v'],
+      }),
+      { emit: vi.fn() },
+    )
 
     expect(harness.calls[0]?.command).toBe('ecc')
     expect(harness.calls[0]?.args).toEqual([
@@ -142,10 +146,13 @@ describe('EccCliAdapter', () => {
       response: 'success',
     })
 
-    const stepPromise = adapter.execute(request('run_step', {
-      rerun: true,
-      step: 'Synthesis',
-    }), { emit: vi.fn() })
+    const stepPromise = adapter.execute(
+      request('run_step', {
+        rerun: true,
+        step: 'Synthesis',
+      }),
+      { emit: vi.fn() },
+    )
 
     expect(harness.calls[1]?.args).toEqual([
       'workspace',
@@ -176,16 +183,21 @@ describe('EccCliAdapter', () => {
     writeFileSync(eccBin, '#!/usr/bin/env bash\n')
     chmodSync(eccBin, 0o755)
 
-    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const loggerDebug = vi
+      .spyOn(electronLogger, 'debug')
+      .mockImplementation(() => undefined)
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({
       env: { PATH: `${binDir}:/usr/bin` },
       spawn: harness.spawn,
     })
 
-    const loadPromise = adapter.execute(request('load_workspace', {
-      directory: '/work/demo',
-    }), { emit: vi.fn() })
+    const loadPromise = adapter.execute(
+      request('load_workspace', {
+        directory: '/work/demo',
+      }),
+      { emit: vi.fn() },
+    )
 
     complete(harness.children[0], {
       cmd: 'load_workspace',
@@ -222,9 +234,12 @@ describe('EccCliAdapter', () => {
     chmodSync(join(firstBin, 'ecc'), 0o755)
     chmodSync(join(secondBin, 'ecc'), 0o755)
 
-    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const loggerDebug = vi
+      .spyOn(electronLogger, 'debug')
+      .mockImplementation(() => undefined)
     const harness = createSpawnHarness()
-    const envProvider = vi.fn()
+    const envProvider = vi
+      .fn()
       .mockResolvedValueOnce({ PATH: `${firstBin}:/usr/bin`, ECOS_DYNAMIC: 'first' })
       .mockResolvedValueOnce({ PATH: `${secondBin}:/usr/bin`, ECOS_DYNAMIC: 'second' })
     const adapter = new EccCliAdapter({
@@ -233,9 +248,12 @@ describe('EccCliAdapter', () => {
       spawn: harness.spawn,
     })
 
-    const firstPromise = adapter.execute(request('load_workspace', {
-      directory: '/work/one',
-    }), { emit: vi.fn() })
+    const firstPromise = adapter.execute(
+      request('load_workspace', {
+        directory: '/work/one',
+      }),
+      { emit: vi.fn() },
+    )
     await waitForSpawn(harness, 0)
     complete(harness.children[0], {
       cmd: 'load_workspace',
@@ -245,9 +263,12 @@ describe('EccCliAdapter', () => {
     })
     await firstPromise
 
-    const secondPromise = adapter.execute(request('load_workspace', {
-      directory: '/work/two',
-    }), { emit: vi.fn() })
+    const secondPromise = adapter.execute(
+      request('load_workspace', {
+        directory: '/work/two',
+      }),
+      { emit: vi.fn() },
+    )
     await waitForSpawn(harness, 1)
     complete(harness.children[1], {
       cmd: 'load_workspace',
@@ -278,7 +299,9 @@ describe('EccCliAdapter', () => {
 
   it('falls back to static env when envProvider fails', async () => {
     const harness = createSpawnHarness()
-    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const loggerDebug = vi
+      .spyOn(electronLogger, 'debug')
+      .mockImplementation(() => undefined)
     const adapter = new EccCliAdapter({
       env: { PATH: '/static/bin:/usr/bin', ECOS_STATIC: 'yes' },
       envProvider: vi.fn(async () => {
@@ -287,9 +310,12 @@ describe('EccCliAdapter', () => {
       spawn: harness.spawn,
     })
 
-    const loadPromise = adapter.execute(request('load_workspace', {
-      directory: '/work/demo',
-    }), { emit: vi.fn() })
+    const loadPromise = adapter.execute(
+      request('load_workspace', {
+        directory: '/work/demo',
+      }),
+      { emit: vi.fn() },
+    )
     await waitForSpawn(harness, 0)
 
     expect(harness.calls[0].options.env).toMatchObject({
@@ -313,9 +339,12 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
 
-    const loadPromise = adapter.execute(request('load_workspace', {
-      directory: '/work/loaded',
-    }), { emit: vi.fn() })
+    const loadPromise = adapter.execute(
+      request('load_workspace', {
+        directory: '/work/loaded',
+      }),
+      { emit: vi.fn() },
+    )
     expect(harness.calls[0]?.args).toEqual([
       'workspace',
       'load',
@@ -331,7 +360,9 @@ describe('EccCliAdapter', () => {
     })
     await expect(loadPromise).resolves.toMatchObject({ ok: true })
 
-    const flowPromise = adapter.execute(request('rtl2gds', { rerun: true }), { emit: vi.fn() })
+    const flowPromise = adapter.execute(request('rtl2gds', { rerun: true }), {
+      emit: vi.fn(),
+    })
     expect(harness.calls[1]?.args).toEqual([
       'workspace',
       'run-flow',
@@ -352,10 +383,13 @@ describe('EccCliAdapter', () => {
       response: 'success',
     })
 
-    const infoPromise = adapter.execute(request('get_info', {
-      id: 'layout',
-      step: 'route',
-    }), { emit: vi.fn() })
+    const infoPromise = adapter.execute(
+      request('get_info', {
+        id: 'layout',
+        step: 'route',
+      }),
+      { emit: vi.fn() },
+    )
     expect(harness.calls[2]?.args).toEqual([
       'workspace',
       'get-info',
@@ -417,9 +451,12 @@ describe('EccCliAdapter', () => {
       ok: true,
     })
 
-    const syncPromise = adapter.execute(request('sync_config', {
-      config_path: '/work/loaded/config/rt_default_config.json',
-    }), { emit: vi.fn() })
+    const syncPromise = adapter.execute(
+      request('sync_config', {
+        config_path: '/work/loaded/config/rt_default_config.json',
+      }),
+      { emit: vi.fn() },
+    )
     expect(harness.calls[5]?.args).toEqual([
       'workspace',
       'sync-config',
@@ -454,10 +491,13 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const emit = vi.fn()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: '/work/demo',
-      step: 'Synthesis',
-    }), { emit })
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: '/work/demo',
+        step: 'Synthesis',
+      }),
+      { emit },
+    )
 
     harness.children[0].stdout.emit('data', 'preparing tools\n')
     harness.children[0].stderr.emit('data', 'warning text\n')
@@ -486,13 +526,19 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const emit = vi.fn()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: workspaceDir,
-      step: 'Place',
-    }), { emit })
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: workspaceDir,
+        step: 'Place',
+      }),
+      { emit },
+    )
 
     harness.children[0].stdout.emit('data', 'preparing dreamplace\n')
-    harness.children[0].stderr.emit('data', 'CMake Error at cmake/TorchExtension.cmake:19\n')
+    harness.children[0].stderr.emit(
+      'data',
+      'CMake Error at cmake/TorchExtension.cmake:19\n',
+    )
     complete(harness.children[0], {
       cmd: 'run_step',
       data: { state: 'Success', step: 'Place' },
@@ -512,8 +558,9 @@ describe('EccCliAdapter', () => {
       response: 'success',
     })
 
-    const logFiles = readdirSync(join(workspaceDir, 'log'))
-      .filter((name) => /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name))
+    const logFiles = readdirSync(join(workspaceDir, 'log')).filter((name) =>
+      /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name),
+    )
     expect(logFiles).toHaveLength(1)
 
     const logText = readFileSync(join(workspaceDir, 'log', logFiles[0]), 'utf8')
@@ -531,11 +578,14 @@ describe('EccCliAdapter', () => {
       spawn: harness.spawn,
       tempDir,
     })
-    const promise = adapter.execute(request('create_workspace', {
-      directory: workspaceDir,
-      pdk: 'ics55',
-      parameters: { Design: 'demo' },
-    }), { emit: vi.fn() })
+    const promise = adapter.execute(
+      request('create_workspace', {
+        directory: workspaceDir,
+        pdk: 'ics55',
+        parameters: { Design: 'demo' },
+      }),
+      { emit: vi.fn() },
+    )
 
     expect(existsSync(workspaceDir)).toBe(false)
 
@@ -548,7 +598,9 @@ describe('EccCliAdapter', () => {
 
     const result = await promise
 
-    expect(result.data.cli_log_file).toEqual(expect.stringContaining(`${tempDir}/ecos-ecc-cli-logs/ecc-cli-`))
+    expect(result.data.cli_log_file).toEqual(
+      expect.stringContaining(`${tempDir}/ecos-ecc-cli-logs/ecc-cli-`),
+    )
     expect(existsSync(workspaceDir)).toBe(false)
   })
 
@@ -560,10 +612,13 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
 
-    const first = adapter.execute(request('run_step', {
-      directory: workspaceDir,
-      step: 'Place',
-    }), { emit: vi.fn() })
+    const first = adapter.execute(
+      request('run_step', {
+        directory: workspaceDir,
+        step: 'Place',
+      }),
+      { emit: vi.fn() },
+    )
     complete(harness.children[0], {
       cmd: 'run_step',
       data: { state: 'Success', step: 'Place' },
@@ -572,10 +627,13 @@ describe('EccCliAdapter', () => {
     })
     await first
 
-    const second = adapter.execute(request('run_step', {
-      directory: workspaceDir,
-      step: 'Place',
-    }), { emit: vi.fn() })
+    const second = adapter.execute(
+      request('run_step', {
+        directory: workspaceDir,
+        step: 'Place',
+      }),
+      { emit: vi.fn() },
+    )
     complete(harness.children[1], {
       cmd: 'run_step',
       data: { state: 'Success', step: 'Place' },
@@ -584,8 +642,9 @@ describe('EccCliAdapter', () => {
     })
     await second
 
-    const logFiles = readdirSync(join(workspaceDir, 'log'))
-      .filter((name) => /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name))
+    const logFiles = readdirSync(join(workspaceDir, 'log')).filter((name) =>
+      /^ecc-cli-\d{8}-\d{6}-run_step-[a-z0-9-]+\.log$/.test(name),
+    )
     expect(logFiles).toHaveLength(2)
   })
 
@@ -595,10 +654,13 @@ describe('EccCliAdapter', () => {
     mkdirSync(workspaceDir, { recursive: true })
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: workspaceDir,
-      step: 'Place',
-    }), { emit: vi.fn() })
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: workspaceDir,
+        step: 'Place',
+      }),
+      { emit: vi.fn() },
+    )
 
     complete(harness.children[0], {
       cmd: 'run_step',
@@ -617,16 +679,22 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const emit = vi.fn()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: workspaceDir,
-      step: 'CTS',
-    }), { emit })
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: workspaceDir,
+        step: 'CTS',
+      }),
+      { emit },
+    )
 
     const startMessage = emit.mock.calls
       .map(([event]) => event)
-      .find((event) => event.stream === 'stdout'
-        && event.type === 'stdout'
-        && event.text?.includes('[ECC CLI log] Writing full command log to:'))
+      .find(
+        (event) =>
+          event.stream === 'stdout' &&
+          event.type === 'stdout' &&
+          event.text?.includes('[ECC CLI log] Writing full command log to:'),
+      )
     expect(startMessage?.text).toContain(`${workspaceDir}/log/ecc-cli-`)
     expect(electronLogger.status).toHaveBeenCalledWith(
       '[ECC CLI log] Writing full command log to: %s',
@@ -660,33 +728,19 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const emit = vi.fn()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: '/work/demo',
-      step: 'Synthesis',
-    }), { emit })
-
-    harness.children[0].stdout.emit('data', `${JSON.stringify({
-      type: 'event',
-      phase: 'completed',
-      cmd: 'run_step',
-      data: {
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: '/work/demo',
         step: 'Synthesis',
-        info: {
-          subflow_path: '/work/demo/Synthesis/subflow.json',
-        },
-      },
-      message: ['subflow changed'],
-    })}\n`)
-    complete(harness.children[0], {
-      cmd: 'run_step',
-      data: { state: 'Success', step: 'Synthesis' },
-      message: ['done'],
-      response: 'success',
-    })
+      }),
+      { emit },
+    )
 
-    await expect(promise).resolves.toMatchObject({ ok: true })
-    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
-      result: expect.objectContaining({
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        type: 'event',
+        phase: 'completed',
         cmd: 'run_step',
         data: {
           step: 'Synthesis',
@@ -695,20 +749,45 @@ describe('EccCliAdapter', () => {
           },
         },
         message: ['subflow changed'],
-        response: 'success',
+      })}\n`,
+    )
+    complete(harness.children[0], {
+      cmd: 'run_step',
+      data: { state: 'Success', step: 'Synthesis' },
+      message: ['done'],
+      response: 'success',
+    })
+
+    await expect(promise).resolves.toMatchObject({ ok: true })
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({
+          cmd: 'run_step',
+          data: {
+            step: 'Synthesis',
+            info: {
+              subflow_path: '/work/demo/Synthesis/subflow.json',
+            },
+          },
+          message: ['subflow changed'],
+          response: 'success',
+        }),
+        stream: 'system',
+        type: 'completed',
       }),
-      stream: 'system',
-      type: 'completed',
-    }))
+    )
   })
 
   it('normalizes JSONL result records emitted by the CLI', async () => {
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
-    const promise = adapter.execute(request('run_step', {
-      directory: '/work/demo',
-      step: 'Synthesis',
-    }), { emit: vi.fn() })
+    const promise = adapter.execute(
+      request('run_step', {
+        directory: '/work/demo',
+        step: 'Synthesis',
+      }),
+      { emit: vi.fn() },
+    )
 
     complete(harness.children[0], {
       cmd: 'run_step',
@@ -733,9 +812,14 @@ describe('EccCliAdapter', () => {
     const harness = createSpawnHarness()
     const adapter = new EccCliAdapter({ spawn: harness.spawn })
 
-    await expect(adapter.execute(request('run_step', {
-      step: 'Synthesis',
-    }), { emit: vi.fn() })).resolves.toMatchObject({
+    await expect(
+      adapter.execute(
+        request('run_step', {
+          step: 'Synthesis',
+        }),
+        { emit: vi.fn() },
+      ),
+    ).resolves.toMatchObject({
       cmd: 'run_step',
       message: ['missing required field: directory'],
       ok: false,
@@ -743,19 +827,27 @@ describe('EccCliAdapter', () => {
     })
     expect(harness.spawn).not.toHaveBeenCalled()
 
-    await expect(adapter.execute(request('sync_config', {
-      directory: '/work/demo',
-    }), { emit: vi.fn() })).resolves.toMatchObject({
+    await expect(
+      adapter.execute(
+        request('sync_config', {
+          directory: '/work/demo',
+        }),
+        { emit: vi.fn() },
+      ),
+    ).resolves.toMatchObject({
       cmd: 'sync_config',
       message: ['missing required field: config_path'],
       ok: false,
       response: 'failed',
     })
 
-    const nonzero = adapter.execute(request('run_step', {
-      directory: '/work/demo',
-      step: 'Synthesis',
-    }), { emit: vi.fn() })
+    const nonzero = adapter.execute(
+      request('run_step', {
+        directory: '/work/demo',
+        step: 'Synthesis',
+      }),
+      { emit: vi.fn() },
+    )
     harness.children[0].stderr.emit('data', 'tool failed\n')
     harness.children[0].emit('close', 1, null)
     await expect(nonzero).resolves.toMatchObject({
@@ -763,9 +855,12 @@ describe('EccCliAdapter', () => {
       response: 'error',
     })
 
-    const invalid = adapter.execute(request('home_page', {
-      directory: '/work/demo',
-    }), { emit: vi.fn() })
+    const invalid = adapter.execute(
+      request('home_page', {
+        directory: '/work/demo',
+      }),
+      { emit: vi.fn() },
+    )
     harness.children[1].stdout.emit('data', '{"not valid"\n')
     harness.children[1].emit('close', 0, null)
     await expect(invalid).resolves.toMatchObject({
@@ -777,5 +872,4 @@ describe('EccCliAdapter', () => {
       expect.stringContaining('Invalid JSON'),
     )
   })
-
 })

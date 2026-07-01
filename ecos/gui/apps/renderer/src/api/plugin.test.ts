@@ -262,7 +262,9 @@ describe('Resource Manager tool API adapter', () => {
     }
     resourcesBridge.importLocalPath.mockResolvedValue(imported)
 
-    await expect(importLocalResourcePathApi('tool:yosys', '/tmp/oss-cad-suite')).resolves.toEqual(imported)
+    await expect(
+      importLocalResourcePathApi('tool:yosys', '/tmp/oss-cad-suite'),
+    ).resolves.toEqual(imported)
 
     expect(resourcesBridge.importLocalPath).toHaveBeenCalledWith({
       resourceId: 'tool:yosys',
@@ -286,7 +288,9 @@ describe('Resource Manager tool API adapter', () => {
 
   it('subscribes to resource progress through the desktop event bridge', () => {
     const unsubscribe = vi.fn()
-    let listener: ((job: Parameters<Parameters<typeof subscribeResourceProgress>[1]>[0]) => void) | undefined
+    let listener:
+      | ((job: Parameters<Parameters<typeof subscribeResourceProgress>[1]>[0]) => void)
+      | undefined
     resourcesBridge.onProgress.mockImplementation((callback) => {
       listener = callback
       return unsubscribe

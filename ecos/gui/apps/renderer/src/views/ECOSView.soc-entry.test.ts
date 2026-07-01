@@ -17,11 +17,7 @@ type GlobalKey =
   | 'SVGElement'
   | 'DocumentFragment'
 
-const {
-  push,
-  loadRecentProjects,
-  openProject,
-} = vi.hoisted(() => ({
+const { push, loadRecentProjects, openProject } = vi.hoisted(() => ({
   push: vi.fn(),
   loadRecentProjects: vi.fn(async () => {}),
   openProject: vi.fn(async () => true),
@@ -413,7 +409,7 @@ describe('ECOSView SoC entry card', () => {
     expect(container.textContent).toContain('IP Catalog')
     expect(container.textContent).toContain('Benchmarks')
     expect(container.textContent.indexOf('Resource Manager')).toBeLessThan(
-      container.textContent.indexOf('IP Catalog')
+      container.textContent.indexOf('IP Catalog'),
     )
     expect(container.textContent).not.toContain('Resources')
     expect(container.textContent).not.toContain('Explore')

@@ -17,7 +17,7 @@ const {
   resetParameters,
   refreshParameters,
   layerOptions,
-  isLayerInRange
+  isLayerInRange,
 } = useParameters()
 
 const utilizationPercent = computed(() => Math.round(config.core.utilization * 100))
@@ -37,7 +37,6 @@ const resetConfig = () => {
   resetParameters()
   console.log('Configuration reset to last saved state')
 }
-
 </script>
 
 <template>
@@ -62,11 +61,19 @@ const resetConfig = () => {
           <i class="ri-refresh-line"></i>
           Reload
         </button>
-        <button class="btn-text" @click="resetConfig" :disabled="!hasChanges || isLoading || isMutationLocked">
+        <button
+          class="btn-text"
+          @click="resetConfig"
+          :disabled="!hasChanges || isLoading || isMutationLocked"
+        >
           <i class="ri-arrow-go-back-line"></i>
           Reset
         </button>
-        <button class="btn-primary" @click="saveConfig" :disabled="!hasChanges || isSaving || isMutationLocked">
+        <button
+          class="btn-primary"
+          @click="saveConfig"
+          :disabled="!hasChanges || isSaving || isMutationLocked"
+        >
           <i :class="isSaving ? 'ri-loader-4-line spin' : 'ri-save-line'"></i>
           {{ isSaving ? 'Saving...' : 'Save' }}
         </button>
@@ -107,7 +114,11 @@ const resetConfig = () => {
             </div>
             <div class="field">
               <label>PDK Root</label>
-              <InputText v-model="config.pdkRoot" size="small" placeholder="Absolute path to PDK" />
+              <InputText
+                v-model="config.pdkRoot"
+                size="small"
+                placeholder="Absolute path to PDK"
+              />
             </div>
           </div>
         </section>
@@ -130,8 +141,13 @@ const resetConfig = () => {
             </div>
             <div class="field">
               <label>Area</label>
-              <InputNumber v-model="config.die.area" size="small" suffix=" μm²" :minFractionDigits="0"
-                :maxFractionDigits="6" />
+              <InputNumber
+                v-model="config.die.area"
+                size="small"
+                suffix=" μm²"
+                :minFractionDigits="0"
+                :maxFractionDigits="6"
+              />
             </div>
           </div>
         </section>
@@ -167,14 +183,28 @@ const resetConfig = () => {
                 <label>Target Density</label>
                 <span class="tag green">{{ densityPercent }}%</span>
               </div>
-              <input type="range" v-model.number="config.targetDensity" min="0" max="1" step="0.01" class="green" />
+              <input
+                type="range"
+                v-model.number="config.targetDensity"
+                min="0"
+                max="1"
+                step="0.01"
+                class="green"
+              />
             </div>
             <div class="field">
               <div class="label-row">
                 <label>Target Overflow</label>
                 <span class="tag orange">{{ overflowPercent }}%</span>
               </div>
-              <input type="range" v-model.number="config.targetOverflow" min="0" max="1" step="0.01" class="orange" />
+              <input
+                type="range"
+                v-model.number="config.targetOverflow"
+                min="0"
+                max="1"
+                step="0.01"
+                class="orange"
+              />
             </div>
           </div>
         </section>
@@ -197,24 +227,44 @@ const resetConfig = () => {
             </div>
             <div class="field">
               <label>Area</label>
-              <InputNumber v-model="config.core.area" size="small" suffix=" μm²" :minFractionDigits="0"
-                :maxFractionDigits="6" />
+              <InputNumber
+                v-model="config.core.area"
+                size="small"
+                suffix=" μm²"
+                :minFractionDigits="0"
+                :maxFractionDigits="6"
+              />
             </div>
             <div class="field">
               <label>Bounding Box</label>
-              <InputText v-model="config.core.boundingBox" size="small" placeholder="(x1 , y1) (x2 , y2)" />
+              <InputText
+                v-model="config.core.boundingBox"
+                size="small"
+                placeholder="(x1 , y1) (x2 , y2)"
+              />
             </div>
             <div class="field">
               <div class="label-row">
                 <label>Utilization</label>
                 <span class="tag blue">{{ utilizationPercent }}%</span>
               </div>
-              <input type="range" v-model.number="config.core.utilization" min="0" max="1" step="0.01" />
+              <input
+                type="range"
+                v-model.number="config.core.utilization"
+                min="0"
+                max="1"
+                step="0.01"
+              />
             </div>
             <div class="field-row">
               <div class="field">
                 <label>Aspect Ratio</label>
-                <InputNumber v-model="config.core.aspectRatio" size="small" :min="0.1" :step="0.1" />
+                <InputNumber
+                  v-model="config.core.aspectRatio"
+                  size="small"
+                  :min="0.1"
+                  :step="0.1"
+                />
               </div>
               <div class="field">
                 <label>Margin X</label>
@@ -235,21 +285,35 @@ const resetConfig = () => {
           </div>
           <div class="card-body">
             <div class="layer-list">
-              <div v-for="l in layerOptions" :key="l.value" class="layer-item"
-                :class="{ active: isLayerInRange(l.value) }">
+              <div
+                v-for="l in layerOptions"
+                :key="l.value"
+                class="layer-item"
+                :class="{ active: isLayerInRange(l.value) }"
+              >
                 {{ l.label }}
               </div>
             </div>
-            <div class="field-row" style="margin-top: 12px;">
+            <div class="field-row" style="margin-top: 12px">
               <div class="field">
                 <label>Bottom</label>
-                <Select v-model="config.bottomLayer" :options="layerOptions" optionLabel="label" optionValue="value"
-                  size="small" />
+                <Select
+                  v-model="config.bottomLayer"
+                  :options="layerOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  size="small"
+                />
               </div>
               <div class="field">
                 <label>Top</label>
-                <Select v-model="config.topLayer" :options="layerOptions" optionLabel="label" optionValue="value"
-                  size="small" />
+                <Select
+                  v-model="config.topLayer"
+                  :options="layerOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  size="small"
+                />
               </div>
             </div>
           </div>
@@ -512,7 +576,7 @@ const resetConfig = () => {
   color: #f59e0b;
 }
 
-input[type="range"] {
+input[type='range'] {
   width: 100%;
   height: 4px;
   -webkit-appearance: none;
@@ -522,7 +586,7 @@ input[type="range"] {
   outline: none;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 12px;
@@ -532,11 +596,11 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 
-input[type="range"].green::-webkit-slider-thumb {
+input[type='range'].green::-webkit-slider-thumb {
   background: #10b981;
 }
 
-input[type="range"].orange::-webkit-slider-thumb {
+input[type='range'].orange::-webkit-slider-thumb {
   background: #f59e0b;
 }
 

@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { desktopApiEventChannels, desktopMenuEventIds } from '@ecos-studio/shared'
 
-const { buildFromTemplate, getAllWindows, getFocusedWindow, setApplicationMenu } = vi.hoisted(
-  () => ({
+const { buildFromTemplate, getAllWindows, getFocusedWindow, setApplicationMenu } =
+  vi.hoisted(() => ({
     buildFromTemplate: vi.fn(),
     getAllWindows: vi.fn(),
     getFocusedWindow: vi.fn(),
     setApplicationMenu: vi.fn(),
-  }),
-)
+  }))
 
 vi.mock('electron', () => ({
   app: {
@@ -60,7 +59,9 @@ describe('menuService', () => {
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
     const helpMenu = capturedTemplate.find((item) => item.label === 'Help')
     const newWorkspace = fileMenu?.submenu?.find((item) => item.label === 'New Workspace')
-    const documentation = helpMenu?.submenu?.find((item) => item.label === 'Documentation')
+    const documentation = helpMenu?.submenu?.find(
+      (item) => item.label === 'Documentation',
+    )
     const about = helpMenu?.submenu?.find((item) => item.label === 'About')
 
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
@@ -109,7 +110,9 @@ describe('menuService', () => {
     registerApplicationMenu()
 
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
-    const openWorkspace = fileMenu?.submenu?.find((item) => item.label === 'Open Workspace')
+    const openWorkspace = fileMenu?.submenu?.find(
+      (item) => item.label === 'Open Workspace',
+    )
 
     openWorkspace?.click?.()
 

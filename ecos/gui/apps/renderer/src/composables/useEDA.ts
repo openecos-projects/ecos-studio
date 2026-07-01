@@ -14,7 +14,6 @@ export interface EdaResponse<T = any> {
 }
 
 export function useEDA() {
-
   /**
    * 将本地资源路径转换为可在 PIXI 中使用的 URL
    * 通过桌面桥接读取文件并创建 blob URL，避免 renderer 直接依赖桌面运行时 SDK
@@ -35,6 +34,6 @@ export function useEDA() {
   }
 
   return {
-    getResourceUrl
+    getResourceUrl,
   }
 }

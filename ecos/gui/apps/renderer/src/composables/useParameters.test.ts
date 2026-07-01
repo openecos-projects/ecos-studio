@@ -8,31 +8,33 @@ import {
 
 describe('useParameters helpers', () => {
   it('parses the current parameters schema into normalized data', () => {
-    const parsed = parseParametersData(JSON.stringify({
-      PDK: 'ics55',
-      Design: 'demo',
-      'Top module': 'top',
-      Die: { Size: ['100', 200], Area: '300' },
-      Core: {
-        Size: [80, '120'],
-        Area: '9600',
-        'Bounding box': '(0,0) (10,10)',
-        Utilitization: '0.55',
-        Margin: ['3', 4],
-        'Aspect ratio': '1.2',
-      },
-      'Max fanout': '42',
-      'Target density': '0.61',
-      'Target overflow': '0.09',
-      'Global right padding': '7',
-      'Cell padding x': '900',
-      'Routability opt flag': 0,
-      Clock: 'clk',
-      'Frequency max [MHz]': '250',
-      'Bottom layer': 'MET3',
-      'Top layer': 'MET6',
-      'PDK Root': '/pdks/ics55',
-    }))
+    const parsed = parseParametersData(
+      JSON.stringify({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'top',
+        Die: { Size: ['100', 200], Area: '300' },
+        Core: {
+          Size: [80, '120'],
+          Area: '9600',
+          'Bounding box': '(0,0) (10,10)',
+          Utilitization: '0.55',
+          Margin: ['3', 4],
+          'Aspect ratio': '1.2',
+        },
+        'Max fanout': '42',
+        'Target density': '0.61',
+        'Target overflow': '0.09',
+        'Global right padding': '7',
+        'Cell padding x': '900',
+        'Routability opt flag': 0,
+        Clock: 'clk',
+        'Frequency max [MHz]': '250',
+        'Bottom layer': 'MET3',
+        'Top layer': 'MET6',
+        'PDK Root': '/pdks/ics55',
+      }),
+    )
 
     expect(parsed).toEqual({
       PDK: 'ics55',
@@ -88,6 +90,8 @@ describe('useParameters helpers', () => {
       topLayer: 'MET7',
     }
 
-    expect(transformParametersToConfig(transformConfigToParameters(config))).toEqual(config)
+    expect(transformParametersToConfig(transformConfigToParameters(config))).toEqual(
+      config,
+    )
   })
 })

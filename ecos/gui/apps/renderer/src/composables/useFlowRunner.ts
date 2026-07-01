@@ -46,7 +46,9 @@ export function clearFlowExecutionActiveForWorkspace(path: string): void {
   refreshGlobalFlowExecutionActive()
 }
 
-export function isFlowExecutionActiveForWorkspace(path: string | undefined | null): boolean {
+export function isFlowExecutionActiveForWorkspace(
+  path: string | undefined | null,
+): boolean {
   return Boolean(path && activeFlowWorkspaces.has(normalizeWorkspacePath(path)))
 }
 
@@ -69,7 +71,7 @@ function clearTransientInteractionLocks() {
 /**
  * 流程运行器 Hook
  * 负责处理流程的运行、停止、重置等操作
- * 
+ *
  * Runtime lifecycle events 由 useWorkspace 管理（workspace 级别订阅），
  * 本 Hook 只负责调用 CLI-backed runtime command 并等待结果。
  */
@@ -86,7 +88,9 @@ export function useFlowRunner() {
   const route = useRoute()
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。
-  const isRunning = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
+  const isRunning = computed(() =>
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  )
   const state = ref<StateEnum>(StateEnum.Invalid)
   const error = ref<string | null>(null)
   const lastRunResult = ref<RunStepResponse | null>(null)
@@ -130,7 +134,9 @@ export function useFlowRunner() {
 
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
-      console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
+      console.warn(
+        'Not running in desktop runtime environment, cannot execute ECC CLI flow command',
+      )
       showDesktopRequiredToast()
       return { step: step as StepEnum, state: StateEnum.Invalid }
     }
@@ -168,8 +174,8 @@ export function useFlowRunner() {
         data: {
           directory,
           step: step as StepEnum,
-          rerun: Boolean(options.rerun)
-        }
+          rerun: Boolean(options.rerun),
+        },
       })
       console.log('run step result', result)
 
@@ -177,7 +183,9 @@ export function useFlowRunner() {
         (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
       )
       if (!homeAndParametersAlreadyInvalidated) {
-        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, { sessionId: runSessionId })
+        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, {
+          sessionId: runSessionId,
+        })
       }
 
       if (result.data?.state === StateEnum.Success) {
@@ -185,14 +193,14 @@ export function useFlowRunner() {
           severity: 'success',
           summary: 'Step Completed',
           detail: `${step} finished successfully`,
-          life: 4000
+          life: 4000,
         })
       } else {
         showToast({
           severity: 'error',
           summary: 'Step Failed',
           detail: `${step} did not complete successfully`,
-          life: 6000
+          life: 6000,
         })
       }
 
@@ -203,7 +211,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'Step Error',
         detail: err instanceof Error ? err.message : String(err),
-        life: 6000
+        life: 6000,
       })
     } finally {
       clearTransientInteractionLocks()
@@ -214,7 +222,7 @@ export function useFlowRunner() {
 
   /**
    * 运行所有步骤
-   * 
+   *
    * 调用 rtl2gds runtime command（同步等待 CLI 执行完成）。
    * 执行过程中，Electron runtime 转发 CLI lifecycle events，
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
@@ -222,7 +230,9 @@ export function useFlowRunner() {
   async function runAllFlow(options: FlowRunOptions = {}): Promise<any | null> {
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
-      console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
+      console.warn(
+        'Not running in desktop runtime environment, cannot execute ECC CLI flow command',
+      )
       showDesktopRequiredToast()
       return null
     }
@@ -261,8 +271,8 @@ export function useFlowRunner() {
         cmd: CMDEnum.rtl2gds,
         data: {
           directory,
-          rerun: Boolean(options.rerun)
-        }
+          rerun: Boolean(options.rerun),
+        },
       })
       console.log('rtl2gds result:', result)
 
@@ -272,7 +282,7 @@ export function useFlowRunner() {
           severity: 'success',
           summary: 'RTL2GDS Completed',
           detail: 'All flow steps finished successfully',
-          life: 5000
+          life: 5000,
         })
       } else {
         state.value = StateEnum.Imcomplete
@@ -281,7 +291,7 @@ export function useFlowRunner() {
           severity: 'error',
           summary: 'RTL2GDS Failed',
           detail: error.value ?? 'Unknown error',
-          life: 8000
+          life: 8000,
         })
       }
 
@@ -294,7 +304,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'RTL2GDS Error',
         detail: error.value ?? 'Unknown error',
-        life: 8000
+        life: 8000,
       })
     } finally {
       clearTransientInteractionLocks()
@@ -313,6 +323,6 @@ export function useFlowRunner() {
 
     // 方法
     runFlow,
-    runAllFlow
+    runAllFlow,
   }
 }

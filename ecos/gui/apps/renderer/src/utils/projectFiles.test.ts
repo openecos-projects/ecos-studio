@@ -46,9 +46,9 @@ describe('projectFiles', () => {
     expect(resolveProjectFilePath('home/flow.json', '/workspace/demo')).toBe(
       '/workspace/demo/home/flow.json',
     )
-    expect(resolveProjectFilePath('/workspace/demo/home/flow.json', '/workspace/demo')).toBe(
-      '/workspace/demo/home/flow.json',
-    )
+    expect(
+      resolveProjectFilePath('/workspace/demo/home/flow.json', '/workspace/demo'),
+    ).toBe('/workspace/demo/home/flow.json')
   })
 
   it('delegates text, blob, and write calls through the desktop bridge', async () => {
@@ -67,7 +67,9 @@ describe('projectFiles', () => {
       reset: false,
       truncated: false,
     })
-    const readProjectBinary = vi.fn().mockResolvedValue(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
+    const readProjectBinary = vi
+      .fn()
+      .mockResolvedValue(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
     const writeProjectText = vi.fn().mockResolvedValue(undefined)
 
     setWindow({
@@ -93,7 +95,9 @@ describe('projectFiles', () => {
       readProjectTextFileTail('logs/run.log', 64, { projectPath: '/workspace/demo' }),
     ).resolves.toBe('tail')
     await expect(
-      readOptionalProjectTextFileTail('logs/run.log', 64, { projectPath: '/workspace/demo' }),
+      readOptionalProjectTextFileTail('logs/run.log', 64, {
+        projectPath: '/workspace/demo',
+      }),
     ).resolves.toEqual({
       content: 'tail',
       truncated: true,
@@ -115,8 +119,15 @@ describe('projectFiles', () => {
 
     expect(readProjectText).toHaveBeenCalledWith('/workspace/demo/home/flow.json')
     expect(readProjectTextTail).toHaveBeenCalledWith('/workspace/demo/logs/run.log', 64)
-    expect(readOptionalProjectTextTail).toHaveBeenCalledWith('/workspace/demo/logs/run.log', 64)
-    expect(readOptionalProjectTextUpdate).toHaveBeenCalledWith('/workspace/demo/logs/run.log', 10, 64)
+    expect(readOptionalProjectTextTail).toHaveBeenCalledWith(
+      '/workspace/demo/logs/run.log',
+      64,
+    )
+    expect(readOptionalProjectTextUpdate).toHaveBeenCalledWith(
+      '/workspace/demo/logs/run.log',
+      10,
+      64,
+    )
     expect(readProjectBinary).toHaveBeenCalledWith('/workspace/demo/images/layout.png')
     expect(writeProjectText).toHaveBeenCalledWith(
       '/workspace/demo/home/parameters.json',
@@ -133,9 +144,9 @@ describe('projectFiles', () => {
 
   it('decompresses gzip project text files before returning content', async () => {
     const payload = '{"schema":"ecc.view.v1","kind":"sites","data":[]}'
-    const readProjectBinary = vi.fn().mockResolvedValue(
-      Uint8Array.from(gzipSync(Buffer.from(payload, 'utf8'))),
-    )
+    const readProjectBinary = vi
+      .fn()
+      .mockResolvedValue(Uint8Array.from(gzipSync(Buffer.from(payload, 'utf8'))))
     const readProjectText = vi.fn()
 
     setWindow({
@@ -148,10 +159,14 @@ describe('projectFiles', () => {
     })
 
     await expect(
-      readProjectTextFile('gcd_view/tech/sites.json.gz', { projectPath: '/workspace/demo' }),
+      readProjectTextFile('gcd_view/tech/sites.json.gz', {
+        projectPath: '/workspace/demo',
+      }),
     ).resolves.toBe(payload)
 
-    expect(readProjectBinary).toHaveBeenCalledWith('/workspace/demo/gcd_view/tech/sites.json.gz')
+    expect(readProjectBinary).toHaveBeenCalledWith(
+      '/workspace/demo/gcd_view/tech/sites.json.gz',
+    )
     expect(readProjectText).not.toHaveBeenCalled()
   })
 })

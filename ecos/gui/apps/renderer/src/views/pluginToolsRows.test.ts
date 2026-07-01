@@ -83,7 +83,8 @@ describe('pluginToolsRows', () => {
       tool: 'ics55',
       phase: 'downloading',
       progress: 0.5,
-      message: 'Downloading ICsprout 55nm PDK post-install asset 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
+      message:
+        'Downloading ICsprout 55nm PDK post-install asset 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
     })
 
     expect(row.statusKind).toBe('installing')
@@ -108,7 +109,8 @@ describe('pluginToolsRows', () => {
   })
 
   it('keeps backend error details compact in visible row copy', () => {
-    const error = 'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const error =
+      'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
     const row = resourceToRow(
       resource({
         status: 'error',
@@ -129,7 +131,8 @@ describe('pluginToolsRows', () => {
   })
 
   it('prefers compact error summaries over registry descriptions on failed rows', () => {
-    const error = 'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const error =
+      'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
     const row = resourceToRow(
       resource({
         status: 'error',
@@ -150,24 +153,47 @@ describe('pluginToolsRows', () => {
         'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)',
       ),
     ).toBe('Connection timeout')
-    expect(compactResourceMessage('Failed to download https://example.invalid/archive.tar.gz: fetch failed')).toBe('Download failed')
+    expect(
+      compactResourceMessage(
+        'Failed to download https://example.invalid/archive.tar.gz: fetch failed',
+      ),
+    ).toBe('Download failed')
     expect(compactResourceMessage('Checksum mismatch')).toBe('Checksum mismatch')
   })
 
   it('formats resource sizes from bytes', () => {
     expect(formatResourceSize(null)).toEqual({ sizeLabel: '0 MB', sizeMb: 0 })
     expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '412 MB', sizeMb: 412 })
-    expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({ sizeLabel: '2.00 GB', sizeMb: 2048 })
+    expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({
+      sizeLabel: '2.00 GB',
+      sizeMb: 2048,
+    })
   })
 
   it('chooses actions from resource action list', () => {
-    expect(rowActionForStatus(resource({ status: 'available', actions: ['install'] }))).toBe('install')
-    expect(rowActionForStatus(resource({ status: 'update_available', actions: ['update'] }))).toBe('update')
-    expect(rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] }))).toBe('uninstall')
-    expect(rowActionForStatus(resource({ status: 'installed', actions: ['remove_reference'] }))).toBe('remove_reference')
-    expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe('cancel')
-    expect(rowActionForStatus(resource({ status: 'uninstalling', actions: ['uninstall'] }))).toBe('none')
-    expect(rowActionForStatus(resource({ status: 'removing', actions: ['remove_reference'] }))).toBe('none')
+    expect(
+      rowActionForStatus(resource({ status: 'available', actions: ['install'] })),
+    ).toBe('install')
+    expect(
+      rowActionForStatus(resource({ status: 'update_available', actions: ['update'] })),
+    ).toBe('update')
+    expect(
+      rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] })),
+    ).toBe('uninstall')
+    expect(
+      rowActionForStatus(
+        resource({ status: 'installed', actions: ['remove_reference'] }),
+      ),
+    ).toBe('remove_reference')
+    expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe(
+      'cancel',
+    )
+    expect(
+      rowActionForStatus(resource({ status: 'uninstalling', actions: ['uninstall'] })),
+    ).toBe('none')
+    expect(
+      rowActionForStatus(resource({ status: 'removing', actions: ['remove_reference'] })),
+    ).toBe('none')
   })
 
   it('identifies rows with primary download actions', () => {
@@ -178,7 +204,10 @@ describe('pluginToolsRows', () => {
     ).toBe('install')
     expect(
       primaryActionForRow(
-        resourceToRow(resource({ status: 'update_available', actions: ['update'] }), undefined),
+        resourceToRow(
+          resource({ status: 'update_available', actions: ['update'] }),
+          undefined,
+        ),
       ),
     ).toBe('update')
     expect(
@@ -294,7 +323,10 @@ describe('pluginToolsRows', () => {
     const updateResource = vi.fn(async () => undefined)
 
     const rows = [
-      resourceToRow(resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }), undefined),
+      resourceToRow(
+        resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }),
+        undefined,
+      ),
       resourceToRow(
         resource({
           id: 'tool:yosys',
@@ -339,36 +371,56 @@ describe('pluginToolsRows', () => {
 
   it('allows local import for tool and PDK rows that are not currently mutating', () => {
     expect(
-      canImportLocalResource(resourceToRow(resource({
-        id: 'tool:yosys',
-        type: 'tool',
-        status: 'available',
-        actions: ['install'],
-      }), undefined)),
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'available',
+            actions: ['install'],
+          }),
+          undefined,
+        ),
+      ),
     ).toBe(true)
     expect(
-      canImportLocalResource(resourceToRow(resource({
-        id: 'pdk:ics55',
-        type: 'pdk',
-        status: 'available',
-        actions: ['install'],
-      }), undefined)),
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'pdk:ics55',
+            type: 'pdk',
+            status: 'available',
+            actions: ['install'],
+          }),
+          undefined,
+        ),
+      ),
     ).toBe(true)
     expect(
-      canImportLocalResource(resourceToRow(resource({
-        id: 'tool:yosys',
-        type: 'tool',
-        status: 'installing',
-        actions: [],
-      }), undefined)),
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'installing',
+            actions: [],
+          }),
+          undefined,
+        ),
+      ),
     ).toBe(false)
     expect(
-      canImportLocalResource(resourceToRow(resource({
-        id: 'tool:yosys',
-        type: 'tool',
-        status: 'uninstalling',
-        actions: [],
-      }), undefined)),
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'uninstalling',
+            actions: [],
+          }),
+          undefined,
+        ),
+      ),
     ).toBe(false)
   })
 

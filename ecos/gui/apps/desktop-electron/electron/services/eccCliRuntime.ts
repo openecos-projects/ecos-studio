@@ -16,7 +16,11 @@ function getPathKey(env: NodeJS.ProcessEnv): string {
   return Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
 }
 
-function prependPath(env: NodeJS.ProcessEnv, directory: string, platform: RuntimePlatform): {
+function prependPath(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  platform: RuntimePlatform,
+): {
   key: string
   value: string
 } {
@@ -31,10 +35,10 @@ function prependPath(env: NodeJS.ProcessEnv, directory: string, platform: Runtim
 }
 
 function resolvePackagedRuntimeBin(options: EccCliRuntimeEnvOptions): string | null {
-  const resourcesPath = options.env.ECOS_ELECTRON_RESOURCES_PATH
-    ?? join(options.appPath, 'resources')
-  const binariesPath = options.env.ECOS_ELECTRON_BINARIES_DIR
-    ?? join(resourcesPath, 'binaries')
+  const resourcesPath =
+    options.env.ECOS_ELECTRON_RESOURCES_PATH ?? join(options.appPath, 'resources')
+  const binariesPath =
+    options.env.ECOS_ELECTRON_BINARIES_DIR ?? join(resourcesPath, 'binaries')
   const executableName = options.platform === 'win32' ? 'ecc.cmd' : 'ecc'
 
   return existsSync(join(binariesPath, executableName)) ? binariesPath : null
@@ -54,8 +58,7 @@ function findRepoRootFromAppPath(appPath: string): string | null {
 }
 
 function resolvePackagedResourcesPath(options: EccCliRuntimeEnvOptions): string {
-  return options.env.ECOS_ELECTRON_RESOURCES_PATH
-    ?? join(options.appPath, 'resources')
+  return options.env.ECOS_ELECTRON_RESOURCES_PATH ?? join(options.appPath, 'resources')
 }
 
 function ensureRepoEccDevShim(
@@ -103,7 +106,6 @@ export function createEccCliRuntimeEnv(
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
     } = options.env
-
 
     if (packagedRuntimeBin) {
       const nextPath = prependPath(baseEnv, packagedRuntimeBin, options.platform)

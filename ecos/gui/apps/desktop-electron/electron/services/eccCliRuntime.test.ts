@@ -1,15 +1,14 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createEccCliRuntimeEnv } from './eccCliRuntime'
 
-function createRepoFixture(): { appPath: string; repoRoot: string; userDataPath: string } {
+function createRepoFixture(): {
+  appPath: string
+  repoRoot: string
+  userDataPath: string
+} {
   const repoRoot = mkdtempSync(join(tmpdir(), 'ecos-studio-'))
   const appPath = join(repoRoot, 'ecos', 'gui', 'apps', 'desktop-electron')
   const userDataPath = join(repoRoot, 'user-data')
@@ -52,7 +51,10 @@ describe('createEccCliRuntimeEnv', () => {
 
   it('uses the repo ecc wrapper even when a venv exists', () => {
     const fixture = createRepoFixture()
-    writeFileSync(join(fixture.repoRoot, 'ecc', 'pyproject.toml'), '[project]\nname = "ecc"\n')
+    writeFileSync(
+      join(fixture.repoRoot, 'ecc', 'pyproject.toml'),
+      '[project]\nname = "ecc"\n',
+    )
     const venvBin = join(fixture.repoRoot, 'ecc', '.venv', 'bin')
     mkdirSync(venvBin, { recursive: true })
     writeFileSync(join(venvBin, 'ecc'), '#!/usr/bin/env bash\n')
@@ -314,7 +316,6 @@ describe('createEccCliRuntimeEnv', () => {
     expect(env.CHIPCOMPILER_OSS_CAD_DIR).toBeUndefined()
     expect(env.ECOS_ELECTRON_OSS_CAD_DIR).toBeUndefined()
   })
-
 
   it('prepends Windows packaged runtime without injecting packaged OSS CAD', () => {
     const fixture = createRepoFixture()

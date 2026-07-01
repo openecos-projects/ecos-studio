@@ -22,16 +22,15 @@ async function canonicalizeExistingDirectory(path: string): Promise<string> {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = relative(rootPath, candidatePath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 async function canonicalizePotentialPathWithinRoot(
@@ -150,7 +149,10 @@ export class ProjectScopeService {
       throw new Error('Project root is not registered')
     }
 
-    const canonicalPath = await canonicalizePotentialPathWithinRoot(path, this.activeProjectRoot)
+    const canonicalPath = await canonicalizePotentialPathWithinRoot(
+      path,
+      this.activeProjectRoot,
+    )
 
     if (!isWithinRoot(canonicalPath, this.activeProjectRoot)) {
       throw new Error(
@@ -187,7 +189,9 @@ export class ProjectScopeService {
       description = 'ICSPROUT 55nm process library (auto-detected)'
       techNode = '55nm'
       pdkId = 'ics55'
-    } else if (detectedFiles.directories.some((directory) => directory.startsWith('sky130'))) {
+    } else if (
+      detectedFiles.directories.some((directory) => directory.startsWith('sky130'))
+    ) {
       name = 'SkyWater SKY130 PDK'
       description = 'SkyWater 130nm open-source PDK (auto-detected)'
       techNode = '130nm'

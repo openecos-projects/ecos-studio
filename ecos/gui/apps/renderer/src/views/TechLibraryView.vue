@@ -23,11 +23,21 @@ interface TechSectionConfig {
 }
 
 const sections: TechSectionConfig[] = [
-  { id: 'overview', label: 'Overview', shortLabel: 'Overview', icon: 'ri-dashboard-3-line' },
+  {
+    id: 'overview',
+    label: 'Overview',
+    shortLabel: 'Overview',
+    icon: 'ri-dashboard-3-line',
+  },
   { id: 'layers', label: 'Layers', shortLabel: 'Layers', icon: 'ri-stack-line' },
   { id: 'sites', label: 'Sites', shortLabel: 'Sites', icon: 'ri-grid-line' },
   { id: 'vias', label: 'Via Masters', shortLabel: 'Vias', icon: 'ri-node-tree' },
-  { id: 'cells', label: 'Cell Masters', shortLabel: 'Cells', icon: 'ri-layout-grid-2-line' },
+  {
+    id: 'cells',
+    label: 'Cell Masters',
+    shortLabel: 'Cells',
+    icon: 'ri-layout-grid-2-line',
+  },
 ]
 
 const { currentProject, resourceVersions } = useWorkspace()
@@ -65,8 +75,8 @@ function sectionCount(section: TechSection): number | null {
   }
 }
 
-const activeSectionConfig = computed(() =>
-  sections.find((section) => section.id === activeSection.value) ?? sections[0],
+const activeSectionConfig = computed(
+  () => sections.find((section) => section.id === activeSection.value) ?? sections[0],
 )
 const resourceSections = computed(() =>
   sections.filter((section) => section.id !== 'overview'),
@@ -90,18 +100,18 @@ const activeRows = computed(() => {
 })
 
 const selectedVia = computed(() =>
-  activeSection.value === 'vias' ? selected.value as TechViaMaster | null : null,
+  activeSection.value === 'vias' ? (selected.value as TechViaMaster | null) : null,
 )
 const selectedCell = computed(() =>
-  activeSection.value === 'cells' ? selected.value as TechCellMaster | null : null,
+  activeSection.value === 'cells' ? (selected.value as TechCellMaster | null) : null,
 )
 const previewMode = computed<'cell' | 'via' | 'empty'>(() => {
   if (selectedCell.value) return 'cell'
   if (selectedVia.value) return 'via'
   return 'empty'
 })
-const hasPreview = computed(() =>
-  activeSection.value === 'vias' || activeSection.value === 'cells',
+const hasPreview = computed(
+  () => activeSection.value === 'vias' || activeSection.value === 'cells',
 )
 const detailEmptyText = computed(() => {
   switch (activeSection.value) {
@@ -217,7 +227,10 @@ function rowCells(row: Exclude<SelectableTech, null>): [string, string, string, 
 }
 
 function selectFirstVisibleRow(): void {
-  selected.value = activeSection.value === 'overview' ? null : activeRows.value[0] as SelectableTech ?? null
+  selected.value =
+    activeSection.value === 'overview'
+      ? null
+      : ((activeRows.value[0] as SelectableTech) ?? null)
 }
 
 function setSection(section: TechSection): void {
@@ -251,7 +264,12 @@ async function loadTech(): Promise<void> {
 watch(activeSection, selectFirstVisibleRow)
 watch(search, selectFirstVisibleRow)
 watch(
-  () => [currentProject.value?.path, resourceVersions.value.all, resourceVersions.value.home] as const,
+  () =>
+    [
+      currentProject.value?.path,
+      resourceVersions.value.all,
+      resourceVersions.value.home,
+    ] as const,
   () => void loadTech(),
 )
 
@@ -383,7 +401,9 @@ onMounted(() => {
 
           <div class="data-table" role="grid" :aria-label="activeSectionConfig.label">
             <div class="data-table-header" role="row">
-              <span v-for="column in tableHeader" :key="column" role="columnheader">{{ column }}</span>
+              <span v-for="column in tableHeader" :key="column" role="columnheader">{{
+                column
+              }}</span>
             </div>
             <div v-if="activeRows.length" class="data-table-body" role="rowgroup">
               <button
@@ -408,7 +428,10 @@ onMounted(() => {
             </div>
             <div v-else class="table-empty">
               <i class="ri-search-eye-line"></i>
-              <span>No {{ activeSectionConfig.shortLabel.toLowerCase() }} match this search.</span>
+              <span
+                >No {{ activeSectionConfig.shortLabel.toLowerCase() }} match this
+                search.</span
+              >
             </div>
           </div>
         </template>
@@ -456,7 +479,12 @@ onMounted(() => {
     <main v-else class="empty-state">
       <i :class="isLoading ? 'ri-loader-4-line spin' : 'ri-database-2-line'"></i>
       <h2>{{ isLoading ? 'Loading Tech Library' : 'No Tech Library Available' }}</h2>
-      <p>{{ error || 'Expected a view package such as gcd_view or place_dreamplace/output/gcd_place_view.' }}</p>
+      <p>
+        {{
+          error ||
+          'Expected a view package such as gcd_view or place_dreamplace/output/gcd_place_view.'
+        }}
+      </p>
     </main>
   </div>
 </template>
@@ -613,7 +641,9 @@ h2 {
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
-  transition: background 140ms ease, color 140ms ease;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
 }
 
 .nav-item:hover {
@@ -624,7 +654,8 @@ h2 {
 .nav-item.active {
   background: var(--bg-primary);
   color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--accent-color) 32%, var(--border-color));
 }
 
 .nav-label {
@@ -955,7 +986,10 @@ dd {
 .data-table-header,
 .data-row {
   display: grid;
-  grid-template-columns: 70px minmax(180px, 1.2fr) minmax(110px, 0.7fr) minmax(120px, 0.8fr);
+  grid-template-columns: 70px minmax(180px, 1.2fr) minmax(110px, 0.7fr) minmax(
+      120px,
+      0.8fr
+    );
   align-items: center;
   gap: 12px;
 }
@@ -986,7 +1020,9 @@ dd {
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
-  transition: background 120ms ease, box-shadow 120ms ease;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .data-row:hover {
@@ -995,7 +1031,8 @@ dd {
 
 .data-row.selected {
   background: color-mix(in srgb, var(--accent-color) 11%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 44%, var(--border-color));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--accent-color) 44%, var(--border-color));
 }
 
 .row-id {
@@ -1200,7 +1237,10 @@ dd {
 
   .data-table-header,
   .data-row {
-    grid-template-columns: 54px minmax(150px, 1fr) minmax(112px, 0.7fr) minmax(112px, 0.7fr);
+    grid-template-columns: 54px minmax(150px, 1fr) minmax(112px, 0.7fr) minmax(
+        112px,
+        0.7fr
+      );
   }
 
   .tech-inspector {

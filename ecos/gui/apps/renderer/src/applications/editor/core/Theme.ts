@@ -30,7 +30,7 @@ export const lightTheme: EditorTheme = {
   gridColor: 0xcccccc,
   gridAlpha: 0.5,
   debugBorderColor: 0x3498db,
-  debugCenterColor: 0xe74c3c
+  debugCenterColor: 0xe74c3c,
 }
 
 /** 暗色主题 */
@@ -43,14 +43,13 @@ export const darkTheme: EditorTheme = {
   gridColor: 0x36363a,
   gridAlpha: 0.6,
   debugBorderColor: 0x00bfa5,
-  debugCenterColor: 0xe74c3c
+  debugCenterColor: 0xe74c3c,
 }
 
 /** 预设主题 */
 export const themes = {
   light: lightTheme,
-  dark: darkTheme
+  dark: darkTheme,
 } as const
 
 export type ThemeName = keyof typeof themes
-

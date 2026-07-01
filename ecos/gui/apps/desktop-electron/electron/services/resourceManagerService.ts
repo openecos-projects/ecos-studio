@@ -1,6 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
-import { access, copyFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  access,
+  copyFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -20,8 +31,16 @@ const TOP_LEVEL_ENTRY_LIMIT = 20
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry
-type ArchiveExtractor = (archivePath: string, destination: string, stripPrefix?: string | null) => Promise<void>
-type CommandRunner = (command: string, args: string[], options?: CommandRunnerOptions) => Promise<void>
+type ArchiveExtractor = (
+  archivePath: string,
+  destination: string,
+  stripPrefix?: string | null,
+) => Promise<void>
+type CommandRunner = (
+  command: string,
+  args: string[],
+  options?: CommandRunnerOptions,
+) => Promise<void>
 type DownloadProgressListener = (progress: DownloadProgress) => void
 type Sha256Verifier = (filePath: string, expected: string) => Promise<boolean>
 
@@ -174,12 +193,14 @@ export class ResourceManagerService {
   private activeJobs = new Map<string, ActiveResourceJob>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
-    this.resourcesDir = options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
+    this.resourcesDir =
+      options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
     this.toolsDir = options.toolsDir ?? join(xdgDataHome(), 'ecos-studio', 'tools')
     this.pdksDir = options.pdksDir ?? join(xdgDataHome(), 'ecos-studio', 'pdks')
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
-    this.registryUrl = options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
+    this.registryUrl =
+      options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
     this.commandRunner = options.commandRunner ?? runCommand
     this.fetchImpl = options.fetchImpl ?? fetch
     this.archiveExtractor = options.archiveExtractor ?? extractArchive
@@ -206,7 +227,9 @@ export class ResourceManagerService {
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id)))
+      resources.push(
+        this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id)),
+      )
     }
 
     return {
@@ -216,7 +239,9 @@ export class ResourceManagerService {
   }
 
   async getResource(resourceId: string): Promise<ResourceInfo> {
-    const resource = (await this.listResources()).resources.find((item) => item.id === resourceId)
+    const resource = (await this.listResources()).resources.find(
+      (item) => item.id === resourceId,
+    )
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`)
     }
@@ -236,7 +261,7 @@ export class ResourceManagerService {
       if (!isToolEntry(entry) || !entry.active) continue
 
       const executablePath = join(entry.path, entry.executable)
-      if (!await isUsableExecutable(executablePath, options.platform)) {
+      if (!(await isUsableExecutable(executablePath, options.platform))) {
         electronLogger.debug(
           '[resources] Skipping runtime tool %s: executable is missing or not executable at %s',
           entry.name,
@@ -263,7 +288,7 @@ export class ResourceManagerService {
 
     for (const entry of Object.values(manifest.installed)) {
       if (!isPdkEntry(entry) || !entry.active || entry.health !== 'ok') continue
-      if (!await isExistingDirectory(entry.canonical_path)) {
+      if (!(await isExistingDirectory(entry.canonical_path))) {
         electronLogger.debug(
           '[resources] Skipping runtime PDK %s: canonical path is missing at %s',
           entry.id,
@@ -288,10 +313,20 @@ export class ResourceManagerService {
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
     if (resourceId.startsWith('tool:')) {
-      return await this.installTool(resourceId.slice('tool:'.length), version, 'install', listener)
+      return await this.installTool(
+        resourceId.slice('tool:'.length),
+        version,
+        'install',
+        listener,
+      )
     }
     if (resourceId.startsWith('pdk:')) {
-      return await this.installPdk(resourceId.slice('pdk:'.length), version, 'install', listener)
+      return await this.installPdk(
+        resourceId.slice('pdk:'.length),
+        version,
+        'install',
+        listener,
+      )
     }
     throw new Error(`Install is not implemented for ${resourceId}`)
   }
@@ -301,10 +336,20 @@ export class ResourceManagerService {
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
     if (resourceId.startsWith('tool:')) {
-      return await this.installTool(resourceId.slice('tool:'.length), undefined, 'update', listener)
+      return await this.installTool(
+        resourceId.slice('tool:'.length),
+        undefined,
+        'update',
+        listener,
+      )
     }
     if (resourceId.startsWith('pdk:')) {
-      return await this.installPdk(resourceId.slice('pdk:'.length), undefined, 'update', listener)
+      return await this.installPdk(
+        resourceId.slice('pdk:'.length),
+        undefined,
+        'update',
+        listener,
+      )
     }
     throw new Error(`Update is not implemented for ${resourceId}`)
   }
@@ -360,7 +405,9 @@ export class ResourceManagerService {
     return { status: 'activated', resource_id: `pdk:${pdkId}` }
   }
 
-  async validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }> {
+  async validatePdk(
+    resourceId: string,
+  ): Promise<{ resource_id: string; health: { status: string } }> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
     const manifest = await this.readManifest()
     const entry = manifest.installed[`pdk:${pdkId}`]
@@ -388,7 +435,9 @@ export class ResourceManagerService {
       throw new Error(`PDK '${pdkId}' not found`)
     }
     if (isPdkEntry(entry) && entry.managed) {
-      throw new Error(`PDK '${pdkId}' is managed and cannot remove reference; use uninstall`)
+      throw new Error(
+        `PDK '${pdkId}' is managed and cannot remove reference; use uninstall`,
+      )
     }
     delete manifest.installed[`pdk:${pdkId}`]
     await this.writeManifest(manifest)
@@ -398,7 +447,9 @@ export class ResourceManagerService {
   async importPdkPath(path: string): Promise<ResourceInfo> {
     const scanned = await scanPdkDirectory(path)
     const manifest = await this.readManifest()
-    const activePdk = Object.values(manifest.installed).find((entry) => isPdkEntry(entry) && entry.active)
+    const activePdk = Object.values(manifest.installed).find(
+      (entry) => isPdkEntry(entry) && entry.active,
+    )
     const resourceId = `pdk:${scanned.pdkId}`
     manifest.installed[resourceId] = {
       type: 'pdk',
@@ -411,7 +462,10 @@ export class ResourceManagerService {
       source_url: '',
       canonical_path: scanned.canonicalPath,
       path: scanned.canonicalPath,
-      detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+      detected_files: [
+        ...scanned.detectedFiles.directories,
+        ...scanned.detectedFiles.files,
+      ],
       detected_file_groups: scanned.detectedFiles,
       imported_at: utcNowIso(),
       active: activePdk == null,
@@ -427,7 +481,10 @@ export class ResourceManagerService {
       return await this.importToolPath(resourceNameFromId(resourceId, 'tool'), path)
     }
     if (resourceId.startsWith('pdk:')) {
-      return await this.importPdkPathForResource(resourceNameFromId(resourceId, 'pdk'), path)
+      return await this.importPdkPathForResource(
+        resourceNameFromId(resourceId, 'pdk'),
+        path,
+      )
     }
     throw new Error(`Unsupported resource id: ${resourceId}`)
   }
@@ -449,14 +506,14 @@ export class ResourceManagerService {
 
     const expectedExecutable = `bin/${name}`
     const expectedPath = join(canonicalPath, ...expectedExecutable.split('/'))
-    if (!await pathExists(expectedPath)) {
+    if (!(await pathExists(expectedPath))) {
       throw new Error(`Expected executable not found for ${name}`)
     }
     const expectedStats = await stat(expectedPath)
     if (!expectedStats.isFile()) {
       throw new Error(`Expected executable is not a file for ${name}`)
     }
-    if (!await isUsableExecutable(expectedPath, process.platform)) {
+    if (!(await isUsableExecutable(expectedPath, process.platform))) {
       throw new Error(`Expected executable is not executable for ${name}`)
     }
 
@@ -480,10 +537,15 @@ export class ResourceManagerService {
     return await this.getResource(resourceId)
   }
 
-  private async importPdkPathForResource(pdkId: string, path: string): Promise<ResourceInfo> {
+  private async importPdkPathForResource(
+    pdkId: string,
+    path: string,
+  ): Promise<ResourceInfo> {
     const scanned = await scanPdkDirectory(path)
     if (scanned.pdkId !== pdkId) {
-      throw new Error(`Selected directory contains PDK '${scanned.pdkId}', expected '${pdkId}'`)
+      throw new Error(
+        `Selected directory contains PDK '${scanned.pdkId}', expected '${pdkId}'`,
+      )
     }
 
     const resourceId = `pdk:${pdkId}`
@@ -514,7 +576,10 @@ export class ResourceManagerService {
       source_url: '',
       canonical_path: scanned.canonicalPath,
       path: scanned.canonicalPath,
-      detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+      detected_files: [
+        ...scanned.detectedFiles.directories,
+        ...scanned.detectedFiles.files,
+      ],
       detected_file_groups: scanned.detectedFiles,
       imported_at: utcNowIso(),
       active,
@@ -523,7 +588,10 @@ export class ResourceManagerService {
     }
     manifest.installed[resourceId] = entry
     await this.writeManifest(manifest)
-    return this.pdkEntryToResource(entry, this.findRegistryPdk(this.registryMemory, pdkId))
+    return this.pdkEntryToResource(
+      entry,
+      this.findRegistryPdk(this.registryMemory, pdkId),
+    )
   }
 
   private async installTool(
@@ -553,7 +621,11 @@ export class ResourceManagerService {
       if (!asset) throw new Error(`No asset for ${name} on ${platform}`)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}.archive`)
+      tempArchive = join(
+        this.resourcesDir,
+        'downloads',
+        `${name}-${version}-${randomUUID()}.archive`,
+      )
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -571,27 +643,51 @@ export class ResourceManagerService {
         tempArchive,
         asset.size,
       )
-      this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${name} v${version}...` })
-      await downloadAsset(asset.url, tempArchive, this.fetchImpl, asset.size, (progress) => {
-        const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
-        this.publish(listener, {
-          resource_id: resourceId,
-          action,
-          phase: 'downloading',
-          progress: progress.progress,
-          message: `Downloading ${name} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
-        })
-        electronLogger.debug(
-          '[resources] Download progress for %s: %d/%s bytes (%d%%)',
-          resourceId,
-          progress.downloadedBytes,
-          progress.totalBytes ?? '?',
-          Math.round(progress.progress * 100),
-        )
-      }, controller.signal)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'downloading',
+        progress: 0,
+        message: `Downloading ${name} v${version}...`,
+      })
+      await downloadAsset(
+        asset.url,
+        tempArchive,
+        this.fetchImpl,
+        asset.size,
+        (progress) => {
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'downloading',
+            progress: progress.progress,
+            message: `Downloading ${name} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+          })
+          electronLogger.debug(
+            '[resources] Download progress for %s: %d/%s bytes (%d%%)',
+            resourceId,
+            progress.downloadedBytes,
+            progress.totalBytes ?? '?',
+            Math.round(progress.progress * 100),
+          )
+        },
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
-      this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'verifying',
+        progress: 0,
+        message: 'Verifying SHA256...',
+      })
+      electronLogger.debug(
+        '[resources] Verifying %s with SHA256 %s',
+        resourceId,
+        asset.sha256 || '(not provided)',
+      )
       const verified = await this.sha256Verifier(tempArchive, asset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${name}`)
@@ -631,7 +727,12 @@ export class ResourceManagerService {
         progress: 1,
         message: `${name} v${version} installed successfully`,
       })
-      electronLogger.info('[resources] Installed %s v%s at %s', resourceId, version, destination)
+      electronLogger.info(
+        '[resources] Installed %s v%s at %s',
+        resourceId,
+        version,
+        destination,
+      )
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -661,7 +762,8 @@ export class ResourceManagerService {
     } finally {
       this.activeJobs.delete(resourceId)
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
-      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
+      if (tempExtract)
+        await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -693,7 +795,11 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}.archive`)
+      tempArchive = join(
+        this.resourcesDir,
+        'downloads',
+        `${pdkId}-${version}-${randomUUID()}.archive`,
+      )
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -711,27 +817,51 @@ export class ResourceManagerService {
         tempArchive,
         asset.size,
       )
-      this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${displayName} v${version}...` })
-      await downloadAsset(asset.url, tempArchive, this.fetchImpl, asset.size, (progress) => {
-        const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
-        this.publish(listener, {
-          resource_id: resourceId,
-          action,
-          phase: 'downloading',
-          progress: progress.progress,
-          message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
-        })
-        electronLogger.debug(
-          '[resources] Download progress for %s: %d/%s bytes (%d%%)',
-          resourceId,
-          progress.downloadedBytes,
-          progress.totalBytes ?? '?',
-          Math.round(progress.progress * 100),
-        )
-      }, controller.signal)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'downloading',
+        progress: 0,
+        message: `Downloading ${displayName} v${version}...`,
+      })
+      await downloadAsset(
+        asset.url,
+        tempArchive,
+        this.fetchImpl,
+        asset.size,
+        (progress) => {
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'downloading',
+            progress: progress.progress,
+            message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+          })
+          electronLogger.debug(
+            '[resources] Download progress for %s: %d/%s bytes (%d%%)',
+            resourceId,
+            progress.downloadedBytes,
+            progress.totalBytes ?? '?',
+            Math.round(progress.progress * 100),
+          )
+        },
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
-      this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, asset.sha256 || '(not provided)')
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'verifying',
+        progress: 0,
+        message: 'Verifying SHA256...',
+      })
+      electronLogger.debug(
+        '[resources] Verifying %s with SHA256 %s',
+        resourceId,
+        asset.sha256 || '(not provided)',
+      )
       const verified = await this.sha256Verifier(tempArchive, asset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
@@ -739,16 +869,38 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
-      await this.withExtractProgress(resourceId, action, displayName, listener, async () => {
-        await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
-      })
+      await this.withExtractProgress(
+        resourceId,
+        action,
+        displayName,
+        listener,
+        async () => {
+          await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
+        },
+      )
       throwIfAborted(controller.signal)
       await rm(destination, { force: true, recursive: true })
       await mkdir(dirname(destination), { recursive: true })
       await rename(tempExtract, destination)
-      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, asset, listener, controller.signal)
+      await this.preDownloadPdkReleaseAssets(
+        resourceId,
+        action,
+        displayName,
+        destination,
+        version,
+        asset,
+        listener,
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
-      await this.runPostInstallSteps(resourceId, action, displayName, destination, asset.post_install, listener)
+      await this.runPostInstallSteps(
+        resourceId,
+        action,
+        displayName,
+        destination,
+        asset.post_install,
+        listener,
+      )
       throwIfAborted(controller.signal)
 
       const scanned = await scanPdkDirectory(destination)
@@ -757,7 +909,9 @@ export class ResourceManagerService {
       const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
         return id !== resourceId && isPdkEntry(entry) && entry.active
       })
-      const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
+      const active = isPdkEntry(previous)
+        ? previous.active || !hasOtherActivePdk
+        : !hasOtherActivePdk
       if (active) {
         for (const [id, entry] of Object.entries(manifest.installed)) {
           if (id !== resourceId && isPdkEntry(entry)) {
@@ -776,7 +930,10 @@ export class ResourceManagerService {
         source_url: asset.url,
         canonical_path: destination,
         path: destination,
-        detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+        detected_files: [
+          ...scanned.detectedFiles.directories,
+          ...scanned.detectedFiles.files,
+        ],
         detected_file_groups: scanned.detectedFiles,
         imported_at: utcNowIso(),
         active,
@@ -791,7 +948,12 @@ export class ResourceManagerService {
         progress: 1,
         message: `${displayName} v${version} installed successfully`,
       })
-      electronLogger.info('[resources] Installed %s v%s at %s', resourceId, version, destination)
+      electronLogger.info(
+        '[resources] Installed %s v%s at %s',
+        resourceId,
+        version,
+        destination,
+      )
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -821,7 +983,8 @@ export class ResourceManagerService {
     } finally {
       this.activeJobs.delete(resourceId)
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
-      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
+      if (tempExtract)
+        await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -874,7 +1037,14 @@ export class ResourceManagerService {
         progress: 0.98,
         message: `Downloading ${name} post-install asset ${index + 1}/${assetNames.length}: ${assetName}`,
       })
-      await downloadAsset(downloadUrl, targetPath, this.fetchImpl, null, undefined, signal)
+      await downloadAsset(
+        downloadUrl,
+        targetPath,
+        this.fetchImpl,
+        null,
+        undefined,
+        signal,
+      )
     }
   }
 
@@ -962,7 +1132,12 @@ export class ResourceManagerService {
 
   private async readManifest(): Promise<ResourceManifest> {
     try {
-      return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
+      return parseManifest(
+        JSON.parse(await readFile(this.manifestPath, 'utf8')),
+        this.resourcesDir,
+        this.toolsDir,
+        this.pdksDir,
+      )
     } catch {
       return this.emptyManifest()
     }
@@ -970,7 +1145,12 @@ export class ResourceManagerService {
 
   private async readRuntimeManifest(): Promise<ResourceManifest> {
     try {
-      return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
+      return parseManifest(
+        JSON.parse(await readFile(this.manifestPath, 'utf8')),
+        this.resourcesDir,
+        this.toolsDir,
+        this.pdksDir,
+      )
     } catch (error) {
       if (!isFileNotFoundError(error)) {
         electronLogger.debug(
@@ -1008,7 +1188,9 @@ export class ResourceManagerService {
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
-    const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
+    const { platform, asset } = latest
+      ? selectPlatformAsset(latest)
+      : { platform: currentPlatform(), asset: null }
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
     let status: ResourceStatus = 'available'
@@ -1020,7 +1202,10 @@ export class ResourceManagerService {
       actions = []
     } else if (local) {
       if (local.managed) {
-        status = versions.length > 0 && versions[0] !== local.version ? 'update_available' : 'installed'
+        status =
+          versions.length > 0 && versions[0] !== local.version
+            ? 'update_available'
+            : 'installed'
         actions = status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']
       } else {
         status = 'installed'
@@ -1080,7 +1265,9 @@ export class ResourceManagerService {
 
   private registryPdkToResource(pdk: RegistryPdk): ResourceInfo {
     const latest = pdk.versions[0]
-    const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
+    const { platform, asset } = latest
+      ? selectPlatformAsset(latest)
+      : { platform: currentPlatform(), asset: null }
     const resourceId = `pdk:${pdk.id}`
     const isActive = this.activeJobs.has(resourceId)
     return {
@@ -1107,22 +1294,26 @@ export class ResourceManagerService {
     }
   }
 
-  private pdkEntryToResource(entry: PdkInventoryEntry, registryPdk?: RegistryPdk): ResourceInfo {
+  private pdkEntryToResource(
+    entry: PdkInventoryEntry,
+    registryPdk?: RegistryPdk,
+  ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
-    const hasUpdate = entry.managed
-      && entry.health === 'ok'
-      && Boolean(entry.version)
-      && Boolean(registryPdk?.versions[0]?.version)
-      && registryPdk?.versions[0]?.version !== entry.version
+    const hasUpdate =
+      entry.managed &&
+      entry.health === 'ok' &&
+      Boolean(entry.version) &&
+      Boolean(registryPdk?.versions[0]?.version) &&
+      registryPdk?.versions[0]?.version !== entry.version
     const status: ResourceStatus = this.activeJobs.has(resourceId)
       ? 'installing'
       : entry.health === 'missing'
-      ? 'missing'
-      : entry.health === 'invalid'
-        ? 'invalid'
-        : hasUpdate
-          ? 'update_available'
-          : 'installed'
+        ? 'missing'
+        : entry.health === 'invalid'
+          ? 'invalid'
+          : hasUpdate
+            ? 'update_available'
+            : 'installed'
     const actions: ResourceAction[] = []
     if (status !== 'installing') {
       if (!entry.active) actions.push('activate')
@@ -1155,7 +1346,10 @@ export class ResourceManagerService {
     }
   }
 
-  private findRegistryPdk(registry: ResourceRegistry | null, pdkId: string): RegistryPdk | undefined {
+  private findRegistryPdk(
+    registry: ResourceRegistry | null,
+    pdkId: string,
+  ): RegistryPdk | undefined {
     return registry?.pdks.find((pdk) => pdk.id === pdkId)
   }
 
@@ -1243,7 +1437,7 @@ function selectPlatformAsset(version: RegistryToolVersion | RegistryPdkVersion):
   const platform = currentPlatform()
   const asset = version.platforms[platform] ?? version.platforms[ALL_PLATFORM] ?? null
   return {
-    platform: version.platforms[platform] ? platform : (asset ? ALL_PLATFORM : platform),
+    platform: version.platforms[platform] ? platform : asset ? ALL_PLATFORM : platform,
     asset,
   }
 }
@@ -1251,7 +1445,9 @@ function selectPlatformAsset(version: RegistryToolVersion | RegistryPdkVersion):
 function parseRegistry(value: unknown): ResourceRegistry {
   const record = readRecord(value)
   if (record.schema_version !== 2) {
-    throw new Error(`Unsupported registry schema version: ${String(record.schema_version)}`)
+    throw new Error(
+      `Unsupported registry schema version: ${String(record.schema_version)}`,
+    )
   }
   return {
     schema_version: 2,
@@ -1268,7 +1464,9 @@ function parseRegistryTool(value: unknown): RegistryTool {
     description: readString(record.description),
     category: readString(record.category),
     homepage: readString(record.homepage),
-    versions: Array.isArray(record.versions) ? record.versions.map(parseRegistryToolVersion) : [],
+    versions: Array.isArray(record.versions)
+      ? record.versions.map(parseRegistryToolVersion)
+      : [],
   }
 }
 
@@ -1288,7 +1486,9 @@ function parseRegistryPdk(value: unknown): RegistryPdk {
     description: readString(record.description),
     category: readString(record.category) || 'pdk',
     homepage: readString(record.homepage),
-    versions: Array.isArray(record.versions) ? record.versions.map(parseRegistryPdkVersion) : [],
+    versions: Array.isArray(record.versions)
+      ? record.versions.map(parseRegistryPdkVersion)
+      : [],
   }
 }
 
@@ -1395,7 +1595,7 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readString(value: unknown): string {
@@ -1411,10 +1611,12 @@ function readStringArray(value: unknown): string[] {
 }
 
 function isFileNotFoundError(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && (error as { code?: unknown }).code === 'ENOENT'
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  )
 }
 
 function pathKeyForRuntimeEnv(env: NodeJS.ProcessEnv): string {
@@ -1435,9 +1637,10 @@ function mergeRuntimePath(
   platform: NodeJS.Platform,
 ): string {
   const baseEntries = splitRuntimePath(basePath, platform)
-  const packagedBin = baseEntries[0] && basename(baseEntries[0]).toLowerCase() === 'binaries'
-    ? baseEntries[0]
-    : null
+  const packagedBin =
+    baseEntries[0] && basename(baseEntries[0]).toLowerCase() === 'binaries'
+      ? baseEntries[0]
+      : null
   const orderedEntries = [
     ...(packagedBin ? [packagedBin] : []),
     ...resourceManagerDirs,
@@ -1453,7 +1656,10 @@ function mergeRuntimePath(
     .join(runtimePathSeparator(platform))
 }
 
-async function isUsableExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
+async function isUsableExecutable(
+  path: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
   try {
     await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
     return true
@@ -1470,7 +1676,10 @@ async function isExistingDirectory(path: string): Promise<boolean> {
   }
 }
 
-async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promise<ResourceRegistry> {
+async function readRegistryFromUrl(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<ResourceRegistry> {
   if (url.startsWith('file://')) {
     return parseRegistry(JSON.parse(await readFile(new URL(url), 'utf8')))
   }
@@ -1481,7 +1690,9 @@ async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promis
   return parseRegistry(await response.json())
 }
 
-function getInstalledTools(manifest: ResourceManifest): Record<string, ToolInventoryEntry> {
+function getInstalledTools(
+  manifest: ResourceManifest,
+): Record<string, ToolInventoryEntry> {
   const entries: Record<string, ToolInventoryEntry> = {}
   for (const [resourceId, entry] of Object.entries(manifest.installed)) {
     if (isToolEntry(entry)) entries[resourceId.replace(/^tool:/, '')] = entry
@@ -1552,9 +1763,21 @@ async function scanPdkDirectory(path: string): Promise<{
     throw new Error(`Not a directory: ${path}`)
   }
   const entries = await readdir(canonicalPath, { withFileTypes: true })
-  const directories = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  let name = canonicalPath.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || 'Unknown PDK'
+  const directories = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
+  const files = entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
+  let name =
+    canonicalPath
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .pop() || 'Unknown PDK'
   let description = ''
   let techNode = ''
   let pdkId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
@@ -1614,7 +1837,9 @@ async function downloadAsset(
   if (url.startsWith('file://')) {
     const fileUrl = new URL(url)
     await copyFile(fileUrl, destination)
-    const size = await stat(fileUrl).then((value) => value.size).catch(() => 0)
+    const size = await stat(fileUrl)
+      .then((value) => value.size)
+      .catch(() => 0)
     onProgress?.({
       downloadedBytes: size,
       progress: 1,
@@ -1627,14 +1852,17 @@ async function downloadAsset(
     response = await fetchImpl(url, { signal })
   } catch (error) {
     if (isAbortError(error) || signal?.aborted) throw error
-    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, { cause: error })
+    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, {
+      cause: error,
+    })
   }
   if (!response.ok) {
     throw new Error(`Download failed with ${response.status}: ${url}`)
   }
 
-  const totalBytes = readContentLength(response.headers.get('content-length'))
-    ?? (expectedSize && expectedSize > 0 ? expectedSize : null)
+  const totalBytes =
+    readContentLength(response.headers.get('content-length')) ??
+    (expectedSize && expectedSize > 0 ? expectedSize : null)
   if (!response.body) {
     const data = Buffer.from(await response.arrayBuffer())
     await writeFile(destination, data)
@@ -1653,15 +1881,14 @@ async function downloadAsset(
   let lastPublishedProgress = 0
 
   const publishProgress = (force = false): void => {
-    const progress = totalBytes === null
-      ? 0
-      : Math.min(downloadedBytes / totalBytes, 1)
-    const shouldPublishKnownTotal = totalBytes !== null
-      && (progress - lastPublishedProgress >= 0.01 || progress >= 1)
-    const shouldPublishUnknownTotal = totalBytes === null
-      && downloadedBytes - lastPublishedBytes >= 1024 * 1024
+    const progress = totalBytes === null ? 0 : Math.min(downloadedBytes / totalBytes, 1)
+    const shouldPublishKnownTotal =
+      totalBytes !== null && (progress - lastPublishedProgress >= 0.01 || progress >= 1)
+    const shouldPublishUnknownTotal =
+      totalBytes === null && downloadedBytes - lastPublishedBytes >= 1024 * 1024
     if (!force && !shouldPublishKnownTotal && !shouldPublishUnknownTotal) return
-    if (downloadedBytes === lastPublishedBytes && progress === lastPublishedProgress) return
+    if (downloadedBytes === lastPublishedBytes && progress === lastPublishedProgress)
+      return
     lastPublishedBytes = downloadedBytes
     lastPublishedProgress = progress
     onProgress?.({
@@ -1693,9 +1920,10 @@ function formatDownloadError(error: unknown): string {
 
   const cause = error.cause
   if (cause instanceof Error) {
-    const code = typeof (cause as NodeJS.ErrnoException).code === 'string'
-      ? `${(cause as NodeJS.ErrnoException).code}: `
-      : ''
+    const code =
+      typeof (cause as NodeJS.ErrnoException).code === 'string'
+        ? `${(cause as NodeJS.ErrnoException).code}: `
+        : ''
     return `${error.message} (${code}${cause.message})`
   }
 
@@ -1703,8 +1931,10 @@ function formatDownloadError(error: unknown): string {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-    || error instanceof Error && error.name === 'AbortError'
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -1746,14 +1976,18 @@ function parseMakefileReleaseAssetNames(makefile: string): string[] {
     variables.set(name, expandMakefileWords(rawValue, variables))
   }
 
-  const releaseFiles = variables.get('RELEASE_FILE')
-    ?? Array.from(variables.entries())
+  const releaseFiles =
+    variables.get('RELEASE_FILE') ??
+    Array.from(variables.entries())
       .filter(([name]) => name.startsWith('RELEASE_FILE'))
       .flatMap(([, value]) => value)
   return Array.from(new Set(releaseFiles.filter(isDownloadableReleaseAssetName)))
 }
 
-function expandMakefileWords(rawValue: string, variables: Map<string, string[]>): string[] {
+function expandMakefileWords(
+  rawValue: string,
+  variables: Map<string, string[]>,
+): string[] {
   const words: string[] = []
   for (const token of rawValue.split(/\s+/).filter(Boolean)) {
     const variableMatch = token.match(/^\$\(([^)]+)\)$/)
@@ -1776,7 +2010,9 @@ function releaseDownloadBaseUrl(sourceUrl: string, version: string): string | nu
   return `https://github.com/${parsed.owner}/${parsed.repo}/releases/download/${parsed.tag || `v${version}`}`
 }
 
-function parseGithubArchiveUrl(sourceUrl: string): { owner: string; repo: string; tag: string | null } | null {
+function parseGithubArchiveUrl(
+  sourceUrl: string,
+): { owner: string; repo: string; tag: string | null } | null {
   let url: URL
   try {
     url = new URL(sourceUrl)
@@ -1787,8 +2023,13 @@ function parseGithubArchiveUrl(sourceUrl: string): { owner: string; repo: string
   const parts = url.pathname.split('/').filter(Boolean)
   if (parts.length < 2) return null
   const [owner, repo] = parts
-  const refsIndex = parts.findIndex((part, index) => part === 'refs' && parts[index + 1] === 'tags')
-  const tag = refsIndex >= 0 ? parts[refsIndex + 2]?.replace(/\.tar\.gz$|\.zip$/, '') ?? null : null
+  const refsIndex = parts.findIndex(
+    (part, index) => part === 'refs' && parts[index + 1] === 'tags',
+  )
+  const tag =
+    refsIndex >= 0
+      ? (parts[refsIndex + 2]?.replace(/\.tar\.gz$|\.zip$/, '') ?? null)
+      : null
   return { owner, repo, tag }
 }
 
@@ -1840,7 +2081,11 @@ async function extractArchive(
   await runCommand('tar', args)
 }
 
-async function moveStrippedPrefix(sourceRoot: string, destination: string, stripPrefix: string): Promise<void> {
+async function moveStrippedPrefix(
+  sourceRoot: string,
+  destination: string,
+  stripPrefix: string,
+): Promise<void> {
   const source = resolveInside(sourceRoot, stripPrefix)
   const sourceStats = await stat(source)
   if (!sourceStats.isDirectory()) {
@@ -1860,7 +2105,11 @@ function resolveInside(root: string, child: string): string {
   return resolved
 }
 
-async function runCommand(command: string, args: string[], options?: CommandRunnerOptions): Promise<void> {
+async function runCommand(
+  command: string,
+  args: string[],
+  options?: CommandRunnerOptions,
+): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(command, args, { cwd: options?.cwd, stdio: 'pipe' })
     let stderr = ''
@@ -1879,7 +2128,11 @@ async function runCommand(command: string, args: string[], options?: CommandRunn
         resolvePromise()
       } else {
         const details = stderr.trim()
-        reject(new Error(`${command} failed with exit code ${code}${details ? `: ${details}` : ''}`))
+        reject(
+          new Error(
+            `${command} failed with exit code ${code}${details ? `: ${details}` : ''}`,
+          ),
+        )
       }
     })
   })
@@ -1891,7 +2144,11 @@ async function detectExecutables(root: string): Promise<string[]> {
   return results.sort()
 }
 
-async function collectExecutableFiles(root: string, directory: string, results: string[]): Promise<void> {
+async function collectExecutableFiles(
+  root: string,
+  directory: string,
+  results: string[],
+): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => null)
   if (!entries) return
 

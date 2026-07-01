@@ -11,11 +11,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return {
     ...actual,
     readFile: vi.fn((file: unknown, options?: unknown) => {
-      const filePath = typeof file === 'string'
-        ? file
-        : file instanceof URL
-          ? file.pathname
-          : ''
+      const filePath =
+        typeof file === 'string' ? file : file instanceof URL ? file.pathname : ''
       if (epermDirectoryReadPaths.has(filePath)) {
         const error = new Error('operation not permitted') as NodeJS.ErrnoException
         error.code = 'EPERM'
@@ -26,10 +23,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   }
 })
 
-import {
-  readRuntimeLockOwner,
-  runtimeLockName,
-} from './runtimeLocks'
+import { readRuntimeLockOwner, runtimeLockName } from './runtimeLocks'
 
 describe('runtimeLocks Windows directory compatibility', () => {
   it('reads directory lock owners when directory reads report EPERM', async () => {
@@ -37,11 +31,14 @@ describe('runtimeLocks Windows directory compatibility', () => {
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'job-1',
-        pid: process.pid,
-        scope: '/work/demo',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'job-1',
+          pid: process.pid,
+          scope: '/work/demo',
+        }),
+      )
       epermDirectoryReadPaths.add(lockDirectory)
 
       await expect(readRuntimeLockOwner(lockDirectory)).resolves.toEqual({

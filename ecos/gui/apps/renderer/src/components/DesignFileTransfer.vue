@@ -1,22 +1,34 @@
 <template>
   <div class="design-file-transfer">
-    <div class="flex items-center justify-between gap-3 mb-3">
+    <div class="mb-3 flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h4 class="text-sm font-semibold text-(--text-primary)">Directory Selection</h4>
-        <p class="text-xs text-(--text-secondary) truncate mt-0.5" :title="rootPath">{{ rootPath }}</p>
+        <p class="mt-0.5 truncate text-xs text-(--text-secondary)" :title="rootPath">
+          {{ rootPath }}
+        </p>
       </div>
-      <span class="text-xs font-medium text-(--text-secondary) shrink-0">
+      <span class="shrink-0 text-xs font-medium text-(--text-secondary)">
         {{ selectedFiles.length }} / {{ allFiles.length }} selected
       </span>
     </div>
 
-    <div class="flex gap-3 min-h-64">
-      <div class="flex-1 min-w-0 flex flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 overflow-hidden">
-        <div class="px-4 py-2.5 border-b border-(--border-color)/60 bg-(--bg-secondary)/40">
-          <span class="text-xs font-semibold uppercase tracking-wider text-(--text-secondary)">Available Files</span>
+    <div class="flex min-h-64 gap-3">
+      <div
+        class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20"
+      >
+        <div
+          class="border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-2.5"
+        >
+          <span
+            class="text-xs font-semibold tracking-wider text-(--text-secondary) uppercase"
+            >Available Files</span
+          >
         </div>
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
-          <p v-if="availableFiles.length === 0" class="text-xs text-(--text-secondary) px-2 py-4 text-center">
+        <div class="custom-scrollbar flex-1 overflow-y-auto p-2">
+          <p
+            v-if="availableFiles.length === 0"
+            class="px-2 py-4 text-center text-xs text-(--text-secondary)"
+          >
             All RTL files in this directory are selected.
           </p>
           <DesignFileTransferTree
@@ -30,7 +42,7 @@
         </div>
       </div>
 
-      <div class="flex flex-col items-center justify-center gap-2 shrink-0">
+      <div class="flex shrink-0 flex-col items-center justify-center gap-2">
         <button
           type="button"
           class="transfer-action"
@@ -69,28 +81,42 @@
         </button>
       </div>
 
-      <div class="flex-1 min-w-0 flex flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 overflow-hidden">
-        <div class="px-4 py-2.5 border-b border-(--border-color)/60 bg-(--bg-secondary)/40">
-          <span class="text-xs font-semibold uppercase tracking-wider text-(--text-secondary)">Selected Files</span>
+      <div
+        class="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20"
+      >
+        <div
+          class="border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-2.5"
+        >
+          <span
+            class="text-xs font-semibold tracking-wider text-(--text-secondary) uppercase"
+            >Selected Files</span
+          >
         </div>
-        <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-          <p v-if="selectedFiles.length === 0" class="text-xs text-(--text-secondary) px-2 py-4 text-center">
+        <div class="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-2">
+          <p
+            v-if="selectedFiles.length === 0"
+            class="px-2 py-4 text-center text-xs text-(--text-secondary)"
+          >
             No RTL files selected from this directory.
           </p>
           <button
             v-for="file in selectedFiles"
             :key="file"
             type="button"
-            class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors duration-200 cursor-pointer"
-            :class="rightSelection.includes(file)
-              ? 'bg-(--accent-color)/10 border border-(--accent-color)/30'
-              : 'hover:bg-(--bg-secondary)/60 border border-transparent'"
+            class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors duration-200"
+            :class="
+              rightSelection.includes(file)
+                ? 'border border-(--accent-color)/30 bg-(--accent-color)/10'
+                : 'border border-transparent hover:bg-(--bg-secondary)/60'
+            "
             :title="`${displayRelativePath(file)} — double-click to remove`"
             @click="toggleRightSelection(file)"
             @dblclick.prevent="removeFile(file)"
           >
-            <i class="ri-file-code-line text-blue-500 shrink-0"></i>
-            <span class="text-sm text-(--text-primary) truncate" :title="file">{{ displayRelativePath(file) }}</span>
+            <i class="ri-file-code-line shrink-0 text-blue-500"></i>
+            <span class="truncate text-sm text-(--text-primary)" :title="file">{{
+              displayRelativePath(file)
+            }}</span>
           </button>
         </div>
       </div>
@@ -128,8 +154,12 @@ const availableTree = computed(() => {
 watch(
   () => [props.allFiles, props.selectedFiles] as const,
   () => {
-    leftSelection.value = leftSelection.value.filter((file) => availableFiles.value.includes(file))
-    rightSelection.value = rightSelection.value.filter((file) => props.selectedFiles.includes(file))
+    leftSelection.value = leftSelection.value.filter((file) =>
+      availableFiles.value.includes(file),
+    )
+    rightSelection.value = rightSelection.value.filter((file) =>
+      props.selectedFiles.includes(file),
+    )
   },
 )
 
@@ -220,7 +250,10 @@ export default {
   border: 1px solid var(--border-color);
   background: color-mix(in srgb, var(--bg-secondary) 40%, transparent);
   color: var(--text-primary);
-  transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
   cursor: pointer;
 }
 

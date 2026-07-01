@@ -18,7 +18,10 @@ export interface BrowserWindowLike {
   on(eventName: 'close', listener: WindowCloseListener): unknown
   on(eventName: Exclude<WindowEventName, 'close'>, listener: WindowEventListener): unknown
   removeListener(eventName: 'close', listener: WindowCloseListener): unknown
-  removeListener(eventName: Exclude<WindowEventName, 'close'>, listener: WindowEventListener): unknown
+  removeListener(
+    eventName: Exclude<WindowEventName, 'close'>,
+    listener: WindowEventListener,
+  ): unknown
   setTitle(title: string): void
   unmaximize(): void
   webContents: {

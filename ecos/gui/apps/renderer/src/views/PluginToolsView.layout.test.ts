@@ -87,7 +87,7 @@ describe('PluginToolsView resource table layout', () => {
 
   it('renders mini progress with a transform driven by the row progress percent', () => {
     expect(pluginToolsViewSource).toContain(
-      ":style=\"{ '--progress': row.progressPercent / 100 }\"",
+      ':style="{ \'--progress\': row.progressPercent / 100 }"',
     )
     expect(pluginToolsViewSource).toMatch(
       /\.mini-progress span\s*\{[\s\S]*transform:\s*scaleX\(var\(--progress,\s*0\)\);/,
@@ -131,7 +131,9 @@ describe('PluginToolsView resource table layout', () => {
   })
 
   it('renders local tool replace controls and copy separately from updates', () => {
-    expect(pluginToolsViewSource).toContain("rowActionForStatus(row.resource) === 'replace'")
+    expect(pluginToolsViewSource).toContain(
+      "rowActionForStatus(row.resource) === 'replace'",
+    )
     expect(pluginToolsViewSource).toContain('data-title="Replace"')
     expect(pluginToolsViewSource).toContain('removalActionForRow(row)')
     expect(pluginToolsViewSource).toContain('handleRowRemove(row)')
@@ -139,7 +141,9 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).toContain(
       'Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.',
     )
-    expect(pluginToolsViewSource).not.toContain('Updates will replace the existing installed versions.')
+    expect(pluginToolsViewSource).not.toContain(
+      'Updates will replace the existing installed versions.',
+    )
   })
 
   it('renders the row local import button before the primary row action', () => {
@@ -148,18 +152,26 @@ describe('PluginToolsView resource table layout', () => {
 
     expect(pluginToolsViewSource).toContain('canImportLocalResource(row)')
     expect(pluginToolsViewSource).toContain('handleLocalImport(row)')
-    expect(pluginToolsViewSource).toContain("importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'")
+    expect(pluginToolsViewSource).toContain(
+      "importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'",
+    )
     expect(importButtonIndex).toBeGreaterThan(-1)
     expect(installButtonIndex).toBeGreaterThan(-1)
     expect(importButtonIndex).toBeLessThan(installButtonIndex)
   })
 
   it('marks a row import busy before opening the native directory picker', () => {
-    const busyFlagIndex = pluginToolsViewSource.indexOf('importingResourceIds.value = next')
-    const directoryPickerIndex = pluginToolsViewSource.indexOf('desktopApi.dialog.pickDirectory')
+    const busyFlagIndex = pluginToolsViewSource.indexOf(
+      'importingResourceIds.value = next',
+    )
+    const directoryPickerIndex = pluginToolsViewSource.indexOf(
+      'desktopApi.dialog.pickDirectory',
+    )
 
     expect(pluginToolsViewSource).toContain('importPdkForResource')
-    expect(pluginToolsViewSource).toContain("row.type === 'pdk' ? importPdkForResource : undefined")
+    expect(pluginToolsViewSource).toContain(
+      "row.type === 'pdk' ? importPdkForResource : undefined",
+    )
     expect(busyFlagIndex).toBeGreaterThan(-1)
     expect(directoryPickerIndex).toBeGreaterThan(-1)
     expect(busyFlagIndex).toBeLessThan(directoryPickerIndex)

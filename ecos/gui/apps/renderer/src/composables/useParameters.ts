@@ -72,7 +72,17 @@ export interface ConfigData {
 // ============ 工具函数 ============
 
 /** 用于 Bottom/Top 金属层下拉的常见顺序（与 PDK 文档一致即可） */
-const ROUTING_LAYER_ORDER = ['LI1', 'MET1', 'MET2', 'MET3', 'MET4', 'MET5', 'MET6', 'MET7', 'MET8']
+const ROUTING_LAYER_ORDER = [
+  'LI1',
+  'MET1',
+  'MET2',
+  'MET3',
+  'MET4',
+  'MET5',
+  'MET6',
+  'MET7',
+  'MET8',
+]
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
 const RUNNING_FLOW_PARAMETERS_POLL_MS = 1600
@@ -90,7 +100,7 @@ function getDefaultConfig(): ConfigData {
       boundingBox: '',
       utilization: 0.4,
       margin: [2, 2],
-      aspectRatio: 1
+      aspectRatio: 1,
     },
     maxFanout: 20,
     targetDensity: 0.3,
@@ -101,11 +111,14 @@ function getDefaultConfig(): ConfigData {
     clock: '',
     frequencyMax: 100,
     bottomLayer: 'MET2',
-    topLayer: 'MET5'
+    topLayer: 'MET5',
   }
 }
 
-function firstResponseMessage(response: { message?: string[] } | undefined, fallback: string): string {
+function firstResponseMessage(
+  response: { message?: string[] } | undefined,
+  fallback: string,
+): string {
   return response?.message?.[0] || fallback
 }
 
@@ -116,7 +129,7 @@ function normalizeDie(d: unknown): ParametersData['Die'] {
   const arr = Array.isArray(size) ? size.map(Number) : []
   return {
     Size: arr,
-    Area: o.Area != null ? Number(o.Area) : 0
+    Area: o.Area != null ? Number(o.Area) : 0,
   }
 }
 
@@ -128,7 +141,7 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
       'Bounding box': '',
       Utilitization: 0.4,
       Margin: [2, 2],
-      'Aspect ratio': 1
+      'Aspect ratio': 1,
     }
   }
   const o = c as Record<string, unknown>
@@ -145,7 +158,7 @@ function normalizeCore(c: unknown): ParametersData['Core'] {
     'Bounding box': String(o['Bounding box'] ?? ''),
     Utilitization: Number(o.Utilitization ?? 0.4),
     Margin: m,
-    'Aspect ratio': Number(o['Aspect ratio'] ?? 1)
+    'Aspect ratio': Number(o['Aspect ratio'] ?? 1),
   }
 }
 
@@ -167,7 +180,7 @@ export function parseParametersData(fileContent: string): ParametersData {
     'Frequency max [MHz]': Number(raw['Frequency max [MHz]'] ?? 100),
     'Bottom layer': String(raw['Bottom layer'] ?? 'MET2'),
     'Top layer': String(raw['Top layer'] ?? 'MET5'),
-    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined
+    'PDK Root': raw['PDK Root'] != null ? String(raw['PDK Root']) : undefined,
   }
 }
 
@@ -179,7 +192,7 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     topModule: data['Top module'] || '',
     die: {
       Size: data.Die?.Size?.length ? [...data.Die.Size] : [],
-      area: data.Die?.Area ?? 0
+      area: data.Die?.Area ?? 0,
     },
     core: {
       Size: data.Core?.Size?.length ? [...data.Core.Size] : [],
@@ -187,7 +200,7 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
       boundingBox: data.Core?.['Bounding box'] || '',
       utilization: data.Core?.Utilitization ?? 0.4,
       margin: data.Core?.Margin ?? [2, 2],
-      aspectRatio: data.Core?.['Aspect ratio'] ?? 1
+      aspectRatio: data.Core?.['Aspect ratio'] ?? 1,
     },
     maxFanout: data['Max fanout'] ?? 20,
     targetDensity: data['Target density'] ?? 0.3,
@@ -198,7 +211,7 @@ export function transformParametersToConfig(data: ParametersData): ConfigData {
     clock: data.Clock || '',
     frequencyMax: data['Frequency max [MHz]'] ?? 100,
     bottomLayer: data['Bottom layer'] || 'MET2',
-    topLayer: data['Top layer'] || 'MET5'
+    topLayer: data['Top layer'] || 'MET5',
   }
 }
 
@@ -209,7 +222,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
     'Top module': config.topModule,
     Die: {
       Size: [...(config.die.Size || [])],
-      Area: config.die.area
+      Area: config.die.area,
     },
     Core: {
       Size: [...(config.core.Size || [])],
@@ -217,7 +230,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
       'Bounding box': config.core.boundingBox,
       Utilitization: config.core.utilization,
       Margin: [...config.core.margin] as [number, number],
-      'Aspect ratio': config.core.aspectRatio
+      'Aspect ratio': config.core.aspectRatio,
     },
     'Max fanout': config.maxFanout,
     'Target density': config.targetDensity,
@@ -228,7 +241,7 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
     Clock: config.clock,
     'Frequency max [MHz]': config.frequencyMax,
     'Bottom layer': config.bottomLayer,
-    'Top layer': config.topLayer
+    'Top layer': config.topLayer,
   }
   out['PDK Root'] = config.pdkRoot ?? ''
   return out
@@ -242,7 +255,8 @@ export function transformConfigToParameters(config: ConfigData): ParametersData 
  */
 export function useParameters() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions, invalidateWorkspaceResources } = useWorkspace()
+  const { currentProject, resourceVersions, invalidateWorkspaceResources } =
+    useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
   const config = reactive<ConfigData>(getDefaultConfig())
@@ -250,7 +264,9 @@ export function useParameters() {
   const isSaving = ref(false)
   const error = ref<string | null>(null)
   const hasChanges = ref(false)
-  const isMutationLocked = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
+  const isMutationLocked = computed(() =>
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  )
 
   let originalConfig: string = ''
   let resolvedParametersPath: string = ''
@@ -292,7 +308,10 @@ export function useParameters() {
 
   function keepLastParametersDuringFlowReload(): boolean {
     if (!currentProject.value?.path) return false
-    return Boolean(originalConfig) && isFlowExecutionActiveForWorkspace(currentProject.value.path)
+    return (
+      Boolean(originalConfig) &&
+      isFlowExecutionActiveForWorkspace(currentProject.value.path)
+    )
   }
 
   function isSaveContextCurrent(options: {
@@ -303,11 +322,11 @@ export function useParameters() {
     projectPath: string
   }): boolean {
     return (
-      workspaceLifecycle.isCurrentSession(options.sessionId)
-      && activeSaveRequestId === options.requestId
-      && parametersResourceToken === options.resourceToken
-      && resolvedParametersPath === options.parametersPath
-      && currentProject.value?.path === options.projectPath
+      workspaceLifecycle.isCurrentSession(options.sessionId) &&
+      activeSaveRequestId === options.requestId &&
+      parametersResourceToken === options.resourceToken &&
+      resolvedParametersPath === options.parametersPath &&
+      currentProject.value?.path === options.projectPath
     )
   }
 
@@ -348,22 +367,22 @@ export function useParameters() {
     const loadResourceToken = advanceParametersResourceToken()
 
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(knownPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(knownPath),
       )
-      if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return true
+      if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+        return true
       if (!resolvedPath) {
         if (keepLastParametersDuringFlowReload()) return true
         resetParametersState()
         return true
       }
 
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
-      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return true
+      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+        return true
       if (fileContent === undefined) return true
       if (loadResourceToken !== parametersResourceToken) return true
 
@@ -405,7 +424,9 @@ export function useParameters() {
 
   async function loadParameters(): Promise<void> {
     if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn('Cannot load parameters: desktop bridge unavailable or no project is open')
+      console.warn(
+        'Cannot load parameters: desktop bridge unavailable or no project is open',
+      )
       resetParametersState()
       return
     }
@@ -422,11 +443,11 @@ export function useParameters() {
 
     try {
       const projectPath = currentProject.value.path
-      const homeData = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
+      const homeData = await workspaceLifecycle.runForSession(sessionId, () =>
+        fetchSharedHomeData(projectPath, isDesktopRuntimeAvailable),
       )
-      if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
+      if (homeData === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+        return
       if (!homeData) {
         console.warn('Failed to get home data')
         if (keepLastParametersDuringFlowReload()) return
@@ -442,11 +463,11 @@ export function useParameters() {
       }
 
       const parametersPath = convertToLocalPath(homeData.parameters)
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(parametersPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(parametersPath),
       )
-      if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
+      if (resolvedPath === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+        return
       console.log('Loading parameters from:', resolvedPath ?? parametersPath)
       if (!resolvedPath) {
         if (keepLastParametersDuringFlowReload()) return
@@ -454,11 +475,11 @@ export function useParameters() {
         return
       }
 
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
-      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId)) return
+      if (fileContent === undefined && !workspaceLifecycle.isCurrentSession(sessionId))
+        return
       if (fileContent === undefined) return
 
       if (loadResourceToken !== parametersResourceToken) return
@@ -479,7 +500,9 @@ export function useParameters() {
 
   async function saveParameters(): Promise<boolean> {
     if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn('Cannot save parameters: desktop bridge unavailable or no project is open')
+      console.warn(
+        'Cannot save parameters: desktop bridge unavailable or no project is open',
+      )
       return false
     }
 
@@ -509,13 +532,15 @@ export function useParameters() {
       let writeSucceeded = false
 
       const writeTask = saveWriteQueue.then(async () => {
-        if (!isSaveContextCurrent({
-          sessionId: saveSessionId,
-          requestId: saveRequestId,
-          resourceToken: saveResourceToken,
-          parametersPath: saveParametersPath,
-          projectPath: saveProjectPath,
-        })) {
+        if (
+          !isSaveContextCurrent({
+            sessionId: saveSessionId,
+            requestId: saveRequestId,
+            resourceToken: saveResourceToken,
+            parametersPath: saveParametersPath,
+            projectPath: saveProjectPath,
+          })
+        ) {
           return
         }
         if (blockSaveWhileFlowRunning(saveProjectPath)) {
@@ -535,13 +560,15 @@ export function useParameters() {
       if (!writeSucceeded) {
         return false
       }
-      if (!isSaveContextCurrent({
-        sessionId: saveSessionId,
-        requestId: saveRequestId,
-        resourceToken: saveResourceToken,
-        parametersPath: saveParametersPath,
-        projectPath: saveProjectPath,
-      })) {
+      if (
+        !isSaveContextCurrent({
+          sessionId: saveSessionId,
+          requestId: saveRequestId,
+          resourceToken: saveResourceToken,
+          parametersPath: saveParametersPath,
+          projectPath: saveProjectPath,
+        })
+      ) {
         return true
       }
 
@@ -552,55 +579,65 @@ export function useParameters() {
         hasChanges.value = true
       }
 
-      const refreshResult = await workspaceLifecycle.runForSession(
-        saveSessionId,
-        () => refreshConfigApi({
+      const refreshResult = await workspaceLifecycle.runForSession(saveSessionId, () =>
+        refreshConfigApi({
           cmd: CMDEnum.refresh_config,
           data: {
             directory: saveProjectPath,
           },
         }),
       )
-      if (!isSaveContextCurrent({
-        sessionId: saveSessionId,
-        requestId: saveRequestId,
-        resourceToken: saveResourceToken,
-        parametersPath: saveParametersPath,
-        projectPath: saveProjectPath,
-      })) {
+      if (
+        !isSaveContextCurrent({
+          sessionId: saveSessionId,
+          requestId: saveRequestId,
+          resourceToken: saveResourceToken,
+          parametersPath: saveParametersPath,
+          projectPath: saveProjectPath,
+        })
+      ) {
         return refreshResult?.response === ResponseEnum.success
       }
 
-      invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], { sessionId: saveSessionId })
+      invalidateWorkspaceResources(['parameters', 'home', 'step-config', 'flow'], {
+        sessionId: saveSessionId,
+      })
 
       if (refreshResult?.response !== ResponseEnum.success) {
-        error.value = firstResponseMessage(refreshResult, 'Refresh workspace config failed')
+        error.value = firstResponseMessage(
+          refreshResult,
+          'Refresh workspace config failed',
+        )
         return false
       }
 
       console.log('Parameters saved successfully')
       return true
     } catch (err) {
-      if (!isSaveContextCurrent({
-        sessionId: saveSessionId,
-        requestId: saveRequestId,
-        resourceToken: saveResourceToken,
-        parametersPath: saveParametersPath,
-        projectPath: saveProjectPath,
-      })) {
+      if (
+        !isSaveContextCurrent({
+          sessionId: saveSessionId,
+          requestId: saveRequestId,
+          resourceToken: saveResourceToken,
+          parametersPath: saveParametersPath,
+          projectPath: saveProjectPath,
+        })
+      ) {
         return false
       }
       console.error('Failed to save parameters:', err)
       error.value = err instanceof Error ? err.message : String(err)
       return false
     } finally {
-      if (isSaveContextCurrent({
-        sessionId: saveSessionId,
-        requestId: saveRequestId,
-        resourceToken: saveResourceToken,
-        parametersPath: saveParametersPath,
-        projectPath: saveProjectPath,
-      })) {
+      if (
+        isSaveContextCurrent({
+          sessionId: saveSessionId,
+          requestId: saveRequestId,
+          resourceToken: saveResourceToken,
+          parametersPath: saveParametersPath,
+          projectPath: saveProjectPath,
+        })
+      ) {
         isSaving.value = false
         if (savingSessionId === saveSessionId) {
           savingSessionId = null
@@ -636,7 +673,7 @@ export function useParameters() {
     () => {
       hasChanges.value = JSON.stringify(config) !== originalConfig
     },
-    { deep: true }
+    { deep: true },
   )
 
   watch(
@@ -650,7 +687,7 @@ export function useParameters() {
         resetParametersState()
       }
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   watch(
@@ -684,11 +721,11 @@ export function useParameters() {
   }
 
   const layerOptions = computed(() => {
-    return ROUTING_LAYER_ORDER.map(layer => ({ label: layer, value: layer }))
+    return ROUTING_LAYER_ORDER.map((layer) => ({ label: layer, value: layer }))
   })
 
   const layersList = computed(() => {
-    const opts = layerOptions.value.map(o => o.value)
+    const opts = layerOptions.value.map((o) => o.value)
     const lo = opts.indexOf(config.bottomLayer)
     const hi = opts.indexOf(config.topLayer)
     if (lo === -1 || hi === -1) return opts
@@ -718,6 +755,6 @@ export function useParameters() {
     loadParameters,
     saveParameters,
     resetParameters,
-    refreshParameters
+    refreshParameters,
   }
 }

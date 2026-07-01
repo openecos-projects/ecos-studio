@@ -37,7 +37,11 @@ export interface RuntimeEventClientConfig {
   connectionTimeout?: number
 }
 
-export type RuntimeEventClientState = 'disconnected' | 'connecting' | 'connected' | 'error'
+export type RuntimeEventClientState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'error'
 
 function normalizeWorkspaceId(value: string): string {
   const normalized = value.trim().replace(/\\/g, '/')
@@ -46,7 +50,10 @@ function normalizeWorkspaceId(value: string): string {
     : normalized
 }
 
-export function createRuntimeEventClient(workspaceId: string, config: RuntimeEventClientConfig = {}) {
+export function createRuntimeEventClient(
+  workspaceId: string,
+  config: RuntimeEventClientConfig = {},
+) {
   void config
 
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
@@ -64,7 +71,7 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
   function handleNotification(response: RuntimeEventResponse) {
     const notifyType = response.data?.type as RuntimeNotifyType
 
-    allHandlers.forEach(handler => {
+    allHandlers.forEach((handler) => {
       try {
         handler(response)
       } catch (err) {
@@ -74,7 +81,7 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
 
     if (notifyType) {
       const typeHandlers = handlers.get(notifyType) || []
-      typeHandlers.forEach(handler => {
+      typeHandlers.forEach((handler) => {
         try {
           handler(response)
         } catch (err) {
@@ -84,7 +91,9 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
     }
   }
 
-  function responseFromCliEvent(event: DesktopCliCommandEvent): RuntimeEventResponse | null {
+  function responseFromCliEvent(
+    event: DesktopCliCommandEvent,
+  ): RuntimeEventResponse | null {
     if (!runtimeNotifyCommandNames.has(event.cmd)) {
       return null
     }
@@ -93,16 +102,14 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
       return null
     }
 
-    const eventWorkspaceId = typeof event.workspaceId === 'string'
-      ? event.workspaceId
-      : undefined
-    const eventDirectory = typeof event.directory === 'string'
-      ? event.directory
-      : undefined
+    const eventWorkspaceId =
+      typeof event.workspaceId === 'string' ? event.workspaceId : undefined
+    const eventDirectory =
+      typeof event.directory === 'string' ? event.directory : undefined
     const metadataWorkspace = eventWorkspaceId ?? eventDirectory
     if (
-      metadataWorkspace
-      && normalizeWorkspaceId(metadataWorkspace) !== normalizedWorkspaceId
+      metadataWorkspace &&
+      normalizeWorkspaceId(metadataWorkspace) !== normalizedWorkspaceId
     ) {
       return null
     }
@@ -113,13 +120,11 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
       : event.text
         ? [event.text]
         : []
-    const step = typeof result?.data.step === 'string'
-      ? result.data.step
-      : undefined
-    const id = typeof result?.data.id === 'string'
-      ? result.data.id
-      : undefined
-    const data: Omit<RuntimeEventResponse['data'], 'type'> & { type?: RuntimeNotifyType } = {
+    const step = typeof result?.data.step === 'string' ? result.data.step : undefined
+    const id = typeof result?.data.id === 'string' ? result.data.id : undefined
+    const data: Omit<RuntimeEventResponse['data'], 'type'> & {
+      type?: RuntimeNotifyType
+    } = {
       cmd: event.cmd,
       jobId: event.jobId,
       timestamp: Date.now(),
@@ -167,11 +172,13 @@ export function createRuntimeEventClient(workspaceId: string, config: RuntimeEve
       cmd: 'notify',
       data: data as RuntimeEventResponse['data'],
       message,
-      response: result?.response ?? (event.type === 'failed'
-        ? 'error'
-        : event.type === 'cancelled'
-          ? 'cancelled'
-          : 'success'),
+      response:
+        result?.response ??
+        (event.type === 'failed'
+          ? 'error'
+          : event.type === 'cancelled'
+            ? 'cancelled'
+            : 'success'),
     }
   }
 
