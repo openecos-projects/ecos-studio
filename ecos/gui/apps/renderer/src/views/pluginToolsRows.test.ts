@@ -125,6 +125,7 @@ describe('pluginToolsRows', () => {
     expect(row.description).not.toContain('https://')
     expect(row.description).not.toContain('UND_ERR')
     expect(row.descriptionTitle).toBe(error)
+    expect(row.statusTitle).toBe(error)
   })
 
   it('prefers compact error summaries over registry descriptions on failed rows', () => {

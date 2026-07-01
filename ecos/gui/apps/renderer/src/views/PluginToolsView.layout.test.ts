@@ -113,6 +113,7 @@ describe('PluginToolsView resource table layout', () => {
 
   it('keeps long resource error details out of table rows', () => {
     expect(pluginToolsViewSource).toContain(':title="row.descriptionTitle || undefined"')
+    expect(pluginToolsViewSource).toContain(':title="row.statusTitle || undefined"')
     expect(pluginToolsViewSource).not.toContain('row-error-msg')
     expect(pluginToolsViewSource).not.toContain('rowError(row)')
   })

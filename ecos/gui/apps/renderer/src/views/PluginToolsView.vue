@@ -172,7 +172,7 @@
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
                   <span class="resource-status-cell">
-                    <b class="status-pill" :class="row.statusKind">
+                    <b class="status-pill" :class="row.statusKind" :title="row.statusTitle || undefined">
                       <span>{{ row.statusText }}</span>
                     </b>
                     <span

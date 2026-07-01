@@ -23,6 +23,7 @@ export interface ResourceRow {
   sizeMb: number
   platform: string
   statusText: string
+  statusTitle: string
   statusKind: StatusKind
   icon: string
   accent: string
@@ -391,6 +392,7 @@ export function resourceToRow(
     sizeMb: size.sizeMb,
     platform: resource.platform || (resource.source === 'local' ? 'Local' : ''),
     statusText: status.text,
+    statusTitle: status.kind === 'error' ? resource.error || '' : '',
     statusKind: status.kind,
     icon: iconFor(resource),
     accent: accentFor(resource),
