@@ -11572,3 +11572,47 @@ fatal error: driver/difftest.h: No such file or directory
 
 - registry 合入或发布前，应先让 `ecc-fe` workflow 成功发布 `ecc-fe-examples-latest`，否则 registry 的在线 URL 检查会因为新 release 尚不存在而失败。
 - GUI 安装 `tool:ecc-fe` 后会同时安装 SoC harness 和 examples；如果未来 examples 包继续变大，可再拆成多个更细粒度资源。
+
+# 第 185 次 开发
+
+## 开发目标
+
+修正 ECC-FE 资源剥离后的 SoC harness 发布结构和 examples 发现方式，确保 Resource Manager 安装后的 SoC/examples 资源能被 ECC-FE runtime 直接组合使用。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 将 `ecc-fe-soc-ysyx-am-latest.tar.gz` 的包内结构改为顶层直接是 SoC harness 根目录，而不是 `fecompiler/thirdparty/SoC` 嵌套目录。
+  - 保持 registry 现有 `strip_prefix: ecc-fe-soc-ysyx-am-latest` 语义，安装后资源根即包含 `manifest.json`、`catalog.json`、`filelist.soc.f` 和 `scripts/`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/build_soc_sim.sh`
+  - 移除 `/home/luyoung/ecc-fe/examples/cl3` 开发机绝对路径默认值。
+  - 未设置 `CPU_ROOT` 时，从当前工作区、源码仓相对路径、SoC 资源内 examples 目录、`ECOS_FE_RESOURCE_ROOTS` 中的 `examples/cl3` 或 `cl3` 自动发现 CPU 示例。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`
+  - 与 `build_soc_sim.sh` 保持一致的 CPU 示例自动发现逻辑。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加 SoC 脚本从 `ECOS_FE_RESOURCE_ROOTS` 发现 `ecc-fe-examples` 资源的回归测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 SoC/examples 资源组合修正。
+
+## 验证情况
+
+- 已下载并校验 `ecc-fe-examples-latest.tar.gz`，`sha256sum -c` 通过，包内结构为 `ecc-fe-examples-latest/examples/...`。
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('ecc-fe/.github/workflows/release-latest.yml'); puts 'workflow ok'"`，通过。
+- 已执行 `bash -n fecompiler/thirdparty/SoC/scripts/build_soc_sim.sh && bash -n fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`，通过。
+- 已执行 `python3 -m pytest test/test_engine_flow.py::test_soc_filelist_script_discovers_examples_resource_root test/test_engine_flow.py::test_workspace_create_discovers_external_soc_resource_root test/test_engine_flow.py::test_soc_runtime_options_discovers_external_soc_root -q`，通过：3 个测试全部通过。
+- 已执行本次修改文件的 `git diff --check`，通过。
+- 额外尝试执行 `python3 -m pytest test/test_engine_flow.py -q`，其中本次新增测试已覆盖到，但全量测试有 3 个既有/环境相关失败：`test_elab_frontend_detail_returns_readiness_and_hierarchy` 受本机 Slang/ELAB 可用性影响，`test_run_all_stops_at_sim_without_testbench` 和 `test_run_all_with_rerun_stops_at_sim_without_testbench` 与当前 Review 严格依赖 Yosys 后的流程状态有关。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 尚未执行 GitHub Actions；新的 SoC 包结构需要 commit/push 后由远端 workflow 重新发布 `ecc-fe-soc-ysyx-am-latest`。
+- 尚未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 在 `ecc-fe` workflow 重新发布 SoC release 之前，当前远端 `ecc-fe-soc-ysyx-am-latest` 仍是旧嵌套结构；此时新安装的 SoC resource 可能无法被 ECC-FE manifest 扫描直接识别。
