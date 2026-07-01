@@ -29,15 +29,15 @@ function isDesktopBridgeErrorResult(
   value: unknown,
 ): value is { error: { code?: string; message: string; name: string }; ok: false } {
   return (
-    typeof value === 'object'
-    && value !== null
-    && 'ok' in value
-    && value.ok === false
-    && 'error' in value
-    && typeof value.error === 'object'
-    && value.error !== null
-    && 'message' in value.error
-    && typeof value.error.message === 'string'
+    typeof value === 'object' &&
+    value !== null &&
+    'ok' in value &&
+    value.ok === false &&
+    'error' in value &&
+    typeof value.error === 'object' &&
+    value.error !== null &&
+    'message' in value.error &&
+    typeof value.error.message === 'string'
   )
 }
 
@@ -147,7 +147,11 @@ const desktopApi: DesktopApi = {
     readOptionalProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadOptionalProjectTextFile, path),
     readProjectTextFileTail: (path, maxChars) =>
-      invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFileTail, path, maxChars),
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceReadProjectTextFileTail,
+        path,
+        maxChars,
+      ),
     readOptionalProjectTextFileTail: (path, maxChars) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceReadOptionalProjectTextFileTail,
@@ -162,11 +166,11 @@ const desktopApi: DesktopApi = {
         maxChars,
       ),
     subscribeProjectLogTail: async (path, options, listener) => {
-      const subscriptionId = await ipcRenderer.invoke(
+      const subscriptionId = (await ipcRenderer.invoke(
         desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
         path,
         options,
-      ) as string
+      )) as string
       const eventListener = (
         _event: IpcRendererEvent,
         payload: DesktopProjectLogTailEvent,
@@ -177,7 +181,10 @@ const desktopApi: DesktopApi = {
       ipcRenderer.on(desktopApiEventChannels.workspaceLogTail, eventListener)
 
       return () => {
-        ipcRenderer.removeListener(desktopApiEventChannels.workspaceLogTail, eventListener)
+        ipcRenderer.removeListener(
+          desktopApiEventChannels.workspaceLogTail,
+          eventListener,
+        )
         void invokeDesktop(
           desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
           subscriptionId,
@@ -192,26 +199,34 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
     scanRtlDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanRtlDirectory, path),
-    listDesignFiles: () =>
-      invokeDesktop(desktopApiIpcChannels.workspaceListDesignFiles),
+    listDesignFiles: () => invokeDesktop(desktopApiIpcChannels.workspaceListDesignFiles),
     addDesignFiles: (sourcePaths) =>
       invokeDesktop(desktopApiIpcChannels.workspaceAddDesignFiles, sourcePaths),
     removeDesignFile: (filelistEntry) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRemoveDesignFile, filelistEntry),
     watchProjectFile: async (path, listener) => {
-      const subscriptionId = await ipcRenderer.invoke(
+      const subscriptionId = (await ipcRenderer.invoke(
         desktopApiIpcChannels.workspaceWatchProjectFile,
         path,
-      ) as string
-      const eventListener = (_event: IpcRendererEvent, payload: DesktopProjectFileChangedEvent) => {
+      )) as string
+      const eventListener = (
+        _event: IpcRendererEvent,
+        payload: DesktopProjectFileChangedEvent,
+      ) => {
         if (payload.subscriptionId !== subscriptionId) return
         listener(payload)
       }
       ipcRenderer.on(desktopApiEventChannels.workspaceFileChanged, eventListener)
 
       return () => {
-        ipcRenderer.removeListener(desktopApiEventChannels.workspaceFileChanged, eventListener)
-        void invokeDesktop(desktopApiIpcChannels.workspaceUnwatchProjectFile, subscriptionId)
+        ipcRenderer.removeListener(
+          desktopApiEventChannels.workspaceFileChanged,
+          eventListener,
+        )
+        void invokeDesktop(
+          desktopApiIpcChannels.workspaceUnwatchProjectFile,
+          subscriptionId,
+        )
       }
     },
   },
@@ -220,22 +235,17 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.layoutViewerOpen, request),
   },
   workspaceResources: {
-    getIndex: () =>
-      invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),
-    readHome: () =>
-      invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadHome),
-    readFlow: () =>
-      invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
+    getIndex: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesGetIndex),
+    readHome: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadHome),
+    readFlow: () => invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadFlow),
     readParameters: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesReadParameters),
     resolveStepInfo: (request: WorkspaceStepInfoRequest) =>
       invokeDesktop(desktopApiIpcChannels.workspaceResourcesResolveStepInfo, request),
   },
   resources: {
-    list: () =>
-      invokeDesktop(desktopApiIpcChannels.resourcesList),
-    get: (resourceId) =>
-      invokeDesktop(desktopApiIpcChannels.resourcesGet, resourceId),
+    list: () => invokeDesktop(desktopApiIpcChannels.resourcesList),
+    get: (resourceId) => invokeDesktop(desktopApiIpcChannels.resourcesGet, resourceId),
     install: (request: ResourceInstallRequest) =>
       invokeDesktop(desktopApiIpcChannels.resourcesInstall, request),
     update: (resourceId) =>
@@ -254,8 +264,7 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.resourcesImportPdkPath, request),
     importLocalPath: (request: ResourceImportLocalRequest) =>
       invokeDesktop(desktopApiIpcChannels.resourcesImportLocalPath, request),
-    refreshRegistry: () =>
-      invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
+    refreshRegistry: () => invokeDesktop(desktopApiIpcChannels.resourcesRefreshRegistry),
     onProgress: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.resourcesProgress,
@@ -282,8 +291,7 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.shellWrite, sessionId, data),
     resize: (sessionId, cols, rows) =>
       invokeDesktop(desktopApiIpcChannels.shellResize, sessionId, cols, rows),
-    kill: (sessionId) =>
-      invokeDesktop(desktopApiIpcChannels.shellKill, sessionId),
+    kill: (sessionId) => invokeDesktop(desktopApiIpcChannels.shellKill, sessionId),
     onData: (listener) =>
       subscribeToDesktopEvent(
         desktopApiEventChannels.shellData,
@@ -302,3 +310,10 @@ const desktopApi: DesktopApi = {
 }
 
 contextBridge.exposeInMainWorld('ecosDesktop', desktopApi)
+
+if (process.env.ECOS_ELECTRON_SMOKE === '1') {
+  contextBridge.exposeInMainWorld('electronSmoke', {
+    complete: () => ipcRenderer.send('ecos-smoke:complete'),
+    failed: (message: string) => ipcRenderer.send('ecos-smoke:failed', message),
+  })
+}

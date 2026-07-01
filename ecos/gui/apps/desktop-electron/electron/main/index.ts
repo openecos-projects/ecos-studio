@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createMainWindow } from './createMainWindow'
@@ -25,19 +25,17 @@ import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
 
 let ipcRegistered = false
-let services:
-  | {
-      appInfoService: AppInfoService
-      desktopRuntimeManager: DesktopRuntimeManager
-      remoteContentService: RemoteContentService
-      settingsStore: SettingsStore
-      resourceManagerService: ResourceManagerService
-      layoutViewerService: LayoutViewerService
-      shellService: ShellPtyService
-      workspaceResourceService: WorkspaceResourceService
-      workspaceService: WorkspaceService
-    }
-  | null = null
+let services: {
+  appInfoService: AppInfoService
+  desktopRuntimeManager: DesktopRuntimeManager
+  remoteContentService: RemoteContentService
+  settingsStore: SettingsStore
+  resourceManagerService: ResourceManagerService
+  layoutViewerService: LayoutViewerService
+  shellService: ShellPtyService
+  workspaceResourceService: WorkspaceResourceService
+  workspaceService: WorkspaceService
+} | null = null
 
 function readHostInfo(path: string): string {
   try {
@@ -65,6 +63,16 @@ configureElectronLoggerFile({
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
 electronLogger.status('[runtime] Runtime: ECC CLI')
+
+if (process.env.ECOS_ELECTRON_SMOKE === '1') {
+  ipcMain.on('ecos-smoke:complete', () => {
+    app.exit(0)
+  })
+  ipcMain.on('ecos-smoke:failed', (_event, message) => {
+    electronLogger.error('[desktop] Smoke test failed: %s', String(message))
+    app.exit(1)
+  })
+}
 
 function getDesktopServices() {
   if (services) {

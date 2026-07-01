@@ -63,6 +63,47 @@ pnpm run typecheck
 pnpm --filter @ecos-studio/renderer exec vitest run src/utils/sanitizeHtml.test.ts
 ```
 
+## Quality checks
+
+Most GUI checks are available from the GUI workspace root:
+
+```bash
+pnpm run check
+```
+
+`check` runs typecheck, lint, format check, and the unit test suites. The unit
+tests include the shared package tests, IPC contract tests, preload bridge
+tests, and GUI infrastructure tests such as the doctor script tests.
+
+For targeted local checks:
+
+```bash
+pnpm run lint
+pnpm run fmt:check
+pnpm run test
+pnpm run doctor
+```
+
+`doctor` is a local environment diagnostic. It checks Node.js, pnpm, installed
+GUI dependencies, optional ECC/Nix availability, and the native resources used
+by the desktop app. It does not start Electron.
+
+The Electron smoke test is manual and should be run after a desktop build:
+
+```bash
+pnpm run desktop:build
+pnpm run desktop:smoke
+```
+
+The smoke test starts Electron and verifies that the preload bridge is exposed
+and a key IPC call can reach the main process. It is not part of `check`,
+`test`, `make build`, or CI.
+
+Git hooks are managed with Lefthook from the repository root. The pre-commit
+hook runs lightweight GUI lint and format checks only for staged `ecos/gui`
+JavaScript, TypeScript, Vue, and JSON changes. The commit-message hook runs
+commitlint against every commit message, regardless of which files changed.
+
 ## Stack
 
 - **Electron 41** — desktop shell and native integration

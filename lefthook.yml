@@ -1,0 +1,14 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: gui lint
+      glob: "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
+      run: pnpm --dir ecos/gui run lint
+    - name: gui format
+      glob: "ecos/gui/**/*.{js,mjs,cjs,ts,tsx,vue,json,jsonc}"
+      run: pnpm --dir ecos/gui run fmt:check
+
+commit-msg:
+  jobs:
+    - name: conventional commits
+      run: pnpm --dir ecos/gui exec commitlint --edit {1}

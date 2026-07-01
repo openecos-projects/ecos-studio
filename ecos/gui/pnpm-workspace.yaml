@@ -5,4 +5,5 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+  lefthook: true
   node-pty: true

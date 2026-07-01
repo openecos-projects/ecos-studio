@@ -118,11 +118,14 @@ function registerHandlers() {
     },
   }
 
-  registerIpc({
-    handle: (channel, listener) => {
-      handlers.set(channel, listener as RegisteredHandler)
+  registerIpc(
+    {
+      handle: (channel, listener) => {
+        handlers.set(channel, listener as RegisteredHandler)
+      },
     },
-  }, services)
+    services,
+  )
 
   return {
     handlers,
@@ -168,68 +171,9 @@ describe('registerIpc', () => {
   it('registers a handler for every desktop bridge channel', () => {
     const { handlers } = registerHandlers()
 
-    expect(Array.from(handlers.keys()).sort()).toEqual([
-      desktopApiIpcChannels.windowMinimize,
-      desktopApiIpcChannels.windowToggleMaximize,
-      desktopApiIpcChannels.windowClose,
-      desktopApiIpcChannels.windowConfirmClose,
-      desktopApiIpcChannels.windowSetTitle,
-      desktopApiIpcChannels.windowIsMaximized,
-      desktopApiIpcChannels.settingsGet,
-      desktopApiIpcChannels.settingsSet,
-      desktopApiIpcChannels.settingsDelete,
-      desktopApiIpcChannels.remoteContentListFiles,
-      desktopApiIpcChannels.remoteContentReadTextFile,
-      desktopApiIpcChannels.remoteContentReadJsonFile,
-      desktopApiIpcChannels.dialogPickDirectory,
-      desktopApiIpcChannels.dialogPickFiles,
-      desktopApiIpcChannels.dialogPickRtlSources,
-      desktopApiIpcChannels.workspaceIsProjectDirectory,
-      desktopApiIpcChannels.workspaceRegisterProjectRoot,
-      desktopApiIpcChannels.workspaceClearProjectRoot,
-      desktopApiIpcChannels.workspaceRequestProjectPathAccess,
-      desktopApiIpcChannels.workspaceReadProjectTextFile,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFile,
-      desktopApiIpcChannels.workspaceReadProjectTextFileTail,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFileTail,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate,
-      desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
-      desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
-      desktopApiIpcChannels.workspaceReadProjectBinaryFile,
-      desktopApiIpcChannels.workspaceWriteProjectTextFile,
-      desktopApiIpcChannels.workspaceScanPdkDirectory,
-      desktopApiIpcChannels.workspaceScanRtlDirectory,
-      desktopApiIpcChannels.workspaceListDesignFiles,
-      desktopApiIpcChannels.workspaceAddDesignFiles,
-      desktopApiIpcChannels.workspaceRemoveDesignFile,
-      desktopApiIpcChannels.workspaceWatchProjectFile,
-      desktopApiIpcChannels.workspaceUnwatchProjectFile,
-      desktopApiIpcChannels.workspaceResourcesGetIndex,
-      desktopApiIpcChannels.workspaceResourcesReadHome,
-      desktopApiIpcChannels.workspaceResourcesReadFlow,
-      desktopApiIpcChannels.workspaceResourcesReadParameters,
-      desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
-      desktopApiIpcChannels.resourcesList,
-      desktopApiIpcChannels.resourcesGet,
-      desktopApiIpcChannels.resourcesInstall,
-      desktopApiIpcChannels.resourcesUpdate,
-      desktopApiIpcChannels.resourcesCancel,
-      desktopApiIpcChannels.resourcesUninstall,
-      desktopApiIpcChannels.resourcesActivatePdk,
-      desktopApiIpcChannels.resourcesValidatePdk,
-      desktopApiIpcChannels.resourcesRemovePdkReference,
-      desktopApiIpcChannels.resourcesImportPdkPath,
-      desktopApiIpcChannels.resourcesImportLocalPath,
-      desktopApiIpcChannels.resourcesRefreshRegistry,
-      desktopApiIpcChannels.layoutViewerOpen,
-      desktopApiIpcChannels.systemOpenExternal,
-      desktopApiIpcChannels.cliExecute,
-      desktopApiIpcChannels.shellCreateSession,
-      desktopApiIpcChannels.shellWrite,
-      desktopApiIpcChannels.shellResize,
-      desktopApiIpcChannels.shellKill,
-      desktopApiIpcChannels.appGetVersions,
-    ].sort())
+    expect(Array.from(handlers.keys()).sort()).toEqual(
+      Object.values(desktopApiIpcChannels).sort(),
+    )
   })
 
   it('returns version information from the app info service', async () => {
@@ -289,10 +233,16 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
-    services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
-    services.resourceManagerService.importLocalPath.mockResolvedValue(resources.resources[0])
+    services.resourceManagerService.importPdkPath.mockResolvedValue(
+      resources.resources[0],
+    )
+    services.resourceManagerService.importLocalPath.mockResolvedValue(
+      resources.resources[0],
+    )
 
-    await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesList)?.(event),
+    ).resolves.toEqual(resources)
     await expect(
       handlers.get(desktopApiIpcChannels.resourcesInstall)?.(event, {
         resourceId: 'tool:yosys',
@@ -328,8 +278,13 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
-    expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith('pdk:ics55', '/tmp/pdk')
-    expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
+    expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith(
+      'pdk:ics55',
+      '/tmp/pdk',
+    )
+    expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith(
+      'tool:yosys',
+    )
   })
 
   it('delegates remote content requests to the remote content service', async () => {
@@ -391,18 +346,20 @@ describe('registerIpc', () => {
       isDestroyed: vi.fn(() => false),
       send: vi.fn(),
     }
-    services.resourceManagerService.installResource.mockImplementation(async (_resourceId, _version, listener) => {
-      listener?.({
-        id: 'job-1',
-        resource_id: 'tool:yosys',
-        action: 'install',
-        phase: 'downloading',
-        progress: 0.5,
-        message: 'Downloading...',
-        error: null,
-      })
-      return { status: 'started', resource_id: 'tool:yosys', version: '0.61' }
-    })
+    services.resourceManagerService.installResource.mockImplementation(
+      async (_resourceId, _version, listener) => {
+        listener?.({
+          id: 'job-1',
+          resource_id: 'tool:yosys',
+          action: 'install',
+          phase: 'downloading',
+          progress: 0.5,
+          message: 'Downloading...',
+          error: null,
+        })
+        return { status: 'started', resource_id: 'tool:yosys', version: '0.61' }
+      },
+    )
 
     await handlers.get(desktopApiIpcChannels.resourcesInstall)?.(
       { sender },
@@ -450,7 +407,9 @@ describe('registerIpc', () => {
 
     await handlers.get(desktopApiIpcChannels.windowMinimize)?.(event)
     await handlers.get(desktopApiIpcChannels.windowSetTitle)?.(event, 'ECOS Studio')
-    const isMaximized = await handlers.get(desktopApiIpcChannels.windowIsMaximized)?.(event)
+    const isMaximized = await handlers.get(desktopApiIpcChannels.windowIsMaximized)?.(
+      event,
+    )
     await handlers.get(desktopApiIpcChannels.windowClose)?.(event)
     await handlers.get(desktopApiIpcChannels.windowConfirmClose)?.(event)
 
@@ -514,25 +473,29 @@ describe('registerIpc', () => {
       reset: false,
       truncated: false,
     })
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(async (_path, _options, listener) => {
-      listener({
-        subscriptionId: 'project-log-tail-1',
-        path: '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-        eventType: 'snapshot',
-        content: 'live log',
-        fromOffsetBytes: 0,
-        nextOffsetBytes: 8,
-        sizeBytes: 8,
-        reset: false,
-        truncated: false,
-      })
-      return 'project-log-tail-1'
-    })
+    services.workspaceService.subscribeProjectLogTail.mockImplementation(
+      async (_path, _options, listener) => {
+        listener({
+          subscriptionId: 'project-log-tail-1',
+          path: '/tmp/project/Synthesis_yosys/log/Synthesis.log',
+          eventType: 'snapshot',
+          content: 'live log',
+          fromOffsetBytes: 0,
+          nextOffsetBytes: 8,
+          sizeBytes: 8,
+          reset: false,
+          truncated: false,
+        })
+        return 'project-log-tail-1'
+      },
+    )
     services.workspaceService.readProjectBinaryFile.mockResolvedValue(
       Uint8Array.from([0x45, 0x43, 0x4f, 0x53]),
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
-    services.workspaceService.requestProjectPathAccess.mockResolvedValue('/tmp/project/home.json')
+    services.workspaceService.requestProjectPathAccess.mockResolvedValue(
+      '/tmp/project/home.json',
+    )
     services.workspaceService.scanPdkDirectory.mockResolvedValue({
       canonicalPath: '/tmp/pdk',
       name: 'ics55',
@@ -549,9 +512,9 @@ describe('registerIpc', () => {
       filePaths: ['/tmp/project'],
     })
 
-    await expect(handlers.get(desktopApiIpcChannels.settingsGet)?.(event, 'recent_projects')).resolves.toEqual([
-      { id: 'recent' },
-    ])
+    await expect(
+      handlers.get(desktopApiIpcChannels.settingsGet)?.(event, 'recent_projects'),
+    ).resolves.toEqual([{ id: 'recent' }])
     await handlers.get(desktopApiIpcChannels.settingsSet)?.(event, 'recent_projects', [
       { id: 'recent' },
     ])
@@ -573,10 +536,16 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual(['/tmp/a.v', '/tmp/b.sv'])
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceIsProjectDirectory)?.(event, '/tmp/project'),
+      handlers.get(desktopApiIpcChannels.workspaceIsProjectDirectory)?.(
+        event,
+        '/tmp/project',
+      ),
     ).resolves.toBe(true)
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(event, '/tmp/project'),
+      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+        event,
+        '/tmp/project',
+      ),
     ).resolves.toBe('/tmp/project')
     await handlers.get(desktopApiIpcChannels.workspaceClearProjectRoot)?.(event)
     await expect(
@@ -655,7 +624,9 @@ describe('registerIpc', () => {
     })
 
     expect(services.settingsStore.get).toHaveBeenCalledWith('recent_projects')
-    expect(services.settingsStore.set).toHaveBeenCalledWith('recent_projects', [{ id: 'recent' }])
+    expect(services.settingsStore.set).toHaveBeenCalledWith('recent_projects', [
+      { id: 'recent' },
+    ])
     expect(services.settingsStore.delete).toHaveBeenCalledWith('recent_projects')
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openDirectory'],
@@ -677,15 +648,12 @@ describe('registerIpc', () => {
       '/tmp/project/Synthesis_yosys/log/Synthesis.log',
       1024,
     )
-    expect(services.workspaceService.readOptionalProjectTextFileTail).toHaveBeenCalledWith(
-      '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-      1024,
-    )
-    expect(services.workspaceService.readOptionalProjectTextFileUpdate).toHaveBeenCalledWith(
-      '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-      1024,
-      2048,
-    )
+    expect(
+      services.workspaceService.readOptionalProjectTextFileTail,
+    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024)
+    expect(
+      services.workspaceService.readOptionalProjectTextFileUpdate,
+    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024, 2048)
     expect(services.workspaceService.subscribeProjectLogTail).toHaveBeenCalledWith(
       '/tmp/project/Synthesis_yosys/log/Synthesis.log',
       {
@@ -740,7 +708,8 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual({
       error: expect.objectContaining({
-        message: 'Please select RTL design files, not folders. Use Select design folder to scan a folder.',
+        message:
+          'Please select RTL design files, not folders. Use Select design folder to scan a folder.',
       }),
       ok: false,
     })
@@ -777,10 +746,18 @@ describe('registerIpc', () => {
       design: 'gcd',
       flow: { steps: [] },
       home: {
-        checklistJson: { exists: false, kind: 'checklist', path: '/tmp/project/home/checklist.json' },
+        checklistJson: {
+          exists: false,
+          kind: 'checklist',
+          path: '/tmp/project/home/checklist.json',
+        },
         flowJson: { exists: true, kind: 'flow', path: '/tmp/project/home/flow.json' },
         homeJson: { exists: true, kind: 'home', path: '/tmp/project/home/home.json' },
-        parametersJson: { exists: true, kind: 'parameters', path: '/tmp/project/home/parameters.json' },
+        parametersJson: {
+          exists: true,
+          kind: 'parameters',
+          path: '/tmp/project/home/parameters.json',
+        },
       },
       homeData: {},
       messages: [],
@@ -791,7 +768,9 @@ describe('registerIpc', () => {
       topModule: 'gcd',
     }
     services.workspaceResourceService.getIndex.mockResolvedValue(index)
-    services.workspaceResourceService.readHome.mockResolvedValue({ flow: '/tmp/project/home/flow.json' })
+    services.workspaceResourceService.readHome.mockResolvedValue({
+      flow: '/tmp/project/home/flow.json',
+    })
     services.workspaceResourceService.readFlow.mockResolvedValue({ steps: [] })
     services.workspaceResourceService.readParameters.mockResolvedValue({ Design: 'gcd' })
     services.workspaceResourceService.resolveStepInfo.mockResolvedValue({
@@ -816,10 +795,10 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.workspaceResourcesReadParameters)?.(event),
     ).resolves.toEqual({ Design: 'gcd' })
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(
-        event,
-        { step: 'route', id: 'layout' },
-      ),
+      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(event, {
+        step: 'route',
+        id: 'layout',
+      }),
     ).resolves.toMatchObject({
       id: 'layout',
       response: 'available',
@@ -876,16 +855,18 @@ describe('registerIpc', () => {
       text: 'queued',
       type: 'queued',
     }
-    services.desktopRuntimeManager.execute.mockImplementation(async (_request, listener) => {
-      listener(cliEvent)
-      return {
-        cmd: 'run_step',
-        data: {},
-        message: [],
-        ok: true,
-        response: 'success',
-      }
-    })
+    services.desktopRuntimeManager.execute.mockImplementation(
+      async (_request, listener) => {
+        listener(cliEvent)
+        return {
+          cmd: 'run_step',
+          data: {},
+          message: [],
+          ok: true,
+          response: 'success',
+        }
+      },
+    )
     const request = {
       cmd: 'run_step',
       data: { step: 'place', rerun: false },
@@ -906,22 +887,24 @@ describe('registerIpc', () => {
       isDestroyed: vi.fn(() => true),
       send: vi.fn(),
     })
-    services.desktopRuntimeManager.execute.mockImplementation(async (_request, listener) => {
-      listener({
-        cmd: 'run_step',
-        jobId: 'job-1',
-        stream: 'stdout',
-        text: 'running',
-        type: 'stdout',
-      })
-      return {
-        cmd: 'run_step',
-        data: {},
-        message: [],
-        ok: true,
-        response: 'success',
-      }
-    })
+    services.desktopRuntimeManager.execute.mockImplementation(
+      async (_request, listener) => {
+        listener({
+          cmd: 'run_step',
+          jobId: 'job-1',
+          stream: 'stdout',
+          text: 'running',
+          type: 'stdout',
+        })
+        return {
+          cmd: 'run_step',
+          data: {},
+          message: [],
+          ok: true,
+          response: 'success',
+        }
+      },
+    )
 
     await handlers.get(desktopApiIpcChannels.cliExecute)?.(
       { sender: destroyedSender },
@@ -969,20 +952,14 @@ describe('registerIpc', () => {
       { cols: 120, rows: 32 },
       expect.any(Function),
     )
-    expect(sender.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.shellData,
-      {
-        data: 'ready\r\n',
-        sessionId: 'shell-1',
-      },
-    )
-    expect(sender.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.shellExit,
-      {
-        exitCode: 0,
-        sessionId: 'shell-1',
-      },
-    )
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.shellData, {
+      data: 'ready\r\n',
+      sessionId: 'shell-1',
+    })
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.shellExit, {
+      exitCode: 0,
+      sessionId: 'shell-1',
+    })
     expect(sender.listenerCount('destroyed')).toBe(1)
   })
 
@@ -1034,10 +1011,7 @@ describe('registerIpc', () => {
       expect(services.shellService.kill).toHaveBeenCalledWith('shell-1')
     })
 
-    await handlers.get(desktopApiIpcChannels.shellKill)?.(
-      { sender },
-      'shell-1',
-    )
+    await handlers.get(desktopApiIpcChannels.shellKill)?.({ sender }, 'shell-1')
 
     expect(services.shellService.kill).toHaveBeenCalledTimes(1)
     expect(sender.listenerCount('destroyed')).toBe(0)
@@ -1085,7 +1059,6 @@ describe('registerIpc', () => {
     )
   })
 
-
   it('sends project file change notifications to the requesting renderer', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {
@@ -1093,14 +1066,16 @@ describe('registerIpc', () => {
       send: vi.fn(),
     })
     const event = { sender }
-    services.workspaceService.watchProjectFile.mockImplementation(async (_path, listener) => {
-      listener({
-        subscriptionId: 'project-file-watch-1',
-        path: '/tmp/project/home/flow.json',
-        eventType: 'change',
-      })
-      return 'project-file-watch-1'
-    })
+    services.workspaceService.watchProjectFile.mockImplementation(
+      async (_path, listener) => {
+        listener({
+          subscriptionId: 'project-file-watch-1',
+          path: '/tmp/project/home/flow.json',
+          eventType: 'change',
+        })
+        return 'project-file-watch-1'
+      },
+    )
 
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceWatchProjectFile)?.(
@@ -1120,14 +1095,11 @@ describe('registerIpc', () => {
       '/tmp/project/home/flow.json',
       expect.any(Function),
     )
-    expect(sender.send).toHaveBeenCalledWith(
-      'workspace:file-changed',
-      {
-        subscriptionId: 'project-file-watch-1',
-        path: '/tmp/project/home/flow.json',
-        eventType: 'change',
-      },
-    )
+    expect(sender.send).toHaveBeenCalledWith('workspace:file-changed', {
+      subscriptionId: 'project-file-watch-1',
+      path: '/tmp/project/home/flow.json',
+      eventType: 'change',
+    })
     expect(services.workspaceService.unwatchProjectFile).toHaveBeenCalledWith(
       'project-file-watch-1',
     )
@@ -1173,15 +1145,17 @@ describe('registerIpc', () => {
       send: vi.fn(),
     })
     const event = { sender }
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(async (_path, _options, listener) => {
-      listener({
-        subscriptionId: 'project-log-tail-1',
-        path: '/tmp/project/home/flow.log',
-        eventType: 'snapshot',
-        content: 'log chunk',
-      })
-      return 'project-log-tail-1'
-    })
+    services.workspaceService.subscribeProjectLogTail.mockImplementation(
+      async (_path, _options, listener) => {
+        listener({
+          subscriptionId: 'project-log-tail-1',
+          path: '/tmp/project/home/flow.log',
+          eventType: 'snapshot',
+          content: 'log chunk',
+        })
+        return 'project-log-tail-1'
+      },
+    )
 
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceSubscribeProjectLogTail)?.(

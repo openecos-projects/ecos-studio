@@ -10,15 +10,18 @@
     "dev:vm": "LIBGL_ALWAYS_SOFTWARE=1 ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_OPEN_DEVTOOLS=1 pnpm run desktop:dev",
     "build": "pnpm --filter @ecos-studio/renderer run typecheck && pnpm run desktop:build",
     "preview": "pnpm run desktop:preview",
+    "doctor": "node scripts/doctor.mjs",
     "lint": "oxlint -c .oxlintrc.json apps packages --deny-warnings",
-    "fmt": "oxfmt --write .oxlintrc.json .oxfmtrc.json package.json packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
-    "fmt:check": "oxfmt --check .oxlintrc.json .oxfmtrc.json package.json packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
-    "test": "pnpm -r --if-present run test",
+    "fmt": "oxfmt --write .oxlintrc.json .oxfmtrc.json package.json apps/desktop-electron/package.json apps/desktop-electron/electron/main/index.ts apps/desktop-electron/electron/main/registerIpc.test.ts apps/desktop-electron/electron/preload/index.ts apps/desktop-electron/electron/preload/index.test.ts apps/desktop-electron/scripts/smoke-electron.mjs pnpm-workspace.yaml scripts/doctor.mjs scripts/doctor.test.mjs packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
+    "fmt:check": "oxfmt --check .oxlintrc.json .oxfmtrc.json package.json apps/desktop-electron/package.json apps/desktop-electron/electron/main/index.ts apps/desktop-electron/electron/main/registerIpc.test.ts apps/desktop-electron/electron/preload/index.ts apps/desktop-electron/electron/preload/index.test.ts apps/desktop-electron/scripts/smoke-electron.mjs pnpm-workspace.yaml scripts/doctor.mjs scripts/doctor.test.mjs packages/shared/package.json packages/shared/src/constants/ipcChannels.test.ts packages/shared/src/utils/hdlPath.ts packages/shared/src/utils/hdlPath.test.ts packages/shared/src/utils/localPath.test.ts",
+    "test": "pnpm run test:infra && pnpm -r --if-present run test",
+    "test:infra": "vitest run scripts/*.test.mjs",
     "typecheck": "pnpm -r --if-present run typecheck",
     "desktop:dev": "pnpm --filter @ecos-studio/desktop-electron run dev",
     "desktop:build": "pnpm --filter @ecos-studio/desktop-electron run build",
     "desktop:preview": "pnpm --filter @ecos-studio/desktop-electron run preview",
     "desktop:package": "pnpm --filter @ecos-studio/desktop-electron run package",
+    "desktop:smoke": "pnpm --filter @ecos-studio/desktop-electron run smoke",
     "desktop:test": "pnpm --filter @ecos-studio/desktop-electron run test",
     "desktop:typecheck": "pnpm --filter @ecos-studio/desktop-electron run typecheck",
     "renderer:dev": "pnpm --filter @ecos-studio/renderer run dev",
@@ -28,7 +31,11 @@
     "renderer:typecheck": "pnpm --filter @ecos-studio/renderer run typecheck"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
+    "lefthook": "^2.1.9",
     "oxfmt": "^0.57.0",
-    "oxlint": "^1.72.0"
+    "oxlint": "^1.72.0",
+    "vitest": "^4.0.18"
   }
 }

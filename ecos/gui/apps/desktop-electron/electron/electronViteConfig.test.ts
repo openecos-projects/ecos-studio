@@ -25,6 +25,20 @@ describe('desktop electron build config', () => {
     })
   })
 
+  it('builds the Electron main bundle as CommonJS for Electron runtime compatibility', () => {
+    const resolvedConfig = typeof electronViteConfig === 'function'
+      ? electronViteConfig({
+          command: 'build',
+          isPreview: false,
+          mode: 'production',
+        })
+      : electronViteConfig
+
+    expect(resolvedConfig.main?.build?.lib).toEqual(expect.objectContaining({
+      formats: ['cjs'],
+    }))
+  })
+
   it('lets the renderer dev server pick a free port after the preferred port', () => {
     const resolvedConfig = typeof electronViteConfig === 'function'
       ? electronViteConfig({
@@ -39,5 +53,4 @@ describe('desktop electron build config', () => {
       strictPort: false,
     }))
   })
-
 })

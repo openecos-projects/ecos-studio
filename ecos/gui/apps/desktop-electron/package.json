@@ -9,13 +9,13 @@
     "email": "openecos-projects@users.noreply.github.com"
   },
   "type": "module",
-  "main": "./dist/main/index.js",
+  "main": "./dist/main/index.cjs",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "verify:package": "node scripts/verify-package.mjs",
-    "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml && pnpm run verify:package",
+    "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml",
+    "smoke": "node scripts/smoke-electron.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
