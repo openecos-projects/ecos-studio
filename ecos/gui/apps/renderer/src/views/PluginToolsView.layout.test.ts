@@ -138,8 +138,8 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).toContain('removalActionForRow(row)')
     expect(pluginToolsViewSource).toContain('handleRowRemove(row)')
     expect(pluginToolsViewSource).toContain('selectedResourceMetaText(row)')
-    expect(pluginToolsViewSource).toContain(
-      'Updates apply to managed installs. Replace switches a local tool to the registry-managed version without deleting the original local directory.',
+    expect(pluginToolsViewSource).toMatch(
+      /Updates apply to managed installs\.\s+Replace switches a local tool to the\s+registry-managed version without deleting the original local directory\./,
     )
     expect(pluginToolsViewSource).not.toContain(
       'Updates will replace the existing installed versions.',
@@ -152,8 +152,8 @@ describe('PluginToolsView resource table layout', () => {
 
     expect(pluginToolsViewSource).toContain('canImportLocalResource(row)')
     expect(pluginToolsViewSource).toContain('handleLocalImport(row)')
-    expect(pluginToolsViewSource).toContain(
-      "importingResourceIds.has(row.id) ? 'ri-loader-4-line spin' : 'ri-folder-add-line'",
+    expect(pluginToolsViewSource).toMatch(
+      /importingResourceIds\.has\(row\.id\)[\s\S]*\?[\s\S]*'ri-loader-4-line spin'[\s\S]*:[\s\S]*'ri-folder-add-line'/,
     )
     expect(importButtonIndex).toBeGreaterThan(-1)
     expect(installButtonIndex).toBeGreaterThan(-1)
