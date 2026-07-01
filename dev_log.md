@@ -11346,3 +11346,67 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `latest` release 每次重发后，registry 静态 fallback 仍需要同步；新增审计脚本和 CI 会阻止不一致的 registry 发布，但不会自动改写 registry。
+
+# 第 179 次 开发
+
+## 开发目标
+
+支持 Resource Manager 安装上游以 `.tar.xz` 或 `.txz` 发布的工具链资源，配合 registry 切换 RISC-V GNU Toolchain 官方 release 资产。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - `archiveExtensionFromUrl()` 增加 `.tar.xz` 和 `.txz` 识别，避免官方 RISC-V 工具链下载包被保存为 `.archive`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 归档格式支持调整。
+
+## 验证情况
+
+- 已执行 `git diff --check -- ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `.tar.xz/.txz` 解包依赖系统 `tar` 支持 xz 压缩；常见 Linux 环境默认支持，若目标环境缺失 xz 支持会在安装阶段失败。
+
+# 第 180 次 开发
+
+## 开发目标
+
+让 `ecc-fe` GitHub Actions 自动发布 `ecc-fe-soc-ysyx-am` SoC harness 到 `openecos-projects/ecos-resource-assets`，使该资源也能使用 `url + sha256_url` 的自动校验模式。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 在打包 `ecc-fe-latest` 的同时，从 `fecompiler/thirdparty/SoC` 生成 `ecc-fe-soc-ysyx-am-latest.tar.gz`。
+  - 为 SoC harness 包生成 `ecc-fe-soc-ysyx-am-latest.tar.gz.sha256`。
+  - 新增发布步骤，将 SoC harness 包和 sha256 sidecar 上传到 `openecos-projects/ecos-resource-assets` 的 `ecc-fe-soc-ysyx-am-latest` release。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 SoC harness 自动发布流程调整。
+
+## 验证情况
+
+- 已执行 `ruby -e "require 'yaml'; YAML.load_file('ecc-fe/.github/workflows/release-latest.yml'); puts 'ok'"`，通过。
+- 已执行 `/home/luyoung/ecos-registry` 的 registry 离线校验和测试，均通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make gui`、Bazel、pnpm build/dev、GUI 启动、Electron 打包等构建/启动命令。
+- 未执行 GitHub Actions；需要 commit/push 后由远端 workflow 首次生成 `ecc-fe-soc-ysyx-am-latest` release。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 在 `ecc-fe` workflow 首次成功发布 `ecc-fe-soc-ysyx-am-latest` 之前，registry 的该资源 URL 在线检查会因为 release 尚不存在而失败。

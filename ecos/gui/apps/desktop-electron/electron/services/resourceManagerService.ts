@@ -2206,7 +2206,7 @@ function archiveExtensionFromUrl(sourceUrl: string): string {
     pathname = sourceUrl.split(/[?#]/, 1)[0]
   }
   const lower = pathname.toLowerCase()
-  for (const extension of ['.tar.gz', '.tgz', '.tar', '.zip']) {
+  for (const extension of ['.tar.gz', '.tar.xz', '.tgz', '.txz', '.tar', '.zip']) {
     if (lower.endsWith(extension)) return extension
   }
   return '.archive'
