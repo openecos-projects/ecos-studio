@@ -94,17 +94,6 @@
             <div class="manager-table-actions">
               <button
                 type="button"
-                :disabled="pluginStore.loading || importingPdk"
-                @click="handleImportPdk"
-              >
-                <i
-                  :class="importingPdk ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
-                  aria-hidden="true"
-                ></i>
-                Import PDK
-              </button>
-              <button
-                type="button"
                 :disabled="pluginStore.refreshing"
                 @click="pluginStore.refresh()"
               >
@@ -393,7 +382,7 @@ type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importPdk, importPdkForResource } = usePdkManager()
+const { importPdkForResource } = usePdkManager()
 
 const searchQuery = ref('')
 const searchInput = ref('')
@@ -409,7 +398,6 @@ watch(searchInput, (val) => {
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
-const importingPdk = ref(false)
 const importingResourceIds = ref<Set<string>>(new Set())
 
 const resourceRows = computed<ResourceRow[]>(() => {
@@ -555,22 +543,6 @@ async function handleRowInstall(row: ResourceRow): Promise<void> {
 
 async function handleRowCancel(row: ResourceRow): Promise<void> {
   await pluginStore.cancelResource(row.id)
-}
-
-async function handleImportPdk(): Promise<void> {
-  if (importingPdk.value) {
-    return
-  }
-
-  importingPdk.value = true
-  try {
-    const imported = await importPdk()
-    if (imported) {
-      await pluginStore.fetchTools({ silent: true })
-    }
-  } finally {
-    importingPdk.value = false
-  }
 }
 
 async function handleLocalImport(row: ResourceRow): Promise<void> {

@@ -124,6 +124,12 @@ describe('PluginToolsView resource table layout', () => {
     expect(pluginToolsViewSource).not.toContain('{{ pluginStore.error }}')
   })
 
+  it('does not render the deprecated global PDK import action', () => {
+    expect(pluginToolsViewSource).not.toContain('handleImportPdk')
+    expect(pluginToolsViewSource).not.toContain('importingPdk')
+    expect(pluginToolsViewSource).not.toContain('Import PDK')
+  })
+
   it('renders local tool replace controls and copy separately from updates', () => {
     expect(pluginToolsViewSource).toContain("rowActionForStatus(row.resource) === 'replace'")
     expect(pluginToolsViewSource).toContain('data-title="Replace"')
