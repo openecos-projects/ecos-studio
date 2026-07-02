@@ -11786,3 +11786,49 @@ fatal error: driver/difftest.h: No such file or directory
 - 已安装旧版 `ecc-fe` 的本地环境需要通过 Resource Manager 更新/重装，才能拿到新增的 CPU RTL 与 difftest reference 资源。
 - SoC harness release 不再内置 `riscv32-spike-so`，运行 difftest 依赖 `ecc-fe-difftest-ref` 被正确安装并注入 `ECOS_FE_RESOURCE_ROOTS`。
 - 工作区仍存在既有 `ecc` 子模块 dirty 状态，本次没有处理或回退。
+
+# 第 188 次 开发
+
+## 开发目标
+
+彻查并收紧 ECOS/ECC-FE 项目运行生成的波形文件管理，避免 `.vcd`、`.fst`、`.fsdb` 等仿真波形被误追踪或跟随 ECC-FE 资源 release 发布。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-no-tracked-waveforms.sh`
+  - 新增 release 前检查脚本，仅检查 `ecc-fe` 仓库自身是否追踪了波形 dump 文件。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/.gitignore`
+  - 增加仿真波形 dump 忽略规则：`*.vcd`、`*.vcd.gz`、`*.fst`、`*.fsdb`、`*.vpd`、`*.ghw`、`*.wlf`、`*.lxt`、`*.lxt2`。
+- `/home/luyoung/ecos-studio/ecc/.gitignore`
+  - 在 `ecc` 子模块边界内增加同样的波形 dump 忽略规则，避免主仓 `.gitignore` 无法覆盖子模块。
+- `/home/luyoung/ecos-studio/ecc-fe/.gitignore`
+  - 在 `ecc-fe` 仓库内增加同样的波形 dump 忽略规则。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - release 打包前执行 `check-no-tracked-waveforms.sh`，发现 `ecc-fe` 自身追踪波形文件时直接失败。
+  - 在每个 ECC-FE 资源包目录打包前删除波形 dump 文件，作为防止运行生成物混入 release 的第二道保险。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次波形追踪和 release 发布边界收紧。
+
+## 验证情况
+
+- 已执行 `git ls-files` 检查 `/home/luyoung/ecos-studio`、`/home/luyoung/ecos-studio/ecc`、`/home/luyoung/ecos-studio/ecc-fe`，当前均无被追踪的波形 dump 文件。
+- 已执行 `find` 检查 ECOS/ECC-FE 项目工作区内的生成波形文件，排除工具 fixture 后未发现残留项目生成波形文件。
+- 已执行 `git check-ignore -v`，确认主仓、`ecc`、`ecc-fe` 的 `.gitignore` 均会忽略 `.vcd/.vcd.gz/.fst/.fsdb/.vpd/.ghw/.wlf/.lxt/.lxt2`。
+- 已执行 `bash -n .github/scripts/check-no-tracked-waveforms.sh && bash .github/scripts/check-no-tracked-waveforms.sh`，通过。
+- 已执行 `.github/workflows/release-latest.yml` 的 YAML 解析检查，返回 `yaml ok`。
+- 已执行 `git diff --check`，主仓、`ecc`、`ecc-fe` 均通过。
+- 已抽查 registry 中 `ecos-resource-assets` 当前发布的 6 个资源包清单，`ecc-fe`、`ecc-fe-cpu-rtl`、`ecc-fe-soc-ysyx-am`、`ecc-fe-difftest-ref`、`ecc-fe-examples`、`surfer` 的波形后缀命中均为 0。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+- 未处理 `surfer` 工具仓库自身的 examples 波形；这些属于工具自身测试/样例资产，不属于 ECOS/ECC-FE 项目运行生成物。
+
+## 已知后续风险
+
+- `ecc-fe` release 的波形清理规则需要 commit/push 后由 GitHub Actions 生效；本地未实际运行 release 打包。
+- 如果未来某个资源包确实需要携带工具测试 fixture 波形，应在对应工具仓库中单独定义边界，不应复用 ECOS/ECC-FE 项目生成物规则。

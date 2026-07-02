@@ -29,3 +29,14 @@ manifest.json
 
 # Simulator disassembly traces
 trace_hart_*.dasm
+
+# Simulator waveform dumps
+*.vcd
+*.vcd.gz
+*.fst
+*.fsdb
+*.vpd
+*.ghw
+*.wlf
+*.lxt
+*.lxt2
