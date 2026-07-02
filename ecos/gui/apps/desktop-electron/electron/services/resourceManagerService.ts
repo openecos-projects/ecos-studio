@@ -67,6 +67,12 @@ interface ResourceUpdateCheckItem {
   error: string | null
 }
 
+interface ResourceUpdateSource {
+  url: string
+}
+
+type CachedResourceUpdateCheckItem = ResourceUpdateCheckItem & { update_url: string | null }
+
 interface ResourceUpdateCheckResult {
   status: string
   checked_count: number
@@ -83,7 +89,7 @@ interface ResourceUpdateCheckOptions {
 interface ResourceUpdateCheckCache {
   schema_version: 1
   checked_at: string
-  resources: Record<string, ResourceUpdateCheckItem & { sha256_url: string | null }>
+  resources: Record<string, CachedResourceUpdateCheckItem>
 }
 
 interface RegistryPostInstallStep {
@@ -676,22 +682,22 @@ export class ResourceManagerService {
     const cacheResources: ResourceUpdateCheckCache['resources'] = {}
 
     for (const candidate of collectUpdateCheckCandidates(state.registry, manifest)) {
-      const sha256Url = candidate.asset.sha256_url ?? null
-      if (!sha256Url) {
+      const updateSource = getAssetUpdateSource(candidate.asset)
+      if (!updateSource) {
         const item: ResourceUpdateCheckItem = {
           resource_id: candidate.resourceId,
           checked_at: checkedAt,
           sha256: null,
           status: 'skipped',
           update_available: false,
-          error: 'No sha256_url in registry asset',
+          error: 'No metadata_url or sha256_url in registry asset',
         }
         resources.push(item)
-        cacheResources[candidate.resourceId] = { ...item, sha256_url: null }
+        cacheResources[candidate.resourceId] = { ...item, update_url: null }
         continue
       }
 
-      const sha256 = await this.fetchAssetSha256(candidate.asset)
+      const sha256 = await this.fetchAssetUpdateSha256(candidate.asset)
       if (!sha256) {
         const item: ResourceUpdateCheckItem = {
           resource_id: candidate.resourceId,
@@ -699,10 +705,10 @@ export class ResourceManagerService {
           sha256: null,
           status: 'error',
           update_available: false,
-          error: `Unable to fetch SHA256 from ${sha256Url}`,
+          error: `Unable to fetch update checksum from ${updateSource.url}`,
         }
         resources.push(item)
-        cacheResources[candidate.resourceId] = { ...item, sha256_url: sha256Url }
+        cacheResources[candidate.resourceId] = { ...item, update_url: updateSource.url }
         continue
       }
 
@@ -715,7 +721,7 @@ export class ResourceManagerService {
         error: null,
       }
       resources.push(item)
-      cacheResources[candidate.resourceId] = { ...item, sha256_url: sha256Url }
+      cacheResources[candidate.resourceId] = { ...item, update_url: updateSource.url }
     }
 
     const cache: ResourceUpdateCheckCache = {
@@ -1379,6 +1385,12 @@ export class ResourceManagerService {
     }
   }
 
+  private async fetchAssetUpdateSha256(asset: PlatformAsset): Promise<string | null> {
+    const metadata = await this.fetchAssetMetadata(asset)
+    if (metadata?.sha256) return metadata.sha256
+    return await this.fetchAssetSha256(asset)
+  }
+
   private installedToolToResource(name: string, entry: ToolInventoryEntry): ResourceInfo {
     const resourceId = `tool:${name}`
     return {
@@ -1958,6 +1970,7 @@ function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
   for (const [resourceId, itemValue] of Object.entries(readRecord(record.resources))) {
     const item = readRecord(itemValue)
     const status = readString(item.status)
+    const updateUrl = readOptionalString(item.update_url) ?? readOptionalString(item.sha256_url)
     const normalizedStatus: ResourceUpdateCheckItem['status'] =
       status === 'checked' || status === 'skipped' || status === 'error' ? status : 'error'
     resources[resourceId] = {
@@ -1967,7 +1980,7 @@ function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
       status: normalizedStatus,
       update_available: item.update_available === true,
       error: readOptionalString(item.error),
-      sha256_url: readOptionalString(item.sha256_url),
+      update_url: updateUrl,
     }
   }
   return {
@@ -1980,7 +1993,7 @@ function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
 function getUpdateCheck(
   cache: ResourceUpdateCheckCache | null,
   resourceId: string,
-): (ResourceUpdateCheckItem & { sha256_url: string | null }) | null {
+): CachedResourceUpdateCheckItem | null {
   return cache?.resources[resourceId] ?? null
 }
 
@@ -2005,7 +2018,7 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!asset || !asset.sha256_url) {
+    if (!getAssetUpdateSource(asset)) {
       continue
     }
     candidates.push({
@@ -2022,7 +2035,7 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!asset || !asset.sha256_url) {
+    if (!getAssetUpdateSource(asset)) {
       continue
     }
     candidates.push({
@@ -2052,6 +2065,17 @@ function parseSha256Text(value: string): string | null {
   return readSha256(value.trim().split(/\s+/)[0] ?? '')
 }
 
+function getAssetUpdateSource(asset: PlatformAsset | null): ResourceUpdateSource | null {
+  if (!asset) return null
+  if (asset.metadata_url) {
+    return { url: asset.metadata_url }
+  }
+  if (asset.sha256_url) {
+    return { url: asset.sha256_url }
+  }
+  return null
+}
+
 function readSha256(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const normalized = value.trim().toLowerCase()
@@ -2062,12 +2086,13 @@ function toolHasUpdate(
   entry: ToolInventoryEntry,
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
-  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
+  updateCheck: CachedResourceUpdateCheckItem | null,
 ): boolean {
   if (!latestVersion) return false
   if (latestVersion !== entry.version) return true
-  if (latestVersion === 'latest' && latestAsset?.sha256_url && updateCheck?.status === 'checked') {
-    if (updateCheck.sha256_url && updateCheck.sha256_url !== latestAsset.sha256_url) return false
+  const updateSource = getAssetUpdateSource(latestAsset)
+  if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
+    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url) return false
     return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
   }
   return false
@@ -2077,12 +2102,13 @@ function pdkHasUpdate(
   entry: PdkInventoryEntry,
   latestVersion: string | undefined,
   latestAsset: PlatformAsset | null,
-  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
+  updateCheck: CachedResourceUpdateCheckItem | null,
 ): boolean {
   if (!latestVersion) return false
   if (latestVersion !== entry.version) return true
-  if (latestVersion === 'latest' && latestAsset?.sha256_url && updateCheck?.status === 'checked') {
-    if (updateCheck.sha256_url && updateCheck.sha256_url !== latestAsset.sha256_url) return false
+  const updateSource = getAssetUpdateSource(latestAsset)
+  if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
+    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url) return false
     return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
   }
   return false
@@ -2270,7 +2296,7 @@ function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
 
 function withUpdateCheckHealth(
   health: Record<string, unknown>,
-  updateCheck: (ResourceUpdateCheckItem & { sha256_url?: string | null }) | null,
+  updateCheck: CachedResourceUpdateCheckItem | null,
 ): Record<string, unknown> {
   if (!updateCheck) {
     return health
@@ -2280,7 +2306,7 @@ function withUpdateCheckHealth(
     update_check: {
       checked_at: updateCheck.checked_at,
       sha256: updateCheck.sha256,
-      sha256_url: updateCheck.sha256_url ?? null,
+      update_url: updateCheck.update_url ?? null,
       status: updateCheck.status,
       update_available: updateCheck.update_available,
       error: updateCheck.error,

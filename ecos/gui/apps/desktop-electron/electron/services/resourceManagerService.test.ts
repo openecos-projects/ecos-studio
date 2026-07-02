@@ -1292,7 +1292,111 @@ describe('ResourceManagerService', () => {
       health: expect.objectContaining({
         update_check: expect.objectContaining({
           sha256: latestSha,
-          sha256_url: shaUrl,
+          update_url: shaUrl,
+          status: 'checked',
+        }),
+      }),
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('checks rolling release metadata manually and then marks latest tools as updatable', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
+    const installedSha = 'c'.repeat(64)
+    const latestSha = 'd'.repeat(64)
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  metadata_url: metadataUrl,
+                  sha256: 'b'.repeat(64),
+                  size: 1,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: join(toolsDir, 'ecc-fe', 'latest'),
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: installedSha,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url)
+      if (requestUrl === metadataUrl) {
+        return new Response(JSON.stringify({
+          sha256: latestSha,
+          size: archive.size,
+          commit: 'abcdef0',
+          built_at: '2026-06-30T00:00:00Z',
+        }), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${requestUrl}`)
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      cacheDir: join(root, 'cache'),
+      pdksDir: join(root, 'data', 'pdks'),
+      fetchImpl: fetchImpl as typeof fetch,
+    })
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 1,
+      update_count: 1,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: latestSha,
+          status: 'checked',
+          update_available: true,
+        }),
+      ],
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'update_available',
+      actions: ['update', 'uninstall'],
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: latestSha,
+          update_url: metadataUrl,
           status: 'checked',
         }),
       }),

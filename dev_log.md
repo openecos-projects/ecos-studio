@@ -11910,3 +11910,43 @@ fatal error: driver/difftest.h: No such file or directory
 
 - registry 当前仍保留 `sha256_url` 作为 fallback 和人工检查入口；安装校验仍以静态 `sha256` 为准。
 - `/home/luyoung/ecos-registry/tool-registry.json` 还未 commit/push；需要后续提交后 registry CI 才会接收 metadata URL 与新静态锁值。
+
+# 第 191 次 开发
+
+## 开发目标
+
+将 ECOS 自家 latest 资源的更新检查入口从 `sha256_url` 收敛到 `metadata_url`，同时继续保留静态 `sha256`/`size` 作为安装校验锁字段。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager 的后台/手动更新检查改为优先从 `metadata_url` 获取远端最新 sha256，只有没有 metadata 时才回退到 `sha256_url`。
+  - 更新检查缓存字段从 `sha256_url` 迁移为通用的 `update_url`，并兼容读取旧缓存中的 `sha256_url`。
+  - latest 资源的 update_available 判断改为基于通用 update source，支持 registry 只保留 `metadata_url`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 更新 sha256 sidecar 手动检查测试，使 health 输出断言使用 `update_url`。
+  - 新增 metadata-only latest 更新检查测试，覆盖 registry 没有 `sha256_url` 时仍能发现更新的路径。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 删除 `tool:ecc-fe`、`tool:ecc-fe-cpu-rtl`、`tool:ecc-fe-soc-ysyx-am`、`tool:ecc-fe-difftest-ref`、`tool:ecc-fe-examples`、`tool:surfer` 的 `sha256_url` 字段。
+  - 保留每个资源的 `url`、`metadata_url`、静态 `sha256`、静态 `size`，使 registry 仍是可审查、可复现的锁源。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：23 个测试全部通过。
+- 已执行 `/home/luyoung/ecos-registry` 下的 `python3 -m unittest discover -s tests`，通过：20 个测试全部通过。
+- 已执行 `/home/luyoung/ecos-registry` 下的 `python3 .github/scripts/validate_registry.py tool-registry.json --check-urls`，通过。
+- 已执行 `/home/luyoung/ecos-studio` 与 `/home/luyoung/ecos-registry` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- registry refresh 脚本仍保留 `sha256_url` fallback 支持；当前 registry 清单不再使用该字段。
+- 需要后续 commit/push `/home/luyoung/ecos-studio` 与 `/home/luyoung/ecos-registry` 的改动后，远端 GUI 与 registry 才会同步这次迁移。
