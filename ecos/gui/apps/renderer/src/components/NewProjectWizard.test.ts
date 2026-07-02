@@ -19,4 +19,17 @@ describe('NewProjectWizard RTL browsing', () => {
       'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.',
     )
   })
+
+  it('accepts initial config so project management can prefill the workspace path', () => {
+    expect(source).toContain('initialConfig')
+    expect(source).toContain('defineProps')
+    expect(source).toContain('props.initialConfig')
+  })
+
+  it('can derive a project-managed workspace path from project root plus workspace name', () => {
+    expect(source).toContain('managedWorkspaceRoot')
+    expect(source).toContain('deriveDirectoryFromDesign')
+    expect(source).toContain('syncManagedWorkspaceDirectory')
+    expect(source).toContain('joinPath(managedWorkspaceRoot.value, workspaceName)')
+  })
 })

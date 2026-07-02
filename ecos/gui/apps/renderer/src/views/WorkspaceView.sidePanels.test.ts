@@ -16,4 +16,11 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain('<ThumbnailGallery />')
     expect(source).toContain('<ChatInspectorPanel />')
   })
+
+  it('shows project context actions for project-managed workspaces', () => {
+    expect(source).toContain('projectContext')
+    expect(source).toContain('Back to Project')
+    expect(source).toContain('Create Workspace From Current Step')
+    expect(source).toContain('createWorkspaceFromCurrentStep')
+  })
 })
