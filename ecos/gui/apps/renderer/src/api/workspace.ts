@@ -37,6 +37,13 @@ export interface CreateWorkspaceRequest {
     origin_verilog: string
     filelist: string
     rtl_list: string[]
+    design_input_mode?: string
+    sdc?: string
+    flow_config?: Record<string, unknown>
+    pdk_config_mode?: string
+    pdk_config?: Record<string, unknown>
+    pdk_json?: string
+    project_context?: Record<string, unknown>
   }
 }
 
@@ -67,6 +74,13 @@ export function createWorkspaceApi(options: {
   rtl_list?: string[]
   pdk_root?: string
   filelist?: string
+  design_input_mode?: string
+  sdc?: string
+  flow_config?: Record<string, unknown>
+  pdk_config_mode?: string
+  pdk_config?: Record<string, unknown>
+  pdk_json?: string
+  project_context?: Record<string, unknown>
 }) {
   const data = toDesktopCliData({
     directory: options?.directory || '',
@@ -77,6 +91,13 @@ export function createWorkspaceApi(options: {
     rtl_list: options.rtl_list || [],
     pdk_root: options.pdk_root || '',
     filelist: options.filelist || '',
+    design_input_mode: options.design_input_mode || '',
+    sdc: options.sdc || '',
+    flow_config: options.flow_config || {},
+    pdk_config_mode: options.pdk_config_mode || '',
+    pdk_config: options.pdk_config || {},
+    pdk_json: options.pdk_json || '',
+    project_context: options.project_context || {},
   })
   return getDesktopApi().cli.execute({
     cmd: 'create_workspace',

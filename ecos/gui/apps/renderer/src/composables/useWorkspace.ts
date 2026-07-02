@@ -587,26 +587,40 @@ export function useWorkspace() {
         'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
-      // 将前端参数映射为后端期望的格式 (参考 ics55_parameter.json)
+      // 3. 通过桌面 CLI 创建工作区（传递 Wizard 配置信息）
       const frontendParams = config?.parameters || {}
       const pdkName = config?.pdk || 'ics55'
+      const toNumber = (value: unknown, fallback: number) => {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : fallback
+      }
+      const dieAreaMode = frontendParams.die_area_mode === 'width_height'
+        ? 'width_height'
+        : 'utilitization_margin'
+      const dieArea = dieAreaMode === 'width_height'
+        ? {
+          mode: dieAreaMode,
+          width: toNumber(frontendParams.die_width, 100),
+          height: toNumber(frontendParams.die_height, 100),
+        }
+        : {
+          mode: dieAreaMode,
+          utilitization: toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6),
+          margin: toNumber(frontendParams.margin, 0),
+        }
       const backendParameters = {
-        // 基本设计信息 (必需)
-        Design:
-          frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+        Design: frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
         'Top module': frontendParams.top_module || 'top',
-        Clock: frontendParams.clock || 'clk',
-        'Frequency max [MHz]': frontendParams.frequency_max || 100,
-        // PDK 信息
+        'Clock': frontendParams.clock || 'clk',
+        'Die Area': dieArea,
+        'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
+        'Max fanout': toNumber(frontendParams.max_fanout, 20),
         PDK: pdkName,
-        // 核心配置
         Core: {
-          Utilitization: frontendParams.core_utilization || 0.5,
+          Utilitization: dieAreaMode === 'utilitization_margin'
+            ? toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6)
+            : toNumber(frontendParams.core_utilization, 0.5),
         },
-        // 布局参数
-        'Target density': frontendParams.target_density || 0.6,
-        'Max fanout': frontendParams.max_fanout || 20,
       }
 
       const resolvedPdkRoot = config?.pdk_root || ''
@@ -619,6 +633,14 @@ export function useWorkspace() {
         origin_def: config?.origin_def,
         origin_verilog: config?.origin_verilog,
         rtl_list: config?.rtl_list || [],
+        filelist: config?.filelist,
+        design_input_mode: config?.design_input_mode,
+        sdc: config?.sdc,
+        flow_config: config?.flow_config,
+        pdk_config_mode: config?.pdk_config_mode,
+        pdk_config: config?.pdk_config,
+        pdk_json: config?.pdk_json,
+        project_context: config?.project_context,
       })
       console.log(response)
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false

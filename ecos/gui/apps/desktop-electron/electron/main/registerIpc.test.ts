@@ -693,7 +693,7 @@ describe('registerIpc', () => {
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openFile'],
       title: 'Add RTL Design Files',
-      filters: [{ name: 'HDL Files', extensions: ['v', 'sv', 'vhd', 'vhdl'] }],
+      filters: [{ name: 'HDL Files', extensions: ['v', 'sv', 'vhd', 'vhdl', 'gz'] }],
     })
 
     showOpenDialog.mockResolvedValueOnce({

@@ -19,8 +19,11 @@ describe('scanRtlDirectory', () => {
     await mkdir(join(tempRoot, 'src', 'core'), { recursive: true })
     await mkdir(join(tempRoot, 'node_modules', 'ignored'), { recursive: true })
     await writeFile(join(tempRoot, 'src', 'top.v'), 'module top(); endmodule\n')
+    await writeFile(join(tempRoot, 'src', 'top_gzip.v.gz'), 'compressed-placeholder\n')
     await writeFile(join(tempRoot, 'src', 'core', 'alu.sv'), 'module alu(); endmodule\n')
+    await writeFile(join(tempRoot, 'src', 'core', 'pkg.vhdl.gz'), 'compressed-placeholder\n')
     await writeFile(join(tempRoot, 'src', 'readme.txt'), 'ignore me\n')
+    await writeFile(join(tempRoot, 'src', 'readme.txt.gz'), 'ignore me too\n')
     await writeFile(
       join(tempRoot, 'node_modules', 'ignored', 'bad.v'),
       'module bad(); endmodule\n',
@@ -31,6 +34,8 @@ describe('scanRtlDirectory', () => {
     expect(scanned.rootPath).toBe(tempRoot)
     expect(scanned.files).toEqual([
       join(tempRoot, 'src', 'core', 'alu.sv'),
+      join(tempRoot, 'src', 'core', 'pkg.vhdl.gz'),
+      join(tempRoot, 'src', 'top_gzip.v.gz'),
       join(tempRoot, 'src', 'top.v'),
     ])
   })

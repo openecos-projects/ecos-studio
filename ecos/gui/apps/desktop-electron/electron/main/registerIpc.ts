@@ -339,7 +339,7 @@ async function pickRtlSources(
     filters: [
       {
         name: 'HDL Files',
-        extensions: ['v', 'sv', 'vhd', 'vhdl'],
+        extensions: ['v', 'sv', 'vhd', 'vhdl', 'gz'],
       },
     ],
   })

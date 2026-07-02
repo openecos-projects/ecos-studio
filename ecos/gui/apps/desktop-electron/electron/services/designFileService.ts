@@ -112,7 +112,7 @@ export async function addWorkspaceDesignFiles(
     if (!isHdlFilePath(normalizedSource)) {
       skipped.push({
         path: rawPath,
-        reason: 'Not an RTL design file (.v, .sv, .vhd, .vhdl).',
+        reason: 'Not an RTL design file (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).',
       })
       continue
     }

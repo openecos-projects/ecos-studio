@@ -400,7 +400,7 @@ async function browseRtlFiles() {
   const hdlFiles = picked.files.filter((path) => isHdlFilePath(path))
   if (hdlFiles.length === 0) {
     manualFilePickError.value =
-      'Please select RTL design files only (.v, .sv, .vhd, .vhdl).'
+      'Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).'
     return
   }
 

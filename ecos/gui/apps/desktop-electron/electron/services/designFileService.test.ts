@@ -47,6 +47,29 @@ describe('designFileService', () => {
     expect(await readFile(originCopy, 'utf8')).toContain('module top')
   })
 
+  it('adds gzip-compressed external RTL files to origin/filelist', async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), 'design-files-'))
+    const workspaceRoot = join(tempRoot, 'workspace')
+    const externalDir = join(tempRoot, 'rtl')
+    await mkdir(externalDir, { recursive: true })
+
+    const externalFile = join(externalDir, 'top.v.gz')
+    await writeFile(externalFile, 'compressed-placeholder\n')
+
+    const result = await addWorkspaceDesignFiles(workspaceRoot, [externalFile])
+
+    expect(result.added).toHaveLength(1)
+    expect(result.skipped).toEqual([])
+    expect(await readFile(getWorkspaceFilelistPath(workspaceRoot), 'utf8')).toBe('top.v.gz\n')
+
+    const listed = await listWorkspaceDesignFiles(workspaceRoot)
+    expect(listed).toHaveLength(1)
+    expect(listed[0]?.basename).toBe('top.v.gz')
+    expect(listed[0]?.resolvedPath).toBe(join(workspaceRoot, 'origin', 'top.v.gz'))
+    expect(listed[0]?.exists).toBe(true)
+    expect(listed[0]?.managedInWorkspace).toBe(true)
+  })
+
   it('skips external files that would overwrite an existing origin file', async () => {
     tempRoot = await mkdtemp(join(tmpdir(), 'design-files-'))
     const workspaceRoot = join(tempRoot, 'workspace')
