@@ -221,6 +221,8 @@ export class ResourceManagerService {
   private updateCheckMemory: ResourceUpdateCheckCache | null = null
   private updateCheckPromise: Promise<ResourceUpdateCheckResult> | null = null
   private activeJobs = new Map<string, ActiveResourceJob>()
+  private manifestOperationPromise: Promise<void> = Promise.resolve()
+  private resourceOperationPromises = new Map<string, Promise<ResourceOperationResult>>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
     this.resourcesDir = options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
@@ -416,6 +418,37 @@ export class ResourceManagerService {
     if (visiting.has(resourceId)) {
       throw new Error(`Resource dependency cycle detected at ${resourceId}`)
     }
+
+    const existingOperation = this.resourceOperationPromises.get(resourceId)
+    if (existingOperation) {
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'waiting_for_active_job',
+        progress: 0,
+        message: `Waiting for active job: ${resourceNameFromAnyId(resourceId)}...`,
+      })
+      return await existingOperation
+    }
+
+    const operation = this.runInstallResourceWithDependencies(resourceId, version, action, listener, visiting)
+    this.resourceOperationPromises.set(resourceId, operation)
+    try {
+      return await operation
+    } finally {
+      if (this.resourceOperationPromises.get(resourceId) === operation) {
+        this.resourceOperationPromises.delete(resourceId)
+      }
+    }
+  }
+
+  private async runInstallResourceWithDependencies(
+    resourceId: string,
+    version: string | undefined,
+    action: ResourceAction,
+    listener: ((event: ResourceJob) => void) | undefined,
+    visiting: Set<string>,
+  ): Promise<ResourceOperationResult> {
     visiting.add(resourceId)
     try {
       const state = await this.fetchRegistry()
@@ -789,7 +822,6 @@ export class ResourceManagerService {
 
       const detected = await detectExecutables(destination)
       const executable = selectToolExecutable(name, detected)
-      const manifest = await this.readManifest()
       const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
         name,
@@ -805,8 +837,9 @@ export class ResourceManagerService {
       if (resolvedAsset.size && resolvedAsset.size > 0) {
         manifestEntry.size = resolvedAsset.size
       }
-      manifest.installed[resourceId] = manifestEntry
-      await this.writeManifest(manifest)
+      await this.mutateManifest((manifest) => {
+        manifest.installed[resourceId] = manifestEntry
+      })
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -936,42 +969,42 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
 
       const scanned = await scanPdkDirectory(destination)
-      const manifest = await this.readManifest()
-      const previous = manifest.installed[resourceId]
-      const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
-        return id !== resourceId && isPdkEntry(entry) && entry.active
-      })
-      const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
-      if (active) {
-        for (const [id, entry] of Object.entries(manifest.installed)) {
-          if (id !== resourceId && isPdkEntry(entry)) {
-            entry.active = false
+      await this.mutateManifest((manifest) => {
+        const previous = manifest.installed[resourceId]
+        const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
+          return id !== resourceId && isPdkEntry(entry) && entry.active
+        })
+        const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
+        if (active) {
+          for (const [id, entry] of Object.entries(manifest.installed)) {
+            if (id !== resourceId && isPdkEntry(entry)) {
+              entry.active = false
+            }
           }
         }
-      }
-      const manifestEntry: PdkInventoryEntry = {
-        type: 'pdk',
-        id: pdkId,
-        name: scanned.name || displayName,
-        pdk_id: pdkId,
-        version,
-        sha256: resolvedAsset.sha256,
-        source: 'registry',
-        source_url: resolvedAsset.url,
-        canonical_path: destination,
-        path: destination,
-        detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
-        detected_file_groups: scanned.detectedFiles,
-        imported_at: utcNowIso(),
-        active,
-        managed: true,
-        health: 'ok',
-      }
-      if (resolvedAsset.size && resolvedAsset.size > 0) {
-        manifestEntry.size = resolvedAsset.size
-      }
-      manifest.installed[resourceId] = manifestEntry
-      await this.writeManifest(manifest)
+        const manifestEntry: PdkInventoryEntry = {
+          type: 'pdk',
+          id: pdkId,
+          name: scanned.name || displayName,
+          pdk_id: pdkId,
+          version,
+          sha256: resolvedAsset.sha256,
+          source: 'registry',
+          source_url: resolvedAsset.url,
+          canonical_path: destination,
+          path: destination,
+          detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+          detected_file_groups: scanned.detectedFiles,
+          imported_at: utcNowIso(),
+          active,
+          managed: true,
+          health: 'ok',
+        }
+        if (resolvedAsset.size && resolvedAsset.size > 0) {
+          manifestEntry.size = resolvedAsset.size
+        }
+        manifest.installed[resourceId] = manifestEntry
+      })
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1196,11 +1229,39 @@ export class ResourceManagerService {
   }
 
   private async writeManifest(manifest: ResourceManifest): Promise<void> {
+    await this.withManifestLock(async () => {
+      await this.writeManifestFile(manifest)
+    })
+  }
+
+  private async mutateManifest(mutator: (manifest: ResourceManifest) => void | Promise<void>): Promise<void> {
+    await this.withManifestLock(async () => {
+      const manifest = await this.readManifest()
+      await mutator(manifest)
+      await this.writeManifestFile(manifest)
+    })
+  }
+
+  private async withManifestLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.manifestOperationPromise
+    let release!: () => void
+    this.manifestOperationPromise = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous.catch(() => undefined)
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+
+  private async writeManifestFile(manifest: ResourceManifest): Promise<void> {
     manifest.resources_dir = this.resourcesDir
     manifest.tools_dir = this.toolsDir
     manifest.pdks_dir = this.pdksDir
     await mkdir(dirname(this.manifestPath), { recursive: true })
-    const tempPath = `${this.manifestPath}.${process.pid}.${Date.now()}.tmp`
+    const tempPath = `${this.manifestPath}.${process.pid}.${randomUUID()}.tmp`
     await writeFile(tempPath, JSON.stringify(manifest, null, 2), 'utf8')
     await rename(tempPath, this.manifestPath)
   }

@@ -111,6 +111,21 @@ async function createEccFeSocArchive(root: string): Promise<{ path: string; sha2
   }
 }
 
+async function createEccFeCpuRtlArchive(root: string): Promise<{ path: string; sha256: string; size: number }> {
+  const sourceRoot = join(root, 'ecc-fe-cpu-rtl-source')
+  const sourceDir = join(sourceRoot, 'ecc-fe-cpu-rtl')
+  const archive = join(root, 'ecc-fe-cpu-rtl.tar')
+  await mkdir(join(sourceDir, 'thirdparty', 'cv32e40p'), { recursive: true })
+  await writeFile(join(sourceDir, 'thirdparty', 'cv32e40p', 'README.md'), 'fixture cpu rtl\n', 'utf8')
+  await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-cpu-rtl'])
+  const size = Buffer.byteLength(await readFile(archive))
+  return {
+    path: archive,
+    sha256: 'fixture-ecc-fe-cpu-rtl-sha',
+    size,
+  }
+}
+
 async function createEccFeExamplesArchive(root: string): Promise<{ path: string; sha256: string; size: number }> {
   const sourceRoot = join(root, 'ecc-fe-examples-source')
   const sourceDir = join(sourceRoot, 'ecc-fe-examples')
@@ -124,6 +139,20 @@ async function createEccFeExamplesArchive(root: string): Promise<{ path: string;
     sha256: 'fixture-ecc-fe-examples-sha',
     size,
   }
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value?: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
+} {
+  let resolve!: (value?: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+  return { promise, resolve, reject }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -888,6 +917,208 @@ describe('ResourceManagerService', () => {
         missing_requires: [],
       }),
     ]))
+  })
+
+  it('waits for an active shared dependency job during concurrent resource updates', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const socArchive = await createEccFeSocArchive(root)
+    const cpuRtlArchive = await createEccFeCpuRtlArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    await mkdir(join(toolsDir, 'ecc-fe', 'latest'), { recursive: true })
+    await mkdir(join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+              requires: ['tool:ecc-fe-cpu-rtl'],
+            },
+          ],
+        },
+        {
+          name: 'ecc-fe-soc-ysyx-am',
+          display_name: 'ECC-FE YSYX AM SoC Harness',
+          description: 'Frontend SoC harness resource',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${socArchive.path}`,
+                  sha256: socArchive.sha256,
+                  size: socArchive.size,
+                  strip_prefix: 'ecc-fe-soc-ysyx-am',
+                },
+              },
+              requires: ['tool:ecc-fe-cpu-rtl'],
+            },
+          ],
+        },
+        {
+          name: 'ecc-fe-cpu-rtl',
+          display_name: 'ECC-FE CPU RTL Resources',
+          description: 'Frontend CPU RTL resource bundle',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${cpuRtlArchive.path}`,
+                  sha256: cpuRtlArchive.sha256,
+                  size: cpuRtlArchive.size,
+                  strip_prefix: 'ecc-fe-cpu-rtl',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: join(toolsDir, 'ecc-fe', 'latest'),
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: 'old-ecc-fe-sha',
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+        'tool:ecc-fe-soc-ysyx-am': {
+          type: 'tool',
+          name: 'ecc-fe-soc-ysyx-am',
+          version: 'latest',
+          path: join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'),
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: 'old-ecc-fe-soc-sha',
+          executable: '',
+          detected_executables: [],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+
+    const cpuExtractStarted = deferred()
+    const releaseCpuExtract = deferred()
+    const waitedForCpuJob = deferred()
+    const extract = vi.fn(async (archivePath: string, destination: string) => {
+      if (archivePath.includes('ecc-fe-cpu-rtl-latest')) {
+        cpuExtractStarted.resolve()
+        await releaseCpuExtract.promise
+        await mkdir(join(destination, 'thirdparty', 'cv32e40p'), { recursive: true })
+        await writeFile(join(destination, 'thirdparty', 'cv32e40p', 'README.md'), 'fixture cpu rtl\n', 'utf8')
+        return
+      }
+      if (archivePath.includes('ecc-fe-soc-ysyx-am-latest')) {
+        await mkdir(destination, { recursive: true })
+        await writeFile(join(destination, 'ecos_sim_top.v'), 'module ecos_sim_top; endmodule\n', 'utf8')
+        return
+      }
+      if (archivePath.includes('ecc-fe-latest')) {
+        await mkdir(join(destination, 'bin'), { recursive: true })
+        const executable = join(destination, 'bin', 'ecc-fe')
+        await writeFile(executable, '#!/bin/sh\n', 'utf8')
+        await chmod(executable, 0o755)
+        return
+      }
+      throw new Error(`unexpected archive ${archivePath}`)
+    })
+    const verifySha256 = vi.fn(async () => true)
+    const progress = vi.fn((event: { resource_id: string; phase: string }) => {
+      if (event.resource_id === 'tool:ecc-fe-cpu-rtl' && event.phase === 'waiting_for_active_job') {
+        waitedForCpuJob.resolve()
+      }
+    })
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      archiveExtractor: extract,
+      sha256Verifier: verifySha256,
+    })
+
+    const firstUpdate = service.updateResource('tool:ecc-fe', progress)
+    await withTimeout(cpuExtractStarted.promise, 2000)
+    const secondUpdate = service.updateResource('tool:ecc-fe-soc-ysyx-am', progress)
+
+    let waitError: unknown = null
+    try {
+      await withTimeout(waitedForCpuJob.promise, 2000)
+    } catch (error) {
+      waitError = error
+    } finally {
+      releaseCpuExtract.resolve()
+    }
+    await expect(Promise.all([firstUpdate, secondUpdate])).resolves.toEqual([
+      {
+        status: 'started',
+        resource_id: 'tool:ecc-fe',
+        version: 'latest',
+      },
+      {
+        status: 'started',
+        resource_id: 'tool:ecc-fe-soc-ysyx-am',
+        version: 'latest',
+      },
+    ])
+    if (waitError) throw waitError
+
+    const cpuExtractCalls = extract.mock.calls.filter(([archivePath]) => {
+      return archivePath.includes('ecc-fe-cpu-rtl-latest')
+    })
+    expect(cpuExtractCalls).toHaveLength(1)
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      resource_id: 'tool:ecc-fe-cpu-rtl',
+      phase: 'waiting_for_active_job',
+    }))
+    const manifest = JSON.parse(
+      await readFile(join(resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, { version?: string; sha256?: string; detected_executables?: string[] }> }
+    expect(manifest.installed['tool:ecc-fe']).toMatchObject({
+      version: 'latest',
+      sha256: archive.sha256,
+    })
+    expect(manifest.installed['tool:ecc-fe-soc-ysyx-am']).toMatchObject({
+      version: 'latest',
+      sha256: socArchive.sha256,
+    })
+    expect(manifest.installed['tool:ecc-fe-cpu-rtl']).toMatchObject({
+      version: 'latest',
+      sha256: cpuRtlArchive.sha256,
+      detected_executables: [],
+    })
   })
 
   it('does not fetch rolling release sidecars while listing resources', async () => {

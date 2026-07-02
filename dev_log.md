@@ -11832,3 +11832,41 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `ecc-fe` release 的波形清理规则需要 commit/push 后由 GitHub Actions 生效；本地未实际运行 release 打包。
 - 如果未来某个资源包确实需要携带工具测试 fixture 波形，应在对应工具仓库中单独定义边界，不应复用 ECOS/ECC-FE 项目生成物规则。
+
+# 第 189 次 开发
+
+## 开发目标
+
+修复 Resource Manager 中多个资源同时更新、且共享同一个依赖资源时出现 `Job already active for tool:ecc-fe-cpu-rtl` 的并发失败，并补强 manifest 并发写入的鲁棒性。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 在资源安装/更新依赖链外层增加同资源操作 Promise 复用；当另一个更新流程已经在安装同一个依赖时，后来的流程等待已有任务完成，而不是抛出 `Job already active`。
+  - 增加 manifest 写入锁，避免并发安装/更新时多个写入同时操作 `manifest.json`。
+  - manifest 临时文件名改为 `randomUUID()`，避免同毫秒并发写入产生相同 tmp 路径。
+  - tool/PDK 安装完成写 manifest 时改为锁内读取最新 manifest 后合并当前 entry，避免两个顶层资源更新互相覆盖已安装条目。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 新增 CPU RTL fixture 和 deferred 测试工具。
+  - 新增并发更新回归测试：`tool:ecc-fe` 与 `tool:ecc-fe-soc-ysyx-am` 同时更新且共享 `tool:ecc-fe-cpu-rtl` 依赖时，CPU RTL 只安装一次，第二个流程等待活跃依赖任务，最终三个 manifest 条目都保留。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager 并发更新修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron exec vitest run electron/services/resourceManagerService.test.ts`，通过：22 个测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次只修复 Resource Manager 后端并发安装/更新链路；GUI 需要用户重新运行后手动验证“批量/连续点击更新”体验。
+- 其它少见的非安装类 manifest 读改写路径已通过写锁避免 tmp 冲突，但如果未来需要支持高频并发激活/卸载，也建议继续收敛为锁内读改写。
