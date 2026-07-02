@@ -128,11 +128,19 @@
                     <p v-if="directoryError" class="mt-2 text-xs text-red-500 flex items-center gap-1">
                       <i class="ri-error-warning-fill"></i> {{ directoryError }}
                     </p>
-                    <p v-else-if="managedWorkspaceRoot" class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
-                      <i class="ri-information-line"></i> Workspace path defaults to {{ managedWorkspacePreview }}.
+                    <p
+                      v-else-if="managedWorkspacePreview"
+                      class="mt-2 flex items-center gap-1 text-xs text-(--text-secondary)"
+                    >
+                      <i class="ri-information-line"></i> Workspace path defaults to
+                      {{ managedWorkspacePreview }}.
                     </p>
-                    <p v-else-if="!config.directory" class="mt-2 text-xs text-(--text-secondary) flex items-center gap-1">
-                      <i class="ri-information-line"></i> The path cannot contain spaces or Chinese characters.
+                    <p
+                      v-else-if="!config.directory"
+                      class="mt-2 flex items-center gap-1 text-xs text-(--text-secondary)"
+                    >
+                      <i class="ri-information-line"></i> The path cannot contain spaces
+                      or Chinese characters.
                     </p>
                   </div>
                 </div>
@@ -645,6 +653,7 @@ const scannedRtlFiles = ref<string[]>([])
 const directorySelectedFiles = ref<string[]>([])
 const manuallyAddedFiles = ref<string[]>([])
 const showBrowseMenu = ref(false)
+const directoryManuallySelected = ref(false)
 
 const steps = [
   { id: 1, title: 'Basic Info' },
@@ -670,14 +679,16 @@ const ensurePdksLoaded = async () => {
 }
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
-const directoryManuallySelected = ref(false)
-const managedWorkspaceRoot = computed(() => normalizePath(props.initialConfig?.managedWorkspaceRoot ?? ''))
+const managedWorkspaceRoot = computed(() =>
+  normalizePath(props.initialConfig?.managedWorkspaceRoot ?? ''),
+)
 const shouldDeriveManagedDirectory = computed(() =>
   Boolean(props.initialConfig?.deriveDirectoryFromDesign && managedWorkspaceRoot.value),
 )
 const managedWorkspacePreview = computed(() => {
-  if (!managedWorkspaceRoot.value) return ''
-  const workspaceName = String(config.value.parameters.design || '<workspace_name>').trim() || '<workspace_name>'
+  if (!shouldDeriveManagedDirectory.value) return ''
+  const workspaceName =
+    String(config.value.parameters.design || '').trim() || '<workspace_name>'
   return joinPath(managedWorkspaceRoot.value, workspaceName)
 })
 
@@ -688,16 +699,16 @@ function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): Work
     pdk_root: initialConfig?.pdk_root ?? '',
     parameters: {
       // 基本信息
-      design: '',           // 项目/设计名称 -> "Design"
-      description: '',      // 项目描述
+      design: '', // 项目/设计名称 -> "Design"
+      description: '', // 项目描述
       // 设计参数
-      top_module: '',       // 顶层模块名 -> "Top module"
-      clock: '',            // 时钟信号名 -> "Clock"
+      top_module: '', // 顶层模块名 -> "Top module"
+      clock: '', // 时钟信号名 -> "Clock"
       // 工艺参数
-      frequency_max: 50,   // 目标频率 -> "Frequency max [MHz]"
+      frequency_max: 50, // 目标频率 -> "Frequency max [MHz]"
       core_utilization: 0.2, // 核心利用率 -> "Core.Utilitization"
-      target_density: 0.3,  // 目标密度 -> "Target density"
-      max_fanout: 32,       // 最大扇出 -> "Max fanout"
+      target_density: 0.3, // 目标密度 -> "Target density"
+      max_fanout: 32, // 最大扇出 -> "Max fanout"
       ...(initialConfig?.parameters ?? {}),
     },
     origin_def: initialConfig?.origin_def ?? '',
@@ -706,13 +717,17 @@ function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): Work
   }
 }
 
-function syncManagedWorkspaceDirectory() {
+const syncManagedWorkspaceDirectory = () => {
   if (!shouldDeriveManagedDirectory.value || directoryManuallySelected.value) return
   const workspaceName = String(config.value.parameters.design || '').trim()
-  config.value.directory = workspaceName ? joinPath(managedWorkspaceRoot.value, workspaceName) : ''
+  config.value.directory = workspaceName
+    ? joinPath(managedWorkspaceRoot.value, workspaceName)
+    : ''
 }
 
-watch(() => config.value.parameters.design, syncManagedWorkspaceDirectory, { immediate: true })
+watch(() => config.value.parameters.design, syncManagedWorkspaceDirectory, {
+  immediate: true,
+})
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '')
@@ -721,7 +736,9 @@ function normalizePath(path: string): string {
 function joinPath(...parts: string[]): string {
   const joined = parts
     .filter(Boolean)
-    .map((part, index) => index === 0 ? part.replace(/\/+$/g, '') : part.replace(/^\/+|\/+$/g, ''))
+    .map((part, index) =>
+      index === 0 ? part.replace(/\/+$/g, '') : part.replace(/^\/+|\/+$/g, ''),
+    )
     .join('/')
   return normalizePath(joined)
 }
