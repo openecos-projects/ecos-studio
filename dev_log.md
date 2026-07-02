@@ -11870,3 +11870,43 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 本次只修复 Resource Manager 后端并发安装/更新链路；GUI 需要用户重新运行后手动验证“批量/连续点击更新”体验。
 - 其它少见的非安装类 manifest 读改写路径已通过写锁避免 tmp 冲突，但如果未来需要支持高频并发激活/卸载，也建议继续收敛为锁内读改写。
+
+# 第 190 次 开发
+
+## 开发目标
+
+推进 ECOS 自家 latest 资源的 metadata.json 锁定链路：让 ECC-FE split release 后续也发布 metadata，并让 registry 对已经具备 metadata 的资源优先使用 metadata_url 刷新静态 sha256/size。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 为 `ecc-fe-soc-ysyx-am-latest`、`ecc-fe-cpu-rtl-latest`、`ecc-fe-difftest-ref-latest`、`ecc-fe-examples-latest` 增加 `.metadata.json` 生成与 release 上传。
+  - 每个 metadata 文件记录 `name`、`version`、`commit`、`sha256`、`size`、`built_at`、`archive`、`strip_prefix`，供 registry refresh CI 后续刷新静态锁字段。
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 为 `tool:ecc-fe`、`tool:ecc-fe-cpu-rtl`、`tool:ecc-fe-soc-ysyx-am`、`tool:ecc-fe-difftest-ref`、`tool:ecc-fe-examples` 增加 `metadata_url`。
+  - 将 `tool:surfer` 从 zip 资源切换到已发布的 `surfer-latest.tar.gz`，增加 `metadata_url`。
+  - 通过 registry refresh 脚本从 metadata 刷新 ECC-FE split 资源和 Surfer tar.gz 对应的静态 `sha256` 和 `size`。
+
+## 验证情况
+
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml` 的 YAML 解析检查，返回 `yaml ok`。
+- 已将 `/home/luyoung/ecos-studio/ecc-fe` 提交并推送到 `openecos-projects/ecc-fe main`，提交为 `4f40dda Publish metadata for split ECC-FE resources`，并确认 split metadata release URL 已可访问。
+- 已将 `/home/luyoung/surfer` 空提交推送到 `Luyoung0001/surfer drawing_but_has_cool_features`，提交为 `985ad9e Trigger ECOS Surfer asset release`，用于重新触发 Surfer 资源发布；已确认 `surfer-latest.tar.gz`、`.sha256`、`.metadata.json` 均可访问。
+- 已在 `/home/luyoung/ecos-registry` 执行 `python3 .github/scripts/refresh_registry_locks.py tool-registry.json`，成功从 metadata 刷新 ECC-FE split 资源与 Surfer tar.gz 的静态 `sha256`/`size`。
+- 已在 `/home/luyoung/ecos-registry` 执行 `python3 -m unittest discover -s tests`，通过：20 个测试全部通过。
+- 已在 `/home/luyoung/ecos-registry` 执行 `python3 .github/scripts/validate_registry.py tool-registry.json --check-urls`，通过。
+- 已在 `/home/luyoung/ecos-registry` 执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次已按用户要求执行 `ecc-fe` commit/push 和 Surfer trigger push；尚未提交/push `/home/luyoung/ecos-registry` 与 `/home/luyoung/ecos-studio` 主仓记录。
+
+## 已知后续风险
+
+- registry 当前仍保留 `sha256_url` 作为 fallback 和人工检查入口；安装校验仍以静态 `sha256` 为准。
+- `/home/luyoung/ecos-registry/tool-registry.json` 还未 commit/push；需要后续提交后 registry CI 才会接收 metadata URL 与新静态锁值。
