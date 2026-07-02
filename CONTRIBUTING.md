@@ -119,6 +119,43 @@ pnpm run test
 pnpm run build
 ```
 
+### GUI Quality Checks
+
+For most GUI changes, run the workspace quality gate from the GUI root:
+
+```bash
+cd ecos/gui
+pnpm run check
+```
+
+`pnpm run check` runs typecheck, lint, format check, and unit tests. CI mirrors
+this in the `GUI Checks` job as four separate steps so failures still point at
+the affected phase.
+
+Use targeted checks when iterating locally:
+
+```bash
+pnpm run lint
+pnpm run fmt:check
+pnpm run test
+pnpm run doctor
+```
+
+`doctor` is a local environment diagnostic for Node.js, pnpm, GUI dependencies,
+optional ECC/Nix availability, and native desktop resources. It does not start
+Electron.
+
+For Electron main, preload, or IPC bridge changes, build the desktop bundle and
+run the manual smoke test:
+
+```bash
+pnpm run desktop:build
+pnpm run desktop:smoke
+```
+
+The smoke test starts Electron, checks that the preload bridge exists, and
+verifies that a key IPC call reaches the main process.
+
 Use the more focused package scripts when the change is limited to one package:
 
 ```bash
