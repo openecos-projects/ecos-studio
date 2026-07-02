@@ -382,6 +382,7 @@ import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
+  formatResourceSizeMb,
   primaryActionForRow,
   resourceToRow,
   resolveRowInstallPath,
@@ -643,9 +644,7 @@ function resolveInstallPath(row: ResourceRow): string {
 }
 
 function formatSize(sizeMb: number): string {
-  if (sizeMb <= 0) return '0 MB'
-  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
-  return `${Math.round(sizeMb)} MB`
+  return formatResourceSizeMb(sizeMb)
 }
 
 function goHome(): void {

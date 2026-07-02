@@ -1394,6 +1394,7 @@ import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
+import { simContextsEqual, type SimRunContext } from '@/utils/simRunContext'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
@@ -1532,12 +1533,6 @@ interface DiagnosticCount {
 
 interface SourcePathItem extends PathItem {
   diagnostics?: DiagnosticCount
-}
-
-interface SimRunContext {
-  suite: SimSuite
-  mode: 'all' | 'selected'
-  cases: string[]
 }
 
 interface RtlReviewIssue {
@@ -2948,16 +2943,6 @@ function simResultFreshnessText(): { state: 'empty' | 'fresh' | 'stale' | 'runni
     return { state: 'fresh', message: 'Matches current selection' }
   }
   return { state: 'stale', message: 'Results out of date' }
-}
-
-function simContextsEqual(left: SimRunContext, right: SimRunContext): boolean {
-  return left.suite === right.suite
-    && left.mode === right.mode
-    && normalizedCaseKey(left.cases) === normalizedCaseKey(right.cases)
-}
-
-function normalizedCaseKey(items: string[]): string {
-  return [...new Set(items.map((item) => item.trim()).filter(Boolean))].sort().join('\n')
 }
 
 function splitCompileFlags(value: string): string[] {

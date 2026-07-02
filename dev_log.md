@@ -11950,3 +11950,78 @@ fatal error: driver/difftest.h: No such file or directory
 
 - registry refresh 脚本仍保留 `sha256_url` fallback 支持；当前 registry 清单不再使用该字段。
 - 需要后续 commit/push `/home/luyoung/ecos-studio` 与 `/home/luyoung/ecos-registry` 的改动后，远端 GUI 与 registry 才会同步这次迁移。
+
+# 第 192 次 开发
+
+## 开发目标
+
+修复 Frontend Sim 结果新鲜度判断的假阳性：`add` 被构建并报告为 `add.soc` 后，GUI 不应提示 `Simulation results out of date`。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/utils/simRunContext.ts`
+  - 新增 Sim 运行上下文比较工具。
+  - 对用于比较的 case 名进行归一化，支持将 `add.soc`、`add.soc.bin` 视为 CPU test case `add`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/utils/simRunContext.test.ts`
+  - 覆盖 `add` 与 `add.soc` 等价、不同 case 不等价、suite/mode 仍必须一致的回归场景。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - Sim 结果 freshness 判断改为调用 `simContextsEqual` 工具函数。
+  - 删除页面内本地的严格字符串 case key 比较，避免 `add` 与 `add.soc` 这种程序名/SoC 镜像名差异造成 stale 假阳性。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Sim freshness 归一化修复。
+
+## 验证情况
+
+- 已确认 `/home/luyoung/test0702a` 的 Sim 结果实际为 pass，结果 case 为 `add.soc`，当前默认 CPU test 为 `add`。
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/utils/simRunContext.test.ts`，通过：3 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/renderer typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次只修复前端 freshness 比较；需要用户重新打开或刷新 GUI 后，在 `test0702a` 的 Sim 页面确认 warning 消失。
+
+# 第 193 次 开发
+
+## 开发目标
+
+修复 Resource Manager 中小体积资源显示为 `0 MB` 的展示问题，让 MB 级展示精确到小数点后两位。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - `formatResourceSize` 不再先四舍五入为整数 MB，而是保留精确 MB 浮点值用于汇总。
+  - 新增 `formatResourceSizeMb`，统一将 MB 显示为 `xx.xx MB`，GB 显示为 `xx.xx GB`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/PluginToolsView.vue`
+  - 选中下载资源的总大小展示复用 `formatResourceSizeMb`，避免总量继续显示整数 MB 或 `0 MB`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 更新资源大小格式化断言，覆盖小资源 `0.29 MB`、小数 MB `0.13 MB` 和 GB 显示。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Resource Manager size 展示修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/renderer exec vitest run src/views/pluginToolsRows.test.ts src/utils/simRunContext.test.ts`，通过：18 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/renderer typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 需要用户刷新或重启 GUI 后确认 Resource Manager 列表和底部 Download 总大小都按两位小数显示。

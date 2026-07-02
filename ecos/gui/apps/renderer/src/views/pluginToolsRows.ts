@@ -54,11 +54,14 @@ const toolMeta: Record<string, { icon: string; accent: string }> = {
 export function formatResourceSize(size: number | null): { sizeLabel: string; sizeMb: number } {
   if (!size || size <= 0) return { sizeLabel: '-', sizeMb: 0 }
 
-  const sizeMb = Math.round(size / (1024 * 1024))
-  if (sizeMb >= 1024) {
-    return { sizeLabel: `${(sizeMb / 1024).toFixed(2)} GB`, sizeMb }
-  }
-  return { sizeLabel: `${sizeMb} MB`, sizeMb }
+  const sizeMb = size / (1024 * 1024)
+  return { sizeLabel: formatResourceSizeMb(sizeMb), sizeMb }
+}
+
+export function formatResourceSizeMb(sizeMb: number): string {
+  if (!Number.isFinite(sizeMb) || sizeMb <= 0) return '0.00 MB'
+  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
+  return `${sizeMb.toFixed(2)} MB`
 }
 
 function versionLabel(resource: ResourceItem): string {

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ResourceItem } from '@/api/plugin'
 import {
   formatResourceSize,
+  formatResourceSizeMb,
   frontendFlowTagsFor,
   isEdaToolRow,
   managedInstallLocation,
@@ -50,8 +51,8 @@ describe('pluginToolsRows', () => {
       type: 'pdk',
       name: 'ICSPROUT 55nm PDK',
       version: 'v1.01',
-      sizeLabel: '412 MB',
-      sizeMb: 412,
+      sizeLabel: '411.99 MB',
+      sizeMb: 411.9873046875,
       statusKind: 'available',
       statusText: 'Available',
     })
@@ -246,8 +247,12 @@ describe('pluginToolsRows', () => {
 
   it('formats resource sizes from bytes', () => {
     expect(formatResourceSize(null)).toEqual({ sizeLabel: '-', sizeMb: 0 })
-    expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '412 MB', sizeMb: 412 })
+    expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '411.99 MB', sizeMb: 411.9873046875 })
+    expect(formatResourceSize(300 * 1024)).toEqual({ sizeLabel: '0.29 MB', sizeMb: 0.29296875 })
     expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({ sizeLabel: '2.00 GB', sizeMb: 2048 })
+    expect(formatResourceSizeMb(0)).toBe('0.00 MB')
+    expect(formatResourceSizeMb(0.125)).toBe('0.13 MB')
+    expect(formatResourceSizeMb(2048)).toBe('2.00 GB')
   })
 
   it('chooses actions from resource action list', () => {
