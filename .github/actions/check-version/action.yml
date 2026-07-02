@@ -1,9 +1,13 @@
 name: Check ECOS Studio Version Consistency
-description: Verify release version fields across ecos-studio package metadata. Optionally verify an expected git tag.
+description: Verify release version fields across ecos-studio package metadata. Optionally verify an expected git tag or release branch.
 
 inputs:
   expected_tag:
     description: Expected tag (for example, v0.1.0-alpha.3). If set, also verify the tag matches the detected version.
+    required: false
+    default: ""
+  expected_ref:
+    description: Expected tag or release branch ref. Accepted forms include refs/tags/vX, vX, refs/heads/release/vX, and release/vX.
     required: false
     default: ""
 
@@ -29,3 +33,4 @@ runs:
       run: python3 .github/scripts/check-version.py
       env:
         EXPECTED_TAG: ${{ inputs.expected_tag }}
+        EXPECTED_REF: ${{ inputs.expected_ref || inputs.expected_tag }}

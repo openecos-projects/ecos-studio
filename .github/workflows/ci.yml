@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*'
   pull_request:
   workflow_dispatch:
 
@@ -64,13 +66,23 @@ jobs:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
     needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: >-
+      ${{
+        startsWith(github.ref, 'refs/heads/release/v') ||
+        startsWith(github.base_ref, 'release/v') ||
+        needs.changes.outputs.gui == 'true' ||
+        needs.changes.outputs.version == 'true' ||
+        needs.changes.outputs.build == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Check version
         uses: ./.github/actions/check-version
+        with:
+          expected_ref: ${{ startsWith(github.ref, 'refs/heads/release/v') && github.ref || startsWith(github.base_ref, 'release/v') && github.base_ref || '' }}
 
   vue-tsc:
     name: Vue Typecheck
