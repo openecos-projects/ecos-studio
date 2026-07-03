@@ -50,6 +50,7 @@
                 libxkbcommon
                 libGL
                 wayland
+                expat
               ]
             );
             nativeBuildInputs = with pkgs; [
