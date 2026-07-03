@@ -110,6 +110,29 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('uses the sizer workspace directory convention for steps with spaces', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'Timing optimization', tool: 'sizer', state: 'Incomplete' },
+    ])
+    await mkdir(join(root, 'timing_optimization_sizer', 'log'), { recursive: true })
+    await writeFile(
+      join(root, 'timing_optimization_sizer', 'log', 'Timing optimization.log'),
+      'sizer log',
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.flow.steps[0].directory).toBe(join(root, 'timing_optimization_sizer'))
+    expect(index.flow.steps[0].resources.log.file).toMatchObject({
+      path: join(root, 'timing_optimization_sizer', 'log', 'Timing optimization.log'),
+      exists: true,
+      kind: 'log',
+    })
+  })
+
   it('exposes workspace-level view package tech resources from the design view directory', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
