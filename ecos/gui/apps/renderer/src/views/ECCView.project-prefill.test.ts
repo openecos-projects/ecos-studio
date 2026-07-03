@@ -15,6 +15,7 @@ describe('ECCView project management handoff', () => {
   it('prefills branch artifact origins from project management query parameters', () => {
     expect(source).toContain('originDef')
     expect(source).toContain('originVerilog')
+    expect(source).toContain('sourceWorkspacePath')
     expect(source).toContain('sourceOutputPath')
     expect(source).toContain('sourceOutputType')
     expect(source).toContain('startStep')
@@ -25,6 +26,21 @@ describe('ECCView project management handoff', () => {
     const prefillSource = source.slice(prefillStart, prefillEnd)
     expect(prefillSource).toContain('origin_def: originDef')
     expect(prefillSource).toContain('origin_verilog: originVerilog')
+  })
+
+  it('reuses source workspace config when creating a branch workspace', () => {
+    expect(source).toContain('loadSourceWorkspaceInitialConfig')
+    expect(source).toContain('sourceWorkspacePath')
+    expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
+    expect(source).toContain("readOptionalProjectTextFile('home/flow.json'")
+    expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
+    expect(source).toContain("readOptionalProjectTextFile('config/db_default_config.json'")
+    expect(source).toContain('tech_lef_path')
+    expect(source).toContain('lef_paths')
+    expect(source).toContain('lib_path')
+    expect(source).toContain('sdc_path')
+    expect(source).toContain('sourceWorkspaceConfig')
+    expect(source).toContain('mergeBranchInitialConfig')
   })
 
   it('records project managed workspaces into project.json after the existing wizard creates them', () => {

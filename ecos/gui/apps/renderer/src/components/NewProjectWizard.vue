@@ -16,6 +16,17 @@
           <div class="mb-7">
             <h1 class="text-2xl font-bold text-(--text-primary)">New Workspace</h1>
             <p class="mt-1 text-sm text-(--text-secondary)">Build a project-scoped RTL2GDS workspace.</p>
+            <div
+              v-if="sourceContext"
+              class="mt-4 rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-3 text-xs"
+            >
+              <p class="font-bold text-(--text-primary)">Created from</p>
+              <p class="mt-1 truncate text-(--text-secondary)">
+                {{ sourceContext.projectName || projectContext.project_name }} /
+                {{ sourceContext.workspaceName || sourceContext.workspaceId }} /
+                {{ sourceContext.step }} output
+              </p>
+            </div>
           </div>
 
           <div class="grid gap-3">
@@ -229,6 +240,15 @@
                     </div>
                   </div>
 
+                  <p
+                    v-if="sourceContext"
+                    class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
+                  >
+                    Cannot select steps before the source output. This workspace starts at
+                    {{ sourceContext.startStep || flowStartStep }} and reuses previous results
+                    from {{ sourceContext.workspaceName || sourceContext.workspaceId }}.
+                  </p>
+
                   <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <div
                       v-for="(step, index) in hardenFlowSteps"
@@ -239,10 +259,13 @@
                         type="button"
                         class="flex min-h-[104px] w-full cursor-pointer flex-col rounded-xl border p-4 text-left transition-colors duration-200"
                         :class="[
-                          isFlowStepSelected(step.name)
-                            ? 'border-(--accent-color) bg-(--accent-color)/10'
-                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                          isFlowStepLocked(step.name)
+                            ? 'cursor-not-allowed border-(--border-color)/60 bg-(--bg-secondary)/25 opacity-45'
+                            : isFlowStepSelected(step.name)
+                              ? 'border-(--accent-color) bg-(--accent-color)/10'
+                              : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45',
                         ]"
+                        :disabled="isFlowStepLocked(step.name)"
                         @click="setFlowBoundary(step.name)"
                       >
                         <span class="mb-3 flex items-center justify-between gap-3">
@@ -264,6 +287,12 @@
                           />
                         </span>
                         <span class="text-xs leading-5 text-(--text-secondary)">{{ step.description }}</span>
+                        <span
+                          v-if="isFlowStepLocked(step.name)"
+                          class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
+                        >
+                          Reused from source
+                        </span>
                       </button>
                       <i
                         v-if="index < hardenFlowSteps.length - 1"
@@ -888,6 +917,17 @@ interface PdkWizardStep {
   filters: DesktopFileDialogOptions['filters']
 }
 
+interface SourceContext {
+  projectName?: string
+  workspaceId?: string
+  workspaceName?: string
+  workspacePath?: string
+  step?: string
+  outputPath?: string
+  outputType?: string
+  startStep?: string
+}
+
 const emit = defineEmits<Emits>()
 
 const currentStep = ref(1)
@@ -903,19 +943,37 @@ const scannedRtlFiles = ref<string[]>([])
 const directorySelectedFiles = ref<string[]>([])
 const manuallyAddedFiles = ref<string[]>([])
 const showBrowseMenu = ref(false)
-const workspaceName = ref('')
-const projectParentPath = ref('')
-const designNameTouched = ref(false)
-const flowStartStep = ref<FlowStepName>('Synthesis')
-const flowEndStep = ref<FlowStepName>('Harden')
-const activeDesignInputType = ref<DesignInputKey>('rtl')
-const pdkConfigMode = ref<'default' | 'manual'>('default')
+const workspaceName = ref(initialWorkspaceName(props.initialConfig))
+const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)))
+const designNameTouched = ref(
+  String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
+)
+const flowStartStep = ref<FlowStepName>(
+  normalizeFlowStepName(
+    props.initialConfig?.flow_config?.start_step ?? props.initialConfig?.parameters?.start_step,
+    'Synthesis',
+  ),
+)
+const flowEndStep = ref<FlowStepName>(
+  normalizeFlowStepName(
+    props.initialConfig?.flow_config?.end_step ?? props.initialConfig?.parameters?.end_step,
+    'Harden',
+  ),
+)
+const activeDesignInputType = ref<DesignInputKey>(
+  flowStartStep.value === 'Synthesis' ? 'rtl' : 'def',
+)
+const pdkConfigMode = ref<'default' | 'manual'>(
+  normalizePdkConfigMode(props.initialConfig?.pdk_config_mode ?? props.initialConfig?.source_config?.pdk_config_mode),
+)
 const activePdkWizardStep = ref<PdkResourceKey>('tech_lef')
 const focusedAvailablePdkFile = ref('')
 const focusedSelectedPdkFile = ref('')
-const filelistPath = ref('')
-const sdcPath = ref('')
-const dieAreaMode = ref<DieAreaMode>('utilitization_margin')
+const filelistPath = ref(props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? '')
+const sdcPath = ref(props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '')
+const dieAreaMode = ref<DieAreaMode>(
+  normalizeDieAreaMode(props.initialConfig?.parameters?.die_area_mode),
+)
 
 const steps = [
   { id: 1, title: 'Project Setup' },
@@ -969,54 +1027,34 @@ const projectContext = ref<ProjectContext>({
   project_json_path: '',
 })
 
-const config = ref<WorkspaceConfig>({
-  directory: '',
-  pdk: 'ics55',
-  pdk_root: '',
-  parameters: {
-    design: '',
-    description: '',
-    top_module: '',
-    clock: '',
-    frequency_max: 50,
-    max_fanout: 32,
-    die_area_mode: 'utilitization_margin',
-    die_width: 100,
-    die_height: 100,
-    utilitization: 0.6,
-    margin: 0,
-  },
-  origin_def: '',
-  origin_verilog: '',
-  rtl_list: [],
-  filelist: '',
-  design_input_mode: 'rtl',
-  sdc: '',
-  pdk_config_mode: 'default',
-  flow_config: {
-    start_step: 'Synthesis',
-    end_step: 'Harden',
-    steps: hardenFlowSteps.map((step) => step.name),
-  },
-  pdk_config: {
-    mode: 'default',
-    tech_lef: [],
-    cell_lef: [],
-    liberty: [],
-  },
-  pdk_json: '',
-  project_context: projectContext.value,
+const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
+const sourceContext = computed<SourceContext | null>(() => {
+  const context = props.initialConfig?.source_context
+  if (!context?.workspaceId && !context?.workspacePath && !context?.step) return null
+  return context
+})
+const managedWorkspaceRoot = computed(() =>
+  normalizePath(props.initialConfig?.managedWorkspaceRoot ?? ''),
+)
+const shouldDeriveManagedDirectory = computed(() =>
+  Boolean(props.initialConfig?.deriveDirectoryFromDesign && managedWorkspaceRoot.value),
+)
+const managedWorkspacePreview = computed(() => {
+  if (!shouldDeriveManagedDirectory.value) return ''
+  return deriveManagedWorkspacePath(workspaceName.value.trim() || '<workspace_name>')
 })
 
 const { importedPdks, loadPdks, importPdk: doImportPdk, removePdk } = usePdkManager()
 const { showToast } = useWorkspace()
-const selectedPdkId = ref<string>('')
+const selectedPdkId = ref<string>(
+  props.initialConfig?.pdk ?? props.initialConfig?.source_config?.pdk ?? '',
+)
 const hasLoadedPdks = ref(false)
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
-  tech_lef: [],
-  cell_lef: [],
-  liberty: [],
+  tech_lef: [...(props.initialConfig?.pdk_config?.tech_lef ?? props.initialConfig?.source_config?.pdk_config?.tech_lef ?? [])],
+  cell_lef: [...(props.initialConfig?.pdk_config?.cell_lef ?? props.initialConfig?.source_config?.pdk_config?.cell_lef ?? [])],
+  liberty: [...(props.initialConfig?.pdk_config?.liberty ?? props.initialConfig?.source_config?.pdk_config?.liberty ?? [])],
 })
 
 const manuallyImportedPdkFiles = ref<Record<PdkResourceKey, string[]>>({
@@ -1025,6 +1063,170 @@ const manuallyImportedPdkFiles = ref<Record<PdkResourceKey, string[]>>({
   liberty: [],
 })
 
+function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): WorkspaceConfig {
+  const source_config = initialConfig?.source_config
+  const startStep = flowStartStep.value
+  const endStep = flowEndStep.value
+  const defaultPdkConfig = {
+    mode: pdkConfigMode.value,
+    tech_lef: [],
+    cell_lef: [],
+    liberty: [],
+  }
+
+  return {
+    directory: normalizePath(
+      initialConfig?.directory ?? joinPath(projectContext.value.project_root, workspaceName.value),
+    ),
+    pdk: initialConfig?.pdk ?? source_config?.pdk ?? 'ics55',
+    pdk_root: initialConfig?.pdk_root ?? source_config?.pdk_root ?? '',
+    parameters: {
+      design: '',
+      description: '',
+      top_module: '',
+      clock: '',
+      frequency_max: 50,
+      max_fanout: 32,
+      die_area_mode: dieAreaMode.value,
+      die_width: 100,
+      die_height: 100,
+      utilitization: 0.6,
+      margin: 0,
+      ...(source_config?.parameters ?? {}),
+      ...(initialConfig?.parameters ?? {}),
+    },
+    origin_def: initialConfig?.origin_def ?? source_config?.origin_def ?? '',
+    origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
+    rtl_list: initialConfig?.rtl_list ? [...initialConfig.rtl_list] : source_config?.rtl_list ? [...source_config.rtl_list] : [],
+    filelist: initialConfig?.filelist ?? source_config?.filelist ?? filelistPath.value,
+    design_input_mode: startStep === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    sdc: initialConfig?.sdc ?? source_config?.sdc ?? sdcPath.value,
+    pdk_config_mode:
+      initialConfig?.pdk_config_mode ?? source_config?.pdk_config_mode ?? 'default',
+    flow_config: initialConfig?.flow_config ?? {
+      start_step: startStep,
+      end_step: endStep,
+      steps: flowStepsBetween(startStep, endStep),
+    },
+    pdk_config: initialConfig?.pdk_config ?? source_config?.pdk_config ?? defaultPdkConfig,
+    pdk_json: initialConfig?.pdk_json ?? source_config?.pdk_json ?? '',
+    project_context: initialConfig?.project_context ?? projectContext.value,
+    source_context: initialConfig?.source_context,
+    source_config,
+  }
+}
+
+function createInitialProjectContext(
+  initialConfig?: WorkspaceWizardInitialConfig,
+): ProjectContext {
+  const projectRoot = initialProjectRoot(initialConfig)
+  return {
+    mode: 'select',
+    project_name: projectRoot ? getFileName(projectRoot) : '',
+    project_root: projectRoot,
+    project_json_path: projectRoot ? joinPath(projectRoot, 'project.json') : '',
+  }
+}
+
+function initialProjectRoot(initialConfig?: WorkspaceWizardInitialConfig) {
+  if (initialConfig?.managedWorkspaceRoot) {
+    return normalizePath(initialConfig.managedWorkspaceRoot)
+  }
+  if (initialConfig?.directory) {
+    return parentPath(initialConfig.directory)
+  }
+  return ''
+}
+
+function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
+  if (initialConfig?.directory) {
+    return getFileName(initialConfig.directory)
+  }
+  return String(initialConfig?.parameters?.design ?? '').trim()
+}
+
+function parentPath(path: string) {
+  const normalized = normalizePath(path)
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+  const parent = parts.slice(0, -1).join('/')
+  return normalized.startsWith('/') ? `/${parent}` : parent
+}
+
+function normalizePath(path: string) {
+  return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+function normalizeFlowStepName(value: unknown, fallback: FlowStepName): FlowStepName {
+  const candidate = String(value ?? '')
+  const aliases: Record<string, FlowStepName> = {
+    synth: 'Synthesis',
+    synthesis: 'Synthesis',
+    floor: 'Floorplan',
+    floorplan: 'Floorplan',
+    fanout: 'fixFanout',
+    fixfanout: 'fixFanout',
+    place: 'place',
+    placement: 'place',
+    cts: 'CTS',
+    legal: 'legalization',
+    legalization: 'legalization',
+    route: 'route',
+    drc: 'drc',
+    filler: 'filler',
+    rcx: 'RCX',
+    sta: 'sta',
+    harden: 'Harden',
+  }
+  const alias = aliases[candidate.toLowerCase()]
+  if (alias) return alias
+  const validSteps: FlowStepName[] = [
+    'Synthesis',
+    'Floorplan',
+    'fixFanout',
+    'place',
+    'CTS',
+    'legalization',
+    'route',
+    'drc',
+    'filler',
+    'RCX',
+    'sta',
+    'Harden',
+  ]
+  return validSteps.includes(candidate as FlowStepName)
+    ? (candidate as FlowStepName)
+    : fallback
+}
+
+function normalizeDieAreaMode(value: unknown): DieAreaMode {
+  return value === 'width_height' ? 'width_height' : 'utilitization_margin'
+}
+
+function normalizePdkConfigMode(value: unknown): 'default' | 'manual' {
+  return value === 'manual' ? 'manual' : 'default'
+}
+
+function flowStepsBetween(startStep: FlowStepName, endStep: FlowStepName) {
+  const startIndex = hardenFlowSteps.findIndex((step) => step.name === startStep)
+  const endIndex = hardenFlowSteps.findIndex((step) => step.name === endStep)
+  const start = Math.min(startIndex, endIndex)
+  const end = Math.max(startIndex, endIndex)
+  return hardenFlowSteps.slice(start, end + 1).map((step) => step.name)
+}
+
+function deriveManagedWorkspacePath(workspaceName: string) {
+  return joinPath(managedWorkspaceRoot.value, workspaceName)
+}
+
+function syncManagedWorkspaceDirectory() {
+  if (!shouldDeriveManagedDirectory.value) return
+  projectContext.value.project_root = managedWorkspaceRoot.value
+  projectContext.value.project_name =
+    projectContext.value.project_name || getFileName(managedWorkspaceRoot.value)
+  projectContext.value.project_json_path = joinPath(managedWorkspaceRoot.value, 'project.json')
+  syncWorkspaceConfig()
+}
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
 const HAS_SPACE_RE = /\s/
 const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
@@ -1042,12 +1244,24 @@ const workspaceLocationError = computed(() => {
 
 const flowStartIndex = computed(() => hardenFlowSteps.findIndex((step) => step.name === flowStartStep.value))
 const flowEndIndex = computed(() => hardenFlowSteps.findIndex((step) => step.name === flowEndStep.value))
+const lockedFlowStepNames = computed(() => {
+  if (!sourceContext.value?.startStep) return []
+  const startStep = normalizeFlowStepName(sourceContext.value.startStep, flowStartStep.value)
+  const startIndex = hardenFlowSteps.findIndex((step) => step.name === startStep)
+  if (startIndex <= 0) return []
+  return hardenFlowSteps.slice(0, startIndex).map((step) => step.name)
+})
 const selectedFlowSteps = computed(() => {
   const start = Math.min(flowStartIndex.value, flowEndIndex.value)
   const end = Math.max(flowStartIndex.value, flowEndIndex.value)
   return hardenFlowSteps.slice(start, end + 1).map((step) => step.name)
 })
 const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
+const hasSelectedPdkConfig = computed(() =>
+  selectedPdkId.value.trim() !== ''
+  || config.value.pdk.trim() !== ''
+  || config.value.pdk_root.trim() !== '',
+)
 
 const designInputTypes = computed<DesignInputType[]>(() => {
   if (startsFromSynthesis.value) {
@@ -1105,7 +1319,7 @@ const canProceed = computed(() => {
     case 4:
       return designFilesReady()
     case 5:
-      if (selectedPdkId.value === '') return false
+      if (!hasSelectedPdkConfig.value) return false
       if (pdkConfigMode.value === 'default') return true
       return pdkSelections.value.tech_lef.length > 0 &&
         pdkSelections.value.cell_lef.length > 0 &&
@@ -1229,6 +1443,7 @@ function isFlowStepSelected(stepName: FlowStepName) {
 }
 
 function setFlowBoundary(stepName: FlowStepName) {
+  if (isFlowStepLocked(stepName)) return
   const index = hardenFlowSteps.findIndex((step) => step.name === stepName)
   if (index < 0) return
 
@@ -1264,9 +1479,48 @@ async function ensurePdksLoaded() {
   if (hasLoadedPdks.value) return
   hasLoadedPdks.value = true
   await loadPdks()
+  if (config.value.pdk || config.value.pdk_root) {
+    const matchedPdk = importedPdks.value.find((pdk) =>
+      pdk.id === selectedPdkId.value
+      || pdk.pdkId === config.value.pdk
+      || pdk.path === config.value.pdk_root,
+    )
+    if (matchedPdk) {
+      selectPdk(matchedPdk)
+      return
+    }
+  }
   if (importedPdks.value.length === 1) {
     selectPdk(importedPdks.value[0])
   }
+}
+
+function isFlowStepLocked(stepName: FlowStepName) {
+  return lockedFlowStepNames.value.includes(stepName)
+}
+
+function applySourceWorkspaceDefaults(initialConfig?: WorkspaceWizardInitialConfig) {
+  const source_config = initialConfig?.source_config
+  if (!source_config) return
+
+  if (!config.value.origin_def && source_config.origin_def) {
+    config.value.origin_def = source_config.origin_def
+  }
+  if (!config.value.origin_verilog && source_config.origin_verilog) {
+    config.value.origin_verilog = source_config.origin_verilog
+  }
+  if (!sdcPath.value && source_config.sdc) {
+    sdcPath.value = source_config.sdc
+  }
+  if (source_config.pdk_config) {
+    pdkSelections.value = {
+      tech_lef: [...(source_config.pdk_config.tech_lef ?? [])],
+      cell_lef: [...(source_config.pdk_config.cell_lef ?? [])],
+      liberty: [...(source_config.pdk_config.liberty ?? [])],
+    }
+  }
+  Object.assign(config.value.parameters, source_config.parameters ?? {})
+  syncWorkspaceConfig()
 }
 
 function closeBrowseMenu() {
@@ -1602,6 +1856,8 @@ function syncWorkspaceConfig() {
     ...projectContext.value,
   }
 }
+
+applySourceWorkspaceDefaults(props.initialConfig)
 
 function nextStep() {
   if (currentStep.value < steps.length && canProceed.value) {

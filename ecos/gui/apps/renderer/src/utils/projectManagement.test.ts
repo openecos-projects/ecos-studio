@@ -263,14 +263,16 @@ describe('project management model', () => {
     expect(nextWorkspaceId(project)).toBe('ws_0002')
     expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor')).toEqual({
       sourceWorkspaceId: 'ws_0001',
+      sourceWorkspacePath: '/projects/gcd/workspaces/ws_0001',
       step: 'Floor',
       targetWorkspaceId: 'ws_0002',
       targetWorkspacePath: '/projects/gcd/ws_0002',
       targetStartStep: 'Fanout',
       targetEndStep: 'Harden',
       sourceOutputType: 'def',
-      sourceOutputPath: '/projects/gcd/workspaces/ws_0001/Floor/output/design.def',
-      originDef: '/projects/gcd/workspaces/ws_0001/Floor/output/design.def',
+      sourceOutputPath: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+      originDef: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+      originVerilog: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.v.gz',
     })
     expect(serializeProjectManifest(manifest)).toContain('"workspaces"')
     expect(serializeProjectManifest(manifest)).not.toContain('"iterations"')

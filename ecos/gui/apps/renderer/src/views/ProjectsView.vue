@@ -382,6 +382,23 @@
               {{ branchDraft.sourceWorkspaceId }} / {{ branchDraft.step }} output
             </p>
             <code>{{ branchDraft.targetWorkspacePath }}</code>
+            <div class="branch-artifacts">
+              <strong>Input Artifacts</strong>
+              <dl>
+                <div>
+                  <dt>Source output</dt>
+                  <dd>{{ branchDraft.sourceOutputPath }}</dd>
+                </div>
+                <div v-if="branchDraft.originDef">
+                  <dt>DEF</dt>
+                  <dd>{{ branchDraft.originDef }}</dd>
+                </div>
+                <div v-if="branchDraft.originVerilog">
+                  <dt>Verilog</dt>
+                  <dd>{{ branchDraft.originVerilog }}</dd>
+                </div>
+              </dl>
+            </div>
             <button type="button" class="primary-button full" @click="continueWorkspaceDraft">
               <i class="ri-arrow-right-line"></i>
               <span>Continue</span>
@@ -624,6 +641,7 @@ async function continueWorkspaceDraft() {
       projectRoot: selectedProject.value.path,
       projectName: selectedProject.value.name,
       sourceWorkspace: branchDraft.value.sourceWorkspaceId,
+      sourceWorkspacePath: branchDraft.value.sourceWorkspacePath,
       sourceStep: branchDraft.value.step,
       sourceOutputPath: branchDraft.value.sourceOutputPath,
       sourceOutputType: branchDraft.value.sourceOutputType,
@@ -2057,6 +2075,31 @@ function basenamePath(path: string): string {
 .branch-draft-card {
   border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
   background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
+}
+
+.branch-artifacts {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 28%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+}
+
+.branch-artifacts strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.branch-artifacts dl {
+  gap: 7px;
+}
+
+.branch-artifacts dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
 }
 
 .empty-state {

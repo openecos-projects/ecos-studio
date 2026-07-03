@@ -197,6 +197,7 @@ export interface ProjectWorkspaceRegistrationInput {
 
 export interface WorkspaceBranchDraft {
   sourceWorkspaceId: string
+  sourceWorkspacePath: string
   step: FlowStep
   targetWorkspaceId: string
   targetWorkspacePath: string
@@ -229,6 +230,24 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   gds: 'Harden',
   signoff: 'Harden',
   harden: 'Harden',
+}
+
+const RUNTIME_STEP_ARTIFACTS: Record<FlowStep, {
+  directory: string
+  outputName: string
+}> = {
+  Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
+  Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
+  Fanout: { directory: 'fixFanout_ecc', outputName: 'fixFanout' },
+  Place: { directory: 'place_dreamplace', outputName: 'place' },
+  CTS: { directory: 'CTS_ecc', outputName: 'CTS' },
+  Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
+  Route: { directory: 'route_ecc', outputName: 'route' },
+  DRC: { directory: 'drc_ecc', outputName: 'drc' },
+  Filler: { directory: 'filler_ecc', outputName: 'filler' },
+  RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
+  STA: { directory: 'sta_ecc', outputName: 'sta' },
+  Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
 }
 
 const METRIC_DEFINITIONS: Array<{
@@ -352,13 +371,19 @@ export function createWorkspaceBranchDraft(
   const targetWorkspaceId = nextWorkspaceId(project)
   const sourceWorkspace = project.workspaces.find(workspace => workspace.id === sourceWorkspaceId)
   const sourceOutputType = step === 'Synth' ? 'verilog' : 'def'
-  const sourceOutputPath = sourceStepOutputPath(sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId), step)
+  const sourceWorkspacePath = sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
+  const designName = projectArtifactDesignName(project)
+  const sourceOutputPath = sourceStepOutputPath(sourceWorkspacePath, step, designName)
   const artifactOrigin = sourceOutputType === 'verilog'
     ? { originVerilog: sourceOutputPath }
-    : { originDef: sourceOutputPath }
+    : {
+        originDef: sourceOutputPath,
+        originVerilog: sourceStepOutputVerilogPath(sourceWorkspacePath, step, designName),
+      }
 
   return {
     sourceWorkspaceId,
+    sourceWorkspacePath,
     step,
     targetWorkspaceId,
     targetWorkspacePath: joinPath(project.path, targetWorkspaceId),
@@ -725,9 +750,43 @@ function metricDeltaState(metricId: ProjectMetricId, delta: number): ProjectComp
   return delta < 0 ? 'good' : 'bad'
 }
 
-function sourceStepOutputPath(workspacePath: string, step: FlowStep): string {
-  const fileName = step === 'Synth' ? 'design.v' : 'design.def'
-  return joinPath(workspacePath, step, 'output', fileName)
+function sourceStepOutputPath(workspacePath: string, step: FlowStep, designName: string): string {
+  return sourceStepArtifactPath(workspacePath, step, defaultSourceOutputType(step), designName)
+}
+
+function sourceStepOutputVerilogPath(workspacePath: string, step: FlowStep, designName: string): string {
+  return sourceStepArtifactPath(workspacePath, step, 'verilog', designName)
+}
+
+function sourceStepArtifactPath(
+  workspacePath: string,
+  step: FlowStep,
+  artifactType: 'verilog' | 'def',
+  designName: string,
+): string {
+  const artifact = RUNTIME_STEP_ARTIFACTS[step]
+  if (!artifact || !designName) {
+    const fileName = artifactType === 'verilog' ? 'design.v' : 'design.def'
+    return joinPath(workspacePath, step, 'output', fileName)
+  }
+
+  const suffix = artifactType === 'verilog'
+    ? step === 'Synth' ? '_fixed.v.gz' : '.v.gz'
+    : '.def.gz'
+  return joinPath(
+    workspacePath,
+    artifact.directory,
+    'output',
+    `${designName}_${artifact.outputName}${suffix}`,
+  )
+}
+
+function projectArtifactDesignName(project: ProjectManagementProject): string {
+  return normalizeArtifactDesignName(project.topModule) || normalizeArtifactDesignName(project.name)
+}
+
+function normalizeArtifactDesignName(value: string | undefined): string {
+  return (value ?? '').trim().replace(/[\\/]/g, '_').replace(/\s+/g, '_')
 }
 
 function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {

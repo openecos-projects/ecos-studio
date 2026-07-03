@@ -186,7 +186,7 @@ const displayedProjects = computed(() => {
 
 onMounted(async () => {
   await loadRecentProjects()
-  prefillWorkspaceDirectory()
+  await prefillWorkspaceDirectory()
 })
 
 const goBack = () => {
@@ -233,12 +233,13 @@ const closeWizard = () => {
   initialWizardConfig.value = undefined
 }
 
-const prefillWorkspaceDirectory = () => {
+const prefillWorkspaceDirectory = async () => {
   const workspacePath = queryString(route.query.workspacePath)
   if (!workspacePath) return
 
   const projectName = queryString(route.query.projectName)
   const sourceWorkspace = queryString(route.query.sourceWorkspace)
+  const sourceWorkspacePath = queryString(route.query.sourceWorkspacePath)
   const sourceStep = queryString(route.query.sourceStep)
   const originDef = queryString(route.query.originDef)
   const originVerilog = queryString(route.query.originVerilog)
@@ -247,23 +248,185 @@ const prefillWorkspaceDirectory = () => {
   const startStep = queryString(route.query.startStep)
   const endStep = queryString(route.query.endStep)
   const workspaceName = workspacePath.split('/').filter(Boolean).pop() || 'workspace'
+  const sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
 
-  initialWizardConfig.value = {
+  initialWizardConfig.value = mergeBranchInitialConfig({
     directory: workspacePath,
     origin_def: originDef,
     origin_verilog: originVerilog,
+    pdk: sourceWorkspaceConfig?.pdk,
+    pdk_root: sourceWorkspaceConfig?.pdk_root,
+    sdc: sourceWorkspaceConfig?.sdc,
+    pdk_config_mode: sourceWorkspaceConfig?.pdk_config_mode,
+    pdk_config: sourceWorkspaceConfig?.pdk_config,
+    pdk_json: sourceWorkspaceConfig?.pdk_json,
+    source_config: sourceWorkspaceConfig,
+    source_context: {
+      projectName,
+      projectRoot: queryString(route.query.projectRoot),
+      workspaceId: sourceWorkspace,
+      workspaceName: sourceWorkspace,
+      workspacePath: sourceWorkspacePath,
+      step: sourceStep,
+      outputPath: sourceOutputPath,
+      outputType: sourceOutputType,
+      startStep,
+    },
     parameters: {
       design: projectName ? `${projectName}_${workspaceName}` : workspaceName,
       description: sourceWorkspace && sourceStep
         ? `Created from ${sourceWorkspace} ${sourceStep} output`
         : 'Created from Project Management',
+      ...(sourceWorkspaceConfig?.parameters ?? {}),
       source_output_path: sourceOutputPath,
       source_output_type: sourceOutputType,
       start_step: startStep,
       end_step: endStep,
     },
-  }
+  }, sourceWorkspaceConfig)
   showWizard.value = true
+}
+
+async function loadSourceWorkspaceInitialConfig(
+  sourceWorkspacePath: string,
+): Promise<ProjectWorkspaceInitialConfig | undefined> {
+  if (!sourceWorkspacePath) return undefined
+
+  const [parametersText, flowText, pdkText, dbConfigText] = await Promise.all([
+    readOptionalProjectTextFile('home/parameters.json', { projectPath: sourceWorkspacePath }),
+    readOptionalProjectTextFile('home/flow.json', { projectPath: sourceWorkspacePath }),
+    readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
+    readOptionalProjectTextFile('config/db_default_config.json', { projectPath: sourceWorkspacePath }),
+  ])
+
+  const parametersJson = parseOptionalJson(parametersText)
+  const flowJson = parseOptionalJson(flowText)
+  const pdkJson = parseOptionalJson(pdkText)
+  const dbConfigJson = parseOptionalJson(dbConfigText)
+  const flowDesign = optionalRecord(flowJson?.design)
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
+
+  return {
+    pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
+    pdk_root: optionalString(parametersJson?.['PDK Root']) || optionalString(parametersJson?.pdk_root),
+    origin_verilog: optionalString(flowJson?.origin_verilog)
+      || optionalString(flowDesign?.origin_verilog)
+      || optionalString(dbInput?.verilog_path),
+    origin_def: optionalString(flowJson?.origin_def)
+      || optionalString(flowDesign?.origin_def)
+      || optionalString(dbInput?.def_path),
+    sdc: optionalString(flowJson?.sdc)
+      || optionalString(pdkJson?.sdc)
+      || optionalString(dbInput?.sdc_path),
+    pdk_config_mode: pdkConfig.mode,
+    pdk_config: pdkConfig,
+    pdk_json: pdkText
+      ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json`
+      : dbConfigText
+        ? `${normalizePath(sourceWorkspacePath)}/config/db_default_config.json`
+        : '',
+    parameters: normalizeSourceParameters(parametersJson),
+  }
+}
+
+function mergeBranchInitialConfig(
+  branchConfig: ProjectWorkspaceInitialConfig,
+  sourceWorkspaceConfig?: ProjectWorkspaceInitialConfig,
+): ProjectWorkspaceInitialConfig {
+  if (!sourceWorkspaceConfig) return branchConfig
+
+  return {
+    ...sourceWorkspaceConfig,
+    ...branchConfig,
+    origin_def: branchConfig.origin_def || sourceWorkspaceConfig.origin_def || '',
+    origin_verilog: branchConfig.origin_verilog || sourceWorkspaceConfig.origin_verilog || '',
+    parameters: {
+      ...(sourceWorkspaceConfig.parameters ?? {}),
+      ...(branchConfig.parameters ?? {}),
+    },
+  }
+}
+
+function parseOptionalJson(content: string | null): Record<string, unknown> | null {
+  if (!content) return null
+  try {
+    return JSON.parse(content) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function normalizeSourceParameters(parametersJson: Record<string, unknown> | null): Record<string, unknown> {
+  if (!parametersJson) return {}
+  const dieAreaRecord = optionalRecord(parametersJson['Die Area']) ?? {}
+  const core = optionalRecord(parametersJson.Core) ?? {}
+
+  return {
+    design: optionalString(parametersJson.Design) || optionalString(parametersJson.design),
+    top_module: optionalString(parametersJson['Top module']) || optionalString(parametersJson.top_module),
+    clock: optionalString(parametersJson.Clock) || optionalString(parametersJson.clock),
+    frequency_max: optionalNumber(parametersJson['Frequency max [MHz]'] ?? parametersJson.frequency_max, 50),
+    max_fanout: optionalNumber(parametersJson['Max fanout'] ?? parametersJson.max_fanout, 32),
+    die_area_mode: optionalString(dieAreaRecord.mode) || optionalString(parametersJson.die_area_mode),
+    die_width: optionalNumber(dieAreaRecord.width ?? parametersJson.die_width, 100),
+    die_height: optionalNumber(dieAreaRecord.height ?? parametersJson.die_height, 100),
+    utilitization: optionalNumber(dieAreaRecord.utilitization ?? core.Utilitization ?? parametersJson.utilitization, 0.6),
+    margin: optionalNumber(dieAreaRecord.margin ?? parametersJson.margin, 0),
+  }
+}
+
+function normalizeSourcePdkConfig(
+  pdkJson: Record<string, unknown> | null,
+  dbConfigJson: Record<string, unknown> | null,
+) {
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const techLef = stringList(
+    pdkJson?.tech_lef
+    ?? pdkJson?.tech
+    ?? pdkJson?.selected_tech_lef
+    ?? dbInput?.tech_lef_path,
+  )
+  const cellLef = stringList(
+    pdkJson?.cell_lef
+    ?? pdkJson?.lefs
+    ?? pdkJson?.cell_lef_list
+    ?? dbInput?.lef_paths,
+  )
+  const liberty = stringList(
+    pdkJson?.liberty
+    ?? pdkJson?.libs
+    ?? pdkJson?.liberty_list
+    ?? dbInput?.lib_path,
+  )
+  const hasManualResources = techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
+
+  return {
+    mode: hasManualResources ? 'manual' as const : 'default' as const,
+    tech_lef: techLef,
+    cell_lef: cellLef,
+    liberty,
+  }
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
+function optionalString(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+function optionalNumber(value: unknown, fallback: number): number {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : fallback
 }
 
 function projectManagedWizardInitialConfig(): ProjectWorkspaceInitialConfig | undefined {

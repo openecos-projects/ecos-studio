@@ -70,4 +70,16 @@ export interface WorkspaceConfig {
     project_root: string
     project_json_path: string
   }
+  source_context?: {
+    projectName?: string
+    projectRoot?: string
+    workspaceId?: string
+    workspaceName?: string
+    workspacePath?: string
+    step?: string
+    outputPath?: string
+    outputType?: string
+    startStep?: string
+  }
+  source_config?: Partial<WorkspaceConfig>
 }

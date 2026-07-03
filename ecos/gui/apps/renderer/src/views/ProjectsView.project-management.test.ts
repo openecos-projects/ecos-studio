@@ -63,10 +63,18 @@ describe('ProjectsView project management surface', () => {
     const continueSource = source.slice(continueStart, continueEnd)
     expect(continueSource).toContain('originDef: branchDraft.value.originDef')
     expect(continueSource).toContain('originVerilog: branchDraft.value.originVerilog')
+    expect(continueSource).toContain('sourceWorkspacePath: branchDraft.value.sourceWorkspacePath')
     expect(continueSource).toContain('sourceOutputPath: branchDraft.value.sourceOutputPath')
     expect(continueSource).toContain('sourceOutputType: branchDraft.value.sourceOutputType')
     expect(continueSource).toContain('startStep: branchDraft.value.targetStartStep')
     expect(continueSource).toContain('endStep: branchDraft.value.targetEndStep')
+  })
+
+  it('shows the source output artifacts before continuing derived workspace creation', () => {
+    expect(source).toContain('Input Artifacts')
+    expect(source).toContain('branchDraft.sourceOutputPath')
+    expect(source).toContain('branchDraft.originDef')
+    expect(source).toContain('branchDraft.originVerilog')
   })
 
   it('removes iteration and step analysis tabs from the toolbar', () => {

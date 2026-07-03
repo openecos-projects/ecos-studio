@@ -32,6 +32,32 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('syncManagedWorkspaceDirectory')
     expect(source).toContain('joinPath(managedWorkspaceRoot.value, workspaceName)')
   })
+
+  it('shows project branch source context for derived workspaces', () => {
+    expect(source).toContain('sourceContext')
+    expect(source).toContain('Created from')
+    expect(source).toContain('sourceContext.projectName')
+    expect(source).toContain('sourceContext.workspaceName')
+    expect(source).toContain('sourceContext.step')
+  })
+
+  it('locks flow steps before the derived workspace start step', () => {
+    expect(source).toContain('lockedFlowStepNames')
+    expect(source).toContain('isFlowStepLocked')
+    expect(source).toContain('Cannot select steps before the source output')
+    expect(source).toContain('sourceContext.startStep')
+    expect(source).toContain(':disabled="isFlowStepLocked(step.name)"')
+  })
+
+  it('reuses source workspace design, PDK, SDC, and spec defaults', () => {
+    expect(source).toContain('source_config')
+    expect(source).toContain('applySourceWorkspaceDefaults')
+    expect(source).toContain('config.value.origin_def')
+    expect(source).toContain('config.value.origin_verilog')
+    expect(source).toContain('sdcPath.value')
+    expect(source).toContain('pdkSelections.value')
+    expect(source).toContain('Object.assign(config.value.parameters')
+  })
 })
 
 describe('NewProjectWizard workspace wizard redesign', () => {
@@ -98,7 +124,9 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('Default Config')
     expect(source).toContain('Manual Config')
     expect(source).toContain('Use ECC default PDK config')
-    expect(source).toContain("const pdkConfigMode = ref<'default' | 'manual'>('default')")
+    expect(source).toContain("const pdkConfigMode = ref<'default' | 'manual'>(")
+    expect(source).toContain('normalizePdkConfigMode')
+    expect(source).toContain('props.initialConfig?.source_config?.pdk_config_mode')
     expect(source).toContain("pdk_config_mode: 'default'")
     expect(source).toContain("mode: pdkConfigMode.value")
     expect(source).toContain("pdkConfigMode.value === 'default'")
