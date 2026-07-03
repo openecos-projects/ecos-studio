@@ -10,6 +10,7 @@ import { stat } from 'node:fs/promises'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
+  type DesktopCliCancelRequest,
   type DesktopCliCommandEvent,
   type DesktopCliCommandRequest,
   type DesktopCliCommandResult,
@@ -158,6 +159,7 @@ export interface DesktopBridgeServices {
     refreshRegistry(): Promise<unknown>
   }
   desktopRuntimeManager: {
+    cancel(request: DesktopCliCancelRequest): Promise<DesktopCliCommandResult>
     execute(
       request: DesktopCliCommandRequest,
       listener?: (event: DesktopCliCommandEvent) => void,
@@ -810,6 +812,10 @@ export function registerIpc(
         }
       },
     )
+  })
+
+  handle(desktopApiIpcChannels.cliCancel, async (_event, request) => {
+    return await services.desktopRuntimeManager.cancel(request as DesktopCliCancelRequest)
   })
 
   handle(desktopApiIpcChannels.shellCreateSession, async (event, options) => {

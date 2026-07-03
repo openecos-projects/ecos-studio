@@ -13,7 +13,10 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DesktopCliCommandRequest } from '@ecos-studio/shared'
+import type {
+  DesktopCliCancelRequest,
+  DesktopCliCommandRequest,
+} from '@ecos-studio/shared'
 import { EccCliAdapter } from './eccCliAdapter'
 import { electronLogger } from './logger'
 
@@ -21,11 +24,14 @@ interface SpawnCall {
   args: string[]
   command: string
   options: {
+    detached?: boolean
     env?: NodeJS.ProcessEnv
+    stdio?: string[]
   }
 }
 
 class FakeChild extends EventEmitter {
+  readonly pid = 12345
   readonly stdout = new EventEmitter()
   readonly stderr = new EventEmitter()
   readonly kill = vi.fn()
@@ -484,6 +490,162 @@ describe('EccCliAdapter', () => {
         refreshed: true,
       },
       ok: true,
+    })
+  })
+
+  it('kills an active rtl2gds command and resolves the run as cancelled', async () => {
+    const harness = createSpawnHarness()
+    const emit = vi.fn()
+    const processKiller = vi.fn(
+      (child: { kill(signal: NodeJS.Signals): void }, signal: NodeJS.Signals) => {
+        child.kill(signal)
+      },
+    )
+    const adapter = new EccCliAdapter({
+      processKiller,
+      spawn: harness.spawn,
+    })
+    const runPromise = adapter.execute(
+      request('rtl2gds', {
+        directory: '/work/demo',
+        rerun: false,
+      }),
+      { emit },
+    )
+
+    await waitForSpawn(harness, 0)
+
+    await expect(
+      adapter.cancel({
+        directory: '/work/demo',
+      } satisfies DesktopCliCancelRequest),
+    ).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(processKiller).toHaveBeenCalledWith(harness.children[0], 'SIGTERM')
+    expect(harness.children[0].kill).toHaveBeenCalledWith('SIGTERM')
+
+    harness.children[0].emit('close', null, 'SIGTERM')
+
+    await expect(runPromise).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(emit).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('[ECC CLI log] Command failed. Full log:'),
+      }),
+    )
+  })
+
+  it('matches active commands by normalized workspace directory when cancelling', async () => {
+    const harness = createSpawnHarness()
+    const processKiller = vi.fn(
+      (child: { kill(signal: NodeJS.Signals): void }, signal: NodeJS.Signals) => {
+        child.kill(signal)
+      },
+    )
+    const adapter = new EccCliAdapter({
+      processKiller,
+      spawn: harness.spawn,
+    })
+    const runPromise = adapter.execute(
+      request('rtl2gds', {
+        directory: '/work/demo/',
+        rerun: false,
+      }),
+      { emit: vi.fn() },
+    )
+
+    await waitForSpawn(harness, 0)
+
+    await expect(
+      adapter.cancel({
+        directory: '/work/demo',
+      }),
+    ).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(processKiller).toHaveBeenCalledWith(harness.children[0], 'SIGTERM')
+
+    harness.children[0].emit('close', null, 'SIGTERM')
+
+    await expect(runPromise).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+  })
+
+  it('keeps the active rtl2gds cancellation target after read-only commands for the same workspace', async () => {
+    const harness = createSpawnHarness()
+    const processKiller = vi.fn(
+      (child: { kill(signal: NodeJS.Signals): void }, signal: NodeJS.Signals) => {
+        child.kill(signal)
+      },
+    )
+    const adapter = new EccCliAdapter({
+      processKiller,
+      spawn: harness.spawn,
+    })
+    const runPromise = adapter.execute(
+      request('rtl2gds', {
+        directory: '/work/demo',
+        rerun: false,
+      }),
+      { emit: vi.fn() },
+    )
+    await waitForSpawn(harness, 0)
+
+    const infoPromise = adapter.execute(
+      request('get_info', {
+        directory: '/work/demo',
+        id: 'layout',
+        step: 'Floorplan',
+      }),
+      { emit: vi.fn() },
+    )
+    await waitForSpawn(harness, 1)
+    complete(harness.children[1], {
+      cmd: 'get_info',
+      data: { id: 'layout', info: {}, step: 'Floorplan' },
+      message: ['info'],
+      response: 'success',
+    })
+    await expect(infoPromise).resolves.toMatchObject({
+      cmd: 'get_info',
+      ok: true,
+    })
+
+    await expect(
+      adapter.cancel({
+        cmd: 'rtl2gds',
+        directory: '/work/demo',
+      }),
+    ).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(processKiller).toHaveBeenCalledWith(harness.children[0], 'SIGTERM')
+
+    harness.children[0].emit('close', null, 'SIGTERM')
+
+    await expect(runPromise).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
     })
   })
 

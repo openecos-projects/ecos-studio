@@ -6,6 +6,7 @@ const testState = vi.hoisted(() => ({
   readWorkspaceHomeResourceApi: vi.fn(),
   readWorkspaceFlowResourceApi: vi.fn(),
   readProjectTextFile: vi.fn(),
+  writeProjectTextFile: vi.fn(),
   resolveProjectPathAccess: vi.fn(async (path: string) => path),
   runtimeEvents: null as Ref<unknown[]> | null,
   resourceVersions: null as Ref<{
@@ -52,6 +53,7 @@ vi.mock('./useHomeData', () => ({
 
 vi.mock('@/utils/projectFiles', () => ({
   readProjectTextFile: testState.readProjectTextFile,
+  writeProjectTextFile: testState.writeProjectTextFile,
   watchProjectFile: testState.watchProjectFile,
 }))
 
@@ -108,6 +110,7 @@ describe('useFlowStages live project file watchers', () => {
     testState.readWorkspaceHomeResourceApi.mockReset()
     testState.readWorkspaceFlowResourceApi.mockReset()
     testState.readProjectTextFile.mockReset()
+    testState.writeProjectTextFile.mockReset()
     testState.resolveProjectPathAccess.mockClear()
     testState.watchProjectFile.mockReset()
 
@@ -191,6 +194,95 @@ describe('useFlowStages live project file watchers', () => {
     await vi.waitFor(() => {
       expect(flow.hasOngoingRunStage.value).toBe(true)
     })
+  })
+
+  it('marks stale ongoing run stages incomplete after cancellation cleanup', async () => {
+    const { useFlowStages } = await importFreshFlowStagesModule()
+    await startLifecycleSession('/workspace/a')
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        Synthesis: 'Success',
+        Floorplan: 'Ongoing',
+      }),
+    )
+
+    const flow = useFlowStages()
+
+    await vi.waitFor(() => {
+      expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+        'Success',
+        'Ongoing',
+      ])
+    })
+
+    await flow.markOngoingRunStagesIncomplete()
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Success',
+      'Incomplete',
+    ])
+    expect(flow.hasOngoingRunStage.value).toBe(false)
+    expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/a/home/flow.json',
+      expect.any(String),
+    )
+    const persistedFlow = JSON.parse(testState.writeProjectTextFile.mock.calls[0][1])
+    expect(persistedFlow.steps.map((step: { state: string }) => step.state)).toEqual([
+      'Success',
+      'Incomplete',
+    ])
+
+    await flow.refreshFlowStages()
+
+    expect(flow.dynamicFlowStages.value.map((stage) => stage.state)).toEqual([
+      'Success',
+      'Incomplete',
+    ])
+    expect(flow.hasOngoingRunStage.value).toBe(false)
+  })
+
+  it('persists stale ongoing stages when the cancelled runtime event arrives', async () => {
+    const { useFlowStages } = await importFreshFlowStagesModule()
+    await startLifecycleSession('/workspace/a')
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        Synthesis: 'Ongoing',
+        Floorplan: 'Unstart',
+      }),
+    )
+
+    const flow = useFlowStages()
+
+    await vi.waitFor(() => {
+      expect(flow.hasOngoingRunStage.value).toBe(true)
+    })
+    testState.writeProjectTextFile.mockClear()
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/workspace/a',
+          type: 'cancelled',
+        },
+        message: ['Cancelled rtl2gds.'],
+        response: 'cancelled',
+      },
+    ]
+    await nextTick()
+
+    await vi.waitFor(() => {
+      expect(testState.writeProjectTextFile).toHaveBeenCalledWith(
+        '/workspace/a/home/flow.json',
+        expect.any(String),
+      )
+    })
+    const persistedFlow = JSON.parse(testState.writeProjectTextFile.mock.calls[0][1])
+    expect(persistedFlow.steps.map((step: { state: string }) => step.state)).toEqual([
+      'Incomplete',
+      'Unstart',
+    ])
   })
 
   it('does not let a stale flow read from a previous session replace current stages', async () => {

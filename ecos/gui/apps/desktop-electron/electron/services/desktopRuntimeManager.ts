@@ -1,4 +1,5 @@
 import type {
+  DesktopCliCancelRequest,
   DesktopCliCommandEvent,
   DesktopCliCommandName,
   DesktopCliCommandRequest,
@@ -18,6 +19,9 @@ export interface DesktopRuntimeAdapterContext {
 }
 
 export interface DesktopRuntimeAdapter {
+  cancel?(
+    request: DesktopCliCancelRequest,
+  ): Promise<DesktopCliCommandResult> | DesktopCliCommandResult
   execute(
     request: DesktopCliCommandRequest,
     context: DesktopRuntimeAdapterContext,
@@ -61,10 +65,11 @@ function createResult(
   cmd: DesktopCliCommandName,
   response: DesktopCliCommandResult['response'],
   message: string[],
+  data: Record<string, unknown> = {},
 ): DesktopCliCommandResult {
   return {
     cmd,
-    data: {},
+    data,
     message,
     ok: response === 'success' || response === 'warning',
     response,
@@ -103,7 +108,10 @@ function resultLifecycleEvent(
     jobId,
     ...eventWorkspaceForScope(scope),
     result,
-    stream: result.ok ? 'system' : result.response === 'warning' ? 'system' : 'stderr',
+    stream:
+      result.ok || result.response === 'warning' || result.response === 'cancelled'
+        ? 'system'
+        : 'stderr',
     text: result.message.join('\n'),
     type:
       result.response === 'cancelled' ? 'cancelled' : result.ok ? 'completed' : 'failed',
@@ -118,9 +126,11 @@ type DesktopSharedRuntimeManager = SharedRuntimeManager<
 >
 
 export class DesktopRuntimeManager {
+  private readonly adapter: DesktopRuntimeAdapter
   private readonly runtimeManager: DesktopSharedRuntimeManager
 
   constructor(options: DesktopRuntimeManagerOptions) {
+    this.adapter = options.adapter
     this.runtimeManager = new SharedRuntimeManager<
       DesktopCliCommandRequest,
       DesktopCliCommandResult,
@@ -210,5 +220,37 @@ export class DesktopRuntimeManager {
     }
 
     return this.runtimeManager.execute(request, listener)
+  }
+
+  async cancel(request: DesktopCliCancelRequest): Promise<DesktopCliCommandResult> {
+    const directory = normalizeDirectoryScope(readString(request.directory))
+    const cmd = request.cmd ?? 'rtl2gds'
+
+    if (!isSupportedCommand(cmd)) {
+      return {
+        cmd: cmd as DesktopCliCommandName,
+        data: { directory },
+        message: [`Unknown command: ${cmd}`],
+        ok: false,
+        response: 'error',
+      }
+    }
+
+    if (!directory) {
+      return createResult(cmd, 'error', ['missing required field: directory'])
+    }
+
+    if (!this.adapter.cancel) {
+      return createResult(
+        cmd,
+        'warning',
+        ['The active ECOS command runtime does not support cancellation.'],
+        { directory },
+      )
+    }
+
+    return await this.adapter.cancel(
+      request.cmd ? { cmd: request.cmd, directory } : { directory },
+    )
   }
 }

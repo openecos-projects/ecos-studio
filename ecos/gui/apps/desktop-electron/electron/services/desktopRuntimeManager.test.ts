@@ -612,6 +612,32 @@ describe('DesktopRuntimeManager', () => {
     )
   })
 
+  it('delegates workspace runtime cancellation to the adapter', async () => {
+    const cancel = vi.fn(async (request) =>
+      result({
+        cmd: 'rtl2gds',
+        data: { directory: request.directory },
+        message: ['Cancellation requested for rtl2gds.'],
+        ok: false,
+        response: 'cancelled',
+      }),
+    )
+    const manager = createManager({
+      adapter: {
+        cancel,
+        execute: vi.fn(),
+      },
+    })
+
+    await expect(manager.cancel({ directory: '/work/demo' })).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(cancel).toHaveBeenCalledWith({ directory: '/work/demo' })
+  })
+
   it('clears the active long-running job after adapter errors', async () => {
     const manager = createManager({
       adapter: {

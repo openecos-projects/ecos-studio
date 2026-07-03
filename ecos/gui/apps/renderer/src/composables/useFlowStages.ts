@@ -3,7 +3,12 @@ import { useWorkspace } from './useWorkspace'
 import { useDesktopRuntime, isDesktopRuntime } from './useDesktopRuntime'
 import { convertRemoteToLocalPath } from './useHomeData'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
-import { readProjectTextFile, watchProjectFile } from '@/utils/projectFiles'
+import type { RuntimeEventResponse } from '@/api/runtimeEvents'
+import {
+  readProjectTextFile,
+  watchProjectFile,
+  writeProjectTextFile,
+} from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 import {
   readWorkspaceFlowResourceApi,
@@ -119,6 +124,13 @@ function flowDataHasStartedRun(flowData: FlowData): boolean {
   })
 }
 
+function flowDataHasOngoingRun(flowData: FlowData): boolean {
+  return flowData.steps.some((step) => {
+    const state = (step.state ?? '').trim().toLowerCase()
+    return state === 'ongoing' || state === 'running'
+  })
+}
+
 // ============ Composable ============
 
 /**
@@ -127,7 +139,7 @@ function flowDataHasStartedRun(flowData: FlowData): boolean {
  */
 export function useFlowStages() {
   const { isDesktopRuntimeAvailable } = useDesktopRuntime()
-  const { currentProject, resourceVersions } = useWorkspace()
+  const { currentProject, resourceVersions, runtimeEvents } = useWorkspace()
   const workspaceLifecycle = useWorkspaceLifecycle()
 
   // 动态加载的流程步骤
@@ -138,6 +150,7 @@ export function useFlowStages() {
   let unregisterFlowJsonLifecycleCleanup: (() => void) | null = null
   let unregisterHomeRunArtifactReset: (() => void) | null = null
   let pendingRerunFlowStartProjectPath = ''
+  let cancelledOngoingRunProjectPath = ''
   let watchSession = 0
 
   // 合并后的完整流程步骤
@@ -266,6 +279,7 @@ export function useFlowStages() {
   }
 
   function resetRunStagesForRerun(): void {
+    cancelledOngoingRunProjectPath = ''
     if (dynamicFlowStages.value.length === 0) return
     dynamicFlowStages.value = dynamicFlowStages.value.map((stage) => ({
       ...stage,
@@ -275,10 +289,97 @@ export function useFlowStages() {
     }))
   }
 
+  function normalizedCurrentProjectPath(): string {
+    const projectPath = currentProject.value?.path
+    return projectPath ? normalizeProjectPath(projectPath) : ''
+  }
+
+  function runtimeEventWorkspacePath(event: RuntimeEventResponse | undefined): string {
+    const data = event?.data
+    const workspacePath =
+      typeof data?.workspaceId === 'string'
+        ? data.workspaceId
+        : typeof data?.directory === 'string'
+          ? data.directory
+          : ''
+    return workspacePath ? normalizeProjectPath(workspacePath) : ''
+  }
+
+  function isCancelledFlowRuntimeEvent(event: RuntimeEventResponse | undefined): boolean {
+    if (event?.data?.type !== 'cancelled') return false
+    const command = event.data.cmd
+    return command === undefined || command === 'rtl2gds' || command === 'run_step'
+  }
+
+  function markFlowDataOngoingStepsIncomplete(flowData: FlowData): boolean {
+    let changed = false
+    for (const step of flowData.steps) {
+      const state = (step.state ?? '').trim().toLowerCase()
+      if (state !== 'ongoing' && state !== 'running') continue
+      step.state = 'Incomplete'
+      changed = true
+    }
+    return changed
+  }
+
+  function markDynamicOngoingStagesIncomplete(): boolean {
+    if (dynamicFlowStages.value.length === 0) return false
+    let markedStaleOngoing = false
+    dynamicFlowStages.value = dynamicFlowStages.value.map((stage) => {
+      const state = stage.state.trim().toLowerCase()
+      if (state !== 'ongoing' && state !== 'running') return stage
+      markedStaleOngoing = true
+      return {
+        ...stage,
+        state: 'Incomplete',
+      }
+    })
+    return markedStaleOngoing
+  }
+
+  async function persistOngoingRunStagesIncomplete(): Promise<boolean> {
+    const projectPath = currentProject.value?.path
+    if (!isDesktopRuntimeAvailable || !projectPath) return false
+
+    try {
+      const homeData = (await readWorkspaceHomeResourceApi()) as { flow?: string } | null
+      const flowJsonPath = homeData?.flow
+      if (!flowJsonPath) return false
+
+      const localFlowPath = convertRemoteToLocalPath(flowJsonPath, projectPath)
+      const resolvedFlowPath = await resolveProjectPathAccess(localFlowPath)
+      if (!resolvedFlowPath) return false
+
+      const fileContent = await readProjectTextFile(resolvedFlowPath)
+      const flowData = JSON.parse(fileContent) as FlowData
+      if (!markFlowDataOngoingStepsIncomplete(flowData)) return false
+
+      await writeProjectTextFile(
+        resolvedFlowPath,
+        `${JSON.stringify(flowData, null, 2)}\n`,
+      )
+      dynamicFlowStages.value = transformFlowData(flowData)
+      return true
+    } catch (err) {
+      console.warn('Failed to persist cancelled flow stage states:', err)
+      error.value = err instanceof Error ? err.message : String(err)
+      return false
+    }
+  }
+
   function shouldApplyFlowData(flowData: FlowData): boolean {
     const projectPath = currentProject.value?.path
     if (!projectPath) return true
     const normalizedProjectPath = normalizeProjectPath(projectPath)
+    if (
+      cancelledOngoingRunProjectPath === normalizedProjectPath &&
+      flowDataHasOngoingRun(flowData)
+    ) {
+      return false
+    }
+    if (cancelledOngoingRunProjectPath === normalizedProjectPath) {
+      cancelledOngoingRunProjectPath = ''
+    }
     const resetPending =
       pendingRerunFlowStartProjectPath === normalizedProjectPath ||
       isHomeRunArtifactResetPending(projectPath)
@@ -338,6 +439,7 @@ export function useFlowStages() {
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
    */
   function setFirstRunStepOngoing(): void {
+    cancelledOngoingRunProjectPath = ''
     const idx = dynamicFlowStages.value.findIndex((s) => s.state !== 'Success')
     if (idx !== -1) {
       dynamicFlowStages.value[idx] = {
@@ -353,6 +455,7 @@ export function useFlowStages() {
    */
   function setRunStepOngoingByPath(stepPath: string): void {
     if (!stepPath) return
+    cancelledOngoingRunProjectPath = ''
     const key = stepPath.toLowerCase()
     const idx = dynamicFlowStages.value.findIndex((s) => s.path.toLowerCase() === key)
     if (idx !== -1) {
@@ -360,6 +463,14 @@ export function useFlowStages() {
         ...dynamicFlowStages.value[idx],
         state: 'Ongoing',
       }
+    }
+  }
+
+  async function markOngoingRunStagesIncomplete(): Promise<void> {
+    const markedStaleOngoing = markDynamicOngoingStagesIncomplete()
+    const persistedStaleOngoing = await persistOngoingRunStagesIncomplete()
+    if (markedStaleOngoing || persistedStaleOngoing) {
+      cancelledOngoingRunProjectPath = normalizedCurrentProjectPath()
     }
   }
 
@@ -402,6 +513,18 @@ export function useFlowStages() {
     },
   )
 
+  watch(
+    () => runtimeEvents.value[runtimeEvents.value.length - 1],
+    (event) => {
+      if (!isCancelledFlowRuntimeEvent(event)) return
+      const projectPath = normalizedCurrentProjectPath()
+      if (!projectPath) return
+      const eventWorkspacePath = runtimeEventWorkspacePath(event)
+      if (eventWorkspacePath && eventWorkspacePath !== projectPath) return
+      void markOngoingRunStagesIncomplete()
+    },
+  )
+
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
     const currentProjectPath = currentProject.value?.path
     if (
@@ -439,5 +562,6 @@ export function useFlowStages() {
     clearFlowStages,
     setFirstRunStepOngoing,
     setRunStepOngoingByPath,
+    markOngoingRunStagesIncomplete,
   }
 }

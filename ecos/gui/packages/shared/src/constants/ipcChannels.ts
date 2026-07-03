@@ -56,6 +56,7 @@ export const desktopApiIpcChannels = {
   resourcesRefreshRegistry: 'resources:refresh-registry',
   layoutViewerOpen: 'layout-viewer:open',
   cliExecute: 'cli:execute',
+  cliCancel: 'cli:cancel',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',

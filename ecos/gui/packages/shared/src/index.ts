@@ -23,6 +23,7 @@ export type {
   VersionInfo,
 } from './contracts/desktopApi.ts'
 export type {
+  DesktopCliCancelRequest,
   DesktopCliCommandEvent,
   DesktopCliCommandEventType,
   DesktopCliCommandName,

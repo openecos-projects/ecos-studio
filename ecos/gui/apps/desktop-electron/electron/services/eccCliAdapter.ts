@@ -5,6 +5,7 @@ import { appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type {
+  DesktopCliCancelRequest,
   DesktopCliCommandName,
   DesktopCliCommandRequest,
   DesktopCliCommandResponse,
@@ -12,15 +13,22 @@ import type {
 } from '@ecos-studio/shared'
 import type { DesktopRuntimeAdapterContext } from './desktopRuntimeManager'
 import { electronLogger } from './logger'
+import { normalizeDirectoryScope } from './runtime/runtimeScopes'
 
 type SpawnLike = typeof spawnChild
+type KillableChildProcess = Pick<ReturnType<SpawnLike>, 'kill' | 'pid'>
+type ProcessKiller = (child: KillableChildProcess, signal: NodeJS.Signals) => void
 type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
 
+const cancellableCommands = new Set<DesktopCliCommandName>(['rtl2gds', 'run_step'])
+
 export interface EccCliAdapterOptions {
+  cancelGraceMs?: number
   command?: string
   env?: NodeJS.ProcessEnv
   envProvider?: RuntimeEnvProvider
   isPackaged?: boolean
+  processKiller?: ProcessKiller
   spawn?: SpawnLike
   tempDir?: string
 }
@@ -28,6 +36,14 @@ export interface EccCliAdapterOptions {
 interface PreparedCommand {
   args: string[]
   cleanup?: () => void
+}
+
+interface ActiveCliCommand {
+  child: KillableChildProcess
+  cmd: DesktopCliCommandName
+  cancelled: boolean
+  directory: string
+  forceKillTimer?: ReturnType<typeof setTimeout>
 }
 
 type CliEventType =
@@ -82,6 +98,23 @@ function result(
     ok: response === 'success' || response === 'warning',
     response,
   }
+}
+
+function defaultProcessKiller(child: KillableChildProcess, signal: NodeJS.Signals): void {
+  if (process.platform !== 'win32' && typeof child.pid === 'number') {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // Fall back to the direct child when the process group is unavailable.
+    }
+  }
+
+  child.kill(signal)
+}
+
+function isCancellableCommand(cmd: DesktopCliCommandName): boolean {
+  return cancellableCommands.has(cmd)
 }
 
 function failed(
@@ -340,19 +373,24 @@ class CliCommandLog {
 }
 
 export class EccCliAdapter {
+  private readonly activeCommandsByDirectory = new Map<string, ActiveCliCommand>()
+  private readonly cancelGraceMs: number
   private readonly command: string
   private readonly env: NodeJS.ProcessEnv
   private readonly envProvider?: RuntimeEnvProvider
   private readonly isPackaged: boolean
+  private readonly processKiller: ProcessKiller
   private readonly spawnImpl: SpawnLike
   private readonly tempDir: string
   private activeWorkspace: string | null = null
 
   constructor(options: EccCliAdapterOptions = {}) {
+    this.cancelGraceMs = options.cancelGraceMs ?? 3000
     this.command = options.command ?? 'ecc'
     this.env = { ...(options.env ?? process.env) }
     this.envProvider = options.envProvider
     this.isPackaged = options.isPackaged ?? true
+    this.processKiller = options.processKiller ?? defaultProcessKiller
     this.spawnImpl = options.spawn ?? spawnChild
     this.tempDir = options.tempDir ?? tmpdir()
   }
@@ -382,6 +420,59 @@ export class EccCliAdapter {
     } finally {
       prepared.cleanup?.()
     }
+  }
+
+  async cancel(request: DesktopCliCancelRequest): Promise<DesktopCliCommandResult> {
+    const directory = normalizeDirectoryScope(readString(request.directory))
+    const requestedCmd = request.cmd
+    const active = directory ? this.activeCommandsByDirectory.get(directory) : null
+    const cmd = requestedCmd ?? active?.cmd ?? 'rtl2gds'
+
+    if (!directory) {
+      return error(
+        { cmd, data: {}, source: 'button' },
+        'missing required field: directory',
+      )
+    }
+
+    if (!active) {
+      return result(
+        cmd,
+        'warning',
+        [`No active ECC command is running for ${directory}.`],
+        {
+          directory,
+        },
+      )
+    }
+
+    if (requestedCmd && active.cmd !== requestedCmd) {
+      return result(
+        requestedCmd,
+        'warning',
+        [`Active ${active.cmd} is running for ${directory}, not ${requestedCmd}.`],
+        { directory },
+      )
+    }
+
+    active.cancelled = true
+    this.processKiller(active.child, 'SIGTERM')
+
+    if (this.cancelGraceMs > 0 && !active.forceKillTimer) {
+      active.forceKillTimer = setTimeout(() => {
+        if (this.activeCommandsByDirectory.get(directory) === active) {
+          active.forceKillTimer = undefined
+          this.processKiller(active.child, 'SIGKILL')
+        }
+      }, this.cancelGraceMs)
+    }
+
+    return result(
+      active.cmd,
+      'cancelled',
+      [`Cancellation requested for ${active.cmd}.`],
+      { directory },
+    )
   }
 
   private prepareCommand(
@@ -522,7 +613,10 @@ export class EccCliAdapter {
       let stderrText = ''
       let invalidJsonLine: string | null = null
       let failureLogAnnounced = false
+      let activeCommand: ActiveCliCommand | null = null
       const start = Date.now()
+      const activeDirectory = directoryFromRequest(request, this.activeWorkspace)
+      const activeDirectoryKey = normalizeDirectoryScope(activeDirectory)
       const resolvedCommand = resolveCommandFromPath(this.command, env)
       const fallbackCommand =
         !this.isPackaged && this.command === 'ecc' && resolvedCommand === '(not found)'
@@ -570,6 +664,19 @@ export class EccCliAdapter {
         })
       }
 
+      const clearActiveCommand = (): void => {
+        if (!activeCommand) return
+        if (activeCommand.forceKillTimer) {
+          clearTimeout(activeCommand.forceKillTimer)
+          activeCommand.forceKillTimer = undefined
+        }
+        if (
+          this.activeCommandsByDirectory.get(activeCommand.directory) === activeCommand
+        ) {
+          this.activeCommandsByDirectory.delete(activeCommand.directory)
+        }
+      }
+
       electronLogger.debug(
         '[ECC CLI] spawn command=%s resolved=%s args=%s pathHead=%s',
         spawnCommand,
@@ -579,9 +686,19 @@ export class EccCliAdapter {
       )
 
       const child = this.spawnImpl(spawnCommand, prepared.args, {
+        detached: process.platform !== 'win32',
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      if (activeDirectoryKey && isCancellableCommand(request.cmd)) {
+        activeCommand = {
+          child,
+          cmd: request.cmd,
+          cancelled: false,
+          directory: activeDirectoryKey,
+        }
+        this.activeCommandsByDirectory.set(activeDirectoryKey, activeCommand)
+      }
 
       announceCliLogStart()
 
@@ -658,6 +775,7 @@ export class EccCliAdapter {
       })
 
       child.once('error', (spawnError) => {
+        clearActiveCommand()
         const message =
           spawnError instanceof Error ? spawnError.message : String(spawnError)
         commandLog.append('error', message)
@@ -666,6 +784,8 @@ export class EccCliAdapter {
       })
 
       child.once('close', (code, signal) => {
+        const wasCancelled = activeCommand?.cancelled === true
+        clearActiveCommand()
         commandLog.append('exit', `code=${code ?? 'unknown'} signal=${signal ?? 'null'}`)
         const remaining = stdoutBuffer.trim()
         if (remaining) {
@@ -687,10 +807,29 @@ export class EccCliAdapter {
             finalResult.response,
             Date.now() - start,
           )
-          if (!finalResult.ok) {
+          if (!finalResult.ok && finalResult.response !== 'cancelled') {
             announceCliLogFailure()
           }
           resolveAfterLogFlush(withCliLogFile(finalResult, commandLog.path))
+          return
+        }
+
+        if (wasCancelled) {
+          const result = withCliLogFile(
+            {
+              ...error(request, `Cancelled ${request.cmd}.`),
+              data: activeDirectoryKey ? { directory: activeDirectoryKey } : {},
+              response: 'cancelled',
+            },
+            commandLog.path,
+          )
+          electronLogger.debug(
+            '[ECC CLI] completed cmd=%s response=%s elapsed=%dms',
+            request.cmd,
+            result.response,
+            Date.now() - start,
+          )
+          resolveAfterLogFlush(result)
           return
         }
 

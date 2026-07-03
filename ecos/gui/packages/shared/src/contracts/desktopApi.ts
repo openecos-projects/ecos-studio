@@ -18,6 +18,7 @@ import type {
 } from './resources.ts'
 import type { RemoteContentApi } from './remoteContent.ts'
 import type {
+  DesktopCliCancelRequest,
   DesktopCliCommandEvent,
   DesktopCliCommandRequest,
   DesktopCliCommandResult,
@@ -228,6 +229,7 @@ export interface DesktopApi {
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
   cli: {
+    cancel(request: DesktopCliCancelRequest): Promise<DesktopCliCommandResult>
     execute(request: DesktopCliCommandRequest): Promise<DesktopCliCommandResult>
     onEvent(listener: (event: DesktopCliCommandEvent) => void): DesktopEventUnsubscribe
   }

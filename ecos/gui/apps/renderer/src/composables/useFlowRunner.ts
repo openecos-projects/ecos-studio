@@ -1,9 +1,10 @@
-import { computed, ref, shallowReactive } from 'vue'
+import { computed, ref, shallowReactive, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDesktopRuntime } from './useDesktopRuntime'
 import { useWorkspace } from './useWorkspace'
 import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
-import { runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
+import { cancelFlowApi, runStepApi, rtl2gdsApi, type RunStepResponse } from '@/api/flow'
+import type { RuntimeEventResponse } from '@/api/runtimeEvents'
 import type { WorkspaceInvalidationScope } from './useWorkspaceLifecycle'
 import {
   clearHomeRunArtifactResetAwaitingBackendStart,
@@ -15,6 +16,11 @@ import {
 /** 任意流程命令执行中为 true，供 Home flow log 等订阅，避免多实例 composable 状态不一致 */
 export const flowExecutionActive = ref(false)
 const activeFlowWorkspaces = shallowReactive(new Set<string>())
+const stoppingFlowWorkspaces = shallowReactive(new Set<string>())
+type FlowRunCommand = CMDEnum.rtl2gds | CMDEnum.run_step
+type FlowExecutionToken = symbol
+const activeFlowWorkspaceTokens = new Map<string, FlowExecutionToken>()
+const activeFlowWorkspaceCommands = new Map<string, FlowRunCommand>()
 const RUN_STEP_FALLBACK_SCOPES: WorkspaceInvalidationScope[] = ['home', 'parameters']
 
 export interface FlowRunOptions {
@@ -32,16 +38,31 @@ function refreshGlobalFlowExecutionActive() {
   flowExecutionActive.value = activeFlowWorkspaces.size > 0
 }
 
-export function markFlowExecutionActiveForWorkspace(path: string): void {
+export function markFlowExecutionActiveForWorkspace(
+  path: string,
+  command?: FlowRunCommand,
+): FlowExecutionToken | null {
   const workspacePath = normalizeWorkspacePath(path)
-  if (!workspacePath) return
+  if (!workspacePath) return null
+  const token = Symbol(workspacePath)
+  activeFlowWorkspaceTokens.set(workspacePath, token)
+  if (command) {
+    activeFlowWorkspaceCommands.set(workspacePath, command)
+  }
   activeFlowWorkspaces.add(workspacePath)
   refreshGlobalFlowExecutionActive()
+  return token
 }
 
-export function clearFlowExecutionActiveForWorkspace(path: string): void {
+export function clearFlowExecutionActiveForWorkspace(
+  path: string,
+  token?: FlowExecutionToken | null,
+): void {
   const workspacePath = normalizeWorkspacePath(path)
   if (!workspacePath) return
+  if (token && activeFlowWorkspaceTokens.get(workspacePath) !== token) return
+  activeFlowWorkspaceTokens.delete(workspacePath)
+  activeFlowWorkspaceCommands.delete(workspacePath)
   activeFlowWorkspaces.delete(workspacePath)
   refreshGlobalFlowExecutionActive()
 }
@@ -50,6 +71,31 @@ export function isFlowExecutionActiveForWorkspace(
   path: string | undefined | null,
 ): boolean {
   return Boolean(path && activeFlowWorkspaces.has(normalizeWorkspacePath(path)))
+}
+
+function activeFlowCommandForWorkspace(
+  path: string | undefined | null,
+): FlowRunCommand | null {
+  if (!path) return null
+  return activeFlowWorkspaceCommands.get(normalizeWorkspacePath(path)) ?? null
+}
+
+export function markFlowCancellationPendingForWorkspace(path: string): void {
+  const workspacePath = normalizeWorkspacePath(path)
+  if (!workspacePath) return
+  stoppingFlowWorkspaces.add(workspacePath)
+}
+
+export function clearFlowCancellationPendingForWorkspace(path: string): void {
+  const workspacePath = normalizeWorkspacePath(path)
+  if (!workspacePath) return
+  stoppingFlowWorkspaces.delete(workspacePath)
+}
+
+export function isFlowCancellationPendingForWorkspace(
+  path: string | undefined | null,
+): boolean {
+  return Boolean(path && stoppingFlowWorkspaces.has(normalizeWorkspacePath(path)))
 }
 
 /**
@@ -64,6 +110,41 @@ function clearTransientInteractionLocks() {
     'splitter-resizing-vertical',
     'window-resizing',
   )
+}
+
+function workspacePathFromRuntimeEvent(event: RuntimeEventResponse | undefined): string {
+  const data = event?.data
+  const workspacePath =
+    typeof data?.workspaceId === 'string'
+      ? data.workspaceId
+      : typeof data?.directory === 'string'
+        ? data.directory
+        : ''
+  return workspacePath ? normalizeWorkspacePath(workspacePath) : ''
+}
+
+function isTerminalFlowRuntimeEvent(event: RuntimeEventResponse | undefined): boolean {
+  const eventType = event?.data?.type
+  if (
+    eventType !== 'cancelled' &&
+    eventType !== 'task_complete' &&
+    eventType !== 'step_complete' &&
+    eventType !== 'error'
+  ) {
+    return false
+  }
+
+  const command = event?.data?.cmd
+  return command === undefined || command === 'rtl2gds' || command === 'run_step'
+}
+
+function isNoActiveCancellationWarning(result: {
+  message?: string[]
+  response?: string
+}): boolean {
+  if (result.response !== 'warning') return false
+  const message = result.message?.[0] ?? ''
+  return /no active|no running/i.test(message)
 }
 
 // ============ Composable ============
@@ -83,6 +164,7 @@ export function useFlowRunner() {
     showToast,
     invalidateWorkspaceResources,
     resourceVersions,
+    runtimeEvents,
     workspaceSession,
   } = useWorkspace()
   const route = useRoute()
@@ -91,9 +173,24 @@ export function useFlowRunner() {
   const isRunning = computed(() =>
     isFlowExecutionActiveForWorkspace(currentProject.value?.path),
   )
+  const isStopping = computed(() =>
+    isFlowCancellationPendingForWorkspace(currentProject.value?.path),
+  )
   const state = ref<StateEnum>(StateEnum.Invalid)
   const error = ref<string | null>(null)
+  const isCancelling = ref(false)
   const lastRunResult = ref<RunStepResponse | null>(null)
+
+  watch(
+    () => runtimeEvents.value[runtimeEvents.value.length - 1],
+    (event) => {
+      if (!isTerminalFlowRuntimeEvent(event)) return
+      const workspacePath = workspacePathFromRuntimeEvent(event)
+      if (workspacePath) {
+        clearFlowCancellationPendingForWorkspace(workspacePath)
+      }
+    },
+  )
 
   /**
    * 获取当前步骤（从动态路由参数获取）
@@ -161,7 +258,11 @@ export function useFlowRunner() {
     }
 
     clearTransientInteractionLocks()
-    markFlowExecutionActiveForWorkspace(directory)
+    clearFlowCancellationPendingForWorkspace(directory)
+    const executionToken = markFlowExecutionActiveForWorkspace(
+      directory,
+      CMDEnum.run_step,
+    )
     state.value = StateEnum.Ongoing
     error.value = null
     try {
@@ -215,7 +316,8 @@ export function useFlowRunner() {
       })
     } finally {
       clearTransientInteractionLocks()
-      clearFlowExecutionActiveForWorkspace(directory)
+      clearFlowCancellationPendingForWorkspace(directory)
+      clearFlowExecutionActiveForWorkspace(directory, executionToken)
     }
     return null
   }
@@ -257,10 +359,11 @@ export function useFlowRunner() {
     }
 
     clearTransientInteractionLocks()
+    clearFlowCancellationPendingForWorkspace(directory)
     if (options.rerun) {
       markHomeRunArtifactResetAwaitingBackendStart(directory)
     }
-    markFlowExecutionActiveForWorkspace(directory)
+    const executionToken = markFlowExecutionActiveForWorkspace(directory, CMDEnum.rtl2gds)
     state.value = StateEnum.Ongoing
     error.value = null
 
@@ -284,6 +387,9 @@ export function useFlowRunner() {
           detail: 'All flow steps finished successfully',
           life: 5000,
         })
+      } else if (result.response === 'cancelled') {
+        state.value = StateEnum.Imcomplete
+        error.value = null
       } else {
         state.value = StateEnum.Imcomplete
         error.value = result.message?.[0] || 'rtl2gds failed'
@@ -309,14 +415,104 @@ export function useFlowRunner() {
     } finally {
       clearTransientInteractionLocks()
       clearHomeRunArtifactResetAwaitingBackendStart(directory)
-      clearFlowExecutionActiveForWorkspace(directory)
+      clearFlowCancellationPendingForWorkspace(directory)
+      clearFlowExecutionActiveForWorkspace(directory, executionToken)
     }
     return null
+  }
+
+  async function cancelRunningFlow(): Promise<boolean> {
+    if (!ensureDesktopRuntime()) {
+      console.warn(
+        'Not running in desktop runtime environment, cannot cancel ECC CLI flow command',
+      )
+      showDesktopRequiredToast()
+      return false
+    }
+
+    const directory = getCurrentWorkspacePath()
+    if (!directory) {
+      showToast({
+        severity: 'error',
+        summary: 'No Workspace Open',
+        detail: 'Open a workspace before stopping the flow.',
+        life: 5000,
+      })
+      return false
+    }
+
+    if (isCancelling.value) {
+      return false
+    }
+
+    const command = activeFlowCommandForWorkspace(directory)
+
+    markFlowCancellationPendingForWorkspace(directory)
+    isCancelling.value = true
+    try {
+      const result = await cancelFlowApi({
+        ...(command ? { cmd: command } : {}),
+        data: {
+          directory,
+        },
+      })
+
+      if (result.response === 'cancelled') {
+        clearHomeRunArtifactResetAwaitingBackendStart(directory)
+        state.value = StateEnum.Imcomplete
+        error.value = null
+        showToast({
+          severity: 'warn',
+          summary: 'Flow Stopped',
+          detail: result.message?.[0] || 'Cancellation requested.',
+          life: 5000,
+        })
+        return true
+      }
+
+      if (isNoActiveCancellationWarning(result)) {
+        clearHomeRunArtifactResetAwaitingBackendStart(directory)
+        clearFlowCancellationPendingForWorkspace(directory)
+        state.value = StateEnum.Imcomplete
+        error.value = null
+        showToast({
+          severity: 'warn',
+          summary: 'Stop Flow',
+          detail: result.message?.[0] || 'No running flow was found.',
+          life: 5000,
+        })
+        return true
+      }
+
+      showToast({
+        severity: 'warn',
+        summary: 'Stop Flow',
+        detail: result.message?.[0] || 'No running flow was found.',
+        life: 5000,
+      })
+      clearFlowCancellationPendingForWorkspace(directory)
+      return false
+    } catch (err) {
+      console.error('Cancel flow failed:', err)
+      clearFlowCancellationPendingForWorkspace(directory)
+      showToast({
+        severity: 'error',
+        summary: 'Stop Flow Error',
+        detail: err instanceof Error ? err.message : String(err),
+        life: 6000,
+      })
+      return false
+    } finally {
+      isCancelling.value = false
+      clearTransientInteractionLocks()
+    }
   }
 
   return {
     // 状态
     isRunning,
+    isCancelling,
+    isStopping,
     state,
     error,
     lastRunResult,
@@ -324,5 +520,6 @@ export function useFlowRunner() {
     // 方法
     runFlow,
     runAllFlow,
+    cancelRunningFlow,
   }
 }

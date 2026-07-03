@@ -35,6 +35,11 @@ export interface DesktopCliCommandRequest {
   source: DesktopCliCommandSource
 }
 
+export interface DesktopCliCancelRequest {
+  directory: string
+  cmd?: DesktopCliCommandName
+}
+
 export interface DesktopCliCommandResult {
   ok: boolean
   cmd: DesktopCliCommandName

@@ -28,6 +28,16 @@ describe('flow API desktop bridge payloads', () => {
   })
 
   it('sends structured-cloneable requests when flow command data is reactive', async () => {
+    const cancel = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return {
+        cmd: 'rtl2gds',
+        data: {},
+        message: ['cancelled'],
+        ok: false,
+        response: 'cancelled',
+      }
+    })
     const execute = vi.fn(async (request: unknown) => {
       expect(() => structuredClone(request)).not.toThrow()
       return {
@@ -42,13 +52,20 @@ describe('flow API desktop bridge payloads', () => {
     setWindow({
       ecosDesktop: {
         cli: {
+          cancel,
           execute,
         },
       },
     })
 
-    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } =
-      await import('./flow')
+    const {
+      cancelFlowApi,
+      getInfoApi,
+      refreshConfigApi,
+      rtl2gdsApi,
+      runStepApi,
+      syncConfigApi,
+    } = await import('./flow')
 
     await runStepApi(
       reactive({
@@ -91,6 +108,14 @@ describe('flow API desktop bridge payloads', () => {
         cmd: CMDEnum.sync_config,
         data: {
           config_path: '/work/demo/config/rt_default_config.json',
+          directory: '/work/demo',
+        },
+      }),
+    )
+    await cancelFlowApi(
+      reactive({
+        cmd: CMDEnum.rtl2gds,
+        data: {
           directory: '/work/demo',
         },
       }),
@@ -147,5 +172,44 @@ describe('flow API desktop bridge payloads', () => {
         },
       }),
     )
+    expect(cancel).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      directory: '/work/demo',
+    })
+  })
+
+  it('omits the command when cancelling by active workspace only', async () => {
+    const cancel = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return {
+        cmd: 'run_step',
+        data: {},
+        message: ['cancelled'],
+        ok: false,
+        response: 'cancelled',
+      }
+    })
+
+    setWindow({
+      ecosDesktop: {
+        cli: {
+          cancel,
+        },
+      },
+    })
+
+    const { cancelFlowApi } = await import('./flow')
+
+    await cancelFlowApi(
+      reactive({
+        data: {
+          directory: '/work/demo',
+        },
+      }),
+    )
+
+    expect(cancel).toHaveBeenCalledWith({
+      directory: '/work/demo',
+    })
   })
 })

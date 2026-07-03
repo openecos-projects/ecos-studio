@@ -1,5 +1,6 @@
 import { toDesktopCliData } from './desktopPayload'
 import { RequestData, ResponseData, StepEnum, InfoEnum, StateEnum } from './type'
+import type { DesktopCliCancelRequest } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 
 export interface GetInfoRequest {
@@ -36,6 +37,29 @@ export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
     data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
     source: 'button',
   }) as unknown as Promise<ResponseData<RTL2GDSResponse>>
+}
+
+export interface CancelFlowRequest {
+  directory: string
+}
+
+export interface CancelFlowApiRequest {
+  cmd?: DesktopCliCancelRequest['cmd']
+  data: CancelFlowRequest
+}
+
+export function cancelFlowApi(request: CancelFlowApiRequest) {
+  const data = toDesktopCliData(request.data as unknown as Record<string, unknown>)
+  const cancelRequest: DesktopCliCancelRequest = {
+    directory: String(data.directory ?? ''),
+  }
+  if (request.cmd) {
+    cancelRequest.cmd = request.cmd
+  }
+
+  return getDesktopApi().cli.cancel(cancelRequest) as unknown as Promise<
+    ResponseData<{ directory: string }>
+  >
 }
 
 export interface RunStepRequest {

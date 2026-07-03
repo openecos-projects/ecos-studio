@@ -332,7 +332,7 @@
               <button
                 class="mode-trigger"
                 @click="showModeMenu = !showModeMenu"
-                :disabled="flowRunControlBusy"
+                :disabled="flowRunControlBusy || isCancelling || isStopping"
               >
                 <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
                 <span>{{ runModes[activeRunMode].label }}</span>
@@ -365,13 +365,20 @@
             <!-- 执行按钮 -->
             <button
               @click="handleRunFlow"
-              :disabled="flowRunControlBusy"
+              :disabled="flowRunControlDisabled"
               class="run-go-btn"
-              :class="{ running: flowRunControlBusy }"
+              :class="{
+                running: flowRunControlBusy && !isCancelling && !isStopping,
+                stopping: flowRunControlBusy || isStopping,
+              }"
             >
               <i
                 :class="
-                  flowRunControlBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-fill'
+                  isCancelling || isStopping
+                    ? 'ri-loader-4-line animate-spin'
+                    : flowRunControlBusy
+                      ? 'ri-stop-fill'
+                      : 'ri-play-fill'
                 "
               ></i>
             </button>
@@ -595,7 +602,7 @@
               <button
                 class="mode-trigger"
                 @click="showModeMenu = !showModeMenu"
-                :disabled="flowRunControlBusy"
+                :disabled="flowRunControlBusy || isCancelling || isStopping"
               >
                 <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
                 <span>{{ runModes[activeRunMode].label }}</span>
@@ -626,15 +633,20 @@
 
             <button
               @click="handleRunFlow"
-              :disabled="flowRunControlBusy"
+              :disabled="flowRunControlDisabled"
               class="run-go-btn"
-              :class="{ running: flowRunControlBusy }"
+              :class="{
+                running: flowRunControlBusy && !isCancelling && !isStopping,
+                stopping: flowRunControlBusy || isStopping,
+              }"
             >
               <i
                 :class="
-                  flowRunControlBusy
+                  isCancelling || isStopping
                     ? 'ri-loader-4-line animate-spin'
-                    : runModes[activeRunMode].icon
+                    : flowRunControlBusy
+                      ? 'ri-stop-fill'
+                      : runModes[activeRunMode].icon
                 "
               ></i>
             </button>
@@ -653,6 +665,7 @@ import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowRunMode } from '@/composables/useFlowRunMode'
 import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { StateEnum } from '@/api/type'
 
 // ============ Composables ============
 
@@ -663,6 +676,7 @@ const {
   refreshFlowStages,
   setFirstRunStepOngoing,
   setRunStepOngoingByPath,
+  markOngoingRunStagesIncomplete,
 } = useFlowStages()
 
 // 子流程管理
@@ -680,7 +694,16 @@ const {
 } = useSubflow()
 
 // 流程运行器
-const { isRunning, runFlow, runAllFlow } = useFlowRunner()
+const {
+  isRunning,
+  isCancelling,
+  isStopping,
+  state: flowRunState,
+  error: flowRunError,
+  runFlow,
+  runAllFlow,
+  cancelRunningFlow,
+} = useFlowRunner()
 
 // Workspace runtime events
 // const { runtimeEvents } = useWorkspace()
@@ -724,6 +747,7 @@ const flowResult = computed(() => {
 })
 
 const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.value)
+const flowRunControlDisabled = computed(() => isCancelling.value || isStopping.value)
 
 // ============ 运行模式 ============
 const showModeMenu = ref(false)
@@ -744,9 +768,29 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
 const { ensureApiReady } = useWorkspace()
 
 // ============ 事件处理 ============
+const refreshAfterCancel = async () => {
+  if (currentStage.value === 'home') {
+    await refreshFlowStages()
+    return
+  }
+
+  await Promise.all([refreshCurrentSubflow(), refreshFlowStages()])
+}
+
 const handleRunFlow = async () => {
   closeMenu()
-  if (flowRunControlBusy.value) return
+  if (flowRunControlDisabled.value) return
+  if (flowRunControlBusy.value) {
+    const stopped = await cancelRunningFlow()
+    if (stopped) {
+      await markOngoingRunStagesIncomplete()
+    }
+    await refreshAfterCancel()
+    if (stopped) {
+      await markOngoingRunStagesIncomplete()
+    }
+    return
+  }
 
   if (!(await ensureApiReady())) {
     await refreshFlowStages()
@@ -757,6 +801,9 @@ const handleRunFlow = async () => {
     setFirstRunStepOngoing()
     await runAllFlow({ rerun: isRerun.value })
     await refreshFlowStages()
+    if (flowRunState.value === StateEnum.Imcomplete && flowRunError.value == null) {
+      await markOngoingRunStagesIncomplete()
+    }
   } else {
     setRunStepOngoingByPath(currentStage.value)
     await runFlow({ rerun: isRerun.value })
@@ -1009,6 +1056,10 @@ const handleRunFlow = async () => {
 
 .run-go-btn.running {
   animation: pulse-btn 1.5s ease infinite;
+}
+
+.run-go-btn.stopping {
+  background: #ef4444;
 }
 
 @keyframes pulse-btn {

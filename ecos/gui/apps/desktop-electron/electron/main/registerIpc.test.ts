@@ -104,6 +104,7 @@ function registerHandlers() {
       getVersions: vi.fn(),
     },
     desktopRuntimeManager: {
+      cancel: vi.fn(),
       execute: vi.fn(),
       onEvent: vi.fn(),
     },
@@ -285,6 +286,33 @@ describe('registerIpc', () => {
     expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith(
       'tool:yosys',
     )
+  })
+
+  it('delegates CLI cancellation to the desktop runtime manager', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.desktopRuntimeManager.cancel.mockResolvedValue({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.cliCancel)?.(event, {
+        directory: '/work/demo',
+      }),
+    ).resolves.toEqual({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+    expect(services.desktopRuntimeManager.cancel).toHaveBeenCalledWith({
+      directory: '/work/demo',
+    })
   })
 
   it('delegates remote content requests to the remote content service', async () => {

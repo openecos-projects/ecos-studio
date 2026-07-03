@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { StateEnum, StepEnum } from '@/api/type'
+import { nextTick, ref } from 'vue'
+import { CMDEnum, StateEnum, StepEnum } from '@/api/type'
+
+const testState = vi.hoisted(() => ({
+  runtimeEvents: null as import('vue').Ref<unknown[]> | null,
+}))
 
 const {
   ensureDesktopRuntime,
@@ -8,6 +13,7 @@ const {
   invalidateWorkspaceResources,
   resourceVersions,
   workspaceSession,
+  cancelFlowApi,
   runStepApi,
   rtl2gdsApi,
   currentProject,
@@ -36,6 +42,7 @@ const {
       sessionId: 'session-1',
     },
   },
+  cancelFlowApi: vi.fn(),
   runStepApi: vi.fn(),
   rtl2gdsApi: vi.fn(),
   currentProject: { value: null as { path: string } | null },
@@ -66,11 +73,13 @@ vi.mock('./useWorkspace', () => ({
     showToast,
     invalidateWorkspaceResources,
     resourceVersions,
+    runtimeEvents: testState.runtimeEvents,
     workspaceSession,
   }),
 }))
 
 vi.mock('@/api/flow', () => ({
+  cancelFlowApi,
   runStepApi,
   rtl2gdsApi,
 }))
@@ -82,11 +91,23 @@ vi.mock('./homeRunArtifacts', () => ({
 }))
 
 import {
+  clearFlowCancellationPendingForWorkspace,
   clearFlowExecutionActiveForWorkspace,
   flowExecutionActive,
+  isFlowExecutionActiveForWorkspace,
   markFlowExecutionActiveForWorkspace,
   useFlowRunner,
 } from './useFlowRunner'
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, reject, resolve }
+}
 
 describe('useFlowRunner desktop-only guard', () => {
   beforeEach(() => {
@@ -106,15 +127,23 @@ describe('useFlowRunner desktop-only guard', () => {
       logs: 0,
       all: 0,
     }
+    testState.runtimeEvents = ref([])
     workspaceSession.value = {
       sessionId: 'session-1',
     }
+    cancelFlowApi.mockReset()
     runStepApi.mockReset()
     rtl2gdsApi.mockReset()
     requestHomeRunArtifactReset.mockReset()
     markHomeRunArtifactResetAwaitingBackendStart.mockReset()
     clearHomeRunArtifactResetAwaitingBackendStart.mockReset()
     flowExecutionActive.value = false
+    clearFlowExecutionActiveForWorkspace('/work/a')
+    clearFlowExecutionActiveForWorkspace('/work/b')
+    clearFlowExecutionActiveForWorkspace('/work/demo')
+    clearFlowCancellationPendingForWorkspace('/work/a')
+    clearFlowCancellationPendingForWorkspace('/work/b')
+    clearFlowCancellationPendingForWorkspace('/work/demo')
     currentProject.value = null
   })
 
@@ -210,6 +239,267 @@ describe('useFlowRunner desktop-only guard', () => {
     expect(ensureApiReady).toHaveBeenCalledTimes(1)
     expect(rtl2gdsApi).not.toHaveBeenCalled()
     expect(isRunning.value).toBe(false)
+  })
+
+  it('cancels the active workspace flow through the desktop runtime', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    markFlowExecutionActiveForWorkspace('/work/demo', CMDEnum.rtl2gds)
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    const { cancelRunningFlow, isCancelling, isRunning, isStopping } = useFlowRunner()
+
+    expect(isRunning.value).toBe(true)
+    expect(isStopping.value).toBe(false)
+
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+    expect(isCancelling.value).toBe(false)
+    expect(isRunning.value).toBe(true)
+    expect(isStopping.value).toBe(true)
+    expect(flowExecutionActive.value).toBe(true)
+    expect(cancelFlowApi).toHaveBeenCalledWith({
+      cmd: 'rtl2gds',
+      data: {
+        directory: '/work/demo',
+      },
+    })
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'warn',
+      summary: 'Flow Stopped',
+      detail: 'Cancellation requested for rtl2gds.',
+      life: 5000,
+    })
+  })
+
+  it('shows stopping for a cancellation accepted without a local run marker until the runtime exits', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    const { cancelRunningFlow, isRunning, isStopping } = useFlowRunner()
+
+    expect(isRunning.value).toBe(false)
+    expect(isStopping.value).toBe(false)
+
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+
+    expect(isRunning.value).toBe(false)
+    expect(isStopping.value).toBe(true)
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/work/demo',
+          type: 'cancelled',
+        },
+        message: ['Cancelled rtl2gds.'],
+        response: 'cancelled',
+      },
+    ]
+    await nextTick()
+
+    expect(isStopping.value).toBe(false)
+  })
+
+  it('does not re-enter stopping when the runtime cancelled event arrives before the cancel response', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    const deferredCancel = createDeferred<{
+      cmd: string
+      data: { directory: string }
+      message: string[]
+      ok: boolean
+      response: string
+    }>()
+    cancelFlowApi.mockReturnValue(deferredCancel.promise)
+
+    const { cancelRunningFlow, isStopping } = useFlowRunner()
+    const cancelPromise = cancelRunningFlow()
+
+    await nextTick()
+    expect(isStopping.value).toBe(true)
+
+    testState.runtimeEvents!.value = [
+      {
+        cmd: 'notify',
+        data: {
+          cmd: 'rtl2gds',
+          directory: '/work/demo',
+          type: 'cancelled',
+        },
+        message: ['Cancelled rtl2gds.'],
+        response: 'cancelled',
+      },
+    ]
+    await nextTick()
+    expect(isStopping.value).toBe(false)
+
+    deferredCancel.resolve({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    await expect(cancelPromise).resolves.toBe(true)
+    expect(isStopping.value).toBe(false)
+  })
+
+  it('treats a no-active cancellation warning as stale flow UI cleanup', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['No active ECC command is running for /work/demo.'],
+      ok: true,
+      response: 'warning',
+    })
+
+    const { cancelRunningFlow, isStopping } = useFlowRunner()
+
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+
+    expect(isStopping.value).toBe(false)
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'warn',
+      summary: 'Stop Flow',
+      detail: 'No active ECC command is running for /work/demo.',
+      life: 5000,
+    })
+  })
+
+  it('does not force a fallback command when no local flow command is known', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'run_step',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for run_step.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    const { cancelRunningFlow } = useFlowRunner()
+
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+
+    expect(cancelFlowApi).toHaveBeenCalledWith({
+      data: {
+        directory: '/work/demo',
+      },
+    })
+  })
+
+  it('cancels an active single-step run with the run_step command', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    let resolveRunStep:
+      | ((value: {
+          data: { state: StateEnum; step: StepEnum }
+          message: string[]
+          response: string
+        }) => void)
+      | undefined
+    runStepApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRunStep = resolve
+      }),
+    )
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'run_step',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for run_step.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    const { cancelRunningFlow, runFlow } = useFlowRunner()
+    const runPromise = runFlow()
+
+    await vi.waitFor(() => {
+      expect(runStepApi).toHaveBeenCalledTimes(1)
+    })
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+
+    expect(cancelFlowApi).toHaveBeenCalledWith({
+      cmd: 'run_step',
+      data: {
+        directory: '/work/demo',
+      },
+    })
+
+    resolveRunStep?.({
+      data: { state: StateEnum.Success, step: StepEnum.FLOORPLAN },
+      message: ['done'],
+      response: 'success',
+    })
+    await runPromise
+  })
+
+  it('shows one stopped toast when a cancelled full flow settles after the stop request', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    let resolveRunAll:
+      | ((value: {
+          data: Record<string, unknown>
+          message: string[]
+          response: string
+        }) => void)
+      | undefined
+    rtl2gdsApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRunAll = resolve
+      }),
+    )
+    cancelFlowApi.mockResolvedValue({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    const { cancelRunningFlow, isRunning, isStopping, runAllFlow } = useFlowRunner()
+    const runPromise = runAllFlow()
+
+    await vi.waitFor(() => {
+      expect(rtl2gdsApi).toHaveBeenCalledTimes(1)
+    })
+    await expect(cancelRunningFlow()).resolves.toBe(true)
+    expect(isRunning.value).toBe(true)
+    expect(isStopping.value).toBe(true)
+    resolveRunAll?.({
+      data: {},
+      message: ['Cancelled rtl2gds.'],
+      response: 'cancelled',
+    })
+    await runPromise
+    expect(isRunning.value).toBe(false)
+    expect(isStopping.value).toBe(false)
+
+    const stoppedToasts = showToast.mock.calls.filter(([toast]) =>
+      String(toast.summary).includes('Stopped'),
+    )
+    expect(stoppedToasts).toHaveLength(1)
+    expect(stoppedToasts[0]?.[0]).toMatchObject({
+      summary: 'Flow Stopped',
+    })
   })
 
   it('sends the active project directory when running a single step', async () => {
@@ -382,6 +672,22 @@ describe('useFlowRunner desktop-only guard', () => {
 
     clearFlowExecutionActiveForWorkspace('/work/a')
 
+    expect(flowExecutionActive.value).toBe(false)
+  })
+
+  it('does not let an old flow finalizer clear a newer workspace run', () => {
+    const staleToken = markFlowExecutionActiveForWorkspace('/work/demo')
+
+    clearFlowExecutionActiveForWorkspace('/work/demo')
+    const newerToken = markFlowExecutionActiveForWorkspace('/work/demo')
+    clearFlowExecutionActiveForWorkspace('/work/demo', staleToken)
+
+    expect(isFlowExecutionActiveForWorkspace('/work/demo')).toBe(true)
+    expect(flowExecutionActive.value).toBe(true)
+
+    clearFlowExecutionActiveForWorkspace('/work/demo', newerToken)
+
+    expect(isFlowExecutionActiveForWorkspace('/work/demo')).toBe(false)
     expect(flowExecutionActive.value).toBe(false)
   })
 })

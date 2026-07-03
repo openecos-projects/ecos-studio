@@ -184,6 +184,13 @@ const desktopBridge = {
     onProgress: () => () => undefined,
   },
   cli: {
+    cancel: async (request) => ({
+      cmd: request.cmd ?? 'rtl2gds',
+      data: { directory: request.directory },
+      message: [],
+      ok: false,
+      response: 'cancelled',
+    }),
     execute: async (request) => ({
       cmd: request.cmd,
       data: {},

@@ -5,6 +5,7 @@ import {
 } from '../../../../packages/shared/src/constants/ipcChannels.ts'
 import type {
   DesktopApi,
+  DesktopCliCancelRequest,
   DesktopCliCommandEvent,
   DesktopCliCommandRequest,
   DesktopDirectoryDialogOptions,
@@ -274,6 +275,8 @@ const desktopApi: DesktopApi = {
       ),
   },
   cli: {
+    cancel: (request: DesktopCliCancelRequest) =>
+      invokeDesktop(desktopApiIpcChannels.cliCancel, request),
     execute: (request: DesktopCliCommandRequest) =>
       invokeDesktop(desktopApiIpcChannels.cliExecute, request),
     onEvent: (listener) =>

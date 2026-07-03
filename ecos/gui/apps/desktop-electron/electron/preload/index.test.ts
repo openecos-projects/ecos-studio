@@ -30,6 +30,8 @@ async function loadDesktopBridge() {
       getVersions(): Promise<unknown>
     }
     cli: {
+      cancel(request: unknown): Promise<unknown>
+      execute(request: unknown): Promise<unknown>
       onEvent(listener: (event: unknown) => void): () => void
     }
     workspace: {
@@ -57,6 +59,8 @@ describe('preload desktop bridge contract', () => {
           getVersions: expect.any(Function),
         }),
         cli: expect.objectContaining({
+          cancel: expect.any(Function),
+          execute: expect.any(Function),
           onEvent: expect.any(Function),
         }),
         workspace: expect.objectContaining({
@@ -85,6 +89,25 @@ describe('preload desktop bridge contract', () => {
       desktopApiIpcChannels.workspaceReadProjectTextFile,
       'rtl/top.sv',
     )
+  })
+
+  it('routes CLI cancellation through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      cmd: 'rtl2gds',
+      data: { directory: '/work/demo' },
+      message: ['Cancellation requested for rtl2gds.'],
+      ok: false,
+      response: 'cancelled',
+    })
+
+    await expect(bridge.cli.cancel({ directory: '/work/demo' })).resolves.toMatchObject({
+      cmd: 'rtl2gds',
+      response: 'cancelled',
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopApiIpcChannels.cliCancel, {
+      directory: '/work/demo',
+    })
   })
 
   it('subscribes and unsubscribes with shared event channel constants', async () => {

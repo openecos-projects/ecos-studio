@@ -238,6 +238,7 @@ export enum ResponseEnum {
   failed = 'failed',
   error = 'error',
   warning = 'warning',
+  cancelled = 'cancelled',
 }
 
 export enum StateEnum {
