@@ -71,6 +71,15 @@ interface ResourceUpdateSource {
   url: string
 }
 
+interface ToolHealthStatus {
+  status: 'ok' | 'missing' | 'invalid'
+  path_exists: boolean
+  required_markers: string[]
+  missing_markers: string[]
+}
+
+type ToolHealthByResourceId = Record<string, ToolHealthStatus>
+
 type CachedResourceUpdateCheckItem = ResourceUpdateCheckItem & { update_url: string | null }
 
 interface ResourceUpdateCheckResult {
@@ -249,22 +258,23 @@ export class ResourceManagerService {
     const updateChecks = await this.readUpdateCheckCache()
     const installedTools = getInstalledTools(manifest)
     const installedPdks = getInstalledPdks(manifest)
+    const toolHealth = await checkInstalledToolHealth(installedTools)
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, installedTools, manifest, updateChecks))
+      resources.push(this.registryToolToResource(tool, installedTools, manifest, updateChecks, toolHealth))
     }
     for (const pdk of state.registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
-      if (!local) resources.push(this.registryPdkToResource(pdk, manifest))
+      if (!local) resources.push(this.registryPdkToResource(pdk, manifest, toolHealth))
     }
     for (const [name, entry] of Object.entries(installedTools)) {
       if (!resources.some((resource) => resource.id === `tool:${name}`)) {
-        resources.push(this.installedToolToResource(name, entry))
+        resources.push(this.installedToolToResource(name, entry, toolHealth[`tool:${name}`]))
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest, updateChecks))
+      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest, updateChecks, toolHealth))
     }
 
     return {
@@ -296,6 +306,17 @@ export class ResourceManagerService {
     for (const entry of Object.values(manifest.installed)) {
       if (!isToolEntry(entry) || !entry.active) continue
       const toolKind = normalizeToolName(entry.name)
+      const health = await checkToolEntryHealth(entry)
+      if (health.status !== 'ok') {
+        electronLogger.debug(
+          '[resources] Skipping runtime tool %s: health=%s missing=%s path=%s',
+          entry.name,
+          health.status,
+          health.missing_markers.join(',') || '-',
+          entry.path,
+        )
+        continue
+      }
 
       if (isFrontendResourceTool(toolKind)) {
         frontendResourceRoots.push(entry.path)
@@ -459,9 +480,10 @@ export class ResourceManagerService {
     try {
       const state = await this.fetchRegistry()
       const manifest = await this.readManifest()
+      const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
       const dependencies = this.registryRequiresForResource(state.registry, resourceId, version)
       const missingDependencies = dependencies.filter((dependencyId) => {
-        return !isInstalledResource(manifest, dependencyId)
+        return !isInstalledResource(manifest, dependencyId, toolHealth)
       })
 
       if (missingDependencies.length > 0) {
@@ -476,7 +498,8 @@ export class ResourceManagerService {
 
       for (const [index, dependencyId] of missingDependencies.entries()) {
         const latestManifest = await this.readManifest()
-        if (isInstalledResource(latestManifest, dependencyId)) {
+        const latestToolHealth = await checkInstalledToolHealth(getInstalledTools(latestManifest))
+        if (isInstalledResource(latestManifest, dependencyId, latestToolHealth)) {
           continue
         }
         this.publish(listener, {
@@ -809,6 +832,9 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
       electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      if (!resolvedAsset.sha256) {
+        throw new Error(`Missing SHA256 checksum for ${name}`)
+      }
       const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${name}`)
@@ -955,6 +981,9 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
       this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
       electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      if (!resolvedAsset.sha256) {
+        throw new Error(`Missing SHA256 checksum for ${pdkId}`)
+      }
       const verified = await this.sha256Verifier(tempArchive, resolvedAsset.sha256)
       if (!verified) {
         throw new Error(`SHA256 verification failed for ${pdkId}`)
@@ -1287,14 +1316,16 @@ export class ResourceManagerService {
     installed: Record<string, ToolInventoryEntry>,
     manifest: ResourceManifest,
     updateChecks: ResourceUpdateCheckCache | null,
+    toolHealth: ToolHealthByResourceId,
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
+    const localHealth = local ? toolHealth[resourceId] ?? unknownToolHealth(local) : null
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, manifest)
+    const requirementState = dependencyStateFor(requirements, manifest, toolHealth)
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
 
@@ -1302,8 +1333,13 @@ export class ResourceManagerService {
       status = 'installing'
       actions = []
     } else if (local) {
-      status = toolHasUpdate(local, versions[0], asset, getUpdateCheck(updateChecks, resourceId)) ? 'update_available' : 'installed'
-      actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
+      if (localHealth?.status !== 'ok') {
+        status = localHealth?.status ?? 'invalid'
+        actions = local.managed ? ['update', 'uninstall'] : []
+      } else {
+        status = toolHasUpdate(local, versions[0], asset, getUpdateCheck(updateChecks, resourceId)) ? 'update_available' : 'installed'
+        actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
+      }
     }
 
     return {
@@ -1316,8 +1352,8 @@ export class ResourceManagerService {
       status,
       installed_version: local?.version ?? null,
       available_versions: versions,
-      active_version: local?.active ? local.version : null,
-      active: local?.active ?? false,
+      active_version: local?.active && localHealth?.status === 'ok' ? local.version : null,
+      active: Boolean(local?.active && localHealth?.status === 'ok'),
       path: local?.path ?? null,
       managed_root: this.toolsDir,
       platform,
@@ -1325,8 +1361,8 @@ export class ResourceManagerService {
       source: 'registry',
       homepage: tool.homepage,
       actions,
-      health: local ? withUpdateCheckHealth(toolHealth(local), getUpdateCheck(updateChecks, resourceId)) : {},
-      error: null,
+      health: local ? withUpdateCheckHealth(toolHealthInfo(local, localHealth), getUpdateCheck(updateChecks, resourceId)) : {},
+      error: localHealth && localHealth.status !== 'ok' ? toolHealthError(localHealth) : null,
       requires: requirements,
       installed_requires: requirementState.installed,
       missing_requires: requirementState.missing,
@@ -1391,8 +1427,18 @@ export class ResourceManagerService {
     return await this.fetchAssetSha256(asset)
   }
 
-  private installedToolToResource(name: string, entry: ToolInventoryEntry): ResourceInfo {
+  private installedToolToResource(
+    name: string,
+    entry: ToolInventoryEntry,
+    health: ToolHealthStatus | undefined,
+  ): ResourceInfo {
     const resourceId = `tool:${name}`
+    const toolHealth = health ?? unknownToolHealth(entry)
+    const status: ResourceStatus = this.activeJobs.has(resourceId)
+      ? 'installing'
+      : toolHealth.status === 'ok'
+        ? 'installed'
+        : toolHealth.status
     return {
       id: resourceId,
       type: 'tool',
@@ -1400,11 +1446,11 @@ export class ResourceManagerService {
       display_name: name,
       description: '',
       category: '',
-      status: this.activeJobs.has(resourceId) ? 'installing' : 'installed',
+      status,
       installed_version: entry.version,
       available_versions: [],
-      active_version: entry.active ? entry.version : null,
-      active: entry.active,
+      active_version: entry.active && toolHealth.status === 'ok' ? entry.version : null,
+      active: entry.active && toolHealth.status === 'ok',
       path: entry.path,
       managed_root: this.toolsDir,
       platform: null,
@@ -1412,21 +1458,25 @@ export class ResourceManagerService {
       source: 'local',
       homepage: '',
       actions: entry.managed ? ['uninstall'] : [],
-      health: toolHealth(entry),
-      error: null,
+      health: toolHealthInfo(entry, toolHealth),
+      error: toolHealth.status === 'ok' ? null : toolHealthError(toolHealth),
       requires: [],
       installed_requires: [],
       missing_requires: [],
     }
   }
 
-  private registryPdkToResource(pdk: RegistryPdk, manifest: ResourceManifest): ResourceInfo {
+  private registryPdkToResource(
+    pdk: RegistryPdk,
+    manifest: ResourceManifest,
+    toolHealth: ToolHealthByResourceId = {},
+  ): ResourceInfo {
     const latest = pdk.versions[0]
     const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
     const resourceId = `pdk:${pdk.id}`
     const isActive = this.activeJobs.has(resourceId)
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, manifest)
+    const requirementState = dependencyStateFor(requirements, manifest, toolHealth)
     return {
       id: resourceId,
       type: 'pdk',
@@ -1459,6 +1509,7 @@ export class ResourceManagerService {
     registryPdk?: RegistryPdk,
     manifest?: ResourceManifest,
     updateChecks?: ResourceUpdateCheckCache | null,
+    toolHealth: ToolHealthByResourceId = {},
   ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
     const registryVersion = selectRegistryVersion(registryPdk?.versions, entry.version) ?? registryPdk?.versions[0]
@@ -1467,7 +1518,7 @@ export class ResourceManagerService {
       : { platform: null, asset: null }
     const requirements = registryVersion?.requires ?? []
     const requirementState = manifest
-      ? dependencyStateFor(requirements, manifest)
+      ? dependencyStateFor(requirements, manifest, toolHealth)
       : { installed: [], missing: [] }
     const hasUpdate = entry.managed
       && entry.health === 'ok'
@@ -1623,20 +1674,26 @@ function selectRegistryVersion<T extends { version: string }>(
 function dependencyStateFor(
   dependencies: string[],
   manifest: ResourceManifest,
+  toolHealth: ToolHealthByResourceId = {},
 ): { installed: string[]; missing: string[] } {
   const installed: string[] = []
   const missing: string[] = []
   for (const dependencyId of dependencies) {
-    if (isInstalledResource(manifest, dependencyId)) installed.push(dependencyId)
+    if (isInstalledResource(manifest, dependencyId, toolHealth)) installed.push(dependencyId)
     else missing.push(dependencyId)
   }
   return { installed, missing }
 }
 
-function isInstalledResource(manifest: ResourceManifest, resourceId: string): boolean {
+function isInstalledResource(
+  manifest: ResourceManifest,
+  resourceId: string,
+  toolHealth: ToolHealthByResourceId = {},
+): boolean {
   const entry = manifest.installed[resourceId]
   if (isToolEntry(entry)) {
-    return entry.active !== false && Boolean(entry.path)
+    const health = toolHealth[resourceId]
+    return entry.active !== false && Boolean(entry.path) && (!health || health.status === 'ok')
   }
   if (isPdkEntry(entry)) {
     return entry.active === true && entry.health !== 'missing' && entry.health !== 'invalid'
@@ -2018,7 +2075,7 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!getAssetUpdateSource(asset)) {
+    if (!asset || !getAssetUpdateSource(asset)) {
       continue
     }
     candidates.push({
@@ -2035,7 +2092,7 @@ function collectUpdateCheckCandidates(
       continue
     }
     const { asset } = selectPlatformAsset(latest)
-    if (!getAssetUpdateSource(asset)) {
+    if (!asset || !getAssetUpdateSource(asset)) {
       continue
     }
     candidates.push({
@@ -2179,6 +2236,122 @@ function isFrontendResourceTool(normalizedName: string): boolean {
     || normalizedName === 'ecc-fe-difftest-ref'
 }
 
+async function checkInstalledToolHealth(
+  installed: Record<string, ToolInventoryEntry>,
+): Promise<ToolHealthByResourceId> {
+  const entries = await Promise.all(
+    Object.entries(installed).map(async ([name, entry]) => {
+      return [`tool:${name}`, await checkToolEntryHealth(entry)] as const
+    }),
+  )
+  return Object.fromEntries(entries)
+}
+
+async function checkToolEntryHealth(entry: ToolInventoryEntry): Promise<ToolHealthStatus> {
+  const requiredMarkers = requiredToolMarkers(normalizeToolName(entry.name))
+  const rootExists = await isExistingDirectory(entry.path)
+  if (!rootExists) {
+    return {
+      status: 'missing',
+      path_exists: false,
+      required_markers: requiredMarkers,
+      missing_markers: requiredMarkers,
+    }
+  }
+
+  const missingMarkers: string[] = []
+  for (const marker of requiredMarkers) {
+    if (!await pathExists(join(entry.path, marker))) {
+      missingMarkers.push(marker)
+    }
+  }
+
+  if (missingMarkers.length > 0) {
+    return {
+      status: 'invalid',
+      path_exists: true,
+      required_markers: requiredMarkers,
+      missing_markers: missingMarkers,
+    }
+  }
+
+  if (requiredMarkers.length === 0 && !await resolveRuntimeExecutable(entry, process.platform)) {
+    return {
+      status: 'invalid',
+      path_exists: true,
+      required_markers: executableHealthMarkers(entry),
+      missing_markers: executableHealthMarkers(entry),
+    }
+  }
+
+  return {
+    status: 'ok',
+    path_exists: true,
+    required_markers: requiredMarkers,
+    missing_markers: [],
+  }
+}
+
+function requiredToolMarkers(normalizedName: string): string[] {
+  if (normalizedName === 'ecc-fe') {
+    return ['bin/ecc-fe', 'fecompiler']
+  }
+  if (normalizedName === 'ecc-fe-soc-ysyx-am') {
+    return ['manifest.json', 'catalog.json', 'filelist.soc.f', 'driver/main.cpp']
+  }
+  if (normalizedName === 'ecc-fe-cpu-rtl') {
+    return [
+      'thirdparty/README',
+      'thirdparty/rtthread_prepare.py',
+      'thirdparty/cv32e40p',
+      'thirdparty/cva6',
+      'thirdparty/darkriscv',
+      'thirdparty/ibex',
+      'thirdparty/learn-fpga',
+      'thirdparty/picorv32',
+      'thirdparty/rt-thread-am',
+      'thirdparty/scr1',
+      'thirdparty/serv',
+      'thirdparty/vexriscv',
+    ]
+  }
+  if (normalizedName.startsWith('ecc-fe-cpu-')) {
+    return ['thirdparty']
+  }
+  if (normalizedName === 'ecc-fe-difftest-ref') {
+    return ['tools/riscv32-spike-so']
+  }
+  if (normalizedName === 'ecc-fe-examples') {
+    return ['examples/cl3/filelist.cpu.f', 'examples/cl3_std/filelist.cpu.f']
+  }
+  if (normalizedName.startsWith('ecc-fe-test-')) {
+    return ['tests']
+  }
+  if (normalizedName === 'surfer') {
+    return ['index.html', 'integration.js', 'surfer.js', 'surfer_bg.wasm']
+  }
+  return []
+}
+
+function executableHealthMarkers(entry: ToolInventoryEntry): string[] {
+  const normalized = normalizeToolName(entry.name)
+  const markers = [
+    entry.executable,
+    ...entry.detected_executables,
+    ...preferredExecutableNames(normalized),
+  ].map((item) => item.trim()).filter(Boolean)
+  return [...new Set(markers)]
+}
+
+function unknownToolHealth(entry: ToolInventoryEntry): ToolHealthStatus {
+  return {
+    status: entry.path ? 'ok' : 'missing',
+    path_exists: Boolean(entry.path),
+    required_markers: [],
+    missing_markers: [],
+  }
+}
+
 async function resolveRuntimeExecutable(
   entry: ToolInventoryEntry,
   platform: NodeJS.Platform,
@@ -2269,14 +2442,31 @@ function resourceNameFromId(resourceId: string, prefix: 'tool' | 'pdk'): string 
   return resourceId.slice(expectedPrefix.length)
 }
 
-function toolHealth(entry: ToolInventoryEntry): Record<string, unknown> {
+function toolHealthInfo(
+  entry: ToolInventoryEntry,
+  health: ToolHealthStatus | null | undefined,
+): Record<string, unknown> {
   return {
     detected_executables: entry.detected_executables,
     installed_at: entry.installed_at,
     managed: entry.managed,
     sha256: entry.sha256,
     executable: entry.executable,
+    status: health?.status ?? 'unknown',
+    path_exists: health?.path_exists ?? Boolean(entry.path),
+    required_markers: health?.required_markers ?? [],
+    missing_markers: health?.missing_markers ?? [],
   }
+}
+
+function toolHealthError(health: ToolHealthStatus): string {
+  if (health.status === 'missing') {
+    return 'Installed resource path is missing'
+  }
+  if (health.missing_markers.length > 0) {
+    return `Installed resource is missing required files: ${health.missing_markers.join(', ')}`
+  }
+  return 'Installed resource is invalid'
 }
 
 function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
@@ -2583,7 +2773,7 @@ function archiveExtensionFromUrl(sourceUrl: string): string {
 }
 
 async function verifySha256(filePath: string, expected: string): Promise<boolean> {
-  if (!expected) return true
+  if (!expected) return false
   const hash = createHash('sha256')
   await new Promise<void>((resolvePromise, reject) => {
     const stream = createReadStream(filePath)

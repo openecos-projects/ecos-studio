@@ -100,7 +100,11 @@ async function createEccFeSocArchive(root: string): Promise<{ path: string; sha2
   const sourceRoot = join(root, 'ecc-fe-soc-source')
   const sourceDir = join(sourceRoot, 'ecc-fe-soc-ysyx-am')
   const archive = join(root, 'ecc-fe-soc.tar')
-  await mkdir(sourceDir, { recursive: true })
+  await mkdir(join(sourceDir, 'driver'), { recursive: true })
+  await writeFile(join(sourceDir, 'manifest.json'), '{"id":"ysyx-am-soc"}\n', 'utf8')
+  await writeFile(join(sourceDir, 'catalog.json'), '{"id":"ysyx-am-soc"}\n', 'utf8')
+  await writeFile(join(sourceDir, 'filelist.soc.f'), 'ecos_sim_top.v\n', 'utf8')
+  await writeFile(join(sourceDir, 'driver', 'main.cpp'), 'int main() { return 0; }\n', 'utf8')
   await writeFile(join(sourceDir, 'ecos_sim_top.v'), 'module ecos_sim_top; endmodule\n', 'utf8')
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-soc-ysyx-am'])
   const size = Buffer.byteLength(await readFile(archive))
@@ -115,7 +119,11 @@ async function createEccFeCpuRtlArchive(root: string): Promise<{ path: string; s
   const sourceRoot = join(root, 'ecc-fe-cpu-rtl-source')
   const sourceDir = join(sourceRoot, 'ecc-fe-cpu-rtl')
   const archive = join(root, 'ecc-fe-cpu-rtl.tar')
-  await mkdir(join(sourceDir, 'thirdparty', 'cv32e40p'), { recursive: true })
+  for (const name of ['cv32e40p', 'cva6', 'darkriscv', 'ibex', 'learn-fpga', 'picorv32', 'rt-thread-am', 'scr1', 'serv', 'vexriscv']) {
+    await mkdir(join(sourceDir, 'thirdparty', name), { recursive: true })
+  }
+  await writeFile(join(sourceDir, 'thirdparty', 'README'), 'fixture thirdparty bundle\n', 'utf8')
+  await writeFile(join(sourceDir, 'thirdparty', 'rtthread_prepare.py'), '# fixture helper\n', 'utf8')
   await writeFile(join(sourceDir, 'thirdparty', 'cv32e40p', 'README.md'), 'fixture cpu rtl\n', 'utf8')
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-cpu-rtl'])
   const size = Buffer.byteLength(await readFile(archive))
@@ -131,7 +139,9 @@ async function createEccFeExamplesArchive(root: string): Promise<{ path: string;
   const sourceDir = join(sourceRoot, 'ecc-fe-examples')
   const archive = join(root, 'ecc-fe-examples.tar')
   await mkdir(join(sourceDir, 'examples', 'cl3'), { recursive: true })
+  await mkdir(join(sourceDir, 'examples', 'cl3_std'), { recursive: true })
   await writeFile(join(sourceDir, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
+  await writeFile(join(sourceDir, 'examples', 'cl3_std', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-examples'])
   const size = Buffer.byteLength(await readFile(archive))
   return {
@@ -141,12 +151,36 @@ async function createEccFeExamplesArchive(root: string): Promise<{ path: string;
   }
 }
 
+async function createInstalledEccFeRoot(root: string): Promise<void> {
+  await mkdir(join(root, 'bin'), { recursive: true })
+  await mkdir(join(root, 'fecompiler'), { recursive: true })
+  await writeFile(join(root, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+  await chmod(join(root, 'bin', 'ecc-fe'), 0o755)
+  await writeFile(join(root, 'fecompiler', '__init__.py'), '', 'utf8')
+}
+
+async function createInstalledEccFeSocRoot(root: string): Promise<void> {
+  await mkdir(join(root, 'driver'), { recursive: true })
+  await writeFile(join(root, 'manifest.json'), '{"id":"ysyx-am-soc"}\n', 'utf8')
+  await writeFile(join(root, 'catalog.json'), '{"id":"ysyx-am-soc"}\n', 'utf8')
+  await writeFile(join(root, 'filelist.soc.f'), 'ecos_sim_top.v\n', 'utf8')
+  await writeFile(join(root, 'driver', 'main.cpp'), 'int main() { return 0; }\n', 'utf8')
+}
+
+async function createInstalledEccFeCpuRtlRoot(root: string): Promise<void> {
+  for (const name of ['cv32e40p', 'cva6', 'darkriscv', 'ibex', 'learn-fpga', 'picorv32', 'rt-thread-am', 'scr1', 'serv', 'vexriscv']) {
+    await mkdir(join(root, 'thirdparty', name), { recursive: true })
+  }
+  await writeFile(join(root, 'thirdparty', 'README'), 'fixture thirdparty bundle\n', 'utf8')
+  await writeFile(join(root, 'thirdparty', 'rtthread_prepare.py'), '# fixture helper\n', 'utf8')
+}
+
 function deferred<T = void>(): {
   promise: Promise<T>
-  resolve: (value?: T | PromiseLike<T>) => void
+  resolve: (value: T | PromiseLike<T>) => void
   reject: (reason?: unknown) => void
 } {
-  let resolve!: (value?: T | PromiseLike<T>) => void
+  let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void
   const promise = new Promise<T>((innerResolve, innerReject) => {
     resolve = innerResolve
@@ -260,6 +294,149 @@ describe('ResourceManagerService', () => {
     ]))
   })
 
+  it('marks installed registry tools as missing when their install directory is gone', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const missingPath = join(toolsDir, 'ecc-fe', 'latest')
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: 'https://example.com/ecc-fe-latest.tar.gz',
+                  sha256: 'a'.repeat(64),
+                  size: 1024,
+                  strip_prefix: 'ecc-fe-latest',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: missingPath,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      id: 'tool:ecc-fe',
+      status: 'missing',
+      active: false,
+      active_version: null,
+      path: missingPath,
+      actions: ['update', 'uninstall'],
+      error: 'Installed resource path is missing',
+      health: expect.objectContaining({
+        status: 'missing',
+        path_exists: false,
+        missing_markers: ['bin/ecc-fe', 'fecompiler'],
+      }),
+    })
+  })
+
+  it('marks installed registry tools as invalid when required content markers are missing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const eccFeRoot = join(toolsDir, 'ecc-fe', 'latest')
+    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: 'https://example.com/ecc-fe-latest.tar.gz',
+                  sha256: 'a'.repeat(64),
+                  size: 1024,
+                  strip_prefix: 'ecc-fe-latest',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: eccFeRoot,
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      id: 'tool:ecc-fe',
+      status: 'invalid',
+      active: false,
+      actions: ['update', 'uninstall'],
+      error: 'Installed resource is missing required files: fecompiler',
+      health: expect.objectContaining({
+        status: 'invalid',
+        path_exists: true,
+        missing_markers: ['fecompiler'],
+      }),
+    })
+  })
+
   it('builds a runtime env from active healthy Resource Manager resources', async () => {
     const root = await createTempDir('ecos-resources-')
     const resourcesDir = join(root, 'state', 'resources')
@@ -281,9 +458,10 @@ describe('ResourceManagerService', () => {
     await mkdir(join(yosysRoot, 'bin'), { recursive: true })
     await mkdir(join(slangRoot, 'bin'), { recursive: true })
     await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
-    await mkdir(join(eccFeRoot, 'bin'), { recursive: true })
-    await mkdir(eccFeSocRoot, { recursive: true })
-    await mkdir(eccFeExamplesRoot, { recursive: true })
+    await createInstalledEccFeRoot(eccFeRoot)
+    await createInstalledEccFeSocRoot(eccFeSocRoot)
+    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3'), { recursive: true })
+    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3_std'), { recursive: true })
     await mkdir(join(riscvRoot, 'bin'), { recursive: true })
     await mkdir(surferRoot, { recursive: true })
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
@@ -294,8 +472,9 @@ describe('ResourceManagerService', () => {
     await writeFile(join(yosysRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
-    await writeFile(join(eccFeRoot, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
+    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3_std', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
     await writeFile(join(surferRoot, 'index.html'), '<!doctype html>\n', 'utf8')
     await writeFile(join(surferRoot, 'integration.js'), 'function register_message_listener() {}\n', 'utf8')
     await writeFile(join(surferRoot, 'surfer.js'), 'export default async function init() {}\n', 'utf8')
@@ -306,7 +485,6 @@ describe('ResourceManagerService', () => {
     await chmod(join(yosysRoot, 'bin', 'verilator'), 0o755)
     await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
     await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
-    await chmod(join(eccFeRoot, 'bin', 'ecc-fe'), 0o755)
     await chmod(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), 0o755)
     await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
     await chmod(join(inactiveRoot, 'bin', 'inactive'), 0o755)
@@ -670,6 +848,58 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('fails closed instead of installing a tool without a checksum', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createFixtureArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'yosys',
+          display_name: 'Yosys',
+          description: 'RTL synthesis',
+          category: 'synthesis',
+          homepage: '',
+          versions: [
+            {
+              version: '0.61',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: '',
+                  size: archive.size,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    const extract = vi.fn(async () => undefined)
+    const verifySha256 = vi.fn(async () => true)
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      archiveExtractor: extract,
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.installResource('tool:yosys', '0.61', progress)).rejects.toThrow(
+      'Missing SHA256 checksum for yosys',
+    )
+    expect(verifySha256).not.toHaveBeenCalled()
+    expect(extract).not.toHaveBeenCalled()
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'error',
+      error: 'Missing SHA256 checksum for yosys',
+    }))
+  })
+
   it('installs a zip-packaged Surfer web asset tool', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createSurferAssetsZip(root)
@@ -919,6 +1149,114 @@ describe('ResourceManagerService', () => {
     ]))
   })
 
+  it('reinstalls unhealthy managed dependencies before installing a dependent resource', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createEccFeArchive(root)
+    const cpuRtlArchive = await createEccFeCpuRtlArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const brokenCpuRtlRoot = join(toolsDir, 'ecc-fe-cpu-rtl', 'latest')
+    await mkdir(join(brokenCpuRtlRoot, 'thirdparty', 'cv32e40p'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [
+        {
+          name: 'ecc-fe',
+          display_name: 'ECC-FE Frontend Flow',
+          description: 'Frontend flow runtime CLI',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'ecc-fe-runtime',
+                },
+              },
+              requires: ['tool:ecc-fe-cpu-rtl'],
+            },
+          ],
+        },
+        {
+          name: 'ecc-fe-cpu-rtl',
+          display_name: 'ECC-FE CPU RTL Resources',
+          description: 'Frontend CPU RTL resource bundle',
+          category: 'frontend',
+          homepage: 'https://github.com/openecos-projects/ecc-fe',
+          versions: [
+            {
+              version: 'latest',
+              platforms: {
+                'all-platform': {
+                  url: `file://${cpuRtlArchive.path}`,
+                  sha256: cpuRtlArchive.sha256,
+                  size: cpuRtlArchive.size,
+                  strip_prefix: 'ecc-fe-cpu-rtl',
+                },
+              },
+              requires: [],
+            },
+          ],
+        },
+      ],
+      pdks: [],
+    }), 'utf8')
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe-cpu-rtl': {
+          type: 'tool',
+          name: 'ecc-fe-cpu-rtl',
+          version: 'latest',
+          path: brokenCpuRtlRoot,
+          installed_at: '2026-06-30T00:00:00Z',
+          sha256: 'old-cpu-rtl-sha',
+          executable: '',
+          detected_executables: [],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    const verifySha256 = vi.fn(async () => true)
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      missing_requires: ['tool:ecc-fe-cpu-rtl'],
+    })
+    await expect(service.installResource('tool:ecc-fe', 'latest', progress)).resolves.toEqual({
+      status: 'started',
+      resource_id: 'tool:ecc-fe',
+      version: 'latest',
+    })
+
+    const manifest = JSON.parse(
+      await readFile(join(resourcesDir, 'manifest.json'), 'utf8'),
+    ) as { installed: Record<string, { sha256?: string }> }
+    expect(manifest.installed['tool:ecc-fe-cpu-rtl']).toMatchObject({
+      sha256: cpuRtlArchive.sha256,
+    })
+    await expect(readFile(join(brokenCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'), 'utf8')).resolves.toContain('fixture helper')
+    expect(verifySha256).toHaveBeenCalledTimes(2)
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      resource_id: 'tool:ecc-fe',
+      phase: 'installing_dependency',
+    }))
+  })
+
   it('waits for an active shared dependency job during concurrent resource updates', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
@@ -999,6 +1337,8 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
+    await createInstalledEccFeSocRoot(join(toolsDir, 'ecc-fe-soc-ysyx-am', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1036,20 +1376,15 @@ describe('ResourceManagerService', () => {
       if (archivePath.includes('ecc-fe-cpu-rtl-latest')) {
         cpuExtractStarted.resolve()
         await releaseCpuExtract.promise
-        await mkdir(join(destination, 'thirdparty', 'cv32e40p'), { recursive: true })
-        await writeFile(join(destination, 'thirdparty', 'cv32e40p', 'README.md'), 'fixture cpu rtl\n', 'utf8')
+        await createInstalledEccFeCpuRtlRoot(destination)
         return
       }
       if (archivePath.includes('ecc-fe-soc-ysyx-am-latest')) {
-        await mkdir(destination, { recursive: true })
-        await writeFile(join(destination, 'ecos_sim_top.v'), 'module ecos_sim_top; endmodule\n', 'utf8')
+        await createInstalledEccFeSocRoot(destination)
         return
       }
       if (archivePath.includes('ecc-fe-latest')) {
-        await mkdir(join(destination, 'bin'), { recursive: true })
-        const executable = join(destination, 'bin', 'ecc-fe')
-        await writeFile(executable, '#!/bin/sh\n', 'utf8')
-        await chmod(executable, 0o755)
+        await createInstalledEccFeRoot(destination)
         return
       }
       throw new Error(`unexpected archive ${archivePath}`)
@@ -1159,6 +1494,7 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1224,6 +1560,8 @@ describe('ResourceManagerService', () => {
                 'all-platform': {
                   url: `file://${archive.path}`,
                   sha256_url: shaUrl,
+                  sha256: 'b'.repeat(64),
+                  size: archive.size,
                   strip_prefix: 'ecc-fe-runtime',
                 },
               },
@@ -1234,6 +1572,7 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1338,6 +1677,7 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1443,6 +1783,7 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1541,6 +1882,7 @@ describe('ResourceManagerService', () => {
       ],
       pdks: [],
     }), 'utf8')
+    await createInstalledEccFeRoot(join(toolsDir, 'ecc-fe', 'latest'))
     await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
       schema_version: 1,
       installed: {
@@ -1698,7 +2040,7 @@ describe('ResourceManagerService', () => {
               platforms: {
                 'all-platform': {
                   url: 'https://github.com/YosysHQ/oss-cad-suite-build/releases/download/0.61/yosys.tar',
-                  sha256: '',
+                  sha256: 'fixture-sha',
                   size: 20,
                 },
               },
@@ -1751,7 +2093,7 @@ describe('ResourceManagerService', () => {
               platforms: {
                 'all-platform': {
                   url: 'https://example.com/yosys.tar',
-                  sha256: '',
+                  sha256: 'fixture-sha',
                   size: 9,
                 },
               },
@@ -1978,6 +2320,56 @@ describe('ResourceManagerService', () => {
         files: ['README.md', 'post-install-ran.txt'],
       },
     })
+  })
+
+  it('fails closed instead of installing a PDK without a checksum', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [],
+      pdks: [
+        {
+          id: 'ics55',
+          display_name: 'ICsprout 55nm PDK',
+          versions: [
+            {
+              version: '1.10.100',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: '',
+                  size: archive.size,
+                  strip_prefix: 'icsprout55-pdk-1.10.100',
+                },
+              },
+            },
+          ],
+        },
+      ],
+    }), 'utf8')
+    const extract = vi.fn(async () => undefined)
+    const verifySha256 = vi.fn(async () => true)
+    const progress = vi.fn()
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      archiveExtractor: extract,
+      sha256Verifier: verifySha256,
+    })
+
+    await expect(service.installResource('pdk:ics55', '1.10.100', progress)).rejects.toThrow(
+      'Missing SHA256 checksum for ics55',
+    )
+    expect(verifySha256).not.toHaveBeenCalled()
+    expect(extract).not.toHaveBeenCalled()
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({
+      phase: 'error',
+      error: 'Missing SHA256 checksum for ics55',
+    }))
   })
 
   it('marks managed registry PDKs updateable and updates them through the PDK install path', async () => {

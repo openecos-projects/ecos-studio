@@ -206,6 +206,10 @@ function mapStatus(
 
 export function rowActionForStatus(resource: ResourceItem): RowAction {
   const actions = new Set<ResourceAction>(resource.actions)
+  const recoverable = resource.status === 'update_available'
+    || resource.status === 'error'
+    || resource.status === 'missing'
+    || resource.status === 'invalid'
 
   if (resource.status === 'installing') {
     return 'cancel'
@@ -213,13 +217,13 @@ export function rowActionForStatus(resource: ResourceItem): RowAction {
   if (resource.status === 'uninstalling' || resource.status === 'removing') {
     return 'none'
   }
-  if (
-    (resource.status === 'update_available' || resource.status === 'error') &&
-    actions.has('update')
-  ) {
+  if (recoverable && actions.has('update')) {
     return 'update'
   }
-  if ((resource.status === 'available' || resource.status === 'error') && actions.has('install')) {
+  if (
+    (resource.status === 'available' || recoverable) &&
+    actions.has('install')
+  ) {
     return 'install'
   }
   if (actions.has('uninstall')) {

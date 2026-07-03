@@ -12025,3 +12025,60 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 需要用户刷新或重启 GUI 后确认 Resource Manager 列表和底部 Download 总大小都按两位小数显示。
+
+# 第 194 次 开发
+
+## 开发目标
+
+落实 ECC-FE 资源拆分后的鲁棒性改进：增加 release archive 内容契约检查、Resource Manager 已安装资源健康检查、安装 checksum fail-closed、thirdparty 来源说明，并同步相关测试。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - 新增 ECC-FE latest release 内容检查脚本。
+  - 校验 runtime、SoC harness、CPU RTL、difftest reference、examples 五个归档是否包含预期 marker。
+  - 禁止 `.git`、缓存目录、workspace 输出、obj_dir、pyc、dasm、VCD/FST/FSDB 等波形或生成文件进入 release。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 在生成 metadata 后、发布 release 前加入 `check-release-archives.sh dist` 检查。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 新增 third-party resource provenance 说明，明确 runtime、SoC、difftest、CPU RTL 各 release 的来源边界。
+  - 记录 CPU RTL 中 submodule 与 vendored snapshot 的区别，提醒 `cva6`、`vexriscv` 更新需记录来源与 commit。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - Resource Manager 列表加载时检查已安装 tool 的路径和内容 marker，`missing`/`invalid` 资源不再被当作健康安装。
+  - runtime env 注入前检查工具健康状态，路径丢失或内容不完整的 tool 不再进入 `PATH` 或 ECC-FE runtime 环境变量。
+  - `requires` 依赖遍历会把不健康的已安装依赖视为缺失，并在父资源安装/更新前自动重装。
+  - tool/PDK 安装在缺少可用 sha256 时 fail closed，不再调用 verifier 后跳过完整性校验。
+  - update check 候选收集显式判空 platform asset，修复 TypeScript 类型风险。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 同步 ECC-FE split archive fixture marker，覆盖 SoC manifest/catalog/filelist/driver、CPU RTL 完整 thirdparty 目录、examples 的 `cl3`/`cl3_std`。
+  - 新增 missing install path、invalid required marker、坏依赖自动重装、tool/PDK 缺 checksum fail-closed 回归测试。
+  - 将普通 registry fixture 保持为静态 `sha256`/`size` 策略，sidecar/metadata 只用于更新检查测试。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.ts`
+  - `missing`/`invalid` 资源如果提供 `update` 或 `install` action，会显示可恢复的主操作。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/pluginToolsRows.test.ts`
+  - 增加 `missing`/`invalid` 行动作和 primary action 断言。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次资源鲁棒性改进。
+
+## 验证情况
+
+- 已在 `/home/luyoung/ecos-studio/ecc-fe` 执行 `bash -n .github/scripts/check-release-archives.sh`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecc-fe` 执行 `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-latest.yml"); puts "yaml ok"'`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron` 执行 `pnpm exec vitest run electron/services/resourceManagerService.test.ts`，通过：28 个测试全部通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron` 执行 `pnpm exec tsc --noEmit -p tsconfig.json`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vitest run src/views/pluginToolsRows.test.ts`，通过：15 个测试全部通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vue-tsc --noEmit`，通过。
+- 已执行 `/home/luyoung/ecos-studio` 与 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `check-release-archives.sh` 已做语法和 workflow 接入检查，但未在本地执行真实 release 打包；实际 archive 内容检查会在 ecc-fe release workflow 中运行。
+- Resource Manager 的健康状态和恢复按钮仍需用户刷新或重启 GUI 后做一次手动安装/更新体验验证。

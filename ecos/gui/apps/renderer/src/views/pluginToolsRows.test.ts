@@ -258,6 +258,9 @@ describe('pluginToolsRows', () => {
   it('chooses actions from resource action list', () => {
     expect(rowActionForStatus(resource({ status: 'available', actions: ['install'] }))).toBe('install')
     expect(rowActionForStatus(resource({ status: 'update_available', actions: ['update'] }))).toBe('update')
+    expect(rowActionForStatus(resource({ status: 'missing', actions: ['update', 'uninstall'] }))).toBe('update')
+    expect(rowActionForStatus(resource({ status: 'invalid', actions: ['update', 'uninstall'] }))).toBe('update')
+    expect(rowActionForStatus(resource({ status: 'missing', actions: ['install'] }))).toBe('install')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] }))).toBe('uninstall')
     expect(rowActionForStatus(resource({ status: 'installed', actions: ['remove_reference'] }))).toBe('remove_reference')
     expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe('cancel')
@@ -274,6 +277,11 @@ describe('pluginToolsRows', () => {
     expect(
       primaryActionForRow(
         resourceToRow(resource({ status: 'update_available', actions: ['update'] }), undefined),
+      ),
+    ).toBe('update')
+    expect(
+      primaryActionForRow(
+        resourceToRow(resource({ status: 'invalid', actions: ['update', 'uninstall'] }), undefined),
       ),
     ).toBe('update')
     expect(
