@@ -16,8 +16,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('class="manager-grid"')
     expect(source).toContain('class="manager-sidebar"')
     expect(source).toContain('class="manager-table-panel"')
-    expect(source).toContain('class="selected-panel"')
+    expect(source).toContain('class="sidebar-info-panel project-info-panel"')
+    expect(source).toContain('class="sidebar-info-panel selection-info-panel"')
     expect(source).toContain('class="resource-row"')
+    expect(source).not.toContain('class="selected-panel"')
   })
 
   it('provides a maximize toggle for the project management dialog', () => {
@@ -48,23 +50,33 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('registerWorkspaceToSelectedProject')
   })
 
-  it('shows comparison summary, risk, and workspace management actions', () => {
+  it('shows comparison summary and removes the old workspace actions side panel', () => {
     expect(source).toContain('comparisonSummary')
     expect(source).toContain('Parameter Diff')
     expect(source).toContain('Metric Delta')
     expect(source).toContain('Risk')
-    expect(source).toContain('archiveSelectedWorkspace')
-    expect(source).toContain('deleteSelectedWorkspace')
+    expect(source).not.toContain('Workspace Actions')
+    expect(source).not.toContain('archiveSelectedWorkspace')
+    expect(source).not.toContain('deleteSelectedWorkspace')
   })
 
-  it('adds a row-level delete action to each workspace in the flow matrix', () => {
+  it('places open and delete actions on each workspace flow matrix row', () => {
     const matrixStart = source.indexOf('class="flow-row"')
     const rowStart = source.lastIndexOf('v-for="workspace in selectedProject.workspaces"', matrixStart)
-    const rowEnd = source.indexOf('class="row-action-btn"', rowStart)
+    const rowEnd = source.indexOf('</div>', source.indexOf('class="flow-row-actions"', rowStart))
     const rowSource = source.slice(rowStart, rowEnd)
-    expect(rowSource).toContain('workspace-delete-btn')
+    expect(rowSource).toContain('flow-row-actions')
+    expect(rowSource).toContain('title="Open workspace"')
     expect(rowSource).toContain('title="Delete workspace"')
-    expect(rowSource).toContain('@click.stop="deleteWorkspace(workspace.id)"')
+    expect(rowSource).toContain('@click.stop="requestDeleteWorkspace(workspace.id)"')
+    expect(rowSource.indexOf('title="Open workspace"')).toBeLessThan(rowSource.indexOf('title="Delete workspace"'))
+  })
+
+  it('requires confirmation before deleting a workspace row', () => {
+    expect(source).toContain('pendingDeleteWorkspaceId')
+    expect(source).toContain('confirmDeleteWorkspace')
+    expect(source).toContain('closeDeleteWorkspaceDialog')
+    expect(source).toContain('Delete Workspace')
 
     const handlerStart = source.indexOf('async function deleteWorkspace(')
     const handlerEnd = source.indexOf('async function removeProjectFromHistory', handlerStart)
@@ -98,6 +110,9 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('branchDraft.sourceOutputPath')
     expect(source).toContain('branchDraft.originDef')
     expect(source).toContain('branchDraft.originVerilog')
+    expect(source).toContain('class="project-modal-dialog branch-draft-dialog"')
+    expect(source).toContain('closeWorkspaceDraftDialog')
+    expect(source).not.toContain('branch-draft-card')
   })
 
   it('removes iteration and step analysis tabs from the toolbar', () => {
@@ -130,14 +145,43 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('iter_0001')
   })
 
-  it('keeps the sidebar focused on project search and project list only', () => {
+  it('keeps project search/list plus selected context in the left sidebar', () => {
+    expect(source).toContain('class="project-list-panel"')
+    expect(source).toContain('class="sidebar-context-panel"')
     expect(source).toContain('class="resource-search sidebar-search"')
     expect(source).toContain('class="project-list"')
+    expect(source).toContain('class="sidebar-info-panel project-info-panel"')
+    expect(source).toContain('class="sidebar-info-panel selection-info-panel"')
+    expect(source).not.toContain('Project Storage Location</h2>')
     expect(source).not.toContain('class="resource-nav"')
     expect(source).not.toContain('class="project-filters"')
     expect(source).not.toContain('class="manager-help project-root-card"')
     expect(source).not.toContain('<span>Iterations</span>')
     expect(source).not.toContain('<span>Metrics</span>')
+
+    const sidebarStart = source.indexOf('class="manager-sidebar"')
+    const listPanelStart = source.indexOf('class="project-list-panel"', sidebarStart)
+    const contextPanelStart = source.indexOf('class="sidebar-context-panel"', sidebarStart)
+    const contextPanelEnd = source.indexOf('</aside>', contextPanelStart)
+    const contextPanelSource = source.slice(contextPanelStart, contextPanelEnd)
+    expect(listPanelStart).toBeGreaterThan(sidebarStart)
+    expect(contextPanelStart).toBeGreaterThan(listPanelStart)
+    expect(contextPanelSource).toContain('class="sidebar-info-panel project-info-panel"')
+    expect(contextPanelSource).toContain('class="sidebar-info-panel selection-info-panel"')
+  })
+
+  it('keeps project list items fixed-size instead of stretching to fill the list area', () => {
+    const listStyleStart = source.indexOf('.project-list {')
+    const listStyleEnd = source.indexOf('}', listStyleStart)
+    const listStyles = source.slice(listStyleStart, listStyleEnd)
+    expect(listStyles).toContain('align-content: start')
+    expect(listStyles).toContain('grid-auto-rows: 54px')
+
+    const rowStyleStart = source.indexOf('.resource-row {')
+    const rowStyleEnd = source.indexOf('}', rowStyleStart)
+    const rowStyles = source.slice(rowStyleStart, rowStyleEnd)
+    expect(rowStyles).toContain('height: 54px')
+    expect(rowStyles).toContain('min-height: 54px')
   })
 
   it('uses workspace terminology and manifest-driven project data', () => {

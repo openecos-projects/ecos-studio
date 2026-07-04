@@ -60,45 +60,87 @@
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Projects">
           <div class="sidebar-stack">
-            <div class="resource-search sidebar-search">
-              <i class="ri-search-line"></i>
-              <input v-model="searchQuery" type="text" placeholder="Search project" />
-            </div>
-
-            <div class="project-list" aria-label="Project list">
-              <div
-                v-for="project in projectCards"
-                :key="project.source.id"
-                role="button"
-                tabindex="0"
-                class="resource-row"
-                :class="{ selected: project.model.id === selectedProjectId }"
-                @click="selectProject(project.model.id)"
-                @keydown.enter.prevent="selectProject(project.model.id)"
-                @keydown.space.prevent="selectProject(project.model.id)"
-              >
-                <span class="resource-icon">
-                  <i class="ri-folder-chart-line"></i>
-                </span>
-                <span class="resource-copy">
-                  <strong>{{ project.model.name }}</strong>
-                  <small>{{ project.model.pdk }} · {{ project.model.topModule }}</small>
-                </span>
-                <span class="status-pill" :class="statusBadgeClass(project.source.status)">
-                  {{ statusLabel(project.source.status) }}
-                </span>
-                <button
-                  type="button"
-                  class="row-remove-btn"
-                  title="Remove project history"
-                  @click.stop="removeProjectFromHistory(project.source)"
-                >
-                  <i class="ri-close-line"></i>
-                </button>
+            <div class="project-list-panel" aria-label="Project list panel">
+              <div class="resource-search sidebar-search">
+                <i class="ri-search-line"></i>
+                <input v-model="searchQuery" type="text" placeholder="Search project" />
               </div>
 
-              <div v-if="projectCards.length === 0" class="empty-state">
-                No matching projects.
+              <div class="project-list" aria-label="Project list">
+                <div
+                  v-for="project in projectCards"
+                  :key="project.source.id"
+                  role="button"
+                  tabindex="0"
+                  class="resource-row"
+                  :class="{ selected: project.model.id === selectedProjectId }"
+                  @click="selectProject(project.model.id)"
+                  @keydown.enter.prevent="selectProject(project.model.id)"
+                  @keydown.space.prevent="selectProject(project.model.id)"
+                >
+                  <span class="resource-icon">
+                    <i class="ri-folder-chart-line"></i>
+                  </span>
+                  <span class="resource-copy">
+                    <strong>{{ project.model.name }}</strong>
+                    <small>{{ project.model.pdk }} · {{ project.model.topModule }}</small>
+                  </span>
+                  <span class="status-pill" :class="statusBadgeClass(project.source.status)">
+                    {{ statusLabel(project.source.status) }}
+                  </span>
+                  <button
+                    type="button"
+                    class="row-remove-btn"
+                    title="Remove project history"
+                    @click.stop="removeProjectFromHistory(project.source)"
+                  >
+                    <i class="ri-close-line"></i>
+                  </button>
+                </div>
+
+                <div v-if="projectCards.length === 0" class="empty-state">
+                  No matching projects.
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-context-panel" aria-label="Selected project context panel">
+              <div class="sidebar-info-stack" aria-label="Selected project context">
+                <section class="sidebar-info-panel project-info-panel">
+                  <h2>Project</h2>
+                  <dl>
+                    <div>
+                      <dt>Root</dt>
+                      <dd>{{ selectedProject.path }}</dd>
+                    </div>
+                    <div>
+                      <dt>Best</dt>
+                      <dd>{{ selectedProject.bestWorkspaceId || '-' }}</dd>
+                    </div>
+                    <div>
+                      <dt>PDK</dt>
+                      <dd>{{ selectedProject.pdk || '-' }}</dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section class="sidebar-info-panel selection-info-panel">
+                  <h2>Selection</h2>
+                  <dl>
+                    <div>
+                      <dt>Path</dt>
+                      <dd>{{ selectedWorkspacePathLabel }}</dd>
+                    </div>
+                    <div>
+                      <dt>Step</dt>
+                      <dd>{{ selectedStep }}</dd>
+                    </div>
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd>{{ selectedWorkspaceLabel }}</dd>
+                    </div>
+                  </dl>
+                </section>
               </div>
             </div>
           </div>
@@ -244,7 +286,7 @@
                   >
                     {{ step }}
                   </button>
-                  <div class="flow-header open-header">Open</div>
+                  <div class="flow-header actions-header">Actions</div>
 
                   <div v-if="hasProjectData" class="flow-rows">
                     <svg class="flow-link-layer" :viewBox="branchLinkViewBox" preserveAspectRatio="none" aria-hidden="true">
@@ -299,15 +341,6 @@
                           <strong>{{ workspace.id }}</strong>
                           <small>{{ workspace.description }}</small>
                         </span>
-                        <button
-                          type="button"
-                          class="workspace-delete-btn"
-                          title="Delete workspace"
-                          :aria-label="`Delete workspace ${workspace.id}`"
-                          @click.stop="deleteWorkspace(workspace.id)"
-                        >
-                          <i class="ri-delete-bin-line"></i>
-                        </button>
                       </div>
 
                       <div
@@ -335,14 +368,26 @@
                         </button>
                       </div>
 
-                      <button
-                        type="button"
-                        class="row-action-btn"
-                        title="Open workspace"
-                        @click.stop="openWorkspace(workspace)"
-                      >
-                        <i class="ri-external-link-line"></i>
-                      </button>
+                      <div class="flow-row-actions">
+                        <button
+                          type="button"
+                          class="row-action-btn"
+                          title="Open workspace"
+                          :aria-label="`Open workspace ${workspace.id}`"
+                          @click.stop="openWorkspace(workspace)"
+                        >
+                          <i class="ri-external-link-line"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="row-action-btn danger row-delete-action-btn"
+                          title="Delete workspace"
+                          :aria-label="`Delete workspace ${workspace.id}`"
+                          @click.stop="requestDeleteWorkspace(workspace.id)"
+                        >
+                          <i class="ri-delete-bin-line"></i>
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <div v-else class="flow-empty-state">
@@ -356,91 +401,6 @@
           </div>
         </main>
 
-        <aside class="selected-panel" aria-label="Selected context">
-          <section class="selected-section">
-            <h2>Project</h2>
-            <dl>
-              <div>
-                <dt>Root</dt>
-                <dd>{{ selectedProject.path }}</dd>
-              </div>
-              <div>
-                <dt>Best</dt>
-                <dd>{{ selectedProject.bestWorkspaceId || '-' }}</dd>
-              </div>
-              <div>
-                <dt>PDK</dt>
-                <dd>{{ selectedProject.pdk || '-' }}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="selected-section">
-            <h2>Selection</h2>
-            <dl>
-              <div>
-                <dt>Path</dt>
-                <dd>{{ selectedWorkspacePathLabel }}</dd>
-              </div>
-              <div>
-                <dt>Step</dt>
-                <dd>{{ selectedStep }}</dd>
-              </div>
-              <div>
-                <dt>Workspace</dt>
-                <dd>{{ selectedWorkspaceLabel }}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="selected-section">
-            <h2>Project Storage Location</h2>
-            <p class="side-note">{{ selectedProject.path || '<project_root>' }}/&lt;workspace_name&gt;</p>
-          </section>
-
-          <section v-if="selectedWorkspace" class="selected-section">
-            <h2>Workspace Actions</h2>
-            <div class="action-row">
-              <button type="button" class="secondary-button" @click="archiveSelectedWorkspace">
-                <i class="ri-archive-line"></i>
-                <span>Archive</span>
-              </button>
-              <button type="button" class="secondary-button danger" @click="deleteSelectedWorkspace">
-                <i class="ri-delete-bin-line"></i>
-                <span>Delete</span>
-              </button>
-            </div>
-          </section>
-
-          <section v-if="branchDraft" class="selected-section branch-draft-card">
-            <h2>Create Workspace</h2>
-            <p>
-              {{ branchDraft.sourceWorkspaceId }} / {{ branchDraft.step }} output
-            </p>
-            <code>{{ branchDraft.targetWorkspacePath }}</code>
-            <div class="branch-artifacts">
-              <strong>Input Artifacts</strong>
-              <dl>
-                <div>
-                  <dt>Source output</dt>
-                  <dd>{{ branchDraft.sourceOutputPath }}</dd>
-                </div>
-                <div v-if="branchDraft.originDef">
-                  <dt>DEF</dt>
-                  <dd>{{ branchDraft.originDef }}</dd>
-                </div>
-                <div v-if="branchDraft.originVerilog">
-                  <dt>Verilog</dt>
-                  <dd>{{ branchDraft.originVerilog }}</dd>
-                </div>
-              </dl>
-            </div>
-            <button type="button" class="primary-button full" @click="continueWorkspaceDraft">
-              <i class="ri-arrow-right-line"></i>
-              <span>Continue</span>
-            </button>
-          </section>
-        </aside>
       </div>
     </section>
 
@@ -485,6 +445,69 @@
         </footer>
       </section>
     </div>
+
+    <div v-if="branchDraft" class="project-modal-scrim" role="presentation">
+      <section class="project-modal-dialog branch-draft-dialog" role="dialog" aria-modal="true" aria-labelledby="branch-draft-title">
+        <button type="button" class="manager-close modal-close" aria-label="Close create workspace dialog" @click="closeWorkspaceDraftDialog">
+          <i class="ri-close-line"></i>
+        </button>
+        <header>
+          <p class="manager-eyebrow">Workspace branch</p>
+          <h2 id="branch-draft-title">Create Workspace</h2>
+          <p>{{ branchDraft.sourceWorkspaceId }} / {{ branchDraft.step }} output</p>
+        </header>
+
+        <code class="modal-path">{{ branchDraft.targetWorkspacePath }}</code>
+
+        <div class="branch-artifacts">
+          <strong>Input Artifacts</strong>
+          <dl>
+            <div>
+              <dt>Source output</dt>
+              <dd>{{ branchDraft.sourceOutputPath }}</dd>
+            </div>
+            <div v-if="branchDraft.originDef">
+              <dt>DEF</dt>
+              <dd>{{ branchDraft.originDef }}</dd>
+            </div>
+            <div v-if="branchDraft.originVerilog">
+              <dt>Verilog</dt>
+              <dd>{{ branchDraft.originVerilog }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <footer class="modal-actions">
+          <button type="button" class="secondary-button" @click="closeWorkspaceDraftDialog">Cancel</button>
+          <button type="button" class="primary-button" @click="continueWorkspaceDraft">
+            <i class="ri-arrow-right-line"></i>
+            <span>Continue</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="pendingDeleteWorkspaceId" class="project-modal-scrim" role="presentation">
+      <section class="project-modal-dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title">
+        <button type="button" class="manager-close modal-close" aria-label="Close delete workspace dialog" @click="closeDeleteWorkspaceDialog">
+          <i class="ri-close-line"></i>
+        </button>
+        <header>
+          <p class="manager-eyebrow">Confirm delete</p>
+          <h2 id="delete-workspace-title">Delete Workspace</h2>
+        </header>
+        <p class="modal-help">
+          Remove {{ pendingDeleteWorkspaceId }} from project.json? This will not delete the workspace directory.
+        </p>
+        <footer class="modal-actions">
+          <button type="button" class="secondary-button" @click="closeDeleteWorkspaceDialog">Cancel</button>
+          <button type="button" class="secondary-button danger" @click="confirmDeleteWorkspace">
+            <i class="ri-delete-bin-line"></i>
+            <span>Delete</span>
+          </button>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -496,7 +519,6 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { waitForDesktopApi } from '@/platform/desktop'
 import {
   FLOW_STEPS,
-  archiveWorkspaceInManifest,
   buildProjectManagementProject,
   createSelectionState,
   createProjectManifestDraft,
@@ -535,6 +557,7 @@ const selectedProjectId = ref<string | null>(null)
 const selectedWorkspaceId = ref('')
 const selectedStep = ref<FlowStep>('DRC')
 const branchDraft = ref<BranchDraft | null>(null)
+const pendingDeleteWorkspaceId = ref<string | null>(null)
 const isDialogMaximized = ref(false)
 const projectHistory = ref<Project[]>([])
 const projectManifests = ref<Record<string, ProjectManifest>>({})
@@ -597,7 +620,7 @@ const selectedWorkspacePathLabel = computed(() => selectedWorkspace.value?.works
 const selectedProjectManifest = computed(() => projectManifests.value[selectedProject.value.path] ?? null)
 
 const matrixGridStyle = computed(() => ({
-  gridTemplateColumns: `150px repeat(${FLOW_STEPS.length}, minmax(54px, 1fr)) 48px`,
+  gridTemplateColumns: `150px repeat(${FLOW_STEPS.length}, minmax(54px, 1fr)) 76px`,
 }))
 
 const metricsGridStyle = computed(() => ({
@@ -662,6 +685,10 @@ function toggleDialogMaximized() {
 
 function startWorkspaceFromCell(workspaceId: string, step: FlowStep) {
   branchDraft.value = createWorkspaceBranchDraft(selectedProject.value, workspaceId, step)
+}
+
+function closeWorkspaceDraftDialog() {
+  branchDraft.value = null
 }
 
 async function openBackendDesign() {
@@ -779,32 +806,22 @@ async function importProject() {
   }
 }
 
-async function archiveSelectedWorkspace() {
-  const workspaceId = selectedWorkspace.value?.id
-  if (!workspaceId || !selectedProject.value.path) return
-  try {
-    const manifest = selectedProjectManifest.value
-      ?? await readOrCreateProjectManifest(selectedProject.value.path, selectedProject.value.name)
-    const updated = archiveWorkspaceInManifest(manifest, workspaceId)
-    await writeSelectedProjectManifest(updated, selectedProject.value.path)
-    branchDraft.value = null
-  } catch (error) {
-    console.warn('Failed to archive selected workspace.', error)
-    showToast({
-      severity: 'warn',
-      summary: 'Workspace not archived',
-      detail: 'project.json could not be updated.',
-    })
-  }
+function requestDeleteWorkspace(workspaceId: string) {
+  pendingDeleteWorkspaceId.value = workspaceId
 }
 
-async function deleteSelectedWorkspace() {
-  const workspaceId = selectedWorkspace.value?.id
-  await deleteWorkspace(workspaceId)
+function closeDeleteWorkspaceDialog() {
+  pendingDeleteWorkspaceId.value = null
 }
 
-async function deleteWorkspace(workspaceId?: string) {
-  if (!workspaceId || !selectedProject.value.path) return
+async function confirmDeleteWorkspace() {
+  const workspaceId = pendingDeleteWorkspaceId.value
+  const deleted = await deleteWorkspace(workspaceId ?? undefined)
+  if (deleted) closeDeleteWorkspaceDialog()
+}
+
+async function deleteWorkspace(workspaceId?: string): Promise<boolean> {
+  if (!workspaceId || !selectedProject.value.path) return false
   try {
     const manifest = selectedProjectManifest.value
       ?? await readOrCreateProjectManifest(selectedProject.value.path, selectedProject.value.name)
@@ -814,6 +831,7 @@ async function deleteWorkspace(workspaceId?: string) {
       selectedWorkspaceId.value = updated.workspaces[0]?.workspace_id ?? ''
     }
     branchDraft.value = null
+    return true
   } catch (error) {
     console.warn('Failed to delete selected workspace.', error)
     showToast({
@@ -821,6 +839,7 @@ async function deleteWorkspace(workspaceId?: string) {
       summary: 'Workspace not deleted',
       detail: 'project.json could not be updated.',
     })
+    return false
   }
 }
 
@@ -1304,7 +1323,7 @@ function basenamePath(path: string): string {
 
 .manager-header h1,
 .manager-toolbar h2,
-.selected-section h2,
+.sidebar-info-panel h2,
 .project-modal-dialog h2 {
   margin: 0;
   color: var(--text-primary);
@@ -1333,7 +1352,7 @@ function basenamePath(path: string): string {
 
 .manager-grid {
   display: grid;
-  grid-template-columns: minmax(230px, 270px) minmax(620px, 1fr) minmax(230px, 260px);
+  grid-template-columns: minmax(250px, 300px) minmax(620px, 1fr);
   gap: 12px;
   min-height: 0;
   overflow: hidden;
@@ -1341,8 +1360,7 @@ function basenamePath(path: string): string {
 }
 
 .manager-sidebar,
-.manager-table-panel,
-.selected-panel {
+.manager-table-panel {
   min-height: 0;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -1350,8 +1368,7 @@ function basenamePath(path: string): string {
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 78%, transparent);
 }
 
-.manager-sidebar,
-.selected-panel {
+.manager-sidebar {
   display: flex;
   flex-direction: column;
   padding: 16px;
@@ -1364,6 +1381,29 @@ function basenamePath(path: string): string {
   flex: 1 1 auto;
   flex-direction: column;
   gap: 12px;
+}
+
+.project-list-panel,
+.sidebar-context-panel {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 80%, transparent);
+}
+
+.project-list-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.sidebar-context-panel {
+  flex: 0 0 auto;
+  padding: 12px;
 }
 
 .resource-search {
@@ -1399,10 +1439,57 @@ function basenamePath(path: string): string {
 
 .project-list {
   display: grid;
+  align-content: start;
+  grid-auto-rows: 54px;
   gap: 8px;
   min-height: 0;
+  flex: 1 1 auto;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.sidebar-info-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.sidebar-info-panel {
+  min-width: 0;
+  padding: 0;
+}
+
+.sidebar-info-panel h2 {
+  margin-bottom: 9px;
+  font-size: 13px;
+}
+
+.sidebar-info-panel dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.sidebar-info-panel dl div {
+  min-width: 0;
+}
+
+.sidebar-info-panel dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.sidebar-info-panel dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.selection-info-panel {
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
 
 .resource-row {
@@ -1411,6 +1498,7 @@ function basenamePath(path: string): string {
   align-items: center;
   gap: 10px;
   width: 100%;
+  height: 54px;
   min-height: 54px;
   padding: 8px;
   border: 1px solid transparent;
@@ -1847,16 +1935,8 @@ function basenamePath(path: string): string {
   background: var(--success-bg);
 }
 
-.open-header {
-  font-size: 0;
-}
-
-.open-header::after {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 50%, transparent);
+.actions-header {
+  font-size: 11px;
 }
 
 .flow-rows {
@@ -1972,27 +2052,6 @@ function basenamePath(path: string): string {
   white-space: nowrap;
 }
 
-.workspace-delete-btn {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: color-mix(in srgb, var(--text-secondary) 74%, transparent);
-  background: transparent;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.workspace-delete-btn:hover,
-.workspace-delete-btn:focus-visible {
-  color: var(--danger-color);
-  border-color: color-mix(in srgb, var(--danger-color) 48%, transparent);
-  background: color-mix(in srgb, var(--danger-color) 9%, transparent);
-}
-
 .flow-cell-wrap {
   position: relative;
   display: grid;
@@ -2050,6 +2109,12 @@ function basenamePath(path: string): string {
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.24);
 }
 
+.flow-row-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
 .row-action-btn,
 .icon-button {
   display: grid;
@@ -2078,6 +2143,13 @@ function basenamePath(path: string): string {
   color: var(--accent-color);
   border-color: color-mix(in srgb, var(--accent-color) 58%, transparent);
   background: color-mix(in srgb, var(--accent-color) 9%, transparent);
+}
+
+.row-action-btn.danger:hover,
+.row-action-btn.danger:focus-visible {
+  color: var(--danger-color);
+  border-color: color-mix(in srgb, var(--danger-color) 56%, transparent);
+  background: var(--danger-bg);
 }
 
 .primary-button,
@@ -2128,73 +2200,6 @@ function basenamePath(path: string): string {
   opacity: 0.48;
 }
 
-.selected-panel {
-  gap: 12px;
-  overflow-y: auto;
-}
-
-.selected-section {
-  padding: 13px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
-}
-
-.selected-section h2 {
-  margin-bottom: 10px;
-  font-size: 13px;
-}
-
-.selected-section dl {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-}
-
-.selected-section dl div {
-  min-width: 0;
-}
-
-.selected-section dt {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.selected-section dd,
-.selected-section p,
-.selected-section code {
-  margin: 3px 0 0;
-  overflow-wrap: anywhere;
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.selected-section code {
-  display: block;
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--accent-color);
-  background: color-mix(in srgb, var(--bg-secondary) 44%, transparent);
-}
-
-.side-note {
-  color: var(--text-secondary) !important;
-}
-
-.action-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.branch-draft-card {
-  border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
-  background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-primary));
-}
-
 .branch-artifacts {
   display: grid;
   gap: 8px;
@@ -2212,10 +2217,22 @@ function basenamePath(path: string): string {
 }
 
 .branch-artifacts dl {
+  display: grid;
   gap: 7px;
+  margin: 0;
+}
+
+.branch-artifacts dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
 }
 
 .branch-artifacts dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
 }
@@ -2257,6 +2274,27 @@ function basenamePath(path: string): string {
 
 .project-modal-dialog h2 {
   font-size: 20px;
+}
+
+.project-modal-dialog header p:not(.manager-eyebrow) {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.modal-path {
+  display: block;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--bg-secondary) 44%, transparent);
+  font-size: 12px;
+}
+
+.branch-draft-dialog {
+  width: min(620px, calc(100vw - 36px));
 }
 
 .form-field {
@@ -2315,10 +2353,6 @@ function basenamePath(path: string): string {
 @media (max-width: 1180px) {
   .manager-grid {
     grid-template-columns: minmax(220px, 250px) minmax(560px, 1fr);
-  }
-
-  .selected-panel {
-    display: none;
   }
 }
 
