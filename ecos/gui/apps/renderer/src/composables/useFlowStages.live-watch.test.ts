@@ -193,6 +193,29 @@ describe('useFlowStages live project file watchers', () => {
     })
   })
 
+  it('creates run stages only for steps configured in home/flow.json', async () => {
+    const { useFlowStages } = await importFreshFlowStagesModule()
+    await startLifecycleSession('/workspace/a')
+    testState.readProjectTextFile.mockResolvedValue(
+      flowJsonFor({
+        fixFanout: 'Unstart',
+        place: 'Unstart',
+        CTS: 'Unstart',
+      }),
+    )
+
+    const flow = useFlowStages()
+
+    await vi.waitFor(() => {
+      const paths = flow.dynamicFlowStages.value.map((stage) => stage.path.toLowerCase())
+      expect(paths).toContain('fixfanout')
+      expect(paths).toContain('place')
+      expect(paths).toContain('cts')
+      expect(paths).not.toContain('synthesis')
+      expect(paths).not.toContain('floorplan')
+    })
+  })
+
   it('does not let a stale flow read from a previous session replace current stages', async () => {
     const { useFlowStages } = await importFreshFlowStagesModule()
     await startLifecycleSession('/workspace/a')

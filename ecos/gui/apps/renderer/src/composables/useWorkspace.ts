@@ -677,6 +677,10 @@ export function useWorkspace() {
           workspaceId,
           projectRoot: canonicalProjectRoot,
         })
+        workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
+          sessionId: session.sessionId,
+          reason: 'workspace-created',
+        })
         connectRuntimeEvents(workspaceId, session.sessionId)
 
         // 更新窗口标题

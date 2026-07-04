@@ -249,16 +249,34 @@
                   <div v-if="hasProjectData" class="flow-rows">
                     <svg class="flow-link-layer" :viewBox="branchLinkViewBox" preserveAspectRatio="none" aria-hidden="true">
                       <defs>
-                        <marker id="branch-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                          <path d="M0,0 L8,4 L0,8 Z"></path>
+                        <marker
+                          v-for="tone in BRANCH_LINK_TONES"
+                          :id="`branch-arrow-${tone.id}`"
+                          :key="tone.id"
+                          markerWidth="9"
+                          markerHeight="9"
+                          refX="8"
+                          refY="4.5"
+                          orient="auto"
+                          class="branch-arrow"
+                          :class="tone.class"
+                        >
+                          <path d="M0,0 L9,4.5 L0,9 Z"></path>
                         </marker>
                       </defs>
-                      <path
-                        v-for="link in selectedProject.branchLinks"
+                      <g
+                        v-for="(link, index) in selectedProject.branchLinks"
                         :key="`${link.fromWorkspaceId}-${link.fromStep}-${link.toWorkspaceId}-${link.toStep}`"
-                        class="branch-link"
-                        :d="branchLinkPath(link)"
-                      ></path>
+                        class="branch-link-group"
+                        :class="branchLinkToneClass(index)"
+                      >
+                        <path class="branch-link-halo" :d="branchLinkPath(link)"></path>
+                        <path
+                          class="branch-link"
+                          :d="branchLinkPath(link)"
+                          :marker-end="`url(#${branchLinkMarkerId(index)})`"
+                        ></path>
+                      </g>
                     </svg>
 
                     <div
@@ -269,10 +287,28 @@
                       :style="matrixGridStyle"
                       @click="selectWorkspace(workspace.id)"
                     >
-                      <button type="button" class="workspace-cell" @click.stop="selectWorkspace(workspace.id)">
-                        <strong>{{ workspace.id }}</strong>
-                        <small>{{ workspace.description }}</small>
-                      </button>
+                      <div
+                        class="workspace-cell"
+                        role="button"
+                        tabindex="0"
+                        @click.stop="selectWorkspace(workspace.id)"
+                        @keydown.enter.stop.prevent="selectWorkspace(workspace.id)"
+                        @keydown.space.stop.prevent="selectWorkspace(workspace.id)"
+                      >
+                        <span class="workspace-cell-copy">
+                          <strong>{{ workspace.id }}</strong>
+                          <small>{{ workspace.description }}</small>
+                        </span>
+                        <button
+                          type="button"
+                          class="workspace-delete-btn"
+                          title="Delete workspace"
+                          :aria-label="`Delete workspace ${workspace.id}`"
+                          @click.stop="deleteWorkspace(workspace.id)"
+                        >
+                          <i class="ri-delete-bin-line"></i>
+                        </button>
+                      </div>
 
                       <div
                         v-for="cell in workspace.steps"
@@ -588,6 +624,13 @@ const legendItems = [
   { label: 'failed / count', class: 'legend-failed' },
 ]
 
+const BRANCH_LINK_TONES = [
+  { id: 'blue', class: 'branch-link-blue' },
+  { id: 'teal', class: 'branch-link-teal' },
+  { id: 'amber', class: 'branch-link-amber' },
+  { id: 'rose', class: 'branch-link-rose' },
+]
+
 watch(selectedProject, (project) => {
   const selection = createSelectionState(project)
   selectedWorkspaceId.value = selection.selectedWorkspaceId
@@ -757,13 +800,19 @@ async function archiveSelectedWorkspace() {
 
 async function deleteSelectedWorkspace() {
   const workspaceId = selectedWorkspace.value?.id
+  await deleteWorkspace(workspaceId)
+}
+
+async function deleteWorkspace(workspaceId?: string) {
   if (!workspaceId || !selectedProject.value.path) return
   try {
     const manifest = selectedProjectManifest.value
       ?? await readOrCreateProjectManifest(selectedProject.value.path, selectedProject.value.name)
     const updated = deleteWorkspaceFromManifest(manifest, workspaceId)
     await writeSelectedProjectManifest(updated, selectedProject.value.path)
-    selectedWorkspaceId.value = updated.workspaces[0]?.workspace_id ?? ''
+    if (selectedWorkspaceId.value === workspaceId || !updated.workspaces.some(workspace => workspace.workspace_id === selectedWorkspaceId.value)) {
+      selectedWorkspaceId.value = updated.workspaces[0]?.workspace_id ?? ''
+    }
     branchDraft.value = null
   } catch (error) {
     console.warn('Failed to delete selected workspace.', error)
@@ -934,6 +983,14 @@ function branchLinkPath(link: ProjectBranchLink): string {
   const toY = 27 + toRowIndex * 54
   const bend = Math.max(70, Math.abs(toX - fromX) * 0.4)
   return `M ${fromX} ${fromY} C ${fromX + bend} ${fromY}, ${toX - bend} ${toY}, ${toX} ${toY}`
+}
+
+function branchLinkToneClass(index: number): string {
+  return BRANCH_LINK_TONES[index % BRANCH_LINK_TONES.length]?.class ?? BRANCH_LINK_TONES[0].class
+}
+
+function branchLinkMarkerId(index: number): string {
+  return `branch-arrow-${BRANCH_LINK_TONES[index % BRANCH_LINK_TONES.length]?.id ?? BRANCH_LINK_TONES[0].id}`
 }
 
 async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
@@ -1819,18 +1876,49 @@ function basenamePath(path: string): string {
   z-index: 1;
 }
 
-.branch-link {
-  fill: none;
-  stroke: color-mix(in srgb, var(--accent-color) 72%, white 8%);
-  stroke-width: 2.3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  marker-end: url(#branch-arrow);
-  opacity: 0.7;
+.branch-link-group {
+  --branch-link-color: #2f7df6;
+  --branch-link-halo: color-mix(in srgb, var(--bg-primary) 90%, white 22%);
+  filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.22));
 }
 
-#branch-arrow path {
-  fill: color-mix(in srgb, var(--accent-color) 72%, white 8%);
+.branch-link-blue {
+  --branch-link-color: #2f7df6;
+}
+
+.branch-link-teal {
+  --branch-link-color: #00a7a7;
+}
+
+.branch-link-amber {
+  --branch-link-color: #d97706;
+}
+
+.branch-link-rose {
+  --branch-link-color: #e03a7a;
+}
+
+.branch-link,
+.branch-link-halo {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.branch-link-halo {
+  stroke: var(--branch-link-halo);
+  stroke-width: 6.4;
+  opacity: 0.82;
+}
+
+.branch-link {
+  stroke: var(--branch-link-color);
+  stroke-width: 3.2;
+  opacity: 0.96;
+}
+
+.branch-arrow path {
+  fill: var(--branch-link-color);
 }
 
 .flow-row {
@@ -1851,28 +1939,58 @@ function basenamePath(path: string): string {
 }
 
 .workspace-cell {
-  display: grid;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   min-width: 0;
   gap: 3px;
-  padding: 0 10px;
+  padding: 0 8px 0 10px;
   border: 0;
+  outline: none;
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
   text-align: left;
 }
 
-.workspace-cell strong {
+.workspace-cell-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspace-cell-copy strong {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
 }
 
-.workspace-cell small {
+.workspace-cell-copy small {
   overflow: hidden;
   color: var(--text-secondary);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-delete-btn {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text-secondary) 74%, transparent);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.workspace-delete-btn:hover,
+.workspace-delete-btn:focus-visible {
+  color: var(--danger-color);
+  border-color: color-mix(in srgb, var(--danger-color) 48%, transparent);
+  background: color-mix(in srgb, var(--danger-color) 9%, transparent);
 }
 
 .flow-cell-wrap {

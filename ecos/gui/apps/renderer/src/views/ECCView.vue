@@ -452,13 +452,14 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   const success = await newProject(config)
   if (!success) return
 
+  const workspacePath = currentProject.value?.path ?? config.directory
   await registerProjectManagedWorkspace({
-    workspacePath: config.directory,
+    workspacePath,
     config,
   })
   router.push({
     path: '/workspace/home',
-    query: workspaceRouteQuery(config.directory),
+    query: workspaceRouteQuery(workspacePath),
   })
 }
 
@@ -467,22 +468,23 @@ async function registerProjectManagedWorkspace(input: {
   config?: WorkspaceConfig
 }) {
   const projectRoot = queryString(route.query.projectRoot)
-  if (!projectRoot || !input.workspacePath) return
+  const workspacePath = input.workspacePath
+  if (!projectRoot || !workspacePath) return
 
-  const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
-  if (!registeredProjectRoot) {
-    showToast({
-      severity: 'warn',
-      summary: 'Project manifest not updated',
-      detail: 'Workspace was created, but the project root could not be registered for manifest access.',
-    })
-    return
-  }
-
-  const projectName = queryString(route.query.projectName)
-    || registeredProjectRoot.split('/').filter(Boolean).pop()
-    || 'project'
   try {
+    const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
+    if (!registeredProjectRoot) {
+      showToast({
+        severity: 'warn',
+        summary: 'Project manifest not updated',
+        detail: 'Workspace was created, but the project root could not be registered for manifest access.',
+      })
+      return
+    }
+
+    const projectName = queryString(route.query.projectName)
+      || registeredProjectRoot.split('/').filter(Boolean).pop()
+      || 'project'
     const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: registeredProjectRoot })
     const manifest = manifestText
       ? parseProjectManifest(manifestText)
@@ -490,7 +492,7 @@ async function registerProjectManagedWorkspace(input: {
     const updated = registerWorkspaceInManifest(manifest, {
       projectRoot: registeredProjectRoot,
       projectName,
-      workspacePath: input.workspacePath,
+      workspacePath,
       sourceWorkspaceId: queryString(route.query.sourceWorkspace) || undefined,
       sourceStep: queryString(route.query.sourceStep) || undefined,
       sourceOutputPath: queryString(route.query.sourceOutputPath) || undefined,
@@ -508,6 +510,8 @@ async function registerProjectManagedWorkspace(input: {
       summary: 'Project manifest not updated',
       detail: 'Workspace was created, but project.json could not be updated.',
     })
+  } finally {
+    await restoreWorkspaceRootForWorkspaceView(workspacePath)
   }
 }
 
@@ -523,12 +527,27 @@ function workspaceRouteQuery(workspacePath?: string) {
 }
 
 async function registerProjectRootForProjectManagement(projectRoot: string): Promise<string | null> {
+  return registerLocalProjectRoot(projectRoot, 'Project Management')
+}
+
+async function restoreWorkspaceRootForWorkspaceView(workspacePath: string) {
+  const workspaceRoot = await registerLocalProjectRoot(workspacePath, 'workspace view')
+  if (!workspaceRoot) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace view not refreshed',
+      detail: 'The workspace root could not be restored for Home resources.',
+    })
+  }
+}
+
+async function registerLocalProjectRoot(rootPath: string, context: string): Promise<string | null> {
   try {
     const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const registeredRoot = await desktopApi.workspace.registerProjectRoot(projectRoot)
-    return normalizePath(registeredRoot || projectRoot)
+    const registeredRoot = await desktopApi.workspace.registerProjectRoot(rootPath)
+    return normalizePath(registeredRoot || rootPath)
   } catch (error) {
-    console.warn('Failed to register project root for Project Management.', error)
+    console.warn(`Failed to register project root for ${context}.`, error)
     return null
   }
 }

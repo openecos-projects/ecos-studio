@@ -1753,6 +1753,40 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
   })
 
+  it('invalidates freshly created workspace resources after activating the session', async () => {
+    const workspace = useWorkspace()
+    const before = { ...workspace.resourceVersions.value }
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/new-project',
+        workspace_id: 'workspace-new-project',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/new-project',
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'new_project',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(true)
+
+    expect(workspace.workspaceSession.value.state).toBe('active')
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
+    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
+  })
+
   it('does not invalidate resources for read-only runtime events', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }

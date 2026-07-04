@@ -50,6 +50,7 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain('writeProjectTextFile')
     expect(source).toContain('project.json')
     expect(source).toContain('projectRoot')
+    expect(source).toContain('restoreWorkspaceRootForWorkspaceView')
   })
 
   it('opens Backend Design new workspace with project-root derived directory mode', () => {
@@ -74,6 +75,7 @@ describe('ECCView project management handoff', () => {
 
   it('registers the project root before updating project.json from ECC', () => {
     expect(source).toContain('registerProjectRootForProjectManagement')
+    expect(source).toContain('registerLocalProjectRoot')
     expect(source).toContain('desktopApi.workspace.registerProjectRoot')
 
     const updateStart = source.indexOf('async function registerProjectManagedWorkspace')
@@ -86,5 +88,27 @@ describe('ECCView project management handoff', () => {
     expect(readIndex).toBeGreaterThan(registerIndex)
     expect(writeIndex).toBeGreaterThan(registerIndex)
     expect(outputPathIndex).toBeGreaterThan(updateStart)
+  })
+
+  it('restores the created workspace root after project manifest access before opening Home', () => {
+    const createStart = source.indexOf('const handleWizardCreate')
+    const workspacePathIndex = source.indexOf('const workspacePath = currentProject.value?.path ?? config.directory', createStart)
+    const registerCallIndex = source.indexOf('await registerProjectManagedWorkspace({', createStart)
+    const routeQueryIndex = source.indexOf('query: workspaceRouteQuery(workspacePath)', createStart)
+    expect(workspacePathIndex).toBeGreaterThan(createStart)
+    expect(registerCallIndex).toBeGreaterThan(workspacePathIndex)
+    expect(routeQueryIndex).toBeGreaterThan(registerCallIndex)
+
+    const updateStart = source.indexOf('async function registerProjectManagedWorkspace')
+    const writeIndex = source.indexOf("await writeProjectTextFile('project.json'", updateStart)
+    const finallyIndex = source.indexOf('} finally {', updateStart)
+    const restoreIndex = source.indexOf('await restoreWorkspaceRootForWorkspaceView(workspacePath)', updateStart)
+    expect(finallyIndex).toBeGreaterThan(writeIndex)
+    expect(restoreIndex).toBeGreaterThan(finallyIndex)
+
+    const restoreStart = source.indexOf('async function restoreWorkspaceRootForWorkspaceView')
+    const restoreEnd = source.indexOf('async function registerLocalProjectRoot', restoreStart)
+    const restoreSource = source.slice(restoreStart, restoreEnd)
+    expect(restoreSource).toContain("registerLocalProjectRoot(workspacePath, 'workspace view')")
   })
 })

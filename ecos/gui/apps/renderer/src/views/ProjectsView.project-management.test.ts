@@ -57,6 +57,22 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('deleteSelectedWorkspace')
   })
 
+  it('adds a row-level delete action to each workspace in the flow matrix', () => {
+    const matrixStart = source.indexOf('class="flow-row"')
+    const rowStart = source.lastIndexOf('v-for="workspace in selectedProject.workspaces"', matrixStart)
+    const rowEnd = source.indexOf('class="row-action-btn"', rowStart)
+    const rowSource = source.slice(rowStart, rowEnd)
+    expect(rowSource).toContain('workspace-delete-btn')
+    expect(rowSource).toContain('title="Delete workspace"')
+    expect(rowSource).toContain('@click.stop="deleteWorkspace(workspace.id)"')
+
+    const handlerStart = source.indexOf('async function deleteWorkspace(')
+    const handlerEnd = source.indexOf('async function removeProjectFromHistory', handlerStart)
+    const handlerSource = source.slice(handlerStart, handlerEnd)
+    expect(handlerSource).toContain('deleteWorkspaceFromManifest(manifest, workspaceId)')
+    expect(handlerSource).toContain('writeSelectedProjectManifest(updated, selectedProject.value.path)')
+  })
+
   it('passes source artifacts when creating a workspace from a successful step', () => {
     const continueStart = source.indexOf('async function continueWorkspaceDraft')
     const continueEnd = source.indexOf('async function openWorkspace', continueStart)
@@ -68,6 +84,13 @@ describe('ProjectsView project management surface', () => {
     expect(continueSource).toContain('sourceOutputType: branchDraft.value.sourceOutputType')
     expect(continueSource).toContain('startStep: branchDraft.value.targetStartStep')
     expect(continueSource).toContain('endStep: branchDraft.value.targetEndStep')
+  })
+
+  it('uses high-contrast branch link tones for workspace lineage arrows', () => {
+    expect(source).toContain('BRANCH_LINK_TONES')
+    expect(source).toContain('branchLinkToneClass(index)')
+    expect(source).toContain('branchLinkMarkerId(index)')
+    expect(source).toContain('branch-link-halo')
   })
 
   it('shows the source output artifacts before continuing derived workspace creation', () => {
