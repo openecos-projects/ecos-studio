@@ -506,6 +506,43 @@ describe('useFlowRunner desktop-only guard', () => {
     })
   })
 
+  it('clears a full-flow rerun after a duplicate startup marker is observed', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    currentProject.value = { path: '/work/demo' }
+    let resolveRunAll:
+      | ((value: {
+          data: Record<string, unknown>
+          message: string[]
+          response: string
+        }) => void)
+      | undefined
+    rtl2gdsApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRunAll = resolve
+      }),
+    )
+
+    const { isRunning, runAllFlow } = useFlowRunner()
+    const runPromise = runAllFlow({ rerun: true })
+
+    await vi.waitFor(() => {
+      expect(rtl2gdsApi).toHaveBeenCalledTimes(1)
+    })
+    expect(isRunning.value).toBe(true)
+
+    markFlowExecutionActiveForWorkspace('/work/demo', CMDEnum.rtl2gds)
+
+    resolveRunAll?.({
+      data: {},
+      message: ['Cancelled rtl2gds.'],
+      response: 'cancelled',
+    })
+    await runPromise
+
+    expect(isRunning.value).toBe(false)
+    expect(flowExecutionActive.value).toBe(false)
+  })
+
   it('sends the active project directory when running a single step', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }

@@ -44,6 +44,14 @@ export function markFlowExecutionActiveForWorkspace(
 ): FlowExecutionToken | null {
   const workspacePath = normalizeWorkspacePath(path)
   if (!workspacePath) return null
+  const existingToken = activeFlowWorkspaceTokens.get(workspacePath)
+  if (existingToken && activeFlowWorkspaces.has(workspacePath)) {
+    if (command) {
+      activeFlowWorkspaceCommands.set(workspacePath, command)
+    }
+    refreshGlobalFlowExecutionActive()
+    return existingToken
+  }
   const token = Symbol(workspacePath)
   activeFlowWorkspaceTokens.set(workspacePath, token)
   if (command) {
