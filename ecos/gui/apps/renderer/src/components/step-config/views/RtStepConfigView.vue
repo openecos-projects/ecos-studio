@@ -14,7 +14,12 @@ const rtEntries = computed(() => {
   return Object.entries(block).sort(([a], [b]) => a.localeCompare(b))
 })
 
+function isFixedRoutingLayerKey(k: string): boolean {
+  return k === '-bottom_routing_layer' || k === '-top_routing_layer'
+}
+
 function setRtKey(k: string, val: string | undefined): void {
+  if (isFixedRoutingLayerKey(k)) return
   const s = val ?? ''
   if (isObj(draft.value.RT)) {
     ;(draft.value.RT as Record<string, unknown>)[k] = s
@@ -40,7 +45,11 @@ function setRtKey(k: string, val: string | undefined): void {
         <div v-for="[k, v] in rtEntries" :key="k" class="sc-pro-flag">
           <div class="sc-pro-flag__key">{{ k }}</div>
           <div class="sc-pro-flag__val min-w-0">
+            <div v-if="isFixedRoutingLayerKey(k)" class="sc-pro-fixed-value">
+              {{ v === null || v === undefined ? '' : String(v) }}
+            </div>
             <InputText
+              v-else
               :model-value="v === null || v === undefined ? '' : String(v)"
               size="small"
               fluid

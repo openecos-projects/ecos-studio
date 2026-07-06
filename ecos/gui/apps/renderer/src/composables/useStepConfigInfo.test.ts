@@ -377,6 +377,56 @@ describe('useStepConfigInfo', () => {
     })
   })
 
+  it('pins route step config routing layers when loading and saving', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        config: '/workspace/demo/config/rt_default_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'route',
+    })
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        RT: {
+          '-bottom_routing_layer': 'MET1',
+          '-top_routing_layer': 'MET6',
+          '-thread_number': '50',
+        },
+      }),
+    )
+    testState.route.path = '/workspace/route'
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigDraft.value).toEqual({
+        RT: {
+          '-bottom_routing_layer': 'MET2',
+          '-top_routing_layer': 'MET5',
+          '-thread_number': '50',
+        },
+      })
+    })
+    expect(result.hasStepConfigChanges.value).toBe(true)
+
+    await expect(result.saveStepConfig()).resolves.toBe(true)
+
+    const savedContent = testState.writeProjectTextFile.mock.calls[0][1] as string
+    expect(JSON.parse(savedContent)).toEqual({
+      RT: {
+        '-bottom_routing_layer': 'MET2',
+        '-top_routing_layer': 'MET5',
+        '-thread_number': '50',
+      },
+    })
+    await vi.waitFor(() => {
+      expect(result.hasStepConfigChanges.value).toBe(false)
+    })
+  })
+
   it('rejects step config saves while the workspace flow is running', async () => {
     testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
       response: 'available',
@@ -417,7 +467,9 @@ describe('useStepConfigInfo', () => {
       step: 'route',
     })
     testState.readProjectTextFile
-      .mockResolvedValueOnce('{"RT":{"-bottom_routing_layer":"MET2"}}')
+      .mockResolvedValueOnce(
+        '{"RT":{"-bottom_routing_layer":"MET2","-top_routing_layer":"MET5","-thread_number":"50"}}',
+      )
       .mockResolvedValue(
         '{\n    "RT": {\n        "-bottom_routing_layer": "MET4"\n    }\n}',
       )
@@ -438,13 +490,23 @@ describe('useStepConfigInfo', () => {
 
     await vi.waitFor(() => {
       expect(result.stepConfigDraft.value).toEqual({
-        RT: { '-bottom_routing_layer': 'MET2' },
+        RT: {
+          '-bottom_routing_layer': 'MET2',
+          '-top_routing_layer': 'MET5',
+          '-thread_number': '50',
+        },
       })
     })
 
     const lifecycle = useWorkspaceLifecycle()
     const initialVersions = { ...lifecycle.resourceVersions.value }
-    result.stepConfigDraft.value = { RT: { '-bottom_routing_layer': 'MET4' } }
+    result.stepConfigDraft.value = {
+      RT: {
+        '-bottom_routing_layer': 'MET2',
+        '-top_routing_layer': 'MET5',
+        '-thread_number': '64',
+      },
+    }
 
     await expect(result.saveStepConfig()).resolves.toBe(true)
 

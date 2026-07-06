@@ -175,35 +175,30 @@ describe('useParameters desktop bridge integration', () => {
     clearFlowExecutionActiveForWorkspace('/workspace/demo')
   })
 
+  it('exposes the ics55 routing layers supported by the route config', () => {
+    fetchSharedHomeData.mockResolvedValue({
+      parameters: '/workspace/demo/home/parameters.json',
+    })
+    readProjectTextFile.mockResolvedValue(parametersJson())
+
+    const parameters = useParameters()
+
+    expect(parameters.layerOptions.value.map((layer) => layer.value)).toEqual([
+      'MET2',
+      'MET3',
+      'MET4',
+      'MET5',
+    ])
+  })
+
   it('loads and saves parameters through the bridge-backed file helpers', async () => {
     fetchSharedHomeData.mockResolvedValue({
       parameters: '/workspace/demo/home/parameters.json',
     })
     readProjectTextFile.mockResolvedValue(
-      JSON.stringify({
-        PDK: 'ics55',
-        Design: 'demo',
-        'Top module': 'chip_top',
-        Die: { Size: [100, 100], Area: 10000 },
-        Core: {
-          Size: [80, 80],
-          Area: 6400,
-          'Bounding box': '(0,0) (80,80)',
-          Utilitization: 0.5,
-          Margin: [4, 4],
-          'Aspect ratio': 1,
-        },
-        'Max fanout': 20,
-        'Target density': 0.3,
-        'Target overflow': 0.1,
-        'Global right padding': 0,
-        'Cell padding x': 600,
-        'Routability opt flag': 1,
-        Clock: 'clk',
-        'Frequency max [MHz]': 100,
-        'Bottom layer': 'MET2',
-        'Top layer': 'MET5',
-        'PDK Root': '/pdks/ics55',
+      parametersJson({
+        'Bottom layer': 'MET3',
+        'Top layer': 'MET6',
       }),
     )
 
@@ -217,6 +212,8 @@ describe('useParameters desktop bridge integration', () => {
 
     expect(parameters.config.design).toBe('demo')
     expect(parameters.config.topModule).toBe('chip_top')
+    expect(parameters.config.bottomLayer).toBe('MET2')
+    expect(parameters.config.topLayer).toBe('MET5')
 
     parameters.config.design = 'updated_demo'
 
@@ -225,10 +222,12 @@ describe('useParameters desktop bridge integration', () => {
     expect(resolveProjectPathAccess).toHaveBeenCalledWith(
       '/workspace/demo/home/parameters.json',
     )
-    expect(writeProjectTextFile).toHaveBeenCalledWith(
-      '/workspace/demo/home/parameters.json',
-      expect.stringContaining('"Design": "updated_demo"'),
-    )
+    const savedContent = writeProjectTextFile.mock.calls[0][1] as string
+    expect(JSON.parse(savedContent)).toMatchObject({
+      Design: 'updated_demo',
+      'Bottom layer': 'MET2',
+      'Top layer': 'MET5',
+    })
     expect(refreshConfigApi).toHaveBeenCalledWith({
       cmd: 'refresh_config',
       data: {

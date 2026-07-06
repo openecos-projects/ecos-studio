@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
-import Select from 'primevue/select'
 import { useParameters } from '@/composables/useParameters'
 
 const {
@@ -297,23 +296,11 @@ const resetConfig = () => {
             <div class="field-row" style="margin-top: 12px">
               <div class="field">
                 <label>Bottom</label>
-                <Select
-                  v-model="config.bottomLayer"
-                  :options="layerOptions"
-                  optionLabel="label"
-                  optionValue="value"
-                  size="small"
-                />
+                <div class="fixed-layer-value">{{ config.bottomLayer }}</div>
               </div>
               <div class="field">
                 <label>Top</label>
-                <Select
-                  v-model="config.topLayer"
-                  :options="layerOptions"
-                  optionLabel="label"
-                  optionValue="value"
-                  size="small"
-                />
+                <div class="fixed-layer-value">{{ config.topLayer }}</div>
               </div>
             </div>
           </div>
@@ -627,17 +614,28 @@ input[type='range'].orange::-webkit-slider-thumb {
   color: #06b6d4;
 }
 
+.fixed-layer-value {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: 'Fira Code', monospace;
+  font-size: 12px;
+}
+
 :deep(.p-inputtext),
-:deep(.p-inputnumber-input),
-:deep(.p-select) {
+:deep(.p-inputnumber-input) {
   background: var(--bg-primary);
   border-color: var(--border-color);
   font-size: 12px;
 }
 
 .field :deep(.p-inputtext),
-.field :deep(.p-inputnumber),
-.field :deep(.p-select) {
+.field :deep(.p-inputnumber) {
   width: 100%;
 }
 

@@ -14,6 +14,12 @@ import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 const stepEnumValues = Object.values(StepEnum)
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
+const ROUTE_STEP_BOTTOM_LAYER = 'MET2'
+const ROUTE_STEP_TOP_LAYER = 'MET5'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
   return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
@@ -49,6 +55,18 @@ function stableJsonSig(v: unknown): string {
   } catch {
     return ''
   }
+}
+
+function pinRouteStepConfigRoutingLayers(
+  value: unknown,
+  step: StepEnum | undefined,
+): unknown {
+  if (step !== StepEnum.ROUTING || !isRecord(value)) return value
+
+  const routeBlock = isRecord(value.RT) ? value.RT : value
+  routeBlock['-bottom_routing_layer'] = ROUTE_STEP_BOTTOM_LAYER
+  routeBlock['-top_routing_layer'] = ROUTE_STEP_TOP_LAYER
+  return value
 }
 
 function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
@@ -227,7 +245,10 @@ export function useStepConfigInfo() {
     }
     try {
       const parsed = JSON.parse(raw) as unknown
-      stepConfigDraft.value = deepClone(parsed)
+      stepConfigDraft.value = pinRouteStepConfigRoutingLayers(
+        deepClone(parsed),
+        currentStep.value,
+      )
       stepConfigBaselineSig.value = stableJsonSig(parsed)
       stepConfigTextDraft.value = ''
       stepConfigTextBaseline.value = ''
@@ -473,14 +494,15 @@ export function useStepConfigInfo() {
         stepConfigSaveError.value = 'Nothing to save'
         return false
       }
-      text = JSON.stringify(draftBeforeSave, null, 4)
+      const normalizedDraft = pinRouteStepConfigRoutingLayers(draftBeforeSave, step)
+      text = JSON.stringify(normalizedDraft, null, 4)
       const writeResult = await workspaceLifecycle.runForSession(sessionId, async () => {
         await writeProjectTextFile(resolvedPath, text)
         return true
       })
       if (!canApply() || writeResult !== true) return false
       stepConfigRaw.value = text
-      stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
+      stepConfigBaselineSig.value = stableJsonSig(normalizedDraft)
       return await syncWorkspaceConfig()
     } catch (e) {
       if (!canApply()) return false
