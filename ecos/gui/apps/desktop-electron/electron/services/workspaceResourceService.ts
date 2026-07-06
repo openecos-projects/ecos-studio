@@ -501,6 +501,9 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function workspaceStepDirectoryName(stepName: string, tool: string): string {
+  // Workaround for Sizer step directory name
+  // Perhaps we should establish some conventions for naming folder paths
+  // during the creation of the ecc tool directory to better unify these paths.
   if (tool.toLowerCase() === 'sizer') {
     return `${stepName.trim().split(/\s+/).join('_').toLowerCase()}_sizer`
   }
