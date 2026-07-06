@@ -473,6 +473,7 @@ export function useFlowRunner() {
       if (isNoActiveCancellationWarning(result)) {
         clearHomeRunArtifactResetAwaitingBackendStart(directory)
         clearFlowCancellationPendingForWorkspace(directory)
+        clearFlowExecutionActiveForWorkspace(directory)
         state.value = StateEnum.Imcomplete
         error.value = null
         showToast({

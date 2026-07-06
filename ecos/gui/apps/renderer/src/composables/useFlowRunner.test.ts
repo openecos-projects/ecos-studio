@@ -363,6 +363,7 @@ describe('useFlowRunner desktop-only guard', () => {
   it('treats a no-active cancellation warning as stale flow UI cleanup', async () => {
     ensureDesktopRuntime.mockReturnValue(true)
     currentProject.value = { path: '/work/demo' }
+    markFlowExecutionActiveForWorkspace('/work/demo', CMDEnum.rtl2gds)
     cancelFlowApi.mockResolvedValue({
       cmd: 'rtl2gds',
       data: { directory: '/work/demo' },
@@ -371,11 +372,14 @@ describe('useFlowRunner desktop-only guard', () => {
       response: 'warning',
     })
 
-    const { cancelRunningFlow, isStopping } = useFlowRunner()
+    const { cancelRunningFlow, isRunning, isStopping } = useFlowRunner()
 
+    expect(isRunning.value).toBe(true)
     await expect(cancelRunningFlow()).resolves.toBe(true)
 
+    expect(isRunning.value).toBe(false)
     expect(isStopping.value).toBe(false)
+    expect(flowExecutionActive.value).toBe(false)
     expect(showToast).toHaveBeenCalledWith({
       severity: 'warn',
       summary: 'Stop Flow',
