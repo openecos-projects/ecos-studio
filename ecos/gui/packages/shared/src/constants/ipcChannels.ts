@@ -30,6 +30,7 @@ export const desktopApiIpcChannels = {
   workspaceUnsubscribeProjectLogTail: 'workspace:unsubscribe-project-log-tail',
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',
   workspaceWriteProjectTextFile: 'workspace:write-project-text-file',
+  workspaceRemoveProjectDirectory: 'workspace:remove-project-directory',
   workspaceScanPdkDirectory: 'workspace:scan-pdk-directory',
   workspaceScanRtlDirectory: 'workspace:scan-rtl-directory',
   workspaceListDesignFiles: 'workspace:list-design-files',

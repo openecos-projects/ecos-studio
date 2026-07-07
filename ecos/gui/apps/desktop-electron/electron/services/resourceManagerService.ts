@@ -27,8 +27,8 @@ import type {
 
 const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
 const ALL_PLATFORM = 'all-platform'
-const TOP_LEVEL_ENTRY_LIMIT = 20
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
+const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry
 type ArchiveExtractor = (
@@ -1762,17 +1762,7 @@ async function scanPdkDirectory(path: string): Promise<{
   if (!pathStats.isDirectory()) {
     throw new Error(`Not a directory: ${path}`)
   }
-  const entries = await readdir(canonicalPath, { withFileTypes: true })
-  const directories = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  const files = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
+  const { directories, files } = await scanPdkResourceEntries(canonicalPath)
   let name =
     canonicalPath
       .replace(/[/\\]+$/, '')
@@ -1792,7 +1782,7 @@ async function scanPdkDirectory(path: string): Promise<{
     description = 'SkyWater 130nm open-source PDK (auto-detected)'
     techNode = '130nm'
     pdkId = 'sky130'
-  } else if (files.some((file) => file.endsWith('.lef') || file.endsWith('.lib'))) {
+  } else if (files.some((file) => isPdkResourceFile(file))) {
     description = 'Process library files detected'
   }
 
@@ -1804,6 +1794,44 @@ async function scanPdkDirectory(path: string): Promise<{
     pdkId,
     detectedFiles: { directories, files },
   }
+}
+
+async function scanPdkResourceEntries(
+  rootPath: string,
+): Promise<{ directories: string[]; files: string[] }> {
+  const directories: string[] = []
+  const files: string[] = []
+
+  async function walk(currentPath: string, relativeDirectory = ''): Promise<void> {
+    const entries = await readdir(currentPath, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${entry.name}`
+        : entry.name
+      const entryPath = join(currentPath, entry.name)
+      if (entry.isDirectory()) {
+        directories.push(relativePath)
+        await walk(entryPath, relativePath)
+        continue
+      }
+      if (entry.isFile() && isPdkResourceFile(entry.name)) {
+        files.push(relativePath)
+      }
+    }
+  }
+
+  await walk(rootPath)
+  return {
+    directories: directories.sort((left, right) => left.localeCompare(right)),
+    files: files.sort((left, right) => left.localeCompare(right)),
+  }
+}
+
+function isPdkResourceFile(path: string): boolean {
+  const lower = path.toLowerCase()
+  return PDK_RESOURCE_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))
 }
 
 function readContentLength(value: string | null): number | null {

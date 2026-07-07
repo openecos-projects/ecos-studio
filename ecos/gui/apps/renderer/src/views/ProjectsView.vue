@@ -44,358 +44,405 @@
         <div>
           <p class="manager-eyebrow">ECOS Studio</p>
           <h1 id="project-manager-title">Project Management</h1>
-          <p>One folder per project. Workspaces are created inside the selected project root.</p>
-        </div>
-        <div class="manager-header-actions">
-          <button type="button" class="icon-button" title="Import Project" @click="importProject">
-            <i class="ri-folder-open-line"></i>
-          </button>
-          <button type="button" class="primary-button" @click="openNewProjectDialog">
-            <i class="ri-add-line"></i>
-            <span>New Project</span>
-          </button>
         </div>
       </header>
 
       <div class="manager-grid">
         <aside class="manager-sidebar" aria-label="Projects">
-          <div class="sidebar-stack">
-            <div class="project-list-panel" aria-label="Project list panel">
-              <div class="resource-search sidebar-search">
-                <i class="ri-search-line"></i>
-                <input v-model="searchQuery" type="text" placeholder="Search project" />
+          <div class="project-list-panel" aria-label="Project list panel">
+            <div class="project-list-title">
+              <h2>Projects</h2>
+              <div class="project-list-actions">
+                <button
+                  type="button"
+                  class="circle-action primary header-action-button"
+                  title="Import Project"
+                  aria-label="Import Project"
+                  @click="importProject"
+                >
+                  <i class="circle-glyph file"></i>
+                </button>
+                <button
+                  type="button"
+                  class="circle-action primary header-action-button"
+                  title="New Project"
+                  aria-label="New Project"
+                  @click="openNewProjectDialog"
+                >
+                  <i class="circle-glyph add"></i>
+                </button>
               </div>
+            </div>
+            <div class="resource-search sidebar-search">
+              <i class="ri-search-line"></i>
+              <input v-model="searchQuery" type="text" placeholder="Search project or workspace" />
+            </div>
 
-              <div class="project-list" aria-label="Project list">
+            <div class="project-list" aria-label="Project list">
+              <article
+                v-for="project in projectCards"
+                :key="project.source.id"
+                class="project-workspace-tree"
+                :class="{ selected: project.model.id === selectedProjectId }"
+              >
                 <div
-                  v-for="project in projectCards"
-                  :key="project.source.id"
                   role="button"
                   tabindex="0"
-                  class="resource-row"
+                  class="resource-row project-tree-row mockup-project-row"
                   :class="{ selected: project.model.id === selectedProjectId }"
                   @click="selectProject(project.model.id)"
                   @keydown.enter.prevent="selectProject(project.model.id)"
                   @keydown.space.prevent="selectProject(project.model.id)"
                 >
                   <span class="resource-icon">
-                    <i class="ri-folder-chart-line"></i>
+                    <i class="ri-layout-grid-line"></i>
                   </span>
                   <span class="resource-copy">
                     <strong>{{ project.model.name }}</strong>
-                    <small>{{ project.model.pdk }} · {{ project.model.topModule }}</small>
+                    <small>{{ workspaceCountLabel(project.model.workspaces.length) }}</small>
                   </span>
-                  <span class="status-pill" :class="statusBadgeClass(project.source.status)">
-                    {{ statusLabel(project.source.status) }}
+                  <span class="project-tree-actions">
+                    <button
+                      type="button"
+                      class="circle-action primary"
+                      title="Import or open workspace"
+                      :aria-label="`Import or open workspace for ${project.model.name}`"
+                      @click.stop="importWorkspaceIntoProject(project.model)"
+                    >
+                      <i class="circle-glyph file"></i>
+                    </button>
+                    <button
+                      type="button"
+                      class="circle-action primary"
+                      title="New workspace"
+                      :aria-label="`New workspace in ${project.model.name}`"
+                      @click.stop="createWorkspaceForProject(project.model)"
+                    >
+                      <i class="circle-glyph add"></i>
+                    </button>
+                    <button
+                      type="button"
+                      class="circle-action danger"
+                      title="Delete project"
+                      :aria-label="`Delete project ${project.model.name}`"
+                      @click.stop="requestDeleteProject(project.source)"
+                    >
+                      <i class="circle-glyph remove"></i>
+                    </button>
                   </span>
-                  <button
-                    type="button"
-                    class="row-remove-btn"
-                    title="Remove project history"
-                    @click.stop="removeProjectFromHistory(project.source)"
+                </div>
+
+                <div
+                  v-if="project.model.id === selectedProjectId && project.model.workspaces.length > 0"
+                  class="workspace-tree-list"
+                  aria-label="Project workspaces"
+                >
+                  <div
+                    v-for="workspace in project.model.workspaces"
+                    :key="workspace.id"
+                    class="workspace-tree-item"
+                    :class="flowStatusHintClass(workspace.flowStatusHint.state)"
+                    :style="workspaceDepthStyle(workspace)"
                   >
-                    <i class="ri-close-line"></i>
-                  </button>
+                    <div class="workspace-tree-row" @click="selectWorkspace(workspace.id)">
+                      <span class="workspace-tree-copy">
+                        <strong>{{ workspace.id }}</strong>
+                        <small>{{ workspace.startStep }} -> {{ workspace.endStep }}</small>
+                        <em v-if="workspace.sourceWorkspaceId">from {{ workspace.sourceWorkspaceId }} / {{ workspace.branchStep }}</em>
+                      </span>
+                      <span class="workspace-flow-hint" :class="flowStatusHintClass(workspace.flowStatusHint.state)">
+                        {{ workspace.flowStatusHint.label }}
+                      </span>
+                      <span class="workspace-tree-actions">
+                        <button
+                          type="button"
+                          class="circle-action primary"
+                          title="Open workspace"
+                          :aria-label="`Open workspace ${workspace.id}`"
+                          @click.stop="openWorkspace(workspace)"
+                        >
+                          <i class="circle-glyph open"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="circle-action primary workspace-flow-trigger"
+                          title="Create workspace from step output"
+                          :aria-label="`Create workspace from ${workspace.id}`"
+                          @click.stop="toggleWorkspaceFlowPopover(workspace.id)"
+                        >
+                          <i class="circle-glyph add"></i>
+                        </button>
+                        <button
+                          type="button"
+                          class="circle-action danger"
+                          title="Delete workspace"
+                          :aria-label="`Delete workspace ${workspace.id}`"
+                          @click.stop="requestDeleteWorkspace(workspace.id)"
+                        >
+                          <i class="circle-glyph remove"></i>
+                        </button>
+                      </span>
+                    </div>
+
+                    <div
+                      v-if="popoverWorkspaceId === workspace.id && selectedPopoverWorkspace"
+                      class="workspace-flow-popover"
+                      :class="workspacePopoverPlacementClass(workspace.id)"
+                      role="dialog"
+                      aria-label="Workspace Flow Steps"
+                    >
+                      <header>
+                        <strong>Workspace Flow Steps</strong>
+                        <small>{{ selectedPopoverWorkspace.id }} · {{ selectedPopoverWorkspace.startStep }} -> {{ selectedPopoverWorkspace.endStep }}</small>
+                      </header>
+                      <button
+                        v-for="cell in workspaceConfiguredSteps(selectedPopoverWorkspace)"
+                        :key="`${selectedPopoverWorkspace.id}-${cell.step}`"
+                        type="button"
+                        class="popover-step-row"
+                        :disabled="!cell.canCreateWorkspace"
+                        @click.stop="cell.canCreateWorkspace && startWorkspaceFromPopoverStep(selectedPopoverWorkspace.id, cell.step)"
+                      >
+                        <span>{{ cell.step }}</span>
+                        <em :class="stepStatusClass(cell.status)">{{ cell.label }}</em>
+                        <span v-if="cell.canCreateWorkspace" class="popover-step-add">
+                          <i class="circle-glyph add"></i>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div v-if="projectCards.length === 0" class="empty-state">
-                  No matching projects.
+                <div
+                  v-else-if="project.model.id === selectedProjectId"
+                  class="workspace-tree-empty"
+                >
+                  No project data available
                 </div>
-              </div>
-            </div>
+              </article>
 
-            <div class="sidebar-context-panel" aria-label="Selected project context panel">
-              <div class="sidebar-info-stack" aria-label="Selected project context">
-                <section class="sidebar-info-panel project-info-panel">
-                  <h2>Project</h2>
-                  <dl>
-                    <div>
-                      <dt>Root</dt>
-                      <dd>{{ selectedProject.path }}</dd>
-                    </div>
-                    <div>
-                      <dt>Best</dt>
-                      <dd>{{ selectedProject.bestWorkspaceId || '-' }}</dd>
-                    </div>
-                    <div>
-                      <dt>PDK</dt>
-                      <dd>{{ selectedProject.pdk || '-' }}</dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section class="sidebar-info-panel selection-info-panel">
-                  <h2>Selection</h2>
-                  <dl>
-                    <div>
-                      <dt>Path</dt>
-                      <dd>{{ selectedWorkspacePathLabel }}</dd>
-                    </div>
-                    <div>
-                      <dt>Step</dt>
-                      <dd>{{ selectedStep }}</dd>
-                    </div>
-                    <div>
-                      <dt>Workspace</dt>
-                      <dd>{{ selectedWorkspaceLabel }}</dd>
-                    </div>
-                  </dl>
-                </section>
+              <div v-if="projectCards.length === 0" class="empty-state">
+                No matching projects.
               </div>
             </div>
           </div>
         </aside>
 
         <main class="manager-table-panel">
-          <div class="manager-toolbar">
-            <div>
-              <h2>{{ selectedProject.name }}</h2>
-              <p>{{ selectedProject.objective }} · {{ selectedProject.path }}</p>
-            </div>
-            <div class="toolbar-actions">
-              <button
-                type="button"
-                class="secondary-button toolbar-action"
-                :disabled="!selectedProject.path"
-                @click="openBackendDesign"
-              >
-                <i class="ri-cpu-line"></i>
-                <span>Backend Design</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="project-workbench">
-            <section class="metrics-panel" aria-labelledby="metrics-summary-title">
-              <div class="panel-title-row">
+          <div class="project-analysis-shell">
+            <section class="analysis-panel mockup-analysis-panel" aria-labelledby="project-analysis-title">
+              <div class="panel-title-row analysis-heading">
                 <div>
-                  <h3 id="metrics-summary-title">Metrics Summary</h3>
-                  <p>
-                    {{ selectedWorkspaceLabel }} row · {{ selectedStep }} column
-                  </p>
+                  <h3 id="project-analysis-title">Project Analysis</h3>
+                  <p>{{ selectedProject.workspaces.length }} workspaces · {{ selectedStep }} comparison</p>
                 </div>
-                <div class="axis-chips">
-                  <span class="axis-chip workspace">{{ selectedWorkspaceLabel }}</span>
-                  <span class="axis-chip step">{{ selectedStep }}</span>
+                <div class="analysis-header-actions">
+                  <div class="analysis-tabs" role="tablist" aria-label="Project analysis pages">
+                    <button
+                      type="button"
+                      role="tab"
+                      :aria-selected="selectedAnalysisTab === 'dashboard'"
+                      :class="{ selected: selectedAnalysisTab === 'dashboard' }"
+                      @click="selectedAnalysisTab = 'dashboard'"
+                    >
+                      Dashboard
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      :aria-selected="selectedAnalysisTab === 'step'"
+                      :class="{ selected: selectedAnalysisTab === 'step' }"
+                      @click="openStepAnalysis"
+                    >
+                      Step Analysis
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div v-if="hasMetricsData" class="metrics-content">
-                <div class="metrics-board" :style="metricsGridStyle">
-                  <div class="metric-corner">Metric</div>
-                  <div
-                    v-for="workspace in selectedProject.workspaces"
-                    :key="workspace.id"
-                    class="metric-workspace"
-                    :class="{ selected: workspace.id === selectedWorkspaceId }"
-                    @click="selectWorkspace(workspace.id)"
-                  >
-                    {{ workspace.id }}
-                  </div>
-
-                  <template v-for="row in selectedProject.metricsRows" :key="row.id">
-                    <div class="metric-label">
-                      <strong>{{ row.label }}</strong>
-                      <small>{{ row.hint }}</small>
-                    </div>
-                    <div
-                      v-for="point in row.points"
-                      :key="`${row.id}-${point.workspaceId}`"
-                      class="metric-point"
-                      :class="[metricValueClass(point.state), { selected: point.workspaceId === selectedWorkspaceId }]"
-                      @click="selectWorkspace(point.workspaceId)"
-                    >
-                      <span>{{ point.label }}</span>
-                      <div class="metric-track">
-                        <i :style="{ width: `${metricInlineWidth(point)}%` }"></i>
+              <div v-if="hasProjectData && selectedAnalysisTab === 'dashboard'" class="dashboard-grid">
+                <section class="dashboard-card dashboard-run-state-card">
+                  <span>Workspace Run State</span>
+                  <div class="run-state-layout">
+                    <div class="run-state-pie" :style="{ background: runStatePieBackground }" aria-hidden="true"></div>
+                    <div class="run-state-copy">
+                      <div class="dashboard-stat-row">
+                        <strong>{{ selectedProject.dashboardSummary.workspaceCount }}</strong>
+                        <small>workspaces</small>
+                      </div>
+                      <div class="run-state-legend" aria-label="Workspace run state pie legend">
+                        <span
+                          v-for="slice in selectedProject.dashboardSummary.runStateSlices"
+                          :key="slice.state"
+                        >
+                          <i :class="runStateSliceClass(slice.state)"></i>
+                          {{ slice.label }} {{ slice.count }}
+                        </span>
                       </div>
                     </div>
-                  </template>
-                </div>
-
-                <div class="comparison-summary" aria-label="Project comparisonSummary">
-                  <div class="summary-best">
-                    <strong>Best {{ selectedProject.comparisonSummary.bestWorkspaceId || '-' }}</strong>
-                    <span>{{ selectedProject.comparisonSummary.bestReason || 'No recommendation yet' }}</span>
                   </div>
-                  <div class="comparison-grid">
+                  <div class="dashboard-pill-row">
+                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.drcCleanCount }} DRC clean</span>
+                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.timingCleanCount }} timing clean</span>
+                    <span class="dashboard-pill info">{{ selectedProject.dashboardSummary.signoffReadyCount }} signoff ready</span>
+                  </div>
+                </section>
+
+                <section class="dashboard-card dashboard-best-card">
+                  <header>
+                    <span>Best</span>
+                    <small>frequency best workspace PPA</small>
+                  </header>
+                  <div class="best-workspace-summary">
                     <div>
-                      <h4>Parameter Diff</h4>
-                      <p v-if="selectedProject.comparisonSummary.parameterDiffs.length === 0">-</p>
-                      <p
-                        v-for="diff in selectedProject.comparisonSummary.parameterDiffs.slice(0, 3)"
-                        :key="`${diff.workspaceId}-${diff.name}`"
-                      >
-                        {{ diff.workspaceId }} · {{ diff.name }}: {{ diff.from ?? '-' }} -> {{ diff.to ?? '-' }}
-                      </p>
+                      <span>Best Frequency Workspace</span>
+                      <strong>{{ bestFrequencyWorkspace?.workspaceId ?? 'N/A' }}</strong>
                     </div>
-                    <div>
-                      <h4>Metric Delta</h4>
-                      <p v-if="selectedProject.comparisonSummary.metricDiffs.length === 0">-</p>
-                      <p
-                        v-for="diff in selectedProject.comparisonSummary.metricDiffs.slice(0, 3)"
-                        :key="`${diff.fromWorkspaceId}-${diff.toWorkspaceId}-${diff.metric}`"
-                        :class="metricValueClass(diff.state)"
-                      >
-                        {{ diff.metric }} {{ signedDelta(diff.delta) }}
-                      </p>
-                    </div>
-                    <div>
-                      <h4>Risk</h4>
-                      <p v-if="selectedProject.comparisonSummary.riskLabels.length === 0">-</p>
-                      <p
-                        v-for="risk in selectedProject.comparisonSummary.riskLabels.slice(0, 3)"
-                        :key="risk"
-                      >
-                        {{ risk }}
-                      </p>
+                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.drcCleanCount }} DRC clean</span>
+                  </div>
+                  <div v-if="bestWorkspacePpaMetrics.length > 0" class="best-ppa-grid">
+                    <div
+                      v-for="metric in bestWorkspacePpaMetrics"
+                      :key="metric.id"
+                      class="best-ppa-item"
+                    >
+                      <span>{{ metric.label }}</span>
+                      <strong :class="metricValueClass(metric.state)">{{ metric.display }}</strong>
                     </div>
                   </div>
-                </div>
-              </div>
-              <div v-else class="metrics-empty-state">
-                <i class="ri-line-chart-line"></i>
-                <strong>No project data available</strong>
-                <span>Build or import a project manifest to populate metrics.</span>
-              </div>
-            </section>
+                  <div v-else class="dashboard-empty-note">
+                    No frequency data available.
+                  </div>
+                </section>
 
-            <section class="flow-panel" aria-labelledby="flow-matrix-title">
-              <div class="panel-title-row compact">
-                <div>
-                  <h3 id="flow-matrix-title">Workspace Flow Matrix</h3>
-                  <p>{{ selectedProject.workspaces.length }} workspaces · {{ FLOW_STEPS.length }} steps</p>
-                </div>
-                <div class="legend-list">
-                  <span v-for="item in legendItems" :key="item.label">
-                    <i :class="item.class"></i>{{ item.label }}
-                  </span>
-                </div>
+                <section class="dashboard-card dashboard-chart-card dashboard-key-metric-card">
+                  <header>
+                    <span>Key Metric Snapshot</span>
+                    <small>workspace comparison table</small>
+                  </header>
+                  <div
+                    class="dashboard-key-metric-table"
+                    :style="{ '--dashboard-metric-count': String(dashboardMetricRows.length) }"
+                    aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], WNS, TNS, DRC, Runtime, Memory"
+                  >
+                    <div class="dashboard-key-header dashboard-key-workspace-header">Workspace</div>
+                    <div
+                      v-for="metric in dashboardMetricRows"
+                      :key="metric.id"
+                      class="dashboard-key-header"
+                    >
+                      {{ metric.label }}
+                    </div>
+                    <template
+                      v-for="row in dashboardWorkspaceMetricRows"
+                      :key="row.workspaceId"
+                    >
+                      <button
+                        type="button"
+                        class="dashboard-key-workspace-cell"
+                        :class="{ selected: row.workspaceId === selectedWorkspaceId }"
+                        @click="selectWorkspace(row.workspaceId)"
+                      >
+                        {{ row.workspaceId }}
+                      </button>
+                      <button
+                        v-for="cell in row.cells"
+                        :key="`${row.workspaceId}-${cell.metric.id}`"
+                        type="button"
+                        class="dashboard-key-metric-cell"
+                        :class="metricValueClass(cell.point.state)"
+                        :title="`${row.workspaceId} ${cell.metric.label}: ${cell.point.label}`"
+                        @click="selectWorkspace(row.workspaceId)"
+                      >
+                        <strong>{{ cell.point.label }}</strong>
+                        <span class="metric-track">
+                          <i :style="{ width: `${metricInlineWidth(cell.point, cell.metric.points)}%` }"></i>
+                        </span>
+                      </button>
+                    </template>
+                  </div>
+                </section>
               </div>
 
-              <div class="flow-scroll">
-                <div class="flow-matrix" :style="matrixGridStyle">
-                  <div class="flow-header workspace-header">Workspace</div>
+              <div v-else-if="hasProjectData" class="step-analysis-view">
+                <div class="step-selector" aria-label="Flow step selector">
                   <button
                     v-for="step in FLOW_STEPS"
                     :key="step"
                     type="button"
-                    class="flow-header step-header"
                     :class="{ selected: step === selectedStep }"
                     @click="selectStep(step)"
                   >
                     {{ step }}
                   </button>
-                  <div class="flow-header actions-header">Actions</div>
+                </div>
 
-                  <div v-if="hasProjectData" class="flow-rows">
-                    <svg class="flow-link-layer" :viewBox="branchLinkViewBox" preserveAspectRatio="none" aria-hidden="true">
-                      <defs>
-                        <marker
-                          v-for="tone in BRANCH_LINK_TONES"
-                          :id="`branch-arrow-${tone.id}`"
-                          :key="tone.id"
-                          markerWidth="9"
-                          markerHeight="9"
-                          refX="8"
-                          refY="4.5"
-                          orient="auto"
-                          class="branch-arrow"
-                          :class="tone.class"
-                        >
-                          <path d="M0,0 L9,4.5 L0,9 Z"></path>
-                        </marker>
-                      </defs>
-                      <g
-                        v-for="(link, index) in selectedProject.branchLinks"
-                        :key="`${link.fromWorkspaceId}-${link.fromStep}-${link.toWorkspaceId}-${link.toStep}`"
-                        class="branch-link-group"
-                        :class="branchLinkToneClass(index)"
-                      >
-                        <path class="branch-link-halo" :d="branchLinkPath(link)"></path>
-                        <path
-                          class="branch-link"
-                          :d="branchLinkPath(link)"
-                          :marker-end="`url(#${branchLinkMarkerId(index)})`"
-                        ></path>
-                      </g>
-                    </svg>
-
-                    <div
-                      v-for="workspace in selectedProject.workspaces"
-                      :key="workspace.id"
-                      class="flow-row"
-                      :class="{ selected: workspace.id === selectedWorkspaceId }"
-                      :style="matrixGridStyle"
-                      @click="selectWorkspace(workspace.id)"
-                    >
-                      <div
-                        class="workspace-cell"
-                        role="button"
-                        tabindex="0"
-                        @click.stop="selectWorkspace(workspace.id)"
-                        @keydown.enter.stop.prevent="selectWorkspace(workspace.id)"
-                        @keydown.space.stop.prevent="selectWorkspace(workspace.id)"
-                      >
-                        <span class="workspace-cell-copy">
-                          <strong>{{ workspace.id }}</strong>
-                          <small>{{ workspace.description }}</small>
-                        </span>
-                      </div>
-
-                      <div
-                        v-for="cell in workspace.steps"
-                        :key="cell.step"
-                        class="flow-cell-wrap"
-                        :class="{ selected: cell.step === selectedStep }"
-                      >
-                        <button
-                          type="button"
-                          class="flow-cell"
-                          :class="stepStatusClass(cell.status)"
-                          @click.stop="selectStep(cell.step); selectWorkspace(workspace.id)"
-                        >
-                          {{ cell.label }}
-                        </button>
-                        <button
-                          v-if="cell.canCreateWorkspace && cell.step === selectedStep && workspace.id === selectedWorkspaceId"
-                          type="button"
-                          class="cell-add-button"
-                          title="Create workspace from this step"
-                          @click.stop="startWorkspaceFromCell(workspace.id, cell.step)"
-                        >
-                          <i class="ri-add-line"></i>
-                        </button>
-                      </div>
-
-                      <div class="flow-row-actions">
-                        <button
-                          type="button"
-                          class="row-action-btn"
-                          title="Open workspace"
-                          :aria-label="`Open workspace ${workspace.id}`"
-                          @click.stop="openWorkspace(workspace)"
-                        >
-                          <i class="ri-external-link-line"></i>
-                        </button>
-                        <button
-                          type="button"
-                          class="row-action-btn danger row-delete-action-btn"
-                          title="Delete workspace"
-                          :aria-label="`Delete workspace ${workspace.id}`"
-                          @click.stop="requestDeleteWorkspace(workspace.id)"
-                        >
-                          <i class="ri-delete-bin-line"></i>
-                        </button>
-                      </div>
+                <div class="analysis-grid">
+                  <div class="step-compare-overview">
+                    <div>
+                      <span>Configured</span>
+                      <strong>{{ selectedStepCompareSummary?.configuredCount ?? 0 }}</strong>
+                    </div>
+                    <div>
+                      <span>Success</span>
+                      <strong>{{ selectedStepCompareSummary?.successCount ?? 0 }}</strong>
+                    </div>
+                    <div>
+                      <span>Missing</span>
+                      <strong>{{ selectedStepCompareSummary?.missingCount ?? 0 }}</strong>
                     </div>
                   </div>
-                  <div v-else class="flow-empty-state">
-                    <i class="ri-node-tree"></i>
-                    <strong>No project data available</strong>
-                    <span>Workspace rows will appear after a real project is constructed.</span>
+
+                  <div
+                    class="step-compare-metric-table"
+                    :style="{ '--step-compare-metric-count': String(selectedStepCompareMetrics.length) }"
+                    aria-label="Selected step metrics by workspace"
+                  >
+                    <div class="step-compare-header step-compare-workspace-header">Workspace</div>
+                    <div
+                      v-for="metric in selectedStepCompareMetrics"
+                      :key="metric.id"
+                      class="step-compare-header"
+                      :title="metric.hint"
+                    >
+                      {{ metric.label }}
+                    </div>
+                    <template
+                      v-for="row in selectedStepWorkspaceMetricRows"
+                      :key="row.workspaceId"
+                    >
+                      <button
+                        type="button"
+                        class="step-compare-workspace-cell"
+                        :class="{ selected: row.workspaceId === selectedWorkspaceId }"
+                        @click="selectWorkspace(row.workspaceId)"
+                      >
+                        {{ row.workspaceId }}
+                      </button>
+                      <button
+                        v-for="cell in row.cells"
+                        :key="`${row.workspaceId}-${cell.metric.id}`"
+                        type="button"
+                        class="step-compare-metric-cell"
+                        :class="metricValueClass(cell.point.state)"
+                        :title="`${row.workspaceId} ${cell.metric.label}: ${cell.point.label}`"
+                        @click="selectWorkspace(row.workspaceId)"
+                      >
+                        <strong>{{ cell.point.label }}</strong>
+                        <span class="metric-track">
+                          <i :style="{ width: `${metricInlineWidth(cell.point, cell.metric.points)}%` }"></i>
+                        </span>
+                      </button>
+                    </template>
                   </div>
+
                 </div>
+              </div>
+
+              <div v-else class="metrics-empty-state">
+                <i class="ri-line-chart-line"></i>
+                <strong>No project data available</strong>
+                <span>Build or import a project manifest to populate project analysis.</span>
               </div>
             </section>
           </div>
@@ -474,6 +521,10 @@
               <dt>Verilog</dt>
               <dd>{{ branchDraft.originVerilog }}</dd>
             </div>
+            <div v-if="branchDraft.originSdc">
+              <dt>SDC</dt>
+              <dd>{{ branchDraft.originSdc }}</dd>
+            </div>
           </dl>
         </div>
 
@@ -497,11 +548,45 @@
           <h2 id="delete-workspace-title">Delete Workspace</h2>
         </header>
         <p class="modal-help">
-          Remove {{ pendingDeleteWorkspaceId }} from project.json? This will not delete the workspace directory.
+          Remove {{ pendingDeleteWorkspaceId }} from project.json? Keep workspace data is checked by default.
         </p>
+        <label class="workspace-delete-option">
+          <input v-model="keepWorkspaceDataOnDelete" type="checkbox" />
+          <span>
+            <strong>Keep workspace data</strong>
+            <small v-if="keepWorkspaceDataOnDelete">
+              Workspace folder will remain at {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
+            </small>
+            <small v-else>
+              Workspace folder {{ pendingDeleteWorkspace?.workspacePath || '-' }} will be deleted.
+            </small>
+          </span>
+        </label>
         <footer class="modal-actions">
           <button type="button" class="secondary-button" @click="closeDeleteWorkspaceDialog">Cancel</button>
           <button type="button" class="secondary-button danger" @click="confirmDeleteWorkspace">
+            <i class="ri-delete-bin-line"></i>
+            <span>Delete</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div v-if="pendingDeleteProject" class="project-modal-scrim" role="presentation">
+      <section class="project-modal-dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-project-title">
+        <button type="button" class="manager-close modal-close" aria-label="Close delete project dialog" @click="closeDeleteProjectDialog">
+          <i class="ri-close-line"></i>
+        </button>
+        <header>
+          <p class="manager-eyebrow">Confirm delete</p>
+          <h2 id="delete-project-title">Delete Project</h2>
+        </header>
+        <p class="modal-help">
+          Remove {{ pendingDeleteProject.name }} from Project Management? This will not delete the project directory.
+        </p>
+        <footer class="modal-actions">
+          <button type="button" class="secondary-button" @click="closeDeleteProjectDialog">Cancel</button>
+          <button type="button" class="secondary-button danger" @click="confirmDeleteProject">
             <i class="ri-delete-bin-line"></i>
             <span>Delete</span>
           </button>
@@ -512,7 +597,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
@@ -524,20 +609,28 @@ import {
   createProjectManifestDraft,
   createWorkspaceBranchDraft,
   deleteWorkspaceFromManifest,
+  nextWorkspaceId,
   parseWorkspaceFlowStateMap,
   parseProjectManifest,
+  registerWorkspaceInManifest,
   serializeProjectManifest,
   type FlowStep,
-  type ProjectBranchLink,
+  type ProjectFlowStatusHint,
+  type ProjectFeatureFileKey,
   type ProjectManifest,
   type ProjectManagementProject,
+  type ProjectMetricRow,
   type ProjectMetricPoint,
+  type ProjectRunStateSlice,
+  type ProjectStepCompareMetric,
   type ProjectStepStatus,
   type ProjectWorkspace,
+  type ProjectWorkspaceAnalysisInput,
+  type ProjectWorkspaceAnalysisInputsById,
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { readOptionalProjectTextFile, removeProjectDirectory, writeProjectTextFile } from '@/utils/projectFiles'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
@@ -556,12 +649,18 @@ const searchQuery = ref('')
 const selectedProjectId = ref<string | null>(null)
 const selectedWorkspaceId = ref('')
 const selectedStep = ref<FlowStep>('DRC')
+const selectedAnalysisTab = ref<'dashboard' | 'step'>('dashboard')
+const hasOpenedStepAnalysis = ref(false)
 const branchDraft = ref<BranchDraft | null>(null)
+const popoverWorkspaceId = ref('')
 const pendingDeleteWorkspaceId = ref<string | null>(null)
+const keepWorkspaceDataOnDelete = ref(true)
+const pendingDeleteProject = ref<Project | null>(null)
 const isDialogMaximized = ref(false)
 const projectHistory = ref<Project[]>([])
 const projectManifests = ref<Record<string, ProjectManifest>>({})
 const workspaceFlowStates = ref<Record<string, ProjectWorkspaceFlowStatesById>>({})
+const workspaceAnalysisInputs = ref<Record<string, ProjectWorkspaceAnalysisInputsById>>({})
 const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
@@ -570,26 +669,23 @@ const projectRootDraft = ref({
 })
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleWorkspacePopoverPointerDown)
+  document.addEventListener('keydown', handleWorkspacePopoverKeydown)
   projectHistory.value = await loadProjectHistory()
   await refreshProjectManifests()
   if (!selectedProjectId.value) selectedProjectId.value = projectCards.value[0]?.model.id ?? selectedProject.value.id
 })
 
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)
+  document.removeEventListener('keydown', handleWorkspacePopoverKeydown)
+})
+
 const projectSources = computed<Project[]>(() => projectHistory.value)
 
 const projectCards = computed(() => {
-  let projects = [...projectSources.value]
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase()
-    projects = projects.filter(project =>
-      project.name.toLowerCase().includes(query)
-      || project.path.toLowerCase().includes(query)
-      || project.topModule?.toLowerCase().includes(query)
-      || project.pdk?.toLowerCase().includes(query),
-    )
-  }
-
-  return projects
+  const query = searchQuery.value.trim().toLowerCase()
+  const cards = [...projectSources.value]
     .sort((left, right) => new Date(right.lastOpened).getTime() - new Date(left.lastOpened).getTime())
     .map(project => ({
       source: project,
@@ -597,9 +693,46 @@ const projectCards = computed(() => {
         project,
         projectManifests.value[project.path] ?? null,
         workspaceFlowStates.value[project.path] ?? {},
+        workspaceAnalysisInputs.value[project.path] ?? {},
       ),
     }))
+
+  if (!query) return cards
+  return cards.filter(project => projectCardMatchesSearch(project, query))
 })
+
+function projectCardMatchesSearch(
+  project: { source: Project; model: ProjectManagementProject },
+  query: string,
+): boolean {
+  const projectFields = [
+    project.source.name,
+    project.source.path,
+    project.source.topModule,
+    project.source.pdk,
+    project.model.name,
+    project.model.path,
+  ]
+  return projectFields.some(value => textMatchesSearch(value, query))
+    || project.model.workspaces.some(workspace => workspaceMatchesSearch(workspace, query))
+}
+
+function workspaceMatchesSearch(workspace: ProjectWorkspace, query: string): boolean {
+  return [
+    workspace.id,
+    workspace.name,
+    workspace.workspacePath,
+    workspace.sourceWorkspaceId,
+    workspace.branchStep,
+    workspace.startStep,
+    workspace.endStep,
+    workspace.flowStatusHint.label,
+  ].some(value => textMatchesSearch(value, query))
+}
+
+function textMatchesSearch(value: unknown, query: string): boolean {
+  return typeof value === 'string' && value.toLowerCase().includes(query)
+}
 
 const selectedProject = computed<ProjectManagementProject>(() => {
   const selected = projectCards.value.find(project => project.model.id === selectedProjectId.value)
@@ -613,19 +746,85 @@ const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
     ?? null
 })
 
+const selectedPopoverWorkspace = computed<ProjectWorkspace | null>(() => {
+  return selectedProject.value.workspaces.find(workspace => workspace.id === popoverWorkspaceId.value) ?? null
+})
+const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
+  return selectedProject.value.workspaces.find(workspace => workspace.id === pendingDeleteWorkspaceId.value) ?? null
+})
+
 const hasProjectData = computed(() => selectedProject.value.workspaces.length > 0)
-const hasMetricsData = computed(() => hasProjectData.value && selectedProject.value.metricsRows.length > 0)
-const selectedWorkspaceLabel = computed(() => selectedWorkspace.value?.id ?? 'No workspace')
-const selectedWorkspacePathLabel = computed(() => selectedWorkspace.value?.workspacePath ?? 'No workspace')
 const selectedProjectManifest = computed(() => projectManifests.value[selectedProject.value.path] ?? null)
-
-const matrixGridStyle = computed(() => ({
-  gridTemplateColumns: `150px repeat(${FLOW_STEPS.length}, minmax(54px, 1fr)) 76px`,
-}))
-
-const metricsGridStyle = computed(() => ({
-  gridTemplateColumns: `94px repeat(${Math.max(selectedProject.value.workspaces.length, 1)}, minmax(74px, 1fr))`,
-}))
+const selectedStepCompareSummary = computed(() => {
+  return selectedProject.value.stepCompareSummaries.find(summary => summary.step === selectedStep.value)
+    ?? selectedProject.value.stepCompareSummaries[0]
+    ?? null
+})
+const selectedStepCompareMetrics = computed<ProjectStepCompareMetric[]>(() => selectedStepCompareSummary.value?.metrics ?? [])
+const selectedStepWorkspaceMetricRows = computed(() => {
+  return selectedProject.value.workspaces.map(workspace => ({
+    workspaceId: workspace.id,
+    cells: selectedStepCompareMetrics.value.map(metric => ({
+      metric,
+      point: metric.points.find(point => point.workspaceId === workspace.id) ?? pendingMetricPoint(workspace.id),
+    })),
+  }))
+})
+const dashboardMetricRows = computed<ProjectMetricRow[]>(() => {
+  const metricOrder = ['die_area', 'core_util', 'frequency', 'wns', 'tns', 'drc']
+  const chipMetricRows = metricOrder.flatMap(metricId =>
+    selectedProject.value.metricsRows.find(metric => metric.id === metricId) ?? [],
+  )
+  return [
+    ...chipMetricRows,
+    {
+      id: 'runtime',
+      label: 'Runtime',
+      hint: 'workspace flow total runtime',
+      kind: 'bar',
+      points: selectedProject.value.dashboardSummary.flowMetricSummary.runtimePoints,
+    },
+    {
+      id: 'memory',
+      label: 'Memory',
+      hint: 'workspace flow peak memory',
+      kind: 'bar',
+      points: selectedProject.value.dashboardSummary.flowMetricSummary.memoryPoints,
+    },
+  ]
+})
+const dashboardWorkspaceMetricRows = computed(() => {
+  return selectedProject.value.workspaces.map(workspace => ({
+    workspaceId: workspace.id,
+    cells: dashboardMetricRows.value.map(metric => ({
+      metric,
+      point: metric.points.find(point => point.workspaceId === workspace.id) ?? pendingMetricPoint(workspace.id),
+    })),
+  }))
+})
+const bestFrequencyWorkspace = computed<ProjectMetricPoint | null>(() => {
+  const frequency = dashboardMetricRows.value.find(metric => metric.id === 'frequency')
+  return frequency?.points
+    .filter((point): point is ProjectMetricPoint & { value: number } => point.value !== null)
+    .sort((left, right) => right.value - left.value)[0] ?? null
+})
+const bestWorkspacePpaMetrics = computed(() => {
+  const workspaceId = bestFrequencyWorkspace.value?.workspaceId
+  if (!workspaceId) return []
+  const metricIds = ['frequency', 'wns', 'tns', 'drc', 'die_area', 'core_util']
+  return metricIds.flatMap(metricId => {
+    const metric = dashboardMetricRows.value.find(row => row.id === metricId)
+    const point = metric?.points.find(item => item.workspaceId === workspaceId)
+    if (!metric || !point) return []
+    return [{
+      id: metric.id,
+      label: metric.label,
+      display: point.label,
+      state: point.state,
+    }]
+  })
+})
+const runStatePieBackground = computed(() => buildRunStatePieBackground(selectedProject.value.dashboardSummary.runStateSlices))
 
 const projectManifestPreview = computed(() => {
   const root = normalizePath(projectRootDraft.value.directory.trim())
@@ -633,31 +832,50 @@ const projectManifestPreview = computed(() => {
   return `${root}/project.json`
 })
 
-const branchLinkViewBox = computed(() => {
-  const height = Math.max(54, selectedProject.value.workspaces.length * 54)
-  return `0 0 1120 ${height}`
-})
-
-const legendItems = [
-  { label: 'success', class: 'legend-success' },
-  { label: 'reused', class: 'legend-reused' },
-  { label: 'skipped', class: 'legend-skipped' },
-  { label: 'unstart', class: 'legend-unstart' },
-  { label: 'running', class: 'legend-running' },
-  { label: 'failed / count', class: 'legend-failed' },
+const WORKSPACE_ANALYSIS_FILE_SPECS: Array<{ key: ProjectFeatureFileKey; path: string }> = [
+  { key: 'synthesisStat', path: 'Synthesis_yosys/feature/Synthesis_stat.json' },
+  { key: 'floorplanDb', path: 'Floorplan_ecc/feature/Floorplan.db.json' },
+  { key: 'fanoutDb', path: 'fixFanout_ecc/feature/fixFanout.db.json' },
+  { key: 'fanoutStep', path: 'fixFanout_ecc/feature/fixFanout.step.json' },
+  { key: 'placeDb', path: 'place_dreamplace/feature/place.db.json' },
+  { key: 'placeMap', path: 'place_dreamplace/feature/place.map.json' },
+  { key: 'ctsDb', path: 'CTS_ecc/feature/CTS.db.json' },
+  { key: 'ctsStep', path: 'CTS_ecc/feature/CTS.step.json' },
+  { key: 'ctsMap', path: 'CTS_ecc/feature/CTS.map.json' },
+  { key: 'legalDb', path: 'legalization_dreamplace/feature/legalization.db.json' },
+  { key: 'routeDb', path: 'route_ecc/feature/route.db.json' },
+  { key: 'routeStep', path: 'route_ecc/feature/route.step.json' },
+  { key: 'drcDb', path: 'drc_ecc/feature/drc.db.json' },
+  { key: 'drcStep', path: 'drc_ecc/feature/drc.step.json' },
+  { key: 'fillerDb', path: 'filler_ecc/feature/filler.db.json' },
+  { key: 'fillerStep', path: 'filler_ecc/feature/filler.step.json' },
+  { key: 'rcxDb', path: 'RCX_ecc/feature/RCX.db.json' },
+  { key: 'staDb', path: 'sta_ecc/feature/sta.db.json' },
 ]
 
-const BRANCH_LINK_TONES = [
-  { id: 'blue', class: 'branch-link-blue' },
-  { id: 'teal', class: 'branch-link-teal' },
-  { id: 'amber', class: 'branch-link-amber' },
-  { id: 'rose', class: 'branch-link-rose' },
+const STA_CORNER_PATHS = [
+  'MAX_125/Cworst',
+  'MAX_125/RCworst',
+  'TYP_25/TYPICAL',
+  'ML_125/Cworst',
+  'ML_125/RCworst',
+  'ML_125/Cbest',
+  'ML_125/RCbest',
+  'MIN_m40/Cworst',
+  'MIN_m40/RCworst',
+  'MIN_m40/Cbest',
+  'MIN_m40/RCbest',
+  'WCL_m40/Cworst',
+  'WCL_m40/RCworst',
 ]
 
 watch(selectedProject, (project) => {
   const selection = createSelectionState(project)
   selectedWorkspaceId.value = selection.selectedWorkspaceId
   selectedStep.value = selection.selectedStep
+  hasOpenedStepAnalysis.value = false
+  popoverWorkspaceId.value = ''
+  branchDraft.value = null
 }, { immediate: true })
 
 watch(projectSources, () => {
@@ -667,6 +885,7 @@ watch(projectSources, () => {
 function selectProject(projectId: string) {
   selectedProjectId.value = projectId
   branchDraft.value = null
+  popoverWorkspaceId.value = ''
 }
 
 function selectWorkspace(workspaceId: string) {
@@ -676,7 +895,16 @@ function selectWorkspace(workspaceId: string) {
 
 function selectStep(step: FlowStep) {
   selectedStep.value = step
+  hasOpenedStepAnalysis.value = true
   branchDraft.value = null
+}
+
+function openStepAnalysis() {
+  selectedAnalysisTab.value = 'step'
+  if (!hasOpenedStepAnalysis.value) {
+    selectedStep.value = 'Synth'
+    hasOpenedStepAnalysis.value = true
+  }
 }
 
 function toggleDialogMaximized() {
@@ -687,19 +915,50 @@ function startWorkspaceFromCell(workspaceId: string, step: FlowStep) {
   branchDraft.value = createWorkspaceBranchDraft(selectedProject.value, workspaceId, step)
 }
 
-function closeWorkspaceDraftDialog() {
+function toggleWorkspaceFlowPopover(workspaceId: string) {
+  selectedWorkspaceId.value = workspaceId
   branchDraft.value = null
+  popoverWorkspaceId.value = popoverWorkspaceId.value === workspaceId ? '' : workspaceId
 }
 
-async function openBackendDesign() {
-  if (!selectedProject.value.path) return
-  await router.push({
-    path: '/ecc',
-    query: {
-      projectRoot: selectedProject.value.path,
-      projectName: selectedProject.value.name,
-    },
+function closeWorkspaceFlowPopover() {
+  popoverWorkspaceId.value = ''
+}
+
+function handleWorkspacePopoverPointerDown(event: PointerEvent) {
+  if (!popoverWorkspaceId.value) return
+  const target = event.target
+  if (!(target instanceof Element)) {
+    closeWorkspaceFlowPopover()
+    return
+  }
+  if (target.closest('.workspace-flow-popover')) return
+  if (target.closest('.workspace-flow-trigger')) return
+  closeWorkspaceFlowPopover()
+}
+
+function handleWorkspacePopoverKeydown(event: KeyboardEvent) {
+  if (!popoverWorkspaceId.value || event.key !== 'Escape') return
+  closeWorkspaceFlowPopover()
+}
+
+function startWorkspaceFromPopoverStep(workspaceId: string, step: FlowStep) {
+  startWorkspaceFromCell(workspaceId, step)
+  closeWorkspaceFlowPopover()
+}
+
+function workspaceConfiguredSteps(workspace: ProjectWorkspace): ProjectWorkspace['steps'] {
+  const startIndex = FLOW_STEPS.indexOf(workspace.startStep)
+  const endIndex = FLOW_STEPS.indexOf(workspace.endStep)
+  if (startIndex < 0 || endIndex < startIndex) return workspace.steps
+  return workspace.steps.filter((cell) => {
+    const stepIndex = FLOW_STEPS.indexOf(cell.step)
+    return stepIndex >= startIndex && stepIndex <= endIndex
   })
+}
+
+function closeWorkspaceDraftDialog() {
+  branchDraft.value = null
 }
 
 async function continueWorkspaceDraft() {
@@ -717,6 +976,7 @@ async function continueWorkspaceDraft() {
       sourceOutputType: branchDraft.value.sourceOutputType,
       originDef: branchDraft.value.originDef,
       originVerilog: branchDraft.value.originVerilog,
+      sdc: branchDraft.value.originSdc,
       startStep: branchDraft.value.targetStartStep,
       endStep: branchDraft.value.targetEndStep,
       workspaceId: branchDraft.value.targetWorkspaceId,
@@ -754,7 +1014,8 @@ async function refreshProjectManifests() {
       if (!manifestText) return null
       const manifest = parseProjectManifest(manifestText)
       const flowStates = await readWorkspaceFlowStates(manifest)
-      return [project.path, manifest, flowStates] as const
+      const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
+      return [project.path, manifest, flowStates, analysisInputs] as const
     } catch (error) {
       console.warn(`Failed to load project manifest: ${project.path}`, error)
       return null
@@ -764,6 +1025,7 @@ async function refreshProjectManifests() {
   const validEntries = entries.filter(entry => entry !== null)
   projectManifests.value = Object.fromEntries(validEntries.map(([path, manifest]) => [path, manifest]))
   workspaceFlowStates.value = Object.fromEntries(validEntries.map(([path, _manifest, flowStates]) => [path, flowStates]))
+  workspaceAnalysisInputs.value = Object.fromEntries(validEntries.map(([path, _manifest, _flowStates, analysisInputs]) => [path, analysisInputs]))
 }
 
 async function importProject() {
@@ -795,6 +1057,10 @@ async function importProject() {
       ...workspaceFlowStates.value,
       [project.path]: await readWorkspaceFlowStates(manifest),
     }
+    workspaceAnalysisInputs.value = {
+      ...workspaceAnalysisInputs.value,
+      [project.path]: await readWorkspaceAnalysisInputs(manifest),
+    }
     selectedProjectId.value = project.id
   } catch (error) {
     console.warn('Failed to import project root.', error)
@@ -806,27 +1072,113 @@ async function importProject() {
   }
 }
 
+async function importWorkspaceIntoProject(project: ProjectManagementProject) {
+  if (!project.path) return
+  try {
+    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    const directory = await desktopApi.dialog.pickDirectory({
+      title: 'Select Workspace Folder',
+    })
+    if (!directory) return
+
+    const projectRoot = await registerProjectRootForProjectManagement(project.path)
+    if (!projectRoot) {
+      showToast({
+        severity: 'warn',
+        summary: 'Workspace not imported',
+        detail: 'The project root could not be registered for local file access.',
+      })
+      return
+    }
+
+    const manifest = projectManifests.value[project.path]
+      ?? await readOrCreateProjectManifest(projectRoot, project.name)
+    const updated = registerWorkspaceInManifest(manifest, {
+      projectRoot,
+      projectName: project.name,
+      workspacePath: directory,
+    })
+    await writeProjectManifestForProject(updated, projectRoot)
+    selectedProjectId.value = project.id
+  } catch (error) {
+    console.warn('Failed to import workspace into project.', error)
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace not imported',
+      detail: 'project.json could not be updated.',
+    })
+  }
+}
+
+async function createWorkspaceForProject(project: ProjectManagementProject) {
+  if (!project.path) return
+  const workspaceId = nextWorkspaceId(project)
+  await router.push({
+    path: '/ecc',
+    query: {
+      projectRoot: project.path,
+      projectName: project.name,
+      workspacePath: joinProjectPath(project.path, workspaceId),
+      workspaceId,
+    },
+  })
+}
+
 function requestDeleteWorkspace(workspaceId: string) {
   pendingDeleteWorkspaceId.value = workspaceId
+  keepWorkspaceDataOnDelete.value = true
 }
 
 function closeDeleteWorkspaceDialog() {
   pendingDeleteWorkspaceId.value = null
+  keepWorkspaceDataOnDelete.value = true
 }
 
 async function confirmDeleteWorkspace() {
   const workspaceId = pendingDeleteWorkspaceId.value
-  const deleted = await deleteWorkspace(workspaceId ?? undefined)
+  const deleted = await deleteWorkspace(workspaceId ?? undefined, {
+    keepWorkspaceData: keepWorkspaceDataOnDelete.value,
+  })
   if (deleted) closeDeleteWorkspaceDialog()
 }
 
-async function deleteWorkspace(workspaceId?: string): Promise<boolean> {
+function requestDeleteProject(project: Project) {
+  pendingDeleteProject.value = project
+}
+
+function closeDeleteProjectDialog() {
+  pendingDeleteProject.value = null
+}
+
+async function confirmDeleteProject() {
+  if (!pendingDeleteProject.value) return
+  await removeProjectFromHistory(pendingDeleteProject.value)
+  closeDeleteProjectDialog()
+}
+
+async function deleteWorkspace(
+  workspaceId?: string,
+  options: { keepWorkspaceData?: boolean } = {},
+): Promise<boolean> {
   if (!workspaceId || !selectedProject.value.path) return false
   try {
+    const workspace = selectedProject.value.workspaces.find(item => item.id === workspaceId) ?? null
     const manifest = selectedProjectManifest.value
       ?? await readOrCreateProjectManifest(selectedProject.value.path, selectedProject.value.name)
     const updated = deleteWorkspaceFromManifest(manifest, workspaceId)
     await writeSelectedProjectManifest(updated, selectedProject.value.path)
+    if (!options.keepWorkspaceData && workspace?.workspacePath) {
+      try {
+        await removeProjectDirectory(workspace.workspacePath)
+      } catch (error) {
+        console.warn('Failed to remove workspace directory.', error)
+        showToast({
+          severity: 'warn',
+          summary: 'Workspace directory not deleted',
+          detail: `${workspace.workspacePath} could not be removed. The project.json entry was deleted.`,
+        })
+      }
+    }
     if (selectedWorkspaceId.value === workspaceId || !updated.workspaces.some(workspace => workspace.workspace_id === selectedWorkspaceId.value)) {
       selectedWorkspaceId.value = updated.workspaces[0]?.workspace_id ?? ''
     }
@@ -851,6 +1203,9 @@ async function removeProjectFromHistory(project: Project) {
   const nextWorkspaceFlowStates = { ...workspaceFlowStates.value }
   delete nextWorkspaceFlowStates[project.path]
   workspaceFlowStates.value = nextWorkspaceFlowStates
+  const nextWorkspaceAnalysisInputs = { ...workspaceAnalysisInputs.value }
+  delete nextWorkspaceAnalysisInputs[project.path]
+  workspaceAnalysisInputs.value = nextWorkspaceAnalysisInputs
   if (selectedProjectId.value === project.id) {
     selectedProjectId.value = projectCards.value[0]?.model.id ?? null
   }
@@ -927,34 +1282,32 @@ async function createProjectFolderDraft() {
     ...workspaceFlowStates.value,
     [projectRoot]: {},
   }
+  workspaceAnalysisInputs.value = {
+    ...workspaceAnalysisInputs.value,
+    [projectRoot]: {},
+  }
   selectedProjectId.value = createdProject.id
   closeNewProjectDialog()
 }
 
 const goBack = () => router.push('/')
 
-function statusBadgeClass(status?: ProjectStatus): string {
-  if (!status) return 'status-neutral'
-  const map: Record<ProjectStatus, string> = {
-    success: 'status-success',
-    failed: 'status-failed',
-    running: 'status-running',
-    in_progress: 'status-progress',
-    not_started: 'status-neutral',
-  }
-  return map[status]
+function workspaceCountLabel(count: number): string {
+  return `${count} workspace${count === 1 ? '' : 's'}`
 }
 
-function statusLabel(status?: ProjectStatus): string {
-  if (!status) return 'Not Started'
-  const map: Record<ProjectStatus, string> = {
-    success: 'Success',
-    failed: 'Failed',
-    running: 'Running',
-    in_progress: 'In Progress',
-    not_started: 'Not Started',
+function workspaceDepthStyle(workspace: ProjectWorkspace) {
+  return {
+    '--workspace-depth': String(workspace.depth),
   }
-  return map[status]
+}
+
+function flowStatusHintClass(state: ProjectFlowStatusHint['state']): string {
+  return `flow-hint-${state}`
+}
+
+function workspacePopoverPlacementClass(_workspaceId: string): string {
+  return ''
 }
 
 function stepStatusClass(status: ProjectStepStatus): string {
@@ -979,37 +1332,57 @@ function metricValueClass(state: ProjectMetricPoint['state']): string {
   return map[state]
 }
 
-function metricInlineWidth(point: ProjectMetricPoint): number {
+function pendingMetricPoint(workspaceId: string): ProjectMetricPoint {
+  return {
+    workspaceId,
+    label: 'N/A',
+    value: null,
+    state: 'pending',
+  }
+}
+
+function runStateSliceClass(state: ProjectRunStateSlice['state']): string {
+  return `run-state-${state}`
+}
+
+function buildRunStatePieBackground(slices: ProjectRunStateSlice[]): string {
+  if (slices.length === 0) {
+    return 'conic-gradient(color-mix(in srgb, var(--text-secondary) 14%, transparent) 0deg 360deg)'
+  }
+
+  let cursor = 0
+  const segments = slices.map((slice) => {
+    const end = cursor + (slice.percent / 100) * 360
+    const segment = `${runStateSliceColor(slice.state)} ${cursor}deg ${end}deg`
+    cursor = end
+    return segment
+  })
+  return `conic-gradient(${segments.join(', ')})`
+}
+
+function runStateSliceColor(state: ProjectRunStateSlice['state']): string {
+  const map: Record<ProjectRunStateSlice['state'], string> = {
+    success: 'var(--success-color)',
+    failed: 'var(--danger-color)',
+    running: 'var(--warn-color)',
+    unstart: 'color-mix(in srgb, var(--text-secondary) 62%, transparent)',
+    skipped: 'color-mix(in srgb, var(--text-secondary) 36%, transparent)',
+  }
+  return map[state]
+}
+
+function joinProjectPath(rootPath: string, name: string): string {
+  const root = normalizePath(rootPath)
+  const child = name.replace(/^\/+/, '')
+  return root ? `${root}/${child}` : child
+}
+
+function metricInlineWidth(point: ProjectMetricPoint, points: ProjectMetricPoint[] = []): number {
   if (point.value === null) return 28
-  return Math.max(8, Math.min(100, Math.abs(point.value) * 12))
-}
-
-function signedDelta(value: number): string {
-  if (value > 0) return `+${value}`
-  return String(value)
-}
-
-function branchLinkPath(link: ProjectBranchLink): string {
-  const fromRowIndex = selectedProject.value.workspaces.findIndex(workspace => workspace.id === link.fromWorkspaceId)
-  const toRowIndex = selectedProject.value.workspaces.findIndex(workspace => workspace.id === link.toWorkspaceId)
-  const fromStepIndex = FLOW_STEPS.indexOf(link.fromStep)
-  const toStepIndex = FLOW_STEPS.indexOf(link.toStep)
-  if (fromRowIndex < 0 || toRowIndex < 0 || fromStepIndex < 0 || toStepIndex < 0) return ''
-
-  const fromX = 170 + fromStepIndex * 72 + 36
-  const toX = 170 + toStepIndex * 72 + 36
-  const fromY = 27 + fromRowIndex * 54
-  const toY = 27 + toRowIndex * 54
-  const bend = Math.max(70, Math.abs(toX - fromX) * 0.4)
-  return `M ${fromX} ${fromY} C ${fromX + bend} ${fromY}, ${toX - bend} ${toY}, ${toX} ${toY}`
-}
-
-function branchLinkToneClass(index: number): string {
-  return BRANCH_LINK_TONES[index % BRANCH_LINK_TONES.length]?.class ?? BRANCH_LINK_TONES[0].class
-}
-
-function branchLinkMarkerId(index: number): string {
-  return `branch-arrow-${BRANCH_LINK_TONES[index % BRANCH_LINK_TONES.length]?.id ?? BRANCH_LINK_TONES[0].id}`
+  const values = points.map(item => Math.abs(item.value ?? 0)).filter(value => value > 0)
+  const maxValue = Math.max(...values, 0)
+  if (maxValue === 0) return 8
+  return Math.max(8, Math.min(100, (Math.abs(point.value) / maxValue) * 100))
 }
 
 async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
@@ -1052,6 +1425,47 @@ async function readWorkspaceFlowStates(manifest: ProjectManifest): Promise<Proje
   return Object.fromEntries(entries)
 }
 
+async function readWorkspaceAnalysisInputs(manifest: ProjectManifest): Promise<ProjectWorkspaceAnalysisInputsById> {
+  const designName = normalizeArtifactDesignName(manifest.base_design.top_module || manifest.name || 'design')
+  const entries = await Promise.all(manifest.workspaces.map(async (workspace) => {
+    try {
+      return [
+        workspace.workspace_id,
+        await readWorkspaceAnalysisInput(workspace.workspace_path, designName),
+      ] as const
+    } catch (error) {
+      console.warn(`Failed to load workspace feature summary: ${workspace.workspace_path}`, error)
+      return [workspace.workspace_id, {}] as const
+    }
+  }))
+
+  return Object.fromEntries(entries)
+}
+
+async function readWorkspaceAnalysisInput(workspacePath: string, designName: string): Promise<ProjectWorkspaceAnalysisInput> {
+  const [fileEntries, staReports, flowText, checklistText, parametersText] = await Promise.all([
+    Promise.all(WORKSPACE_ANALYSIS_FILE_SPECS.map(async (spec) => {
+      const content = await readOptionalProjectTextFile(spec.path, { projectPath: workspacePath })
+      return [spec.key, content] as const
+    })),
+    Promise.all(STA_CORNER_PATHS.map(async (corner) => {
+      const content = await readOptionalProjectTextFile(`sta_ecc/output/${corner}/${designName}.rpt.json`, { projectPath: workspacePath })
+      return { corner, content }
+    })),
+    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
+    readOptionalProjectTextFile('home/checklist.json', { projectPath: workspacePath }),
+    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
+  ])
+
+  return {
+    files: Object.fromEntries(fileEntries),
+    staReports,
+    flowText,
+    checklistText,
+    parametersText,
+  }
+}
+
 async function readOrCreateProjectManifest(projectRoot: string, projectName: string): Promise<ProjectManifest> {
   const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: projectRoot })
   if (manifestText) return parseProjectManifest(manifestText)
@@ -1062,23 +1476,34 @@ async function readOrCreateProjectManifest(projectRoot: string, projectName: str
 }
 
 async function writeSelectedProjectManifest(manifest: ProjectManifest, projectRoot: string) {
+  await writeProjectManifestForProject(manifest, projectRoot)
+}
+
+async function writeProjectManifestForProject(manifest: ProjectManifest, projectRoot: string) {
   const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
   if (!registeredProjectRoot) throw new Error('Project root could not be registered.')
 
   await writeProjectTextFile('project.json', serializeProjectManifest(manifest), { projectPath: registeredProjectRoot })
   const normalizedRoot = normalizePath(registeredProjectRoot)
+  const flowStates = await readWorkspaceFlowStates(manifest)
+  const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
   projectManifests.value = {
     ...projectManifests.value,
-    [selectedProject.value.path]: manifest,
+    [projectRoot]: manifest,
     [normalizedRoot]: manifest,
   }
   workspaceFlowStates.value = {
     ...workspaceFlowStates.value,
-    [selectedProject.value.path]: workspaceFlowStates.value[selectedProject.value.path] ?? {},
-    [normalizedRoot]: workspaceFlowStates.value[normalizedRoot] ?? {},
+    [projectRoot]: flowStates,
+    [normalizedRoot]: flowStates,
+  }
+  workspaceAnalysisInputs.value = {
+    ...workspaceAnalysisInputs.value,
+    [projectRoot]: analysisInputs,
+    [normalizedRoot]: analysisInputs,
   }
   projectHistory.value = projectHistory.value.map(project =>
-    project.path === selectedProject.value.path || project.path === normalizedRoot
+    project.path === projectRoot || project.path === normalizedRoot
       ? {
           ...project,
           pdk: manifest.base_design.pdk,
@@ -1126,10 +1551,17 @@ function normalizePath(path: string): string {
 function basenamePath(path: string): string {
   return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
 }
+
+function normalizeArtifactDesignName(value: string): string {
+  return value.trim().replace(/[\\/]/g, '_').replace(/\s+/g, '_') || 'design'
+}
 </script>
 
 <style scoped>
 .resource-manager-view {
+  --project-manager-bg: color-mix(in srgb, var(--bg-secondary) 92%, var(--bg-primary));
+  --project-list-bg: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));
+  --project-tree-bg: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
   --success-color: #2f9f6f;
   --success-bg: color-mix(in srgb, var(--success-color) 14%, transparent);
   --info-color: var(--accent-color);
@@ -1147,11 +1579,12 @@ function basenamePath(path: string): string {
   height: 100%;
   overflow: hidden;
   color: var(--text-primary);
-  background: var(--bg-secondary);
+  background: var(--project-manager-bg);
   isolation: isolate;
 }
 
 .blurred-home {
+  display: none;
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -1227,7 +1660,8 @@ function basenamePath(path: string): string {
   position: absolute;
   inset: 0;
   z-index: 1;
-  background: rgba(17, 24, 39, 0.32);
+  display: none;
+  background: transparent;
 }
 
 .manager-dialog {
@@ -1235,29 +1669,29 @@ function basenamePath(path: string): string {
   z-index: 2;
   display: flex;
   flex-direction: column;
-  width: min(1520px, calc(100% - var(--dialog-inline-gutter)));
-  height: min(920px, calc(100% - var(--dialog-block-gutter)));
+  width: min(1652px, calc(100% - 44px));
+  height: min(980px, calc(100% - 44px));
   min-height: min(600px, calc(100% - var(--dialog-block-gutter)));
-  padding: clamp(22px, 3vh, 32px) clamp(22px, 2.8vw, 34px) clamp(22px, 3vh, 34px);
+  padding: 24px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
-  box-shadow: 0 34px 90px rgba(15, 23, 42, 0.24);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  box-shadow: 0 18px 28px rgba(17, 24, 39, 0.12);
   transition: width 0.18s ease, height 0.18s ease, border-radius 0.18s ease;
 }
 
 .manager-dialog.maximized {
-  width: calc(100% - 16px);
-  height: calc(100% - 16px);
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
   min-height: 0;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .manager-window-controls {
   position: absolute;
-  top: 28px;
-  right: 28px;
+  top: 24px;
+  right: 22px;
   z-index: 4;
   display: inline-flex;
   gap: 6px;
@@ -1307,9 +1741,12 @@ function basenamePath(path: string): string {
   flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  padding-right: 82px;
-  margin-bottom: 18px;
+  gap: 14px;
+  min-height: 54px;
+  padding: 0 156px 12px 0;
+  margin: 0 -24px 14px;
+  padding-left: 24px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .manager-eyebrow {
@@ -1323,7 +1760,6 @@ function basenamePath(path: string): string {
 
 .manager-header h1,
 .manager-toolbar h2,
-.sidebar-info-panel h2,
 .project-modal-dialog h2 {
   margin: 0;
   color: var(--text-primary);
@@ -1332,17 +1768,18 @@ function basenamePath(path: string): string {
 }
 
 .manager-header h1 {
-  font-size: 22px;
+  font-size: 23px;
+  font-weight: 820;
+  line-height: 1.1;
 }
 
 .manager-header p,
 .manager-toolbar p {
   margin: 4px 0 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.manager-header-actions,
 .modal-actions,
 .axis-chips {
   display: flex;
@@ -1352,10 +1789,10 @@ function basenamePath(path: string): string {
 
 .manager-grid {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(620px, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(330px, 390px) minmax(780px, 1fr);
+  gap: 18px;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   flex: 1 1 auto;
 }
 
@@ -1363,7 +1800,7 @@ function basenamePath(path: string): string {
 .manager-table-panel {
   min-height: 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 78%, transparent);
 }
@@ -1371,25 +1808,17 @@ function basenamePath(path: string): string {
 .manager-sidebar {
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  overflow: hidden;
+  padding: 20px;
+  overflow: visible;
+  background: var(--project-list-bg);
 }
 
-.sidebar-stack {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.project-list-panel,
-.sidebar-context-panel {
+.project-list-panel {
   min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-primary) 80%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary) 80%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .project-list-panel {
@@ -1397,21 +1826,38 @@ function basenamePath(path: string): string {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
+  gap: 14px;
+  padding: 0;
+  overflow: visible;
 }
 
-.sidebar-context-panel {
+.project-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-list-title h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 850;
+}
+
+.project-list-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
-  padding: 12px;
 }
 
 .resource-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 30px;
-  padding: 0 12px;
+  height: 36px;
+  padding: 0 14px;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   color: var(--text-secondary);
@@ -1440,61 +1886,68 @@ function basenamePath(path: string): string {
 .project-list {
   display: grid;
   align-content: start;
-  grid-auto-rows: 54px;
-  gap: 8px;
+  grid-auto-rows: max-content;
+  gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
-  overflow-y: auto;
-  padding-right: 2px;
+  overflow: visible;
 }
 
-.sidebar-info-stack {
+.project-workspace-tree {
+  position: relative;
   display: grid;
-  gap: 12px;
-}
-
-.sidebar-info-panel {
-  min-width: 0;
-  padding: 0;
-}
-
-.sidebar-info-panel h2 {
-  margin-bottom: 9px;
-  font-size: 13px;
-}
-
-.sidebar-info-panel dl {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.sidebar-info-panel dl div {
+  gap: 6px;
   min-width: 0;
 }
 
-.sidebar-info-panel dt {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 750;
-  text-transform: uppercase;
+.project-workspace-tree.selected {
+  padding: 10px 10px 14px 14px;
+  overflow: visible;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 24%, var(--border-color));
+  border-radius: 10px;
+  background: var(--project-tree-bg);
+  box-shadow: 0 10px 18px rgba(17, 24, 39, 0.06);
 }
 
-.sidebar-info-panel dd {
-  margin: 3px 0 0;
-  overflow-wrap: anywhere;
-  color: var(--text-primary);
-  font-size: 12px;
+.project-workspace-tree.selected::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: 10px 0 0 10px;
+  background: var(--accent-color);
+  content: "";
 }
 
-.selection-info-panel {
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+.project-tree-row {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  height: 62px;
+  min-height: 62px;
+  padding: 9px 8px 9px 10px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.project-tree-actions,
+.workspace-tree-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.header-action-button {
+  width: 30px;
+  height: 30px;
+}
+
+.header-action-button .circle-glyph {
+  width: 13px;
+  height: 13px;
 }
 
 .resource-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto 26px;
+  grid-template-columns: 28px minmax(0, 1fr) 26px;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -1504,7 +1957,7 @@ function basenamePath(path: string): string {
   border: 1px solid transparent;
   border-radius: 8px;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-primary) 64%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 52%, var(--bg-secondary));
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -1514,6 +1967,11 @@ function basenamePath(path: string): string {
 .resource-row.selected {
   border-color: color-mix(in srgb, var(--accent-color) 56%, transparent);
   background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary));
+}
+
+.project-workspace-tree.selected .project-tree-row.selected {
+  border-color: color-mix(in srgb, var(--accent-color) 38%, transparent);
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
 }
 
 .row-remove-btn {
@@ -1546,6 +2004,371 @@ function basenamePath(path: string): string {
   background: color-mix(in srgb, var(--accent-color) 12%, transparent);
 }
 
+.workspace-tree-list {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 0 0 28px;
+  overflow: visible;
+}
+
+.workspace-tree-list::before {
+  position: absolute;
+  top: 14px;
+  bottom: 12px;
+  left: 14px;
+  width: 1.3px;
+  background: color-mix(in srgb, var(--text-secondary) 30%, transparent);
+  content: "";
+}
+
+.workspace-tree-item {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-left: calc(var(--workspace-depth, 0) * 14px);
+  overflow: visible;
+}
+
+.workspace-tree-item::before {
+  position: absolute;
+  top: 28px;
+  left: -14px;
+  width: 14px;
+  border-top: 1.3px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
+  content: "";
+}
+
+.workspace-tree-item::after {
+  position: absolute;
+  top: 24px;
+  left: -18px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--text-secondary);
+  content: "";
+}
+
+.workspace-tree-item.flow-hint-success::after {
+  background: var(--success-color);
+}
+
+.workspace-tree-item.flow-hint-running::after {
+  background: var(--warn-color);
+}
+
+.workspace-tree-item.flow-hint-failed::after {
+  background: var(--danger-color);
+}
+
+.workspace-tree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-primary) 74%, var(--bg-secondary));
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.workspace-tree-item.flow-hint-failed .workspace-tree-row {
+  border-color: color-mix(in srgb, var(--danger-color) 22%, var(--border-color));
+  background: color-mix(in srgb, var(--danger-color) 7%, var(--bg-primary));
+}
+
+.workspace-tree-item.flow-hint-running .workspace-tree-row {
+  border-color: color-mix(in srgb, var(--warn-color) 26%, var(--border-color));
+  background: color-mix(in srgb, var(--warn-color) 7%, var(--bg-primary));
+}
+
+.workspace-tree-row:hover {
+  border-color: color-mix(in srgb, var(--accent-color) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-color) 7%, var(--bg-primary));
+}
+
+.workspace-tree-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workspace-tree-copy strong,
+.workspace-tree-copy small,
+.workspace-tree-copy em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tree-copy strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.workspace-tree-copy small,
+.workspace-tree-copy em {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.workspace-tree-copy em {
+  font-style: normal;
+}
+
+.workspace-flow-hint {
+  max-width: 82px;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-flow-hint.flow-hint-success {
+  color: var(--success-color);
+  background: var(--success-bg);
+}
+
+.workspace-flow-hint.flow-hint-running {
+  color: var(--warn-color);
+  background: var(--warn-bg);
+}
+
+.workspace-flow-hint.flow-hint-failed {
+  color: var(--danger-color);
+  background: var(--danger-bg);
+}
+
+.workspace-flow-hint.flow-hint-unstart,
+.workspace-flow-hint.flow-hint-skipped {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 62%, transparent);
+}
+
+.circle-action {
+  position: relative;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-primary) 70%, var(--bg-secondary));
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.circle-action:hover,
+.circle-action:focus-visible {
+  color: var(--accent-color);
+  border-color: color-mix(in srgb, var(--accent-color) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary));
+  transform: translateY(-1px);
+}
+
+.circle-action.primary {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+  background: var(--accent-color);
+}
+
+.circle-action.danger:hover,
+.circle-action.danger:focus-visible {
+  color: var(--danger-color);
+  border-color: color-mix(in srgb, var(--danger-color) 58%, transparent);
+  background: var(--danger-bg);
+}
+
+.circle-glyph {
+  position: relative;
+  display: block;
+  width: 12px;
+  height: 12px;
+  color: currentColor;
+}
+
+.circle-glyph::before,
+.circle-glyph::after {
+  position: absolute;
+  content: "";
+}
+
+.circle-glyph.add::before,
+.circle-glyph.add::after,
+.circle-glyph.remove::before {
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+
+.circle-glyph.add::before {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.circle-glyph.open::before {
+  top: 5px;
+  left: 1px;
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+
+.circle-glyph.open::after {
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 6px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: rotate(0deg);
+}
+
+.circle-glyph.file::before {
+  top: 1px;
+  left: 2px;
+  width: 8px;
+  height: 10px;
+  border: 1.8px solid currentColor;
+  border-radius: 2px;
+  clip-path: polygon(0 0, 68% 0, 100% 32%, 100% 100%, 0 100%);
+}
+
+.circle-glyph.file::after {
+  top: 1px;
+  right: 2px;
+  width: 3px;
+  height: 3px;
+  border-top: 1.8px solid currentColor;
+  border-right: 1.8px solid currentColor;
+  transform: rotate(0deg);
+}
+
+.workspace-flow-popover {
+  position: absolute;
+  left: calc(100% + 14px);
+  top: -44px;
+  z-index: 8;
+  display: grid;
+  width: 322px;
+  max-width: min(322px, calc(100vw - 80px));
+  max-height: min(456px, calc(100vh - 160px));
+  gap: 10px;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+  box-shadow: 0 10px 18px rgba(17, 24, 39, 0.10);
+}
+
+.workspace-flow-popover::before {
+  position: absolute;
+  top: 74px;
+  left: -11px;
+  width: 20px;
+  height: 20px;
+  border-left: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
+  background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.workspace-flow-popover header {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+}
+
+.workspace-flow-popover strong {
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.workspace-flow-popover small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popover-step-row {
+  display: grid;
+  grid-template-columns: minmax(86px, 1fr) auto 26px;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 8px;
+  color: var(--text-primary);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.popover-step-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.popover-step-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.popover-step-row span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.popover-step-row em {
+  border-radius: 999px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.popover-step-add {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--accent-color);
+}
+
+.workspace-tree-empty {
+  margin-left: 12px;
+  padding: 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .resource-copy {
   min-width: 0;
 }
@@ -1568,56 +2391,42 @@ function basenamePath(path: string): string {
   font-size: 11px;
 }
 
-.status-pill {
-  border-radius: 999px;
-  padding: 3px 7px;
-  font-size: 10px;
-  font-weight: 750;
-  white-space: nowrap;
-}
-
-.status-success { color: var(--success-color); background: var(--success-bg); }
-.status-failed { color: var(--danger-color); background: var(--danger-bg); }
-.status-running { color: var(--info-color); background: var(--info-bg); }
-.status-progress { color: var(--warn-color); background: var(--warn-bg); }
-.status-neutral { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
-
 .manager-table-panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 16px;
+  padding: 24px;
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .manager-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.toolbar-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .manager-toolbar h2 {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .project-workbench {
   display: grid;
-  grid-template-rows: minmax(280px, 3fr) minmax(190px, 2fr);
-  gap: 12px;
+  grid-template-rows: minmax(250px, 0.8fr) minmax(360px, 1.2fr);
+  gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
 }
 
-.metrics-panel,
+.project-analysis-shell {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.analysis-panel,
 .flow-panel {
   min-height: 0;
   overflow: hidden;
@@ -1626,40 +2435,431 @@ function basenamePath(path: string): string {
   background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
 }
 
-.metrics-panel {
+.analysis-panel {
   display: flex;
   flex-direction: column;
-  padding: 14px;
+  padding: 10px;
+}
+
+.mockup-analysis-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .flow-panel {
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 10px;
 }
 
 .panel-title-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .panel-title-row.compact {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .panel-title-row h3 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 760;
+  font-size: 22px;
+  font-weight: 850;
 }
 
 .panel-title-row p {
   margin: 3px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.analysis-heading {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.analysis-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.analysis-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 48%, transparent);
+}
+
+.analysis-tabs button {
+  min-height: 26px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.analysis-tabs button.selected {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(166px, auto);
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.dashboard-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 166px;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+.mockup-dashboard-card {
+  min-height: 166px;
+}
+
+.dashboard-card > span,
+.dashboard-card header span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.dashboard-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboard-card header small,
+.dashboard-card small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.dashboard-stat-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dashboard-stat-row strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 28px;
+}
+
+.dashboard-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dashboard-pill {
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.dashboard-pill.success {
+  color: var(--success-color);
+  background: var(--success-bg);
+}
+
+.dashboard-pill.info {
+  color: var(--info-color);
+  background: var(--info-bg);
+}
+
+.dashboard-best-card {
+  min-height: 166px;
+}
+
+.best-workspace-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.best-workspace-summary div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.best-workspace-summary span:not(.dashboard-pill) {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.best-workspace-summary strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.best-ppa-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.best-ppa-item {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 46%, transparent);
+}
+
+.best-ppa-item span,
+.best-ppa-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.best-ppa-item span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.best-ppa-item strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+
+.run-state-layout {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  min-height: 92px;
+}
+
+.run-state-pie {
+  position: relative;
+  width: 92px;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-color) 66%, transparent);
+}
+
+.run-state-pie::after {
+  position: absolute;
+  inset: 22px;
+  border-radius: inherit;
+  background: var(--bg-primary);
+  content: "";
+}
+
+.run-state-copy {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.run-state-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.run-state-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.run-state-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.run-state-success { background: var(--success-color); }
+.run-state-failed { background: var(--danger-color); }
+.run-state-running { background: var(--warn-color); }
+.run-state-unstart { background: color-mix(in srgb, var(--text-secondary) 62%, transparent); }
+.run-state-skipped { background: color-mix(in srgb, var(--text-secondary) 36%, transparent); }
+
+.dashboard-chart-card {
+  min-height: 246px;
+}
+
+.dashboard-key-metric-card {
+  grid-column: 1 / -1;
+  min-height: 336px;
+}
+
+.dashboard-key-metric-table {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.9fr) repeat(var(--dashboard-metric-count), minmax(92px, 1fr));
+  min-width: min(100%, calc(132px + (var(--dashboard-metric-count) * 92px)));
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 34%, transparent);
+}
+
+.dashboard-key-header,
+.dashboard-key-workspace-cell,
+.dashboard-key-metric-cell {
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  background: transparent;
+}
+
+.dashboard-key-header {
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.dashboard-key-workspace-header {
+  justify-items: start;
+}
+
+.dashboard-key-workspace-cell,
+.dashboard-key-metric-cell {
+  cursor: pointer;
+}
+
+.dashboard-key-workspace-cell {
+  overflow: hidden;
+  padding: 0 10px;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 760;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-key-workspace-cell.selected,
+.dashboard-key-workspace-cell:hover,
+.dashboard-key-metric-cell:hover {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.dashboard-key-metric-cell {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 7px 9px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.dashboard-key-metric-cell strong {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-empty-note {
+  display: grid;
+  min-height: 72px;
+  place-items: center;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.step-analysis-view {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.step-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.step-selector button {
+  min-height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.step-selector button.selected {
+  color: var(--success-color);
+  border-color: color-mix(in srgb, var(--success-color) 42%, transparent);
+  background: var(--success-bg);
+}
+
+.flow-title-actions {
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
 }
 
 .axis-chip {
@@ -1669,14 +2869,122 @@ function basenamePath(path: string): string {
   font-size: 11px;
 }
 
-.axis-chip.workspace {
-  color: var(--info-color);
-  background: var(--info-bg);
-}
-
 .axis-chip.step {
   color: var(--success-color);
   background: var(--success-bg);
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-rows: 54px minmax(330px, 1fr);
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.step-compare-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.step-compare-overview div {
+  display: grid;
+  gap: 4px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+}
+
+.step-compare-overview span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.step-compare-overview strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 18px;
+}
+
+.step-compare-metric-table {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.9fr) repeat(var(--step-compare-metric-count), minmax(92px, 1fr));
+  grid-auto-rows: 42px;
+  min-height: 0;
+  min-width: min(100%, calc(132px + (var(--step-compare-metric-count) * 92px)));
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 34%, transparent);
+}
+
+.step-compare-header,
+.step-compare-workspace-cell,
+.step-compare-metric-cell {
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  background: transparent;
+}
+
+.step-compare-header {
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.step-compare-workspace-header {
+  justify-items: start;
+}
+
+.step-compare-workspace-cell,
+.step-compare-metric-cell {
+  cursor: pointer;
+}
+
+.step-compare-workspace-cell {
+  overflow: hidden;
+  padding: 0 10px;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 760;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-compare-workspace-cell.selected,
+.step-compare-workspace-cell:hover,
+.step-compare-metric-cell:hover {
+  background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+}
+
+.step-compare-metric-cell {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 7px 9px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.step-compare-metric-cell strong {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metrics-board {
@@ -1714,55 +3022,6 @@ function basenamePath(path: string): string {
 
 .metrics-empty-state {
   flex: 1 1 auto;
-}
-
-.comparison-summary {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 2.3fr);
-  gap: 10px;
-  min-height: 86px;
-  padding: 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-secondary) 34%, transparent);
-}
-
-.summary-best,
-.comparison-grid > div {
-  min-width: 0;
-}
-
-.summary-best {
-  display: grid;
-  align-content: center;
-  gap: 4px;
-  padding-right: 10px;
-  border-right: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
-}
-
-.summary-best strong,
-.comparison-grid h4 {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.summary-best span,
-.comparison-grid p {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  min-width: 0;
 }
 
 .flow-empty-state {
@@ -2011,11 +3270,6 @@ function basenamePath(path: string): string {
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
   transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.flow-row.selected {
-  border-color: color-mix(in srgb, var(--accent-color) 60%, transparent);
-  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
 }
 
 .workspace-cell {
@@ -2344,6 +3598,41 @@ function basenamePath(path: string): string {
 
 .modal-error {
   color: var(--danger-color);
+}
+
+.workspace-delete-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 42%, transparent);
+}
+
+.workspace-delete-option input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--accent-color);
+}
+
+.workspace-delete-option span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspace-delete-option strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.workspace-delete-option small {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .modal-actions {

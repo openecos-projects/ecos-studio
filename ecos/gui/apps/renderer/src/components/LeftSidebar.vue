@@ -8,7 +8,7 @@
         <router-link
           v-for="stage in flowStages"
           :key="stage.path"
-          :to="'/workspace/' + stage.path"
+          :to="workspaceStageLink(stage.path)"
           class="group relative mb-1 flex flex-col items-center justify-center py-4 transition-all"
           :class="[
             currentStage === stage.path
@@ -173,7 +173,7 @@
             <router-link
               v-for="(stage, index) in runStages"
               :key="stage.path"
-              :to="'/workspace/' + stage.path"
+              :to="workspaceStageLink(stage.path)"
               class="group relative flex cursor-pointer items-center gap-3 rounded-lg p-2 transition-all hover:bg-(--bg-secondary)/50"
               :class="{ 'bg-(--bg-secondary)/30': stage.state === 'Ongoing' }"
             >
@@ -647,6 +647,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useFlowRunner } from '@/composables/useFlowRunner'
@@ -690,6 +691,7 @@ const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
   useCurrentStage()
 
 const { activeRunMode, isRerun, runModes, selectRunMode } = useFlowRunMode(currentStage)
+const route = useRoute()
 
 // ============ Flow 概览计算 ============
 // 只统计 run 组的步骤
@@ -727,6 +729,13 @@ const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.
 
 // ============ 运行模式 ============
 const showModeMenu = ref(false)
+
+function workspaceStageLink(stagePath: string) {
+  return {
+    path: `/workspace/${stagePath}`,
+    query: route.query,
+  }
+}
 
 // 点击外部关闭菜单
 const closeMenu = () => {

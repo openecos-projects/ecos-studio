@@ -190,6 +190,7 @@ export interface DesktopApi {
     ): Promise<DesktopEventUnsubscribe>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    removeProjectDirectory(path: string): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
     scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
     listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>

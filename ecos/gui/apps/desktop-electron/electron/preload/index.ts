@@ -195,6 +195,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectBinaryFile, path),
     writeProjectTextFile: (path, content) =>
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
+    removeProjectDirectory: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceRemoveProjectDirectory, path),
     scanPdkDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
     scanRtlDirectory: (path) =>

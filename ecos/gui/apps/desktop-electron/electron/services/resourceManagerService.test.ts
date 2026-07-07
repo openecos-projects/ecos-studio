@@ -267,6 +267,57 @@ describe('ResourceManagerService', () => {
     )
   })
 
+  it('recursively detects PDK LEF and Liberty files with relative directory paths', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const pdkRoot = join(root, 'local', 'ics55')
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef'), { recursive: true })
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty'), { recursive: true })
+    await mkdir(join(pdkRoot, 'prtech', 'techLEF'), { recursive: true })
+    await writeFile(join(pdkRoot, 'README.md'), 'fixture pdk\n', 'utf8')
+    await writeFile(join(pdkRoot, 'prtech', 'techLEF', 'N551P6M.lef'), 'VERSION 5.8 ;\n', 'utf8')
+    await writeFile(
+      join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef', 'ics55_LLSC_H7CH.lef'),
+      'VERSION 5.8 ;\n',
+      'utf8',
+    )
+    await writeFile(
+      join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty', 'ics55_LLSC_H7CH_typ.lib'),
+      'library(test) {}\n',
+      'utf8',
+    )
+    const dirs = testResourceDirs(root)
+    const service = new ResourceManagerService({
+      ...dirs,
+    })
+
+    await service.importPdkPath(pdkRoot)
+
+    const manifest = JSON.parse(
+      await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
+    ) as {
+      installed: Record<string, {
+        detected_file_groups?: { directories: string[]; files: string[] }
+        detected_files?: string[]
+      }>
+    }
+    const pdkEntry = manifest.installed['pdk:ics55']
+    expect(pdkEntry?.detected_file_groups?.files).toEqual([
+      'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+      'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+      'prtech/techLEF/N551P6M.lef',
+    ])
+    expect(pdkEntry?.detected_file_groups?.directories).toEqual([
+      'IP',
+      'IP/STD_cell',
+      'IP/STD_cell/ics55_LLSC_H7CH',
+      'IP/STD_cell/ics55_LLSC_H7CH/lef',
+      'IP/STD_cell/ics55_LLSC_H7CH/liberty',
+      'prtech',
+      'prtech/techLEF',
+    ])
+    expect(pdkEntry?.detected_files).toContain('prtech/techLEF/N551P6M.lef')
+  })
+
   it('builds a runtime env from active healthy Resource Manager resources', async () => {
     const root = await createTempDir('ecos-resources-')
     const resourcesDir = join(root, 'state', 'resources')
@@ -1342,7 +1393,7 @@ describe('ResourceManagerService', () => {
       health: 'ok',
       detected_file_groups: {
         directories: ['IP', 'prtech'],
-        files: ['README.md', 'post-install-ran.txt'],
+        files: [],
       },
     })
   })

@@ -1,4 +1,4 @@
-import { open, readFile, stat, writeFile } from 'node:fs/promises'
+import { open, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import type {
@@ -331,6 +331,29 @@ export class WorkspaceService {
     const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
     await this.assertCanWriteProjectTextFile(canonicalPath)
     await writeFile(canonicalPath, content, 'utf8')
+  }
+
+  async removeProjectDirectory(path: string): Promise<void> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (isSamePath(canonicalPath, projectRoot)) {
+      throw new Error('Refusing to remove the project root as a workspace directory')
+    }
+
+    try {
+      const pathStats = await stat(canonicalPath)
+      if (!pathStats.isDirectory()) {
+        throw new Error(`${canonicalPath} is not a directory`)
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return
+      }
+
+      throw error
+    }
+
+    await rm(canonicalPath, { force: true, recursive: true })
   }
 
   async watchProjectFile(

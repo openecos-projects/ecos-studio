@@ -99,6 +99,7 @@ const desktopBridge = {
     readProjectTextFileTail: async () => null,
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
+    removeProjectDirectory: async () => undefined,
     scanPdkDirectory: async () => ({
       canonicalPath: '',
       name: '',

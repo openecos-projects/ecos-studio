@@ -7,6 +7,7 @@ import {
   readProjectTextFileTail,
   readProjectBlobUrl,
   readProjectTextFile,
+  removeProjectDirectory,
   resolveProjectFilePath,
   writeProjectTextFile,
 } from './projectFiles'
@@ -71,6 +72,7 @@ describe('projectFiles', () => {
       .fn()
       .mockResolvedValue(Uint8Array.from([0x45, 0x43, 0x4f, 0x53]))
     const writeProjectText = vi.fn().mockResolvedValue(undefined)
+    const removeDirectory = vi.fn().mockResolvedValue(undefined)
 
     setWindow({
       ecosDesktop: {
@@ -81,6 +83,7 @@ describe('projectFiles', () => {
           readOptionalProjectTextFileUpdate: readOptionalProjectTextUpdate,
           readProjectBinaryFile: readProjectBinary,
           writeProjectTextFile: writeProjectText,
+          removeProjectDirectory: removeDirectory,
         },
       },
     })
@@ -116,6 +119,9 @@ describe('projectFiles', () => {
         projectPath: '/workspace/demo',
       }),
     ).resolves.toBeUndefined()
+    await expect(
+      removeProjectDirectory('ws_0001', { projectPath: '/workspace/demo' }),
+    ).resolves.toBeUndefined()
 
     expect(readProjectText).toHaveBeenCalledWith('/workspace/demo/home/flow.json')
     expect(readProjectTextTail).toHaveBeenCalledWith('/workspace/demo/logs/run.log', 64)
@@ -133,6 +139,7 @@ describe('projectFiles', () => {
       '/workspace/demo/home/parameters.json',
       '{"PDK":"ics55"}',
     )
+    expect(removeDirectory).toHaveBeenCalledWith('/workspace/demo/ws_0001')
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
   })
 

@@ -118,6 +118,7 @@ export interface DesktopBridgeServices {
     removeDesignFile(
       filelistEntry: string,
     ): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry | null>
+    removeProjectDirectory(path: string): Promise<void>
     unwatchProjectFile(subscriptionId: string): Promise<void>
     unsubscribeProjectLogTail(subscriptionId: string): Promise<void>
     watchProjectFile(
@@ -614,6 +615,13 @@ export function registerIpc(
         path as string,
         content as string,
       )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceRemoveProjectDirectory,
+    async (_event, path) => {
+      await services.workspaceService.removeProjectDirectory(path as string)
     },
   )
 

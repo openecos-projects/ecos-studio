@@ -34,6 +34,7 @@ async function loadDesktopBridge() {
     }
     workspace: {
       readProjectTextFile(path: string): Promise<unknown>
+      removeProjectDirectory(path: string): Promise<unknown>
     }
   }
 }
@@ -70,11 +71,13 @@ describe('preload desktop bridge contract', () => {
     const bridge = await loadDesktopBridge()
     ipcRenderer.invoke.mockResolvedValueOnce({ gui: '0.1.0-test' })
     ipcRenderer.invoke.mockResolvedValueOnce('module top; endmodule')
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
 
     await expect(bridge.app.getVersions()).resolves.toEqual({ gui: '0.1.0-test' })
     await expect(bridge.workspace.readProjectTextFile('rtl/top.sv')).resolves.toBe(
       'module top; endmodule',
     )
+    await expect(bridge.workspace.removeProjectDirectory('ws_0001')).resolves.toBeUndefined()
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -84,6 +87,11 @@ describe('preload desktop bridge contract', () => {
       2,
       desktopApiIpcChannels.workspaceReadProjectTextFile,
       'rtl/top.sv',
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.workspaceRemoveProjectDirectory,
+      'ws_0001',
     )
   })
 

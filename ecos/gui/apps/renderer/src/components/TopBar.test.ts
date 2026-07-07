@@ -34,4 +34,33 @@ describe('TopBar drag region layout', () => {
 
     expect(topbarLeftZIndex).toBeGreaterThan(20)
   })
+
+  it('places a workspace quick menu before the theme toggle with a divider', () => {
+    const menuIndex = topBarSource.indexOf('class="workspace-quick-menu"')
+    const dividerIndex = topBarSource.indexOf('class="topbar-right-separator"')
+    const themeIndex = topBarSource.indexOf('class="window-btn theme-btn"')
+
+    expect(menuIndex).toBeGreaterThan(-1)
+    expect(dividerIndex).toBeGreaterThan(menuIndex)
+    expect(themeIndex).toBeGreaterThan(dividerIndex)
+    expect(topBarSource).toContain('ri-more-2-line')
+  })
+
+  it('only enables Project Management return when the workspace has project context', () => {
+    expect(topBarSource).toContain('isWorkspaceRoute')
+    expect(topBarSource).toContain('hasWorkspaceProjectContext')
+    expect(topBarSource).toContain('route.query.projectRoot')
+    expect(topBarSource).toContain(':disabled="!hasWorkspaceProjectContext"')
+    expect(topBarSource).toContain('goToProjectManagement')
+    expect(topBarSource).toContain("path: '/projects'")
+  })
+
+  it('teleports the workspace quick menu outside the app container clipping area', () => {
+    expect(topBarSource).toContain('<Teleport to="body">')
+    expect(topBarSource).toContain(':style="quickMenuStyle"')
+    expect(topBarSource).toContain('@click.stop')
+    expect(topBarSource).toContain('updateQuickMenuPosition')
+    expect(topBarSource).toContain('Back to Project Management')
+    expect(topBarSource).toMatch(/\.quick-dropdown-menu\s*\{[\s\S]*position:\s*fixed;/)
+  })
 })

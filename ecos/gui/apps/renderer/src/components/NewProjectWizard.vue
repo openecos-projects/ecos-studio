@@ -1,10 +1,13 @@
 <template>
-  <div class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 sm:p-6">
+  <div
+    class="new-workspace-wizard-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4 sm:p-6"
+    @click.self="closeWizard"
+  >
     <div
       class="new-workspace-wizard-panel relative flex h-[88vh] max-h-[900px] w-full max-w-6xl flex-col overflow-hidden rounded-[20px] border border-(--border-color) bg-(--bg-primary) shadow-[0_28px_70px_-24px_rgba(0,0,0,0.55)]"
     >
       <button
-        @click="$emit('close')"
+        @click="closeWizard"
         class="absolute right-5 top-5 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/60 text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary) hover:text-(--text-primary)"
         title="Close"
       >
@@ -66,7 +69,10 @@
         </aside>
 
         <main class="flex min-w-0 flex-1 flex-col">
-          <section class="min-h-0 flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+          <section
+            class="min-h-0 flex-1 custom-scrollbar"
+            :class="currentStep === 5 ? 'overflow-hidden p-4 md:p-5' : 'overflow-y-auto p-6 md:p-8'"
+          >
             <Transition name="fade-slide" mode="out-in">
               <div v-if="currentStep === 1" key="project-setup" class="mx-auto w-full max-w-3xl">
                 <header class="mb-7">
@@ -451,15 +457,15 @@
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 5" key="pdk-config" class="mx-auto w-full max-w-5xl">
-                <header class="mb-7">
-                  <h2 class="text-2xl font-bold text-(--text-primary)">PDK Config</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">Select an imported PDK, then use ECC defaults or customize PDK resource files.</p>
+              <div v-else-if="currentStep === 5" key="pdk-config" class="mx-auto flex h-full w-full max-w-5xl flex-col">
+                <header class="mb-4 shrink-0">
+                  <h2 class="text-xl font-bold text-(--text-primary)">PDK Config</h2>
+                  <p class="mt-1 text-xs text-(--text-secondary)">Select an imported PDK, then use ECC defaults or customize PDK resource files.</p>
                 </header>
 
-                <div class="grid gap-5">
-                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
-                    <div class="mb-4 flex items-center justify-between gap-3">
+                <div class="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">
+                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                    <div class="mb-3 flex items-center justify-between gap-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Process Design Kit</h3>
                       <button
                         type="button"
@@ -471,16 +477,16 @@
                       </button>
                     </div>
 
-                    <div v-if="importedPdks.length > 0" class="grid gap-3 md:grid-cols-2">
+                    <div v-if="importedPdks.length > 0" class="grid max-h-[132px] gap-2 overflow-y-auto pr-1 md:grid-cols-2 custom-scrollbar">
                       <button
                         v-for="pdk in importedPdks"
                         :key="pdk.id"
                         type="button"
-                        class="relative cursor-pointer rounded-lg border p-4 text-left transition-colors duration-200"
+                        class="relative cursor-pointer rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="selectedPdkId === pdk.id ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
                         @click="selectPdk(pdk)"
                       >
-                        <span class="mb-2 flex items-start justify-between gap-3">
+                        <span class="mb-1 flex items-start justify-between gap-3">
                           <span>
                             <span class="block font-semibold text-(--text-primary)">{{ pdk.name }}</span>
                             <span v-if="pdk.techNode" class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)">{{ pdk.techNode }}</span>
@@ -516,15 +522,15 @@
                     </div>
                   </section>
 
-                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
-                    <div class="mb-4">
+                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                    <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
                       <p class="mt-1 text-xs text-(--text-secondary)">Default Config uses ECC default PDK config. Manual Config lets you choose Tech LEF, Cell LEF, and Liberty.</p>
                     </div>
-                    <div class="grid gap-3 md:grid-cols-2">
+                    <div class="grid gap-2 md:grid-cols-2">
                       <button
                         type="button"
-                        class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 text-left transition-colors duration-200"
+                        class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="pdkConfigMode === 'default' ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
                         @click="pdkConfigMode = 'default'"
                       >
@@ -543,7 +549,7 @@
 
                       <button
                         type="button"
-                        class="flex cursor-pointer items-start gap-3 rounded-lg border p-4 text-left transition-colors duration-200"
+                        class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
                         :class="pdkConfigMode === 'manual' ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
                         @click="pdkConfigMode = 'manual'"
                       >
@@ -562,8 +568,8 @@
                     </div>
                   </section>
 
-                  <section v-if="pdkConfigMode === 'default'" class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
-                    <div class="rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-5">
+                  <section v-if="pdkConfigMode === 'default'" class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                    <div class="rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-4">
                       <div class="mb-3 flex items-center gap-3">
                         <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-(--accent-color) text-white">
                           <i class="ri-check-double-line text-xl"></i>
@@ -577,106 +583,97 @@
                     </div>
                   </section>
 
-                  <section v-else class="grid min-h-[430px] overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 lg:grid-cols-[220px_1fr]">
-                    <nav class="border-b border-(--border-color) bg-(--bg-primary)/60 p-3 lg:border-b-0 lg:border-r">
-                      <button
-                        v-for="item in pdkWizardSteps"
-                        :key="item.key"
-                        type="button"
-                        class="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border px-3 py-3 text-left transition-colors duration-200"
-                        :class="activePdkWizardStep === item.key ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-transparent hover:border-(--border-color) hover:bg-(--bg-secondary)/60'"
-                        @click="activePdkWizardStep = item.key"
-                      >
-                        <span>
-                          <span class="block text-sm font-semibold text-(--text-primary)">{{ item.title }}</span>
-                          <span class="mt-1 block text-xs text-(--text-secondary)">Required</span>
-                        </span>
-                        <i :class="[pdkSelections[item.key].length > 0 ? 'ri-checkbox-circle-fill text-green-500' : 'ri-circle-line text-(--text-secondary)']"></i>
-                      </button>
-                    </nav>
-
-                    <div class="min-w-0 p-5">
-                      <div class="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                          <h3 class="text-lg font-bold text-(--text-primary)">{{ activePdkStep?.title }}</h3>
-                          <p class="mt-1 text-sm text-(--text-secondary)">{{ activePdkStep?.description }}</p>
-                        </div>
-                        <button
-                          type="button"
-                          class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2 text-sm font-semibold text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary)"
-                          @click="importPdkResourceFiles(activePdkWizardStep)"
-                        >
-                          <i class="ri-upload-2-line"></i>
-                          Add Files
-                        </button>
+                  <section v-else class="min-h-0 overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                    <div class="mb-3 flex items-start justify-between gap-4">
+                      <div>
+                        <h3 class="text-sm font-bold text-(--text-primary)">Manual PDK Resources</h3>
+                        <p class="mt-1 text-xs text-(--text-secondary)">
+                          Review each resource type on the left, then update the selection from the current PDK folder when needed.
+                        </p>
                       </div>
+                      <span class="rounded-md bg-(--bg-primary)/70 px-2 py-1 text-xs text-(--text-secondary)">
+                        {{ activeManualPdkSelections.length }} selected
+                      </span>
+                    </div>
 
-                      <div class="grid gap-4 md:grid-cols-[1fr_auto_1fr]">
-                        <div class="min-w-0 rounded-lg border border-(--border-color) bg-(--bg-primary)/65 p-3">
-                          <div class="mb-3 flex items-center justify-between">
-                            <h4 class="text-sm font-semibold text-(--text-primary)">Available Files</h4>
-                            <span class="rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)">{{ availablePdkFiles.length }}</span>
-                          </div>
-                          <div class="h-64 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
-                            <button
-                              v-for="file in availablePdkFiles"
-                              :key="file"
-                              type="button"
-                              class="block w-full cursor-pointer rounded-md border border-(--border-color) bg-(--bg-secondary)/25 px-3 py-2 text-left transition-colors duration-200 hover:border-(--accent-color)/50"
-                              @dblclick="selectPdkFile(activePdkWizardStep, file)"
-                              @click="focusedAvailablePdkFile = file"
-                            >
-                              <span class="block truncate text-sm font-medium text-(--text-primary)">{{ getFileName(file) }}</span>
-                              <span class="block truncate text-xs text-(--text-secondary)">{{ file }}</span>
-                            </button>
-                            <p v-if="availablePdkFiles.length === 0" class="rounded-md border border-dashed border-(--border-color) px-3 py-6 text-center text-xs text-(--text-secondary)">
-                              No files detected for this type.
+                    <div class="pdk-manual-resource-shell grid min-h-0 gap-3 xl:grid-cols-[200px_minmax(0,1fr)]">
+                      <aside class="pdk-resource-category-list grid content-start gap-2">
+                        <button
+                          v-for="item in pdkWizardSteps"
+                          :key="item.key"
+                          type="button"
+                          class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition-colors duration-200"
+                          :class="activePdkWizardStep === item.key ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/40'"
+                          @click="activePdkWizardStep = item.key"
+                        >
+                          <span class="min-w-0">
+                            <span class="block text-sm font-bold text-(--text-primary)">{{ item.title }}</span>
+                            <span class="mt-1 block text-xs leading-5 text-(--text-secondary)">{{ item.description }}</span>
+                          </span>
+                          <span
+                            class="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold"
+                            :class="activePdkWizardStep === item.key ? 'bg-(--accent-color) text-white' : 'bg-(--bg-secondary)/60 text-(--text-secondary)'"
+                          >
+                            {{ pdkSelections[item.key].length }}
+                          </span>
+                        </button>
+                      </aside>
+
+                      <section class="pdk-resource-detail-panel flex min-h-0 flex-col rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-3">
+                        <header class="mb-3 flex items-start justify-between gap-4">
+                          <div class="min-w-0">
+                            <h4 class="text-sm font-bold text-(--text-primary)">{{ activePdkStep?.title }}</h4>
+                            <p class="mt-1 text-xs leading-5 text-(--text-secondary)">
+                              {{ activePdkStep?.description }}
                             </p>
                           </div>
-                        </div>
-
-                        <div class="flex items-center justify-center gap-2 md:flex-col">
                           <button
                             type="button"
-                            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg bg-(--accent-color) text-white transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                            :disabled="!focusedAvailablePdkFile"
-                            @click="selectPdkFile(activePdkWizardStep, focusedAvailablePdkFile)"
+                            class="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary) transition-colors duration-200 hover:border-(--accent-color)/45 hover:bg-(--accent-color)/10 hover:text-(--text-primary)"
+                            title="Update selection"
+                            @click="activePdkStep && openPdkResourcePicker(activePdkStep.key)"
                           >
-                            <i class="ri-arrow-right-line"></i>
+                            <i class="ri-refresh-line text-base"></i>
                           </button>
-                          <button
-                            type="button"
-                            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-primary)/75 text-(--text-primary) transition-colors duration-200 hover:bg-(--bg-secondary) disabled:cursor-not-allowed disabled:opacity-40"
-                            :disabled="!focusedSelectedPdkFile"
-                            @click="removePdkFile(activePdkWizardStep, focusedSelectedPdkFile)"
-                          >
-                            <i class="ri-arrow-left-line"></i>
-                          </button>
-                        </div>
+                        </header>
 
-                        <div class="min-w-0 rounded-lg border border-(--border-color) bg-(--bg-primary)/65 p-3">
-                          <div class="mb-3 flex items-center justify-between">
-                            <h4 class="text-sm font-semibold text-(--text-primary)">Selected Files</h4>
-                            <span class="rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)">{{ pdkSelections[activePdkWizardStep].length }}</span>
+                        <div class="flex min-h-0 flex-1 flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                          <div class="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <h5 class="text-xs font-bold uppercase tracking-wide text-(--text-secondary)">Selected Files</h5>
+                            </div>
+                            <span class="rounded-md bg-(--bg-primary)/75 px-2 py-1 text-[11px] font-semibold text-(--text-secondary)">
+                              {{ activeManualPdkSelections.length }}
+                            </span>
                           </div>
-                          <div class="h-64 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
-                            <button
-                              v-for="file in pdkSelections[activePdkWizardStep]"
-                              :key="file"
-                              type="button"
-                              class="block w-full cursor-pointer rounded-md border border-(--border-color) bg-(--accent-color)/10 px-3 py-2 text-left transition-colors duration-200 hover:border-(--accent-color)/60"
-                              @dblclick="removePdkFile(activePdkWizardStep, file)"
-                              @click="focusedSelectedPdkFile = file"
+
+                          <div class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                            <p
+                              v-if="activeManualPdkSelections.length === 0"
+                              class="rounded-lg border border-dashed border-(--border-color) px-4 py-6 text-center text-xs text-(--text-secondary)"
                             >
-                              <span class="block truncate text-sm font-medium text-(--text-primary)">{{ getFileName(file) }}</span>
-                              <span class="block truncate text-xs text-(--text-secondary)">{{ file }}</span>
-                            </button>
-                            <p v-if="pdkSelections[activePdkWizardStep].length === 0" class="rounded-md border border-dashed border-(--border-color) px-3 py-6 text-center text-xs text-(--text-secondary)">
                               No file selected.
                             </p>
+                            <button
+                              v-for="file in activeManualPdkSelections"
+                              :key="file"
+                              type="button"
+                              class="flex w-full cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-200"
+                              :title="file"
+                            >
+                              <i class="ri-file-list-3-line mt-0.5 shrink-0 text-(--accent-color)"></i>
+                              <span class="min-w-0">
+                                <span class="block truncate text-sm font-semibold text-(--text-primary)">
+                                  {{ displayPdkResourceName(file) }}
+                                </span>
+                                <span class="mt-1 block break-all font-mono text-[11px] leading-5 text-(--text-secondary)">
+                                  {{ file }}
+                                </span>
+                              </span>
+                            </button>
                           </div>
                         </div>
-                      </div>
+                      </section>
                     </div>
                   </section>
                 </div>
@@ -831,7 +828,7 @@
               <button
                 type="button"
                 class="cursor-pointer rounded-lg px-4 py-2.5 text-sm font-semibold text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary)/55 hover:text-(--text-primary)"
-                @click="$emit('close')"
+                @click="closeWizard"
               >
                 Cancel
               </button>
@@ -861,17 +858,33 @@
         </main>
       </div>
     </div>
+    <PdkResourcePickerDialog
+      v-if="pdkResourcePickerOpen && activePdkStep"
+      :resource-title="activePdkStep.title"
+      :root-path="selectedPdk?.path || config.pdk_root || projectContext.project_root"
+      :directories="detectedPdkDirectories"
+      :available-files="detectedPdkFiles[activePdkWizardStep]"
+      :selected-files="pdkSelections[activePdkWizardStep]"
+      @update:selected-files="updatePdkResourceSelection"
+      @close="closePdkResourcePicker"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
-import { isHdlFilePath, type PickedRtlSources, type DesktopFileDialogOptions } from '@ecos-studio/shared'
+import {
+  isHdlFilePath,
+  type DesktopFileDialogOptions,
+  type PdkDetectedFiles,
+  type PickedRtlSources,
+} from '@ecos-studio/shared'
 import DesignFileTransfer from './DesignFileTransfer.vue'
+import PdkResourcePickerDialog from './PdkResourcePickerDialog.vue'
 
 interface Emits {
   (e: 'close'): void
@@ -914,7 +927,6 @@ interface PdkWizardStep {
   key: PdkResourceKey
   title: string
   description: string
-  filters: DesktopFileDialogOptions['filters']
 }
 
 interface SourceContext {
@@ -929,6 +941,14 @@ interface SourceContext {
 }
 
 const emit = defineEmits<Emits>()
+
+onMounted(() => {
+  document.addEventListener('keydown', handleWizardKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', handleWizardKeydown)
+})
 
 const currentStep = ref(1)
 const highestStep = ref(1)
@@ -967,8 +987,7 @@ const pdkConfigMode = ref<'default' | 'manual'>(
   normalizePdkConfigMode(props.initialConfig?.pdk_config_mode ?? props.initialConfig?.source_config?.pdk_config_mode),
 )
 const activePdkWizardStep = ref<PdkResourceKey>('tech_lef')
-const focusedAvailablePdkFile = ref('')
-const focusedSelectedPdkFile = ref('')
+const pdkResourcePickerOpen = ref(false)
 const filelistPath = ref(props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? '')
 const sdcPath = ref(props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '')
 const dieAreaMode = ref<DieAreaMode>(
@@ -1004,19 +1023,16 @@ const pdkWizardSteps: PdkWizardStep[] = [
     key: 'tech_lef',
     title: 'Tech LEF',
     description: 'Technology LEF files used by the flow.',
-    filters: [{ name: 'LEF Files', extensions: ['lef'] }],
   },
   {
     key: 'cell_lef',
     title: 'Cell LEF',
     description: 'Cell LEF files selected from the PDK.',
-    filters: [{ name: 'LEF Files', extensions: ['lef'] }],
   },
   {
     key: 'liberty',
     title: 'Liberty',
     description: 'Timing library files selected from the PDK.',
-    filters: [{ name: 'Liberty Files', extensions: ['lib', 'liberty'] }],
   },
 ]
 
@@ -1055,12 +1071,6 @@ const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
   tech_lef: [...(props.initialConfig?.pdk_config?.tech_lef ?? props.initialConfig?.source_config?.pdk_config?.tech_lef ?? [])],
   cell_lef: [...(props.initialConfig?.pdk_config?.cell_lef ?? props.initialConfig?.source_config?.pdk_config?.cell_lef ?? [])],
   liberty: [...(props.initialConfig?.pdk_config?.liberty ?? props.initialConfig?.source_config?.pdk_config?.liberty ?? [])],
-})
-
-const manuallyImportedPdkFiles = ref<Record<PdkResourceKey, string[]>>({
-  tech_lef: [],
-  cell_lef: [],
-  liberty: [],
 })
 
 function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): WorkspaceConfig {
@@ -1282,25 +1292,23 @@ const designInputTypes = computed<DesignInputType[]>(() => {
 const activeDesignInput = computed(() => designInputTypes.value.find((item) => item.key === activeDesignInputType.value))
 const activePdkStep = computed(() => pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value))
 const selectedPdk = computed(() => importedPdks.value.find((pdk) => pdk.id === selectedPdkId.value))
+const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
+const currentPdkDetectedFiles = computed<PdkDetectedFiles>(() =>
+  manualPdkDetectedFiles.value ?? selectedPdk.value?.detectedFiles ?? { directories: [], files: [] },
+)
+const detectedPdkDirectories = computed(() => currentPdkDetectedFiles.value.directories)
+const activeManualPdkSelections = computed(() => pdkSelections.value[activePdkWizardStep.value] ?? [])
 
 const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
-  const files = selectedPdk.value?.detectedFiles?.files ?? []
+  const files = currentPdkDetectedFiles.value.files
   const resolvedFiles = files.map((file) => resolvePdkFile(file))
   const lefFiles = resolvedFiles.filter((file) => hasExtension(file, ['lef']))
-  const techLefFiles = lefFiles.filter((file) => /(^|[/\\])(tech|technology|tlef|.*tech.*)\.lef$/i.test(file) || /tech/i.test(getFileName(file)))
+  const techLefFiles = lefFiles.filter((file) => isTechLefFile(file))
   return {
     tech_lef: techLefFiles.length > 0 ? techLefFiles : lefFiles,
     cell_lef: lefFiles.filter((file) => !techLefFiles.includes(file)),
     liberty: resolvedFiles.filter((file) => hasExtension(file, ['lib', 'liberty'])),
   }
-})
-
-const availablePdkFiles = computed(() => {
-  const selected = new Set(pdkSelections.value[activePdkWizardStep.value])
-  return uniquePaths([
-    ...detectedPdkFiles.value[activePdkWizardStep.value],
-    ...manuallyImportedPdkFiles.value[activePdkWizardStep.value],
-  ]).filter((file) => !selected.has(file))
 })
 
 const canProceed = computed(() => {
@@ -1399,6 +1407,10 @@ function getFileName(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() || path
 }
 
+function displayPdkResourceName(path: string): string {
+  return getFileName(path)
+}
+
 function uniquePaths(paths: string[]) {
   return [...new Set(paths.filter(Boolean))]
 }
@@ -1408,9 +1420,24 @@ function hasExtension(path: string, extensions: string[]) {
   return extensions.some((extension) => lower.endsWith(`.${extension.toLowerCase()}`))
 }
 
+function isTechLefFile(path: string) {
+  const lower = path.replace(/\\/g, '/').toLowerCase()
+  return lower.includes('/prtech/')
+    || lower.includes('/techlef/')
+    || lower.includes('/tech_lef/')
+    || lower.includes('/tlef/')
+    || /(^|[/\\])(tech|technology|tlef|.*tech.*)\.lef$/i.test(path)
+    || /tech/i.test(getFileName(path))
+}
+
 function resolvePdkFile(file: string) {
   if (file.startsWith('/') || /^[A-Za-z]:[\\/]/.test(file)) return file
-  return config.value.pdk_root ? joinPath(config.value.pdk_root, file) : file
+  const root = getCurrentPdkRoot()
+  return root ? joinPath(root, file) : file
+}
+
+function getCurrentPdkRoot() {
+  return selectedPdk.value?.path || config.value.pdk_root || ''
 }
 
 function setProjectMode(mode: ProjectMode) {
@@ -1449,30 +1476,9 @@ function setFlowBoundary(stepName: FlowStepName) {
 
   const start = flowStartIndex.value
   const end = flowEndIndex.value
-  if (index < start) {
-    flowStartStep.value = stepName
-    return
-  }
-  if (index > end) {
-    flowEndStep.value = stepName
-    return
-  }
-  if (index === start && start < end) {
-    flowStartStep.value = hardenFlowSteps[start + 1].name
-    return
-  }
-  if (index === end && start < end) {
-    flowEndStep.value = hardenFlowSteps[end - 1].name
-    return
-  }
-
-  const distanceToStart = index - start
-  const distanceToEnd = end - index
-  if (distanceToStart <= distanceToEnd) {
-    flowStartStep.value = stepName
-  } else {
-    flowEndStep.value = stepName
-  }
+  const nextEndIndex = index === end && end > start ? end - 1 : index
+  const boundedEndIndex = Math.max(start, nextEndIndex)
+  flowEndStep.value = hardenFlowSteps[boundedEndIndex].name
 }
 
 async function ensurePdksLoaded() {
@@ -1749,8 +1755,7 @@ function selectPdk(pdk: import('../types').ImportedPdk) {
   selectedPdkId.value = pdk.id
   config.value.pdk = pdk.pdkId
   config.value.pdk_root = pdk.path
-  focusedAvailablePdkFile.value = ''
-  focusedSelectedPdkFile.value = ''
+  manualPdkDetectedFiles.value = pdk.detectedFiles ?? null
   syncWorkspaceConfig()
 }
 
@@ -1767,6 +1772,7 @@ async function handleRemovePdk(id: string) {
     selectedPdkId.value = ''
     config.value.pdk = ''
     config.value.pdk_root = ''
+    manualPdkDetectedFiles.value = null
     pdkSelections.value = {
       tech_lef: [],
       cell_lef: [],
@@ -1775,48 +1781,34 @@ async function handleRemovePdk(id: string) {
   }
 }
 
-async function importPdkResourceFiles(type: PdkResourceKey) {
-  const step = pdkWizardSteps.find((item) => item.key === type)
-  if (!step) return
-
-  let picked: string[] | null = null
+async function scanManualPdkResources() {
+  const root = getCurrentPdkRoot()
+  if (!root) return
   try {
-    const fileDialogOptions: DesktopFileDialogOptions = {
-      title: `Select ${step.title} Files`,
-      multiple: true,
-      filters: step.filters,
-    }
-    picked = await getDesktopApi().dialog.pickFiles(fileDialogOptions)
+    const scanned = await getDesktopApi().workspace.scanPdkDirectory(root)
+    manualPdkDetectedFiles.value = scanned.detectedFiles
   } catch (error) {
     showToast({
       severity: 'error',
-      summary: 'Import Failed',
-      detail: error instanceof Error ? error.message : 'Failed to import PDK files.',
+      summary: 'PDK Scan Failed',
+      detail: error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
       life: 5000,
     })
-    return
   }
-
-  if (!picked || picked.length === 0) return
-  manuallyImportedPdkFiles.value[type] = uniquePaths([
-    ...manuallyImportedPdkFiles.value[type],
-    ...picked,
-  ])
 }
 
-function selectPdkFile(type: PdkResourceKey, file: string) {
-  if (!file) return
-  pdkSelections.value[type] = uniquePaths([
-    ...pdkSelections.value[type],
-    file,
-  ])
-  focusedAvailablePdkFile.value = ''
+async function openPdkResourcePicker(type: PdkResourceKey) {
+  activePdkWizardStep.value = type
+  await scanManualPdkResources()
+  pdkResourcePickerOpen.value = true
 }
 
-function removePdkFile(type: PdkResourceKey, file: string) {
-  if (!file) return
-  pdkSelections.value[type] = pdkSelections.value[type].filter((item) => item !== file)
-  focusedSelectedPdkFile.value = ''
+function closePdkResourcePicker() {
+  pdkResourcePickerOpen.value = false
+}
+
+function updatePdkResourceSelection(files: string[]) {
+  pdkSelections.value[activePdkWizardStep.value] = uniquePaths(files)
 }
 
 function specReady() {
@@ -1858,6 +1850,19 @@ function syncWorkspaceConfig() {
 }
 
 applySourceWorkspaceDefaults(props.initialConfig)
+
+function closeWizard() {
+  emit('close')
+}
+
+function handleWizardKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (pdkResourcePickerOpen.value) {
+    closePdkResourcePicker()
+    return
+  }
+  closeWizard()
+}
 
 function nextStep() {
   if (currentStep.value < steps.length && canProceed.value) {

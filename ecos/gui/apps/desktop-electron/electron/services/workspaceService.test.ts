@@ -255,6 +255,36 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('removes a project-scoped workspace directory without deleting the project root', async () => {
+    const directory = await createTempDir('ecos-workspace-service-remove-dir-')
+    const workspaceDirectory = join(directory, 'ws_0001')
+    const filePath = join(workspaceDirectory, 'home', 'parameters.json')
+    await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
+    await writeFile(filePath, '{}', 'utf8')
+
+    const { projectScopeProvider, service } = createWorkspaceService(
+      directory,
+      workspaceDirectory,
+    )
+
+    await expect(
+      service.removeProjectDirectory('/project/ws_0001'),
+    ).resolves.toBeUndefined()
+    await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
+      '/project/ws_0001',
+    )
+  })
+
+  it('refuses to remove the registered project root as a workspace directory', async () => {
+    const directory = await createTempDir('ecos-workspace-service-remove-root-')
+    const { service } = createWorkspaceService(directory, directory)
+
+    await expect(service.removeProjectDirectory('/project')).rejects.toThrow(
+      'Refusing to remove the project root',
+    )
+  })
+
   it('blocks configuration writes while the workspace runtime is active', async () => {
     const directory = await createTempDir('ecos-workspace-service-write-lock-')
     const filePath = join(directory, 'home', 'parameters.json')

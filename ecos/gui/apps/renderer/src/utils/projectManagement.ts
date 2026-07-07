@@ -19,9 +19,28 @@ export type FlowStep = typeof FLOW_STEPS[number]
 export type ProjectStepStatus = 'success' | 'reused' | 'skipped' | 'unstart' | 'running' | 'failed'
 export type ProjectWorkspaceStatus = 'success' | 'failed' | 'running' | 'in_progress' | 'not_started' | 'archived'
 export type MetricsRowKind = 'line' | 'bar'
-export type ProjectMetricId = 'wns' | 'tns' | 'drc' | 'area' | 'runtime'
+export type ProjectMetricId = 'wns' | 'tns' | 'drc' | 'area' | 'runtime' | 'memory' | 'die_area' | 'core_util' | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
+export type ProjectFeatureFileKey =
+  | 'synthesisStat'
+  | 'floorplanDb'
+  | 'fanoutDb'
+  | 'fanoutStep'
+  | 'placeDb'
+  | 'placeMap'
+  | 'ctsDb'
+  | 'ctsStep'
+  | 'ctsMap'
+  | 'legalDb'
+  | 'routeDb'
+  | 'routeStep'
+  | 'drcDb'
+  | 'drcStep'
+  | 'fillerDb'
+  | 'fillerStep'
+  | 'rcxDb'
+  | 'staDb'
 
 export interface ProjectManifestBaseDesign {
   pdk?: string
@@ -42,6 +61,21 @@ export interface ProjectMetricSummary {
   runtime_sec?: number
   [key: string]: unknown
 }
+
+export interface ProjectStaReportInput {
+  corner: string
+  content: string | null
+}
+
+export interface ProjectWorkspaceAnalysisInput {
+  files?: Partial<Record<ProjectFeatureFileKey, string | null>>
+  staReports?: ProjectStaReportInput[]
+  flowText?: string | null
+  checklistText?: string | null
+  parametersText?: string | null
+}
+
+export type ProjectWorkspaceAnalysisInputsById = Record<string, ProjectWorkspaceAnalysisInput>
 
 export interface ProjectWorkspaceManifest {
   workspace_id: string
@@ -101,7 +135,15 @@ export interface ProjectWorkspace {
   branchStep: FlowStep | null
   startStep: FlowStep
   endStep: FlowStep
+  depth: number
+  flowStatusHint: ProjectFlowStatusHint
   steps: ProjectStepCell[]
+}
+
+export interface ProjectFlowStatusHint {
+  state: 'success' | 'failed' | 'running' | 'unstart' | 'skipped'
+  step?: FlowStep
+  label: string
 }
 
 export interface ProjectMetricPoint {
@@ -149,6 +191,100 @@ export interface ProjectComparisonSummary {
   metricDiffs: ProjectComparisonMetricDiff[]
 }
 
+export interface ProjectSummaryMetric {
+  id: string
+  label: string
+  value: number | null
+  display: string
+  state: ProjectMetricPoint['state']
+  hint?: string
+}
+
+export interface ProjectWorkspaceFinalMetrics {
+  drcCount?: ProjectSummaryMetric
+  setupWns?: ProjectSummaryMetric
+  setupTns?: ProjectSummaryMetric
+  holdWns?: ProjectSummaryMetric
+  holdTns?: ProjectSummaryMetric
+  area?: ProjectSummaryMetric
+  dieArea?: ProjectSummaryMetric
+  coreUtil?: ProjectSummaryMetric
+  frequency?: ProjectSummaryMetric
+}
+
+export interface ProjectWorkspaceFlowMetrics {
+  totalRuntimeSec: number
+  peakMemoryMb: number
+  checklistPassed: number
+  checklistFailed: number
+  checklistWarning: number
+  checklistTotal: number
+}
+
+export interface ProjectStepSummary {
+  step: FlowStep
+  title: string
+  metrics: ProjectSummaryMetric[]
+  status: ProjectStepStatus
+  detailHint: string
+}
+
+export interface ProjectWorkspaceSummary {
+  workspaceId: string
+  workspaceName: string
+  workspacePath: string
+  finalMetrics: ProjectWorkspaceFinalMetrics
+  flowMetrics: ProjectWorkspaceFlowMetrics
+  steps: ProjectStepSummary[]
+  deltaSummaries: ProjectComparisonMetricDiff[]
+}
+
+export interface ProjectStepCompareMetric {
+  id: string
+  label: string
+  hint: string
+  points: ProjectMetricPoint[]
+}
+
+export interface ProjectStepCompareSummary {
+  step: FlowStep
+  title: string
+  metricLabel: string
+  metricHint: string
+  configuredCount: number
+  successCount: number
+  missingCount: number
+  points: ProjectMetricPoint[]
+  metrics: ProjectStepCompareMetric[]
+}
+
+export interface ProjectRunStateSlice {
+  state: ProjectFlowStatusHint['state']
+  label: string
+  count: number
+  percent: number
+}
+
+export interface ProjectFlowMetricSummary extends ProjectWorkspaceFlowMetrics {
+  runtimePoints: ProjectMetricPoint[]
+  memoryPoints: ProjectMetricPoint[]
+}
+
+export interface ProjectDashboardSummary {
+  workspaceCount: number
+  configuredStepCount: number
+  successStepCount: number
+  failedStepCount: number
+  runningStepCount: number
+  flowSuccessRatio: number
+  drcCleanCount: number
+  timingCleanCount: number
+  signoffReadyCount: number
+  runStateSlices: ProjectRunStateSlice[]
+  flowMetricSummary: ProjectFlowMetricSummary
+  topBlockingSteps: Array<{ step: FlowStep; count: number }>
+}
+
 export interface ProjectManagementProject {
   id: string
   name: string
@@ -159,6 +295,9 @@ export interface ProjectManagementProject {
   bestWorkspaceId: string
   workspaces: ProjectWorkspace[]
   metricsRows: ProjectMetricRow[]
+  workspaceSummaries: ProjectWorkspaceSummary[]
+  stepCompareSummaries: ProjectStepCompareSummary[]
+  dashboardSummary: ProjectDashboardSummary
   branchLinks: ProjectBranchLink[]
   comparisonSummary: ProjectComparisonSummary
 }
@@ -207,6 +346,7 @@ export interface WorkspaceBranchDraft {
   sourceOutputPath: string
   originVerilog?: string
   originDef?: string
+  originSdc?: string
 }
 
 const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
@@ -262,21 +402,35 @@ const METRIC_DEFINITIONS: Array<{
   { id: 'drc', label: 'DRC', hint: 'violation count', kind: 'bar', manifestKey: 'drc_count' },
   { id: 'area', label: 'Area', hint: 'cell area', kind: 'bar', manifestKey: 'area' },
   { id: 'runtime', label: 'Runtime', hint: 'total runtime', kind: 'bar', manifestKey: 'runtime_sec' },
+  { id: 'die_area', label: 'Die Area', hint: 'die area from parameters', kind: 'bar', manifestKey: 'die_area' },
+  { id: 'core_util', label: 'Core Util', hint: 'core utilization from parameters', kind: 'bar', manifestKey: 'core_util' },
+  { id: 'frequency', label: 'Frequency [MHz]', hint: 'worst frequency across STA corners', kind: 'bar', manifestKey: 'frequency_mhz' },
 ]
 
 export function buildProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
   workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
 ): ProjectManagementProject {
   const path = manifest?.root_path ?? project?.path ?? ''
   const name = manifest?.name ?? project?.name ?? 'No Project Selected'
   const topModule = manifest?.base_design.top_module ?? project?.topModule
   const pdk = manifest?.base_design.pdk ?? project?.pdk
-  const workspaces = manifest?.workspaces.map(workspace =>
-    buildProjectWorkspace(workspace, workspaceFlowStates[workspace.workspace_id] ?? {}),
-  ) ?? []
-  const comparisonSummary = manifest ? buildComparisonSummary(manifest) : emptyComparisonSummary()
+  const effectiveWorkspaces = manifest
+    ? buildEffectiveWorkspaceMetrics(manifest.workspaces, workspaceAnalysisInputs)
+    : []
+  const lineageItems = sortWorkspacesByLineage(effectiveWorkspaces)
+  const sortedEffectiveWorkspaces = lineageItems.map(item => item.workspace)
+  const workspaces = lineageItems.map(({ workspace, depth }) =>
+    buildProjectWorkspace(workspace, workspaceFlowStates[workspace.workspace_id] ?? {}, depth),
+  )
+  const comparisonSummary = manifest
+    ? buildComparisonSummary({ ...manifest, workspaces: sortedEffectiveWorkspaces })
+    : emptyComparisonSummary()
+  const workspaceSummaries = manifest
+    ? buildWorkspaceSummaries(sortedEffectiveWorkspaces, workspaces, workspaceAnalysisInputs, comparisonSummary)
+    : []
 
   return {
     id: manifest?.project_id ?? project?.id ?? '',
@@ -287,8 +441,11 @@ export function buildProjectManagementProject(
     objective: buildObjective(project, manifest),
     bestWorkspaceId: comparisonSummary.bestWorkspaceId,
     workspaces,
-    metricsRows: manifest ? buildMetricRows(manifest.workspaces) : [],
-    branchLinks: manifest ? buildBranchLinks(manifest.workspaces) : [],
+    metricsRows: manifest ? buildMetricRows(sortedEffectiveWorkspaces) : [],
+    workspaceSummaries,
+    stepCompareSummaries: manifest ? buildStepCompareSummaries(sortedEffectiveWorkspaces, workspaces, workspaceSummaries) : [],
+    dashboardSummary: buildProjectDashboardSummary(workspaces, workspaceSummaries),
+    branchLinks: manifest ? buildBranchLinks(sortedEffectiveWorkspaces) : [],
     comparisonSummary,
   }
 }
@@ -374,6 +531,7 @@ export function createWorkspaceBranchDraft(
   const sourceWorkspacePath = sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
   const designName = projectArtifactDesignName(project)
   const sourceOutputPath = sourceStepOutputPath(sourceWorkspacePath, step, designName)
+  const originSdc = sourceWorkspaceSdcPath(sourceWorkspacePath, designName)
   const artifactOrigin = sourceOutputType === 'verilog'
     ? { originVerilog: sourceOutputPath }
     : {
@@ -391,6 +549,7 @@ export function createWorkspaceBranchDraft(
     targetEndStep: 'Harden',
     sourceOutputType,
     sourceOutputPath,
+    originSdc,
     ...artifactOrigin,
   }
 }
@@ -519,10 +678,13 @@ function buildObjective(project?: Project | null, manifest?: ProjectManifest | n
 function buildProjectWorkspace(
   workspace: ProjectWorkspaceManifest,
   flowStateMap: ProjectWorkspaceFlowStateMap,
+  depth = 0,
 ): ProjectWorkspace {
   const startStep = normalizeFlowStep(workspace.start_step)
   const endStep = normalizeFlowStep(workspace.end_step)
   const branchStep = workspace.branch_from ? normalizeFlowStep(workspace.branch_from.source_step) : null
+
+  const steps = FLOW_STEPS.map(step => buildStepCell(workspace, step, startStep, endStep, branchStep, flowStateMap))
 
   return {
     id: workspace.workspace_id,
@@ -536,8 +698,95 @@ function buildProjectWorkspace(
     branchStep,
     startStep,
     endStep,
-    steps: FLOW_STEPS.map(step => buildStepCell(workspace, step, startStep, endStep, branchStep, flowStateMap)),
+    depth,
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
+    steps,
   }
+}
+
+function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<{
+  workspace: ProjectWorkspaceManifest
+  depth: number
+}> {
+  const byId = new Map(workspaces.map(workspace => [workspace.workspace_id, workspace]))
+  const childrenBySource = new Map<string, ProjectWorkspaceManifest[]>()
+  const roots: ProjectWorkspaceManifest[] = []
+
+  for (const workspace of workspaces) {
+    const sourceWorkspaceId = workspace.branch_from?.source_workspace_id ?? workspace.source_workspace_id
+    if (sourceWorkspaceId && byId.has(sourceWorkspaceId)) {
+      const children = childrenBySource.get(sourceWorkspaceId) ?? []
+      children.push(workspace)
+      childrenBySource.set(sourceWorkspaceId, children)
+    } else {
+      roots.push(workspace)
+    }
+  }
+
+  const sortByCreatedAt = (left: ProjectWorkspaceManifest, right: ProjectWorkspaceManifest) =>
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+      || left.workspace_id.localeCompare(right.workspace_id)
+
+  roots.sort(sortByCreatedAt)
+  for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
+
+  const visited = new Set<string>()
+  const sorted: Array<{ workspace: ProjectWorkspaceManifest; depth: number }> = []
+  const visit = (workspace: ProjectWorkspaceManifest, depth: number) => {
+    if (visited.has(workspace.workspace_id)) return
+    visited.add(workspace.workspace_id)
+    sorted.push({ workspace, depth })
+    for (const child of childrenBySource.get(workspace.workspace_id) ?? []) {
+      visit(child, depth + 1)
+    }
+  }
+
+  for (const root of roots) visit(root, 0)
+  for (const workspace of [...workspaces].sort(sortByCreatedAt)) {
+    visit(workspace, 0)
+  }
+
+  return sorted
+}
+
+function buildFlowStatusHint(
+  steps: ProjectStepCell[],
+  startStep: FlowStep,
+  endStep: FlowStep,
+): ProjectFlowStatusHint {
+  const startIndex = FLOW_STEPS.indexOf(startStep)
+  const endIndex = FLOW_STEPS.indexOf(endStep)
+  const configuredSteps = steps.filter(cell => {
+    const stepIndex = FLOW_STEPS.indexOf(cell.step)
+    return stepIndex >= startIndex && stepIndex <= endIndex
+  })
+  const firstIncomplete = configuredSteps.find(cell => cell.status !== 'success')
+  if (!firstIncomplete) {
+    return {
+      state: 'success',
+      label: 'Success',
+    }
+  }
+
+  return {
+    state: flowHintState(firstIncomplete.status),
+    step: firstIncomplete.step,
+    label: `${firstIncomplete.step} ${flowHintStatusLabel(firstIncomplete.status)}`,
+  }
+}
+
+function flowHintState(status: ProjectStepStatus): ProjectFlowStatusHint['state'] {
+  if (status === 'failed') return 'failed'
+  if (status === 'running') return 'running'
+  if (status === 'success' || status === 'reused') return 'success'
+  if (status === 'skipped') return 'skipped'
+  return 'unstart'
+}
+
+function flowHintStatusLabel(status: ProjectStepStatus): string {
+  if (status === 'reused') return 'success'
+  if (status === 'unstart') return 'unstart'
+  return status
 }
 
 function buildStepCell(
@@ -625,6 +874,715 @@ function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranch
       toStep: normalizeFlowStep(workspace.start_step),
     }]
   })
+}
+
+function buildEffectiveWorkspaceMetrics(
+  workspaces: ProjectWorkspaceManifest[],
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById,
+): ProjectWorkspaceManifest[] {
+  return workspaces.map(workspace => {
+    const extracted = extractMetricSummary(workspaceAnalysisInputs[workspace.workspace_id])
+    return {
+      ...workspace,
+      metrics_summary: {
+        ...workspace.metrics_summary,
+        ...extracted,
+      },
+    }
+  })
+}
+
+function buildWorkspaceSummaries(
+  manifestWorkspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectWorkspace[],
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById,
+  comparisonSummary: ProjectComparisonSummary,
+): ProjectWorkspaceSummary[] {
+  return manifestWorkspaces.map(workspace => {
+    const projectWorkspace = workspaces.find(item => item.id === workspace.workspace_id)
+    const workspaceAnalysisInput = workspaceAnalysisInputs[workspace.workspace_id]
+    const extracted = extractAnalysisSummary(workspaceAnalysisInput)
+    const flowMetrics = extractFlowMetrics(workspaceAnalysisInput)
+    const metrics = {
+      ...extracted.metrics,
+      area: extracted.metrics.area ?? metricFromNumber('area', 'Area', asNumber(workspace.metrics_summary.area), metricState('area', asNumber(workspace.metrics_summary.area))),
+      drcCount: extracted.metrics.drcCount ?? metricFromNumber('drc', 'DRC', asNumber(workspace.metrics_summary.drc_count), metricState('drc', asNumber(workspace.metrics_summary.drc_count))),
+      setupWns: extracted.metrics.setupWns ?? metricFromNumber('setup_wns', 'Setup WNS', asNumber(workspace.metrics_summary.wns), metricState('wns', asNumber(workspace.metrics_summary.wns))),
+      setupTns: extracted.metrics.setupTns ?? metricFromNumber('setup_tns', 'Setup TNS', asNumber(workspace.metrics_summary.tns), metricState('tns', asNumber(workspace.metrics_summary.tns))),
+      frequency: extracted.metrics.frequency ?? metricFromNumber('frequency', 'Frequency [MHz]', asNumber(workspace.metrics_summary.frequency_mhz), metricState('frequency', asNumber(workspace.metrics_summary.frequency_mhz))),
+    }
+
+    return {
+      workspaceId: workspace.workspace_id,
+      workspaceName: workspace.name,
+      workspacePath: workspace.workspace_path,
+      finalMetrics: metrics,
+      flowMetrics,
+      steps: FLOW_STEPS.map(step => {
+        const status = projectWorkspace?.steps.find(cell => cell.step === step)?.status ?? 'skipped'
+        return buildStepSummary(step, status, extracted)
+      }),
+      deltaSummaries: comparisonSummary.metricDiffs.filter(diff =>
+        diff.fromWorkspaceId === workspace.workspace_id || diff.toWorkspaceId === workspace.workspace_id,
+      ),
+    }
+  })
+}
+
+function buildStepSummary(
+  step: FlowStep,
+  status: ProjectStepStatus,
+  extracted: ExtractedWorkspaceAnalysis,
+): ProjectStepSummary {
+  const metrics = extracted.stepMetrics[step] ?? []
+  return {
+    step,
+    title: step,
+    metrics,
+    status,
+    detailHint: detailHintForStep(step),
+  }
+}
+
+function buildStepCompareSummaries(
+  manifestWorkspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectWorkspace[],
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): ProjectStepCompareSummary[] {
+  return FLOW_STEPS.map(step => {
+    const definitions = compareDefinitionsForStep(step)
+    const metrics = definitions.map(definition => ({
+      id: definition.metricId,
+      label: definition.label,
+      hint: definition.hint,
+      points: manifestWorkspaces.map(workspace => {
+        const summary = workspaceSummaries.find(item => item.workspaceId === workspace.workspace_id)
+        const value = valueForCompareDefinition(summary, definition.metricId)
+        return {
+          workspaceId: workspace.workspace_id,
+          label: value === null ? 'N/A' : formatMetricValue(value, definition.format),
+          value,
+          state: compareMetricState(definition.metricId, value),
+        }
+      }),
+    }))
+    const primaryMetric = metrics[0] ?? {
+      id: 'none',
+      label: 'metric',
+      hint: 'No metric available',
+      points: [],
+    }
+    const configuredCount = workspaces.filter(workspace =>
+      workspace.steps.find(cell => cell.step === step)?.status !== 'skipped',
+    ).length
+    const successCount = workspaces.filter(workspace =>
+      workspace.steps.find(cell => cell.step === step)?.status === 'success',
+    ).length
+    const missingCount = primaryMetric.points.filter(point => point.value === null).length
+
+    return {
+      step,
+      title: `${step} Compare`,
+      metricLabel: primaryMetric.label,
+      metricHint: primaryMetric.hint,
+      configuredCount,
+      successCount,
+      missingCount,
+      points: primaryMetric.points,
+      metrics,
+    }
+  })
+}
+
+function buildProjectDashboardSummary(
+  workspaces: ProjectWorkspace[],
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): ProjectDashboardSummary {
+  const configuredCells = workspaces.flatMap(workspace =>
+    workspace.steps.filter(cell => cell.status !== 'skipped'),
+  )
+  const successStepCount = configuredCells.filter(cell =>
+    cell.status === 'success' || cell.status === 'reused',
+  ).length
+  const failedStepCount = configuredCells.filter(cell => cell.status === 'failed').length
+  const runningStepCount = configuredCells.filter(cell => cell.status === 'running').length
+  const configuredStepCount = configuredCells.length
+  const flowSuccessRatio = configuredStepCount === 0
+    ? 0
+    : Math.round((successStepCount / configuredStepCount) * 100)
+  const drcCleanCount = workspaceSummaries.filter(summary =>
+    summary.finalMetrics.drcCount?.value === 0,
+  ).length
+  const timingCleanCount = workspaceSummaries.filter(summary => {
+    const setupWns = summary.finalMetrics.setupWns?.value
+    const setupTns = summary.finalMetrics.setupTns?.value
+    return setupWns !== undefined && setupWns !== null && setupWns >= 0
+      && (setupTns === undefined || setupTns === null || setupTns >= 0)
+  }).length
+  const signoffReadyCount = workspaceSummaries.filter(summary => {
+    const drc = summary.finalMetrics.drcCount?.value
+    const setupWns = summary.finalMetrics.setupWns?.value
+    const setupTns = summary.finalMetrics.setupTns?.value
+    return drc === 0
+      && setupWns !== undefined && setupWns !== null && setupWns >= 0
+      && (setupTns === undefined || setupTns === null || setupTns >= 0)
+  }).length
+  const blockingCounts = new Map<FlowStep, number>()
+  for (const workspace of workspaces) {
+    const blockedStep = workspace.steps.find(cell =>
+      cell.status === 'failed' || cell.status === 'running' || cell.status === 'unstart',
+    )
+    if (!blockedStep) continue
+    blockingCounts.set(blockedStep.step, (blockingCounts.get(blockedStep.step) ?? 0) + 1)
+  }
+  const runStateSlices = buildRunStateSlices(workspaces)
+  const flowMetricSummary = buildFlowMetricSummary(workspaceSummaries)
+
+  return {
+    workspaceCount: workspaces.length,
+    configuredStepCount,
+    successStepCount,
+    failedStepCount,
+    runningStepCount,
+    flowSuccessRatio,
+    drcCleanCount,
+    timingCleanCount,
+    signoffReadyCount,
+    runStateSlices,
+    flowMetricSummary,
+    topBlockingSteps: [...blockingCounts.entries()]
+      .sort((left, right) => right[1] - left[1] || FLOW_STEPS.indexOf(left[0]) - FLOW_STEPS.indexOf(right[0]))
+      .slice(0, 3)
+      .map(([step, count]) => ({ step, count })),
+  }
+}
+
+function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSlice[] {
+  const labels: Record<ProjectFlowStatusHint['state'], string> = {
+    success: 'Success',
+    failed: 'Failed',
+    running: 'Running',
+    unstart: 'Not Started',
+    skipped: 'Skipped',
+  }
+  const total = workspaces.length
+  const counts = workspaces.reduce((map, workspace) => {
+    const state = workspace.flowStatusHint.state
+    map.set(state, (map.get(state) ?? 0) + 1)
+    return map
+  }, new Map<ProjectFlowStatusHint['state'], number>())
+
+  return (['success', 'failed', 'running', 'unstart', 'skipped'] satisfies ProjectFlowStatusHint['state'][])
+    .flatMap(state => {
+      const count = counts.get(state) ?? 0
+      if (count === 0) return []
+      return [{
+        state,
+        label: labels[state],
+        count,
+        percent: total === 0 ? 0 : Math.round((count / total) * 100),
+      }]
+    })
+}
+
+function buildFlowMetricSummary(workspaceSummaries: ProjectWorkspaceSummary[]): ProjectFlowMetricSummary {
+  const empty = emptyFlowMetrics()
+  const totals = workspaceSummaries.reduce((summary, workspace) => ({
+    totalRuntimeSec: summary.totalRuntimeSec + workspace.flowMetrics.totalRuntimeSec,
+    peakMemoryMb: Math.max(summary.peakMemoryMb, workspace.flowMetrics.peakMemoryMb),
+    checklistPassed: summary.checklistPassed + workspace.flowMetrics.checklistPassed,
+    checklistFailed: summary.checklistFailed + workspace.flowMetrics.checklistFailed,
+    checklistWarning: summary.checklistWarning + workspace.flowMetrics.checklistWarning,
+    checklistTotal: summary.checklistTotal + workspace.flowMetrics.checklistTotal,
+  }), empty)
+
+  return {
+    ...totals,
+    runtimePoints: workspaceSummaries.map(summary => ({
+      workspaceId: summary.workspaceId,
+      label: formatRuntimeLabel(summary.flowMetrics.totalRuntimeSec),
+      value: summary.flowMetrics.totalRuntimeSec,
+      state: summary.flowMetrics.totalRuntimeSec > 0 ? 'good' : 'pending',
+    })),
+    memoryPoints: workspaceSummaries.map(summary => ({
+      workspaceId: summary.workspaceId,
+      label: `${formatMetricValue(summary.flowMetrics.peakMemoryMb)} MB`,
+      value: summary.flowMetrics.peakMemoryMb,
+      state: summary.flowMetrics.peakMemoryMb > 0 ? 'good' : 'pending',
+    })),
+  }
+}
+
+interface ExtractedWorkspaceAnalysis {
+  metrics: ProjectWorkspaceFinalMetrics
+  stepMetrics: Partial<Record<FlowStep, ProjectSummaryMetric[]>>
+}
+
+function extractMetricSummary(input?: ProjectWorkspaceAnalysisInput): ProjectMetricSummary {
+  const extracted = extractAnalysisSummary(input)
+  return compactMetricSummary({
+    area: extracted.metrics.area?.value ?? undefined,
+    drc_count: extracted.metrics.drcCount?.value ?? undefined,
+    wns: extracted.metrics.setupWns?.value ?? undefined,
+    tns: extracted.metrics.setupTns?.value ?? undefined,
+    die_area: extracted.metrics.dieArea?.value ?? undefined,
+    core_util: extracted.metrics.coreUtil?.value ?? undefined,
+    frequency_mhz: extracted.metrics.frequency?.value ?? undefined,
+  })
+}
+
+function extractFlowMetrics(input?: ProjectWorkspaceAnalysisInput): ProjectWorkspaceFlowMetrics {
+  const metrics = emptyFlowMetrics()
+  const flow = parseJsonRecord(input?.flowText)
+  const steps = arrayAt(flow, 'steps').map(recordValue).filter((step): step is Record<string, unknown> => Boolean(step))
+
+  for (const step of steps) {
+    metrics.totalRuntimeSec += runtimeSeconds(step.runtime)
+    metrics.peakMemoryMb = Math.max(
+      metrics.peakMemoryMb,
+      flexibleNumber(step['peak memory (mb)']) ?? 0,
+      flexibleNumber(step.peakMemoryMb) ?? 0,
+      flexibleNumber(step.peak_memory_mb) ?? 0,
+    )
+  }
+
+  const checklist = parseJsonRecord(input?.checklistText)
+  const checklistRows = checklistItems(checklist)
+  for (const item of checklistRows) {
+    const bucket = checklistStateBucket(item)
+    metrics.checklistTotal += 1
+    if (bucket === 'passed') metrics.checklistPassed += 1
+    if (bucket === 'failed') metrics.checklistFailed += 1
+    if (bucket === 'warning') metrics.checklistWarning += 1
+  }
+
+  metrics.totalRuntimeSec = Number(metrics.totalRuntimeSec.toFixed(3))
+  return metrics
+}
+
+function emptyFlowMetrics(): ProjectWorkspaceFlowMetrics {
+  return {
+    totalRuntimeSec: 0,
+    peakMemoryMb: 0,
+    checklistPassed: 0,
+    checklistFailed: 0,
+    checklistWarning: 0,
+    checklistTotal: 0,
+  }
+}
+
+function extractAnalysisSummary(input?: ProjectWorkspaceAnalysisInput): ExtractedWorkspaceAnalysis {
+  const files = input?.files ?? {}
+  const synthesis = parseJsonRecord(files.synthesisStat)
+  const floorplanDb = parseJsonRecord(files.floorplanDb)
+  const fanoutDb = parseJsonRecord(files.fanoutDb)
+  const fanoutStep = parseJsonRecord(files.fanoutStep)
+  const placeDb = parseJsonRecord(files.placeDb)
+  const placeMap = parseJsonRecord(files.placeMap)
+  const ctsStep = parseJsonRecord(files.ctsStep)
+  const ctsMap = parseJsonRecord(files.ctsMap)
+  const legalDb = parseJsonRecord(files.legalDb)
+  const routeStep = parseJsonRecord(files.routeStep)
+  const drcStep = parseJsonRecord(files.drcStep)
+  const fillerDb = parseJsonRecord(files.fillerDb)
+  const fillerStep = parseJsonRecord(files.fillerStep)
+  const rcxDb = parseJsonRecord(files.rcxDb)
+  const staDb = parseJsonRecord(files.staDb)
+  const parameters = parseJsonRecord(input?.parametersText)
+  const sta = extractStaSummary(input?.staReports ?? [])
+
+  const synthesisDesign = recordAt(synthesis, 'design')
+  const synthesisArea = numberAt(synthesisDesign, 'area')
+  const synthesisCells = numberAt(synthesisDesign, 'num_cells')
+  const synthesisWires = numberAt(synthesisDesign, 'num_wires')
+  const floorplanLayout = extractDbLayout(floorplanDb)
+  const floorplanStats = extractDbStats(floorplanDb)
+  const floorplanInstances = extractDbInstances(floorplanDb)
+  const fanoutInstances = extractDbInstances(fanoutDb)
+  const fanout = recordAt(fanoutStep, 'fixFanout') ?? fanoutStep
+  const placeLayout = extractDbLayout(placeDb)
+  const placeWirelength = recordAt(placeMap, 'Wirelength')
+  const placeCongestion = recordAt(recordAt(recordAt(placeMap, 'Congestion'), 'overflow'), 'total')
+  const cts = recordAt(ctsStep, 'CTS') ?? ctsStep
+  const ctsWirelength = recordAt(ctsMap, 'Wirelength')
+  const ctsCongestion = recordAt(recordAt(recordAt(ctsMap, 'Congestion'), 'overflow'), 'total')
+  const legalStats = extractDbStats(legalDb)
+  const routeFinal = extractRouteFinal(routeStep)
+  const drc = recordAt(drcStep, 'drc') ?? drcStep
+  const fillerInstances = extractDbInstances(fillerDb)
+  const filler = recordAt(fillerStep, 'filler') ?? fillerStep
+  const rcxStats = extractDbStats(rcxDb)
+  const staLayout = extractDbLayout(staDb)
+  const parameterLayout = extractParameterLayout(parameters)
+  const area = synthesisArea ?? floorplanInstances.area ?? null
+  const dieArea = parameterLayout.dieArea ?? floorplanLayout.dieArea ?? staLayout.dieArea ?? null
+  const coreUtil = parameterLayout.coreUtil ?? floorplanLayout.coreUsage ?? staLayout.coreUsage ?? null
+
+  return {
+    metrics: {
+      drcCount: metricFromNumber('drc', 'DRC', numberAt(drc, 'number'), metricState('drc', numberAt(drc, 'number'))),
+      setupWns: metricFromNumber('setup_wns', 'Setup WNS', sta.setupWns, metricState('wns', sta.setupWns), sta.worstSetupCorner),
+      setupTns: metricFromNumber('setup_tns', 'Setup TNS', sta.setupTns, metricState('tns', sta.setupTns), sta.worstSetupCorner),
+      holdWns: metricFromNumber('hold_wns', 'Hold WNS', sta.holdWns, sta.holdWns === null ? 'pending' : sta.holdWns >= 0 ? 'good' : 'bad', sta.worstHoldCorner),
+      holdTns: metricFromNumber('hold_tns', 'Hold TNS', sta.holdTns, sta.holdTns === null ? 'pending' : sta.holdTns >= 0 ? 'good' : 'bad', sta.worstHoldCorner),
+      area: metricFromNumber('area', 'Area', area, metricState('area', area)),
+      dieArea: metricFromNumber('die_area', 'Die Area', dieArea, dieArea === null ? 'pending' : 'good'),
+      coreUtil: metricFromNumber('core_util', 'Core Util', coreUtil, coreUtil === null ? 'pending' : 'good'),
+      frequency: metricFromNumber('frequency', 'Frequency [MHz]', sta.worstFrequency, metricState('frequency', sta.worstFrequency), sta.worstFrequencyCorner),
+    },
+    stepMetrics: {
+      Synth: compactMetrics([
+        metricFromNumber('synth_area', 'area', synthesisArea, metricState('area', synthesisArea)),
+        metricFromNumber('synth_cells', 'cells', synthesisCells, synthesisCells === null ? 'pending' : 'good'),
+        metricFromNumber('synth_wires', 'wires', synthesisWires, synthesisWires === null ? 'pending' : 'good'),
+      ]),
+      Floor: compactMetrics([
+        metricFromNumber('floor_die', 'die', floorplanLayout.dieUsage, floorplanLayout.dieUsage === null ? 'pending' : 'good', undefined, 'percent'),
+        metricFromNumber('floor_core', 'core', floorplanLayout.coreUsage, floorplanLayout.coreUsage === null ? 'pending' : 'good', undefined, 'percent'),
+        metricFromNumber('floor_instances', 'inst', floorplanStats.instances, floorplanStats.instances === null ? 'pending' : 'good'),
+      ]),
+      Fanout: compactMetrics([
+        metricFromNumber('fanout_area', 'area', fanoutInstances.area, metricState('area', fanoutInstances.area)),
+        metricFromNumber('fanout_instances', 'inst', fanoutInstances.count, fanoutInstances.count === null ? 'pending' : 'good'),
+        metricFromNumber('fanout_clocks', 'clocks', Array.isArray(fanout?.clocks_timing) ? fanout.clocks_timing.length : null, 'good'),
+      ]),
+      Place: compactMetrics([
+        metricFromNumber('place_hpwl', 'HPWL', numberAt(placeWirelength, 'HPWL'), numberAt(placeWirelength, 'HPWL') === null ? 'pending' : 'good', undefined, 'compact'),
+        metricFromNumber('place_grwl', 'GRWL', numberAt(placeWirelength, 'GRWL'), numberAt(placeWirelength, 'GRWL') === null ? 'pending' : 'good', undefined, 'compact'),
+        metricFromNumber('place_core', 'core', placeLayout.coreUsage, placeLayout.coreUsage === null ? 'pending' : 'good', undefined, 'percent')
+          ?? metricFromNumber('place_overflow', 'overflow', numberAt(placeCongestion, 'union'), numberAt(placeCongestion, 'union') === null ? 'pending' : numberAt(placeCongestion, 'union') === 0 ? 'good' : 'warn'),
+      ]),
+      CTS: compactMetrics([
+        metricFromNumber('cts_buffers', 'buffers', numberAt(cts, 'buffer_num'), numberAt(cts, 'buffer_num') === null ? 'pending' : 'good'),
+        metricFromNumber('cts_area', 'area', numberAt(cts, 'buffer_area'), metricState('area', numberAt(cts, 'buffer_area'))),
+        metricFromNumber('cts_clock_wire', 'clock wire', numberAt(cts, 'total_clock_wirelength'), numberAt(cts, 'total_clock_wirelength') === null ? 'pending' : 'good', undefined, 'compact'),
+        metricFromNumber('cts_hpwl', 'HPWL', numberAt(ctsWirelength, 'HPWL'), numberAt(ctsWirelength, 'HPWL') === null ? 'pending' : 'good', undefined, 'compact'),
+        metricFromNumber('cts_overflow', 'overflow', numberAt(ctsCongestion, 'union'), numberAt(ctsCongestion, 'union') === null ? 'pending' : numberAt(ctsCongestion, 'union') === 0 ? 'good' : 'warn'),
+      ]),
+      Legal: compactMetrics([
+        metricFromNumber('legal_instances', 'inst', legalStats.instances, legalStats.instances === null ? 'pending' : 'good'),
+        metricFromNumber('legal_nets', 'nets', legalStats.nets, legalStats.nets === null ? 'pending' : 'good'),
+      ]),
+      Route: compactMetrics([
+        metricFromNumber('route_violations', 'viol', routeFinal.violations, routeFinal.violations === null ? 'pending' : routeFinal.violations === 0 ? 'good' : 'bad'),
+        metricFromNumber('route_wire', 'wire', routeFinal.wireLength, routeFinal.wireLength === null ? 'pending' : 'good'),
+        metricFromNumber('route_via', 'via', routeFinal.viaCount, routeFinal.viaCount === null ? 'pending' : 'good'),
+      ]),
+      DRC: compactMetrics([
+        metricFromNumber('drc', 'DRC', numberAt(drc, 'number'), metricState('drc', numberAt(drc, 'number'))),
+      ]),
+      Filler: compactMetrics([
+        metricFromNumber('filler_area', 'area', fillerInstances.area, metricState('area', fillerInstances.area)),
+        metricFromNumber('filler_instances', 'inst', fillerInstances.count, fillerInstances.count === null ? 'pending' : 'good'),
+        metricFromNumber('filler_added', 'added', numberAt(filler, 'inserted_num'), numberAt(filler, 'inserted_num') === null ? 'pending' : 'good'),
+      ]),
+      RCX: compactMetrics([
+        metricFromNumber('rcx_instances', 'inst', rcxStats.instances, rcxStats.instances === null ? 'pending' : 'good'),
+        metricFromNumber('rcx_nets', 'nets', rcxStats.nets, rcxStats.nets === null ? 'pending' : 'good'),
+      ]),
+      STA: compactMetrics([
+        metricFromNumber('setup_wns', 'setup', sta.setupWns, metricState('wns', sta.setupWns)),
+        metricFromNumber('hold_wns', 'hold', sta.holdWns, sta.holdWns === null ? 'pending' : sta.holdWns >= 0 ? 'good' : 'bad'),
+        metricFromNumber('setup_tns', 'TNS', sta.setupTns, metricState('tns', sta.setupTns)),
+      ]),
+      Harden: [],
+    },
+  }
+}
+
+function compactMetrics(metrics: Array<ProjectSummaryMetric | undefined>): ProjectSummaryMetric[] {
+  return metrics.filter((metric): metric is ProjectSummaryMetric => Boolean(metric && metric.value !== null))
+}
+
+function metricFromNumber(
+  id: string,
+  label: string,
+  value: number | null,
+  state: ProjectMetricPoint['state'],
+  hint?: string,
+  format: 'default' | 'percent' | 'compact' = 'default',
+): ProjectSummaryMetric | undefined {
+  if (value === null) return undefined
+  return {
+    id,
+    label: `${label} ${formatMetricValue(value, format)}`,
+    value,
+    display: formatMetricValue(value, format),
+    state,
+    hint,
+  }
+}
+
+function extractDbLayout(db: Record<string, unknown> | null): {
+  dieUsage: number | null
+  coreUsage: number | null
+  dieArea: number | null
+} {
+  const layout = recordAt(db, 'Design Layout')
+  return {
+    dieUsage: numberAt(layout, 'die_usage'),
+    coreUsage: numberAt(layout, 'core_usage'),
+    dieArea: numberAt(layout, 'die_area'),
+  }
+}
+
+function extractParameterLayout(parameters: Record<string, unknown> | null): {
+  dieArea: number | null
+  coreUtil: number | null
+} {
+  const die = recordAt(parameters, 'Die')
+  const core = recordAt(parameters, 'Core')
+  return {
+    dieArea: numberAtAny(die, ['Area', 'area', 'die_area']),
+    coreUtil: numberAtAny(core, ['Utilitization', 'Utilization', 'utilitization', 'utilization', 'core_usage']),
+  }
+}
+
+function extractDbStats(db: Record<string, unknown> | null): {
+  instances: number | null
+  nets: number | null
+} {
+  const stats = recordAt(db, 'Design Statis')
+  return {
+    instances: numberAt(stats, 'num_instances'),
+    nets: numberAt(stats, 'num_nets'),
+  }
+}
+
+function runtimeSeconds(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string' || !value.trim()) return 0
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized.endsWith('s')) {
+    const seconds = Number(normalized.slice(0, -1))
+    return Number.isFinite(seconds) ? seconds : 0
+  }
+
+  const colonParts = normalized.split(':').map(part => Number(part.trim()))
+  if (colonParts.length > 1 && colonParts.every(Number.isFinite)) {
+    if (colonParts.length === 3) return colonParts[0] * 3600 + colonParts[1] * 60 + colonParts[2]
+    if (colonParts.length === 2) return colonParts[0] * 60 + colonParts[1]
+  }
+
+  const numeric = Number(normalized)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+function checklistItems(checklist: Record<string, unknown> | null): Record<string, unknown>[] {
+  if (!checklist) return []
+  const rows = Array.isArray(checklist.checklist)
+    ? checklist.checklist
+    : Array.isArray(checklist.items)
+      ? checklist.items
+      : []
+  return rows.map(recordValue).filter((item): item is Record<string, unknown> => Boolean(item))
+}
+
+function checklistStateBucket(item: Record<string, unknown>): 'passed' | 'failed' | 'warning' | null {
+  const state = optionalString(
+    item.status ?? item.state ?? item.result ?? item.level,
+  ).toLowerCase()
+  if (['passed', 'pass', 'ok', 'success', 'succeeded'].includes(state)) return 'passed'
+  if (['failed', 'fail', 'error', 'fatal'].includes(state)) return 'failed'
+  if (['warning', 'warn'].includes(state)) return 'warning'
+  return null
+}
+
+function extractDbInstances(db: Record<string, unknown> | null): {
+  area: number | null
+  count: number | null
+} {
+  const total = recordAt(recordAt(db, 'Instances'), 'total')
+  return {
+    area: numberAt(total, 'area'),
+    count: numberAt(total, 'num'),
+  }
+}
+
+function extractRouteFinal(routeStep: Record<string, unknown> | null): {
+  violations: number | null
+  wireLength: number | null
+  viaCount: number | null
+  patchCount: number | null
+} {
+  const route = recordAt(routeStep, 'route') ?? routeStep
+  const dr = arrayAt(route, 'DR')
+  const final = dr.length > 0 ? recordValue(dr[dr.length - 1]) : null
+  return {
+    violations: numberAt(final, 'total_violation_num'),
+    wireLength: numberAt(final, 'total_wire_length'),
+    viaCount: numberAt(final, 'total_via_num'),
+    patchCount: numberAt(final, 'total_patch_num'),
+  }
+}
+
+function extractStaSummary(reports: ProjectStaReportInput[]): {
+  setupWns: number | null
+  setupTns: number | null
+  holdWns: number | null
+  holdTns: number | null
+  worstFrequency: number | null
+  worstSetupCorner?: string
+  worstHoldCorner?: string
+  worstFrequencyCorner?: string
+} {
+  const initial = {
+    setupWns: null as number | null,
+    setupTns: null as number | null,
+    holdWns: null as number | null,
+    holdTns: null as number | null,
+    worstFrequency: null as number | null,
+    worstSetupCorner: undefined as string | undefined,
+    worstHoldCorner: undefined as string | undefined,
+    worstFrequencyCorner: undefined as string | undefined,
+  }
+
+  return reports.reduce((summary, report) => {
+    const parsed = parseJsonRecord(report.content)
+    const reportFrequency = extractReportFrequency(parsed)
+    if (reportFrequency !== null && (summary.worstFrequency === null || reportFrequency < summary.worstFrequency)) {
+      summary.worstFrequency = reportFrequency
+      summary.worstFrequencyCorner = report.corner
+    }
+    const slackRows = arrayAt(parsed, 'slack')
+    slackRows.forEach(rowValue => {
+      const row = recordValue(rowValue)
+      const delayType = optionalString(row?.delay_type).toLowerCase()
+      const wns = flexibleNumber(row?.WNS)
+      const tns = flexibleNumber(row?.TNS)
+      if (delayType === 'max' && wns !== null && (summary.setupWns === null || wns < summary.setupWns)) {
+        summary.setupWns = wns
+        summary.setupTns = tns
+        summary.worstSetupCorner = report.corner
+      }
+      if (delayType === 'min' && wns !== null && (summary.holdWns === null || wns < summary.holdWns)) {
+        summary.holdWns = wns
+        summary.holdTns = tns
+        summary.worstHoldCorner = report.corner
+      }
+    })
+    return summary
+  }, initial)
+}
+
+function extractReportFrequency(report: Record<string, unknown> | null): number | null {
+  if (!report) return null
+  const summaryValue = report.summary
+  const summaryRecord = recordValue(summaryValue)
+  if (summaryRecord) return numberAt(summaryRecord, 'freq')
+
+  if (!Array.isArray(summaryValue)) return null
+  const values = summaryValue
+    .map(rowValue => flexibleNumber(recordValue(rowValue)?.freq))
+    .filter((value): value is number => value !== null)
+  return values.length > 0 ? Math.min(...values) : null
+}
+
+interface StepCompareDefinition {
+  metricId: string
+  label: string
+  hint: string
+  format?: 'default' | 'percent' | 'compact'
+}
+
+function compareDefinitionsForStep(step: FlowStep): StepCompareDefinition[] {
+  const map: Record<FlowStep, StepCompareDefinition[]> = {
+    Synth: [
+      { metricId: 'area', label: 'area', hint: 'Synthesis cell area' },
+      { metricId: 'synth_cells', label: 'cells', hint: 'Synthesis cell count' },
+      { metricId: 'synth_wires', label: 'wires', hint: 'Synthesis wire count' },
+    ],
+    Floor: [
+      { metricId: 'coreUtil', label: 'core util', hint: 'Floorplan core usage', format: 'percent' },
+      { metricId: 'dieArea', label: 'die area', hint: 'Floorplan die area' },
+      { metricId: 'floor_instances', label: 'instances', hint: 'Floorplan instance count' },
+    ],
+    Fanout: [
+      { metricId: 'fanout_area', label: 'area', hint: 'Fanout area summary' },
+      { metricId: 'fanout_instances', label: 'instances', hint: 'Fanout instance count' },
+    ],
+    Place: [
+      { metricId: 'place_hpwl', label: 'HPWL', hint: 'Placement HPWL', format: 'compact' },
+      { metricId: 'place_grwl', label: 'GRWL', hint: 'Placement GRWL', format: 'compact' },
+      { metricId: 'place_core', label: 'core util', hint: 'Placement core usage', format: 'percent' },
+    ],
+    CTS: [
+      { metricId: 'cts_buffers', label: 'buffers', hint: 'CTS buffer count' },
+      { metricId: 'cts_clock_wire', label: 'clock wire', hint: 'CTS total clock wirelength', format: 'compact' },
+      { metricId: 'cts_hpwl', label: 'HPWL', hint: 'Post-CTS HPWL', format: 'compact' },
+      { metricId: 'cts_overflow', label: 'overflow', hint: 'Post-CTS congestion overflow' },
+    ],
+    Legal: [
+      { metricId: 'legal_instances', label: 'instances', hint: 'Legalization instance count' },
+      { metricId: 'legal_nets', label: 'nets', hint: 'Legalization net count' },
+    ],
+    Route: [
+      { metricId: 'route_violations', label: 'violations', hint: 'Final detailed-route violations' },
+      { metricId: 'route_wire', label: 'wire', hint: 'Final route wirelength', format: 'compact' },
+      { metricId: 'route_via', label: 'vias', hint: 'Final route via count' },
+    ],
+    DRC: [
+      { metricId: 'drcCount', label: 'DRC count', hint: 'Final DRC violations' },
+    ],
+    Filler: [
+      { metricId: 'filler_area', label: 'area', hint: 'Filler area summary' },
+      { metricId: 'filler_instances', label: 'instances', hint: 'Filler instance count' },
+    ],
+    RCX: [
+      { metricId: 'rcx_instances', label: 'instances', hint: 'RCX instance count' },
+      { metricId: 'rcx_nets', label: 'nets', hint: 'RCX net count' },
+    ],
+    STA: [
+      { metricId: 'setupWns', label: 'setup WNS', hint: 'Worst setup WNS across STA corners' },
+      { metricId: 'holdWns', label: 'hold WNS', hint: 'Worst hold WNS across STA corners' },
+      { metricId: 'setupTns', label: 'setup TNS', hint: 'Worst setup TNS across STA corners' },
+    ],
+    Harden: [
+      { metricId: 'runtime', label: 'runtime', hint: 'Process runtime summary' },
+    ],
+  }
+  return map[step]
+}
+
+function valueForCompareDefinition(
+  summary: ProjectWorkspaceSummary | undefined,
+  metricId: string,
+): number | null {
+  if (!summary) return null
+  const finalMetric = summary.finalMetrics[metricId as keyof ProjectWorkspaceFinalMetrics]
+  if (finalMetric) return finalMetric.value
+  const stepMetric = summary.steps.flatMap(step => step.metrics).find(metric => metric.id === metricId)
+  return stepMetric?.value ?? null
+}
+
+function compareMetricState(metricId: string, value: number | null): ProjectMetricPoint['state'] {
+  if (value === null) return 'pending'
+  if (metricId === 'drcCount' || metricId === 'route_violations') {
+    if (value === 0) return 'good'
+    if (value <= 3) return 'warn'
+    return 'bad'
+  }
+  if (metricId === 'setupWns' || metricId === 'holdWns') return value >= 0 ? 'good' : 'bad'
+  return 'good'
+}
+
+function detailHintForStep(step: FlowStep): string {
+  const hints: Record<FlowStep, string> = {
+    Synth: 'Open workspace Synthesis for cell type and netlist details.',
+    Floor: 'Open workspace Floorplan for geometry, pin and fanout details.',
+    Fanout: 'Open workspace Fanout for high-fanout net details.',
+    Place: 'Open workspace Place for density and congestion maps.',
+    CTS: 'Open workspace CTS for clock tree and post-CTS congestion.',
+    Legal: 'Open workspace Legalization for placement cleanup details.',
+    Route: 'Open workspace Route for route iterations and layer pressure.',
+    DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
+    Filler: 'Open workspace Filler for final filler impact details.',
+    RCX: 'Open workspace RCX for extraction readiness details.',
+    STA: 'Open workspace STA for path detail and corner matrix.',
+    Harden: 'Open workspace Harden for final artifact details.',
+  }
+  return hints[step]
 }
 
 function emptyComparisonSummary(): ProjectComparisonSummary {
@@ -746,7 +1704,7 @@ function diffValueLabel(value: unknown): string | undefined {
 
 function metricDeltaState(metricId: ProjectMetricId, delta: number): ProjectComparisonMetricDiff['state'] {
   if (delta === 0) return 'warn'
-  if (metricId === 'wns' || metricId === 'tns') return delta > 0 ? 'good' : 'bad'
+  if (metricId === 'wns' || metricId === 'tns' || metricId === 'frequency') return delta > 0 ? 'good' : 'bad'
   return delta < 0 ? 'good' : 'bad'
 }
 
@@ -756,6 +1714,10 @@ function sourceStepOutputPath(workspacePath: string, step: FlowStep, designName:
 
 function sourceStepOutputVerilogPath(workspacePath: string, step: FlowStep, designName: string): string {
   return sourceStepArtifactPath(workspacePath, step, 'verilog', designName)
+}
+
+function sourceWorkspaceSdcPath(workspacePath: string, designName: string): string {
+  return joinPath(workspacePath, 'origin', `${designName || 'design'}.sdc`)
 }
 
 function sourceStepArtifactPath(
@@ -853,6 +1815,78 @@ function mergeBaseDesignConfig(
   if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
 
   return next
+}
+
+function parseJsonRecord(content: string | null | undefined): Record<string, unknown> | null {
+  if (!content) return null
+  try {
+    return recordValue(JSON.parse(content))
+  } catch {
+    return null
+  }
+}
+
+function recordAt(record: Record<string, unknown> | null | undefined, key: string): Record<string, unknown> | null {
+  if (!record) return null
+  return recordValue(record[key])
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function arrayAt(record: Record<string, unknown> | null | undefined, key: string): unknown[] {
+  if (!record) return []
+  const value = record[key]
+  return Array.isArray(value) ? value : []
+}
+
+function numberAt(record: Record<string, unknown> | null | undefined, key: string): number | null {
+  if (!record) return null
+  return flexibleNumber(record[key])
+}
+
+function numberAtAny(record: Record<string, unknown> | null | undefined, keys: string[]): number | null {
+  if (!record) return null
+  for (const key of keys) {
+    const value = flexibleNumber(record[key])
+    if (value !== null) return value
+  }
+  return null
+}
+
+function flexibleNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function formatRuntimeLabel(seconds: number): string {
+  if (seconds >= 3600) return `${Number((seconds / 3600).toFixed(2))} h`
+  if (seconds >= 60) return `${Number((seconds / 60).toFixed(1))} min`
+  return `${Number(seconds.toFixed(1))} s`
+}
+
+function formatMetricValue(value: number, format: 'default' | 'percent' | 'compact' = 'default'): string {
+  if (format === 'percent') return `${Number((value * 100).toFixed(1))}%`
+  if (format === 'compact') {
+    if (Math.abs(value) >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
+    if (Math.abs(value) >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+  }
+  if (Math.abs(value) >= 100) return String(Number(value.toFixed(1)))
+  if (Math.abs(value) >= 10) return String(Number(value.toFixed(2)))
+  return String(Number(value.toFixed(3)))
+}
+
+function compactMetricSummary(summary: ProjectMetricSummary): ProjectMetricSummary {
+  return Object.fromEntries(
+    Object.entries(summary).filter(([, value]) => value !== undefined),
+  ) as ProjectMetricSummary
 }
 
 function optionalString(value: unknown): string {

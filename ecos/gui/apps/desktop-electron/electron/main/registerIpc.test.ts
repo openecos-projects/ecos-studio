@@ -67,6 +67,7 @@ function registerHandlers() {
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectRoot: vi.fn(),
+      removeProjectDirectory: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
@@ -616,6 +617,10 @@ describe('registerIpc', () => {
       '/tmp/project/home/parameters.json',
       '{"PDK":"ics55"}',
     )
+    await handlers.get(desktopApiIpcChannels.workspaceRemoveProjectDirectory)?.(
+      event,
+      '/tmp/project/ws_0001',
+    )
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceScanPdkDirectory)?.(event, '/tmp/pdk'),
     ).resolves.toMatchObject({
@@ -668,6 +673,9 @@ describe('registerIpc', () => {
     expect(services.workspaceService.writeProjectTextFile).toHaveBeenCalledWith(
       '/tmp/project/home/parameters.json',
       '{"PDK":"ics55"}',
+    )
+    expect(services.workspaceService.removeProjectDirectory).toHaveBeenCalledWith(
+      '/tmp/project/ws_0001',
     )
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
   })

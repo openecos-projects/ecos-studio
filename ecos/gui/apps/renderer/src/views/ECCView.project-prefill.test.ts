@@ -15,6 +15,7 @@ describe('ECCView project management handoff', () => {
   it('prefills branch artifact origins from project management query parameters', () => {
     expect(source).toContain('originDef')
     expect(source).toContain('originVerilog')
+    expect(source).toContain('sourceSdc')
     expect(source).toContain('sourceWorkspacePath')
     expect(source).toContain('sourceOutputPath')
     expect(source).toContain('sourceOutputType')
@@ -26,13 +27,14 @@ describe('ECCView project management handoff', () => {
     const prefillSource = source.slice(prefillStart, prefillEnd)
     expect(prefillSource).toContain('origin_def: originDef')
     expect(prefillSource).toContain('origin_verilog: originVerilog')
+    expect(prefillSource).toContain('sdc: sourceSdc || sourceWorkspaceConfig?.sdc')
   })
 
-  it('reuses source workspace config when creating a branch workspace', () => {
+  it('reuses only source workspace config files when creating a branch workspace', () => {
     expect(source).toContain('loadSourceWorkspaceInitialConfig')
     expect(source).toContain('sourceWorkspacePath')
     expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
-    expect(source).toContain("readOptionalProjectTextFile('home/flow.json'")
+    expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
     expect(source).toContain("readOptionalProjectTextFile('config/db_default_config.json'")
     expect(source).toContain('tech_lef_path')
@@ -41,6 +43,12 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain('sdc_path')
     expect(source).toContain('sourceWorkspaceConfig')
     expect(source).toContain('mergeBranchInitialConfig')
+
+    const loaderStart = source.indexOf('async function loadSourceWorkspaceInitialConfig')
+    const loaderEnd = source.indexOf('function mergeBranchInitialConfig', loaderStart)
+    const loaderSource = source.slice(loaderStart, loaderEnd)
+    expect(loaderSource).not.toContain('origin_verilog:')
+    expect(loaderSource).not.toContain('origin_def:')
   })
 
   it('records project managed workspaces into project.json after the existing wizard creates them', () => {
@@ -61,6 +69,23 @@ describe('ECCView project management handoff', () => {
     const openEnd = source.indexOf('const closeWizard =', openStart)
     const openSource = source.slice(openStart, openEnd)
     expect(openSource).toContain('projectManagedWizardInitialConfig')
+  })
+
+  it('returns to Project Management when cancelling a project-managed new workspace', () => {
+    expect(source).toContain('resetWizard')
+
+    const closeStart = source.indexOf('const closeWizard =')
+    const closeEnd = source.indexOf('const prefillWorkspaceDirectory', closeStart)
+    const closeSource = source.slice(closeStart, closeEnd)
+    expect(closeSource).toContain('resetWizard()')
+    expect(closeSource).toContain('queryString(route.query.projectRoot)')
+    expect(closeSource).toContain("router.push('/projects')")
+
+    const createStart = source.indexOf('const handleWizardCreate')
+    const createEnd = source.indexOf('async function registerProjectManagedWorkspace', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    expect(createSource).toContain('resetWizard()')
+    expect(createSource).not.toContain('closeWizard()')
   })
 
   it('updates project.json after opening an existing workspace from project context', () => {

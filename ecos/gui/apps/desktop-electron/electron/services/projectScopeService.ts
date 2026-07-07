@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
-const TOP_LEVEL_ENTRY_LIMIT = 20
+const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 
 async function canonicalizeExistingPath(path: string): Promise<string> {
   return await realpath(path)
@@ -71,22 +71,42 @@ async function canonicalizePotentialPathWithinRoot(
 }
 
 async function scanTopLevelEntries(path: string): Promise<PdkDetectedFiles> {
-  const entries = await readdir(path, { withFileTypes: true })
-  const directories = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  const files = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
+  const directories: string[] = []
+  const files: string[] = []
+
+  async function walk(currentPath: string, relativeDirectory = ''): Promise<void> {
+    const entries = await readdir(currentPath, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${entry.name}`
+        : entry.name
+      const entryPath = join(currentPath, entry.name)
+
+      if (entry.isDirectory()) {
+        directories.push(relativePath)
+        await walk(entryPath, relativePath)
+        continue
+      }
+
+      if (entry.isFile() && isPdkResourceFile(entry.name)) {
+        files.push(relativePath)
+      }
+    }
+  }
+
+  await walk(path)
 
   return {
-    directories,
-    files,
+    directories: directories.sort((left, right) => left.localeCompare(right)),
+    files: files.sort((left, right) => left.localeCompare(right)),
   }
+}
+
+function isPdkResourceFile(path: string): boolean {
+  const lower = path.toLowerCase()
+  return PDK_RESOURCE_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))
 }
 
 async function isProjectDirectoryCandidate(path: string): Promise<boolean> {

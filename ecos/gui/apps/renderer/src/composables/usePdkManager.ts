@@ -190,23 +190,15 @@ export function usePdkManager() {
 
       if (saved && saved.length > 0) {
         const deduped = dedupeImportedPdks(saved)
-        importedPdks.value = deduped
+        const refreshed = desktopApi
+          ? await Promise.all(deduped.map((pdk) => refreshPersistedPdk(desktopApi, pdk)))
+          : deduped
+        importedPdks.value = refreshed
 
-        await Promise.all(
-          deduped.map(async (pdk) => {
-            try {
-              await syncImportedPdkReference(pdk.path)
-            } catch (error) {
-              console.warn(
-                '[usePdkManager] Failed to sync imported PDK to backend manifest:',
-                pdk.path,
-                error,
-              )
-            }
-          }),
-        )
-
-        if (desktopApi && deduped.length !== saved.length) {
+        if (
+          desktopApi &&
+          (deduped.length !== saved.length || JSON.stringify(refreshed) !== JSON.stringify(deduped))
+        ) {
           await savePdks(desktopApi)
         }
       }
@@ -263,6 +255,41 @@ export function usePdkManager() {
       return
     }
     await importPdkPathApi(path)
+  }
+
+  const refreshPersistedPdk = async (
+    desktopApi: DesktopApi,
+    pdk: ImportedPdk,
+  ): Promise<ImportedPdk> => {
+    try {
+      const detected = await scanPdkDirectory(desktopApi, pdk.path)
+      await syncImportedPdkReference(detected.canonicalPath)
+      return {
+        ...pdk,
+        name: detected.name || pdk.name,
+        path: detected.canonicalPath,
+        description: detected.description || pdk.description,
+        techNode: detected.techNode || pdk.techNode,
+        pdkId: detected.pdkId || pdk.pdkId,
+        detectedFiles: detected.detectedFiles,
+      }
+    } catch (error) {
+      console.warn(
+        '[usePdkManager] Failed to refresh imported PDK detection, keeping saved metadata:',
+        pdk.path,
+        error,
+      )
+      try {
+        await syncImportedPdkReference(pdk.path)
+      } catch (syncError) {
+        console.warn(
+          '[usePdkManager] Failed to sync imported PDK to backend manifest:',
+          pdk.path,
+          syncError,
+        )
+      }
+      return pdk
+    }
   }
 
   const saveDetectedPdk = async (

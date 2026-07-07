@@ -228,9 +228,16 @@ const openWizard = () => {
   showWizard.value = true
 }
 
-const closeWizard = () => {
+const resetWizard = () => {
   showWizard.value = false
   initialWizardConfig.value = undefined
+}
+
+const closeWizard = () => {
+  resetWizard()
+  if (queryString(route.query.projectRoot)) {
+    router.push('/projects')
+  }
 }
 
 const prefillWorkspaceDirectory = async () => {
@@ -243,6 +250,7 @@ const prefillWorkspaceDirectory = async () => {
   const sourceStep = queryString(route.query.sourceStep)
   const originDef = queryString(route.query.originDef)
   const originVerilog = queryString(route.query.originVerilog)
+  const sourceSdc = queryString(route.query.sdc)
   const sourceOutputPath = queryString(route.query.sourceOutputPath)
   const sourceOutputType = queryString(route.query.sourceOutputType)
   const startStep = queryString(route.query.startStep)
@@ -256,7 +264,7 @@ const prefillWorkspaceDirectory = async () => {
     origin_verilog: originVerilog,
     pdk: sourceWorkspaceConfig?.pdk,
     pdk_root: sourceWorkspaceConfig?.pdk_root,
-    sdc: sourceWorkspaceConfig?.sdc,
+    sdc: sourceSdc || sourceWorkspaceConfig?.sdc,
     pdk_config_mode: sourceWorkspaceConfig?.pdk_config_mode,
     pdk_config: sourceWorkspaceConfig?.pdk_config,
     pdk_json: sourceWorkspaceConfig?.pdk_json,
@@ -292,40 +300,29 @@ async function loadSourceWorkspaceInitialConfig(
 ): Promise<ProjectWorkspaceInitialConfig | undefined> {
   if (!sourceWorkspacePath) return undefined
 
-  const [parametersText, flowText, pdkText, dbConfigText] = await Promise.all([
+  const [parametersText, pdkText, dbConfigText] = await Promise.all([
     readOptionalProjectTextFile('home/parameters.json', { projectPath: sourceWorkspacePath }),
-    readOptionalProjectTextFile('home/flow.json', { projectPath: sourceWorkspacePath }),
     readOptionalProjectTextFile('home/pdk.json', { projectPath: sourceWorkspacePath }),
     readOptionalProjectTextFile('config/db_default_config.json', { projectPath: sourceWorkspacePath }),
   ])
 
   const parametersJson = parseOptionalJson(parametersText)
-  const flowJson = parseOptionalJson(flowText)
   const pdkJson = parseOptionalJson(pdkText)
   const dbConfigJson = parseOptionalJson(dbConfigText)
-  const flowDesign = optionalRecord(flowJson?.design)
   const dbInput = optionalRecord(dbConfigJson?.INPUT)
   const pdkConfig = normalizeSourcePdkConfig(pdkJson, dbConfigJson)
 
   return {
     pdk: optionalString(parametersJson?.PDK) || optionalString(parametersJson?.pdk),
     pdk_root: optionalString(parametersJson?.['PDK Root']) || optionalString(parametersJson?.pdk_root),
-    origin_verilog: optionalString(flowJson?.origin_verilog)
-      || optionalString(flowDesign?.origin_verilog)
-      || optionalString(dbInput?.verilog_path),
-    origin_def: optionalString(flowJson?.origin_def)
-      || optionalString(flowDesign?.origin_def)
-      || optionalString(dbInput?.def_path),
-    sdc: optionalString(flowJson?.sdc)
+    sdc: sourceWorkspaceSdcPath(sourceWorkspacePath, parametersJson)
       || optionalString(pdkJson?.sdc)
       || optionalString(dbInput?.sdc_path),
     pdk_config_mode: pdkConfig.mode,
     pdk_config: pdkConfig,
     pdk_json: pdkText
       ? `${normalizePath(sourceWorkspacePath)}/home/pdk.json`
-      : dbConfigText
-        ? `${normalizePath(sourceWorkspacePath)}/config/db_default_config.json`
-        : '',
+      : '',
     parameters: normalizeSourceParameters(parametersJson),
   }
 }
@@ -339,13 +336,23 @@ function mergeBranchInitialConfig(
   return {
     ...sourceWorkspaceConfig,
     ...branchConfig,
-    origin_def: branchConfig.origin_def || sourceWorkspaceConfig.origin_def || '',
-    origin_verilog: branchConfig.origin_verilog || sourceWorkspaceConfig.origin_verilog || '',
+    origin_def: branchConfig.origin_def || '',
+    origin_verilog: branchConfig.origin_verilog || '',
     parameters: {
       ...(sourceWorkspaceConfig.parameters ?? {}),
       ...(branchConfig.parameters ?? {}),
     },
   }
+}
+
+function sourceWorkspaceSdcPath(
+  sourceWorkspacePath: string,
+  parametersJson: Record<string, unknown> | null,
+): string {
+  const designName = optionalString(parametersJson?.Design)
+    || optionalString(parametersJson?.design)
+  if (!designName) return ''
+  return `${normalizePath(sourceWorkspacePath)}/origin/${designName}.sdc`
 }
 
 function parseOptionalJson(content: string | null): Record<string, unknown> | null {
@@ -448,7 +455,7 @@ const queryString = (value: unknown): string => {
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
-  closeWizard()
+  resetWizard()
   const success = await newProject(config)
   if (!success) return
 

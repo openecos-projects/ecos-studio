@@ -41,6 +41,25 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('sourceContext.step')
   })
 
+  it('closes the modal when clicking the overlay or pressing Escape', () => {
+    expect(source).toContain('@click.self="closeWizard"')
+    expect(source).toContain('@click="closeWizard"')
+    expect(source).toContain("document.addEventListener('keydown', handleWizardKeydown)")
+    expect(source).toContain("document.removeEventListener('keydown', handleWizardKeydown)")
+    expect(source).toContain("event.key !== 'Escape'")
+    expect(source).toContain("emit('close')")
+  })
+
+  it('closes the PDK resource picker before closing the wizard on Escape', () => {
+    const handlerStart = source.indexOf('function handleWizardKeydown')
+    const handlerEnd = source.indexOf('function nextStep', handlerStart)
+    const handlerSource = source.slice(handlerStart, handlerEnd)
+
+    expect(handlerSource).toContain('if (pdkResourcePickerOpen.value)')
+    expect(handlerSource).toContain('closePdkResourcePicker()')
+    expect(handlerSource).toContain('return')
+  })
+
   it('locks flow steps before the derived workspace start step', () => {
     expect(source).toContain('lockedFlowStepNames')
     expect(source).toContain('isFlowStepLocked')
@@ -110,6 +129,18 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('setFlowBoundary')
   })
 
+  it('keeps the first selected flow step fixed and deselects from the end', () => {
+    const boundaryStart = source.indexOf('function setFlowBoundary')
+    const boundaryEnd = source.indexOf('async function ensurePdksLoaded', boundaryStart)
+    const boundarySource = source.slice(boundaryStart, boundaryEnd)
+
+    expect(boundarySource).not.toContain('flowStartStep.value = stepName')
+    expect(boundarySource).not.toContain('flowStartStep.value = hardenFlowSteps[start + 1].name')
+    expect(boundarySource).toContain('const nextEndIndex = index === end && end > start ? end - 1 : index')
+    expect(boundarySource).toContain('const boundedEndIndex = Math.max(start, nextEndIndex)')
+    expect(boundarySource).toContain('flowEndStep.value = hardenFlowSteps[boundedEndIndex].name')
+  })
+
   it('keeps SDC in Design Files and removes it from PDK Config', () => {
     expect(source).toContain('designInputTypes')
     expect(source).toContain('Import SDC')
@@ -130,6 +161,31 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain("pdk_config_mode: 'default'")
     expect(source).toContain("mode: pdkConfigMode.value")
     expect(source).toContain("pdkConfigMode.value === 'default'")
+  })
+
+  it('redesigns Manual PDK Resources into category navigation plus selected-file detail view', () => {
+    expect(source).toContain('PdkResourcePickerDialog')
+    expect(source).toContain('pdkResourcePickerOpen')
+    expect(source).toContain('pdk-manual-resource-shell')
+    expect(source).toContain('pdk-resource-category-list')
+    expect(source).toContain('pdk-resource-detail-panel')
+    expect(source).toContain('@click="activePdkWizardStep = item.key"')
+    expect(source).toContain('displayPdkResourceName(file)')
+    expect(source).toContain('Update selection')
+    expect(source).toContain(':available-files="detectedPdkFiles[activePdkWizardStep]"')
+    expect(source).toContain(':selected-files="pdkSelections[activePdkWizardStep]"')
+    expect(source).toContain('@update:selected-files="updatePdkResourceSelection"')
+    expect(source).toContain('detectedPdkDirectories')
+    expect(source).toContain('scanManualPdkResources')
+    expect(source).toContain('getCurrentPdkRoot')
+    expect(source).toContain('getDesktopApi().workspace.scanPdkDirectory')
+    expect(source).not.toContain('selectedManualPdkResourcePath')
+    expect(source).not.toContain('Select a file to preview its full path.')
+    expect(source).not.toContain('File Path')
+    expect(source).not.toContain('PDK root')
+    expect(source).not.toContain('Choose Files')
+    expect(source).not.toContain('Add Files')
+    expect(source).not.toContain('Detected Files')
   })
 
   it('allows compressed and uncompressed design file imports', () => {

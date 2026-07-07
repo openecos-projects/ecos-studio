@@ -149,6 +149,7 @@ const desktopBridge = {
     readProjectTextFileTail: async () => null,
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
+    removeProjectDirectory: async () => undefined,
     scanPdkDirectory,
     scanRtlDirectory,
     watchProjectFile: async () => () => undefined,
@@ -339,7 +340,7 @@ describe('usePdkManager', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('syncs persisted imported PDKs into the resource manager manifest during load', async () => {
+  it('syncs and refreshes persisted imported PDKs during load', async () => {
     settingsGet.mockResolvedValueOnce([
       {
         id: 'local-ics55',
@@ -349,14 +350,46 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        detectedFiles: {
+          directories: ['IP', 'prtech'],
+          files: [],
+        },
       },
     ])
+    scanPdkDirectory.mockResolvedValueOnce({
+      ...scannedPdk,
+      canonicalPath: '/tmp/pdks/ics55',
+      detectedFiles: {
+        directories: ['IP', 'IP/STD_cell', 'prtech', 'prtech/techLEF'],
+        files: [
+          'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+          'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+          'prtech/techLEF/N551P6M.lef',
+        ],
+      },
+    })
 
     const { loadPdks, importedPdks } = usePdkManager()
     await loadPdks()
 
-    expect(importedPdks.value).toHaveLength(1)
+    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdks/ics55')
     expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdks/ics55' })
+    expect(importedPdks.value).toHaveLength(1)
+    expect(importedPdks.value[0]?.detectedFiles?.files).toEqual([
+      'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+      'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+      'prtech/techLEF/N551P6M.lef',
+    ])
+    expect(settingsSet).toHaveBeenCalledWith(
+      'imported_pdks',
+      expect.arrayContaining([
+        expect.objectContaining({
+          detectedFiles: expect.objectContaining({
+            files: expect.arrayContaining(['prtech/techLEF/N551P6M.lef']),
+          }),
+        }),
+      ]),
+    )
   })
 
   it('imports a row-bound PDK through the local resource API and persists it for project creation', async () => {
