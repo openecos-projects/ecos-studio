@@ -12375,3 +12375,78 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中确认 `My CPU Filelist` 入口下方展示的是 `cpu_top` contract。
 - 用户真实 CPU 顶层如果不是 `cpu_top`，仍需要提供一个名为 `cpu_top` 的薄适配模块来实例化真实 CPU。
+
+# 第 200 次 开发
+
+## 开发目标
+
+修复 `test0707c` 在 elab 阶段失败的问题：`prepare` 动态生成的 `generated_standard_cpu_wrapper.sv` 仍使用旧的 `io_interrupt/io_master_awready` 端口名连接 `cpu_top`，与当前 `cpu_top` contract 的 `io_extIrq/io_master_aw_ready/...` 端口名不一致。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 将 `_standard_cpu_wrapper_source()` 里的 `cpu_top` 实例化端口映射改为当前 contract 名字。
+  - 动态生成 wrapper 现在与静态 SoC wrapper 一样连接 `.io_extIrq`、`.io_timerIrq`、`.io_master_aw_ready`、`.io_master_aw_bits_awaddr` 等端口。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 加严 `test_prepare_generates_cpu_alias_for_cpu_top_filelist`，检查生成 wrapper 包含新端口名，并确保不再生成旧的 `.io_interrupt`、`.io_master_awready` 连接。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 elab 失败原因和动态 wrapper 模板修复。
+
+## 验证情况
+
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m py_compile ecc-fe/fecompiler/tools/prepare/runner.py ecc-fe/test/test_engine_flow.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_engine_flow.py::test_prepare_generates_cpu_alias_for_cpu_top_filelist ecc-fe/test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_alias`，通过：2 个测试全部通过。
+- 已执行轻量生成检查：`_standard_cpu_wrapper_source('cpu_top')` 包含 `.io_extIrq`、`.io_timerIrq`、`.io_master_aw_ready`、`.io_master_aw_bits_awaddr`，且不再包含 `.io_interrupt`、`.io_master_awready`。
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未重跑 `/home/luyoung/test0707c` 的 prepare/elab 步骤；当前项目里的 `generated_standard_cpu_wrapper.sv` 是旧产物，需要重新执行 prepare 后再跑 elab。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `/home/luyoung/test0707c/prepare_fe/output/generated_standard_cpu_wrapper.sv` 需要由新的 prepare 重新生成；旧文件仍会导致相同 elab 报错。
+
+# 第 201 次 开发
+
+## 开发目标
+
+修复 `test0707c` 在 sim 阶段失败的问题：Verilator C++ 编译 `difftest.cpp` 时找不到 `...u_core__DOT__cl3_top__DOT__core...` 层级，因为动态生成 wrapper 里把用户 CPU 实例命名为 `u_cpu`，而既有 difftest 代码写死读取 `cl3_top` 实例下的寄存器和 CSR。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 动态生成的 SoC-facing wrapper 继续实例化用户提供的 `cpu_top` 模块，但实例名固定为 `cl3_top`，与 `difftest.cpp` 期望的 Verilator 层级保持一致。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/ysyx_00000000.sv`
+  - 静态 SoC wrapper 同步把 `cpu_top` 实例名改为 `cl3_top`，避免源码内静态模板和动态生成模板分叉。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 更新生成 wrapper 的测试断言，要求输出 `cpu_top cl3_top`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 sim 失败原因和 difftest 层级兼容修复。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile ecc-fe/fecompiler/tools/prepare/runner.py ecc-fe/test/test_engine_flow.py`，通过。
+- 已执行 `PYTHONPATH=. python3` 轻量生成检查，确认 `_standard_cpu_wrapper_source('cpu_top')` 包含 `cpu_top cl3_top`，不再包含 `cpu_top u_cpu`，并保留 `.io_extIrq`、`.io_master_aw_ready` 等端口连接。
+- 已在 `/home/luyoung/ecos-studio/ecc-fe` 执行 `PYTHONPATH=. pytest -q test/test_engine_flow.py::test_prepare_generates_cpu_alias_for_cpu_top_filelist test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_alias`，通过：2 个测试全部通过。
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 和 `/home/luyoung/ecos-studio` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未重跑 `/home/luyoung/test0707c` 的 prepare/sim；当前项目里的已生成 wrapper 仍可能是旧产物，需要重新执行 prepare 后再跑 sim。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `difftest.cpp` 仍依赖 CL3 内部层级 `cl3_top.core.issue.rf` 和 `cl3_top.core.csr...`；如果未来接入非 CL3 微结构 CPU，即使顶层接口满足 `cpu_top`，difftest 内部状态读取还需要进一步抽象。
