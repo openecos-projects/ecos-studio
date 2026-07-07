@@ -68,7 +68,7 @@
         </aside>
 
         <main class="relative flex min-w-0 flex-1 flex-col bg-transparent">
-          <div class="custom-scrollbar flex-1 overflow-y-auto p-8 md:p-12">
+          <div ref="wizardScrollRef" class="custom-scrollbar flex-1 overflow-y-auto p-8 md:p-12">
             <Transition name="fade-slide" mode="out-in">
               <section v-if="currentStep === 1" key="step1" class="mx-auto w-full max-w-2xl">
                 <div class="mb-10">
@@ -252,6 +252,46 @@
                     </div>
                   </section>
 
+                  <section
+                    v-if="showCpuTopContract"
+                    ref="cpuTopContractRef"
+                    class="cpu-top-contract"
+                  >
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div class="flex items-center gap-2 text-sm font-bold text-(--text-primary)">
+                          <i class="ri-code-box-line text-(--accent-color)"></i>
+                          <span>CPU Top IO Contract</span>
+                        </div>
+                        <p class="mt-1 text-xs text-(--text-secondary)">
+                          The user CPU filelist must define this exact CPU top module interface.
+                        </p>
+                      </div>
+                      <div class="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                        <div class="cpu-top-contract-metric">
+                          <span>Module</span>
+                          <strong>{{ requiredCpuTopModule }}</strong>
+                        </div>
+                        <div class="cpu-top-contract-metric">
+                          <span>IO Count</span>
+                          <strong>{{ cpuTopPortCount }} ports</strong>
+                        </div>
+                        <div class="cpu-top-contract-metric col-span-2 sm:col-span-1">
+                          <span>Match</span>
+                          <strong>Module + IO names</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="mt-4 overflow-hidden rounded-xl border border-(--border-color)/70 bg-(--bg-primary)/65">
+                      <div class="flex items-center justify-between gap-3 border-b border-(--border-color)/70 px-4 py-2.5">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">CL3Top.sv</span>
+                        <span class="text-xs font-medium text-(--text-secondary)">module name and IO names must match</span>
+                      </div>
+                      <pre class="custom-scrollbar max-h-72 overflow-auto p-4 text-[11px] leading-relaxed text-(--text-primary)"><code>{{ cpuTopExample }}</code></pre>
+                    </div>
+                  </section>
+
                   <section class="validation-panel" :class="validationPanelClass">
                     <div class="validation-head">
                       <i :class="validationIcon"></i>
@@ -368,12 +408,56 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
 import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendCompatibilityEntry, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
 
 const FINAL_STEP = 3
+const CPU_TOP_MODULE_FALLBACK = 'CL3Top'
+const CPU_TOP_PORT_DECLARATIONS = `  input         clock,
+  input         reset,
+  input         io_extIrq,
+  input         io_timerIrq,
+  input         io_master_aw_ready,
+  output        io_master_aw_valid,
+  output [31:0] io_master_aw_bits_awaddr,
+  output [3:0]  io_master_aw_bits_awid,
+  output [7:0]  io_master_aw_bits_awlen,
+  output [2:0]  io_master_aw_bits_awsize,
+  output [1:0]  io_master_aw_bits_awburst,
+  output        io_master_aw_bits_awlock,
+  output [3:0]  io_master_aw_bits_awcache,
+  output [2:0]  io_master_aw_bits_awprot,
+  input         io_master_w_ready,
+  output        io_master_w_valid,
+  output [31:0] io_master_w_bits_wdata,
+  output [3:0]  io_master_w_bits_wstrb,
+  output        io_master_w_bits_wlast,
+  output        io_master_b_ready,
+  input         io_master_b_valid,
+  input  [1:0]  io_master_b_bits_bresp,
+  input  [3:0]  io_master_b_bits_bid,
+  input         io_master_ar_ready,
+  output        io_master_ar_valid,
+  output [31:0] io_master_ar_bits_araddr,
+  output [3:0]  io_master_ar_bits_arid,
+  output [7:0]  io_master_ar_bits_arlen,
+  output [2:0]  io_master_ar_bits_arsize,
+  output [1:0]  io_master_ar_bits_arburst,
+  output        io_master_ar_bits_arlock,
+  output [3:0]  io_master_ar_bits_arcache,
+  output [2:0]  io_master_ar_bits_arprot,
+  output        io_master_r_ready,
+  input         io_master_r_valid,
+  input  [1:0]  io_master_r_bits_rresp,
+  input  [31:0] io_master_r_bits_rdata,
+  input         io_master_r_bits_rlast,
+  input  [3:0]  io_master_r_bits_rid`
+const CPU_TOP_PORT_COUNT = CPU_TOP_PORT_DECLARATIONS
+  .split('\n')
+  .filter((line) => /^\s*(input|output)\b/.test(line))
+  .length
 
 interface FrontendParameters extends Record<string, unknown> {
   design: string
@@ -426,6 +510,8 @@ const catalogError = ref('')
 const validationBusy = ref(false)
 const validation = ref<FrontendValidationResult | null>(null)
 const validationFallbackIssues = ref<FrontendValidationIssue[]>([])
+const wizardScrollRef = ref<HTMLElement | null>(null)
+const cpuTopContractRef = ref<HTMLElement | null>(null)
 const selectedCoreId = ref('')
 const selectedSocHarnessId = ref('')
 const selectedToolchainId = ref('')
@@ -474,6 +560,19 @@ const effectiveCpuFilelist = computed(() =>
   || stringField(selectedCore.value, 'cpu_filelist')
   || '',
 )
+const requiredCpuTopModule = computed(() =>
+  stringField(selectedCore.value, 'required_cpu_top_module')
+  || validation.value?.normalized?.required_cpu_top_module
+  || CPU_TOP_MODULE_FALLBACK,
+)
+const showCpuTopContract = computed(() =>
+  selectedCoreId.value === 'custom-filelist'
+  || Boolean(stringField(selectedCore.value, 'required_cpu_top_module') || validation.value?.normalized?.required_cpu_top_module),
+)
+const cpuTopExample = computed(() =>
+  `module ${requiredCpuTopModule.value} (\n${CPU_TOP_PORT_DECLARATIONS}\n);`,
+)
+const cpuTopPortCount = computed(() => CPU_TOP_PORT_COUNT)
 const combinationSummary = computed(() =>
   validation.value?.normalized?.compatibility_summary
   || selectedCompatibility.value?.summary
@@ -766,6 +865,9 @@ const selectCpuFilelist = async () => {
 
 function selectCore(id: string) {
   selectedCoreId.value = id
+  if (id === 'custom-filelist') {
+    void scrollToCpuTopContract()
+  }
 }
 
 function selectSocHarness(id: string) {
@@ -778,6 +880,23 @@ function selectToolchain(id: string) {
 
 function selectTestSuite(id: string) {
   selectedTestSuiteId.value = id
+}
+
+async function scrollToCpuTopContract(): Promise<void> {
+  await nextTick()
+  const target = cpuTopContractRef.value
+  if (!target) return
+
+  const container = wizardScrollRef.value
+  if (!container) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' })
+    return
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const nextTop = container.scrollTop + targetRect.top - containerRect.top - 12
+  container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
 }
 
 const nextStep = () => {
@@ -1118,6 +1237,44 @@ const ReviewItem = defineComponent({
   margin-top: 0.15rem;
   color: var(--text-secondary);
   font-size: 0.68rem;
+}
+
+.cpu-top-contract {
+  scroll-margin-top: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-color) 6%, var(--bg-secondary) 24%);
+  padding: 1rem;
+}
+
+.cpu-top-contract-metric {
+  min-width: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+  padding: 0.65rem 0.75rem;
+}
+
+.cpu-top-contract-metric span,
+.cpu-top-contract-metric strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cpu-top-contract-metric span {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cpu-top-contract-metric strong {
+  margin-top: 0.15rem;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
 }
 
 .validation-panel {

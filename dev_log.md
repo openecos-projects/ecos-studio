@@ -12146,3 +12146,108 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `examples/cl3_std` 仍保留 `ecos_user_cpu_top` 作为内部薄包装示例，但现在 filelist 也包含静态 `ysyx_00000000`，GUI 用户应继续选择 `custom-filelist`。
 - release archive 的真实内容检查仍需等 GitHub Actions 打包时执行；本地未运行 release 打包。
+
+# 第 196 次 开发
+
+## 开发目标
+
+在 GUI 创建前端项目时强化 `My CPU Filelist` 的入口提示：用户点击该卡片后，向导自动滚动到 Toolchain/Test Suite 下方的新 `cpu_top.v` IO contract 区域，直接展示 SoC 兼容 CPU top 模块名、端口数量和完整端口声明。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 为向导滚动容器和 `cpu_top.v` contract 区域增加 ref。
+  - 点击 `custom-filelist`/`My CPU Filelist` 后自动滚动到 contract 区域。
+  - 在 Toolchain/Test Suite 下方新增 `cpu_top.v IO Contract` 区域，展示 `ysyx_00000000` 模块名、81 个 IO 端口数量，以及方向、位宽、端口名必须完全一致的完整声明。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/frontendCatalog.ts`
+  - 在 `FrontendValidationResult.normalized` 类型中补充 `required_cpu_top_module`，对齐后端 validation 返回字段。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GUI contract 展示和滚动交互修改。
+
+## 验证情况
+
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vue-tsc --noEmit`，通过。
+- 已在 `/home/luyoung/ecos-studio` 执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中点击 `My CPU Filelist` 后确认滚动位置和契约文本展示是否符合预期。
+
+# 第 197 次 开发
+
+## 开发目标
+
+纠正 `My CPU Filelist` 的用户边界：用户 filelist 应提供类似 `examples/cl3_std/cl3_verilog/CL3Top.sv` 的 CPU 顶层模块，模块名必须是 `CL3Top`，IO 名字必须匹配该接口；`ysyx_00000000` 保持为工具/SoC 内部生成和连接的兼容 wrapper，不再要求用户直接提供。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 将 `custom-filelist` 的用户 CPU top contract 从 `ysyx_00000000` 改为 `CL3Top`。
+  - 增加 `cpu_standard_top: CL3Top`、`cpu_wrapper_generation: standard_alias_v1` 和 39 个 `required_cpu_top_ports`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - validation 结果暴露 `required_cpu_top_ports`。
+  - 用户 CPU filelist 校验改为检查恰好一个 `CL3Top`，并检查端口名缺失/多余。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+  - `standard_alias_v1` catalog contract 不再写死 `ecos_user_cpu_top`，改为要求声明 `cpu_standard_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 文档改为说明用户提供 `CL3Top`，prepare 阶段生成 SoC-facing `ysyx_00000000` wrapper。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - examples archive marker 改为检查 `CL3Top.sv`。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/filelist.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/filelist.f`
+  - 从 CPU filelist 中移除用户不应提供的 wrapper 文件条目。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/ysyx_00000000.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/ecos_user_cpu_top.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/ysyx_00000000.sv`
+  - 删除示例中会误导用户的 wrapper 文件。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 更新 custom filelist 成功/失败用例，覆盖 `CL3Top` 模块和端口名校验。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 更新 prepare 期望，使标准 wrapper 生成模式被视为已提供 SoC-facing alias。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 将“缺少用户 ysyx wrapper 失败”的测试改为“用户提供 CL3Top 后生成 wrapper 并过滤 SoC wrapper”。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - examples 断言改为要求 filelist 中有且只有一个 `CL3Top`，并确认不再列出 wrapper。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - GUI contract 区域从 `ysyx_00000000`/81 端口改为 `CL3Top`/39 端口。
+  - 文案改为强调模块名和 IO 名字必须匹配。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/frontendCatalog.ts`
+  - 补充 `required_cpu_top_ports`、`cpu_standard_top`、`cpu_wrapper_generation` 类型。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 contract 分层纠正。
+
+## 验证情况
+
+- 已执行 `python3 -m json.tool ecc-fe/fecompiler/catalog/builtin/cores.json >/dev/null`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m py_compile ecc-fe/fecompiler/catalog/registry.py ecc-fe/fecompiler/catalog/contract.py ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_catalog_contract.py ecc-fe/test/test_engine_flow.py ecc-fe/test/test_examples.py`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vue-tsc --noEmit`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_examples.py`，通过：22 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_contract.py::test_sim_ready_catalog_entries_have_adapter_collateral ecc-fe/test/test_catalog_contract.py::test_workspace_catalog_check_cli_returns_contract_summary ecc-fe/test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_alias`，通过：3 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_engine_flow.py::test_prepare_generates_cpu_alias_for_cl3_top_filelist ecc-fe/test/test_engine_flow.py::test_prepare_filters_soc_cpu_alias_when_cpu_filelist_provides_adapter ecc-fe/test/test_engine_flow.py::test_prepare_fails_when_frontend_workspace_has_duplicate_cpu_alias`，通过：3 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m fecompiler.cli.main workspace validate-config --core-id custom-filelist --cpu-filelist /home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f --soc-harness-id ysyx-am-soc --toolchain-id riscv32-unknown-elf --test-suite-id cpu-tests --json`，结果为 `success`，返回 `required_cpu_top_module: CL3Top` 和 39 个 `required_cpu_top_ports`。
+- 已执行 `/home/luyoung/ecos-studio` 和 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中点击 `My CPU Filelist` 后确认滚动到 `CL3Top` contract 区域。
+- prepare 生成的 `ysyx_00000000` wrapper 仍需在完整仿真链路中由用户后续验证。

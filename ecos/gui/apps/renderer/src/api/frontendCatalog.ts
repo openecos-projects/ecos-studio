@@ -67,6 +67,10 @@ export interface FrontendValidationResult {
     cpu_wrapper_contract?: string
     cpu_socket_contract?: string
     cpu_wrapper_top?: string
+    required_cpu_top_module?: string
+    required_cpu_top_ports?: string[]
+    cpu_standard_top?: string
+    cpu_wrapper_generation?: string
     cpu_supports_difftest?: boolean
     core_supported_test_suites?: string[]
     core_sim_program_link_base?: string
