@@ -12251,3 +12251,127 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中点击 `My CPU Filelist` 后确认滚动到 `CL3Top` contract 区域。
 - prepare 生成的 `ysyx_00000000` wrapper 仍需在完整仿真链路中由用户后续验证。
+
+# 第 198 次 开发
+
+## 开发目标
+
+将用户 CPU top 的标准入口名从具体示例工程名 `CL3Top` 改为通用名 `ecos_user_cpu_top`，避免用户误以为自己的真实 CPU 顶层必须叫 `CL3Top`。示例 filelist 现在提供 `ecos_user_cpu_top.sv`，该模块可作为用户真实 CPU 的薄适配顶层。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/ecos_user_cpu_top.sv`
+  - 由原 `CL3Top.sv` 改名而来，模块名改为 `ecos_user_cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/ecos_user_cpu_top.sv`
+  - 由原 `CL3Top.sv` 改名而来，模块名改为 `ecos_user_cpu_top`。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/CL3Top.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/CL3Top.sv`
+  - 移除旧的示例工程名文件入口，避免 filelist 继续暴露 `CL3Top` 作为用户 contract。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/filelist.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/filelist.f`
+  - 将 CPU top 条目从 `CL3Top.sv` 改为 `ecos_user_cpu_top.sv`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 将 `custom-filelist` 的 `top_module`、`cpu_standard_top`、`required_cpu_top_module` 全部改为 `ecos_user_cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/ysyx_00000000.sv`
+  - 静态 SoC compatibility wrapper 改为实例化 `ecos_user_cpu_top`，与生成 wrapper 路径一致。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - 更新文档和 release archive marker，使用 `ecos_user_cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_matrix_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 更新测试样例、路径和断言，覆盖 `ecos_user_cpu_top` contract。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - GUI contract 区域显示 `ecos_user_cpu_top.sv` 和 `ecos_user_cpu_top` 模块名。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次通用 CPU top 命名修正。
+
+## 验证情况
+
+- 已执行 `python3 -m json.tool ecc-fe/fecompiler/catalog/builtin/cores.json >/dev/null`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m py_compile ecc-fe/fecompiler/catalog/registry.py ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_engine_flow.py ecc-fe/test/test_examples.py ecc-fe/test/test_cpu_soc_matrix_flow.py`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vue-tsc --noEmit`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_examples.py`，通过：22 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_alias ecc-fe/test/test_engine_flow.py::test_prepare_generates_cpu_alias_for_ecos_user_cpu_top_filelist ecc-fe/test/test_engine_flow.py::test_prepare_filters_soc_cpu_alias_when_cpu_filelist_provides_adapter`，通过：3 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m fecompiler.cli.main workspace validate-config --core-id custom-filelist --cpu-filelist /home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f --soc-harness-id ysyx-am-soc --toolchain-id riscv32-unknown-elf --test-suite-id cpu-tests --json`，结果为 `success`，返回 `required_cpu_top_module: ecos_user_cpu_top` 和 39 个 `required_cpu_top_ports`。
+- 已执行 `/home/luyoung/ecos-studio` 和 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中确认 `My CPU Filelist` 入口下方展示的是 `ecos_user_cpu_top` contract。
+- 用户真实 CPU 顶层如果不是 `ecos_user_cpu_top`，仍需要提供一个同名薄适配模块来实例化真实 CPU。
+
+# 第 199 次 开发
+
+## 开发目标
+
+将用户必须提供的通用 CPU 顶层模块名最终收敛为 `cpu_top`。示例 cl3/cl3_std 的顶层文件改为 `cpu_top.sv`，模块名改为 `cpu_top`；catalog、GUI、SoC wrapper、文档和测试都同步使用 `cpu_top`。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/cpu_top.sv`
+  - 由上一版通用 CPU top 示例改名而来，模块名为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/cpu_top.sv`
+  - 由上一版通用 CPU top 示例改名而来，模块名为 `cpu_top`。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/CL3Top.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/CL3Top.sv`
+  - 移除旧的示例工程名顶层入口。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/filelist.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/filelist.f`
+  - CPU top 条目改为 `cpu_top.sv`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - `custom-filelist` 的 `top_module`、`cpu_standard_top`、`required_cpu_top_module` 改为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 标准 CPU top 默认值改为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/ysyx_00000000.sv`
+  - SoC-facing wrapper 改为实例化 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - 文档和 release archive marker 同步为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_cpu_soc_matrix_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 测试路径、模块名和断言同步为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - GUI contract 区域显示 `cpu_top.sv` 和 `cpu_top` 模块名。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次通用 CPU top 命名收敛。
+
+## 验证情况
+
+- 已执行 `python3 -m json.tool ecc-fe/fecompiler/catalog/builtin/cores.json >/dev/null`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m py_compile ecc-fe/fecompiler/tools/prepare/runner.py ecc-fe/fecompiler/catalog/registry.py ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_engine_flow.py ecc-fe/test/test_examples.py ecc-fe/test/test_cpu_soc_matrix_flow.py`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecos/gui/apps/renderer` 执行 `pnpm exec vue-tsc --noEmit`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_examples.py`，通过：22 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_alias ecc-fe/test/test_engine_flow.py::test_prepare_generates_cpu_alias_for_cpu_top_filelist ecc-fe/test/test_engine_flow.py::test_prepare_filters_soc_cpu_alias_when_cpu_filelist_provides_adapter`，通过：3 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m fecompiler.cli.main workspace validate-config --core-id custom-filelist --cpu-filelist /home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f --soc-harness-id ysyx-am-soc --toolchain-id riscv32-unknown-elf --test-suite-id cpu-tests --json`，结果为 `success`，返回 `required_cpu_top_module: cpu_top` 和 39 个 `required_cpu_top_ports`。
+- 已执行 `/home/luyoung/ecos-studio` 和 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 未启动 GUI 做真实点击和滚动体验验证；需要用户在 GUI 中确认 `My CPU Filelist` 入口下方展示的是 `cpu_top` contract。
+- 用户真实 CPU 顶层如果不是 `cpu_top`，仍需要提供一个名为 `cpu_top` 的薄适配模块来实例化真实 CPU。

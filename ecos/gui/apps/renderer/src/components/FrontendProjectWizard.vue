@@ -285,7 +285,7 @@
 
                     <div class="mt-4 overflow-hidden rounded-xl border border-(--border-color)/70 bg-(--bg-primary)/65">
                       <div class="flex items-center justify-between gap-3 border-b border-(--border-color)/70 px-4 py-2.5">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">CL3Top.sv</span>
+                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">cpu_top.sv</span>
                         <span class="text-xs font-medium text-(--text-secondary)">module name and IO names must match</span>
                       </div>
                       <pre class="custom-scrollbar max-h-72 overflow-auto p-4 text-[11px] leading-relaxed text-(--text-primary)"><code>{{ cpuTopExample }}</code></pre>
@@ -414,7 +414,7 @@ import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
 
 const FINAL_STEP = 3
-const CPU_TOP_MODULE_FALLBACK = 'CL3Top'
+const CPU_TOP_MODULE_FALLBACK = 'cpu_top'
 const CPU_TOP_PORT_DECLARATIONS = `  input         clock,
   input         reset,
   input         io_extIrq,
