@@ -12450,3 +12450,56 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `difftest.cpp` 仍依赖 CL3 内部层级 `cl3_top.core.issue.rf` 和 `cl3_top.core.csr...`；如果未来接入非 CL3 微结构 CPU，即使顶层接口满足 `cpu_top`，difftest 内部状态读取还需要进一步抽象。
+
+# 第 202 次 开发
+
+## 开发目标
+
+将 `/home/luyoung/ecos-studio/ecc-fe/examples` 收敛为一套示例文件，避免 `cl3` 和 `cl3_std` 两份几乎重复的 CL3 示例同时存在，降低用户选择和后续维护成本。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f`
+  - 移除 `difftest_info_pkg.sv` 和 `difftest.sv` 条目，只保留标准 CPU 示例所需 RTL。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/filelist.f`
+  - 移除老 difftest package 条目，并把 `difftest_wrapper.sv` 路径规范为普通相对路径。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/difftest_wrapper.sv`
+  - 改为空的兼容占位模块，保留 CL3 RTL 对 `difftest_wrapper` 的实例化接口，但不再依赖额外 difftest package。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`
+  - 生成 CPU filelist 时不再自动注入 `difftest_info_pkg.sv` 和 `difftest.sv`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 将用户 CPU top contract 示例路径从 `examples/cl3_std/...` 改为唯一保留的 `examples/cl3/...`。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 删除 `cl3_std` 示例测试，增加 `examples` 下只保留 `cl3` 示例树的断言。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 更新 `gen_filelists.sh` 相关测试，不再期待自动生成 difftest package 条目。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 examples 去重。
+
+## 删除文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/`
+  - 删除整套重复的 CL3 标准示例目录。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/difftest_info_pkg.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/difftest.sv`
+  - 删除 `cl3` 示例中不再被 filelist 引用的老 difftest package 文件。
+
+## 验证情况
+
+- 已执行 `python3 -m py_compile test/test_examples.py test/test_engine_flow.py`，通过。
+- 已在 `/home/luyoung/ecos-studio/ecc-fe` 执行 `PYTHONPATH=. pytest -q test/test_examples.py test/test_engine_flow.py::test_soc_filelist_script_discovers_examples_resource_root`，通过：7 个测试全部通过。
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+- 已确认 `/home/luyoung/ecos-studio/ecc-fe/examples` 顶层只剩 `cl3` 一个示例目录。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `difftest_wrapper.sv` 现在是空占位模块；这符合当前“示例只提供 CPU top contract”的方向，但如果后续需要在示例 RTL 内直接做 Chisel/FIRRTL 原生 difftest，需要重新引入独立资源或专用示例。
