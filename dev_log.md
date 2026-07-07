@@ -12082,3 +12082,67 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `check-release-archives.sh` 已做语法和 workflow 接入检查，但未在本地执行真实 release 打包；实际 archive 内容检查会在 ecc-fe release workflow 中运行。
 - Resource Manager 的健康状态和恢复按钮仍需用户刷新或重启 GUI 后做一次手动安装/更新体验验证。
+
+# 第 195 次 开发
+
+## 开发目标
+
+收紧 ECC-FE 用户 CPU filelist 规则：GUI/catalog 只保留 `custom-filelist` 用户入口，要求用户 filelist 直接提供 SoC 兼容 CPU top `ysyx_00000000`，不再依赖 SoC 资源里的默认 CPU wrapper 兜底。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/ysyx_00000000.sv`
+  - 为 CL3 示例补充 SoC-facing CPU wrapper，使 `examples/cl3/filelist.cpu.f` 自身包含 `ysyx_00000000`。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/ysyx_00000000.sv`
+  - 为 `cl3_std` 示例补充静态 SoC-facing wrapper，避免 examples 资源中保留会被新规则拒绝的 filelist。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 移除 `standard-cpu-filelist` catalog 入口。
+  - 将 `custom-filelist` 的 `top_module` 设为 `ysyx_00000000`，并新增 `required_cpu_top_module: ysyx_00000000`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - `validate_frontend_config` 在用户选择 CPU filelist 后解析 filelist，检查引用 RTL 是否存在，并要求恰好定义一个 `ysyx_00000000`。
+  - validation 结果中暴露 `required_cpu_top_module`，便于 GUI/API 理解当前 filelist contract。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - prepare 阶段新增直接 CPU alias 校验：缺少 `ysyx_00000000` 的用户 filelist 会失败，不再让 SoC filelist 中的默认 alias 兜底。
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/filelist.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3_std/cl3_verilog/filelist.f`
+  - 将新增的 `ysyx_00000000.sv` 纳入示例 filelist。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 将用户 CPU filelist 文档从双模式说明改为单一 contract：必须直接提供 `ysyx_00000000`。
+  - 删除 `generated_standard_cpu_wrapper.sv` 的 workspace 输出说明。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - examples archive 内容检查新增 `ysyx_00000000.sv` marker。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 更新 catalog 数量预期，删除 standard 模式测试，新增缺少 `ysyx_00000000` 的 validation 负例。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 更新 catalog contract 数量预期，删除 standard catalog create/prepare 测试路径。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 将旧的“缺 CPU alias 时保留 SoC alias”测试改为“缺 CPU alias 时 prepare 失败”。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 增加 `cl3` 和 `cl3_std` 示例 filelist 必须包含 `ysyx_00000000` 的断言。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 filelist contract 收紧。
+
+## 验证情况
+
+- 已执行 `python3 -m json.tool ecc-fe/fecompiler/catalog/builtin/cores.json >/dev/null`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m py_compile ecc-fe/fecompiler/catalog/registry.py ecc-fe/fecompiler/tools/prepare/runner.py ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_catalog_contract.py ecc-fe/test/test_engine_flow.py ecc-fe/test/test_examples.py`，通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_catalog_compatibility.py ecc-fe/test/test_examples.py`，通过：21 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_contract.py`，通过：5 个测试全部通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q ecc-fe/test/test_engine_flow.py::test_prepare_filters_soc_cpu_alias_when_cpu_filelist_provides_adapter ecc-fe/test/test_engine_flow.py::test_prepare_rejects_custom_filelist_without_direct_cpu_alias ecc-fe/test/test_engine_flow.py::test_prepare_fails_when_frontend_workspace_has_duplicate_cpu_alias ecc-fe/test/test_engine_flow.py::test_soc_filelist_script_discovers_examples_resource_root`，通过：4 个测试全部通过。
+- 已执行 `python3 -m fecompiler.cli.main workspace validate-config --core-id custom-filelist --cpu-filelist /home/luyoung/ecos-studio/ecc-fe/examples/cl3/filelist.cpu.f --soc-harness-id ysyx-am-soc --toolchain-id riscv32-unknown-elf --test-suite-id cpu-tests --json`，结果为 `success`。
+- 已用临时 filelist 验证负例：只包含 `CL3Top`、不包含 `ysyx_00000000` 时，`validate-config` 返回 `failed`，错误码为 `cpu_top_module_not_found`。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- `examples/cl3_std` 仍保留 `ecos_user_cpu_top` 作为内部薄包装示例，但现在 filelist 也包含静态 `ysyx_00000000`，GUI 用户应继续选择 `custom-filelist`。
+- release archive 的真实内容检查仍需等 GitHub Actions 打包时执行；本地未运行 release 打包。
