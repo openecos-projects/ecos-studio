@@ -64,6 +64,7 @@ export interface WorkspaceConfig {
     liberty: string[]
   }
   pdk_json?: string
+  replaceExistingWorkspace?: boolean
   project_context?: {
     mode: 'select' | 'create'
     project_name: string

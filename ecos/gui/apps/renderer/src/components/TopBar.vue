@@ -251,6 +251,12 @@ const menus = computed<Menu[]>(() => [
         shortcut: '⌘O',
         event: appMenuActionIds.openProject,
       },
+      {
+        label: 'Reconfigure Workspace...',
+        icon: 'ri-settings-3-line',
+        event: appMenuActionIds.reconfigureWorkspace,
+        disabled: !props.hasWorkspace,
+      },
     ],
   },
   ...(props.hasWorkspace

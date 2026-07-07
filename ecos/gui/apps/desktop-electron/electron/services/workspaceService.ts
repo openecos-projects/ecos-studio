@@ -1,13 +1,15 @@
-import { open, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import type {
   DesktopProjectFileChangedEvent,
   DesktopProjectFileChangeEventType,
+  DesktopProjectDirectoryEntry,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   ScannedPdkDirectory,
   ScannedRtlDirectory,
+  WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
 import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
@@ -111,6 +113,33 @@ async function findProjectFileWatchDirectory(
   }
 
   return rootPath
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) return false
+    throw error
+  }
+}
+
+async function createUniqueReplacementBackupPath(targetPath: string): Promise<string> {
+  const targetParent = dirname(targetPath)
+  const targetName = basename(targetPath)
+  const timestamp = Date.now()
+
+  for (let index = 0; index < 100; index += 1) {
+    const suffix = index === 0 ? '' : `-${index}`
+    const candidate = join(
+      targetParent,
+      `.${targetName}.replace-backup-${timestamp}${suffix}`,
+    )
+    if (!(await pathExists(candidate))) return candidate
+  }
+
+  throw new Error(`Unable to allocate a replacement backup path for ${targetPath}`)
 }
 
 type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
@@ -333,6 +362,32 @@ export class WorkspaceService {
     await writeFile(canonicalPath, content, 'utf8')
   }
 
+  async listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    try {
+      const entries = await readdir(canonicalPath, { withFileTypes: true })
+      return entries
+        .filter((entry) => entry.isFile() || entry.isDirectory())
+        .map((entry) => ({
+          name: entry.name,
+          path: join(canonicalPath, entry.name),
+          type: entry.isDirectory() ? ('directory' as const) : ('file' as const),
+        }))
+        .sort((entry, otherEntry) => {
+          if (entry.type !== otherEntry.type) {
+            return entry.type === 'directory' ? -1 : 1
+          }
+          return entry.name.localeCompare(otherEntry.name)
+        })
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return []
+      }
+
+      throw error
+    }
+  }
+
   async removeProjectDirectory(path: string): Promise<void> {
     const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
@@ -354,6 +409,62 @@ export class WorkspaceService {
     }
 
     await rm(canonicalPath, { force: true, recursive: true })
+  }
+
+  async prepareProjectDirectoryReplacement(
+    path: string,
+  ): Promise<WorkspaceDirectoryReplacement | null> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (isSamePath(canonicalPath, projectRoot)) {
+      throw new Error('Refusing to replace the registered project root directly')
+    }
+
+    try {
+      const pathStats = await stat(canonicalPath)
+      if (!pathStats.isDirectory()) {
+        throw new Error(`${canonicalPath} is not a directory`)
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return null
+      throw error
+    }
+
+    const backupPath = await createUniqueReplacementBackupPath(canonicalPath)
+    await rename(canonicalPath, backupPath)
+    return {
+      targetPath: canonicalPath,
+      backupPath,
+    }
+  }
+
+  async restoreProjectDirectoryReplacement(
+    replacement: WorkspaceDirectoryReplacement,
+  ): Promise<void> {
+    const canonicalTarget = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.targetPath,
+    )
+    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.backupPath,
+    )
+
+    await rm(canonicalTarget, { force: true, recursive: true })
+
+    try {
+      await rename(canonicalBackup, canonicalTarget)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return
+      throw error
+    }
+  }
+
+  async finalizeProjectDirectoryReplacement(
+    replacement: WorkspaceDirectoryReplacement,
+  ): Promise<void> {
+    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.backupPath,
+    )
+    await rm(canonicalBackup, { force: true, recursive: true })
   }
 
   async watchProjectFile(

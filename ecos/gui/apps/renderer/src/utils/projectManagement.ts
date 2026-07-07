@@ -69,6 +69,7 @@ export interface ProjectStaReportInput {
 
 export interface ProjectWorkspaceAnalysisInput {
   files?: Partial<Record<ProjectFeatureFileKey, string | null>>
+  stepMetricTexts?: Partial<Record<FlowStep, string | null>>
   staReports?: ProjectStaReportInput[]
   flowText?: string | null
   checklistText?: string | null
@@ -950,19 +951,20 @@ function buildStepCompareSummaries(
   workspaceSummaries: ProjectWorkspaceSummary[],
 ): ProjectStepCompareSummary[] {
   return FLOW_STEPS.map(step => {
-    const definitions = compareDefinitionsForStep(step)
+    const definitions = stepMetricDefinitions(step, workspaceSummaries)
     const metrics = definitions.map(definition => ({
-      id: definition.metricId,
+      id: definition.id,
       label: definition.label,
       hint: definition.hint,
       points: manifestWorkspaces.map(workspace => {
         const summary = workspaceSummaries.find(item => item.workspaceId === workspace.workspace_id)
-        const value = valueForCompareDefinition(summary, definition.metricId)
+        const metric = stepMetricFromSummary(summary, step, definition.id)
+        const value = metric?.value ?? null
         return {
           workspaceId: workspace.workspace_id,
-          label: value === null ? 'N/A' : formatMetricValue(value, definition.format),
+          label: metric?.display ?? 'N/A',
           value,
-          state: compareMetricState(definition.metricId, value),
+          state: metric?.state ?? 'pending',
         }
       }),
     }))
@@ -970,7 +972,12 @@ function buildStepCompareSummaries(
       id: 'none',
       label: 'metric',
       hint: 'No metric available',
-      points: [],
+      points: manifestWorkspaces.map(workspace => ({
+        workspaceId: workspace.workspace_id,
+        label: 'N/A',
+        value: null,
+        state: 'pending' as const,
+      })),
     }
     const configuredCount = workspaces.filter(workspace =>
       workspace.steps.find(cell => cell.step === step)?.status !== 'skipped',
@@ -1175,43 +1182,16 @@ function extractAnalysisSummary(input?: ProjectWorkspaceAnalysisInput): Extracte
   const files = input?.files ?? {}
   const synthesis = parseJsonRecord(files.synthesisStat)
   const floorplanDb = parseJsonRecord(files.floorplanDb)
-  const fanoutDb = parseJsonRecord(files.fanoutDb)
-  const fanoutStep = parseJsonRecord(files.fanoutStep)
-  const placeDb = parseJsonRecord(files.placeDb)
-  const placeMap = parseJsonRecord(files.placeMap)
-  const ctsStep = parseJsonRecord(files.ctsStep)
-  const ctsMap = parseJsonRecord(files.ctsMap)
-  const legalDb = parseJsonRecord(files.legalDb)
-  const routeStep = parseJsonRecord(files.routeStep)
   const drcStep = parseJsonRecord(files.drcStep)
-  const fillerDb = parseJsonRecord(files.fillerDb)
-  const fillerStep = parseJsonRecord(files.fillerStep)
-  const rcxDb = parseJsonRecord(files.rcxDb)
   const staDb = parseJsonRecord(files.staDb)
   const parameters = parseJsonRecord(input?.parametersText)
   const sta = extractStaSummary(input?.staReports ?? [])
 
   const synthesisDesign = recordAt(synthesis, 'design')
   const synthesisArea = numberAt(synthesisDesign, 'area')
-  const synthesisCells = numberAt(synthesisDesign, 'num_cells')
-  const synthesisWires = numberAt(synthesisDesign, 'num_wires')
   const floorplanLayout = extractDbLayout(floorplanDb)
-  const floorplanStats = extractDbStats(floorplanDb)
   const floorplanInstances = extractDbInstances(floorplanDb)
-  const fanoutInstances = extractDbInstances(fanoutDb)
-  const fanout = recordAt(fanoutStep, 'fixFanout') ?? fanoutStep
-  const placeLayout = extractDbLayout(placeDb)
-  const placeWirelength = recordAt(placeMap, 'Wirelength')
-  const placeCongestion = recordAt(recordAt(recordAt(placeMap, 'Congestion'), 'overflow'), 'total')
-  const cts = recordAt(ctsStep, 'CTS') ?? ctsStep
-  const ctsWirelength = recordAt(ctsMap, 'Wirelength')
-  const ctsCongestion = recordAt(recordAt(recordAt(ctsMap, 'Congestion'), 'overflow'), 'total')
-  const legalStats = extractDbStats(legalDb)
-  const routeFinal = extractRouteFinal(routeStep)
   const drc = recordAt(drcStep, 'drc') ?? drcStep
-  const fillerInstances = extractDbInstances(fillerDb)
-  const filler = recordAt(fillerStep, 'filler') ?? fillerStep
-  const rcxStats = extractDbStats(rcxDb)
   const staLayout = extractDbLayout(staDb)
   const parameterLayout = extractParameterLayout(parameters)
   const area = synthesisArea ?? floorplanInstances.area ?? null
@@ -1230,68 +1210,8 @@ function extractAnalysisSummary(input?: ProjectWorkspaceAnalysisInput): Extracte
       coreUtil: metricFromNumber('core_util', 'Core Util', coreUtil, coreUtil === null ? 'pending' : 'good'),
       frequency: metricFromNumber('frequency', 'Frequency [MHz]', sta.worstFrequency, metricState('frequency', sta.worstFrequency), sta.worstFrequencyCorner),
     },
-    stepMetrics: {
-      Synth: compactMetrics([
-        metricFromNumber('synth_area', 'area', synthesisArea, metricState('area', synthesisArea)),
-        metricFromNumber('synth_cells', 'cells', synthesisCells, synthesisCells === null ? 'pending' : 'good'),
-        metricFromNumber('synth_wires', 'wires', synthesisWires, synthesisWires === null ? 'pending' : 'good'),
-      ]),
-      Floor: compactMetrics([
-        metricFromNumber('floor_die', 'die', floorplanLayout.dieUsage, floorplanLayout.dieUsage === null ? 'pending' : 'good', undefined, 'percent'),
-        metricFromNumber('floor_core', 'core', floorplanLayout.coreUsage, floorplanLayout.coreUsage === null ? 'pending' : 'good', undefined, 'percent'),
-        metricFromNumber('floor_instances', 'inst', floorplanStats.instances, floorplanStats.instances === null ? 'pending' : 'good'),
-      ]),
-      Fanout: compactMetrics([
-        metricFromNumber('fanout_area', 'area', fanoutInstances.area, metricState('area', fanoutInstances.area)),
-        metricFromNumber('fanout_instances', 'inst', fanoutInstances.count, fanoutInstances.count === null ? 'pending' : 'good'),
-        metricFromNumber('fanout_clocks', 'clocks', Array.isArray(fanout?.clocks_timing) ? fanout.clocks_timing.length : null, 'good'),
-      ]),
-      Place: compactMetrics([
-        metricFromNumber('place_hpwl', 'HPWL', numberAt(placeWirelength, 'HPWL'), numberAt(placeWirelength, 'HPWL') === null ? 'pending' : 'good', undefined, 'compact'),
-        metricFromNumber('place_grwl', 'GRWL', numberAt(placeWirelength, 'GRWL'), numberAt(placeWirelength, 'GRWL') === null ? 'pending' : 'good', undefined, 'compact'),
-        metricFromNumber('place_core', 'core', placeLayout.coreUsage, placeLayout.coreUsage === null ? 'pending' : 'good', undefined, 'percent')
-          ?? metricFromNumber('place_overflow', 'overflow', numberAt(placeCongestion, 'union'), numberAt(placeCongestion, 'union') === null ? 'pending' : numberAt(placeCongestion, 'union') === 0 ? 'good' : 'warn'),
-      ]),
-      CTS: compactMetrics([
-        metricFromNumber('cts_buffers', 'buffers', numberAt(cts, 'buffer_num'), numberAt(cts, 'buffer_num') === null ? 'pending' : 'good'),
-        metricFromNumber('cts_area', 'area', numberAt(cts, 'buffer_area'), metricState('area', numberAt(cts, 'buffer_area'))),
-        metricFromNumber('cts_clock_wire', 'clock wire', numberAt(cts, 'total_clock_wirelength'), numberAt(cts, 'total_clock_wirelength') === null ? 'pending' : 'good', undefined, 'compact'),
-        metricFromNumber('cts_hpwl', 'HPWL', numberAt(ctsWirelength, 'HPWL'), numberAt(ctsWirelength, 'HPWL') === null ? 'pending' : 'good', undefined, 'compact'),
-        metricFromNumber('cts_overflow', 'overflow', numberAt(ctsCongestion, 'union'), numberAt(ctsCongestion, 'union') === null ? 'pending' : numberAt(ctsCongestion, 'union') === 0 ? 'good' : 'warn'),
-      ]),
-      Legal: compactMetrics([
-        metricFromNumber('legal_instances', 'inst', legalStats.instances, legalStats.instances === null ? 'pending' : 'good'),
-        metricFromNumber('legal_nets', 'nets', legalStats.nets, legalStats.nets === null ? 'pending' : 'good'),
-      ]),
-      Route: compactMetrics([
-        metricFromNumber('route_violations', 'viol', routeFinal.violations, routeFinal.violations === null ? 'pending' : routeFinal.violations === 0 ? 'good' : 'bad'),
-        metricFromNumber('route_wire', 'wire', routeFinal.wireLength, routeFinal.wireLength === null ? 'pending' : 'good'),
-        metricFromNumber('route_via', 'via', routeFinal.viaCount, routeFinal.viaCount === null ? 'pending' : 'good'),
-      ]),
-      DRC: compactMetrics([
-        metricFromNumber('drc', 'DRC', numberAt(drc, 'number'), metricState('drc', numberAt(drc, 'number'))),
-      ]),
-      Filler: compactMetrics([
-        metricFromNumber('filler_area', 'area', fillerInstances.area, metricState('area', fillerInstances.area)),
-        metricFromNumber('filler_instances', 'inst', fillerInstances.count, fillerInstances.count === null ? 'pending' : 'good'),
-        metricFromNumber('filler_added', 'added', numberAt(filler, 'inserted_num'), numberAt(filler, 'inserted_num') === null ? 'pending' : 'good'),
-      ]),
-      RCX: compactMetrics([
-        metricFromNumber('rcx_instances', 'inst', rcxStats.instances, rcxStats.instances === null ? 'pending' : 'good'),
-        metricFromNumber('rcx_nets', 'nets', rcxStats.nets, rcxStats.nets === null ? 'pending' : 'good'),
-      ]),
-      STA: compactMetrics([
-        metricFromNumber('setup_wns', 'setup', sta.setupWns, metricState('wns', sta.setupWns)),
-        metricFromNumber('hold_wns', 'hold', sta.holdWns, sta.holdWns === null ? 'pending' : sta.holdWns >= 0 ? 'good' : 'bad'),
-        metricFromNumber('setup_tns', 'TNS', sta.setupTns, metricState('tns', sta.setupTns)),
-      ]),
-      Harden: [],
-    },
+    stepMetrics: extractStepMetrics(input?.stepMetricTexts ?? {}),
   }
-}
-
-function compactMetrics(metrics: Array<ProjectSummaryMetric | undefined>): ProjectSummaryMetric[] {
-  return metrics.filter((metric): metric is ProjectSummaryMetric => Boolean(metric && metric.value !== null))
 }
 
 function metricFromNumber(
@@ -1311,6 +1231,55 @@ function metricFromNumber(
     state,
     hint,
   }
+}
+
+function extractStepMetrics(
+  stepMetricTexts: Partial<Record<FlowStep, string | null>>,
+): Partial<Record<FlowStep, ProjectSummaryMetric[]>> {
+  return Object.fromEntries(
+    FLOW_STEPS.flatMap((step) => {
+      const metrics = stepMetricsFromRecord(parseJsonRecord(stepMetricTexts[step]))
+      return metrics.length > 0 ? [[step, metrics]] : []
+    }),
+  )
+}
+
+function stepMetricsFromRecord(record: Record<string, unknown> | null): ProjectSummaryMetric[] {
+  if (!record) return []
+  return Object.entries(record).flatMap(([key, rawValue]) => {
+    if (key.trim().toLowerCase() === 'tool') return []
+    const value = flexibleNumber(rawValue)
+    if (value === null) return []
+    const id = metricIdFromAnalysisKey(key)
+    return [{
+      id,
+      label: metricLabelFromAnalysisKey(key),
+      value,
+      display: formatRawMetricValue(value),
+      state: compareMetricState(id, value),
+      hint: key,
+    }]
+  })
+}
+
+function metricIdFromAnalysisKey(key: string): string {
+  const normalized = key
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return normalized || 'metric'
+}
+
+function metricLabelFromAnalysisKey(key: string): string {
+  return key
+    .trim()
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+}
+
+function formatRawMetricValue(value: number): string {
+  return String(Number(value.toFixed(6)))
 }
 
 function extractDbLayout(db: Record<string, unknown> | null): {
@@ -1335,17 +1304,6 @@ function extractParameterLayout(parameters: Record<string, unknown> | null): {
   return {
     dieArea: numberAtAny(die, ['Area', 'area', 'die_area']),
     coreUtil: numberAtAny(core, ['Utilitization', 'Utilization', 'utilitization', 'utilization', 'core_usage']),
-  }
-}
-
-function extractDbStats(db: Record<string, unknown> | null): {
-  instances: number | null
-  nets: number | null
-} {
-  const stats = recordAt(db, 'Design Statis')
-  return {
-    instances: numberAt(stats, 'num_instances'),
-    nets: numberAt(stats, 'num_nets'),
   }
 }
 
@@ -1397,23 +1355,6 @@ function extractDbInstances(db: Record<string, unknown> | null): {
   return {
     area: numberAt(total, 'area'),
     count: numberAt(total, 'num'),
-  }
-}
-
-function extractRouteFinal(routeStep: Record<string, unknown> | null): {
-  violations: number | null
-  wireLength: number | null
-  viaCount: number | null
-  patchCount: number | null
-} {
-  const route = recordAt(routeStep, 'route') ?? routeStep
-  const dr = arrayAt(route, 'DR')
-  const final = dr.length > 0 ? recordValue(dr[dr.length - 1]) : null
-  return {
-    violations: numberAt(final, 'total_violation_num'),
-    wireLength: numberAt(final, 'total_wire_length'),
-    viaCount: numberAt(final, 'total_via_num'),
-    patchCount: numberAt(final, 'total_patch_num'),
   }
 }
 
@@ -1480,90 +1421,49 @@ function extractReportFrequency(report: Record<string, unknown> | null): number 
 }
 
 interface StepCompareDefinition {
-  metricId: string
+  id: string
   label: string
   hint: string
-  format?: 'default' | 'percent' | 'compact'
 }
 
-function compareDefinitionsForStep(step: FlowStep): StepCompareDefinition[] {
-  const map: Record<FlowStep, StepCompareDefinition[]> = {
-    Synth: [
-      { metricId: 'area', label: 'area', hint: 'Synthesis cell area' },
-      { metricId: 'synth_cells', label: 'cells', hint: 'Synthesis cell count' },
-      { metricId: 'synth_wires', label: 'wires', hint: 'Synthesis wire count' },
-    ],
-    Floor: [
-      { metricId: 'coreUtil', label: 'core util', hint: 'Floorplan core usage', format: 'percent' },
-      { metricId: 'dieArea', label: 'die area', hint: 'Floorplan die area' },
-      { metricId: 'floor_instances', label: 'instances', hint: 'Floorplan instance count' },
-    ],
-    Fanout: [
-      { metricId: 'fanout_area', label: 'area', hint: 'Fanout area summary' },
-      { metricId: 'fanout_instances', label: 'instances', hint: 'Fanout instance count' },
-    ],
-    Place: [
-      { metricId: 'place_hpwl', label: 'HPWL', hint: 'Placement HPWL', format: 'compact' },
-      { metricId: 'place_grwl', label: 'GRWL', hint: 'Placement GRWL', format: 'compact' },
-      { metricId: 'place_core', label: 'core util', hint: 'Placement core usage', format: 'percent' },
-    ],
-    CTS: [
-      { metricId: 'cts_buffers', label: 'buffers', hint: 'CTS buffer count' },
-      { metricId: 'cts_clock_wire', label: 'clock wire', hint: 'CTS total clock wirelength', format: 'compact' },
-      { metricId: 'cts_hpwl', label: 'HPWL', hint: 'Post-CTS HPWL', format: 'compact' },
-      { metricId: 'cts_overflow', label: 'overflow', hint: 'Post-CTS congestion overflow' },
-    ],
-    Legal: [
-      { metricId: 'legal_instances', label: 'instances', hint: 'Legalization instance count' },
-      { metricId: 'legal_nets', label: 'nets', hint: 'Legalization net count' },
-    ],
-    Route: [
-      { metricId: 'route_violations', label: 'violations', hint: 'Final detailed-route violations' },
-      { metricId: 'route_wire', label: 'wire', hint: 'Final route wirelength', format: 'compact' },
-      { metricId: 'route_via', label: 'vias', hint: 'Final route via count' },
-    ],
-    DRC: [
-      { metricId: 'drcCount', label: 'DRC count', hint: 'Final DRC violations' },
-    ],
-    Filler: [
-      { metricId: 'filler_area', label: 'area', hint: 'Filler area summary' },
-      { metricId: 'filler_instances', label: 'instances', hint: 'Filler instance count' },
-    ],
-    RCX: [
-      { metricId: 'rcx_instances', label: 'instances', hint: 'RCX instance count' },
-      { metricId: 'rcx_nets', label: 'nets', hint: 'RCX net count' },
-    ],
-    STA: [
-      { metricId: 'setupWns', label: 'setup WNS', hint: 'Worst setup WNS across STA corners' },
-      { metricId: 'holdWns', label: 'hold WNS', hint: 'Worst hold WNS across STA corners' },
-      { metricId: 'setupTns', label: 'setup TNS', hint: 'Worst setup TNS across STA corners' },
-    ],
-    Harden: [
-      { metricId: 'runtime', label: 'runtime', hint: 'Process runtime summary' },
-    ],
+function stepMetricDefinitions(
+  step: FlowStep,
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): StepCompareDefinition[] {
+  const definitions = new Map<string, StepCompareDefinition>()
+  for (const summary of workspaceSummaries) {
+    const stepSummary = summary.steps.find(item => item.step === step)
+    for (const metric of stepSummary?.metrics ?? []) {
+      if (definitions.has(metric.id)) continue
+      definitions.set(metric.id, {
+        id: metric.id,
+        label: metric.label,
+        hint: metric.hint ?? metric.label,
+      })
+    }
   }
-  return map[step]
+  return [...definitions.values()]
 }
 
-function valueForCompareDefinition(
+function stepMetricFromSummary(
   summary: ProjectWorkspaceSummary | undefined,
+  step: FlowStep,
   metricId: string,
-): number | null {
-  if (!summary) return null
-  const finalMetric = summary.finalMetrics[metricId as keyof ProjectWorkspaceFinalMetrics]
-  if (finalMetric) return finalMetric.value
-  const stepMetric = summary.steps.flatMap(step => step.metrics).find(metric => metric.id === metricId)
-  return stepMetric?.value ?? null
+): ProjectSummaryMetric | undefined {
+  return summary
+    ?.steps.find(item => item.step === step)
+    ?.metrics.find(metric => metric.id === metricId)
 }
 
 function compareMetricState(metricId: string, value: number | null): ProjectMetricPoint['state'] {
   if (value === null) return 'pending'
-  if (metricId === 'drcCount' || metricId === 'route_violations') {
+  const normalized = metricId.toLowerCase()
+  if (normalized.includes('drc') || normalized.includes('violation')) {
     if (value === 0) return 'good'
     if (value <= 3) return 'warn'
     return 'bad'
   }
-  if (metricId === 'setupWns' || metricId === 'holdWns') return value >= 0 ? 'good' : 'bad'
+  if (normalized.includes('wns') || normalized.includes('slack')) return value >= 0 ? 'good' : 'bad'
   return 'good'
 }
 

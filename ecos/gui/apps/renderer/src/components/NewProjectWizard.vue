@@ -197,8 +197,9 @@
                       v-model="workspaceName"
                       type="text"
                       placeholder="density_065_from_floorplan"
+                      :disabled="lockWorkspaceDirectory"
                       class="w-full rounded-lg border px-3 py-2.5 text-sm text-(--text-primary) outline-none transition-colors duration-200"
-                      :class="workspaceNameError ? 'border-red-500 bg-red-500/5' : 'border-(--border-color) bg-(--bg-primary)/75 focus:border-(--accent-color)'"
+                      :class="workspaceNameError ? 'border-red-500 bg-red-500/5' : lockWorkspaceDirectory ? 'border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary)' : 'border-(--border-color) bg-(--bg-primary)/75 focus:border-(--accent-color)'"
                     />
                     <p v-if="workspaceNameError" class="mt-2 text-xs text-red-500">{{ workspaceNameError }}</p>
                   </div>
@@ -583,7 +584,7 @@
                     </div>
                   </section>
 
-                  <section v-else class="min-h-0 overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                  <section v-else class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
                     <div class="mb-3 flex items-start justify-between gap-4">
                       <div>
                         <h3 class="text-sm font-bold text-(--text-primary)">Manual PDK Resources</h3>
@@ -596,7 +597,7 @@
                       </span>
                     </div>
 
-                    <div class="pdk-manual-resource-shell grid min-h-0 gap-3 xl:grid-cols-[200px_minmax(0,1fr)]">
+                    <div class="pdk-manual-resource-shell grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[200px_minmax(0,1fr)]">
                       <aside class="pdk-resource-category-list grid content-start gap-2">
                         <button
                           v-for="item in pdkWizardSteps"
@@ -647,7 +648,7 @@
                             </span>
                           </div>
 
-                          <div class="custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                          <div class="pdk-resource-selected-list custom-scrollbar min-h-0 flex-1 space-y-2 pr-1">
                             <p
                               v-if="activeManualPdkSelections.length === 0"
                               class="rounded-lg border border-dashed border-(--border-color) px-4 py-6 text-center text-xs text-(--text-secondary)"
@@ -891,6 +892,15 @@ interface Emits {
   (e: 'create', config: WorkspaceConfig): void
 }
 
+type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
+  managedWorkspaceRoot?: string
+  deriveDirectoryFromDesign?: boolean
+  lockWorkspaceDirectory?: boolean
+}
+
+interface Props {
+  initialConfig?: WorkspaceWizardInitialConfig
+}
 type ProjectMode = 'select' | 'create'
 type FlowStepName =
   | 'Synthesis'
@@ -961,7 +971,13 @@ const designFileError = ref('')
 const rtlSourceDirectory = ref<string | null>(null)
 const scannedRtlFiles = ref<string[]>([])
 const directorySelectedFiles = ref<string[]>([])
-const manuallyAddedFiles = ref<string[]>([])
+const initialRtlFiles = uniquePaths([
+  ...(props.initialConfig?.rtl_list ?? []),
+  ...(props.initialConfig?.source_config?.rtl_list ?? []),
+])
+const initialFilelistPath =
+  props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? ''
+const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])
 const showBrowseMenu = ref(false)
 const workspaceName = ref(initialWorkspaceName(props.initialConfig))
 const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)))
@@ -981,14 +997,14 @@ const flowEndStep = ref<FlowStepName>(
   ),
 )
 const activeDesignInputType = ref<DesignInputKey>(
-  flowStartStep.value === 'Synthesis' ? 'rtl' : 'def',
+  initialDesignInputType(flowStartStep.value),
 )
 const pdkConfigMode = ref<'default' | 'manual'>(
   normalizePdkConfigMode(props.initialConfig?.pdk_config_mode ?? props.initialConfig?.source_config?.pdk_config_mode),
 )
 const activePdkWizardStep = ref<PdkResourceKey>('tech_lef')
 const pdkResourcePickerOpen = ref(false)
-const filelistPath = ref(props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? '')
+const filelistPath = ref(initialFilelistPath)
 const sdcPath = ref(props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '')
 const dieAreaMode = ref<DieAreaMode>(
   normalizeDieAreaMode(props.initialConfig?.parameters?.die_area_mode),
@@ -1051,6 +1067,9 @@ const sourceContext = computed<SourceContext | null>(() => {
 })
 const managedWorkspaceRoot = computed(() =>
   normalizePath(props.initialConfig?.managedWorkspaceRoot ?? ''),
+)
+const lockWorkspaceDirectory = computed(() =>
+  Boolean(props.initialConfig?.lockWorkspaceDirectory && props.initialConfig?.directory),
 )
 const shouldDeriveManagedDirectory = computed(() =>
   Boolean(props.initialConfig?.deriveDirectoryFromDesign && managedWorkspaceRoot.value),
@@ -1155,6 +1174,11 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
+function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
+  if (startStep !== 'Synthesis') return 'def'
+  return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'
+}
+
 function parentPath(path: string) {
   const normalized = normalizePath(path)
   const parts = normalized.split('/').filter(Boolean)
@@ -1244,7 +1268,11 @@ const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
 
 const projectNameError = computed(() => validateName(projectContext.value.project_name, 'Project name'))
 const workspaceNameError = computed(() => validateName(workspaceName.value, 'Workspace name'))
-const workspaceLocation = computed(() => joinPath(projectContext.value.project_root, workspaceName.value))
+const workspaceLocation = computed(() =>
+  lockWorkspaceDirectory.value && props.initialConfig?.directory
+    ? normalizePath(props.initialConfig.directory)
+    : joinPath(projectContext.value.project_root, workspaceName.value),
+)
 const workspaceLocationError = computed(() => {
   if (!workspaceLocation.value) return ''
   if (HAS_SPACE_RE.test(workspaceLocation.value)) return 'Workspace location cannot contain spaces'
@@ -1929,6 +1957,13 @@ async function createWorkspace() {
 .fade-slide-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+.pdk-resource-selected-list {
+  max-height: min(260px, 32vh);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .custom-scrollbar::-webkit-scrollbar {

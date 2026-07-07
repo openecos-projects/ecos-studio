@@ -33,6 +33,12 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('joinPath(managedWorkspaceRoot.value, workspaceName)')
   })
 
+  it('can lock the workspace directory when reconfiguring an existing workspace', () => {
+    expect(source).toContain('lockWorkspaceDirectory')
+    expect(source).toContain(':disabled="lockWorkspaceDirectory"')
+    expect(source).toContain('normalizePath(props.initialConfig.directory)')
+  })
+
   it('shows project branch source context for derived workspaces', () => {
     expect(source).toContain('sourceContext')
     expect(source).toContain('Created from')
@@ -76,6 +82,21 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('sdcPath.value')
     expect(source).toContain('pdkSelections.value')
     expect(source).toContain('Object.assign(config.value.parameters')
+  })
+
+  it('shows initial RTL files in the Design Files list when reconfiguring a workspace', () => {
+    expect(source).toContain('initialRtlFiles')
+    expect(source).toContain('props.initialConfig?.rtl_list')
+    expect(source).toContain('props.initialConfig?.source_config?.rtl_list')
+    expect(source).toContain('const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])')
+  })
+
+  it('opens Filelist by default when synthesis reconfigure has a filelist but no RTL files', () => {
+    expect(source).toContain('initialFilelistPath')
+    expect(source).toContain('initialDesignInputType')
+    expect(source).toContain(
+      "return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'",
+    )
   })
 })
 
@@ -169,6 +190,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('pdk-manual-resource-shell')
     expect(source).toContain('pdk-resource-category-list')
     expect(source).toContain('pdk-resource-detail-panel')
+    expect(source).toContain('pdk-resource-selected-list')
     expect(source).toContain('@click="activePdkWizardStep = item.key"')
     expect(source).toContain('displayPdkResourceName(file)')
     expect(source).toContain('Update selection')
@@ -186,6 +208,17 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).not.toContain('Choose Files')
     expect(source).not.toContain('Add Files')
     expect(source).not.toContain('Detected Files')
+  })
+
+  it('keeps selected PDK resource files in an internal scroll list', () => {
+    const styleStart = source.indexOf('.pdk-resource-selected-list')
+    const styleEnd = source.indexOf('.custom-scrollbar::-webkit-scrollbar', styleStart)
+    const styleSource = source.slice(styleStart, styleEnd)
+
+    expect(styleStart).toBeGreaterThan(-1)
+    expect(styleSource).toContain('max-height:')
+    expect(styleSource).toContain('overflow-y: auto')
+    expect(styleSource).toContain('scrollbar-gutter: stable')
   })
 
   it('allows compressed and uncompressed design file imports', () => {

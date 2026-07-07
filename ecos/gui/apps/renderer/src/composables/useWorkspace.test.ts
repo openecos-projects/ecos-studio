@@ -139,6 +139,11 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       subscribeProjectLogTail: vi.fn(),
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
+      listProjectDirectory: vi.fn(),
+      removeProjectDirectory: vi.fn(),
+      prepareProjectDirectoryReplacement: vi.fn(),
+      restoreProjectDirectoryReplacement: vi.fn(),
+      finalizeProjectDirectoryReplacement: vi.fn(),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
       listDesignFiles: vi.fn(),
@@ -1785,6 +1790,105 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
     expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
     expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
+  })
+
+  it('replaces an existing workspace by creating from a temporary backup directory', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '/work/demo/origin/demo.def',
+        origin_verilog: '/work/demo/origin/demo.v',
+        rtl_list: ['/work/demo/origin/demo.v'],
+        sdc: '/work/demo/origin/demo.sdc',
+        pdk_json: '/work/demo/home/pdk.json',
+      }),
+    ).resolves.toBe(true)
+
+    expect(desktopApi.workspace.registerProjectRoot).toHaveBeenNthCalledWith(1, '/work')
+    expect(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith('/work/demo')
+    expect(createWorkspaceApiMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: '/work/demo',
+        origin_def: '/work/.demo.replace-backup-1/origin/demo.def',
+        origin_verilog: '/work/.demo.replace-backup-1/origin/demo.v',
+        rtl_list: ['/work/.demo.replace-backup-1/origin/demo.v'],
+        sdc: '/work/.demo.replace-backup-1/origin/demo.sdc',
+        pdk_json: '/work/.demo.replace-backup-1/home/pdk.json',
+      }),
+    )
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith(replacement)
+    expect(
+      desktopApi.workspace.restoreProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('restores the original workspace backup when replacement creation fails', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'error',
+      data: {},
+      message: ['creation failed'],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '/work/demo/origin/demo.def',
+        origin_verilog: '/work/demo/origin/demo.v',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(
+      desktopApi.workspace.restoreProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith(replacement)
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
   })
 
   it('does not invalidate resources for read-only runtime events', async () => {

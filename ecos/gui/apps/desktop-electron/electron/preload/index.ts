@@ -195,8 +195,25 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectBinaryFile, path),
     writeProjectTextFile: (path, content) =>
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
+    listProjectDirectory: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceListProjectDirectory, path),
     removeProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRemoveProjectDirectory, path),
+    prepareProjectDirectoryReplacement: (path) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
+        path,
+      ),
+    restoreProjectDirectoryReplacement: (replacement) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+        replacement,
+      ),
+    finalizeProjectDirectoryReplacement: (replacement) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+        replacement,
+      ),
     scanPdkDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),
     scanRtlDirectory: (path) =>

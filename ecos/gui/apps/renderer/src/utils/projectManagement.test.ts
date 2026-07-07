@@ -356,11 +356,7 @@ describe('project management model', () => {
     expect(workspaceSummary?.finalMetrics.setupWns?.value).toBe(8.5)
     expect(workspaceSummary?.finalMetrics.holdWns?.value).toBe(0.095)
     expect(workspaceSummary?.finalMetrics.area?.value).toBe(758.24)
-    expect(workspaceSummary?.steps.find(step => step.step === 'Route')?.metrics.map(metric => metric.label)).toEqual([
-      'viol 0',
-      'wire 5196.3',
-      'via 1502',
-    ])
+    expect(workspaceSummary?.steps.find(step => step.step === 'Route')?.metrics).toEqual([])
     expect(model.metricsRows.find(row => row.id === 'drc')?.points).toContainEqual({
       workspaceId: 'ws_0007',
       label: '0',
@@ -369,29 +365,91 @@ describe('project management model', () => {
     })
 
     const staCompare = model.stepCompareSummaries.find(summary => summary.step === 'STA')
-    expect(staCompare?.metricLabel).toBe('setup WNS')
-    expect(staCompare?.metrics.map(metric => metric.label)).toEqual(['setup WNS', 'hold WNS', 'setup TNS'])
-    expect(staCompare?.points.map(point => [point.workspaceId, point.value])).toEqual([
-      ['baseline', 8.1],
-      ['ws_0007', 8.5],
-    ])
-    expect(staCompare?.metrics.find(metric => metric.id === 'holdWns')?.points.map(point => [point.workspaceId, point.value])).toEqual([
-      ['baseline', 0.08],
-      ['ws_0007', 0.095],
-    ])
+    expect(staCompare?.metrics).toEqual([])
 
-    const ctsCompare = model.stepCompareSummaries.find(summary => summary.step === 'CTS')
-    expect(ctsCompare?.metrics.map(metric => metric.label)).toEqual(['buffers', 'clock wire', 'HPWL', 'overflow'])
-    expect(ctsCompare?.metrics.find(metric => metric.id === 'cts_hpwl')?.points.map(point => [point.workspaceId, point.value])).toEqual([
-      ['baseline', 4010000],
-      ['ws_0007', 3983429],
+    const drcCompare = model.stepCompareSummaries.find(summary => summary.step === 'DRC')
+    expect(drcCompare?.metrics).toEqual([])
+    expect(drcCompare?.missingCount).toBe(2)
+  })
+
+  it('uses each step analysis metrics json as the Step Analysis metric source', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.workspaces.push(
+      {
+        workspace_id: 'baseline',
+        name: 'baseline',
+        workspace_path: '/projects/gcd/baseline',
+        source_workspace_id: null,
+        branch_from: null,
+        start_step: 'Synth',
+        end_step: 'Harden',
+        status: 'success',
+        created_at: '2026-07-02T08:00:00.000Z',
+        updated_at: '2026-07-02T08:30:00.000Z',
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
+      },
+      {
+        workspace_id: 'ws_0008',
+        name: 'ws_0008',
+        workspace_path: '/projects/gcd/ws_0008',
+        source_workspace_id: 'baseline',
+        branch_from: {
+          source_workspace_id: 'baseline',
+          source_step: 'Floor',
+        },
+        start_step: 'Fanout',
+        end_step: 'Harden',
+        status: 'success',
+        created_at: '2026-07-02T09:00:00.000Z',
+        updated_at: '2026-07-02T09:30:00.000Z',
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
+      },
+    )
+
+    const model = buildProjectManagementProject(recentProject, manifest, {}, {
+      baseline: {
+        stepMetricTexts: {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5196.258, num_via: 1502 }),
+          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+        },
+      },
+      ws_0008: {
+        stepMetricTexts: {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 4800.5, num_via: 1330 }),
+          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
+        },
+      },
+    })
+
+    const routeCompare = model.stepCompareSummaries.find(summary => summary.step === 'Route')
+    expect(routeCompare?.metrics.map(metric => metric.label)).toEqual(['wire len', 'num via'])
+    expect(routeCompare?.metrics.find(metric => metric.id === 'wire_len')?.points.map(point => [point.workspaceId, point.value, point.label])).toEqual([
+      ['baseline', 5196.258, '5196.258'],
+      ['ws_0008', 4800.5, '4800.5'],
+    ])
+    expect(routeCompare?.metrics.find(metric => metric.id === 'num_via')?.points.map(point => [point.workspaceId, point.value])).toEqual([
+      ['baseline', 1502],
+      ['ws_0008', 1330],
     ])
 
     const drcCompare = model.stepCompareSummaries.find(summary => summary.step === 'DRC')
+    expect(drcCompare?.metrics.map(metric => metric.label)).toEqual(['drc num'])
     expect(drcCompare?.points.map(point => [point.workspaceId, point.value, point.state])).toEqual([
-      ['baseline', 2, 'warn'],
-      ['ws_0007', 0, 'good'],
+      ['baseline', 0, 'good'],
+      ['ws_0008', 2, 'warn'],
     ])
+
+    const legalCompare = model.stepCompareSummaries.find(summary => summary.step === 'Legal')
+    expect(legalCompare?.metrics).toEqual([])
+    expect(legalCompare?.missingCount).toBe(2)
   })
 
   it('uses workspace home flow.json states for tree status hints and step cells when available', () => {

@@ -15,6 +15,7 @@ import {
   type DesktopCliCommandResult,
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
+  type DesktopProjectDirectoryEntry,
   type DesktopDirectoryDialogOptions,
   type DesktopFileDialogOptions,
   type DesktopRtlSourceDialogOptions,
@@ -39,6 +40,7 @@ import {
   type ScannedPdkDirectory,
   type ScannedRtlDirectory,
   type VersionInfo,
+  type WorkspaceDirectoryReplacement,
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
@@ -119,6 +121,15 @@ export interface DesktopBridgeServices {
       filelistEntry: string,
     ): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry | null>
     removeProjectDirectory(path: string): Promise<void>
+    prepareProjectDirectoryReplacement(
+      path: string,
+    ): Promise<WorkspaceDirectoryReplacement | null>
+    restoreProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
+    finalizeProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
     unwatchProjectFile(subscriptionId: string): Promise<void>
     unsubscribeProjectLogTail(subscriptionId: string): Promise<void>
     watchProjectFile(
@@ -126,6 +137,7 @@ export interface DesktopBridgeServices {
       listener: (event: DesktopProjectFileChangedEvent) => void,
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
   }
   layoutViewerService: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
@@ -619,9 +631,43 @@ export function registerIpc(
   )
 
   handle(
+    desktopApiIpcChannels.workspaceListProjectDirectory,
+    async (_event, path) => {
+      return await services.workspaceService.listProjectDirectory(path as string)
+    },
+  )
+
+  handle(
     desktopApiIpcChannels.workspaceRemoveProjectDirectory,
     async (_event, path) => {
       await services.workspaceService.removeProjectDirectory(path as string)
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
+    async (_event, path) => {
+      return await services.workspaceService.prepareProjectDirectoryReplacement(
+        path as string,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+    async (_event, replacement) => {
+      await services.workspaceService.restoreProjectDirectoryReplacement(
+        replacement as WorkspaceDirectoryReplacement,
+      )
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+    async (_event, replacement) => {
+      await services.workspaceService.finalizeProjectDirectoryReplacement(
+        replacement as WorkspaceDirectoryReplacement,
+      )
     },
   )
 

@@ -118,6 +118,12 @@ export interface DesktopProjectLogTailSubscriptionOptions {
   pollIntervalMs?: number
 }
 
+export interface DesktopProjectDirectoryEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+}
+
 export interface LayoutViewerOpenRequest {
   projectPath: string
   viewJsonPackageRoot: string
@@ -128,6 +134,11 @@ export interface LayoutViewerOpenResult {
   packageRoot: string
   layoutPackagePath: string
   spawned: boolean
+}
+
+export interface WorkspaceDirectoryReplacement {
+  targetPath: string
+  backupPath: string
 }
 
 export interface DesktopApi {
@@ -190,7 +201,17 @@ export interface DesktopApi {
     ): Promise<DesktopEventUnsubscribe>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
     removeProjectDirectory(path: string): Promise<void>
+    prepareProjectDirectoryReplacement(
+      path: string,
+    ): Promise<WorkspaceDirectoryReplacement | null>
+    restoreProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
+    finalizeProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
     scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
     listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>

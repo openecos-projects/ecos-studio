@@ -59,6 +59,9 @@ describe('menuService', () => {
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
     const helpMenu = capturedTemplate.find((item) => item.label === 'Help')
     const newWorkspace = fileMenu?.submenu?.find((item) => item.label === 'New Workspace')
+    const reconfigureWorkspace = fileMenu?.submenu?.find(
+      (item) => item.label === 'Reconfigure Workspace...',
+    )
     const documentation = helpMenu?.submenu?.find(
       (item) => item.label === 'Documentation',
     )
@@ -66,10 +69,12 @@ describe('menuService', () => {
 
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
     expect(newWorkspace?.accelerator).toBe('CmdOrCtrl+N')
+    expect(reconfigureWorkspace).toBeDefined()
     expect(documentation).toBeDefined()
     expect(about).toBeDefined()
 
     newWorkspace?.click?.()
+    reconfigureWorkspace?.click?.()
     documentation?.click?.()
     about?.click?.()
 
@@ -81,10 +86,15 @@ describe('menuService', () => {
     expect(send).toHaveBeenNthCalledWith(
       2,
       desktopApiEventChannels.menuAction,
-      desktopMenuEventIds.documentation,
+      desktopMenuEventIds.reconfigureWorkspace,
     )
     expect(send).toHaveBeenNthCalledWith(
       3,
+      desktopApiEventChannels.menuAction,
+      desktopMenuEventIds.documentation,
+    )
+    expect(send).toHaveBeenNthCalledWith(
+      4,
       desktopApiEventChannels.menuAction,
       desktopMenuEventIds.about,
     )

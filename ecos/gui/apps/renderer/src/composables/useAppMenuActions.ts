@@ -5,6 +5,7 @@ interface AppMenuActionDependencies {
   navigateToWorkspace(): void
   openDocumentation(): Promise<void>
   openProject(): Promise<boolean | undefined>
+  reconfigureWorkspace?(): void | Promise<void>
   showAboutDialog(): void
   showNewProjectWizard(): void
   manageDesignFiles?(): void | Promise<void>
@@ -14,6 +15,7 @@ export function useAppMenuActions({
   navigateToWorkspace,
   openDocumentation,
   openProject,
+  reconfigureWorkspace,
   showAboutDialog,
   showNewProjectWizard,
   manageDesignFiles,
@@ -30,6 +32,9 @@ export function useAppMenuActions({
         break
       case appMenuActionIds.manageDesignFiles:
         await manageDesignFiles?.()
+        break
+      case appMenuActionIds.reconfigureWorkspace:
+        await reconfigureWorkspace?.()
         break
       case appMenuActionIds.documentation:
         await openDocumentation()
@@ -57,6 +62,9 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.manageDesignFiles]: () => {
       void handleMenuAction(appMenuActionIds.manageDesignFiles)
+    },
+    [appMenuActionIds.reconfigureWorkspace]: () => {
+      void handleMenuAction(appMenuActionIds.reconfigureWorkspace)
     },
   })
 

@@ -1,5 +1,8 @@
 import { ref, getCurrentInstance } from 'vue'
-import type { DesktopSettingsValue } from '@ecos-studio/shared'
+import type {
+  DesktopSettingsValue,
+  WorkspaceDirectoryReplacement,
+} from '@ecos-studio/shared'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
@@ -183,6 +186,57 @@ export function useWorkspace() {
       normalized = normalized.slice(0, -1)
     }
     return normalized
+  }
+
+  const parentPath = (path: string): string => {
+    const normalized = normalizePath(path)
+    const parts = normalized.split('/').filter(Boolean)
+    if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+    const parent = parts.slice(0, -1).join('/')
+    return normalized.startsWith('/') ? `/${parent}` : parent
+  }
+
+  const rewriteReplacementPath = (
+    value: string | undefined,
+    targetPath: string,
+    backupPath: string,
+  ): string | undefined => {
+    if (!value) return value
+    const normalizedValue = normalizePath(value)
+    const normalizedTarget = normalizePath(targetPath)
+    if (normalizedValue === normalizedTarget) return normalizePath(backupPath)
+    if (normalizedValue.startsWith(`${normalizedTarget}/`)) {
+      return `${normalizePath(backupPath)}/${normalizedValue.slice(normalizedTarget.length + 1)}`
+    }
+    return value
+  }
+
+  const rewriteReplacementPathList = (
+    values: string[] | undefined,
+    targetPath: string,
+    backupPath: string,
+  ): string[] | undefined => {
+    if (!values) return values
+    return values.map((value) =>
+      rewriteReplacementPath(value, targetPath, backupPath) ?? value,
+    )
+  }
+
+  const rewriteConfigPathsForReplacement = (
+    config: WorkspaceConfig,
+    targetPath: string,
+    backupPath: string,
+  ): WorkspaceConfig => {
+    return {
+      ...config,
+      origin_def: rewriteReplacementPath(config.origin_def, targetPath, backupPath) ?? '',
+      origin_verilog:
+        rewriteReplacementPath(config.origin_verilog, targetPath, backupPath) ?? '',
+      rtl_list: rewriteReplacementPathList(config.rtl_list, targetPath, backupPath) ?? [],
+      filelist: rewriteReplacementPath(config.filelist, targetPath, backupPath),
+      sdc: rewriteReplacementPath(config.sdc, targetPath, backupPath),
+      pdk_json: rewriteReplacementPath(config.pdk_json, targetPath, backupPath),
+    }
   }
 
   /**
@@ -549,6 +603,25 @@ export function useWorkspace() {
    */
   const newProject = async (config?: WorkspaceConfig) => {
     let sessionId: string | null = null
+    let replacement: WorkspaceDirectoryReplacement | null = null
+    let committedReplacement = false
+    const restoreReplacement = async () => {
+      if (!replacement || committedReplacement) return
+      const desktopApi = await waitForDesktopApi()
+      await desktopApi.workspace.restoreProjectDirectoryReplacement(replacement)
+      replacement = null
+    }
+    const finalizeReplacement = async () => {
+      if (!replacement) return
+      committedReplacement = true
+      try {
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.finalizeProjectDirectoryReplacement(replacement)
+      } catch (error) {
+        console.warn('Failed to remove workspace replacement backup:', error)
+      }
+      replacement = null
+    }
     try {
       runtimeBackendTitle.value = 'Creating your workspace'
       runtimeBackendSubtitle.value =
@@ -563,13 +636,40 @@ export function useWorkspace() {
 
       if (config) {
         // 使用向导提供的配置
-        selectedPath = config.directory
+        selectedPath = normalizePath(config.directory)
       } else {
         // 回退到旧的文件选择方式
         const result = await pickDirectory('Select New Project Save Location')
 
         if (!result) return false
         selectedPath = result
+      }
+
+      let creationConfig = config
+      if (config?.replaceExistingWorkspace) {
+        const desktopApi = await waitForDesktopApi()
+        const registeredParent = await desktopApi.workspace.registerProjectRoot(
+          parentPath(selectedPath),
+        )
+        replacement =
+          await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
+        if (replacement) {
+          replacement = {
+            targetPath: normalizePath(replacement.targetPath),
+            backupPath: normalizePath(replacement.backupPath),
+          }
+          creationConfig = rewriteConfigPathsForReplacement(
+            config,
+            replacement.targetPath,
+            replacement.backupPath,
+          )
+          selectedPath = normalizePath(replacement.targetPath)
+        } else {
+          selectedPath = normalizePath(selectedPath)
+        }
+        if (!registeredParent) {
+          throw new Error('Failed to register workspace parent directory')
+        }
       }
 
       const session = workspaceLifecycle.beginSession({
@@ -579,6 +679,7 @@ export function useWorkspace() {
 
       if (!(await ensureApiReady({ keepLoading: true }))) {
         workspaceLifecycle.failSession(session.sessionId)
+        await restoreReplacement()
         return false
       }
 
@@ -588,8 +689,8 @@ export function useWorkspace() {
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
       // 3. 通过桌面 CLI 创建工作区（传递 Wizard 配置信息）
-      const frontendParams = config?.parameters || {}
-      const pdkName = config?.pdk || 'ics55'
+      const frontendParams = creationConfig?.parameters || {}
+      const pdkName = creationConfig?.pdk || 'ics55'
       const toNumber = (value: unknown, fallback: number) => {
         const parsed = Number(value)
         return Number.isFinite(parsed) ? parsed : fallback
@@ -623,33 +724,39 @@ export function useWorkspace() {
         },
       }
 
-      const resolvedPdkRoot = config?.pdk_root || ''
+      const resolvedPdkRoot = creationConfig?.pdk_root || ''
 
       const response = await createWorkspaceApi({
         directory: selectedPath,
         pdk: pdkName,
         pdk_root: resolvedPdkRoot,
         parameters: backendParameters,
-        origin_def: config?.origin_def,
-        origin_verilog: config?.origin_verilog,
-        rtl_list: config?.rtl_list || [],
-        filelist: config?.filelist,
-        design_input_mode: config?.design_input_mode,
-        sdc: config?.sdc,
-        flow_config: config?.flow_config,
-        pdk_config_mode: config?.pdk_config_mode,
-        pdk_config: config?.pdk_config,
-        pdk_json: config?.pdk_json,
-        project_context: config?.project_context,
+        origin_def: creationConfig?.origin_def,
+        origin_verilog: creationConfig?.origin_verilog,
+        rtl_list: creationConfig?.rtl_list || [],
+        filelist: creationConfig?.filelist,
+        design_input_mode: creationConfig?.design_input_mode,
+        sdc: creationConfig?.sdc,
+        flow_config: creationConfig?.flow_config,
+        pdk_config_mode: creationConfig?.pdk_config_mode,
+        pdk_config: creationConfig?.pdk_config,
+        pdk_json: creationConfig?.pdk_json,
+        project_context: creationConfig?.project_context,
       })
-      console.log(response)
-      if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+      if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
+        await restoreReplacement()
+        return false
+      }
       if (response.response === 'success') {
         const resolvedPath = normalizePath(response.data.directory)
         const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
-        if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+        if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
+          await restoreReplacement()
+          return false
+        }
         if (!canonicalProjectRoot) {
           workspaceLifecycle.failSession(session.sessionId)
+          await restoreReplacement()
           showToast({
             severity: 'error',
             summary: 'Permission Setup Failed',
@@ -689,8 +796,11 @@ export function useWorkspace() {
         // 添加到最近项目列表（包含路径标准化和持久化）
         await addToRecent(createdProject)
 
+        await finalizeReplacement()
+
         return true
       } else {
+        await restoreReplacement()
         workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to create project:', response.message)
         showToast({
@@ -701,6 +811,13 @@ export function useWorkspace() {
         return false
       }
     } catch (error) {
+      if (replacement && !committedReplacement) {
+        try {
+          await restoreReplacement()
+        } catch (restoreError) {
+          console.error('Failed to restore workspace replacement backup:', restoreError)
+        }
+      }
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('New project error:', error)
       showToast({

@@ -63,4 +63,11 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('Back to Project Management')
     expect(topBarSource).toMatch(/\.quick-dropdown-menu\s*\{[\s\S]*position:\s*fixed;/)
   })
+
+  it('adds a File menu action for reconfiguring the active workspace', () => {
+    expect(topBarSource).toContain('Reconfigure Workspace...')
+    expect(topBarSource).toContain('ri-settings-3-line')
+    expect(topBarSource).toContain('appMenuActionIds.reconfigureWorkspace')
+    expect(topBarSource).toContain('disabled: !props.hasWorkspace')
+  })
 })

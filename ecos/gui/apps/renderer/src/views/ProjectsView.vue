@@ -853,6 +853,21 @@ const WORKSPACE_ANALYSIS_FILE_SPECS: Array<{ key: ProjectFeatureFileKey; path: s
   { key: 'staDb', path: 'sta_ecc/feature/sta.db.json' },
 ]
 
+const WORKSPACE_STEP_METRICS_FILE_SPECS: Array<{ step: FlowStep; path: string }> = [
+  { step: 'Synth', path: 'Synthesis_yosys/analysis/Synthesis_metrics.json' },
+  { step: 'Floor', path: 'Floorplan_ecc/analysis/Floorplan_metrics.json' },
+  { step: 'Fanout', path: 'fixFanout_ecc/analysis/fixFanout_metrics.json' },
+  { step: 'Place', path: 'place_dreamplace/analysis/place_metrics.json' },
+  { step: 'CTS', path: 'CTS_ecc/analysis/CTS_metrics.json' },
+  { step: 'Legal', path: 'legalization_dreamplace/analysis/legalization_metrics.json' },
+  { step: 'Route', path: 'route_ecc/analysis/route_metrics.json' },
+  { step: 'DRC', path: 'drc_ecc/analysis/drc_metrics.json' },
+  { step: 'Filler', path: 'filler_ecc/analysis/filler_metrics.json' },
+  { step: 'RCX', path: 'RCX_ecc/analysis/RCX_metrics.json' },
+  { step: 'STA', path: 'sta_ecc/analysis/sta_metrics.json' },
+  { step: 'Harden', path: 'Harden_ecc/analysis/Harden_metrics.json' },
+]
+
 const STA_CORNER_PATHS = [
   'MAX_125/Cworst',
   'MAX_125/RCworst',
@@ -1443,10 +1458,14 @@ async function readWorkspaceAnalysisInputs(manifest: ProjectManifest): Promise<P
 }
 
 async function readWorkspaceAnalysisInput(workspacePath: string, designName: string): Promise<ProjectWorkspaceAnalysisInput> {
-  const [fileEntries, staReports, flowText, checklistText, parametersText] = await Promise.all([
+  const [fileEntries, stepMetricEntries, staReports, flowText, checklistText, parametersText] = await Promise.all([
     Promise.all(WORKSPACE_ANALYSIS_FILE_SPECS.map(async (spec) => {
       const content = await readOptionalProjectTextFile(spec.path, { projectPath: workspacePath })
       return [spec.key, content] as const
+    })),
+    Promise.all(WORKSPACE_STEP_METRICS_FILE_SPECS.map(async (spec) => {
+      const content = await readOptionalProjectTextFile(spec.path, { projectPath: workspacePath })
+      return [spec.step, content] as const
     })),
     Promise.all(STA_CORNER_PATHS.map(async (corner) => {
       const content = await readOptionalProjectTextFile(`sta_ecc/output/${corner}/${designName}.rpt.json`, { projectPath: workspacePath })
@@ -1459,6 +1478,7 @@ async function readWorkspaceAnalysisInput(workspacePath: string, designName: str
 
   return {
     files: Object.fromEntries(fileEntries),
+    stepMetricTexts: Object.fromEntries(stepMetricEntries),
     staReports,
     flowText,
     checklistText,

@@ -222,6 +222,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('readWorkspaceAnalysisInputs')
     expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
     expect(source).toContain('Synthesis_yosys/feature/Synthesis_stat.json')
+    expect(source).toContain('WORKSPACE_STEP_METRICS_FILE_SPECS')
+    expect(source).toContain('Synthesis_yosys/analysis/Synthesis_metrics.json')
+    expect(source).toContain('route_ecc/analysis/route_metrics.json')
+    expect(source).toContain('stepMetricTexts')
     expect(source).toContain('sta_ecc/output')
   })
 

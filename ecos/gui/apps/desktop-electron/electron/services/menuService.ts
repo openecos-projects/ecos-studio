@@ -59,6 +59,10 @@ export function registerApplicationMenu(): void {
       submenu: [
         createMenuAction('New Workspace', appMenuActionIds.newProject, 'CmdOrCtrl+N'),
         createMenuAction('Open Workspace', appMenuActionIds.openProject, 'CmdOrCtrl+O'),
+        createMenuAction(
+          'Reconfigure Workspace...',
+          appMenuActionIds.reconfigureWorkspace,
+        ),
       ],
     },
     {

@@ -12,6 +12,7 @@ export type {
   DesktopRtlSourceDialogOptions,
   PickedRtlSources,
   DesktopProjectLogTailSubscriptionOptions,
+  DesktopProjectDirectoryEntry,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
@@ -21,6 +22,7 @@ export type {
   ScannedPdkDirectory,
   ScannedRtlDirectory,
   VersionInfo,
+  WorkspaceDirectoryReplacement,
 } from './contracts/desktopApi.ts'
 export type {
   DesktopCliCommandEvent,
