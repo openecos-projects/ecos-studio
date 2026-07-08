@@ -64,7 +64,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
 # Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
-# Install uv (Python package manager used by ecos/server).
+# Install uv (Python package manager used by ecc).
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && ln -s /root/.local/bin/uv /usr/local/bin/uv
 
