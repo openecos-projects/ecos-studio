@@ -12536,3 +12536,38 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 本次修复还未推送到 `ecc-fe main`，因此远端 release workflow 尚未重新触发；需要提交并推送后，`ecos-resource-assets` 的 latest releases 才会更新。
+
+# 第 204 次 开发
+
+## 开发目标
+
+修复 `ecc-fe` release workflow 在 `Check release archive contents` 阶段失败的问题。失败包含两类原因：CPU RTL 归档中残留 submodule 的 `.git` 文件，以及检查脚本在 `set -o pipefail` 下使用 `tar | grep -q` 导致 `tar: stdout: write error` 后误报多个 required entry 缺失。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - release 打包清理阶段除了删除 `.git` 目录，也删除文件类型的 `.git`，覆盖 git submodule 常见的 gitdir pointer 文件。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - `require_entry()` 不再使用 `grep -q`，避免 `grep` 提前退出造成 `tar` 收到 SIGPIPE，并在 `pipefail` 下把已存在的 entry 误判成缺失。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 release workflow 失败原因和修复。
+
+## 验证情况
+
+- 已执行 `bash -n .github/scripts/check-release-archives.sh`，通过。
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+- 已在 `/tmp` 构造最小 release archives，并执行 `bash .github/scripts/check-release-archives.sh "$dist"`，通过，确认 required entry 检查不再触发 `tar: stdout: write error` 误报。
+- 已执行 `find fecompiler/thirdparty -name .git -maxdepth 8 -printf '%y %p\n' | head -n 50`，确认本地第三方资源中的 `.git` 多数为文件类型，说明 workflow 需要删除 `.git` 文件而不仅是目录。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次修复还未推送到 `ecc-fe main`，因此远端 release workflow 尚未重新触发；需要提交并推送后，`ecos-resource-assets` 的 latest releases 才会更新。
