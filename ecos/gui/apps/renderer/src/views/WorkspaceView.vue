@@ -60,8 +60,8 @@ onUnmounted(() => {
 </script>
 <template>
   <div class="editor-view">
-    <Splitter class="flex-1 h-full border-none min-w-0">
-      <SplitterPanel :size="75" :minSize="35" class="flex flex-col min-w-0">
+    <Splitter class="h-full min-w-0 flex-1 border-none">
+      <SplitterPanel :size="75" :minSize="35" class="flex min-w-0 flex-col">
         <Splitter layout="vertical" class="h-full border-none">
           <SplitterPanel :size="70" :minSize="30" class="flex flex-col">
             <DrawingArea />
@@ -72,7 +72,11 @@ onUnmounted(() => {
         </Splitter>
       </SplitterPanel>
 
-      <SplitterPanel :size="25" :minSize="25" class="chat-panel overflow-hidden min-w-0 max-w-full">
+      <SplitterPanel
+        :size="25"
+        :minSize="25"
+        class="chat-panel max-w-full min-w-0 overflow-hidden"
+      >
         <ChatInspectorPanel />
       </SplitterPanel>
     </Splitter>

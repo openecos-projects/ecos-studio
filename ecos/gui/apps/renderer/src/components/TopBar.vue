@@ -74,7 +74,11 @@
           <i class="ri-more-2-line text-base"></i>
         </button>
       </div>
-      <span v-if="isWorkspaceRoute" class="topbar-right-separator" aria-hidden="true"></span>
+      <span
+        v-if="isWorkspaceRoute"
+        class="topbar-right-separator"
+        aria-hidden="true"
+      ></span>
       <button
         @click="toggleTheme"
         class="window-btn theme-btn"

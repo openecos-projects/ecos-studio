@@ -51,7 +51,7 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('route.query.projectRoot')
     expect(topBarSource).not.toContain('hasWorkspaceProjectContext')
     expect(topBarSource).not.toContain(':disabled="!hasWorkspaceProjectContext"')
-    expect(topBarSource).not.toContain("if (!hasWorkspaceProjectContext.value) return")
+    expect(topBarSource).not.toContain('if (!hasWorkspaceProjectContext.value) return')
     expect(topBarSource).toContain('goToProjectManagement')
     expect(topBarSource).toContain("path: '/projects'")
   })

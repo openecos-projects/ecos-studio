@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import source from './NewProjectWizard.vue?raw'
 
+function expectSourceCall(name: string, firstArgument: string) {
+  expect(source).toMatch(new RegExp(`${name}\\(\\s*${firstArgument}`))
+}
+
 describe('NewProjectWizard RTL browsing', () => {
   it('keeps folder browsing available while the file action uses the RTL single-file picker', () => {
     expect(source).toContain('Select design folder...')
@@ -56,9 +60,9 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('manifest.base_design')
     expect(source).toContain('config.value.pdk = baseDesign.pdk')
     expect(source).toContain('config.value.pdk_root = baseDesign.pdk_root')
-    expect(source).toContain("setStringParameterDefault('top_module'")
-    expect(source).toContain("setStringParameterDefault('clock'")
-    expect(source).toContain("setStringParameterDefault('design'")
+    expectSourceCall('setStringParameterDefault', "'top_module'")
+    expectSourceCall('setStringParameterDefault', "'clock'")
+    expectSourceCall('setStringParameterDefault', "'design'")
 
     const selectStart = source.indexOf('async function selectProjectFromHistory')
     const selectEnd = source.indexOf('async function selectProjectRoot', selectStart)
@@ -87,7 +91,9 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('@click.self="closeWizard"')
     expect(source).toContain('@click="closeWizard"')
     expect(source).toContain("document.addEventListener('keydown', handleWizardKeydown)")
-    expect(source).toContain("document.removeEventListener('keydown', handleWizardKeydown)")
+    expect(source).toContain(
+      "document.removeEventListener('keydown', handleWizardKeydown)",
+    )
     expect(source).toContain("event.key !== 'Escape'")
     expect(source).toContain("emit('close')")
   })
@@ -124,7 +130,9 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('initialRtlFiles')
     expect(source).toContain('props.initialConfig?.rtl_list')
     expect(source).toContain('props.initialConfig?.source_config?.rtl_list')
-    expect(source).toContain('const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])')
+    expect(source).toContain(
+      'const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])',
+    )
   })
 
   it('opens Filelist by default when synthesis reconfigure has a filelist but no RTL files', () => {
@@ -139,16 +147,21 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('startsFromFloorplan')
     expect(source).toContain("if (startStep === 'Floorplan') return 'verilog'")
 
-    const designTypesStart = source.indexOf('const designInputTypes = computed<DesignInputType[]>')
+    const designTypesStart = source.indexOf(
+      'const designInputTypes = computed<DesignInputType[]>',
+    )
     const designTypesEnd = source.indexOf('const activeDesignInput', designTypesStart)
     const designTypesSource = source.slice(designTypesStart, designTypesEnd)
     expect(designTypesSource).toContain('startsFromFloorplan.value')
     expect(designTypesSource).toContain("key: 'verilog'")
-    expect(designTypesSource).toContain('Import the synthesized Verilog netlist for floorplan.')
+    expect(designTypesSource).toContain(
+      'Import the synthesized Verilog netlist for floorplan.',
+    )
 
-    const floorplanBranchStart = designTypesSource.indexOf('startsFromFloorplan.value')
-    const floorplanBranchEnd = designTypesSource.indexOf("return [\n    { key: 'def'", floorplanBranchStart)
-    const floorplanBranchSource = designTypesSource.slice(floorplanBranchStart, floorplanBranchEnd)
+    const floorplanBranchSource =
+      designTypesSource.match(
+        /if \(startsFromFloorplan\.value\) \{[\s\S]*?\n  \}/,
+      )?.[0] ?? ''
     expect(floorplanBranchSource).not.toContain("key: 'def'")
 
     const readyStart = source.indexOf('function designFilesReady')
@@ -158,12 +171,20 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(readySource).toContain("return config.value.origin_verilog.trim() !== ''")
 
     const initialConfigStart = source.indexOf('function createInitialConfig')
-    const initialConfigEnd = source.indexOf('function createInitialProjectContext', initialConfigStart)
+    const initialConfigEnd = source.indexOf(
+      'function createInitialProjectContext',
+      initialConfigStart,
+    )
     const initialConfigSource = source.slice(initialConfigStart, initialConfigEnd)
-    expect(initialConfigSource).toContain("startStep === 'Synthesis' || startStep === 'Floorplan'")
+    expect(initialConfigSource).toContain(
+      "startStep === 'Synthesis' || startStep === 'Floorplan'",
+    )
 
     const sourceDefaultsStart = source.indexOf('function applySourceWorkspaceDefaults')
-    const sourceDefaultsEnd = source.indexOf('function closeBrowseMenu', sourceDefaultsStart)
+    const sourceDefaultsEnd = source.indexOf(
+      'function closeBrowseMenu',
+      sourceDefaultsStart,
+    )
     const sourceDefaultsSource = source.slice(sourceDefaultsStart, sourceDefaultsEnd)
     expect(sourceDefaultsSource).toContain('!startsFromFloorplan.value')
   })
@@ -245,10 +266,18 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     const boundarySource = source.slice(boundaryStart, boundaryEnd)
 
     expect(boundarySource).not.toContain('flowStartStep.value = stepName')
-    expect(boundarySource).not.toContain('flowStartStep.value = hardenFlowSteps[start + 1].name')
-    expect(boundarySource).toContain('const nextEndIndex = index === end && end > start ? end - 1 : index')
-    expect(boundarySource).toContain('const boundedEndIndex = Math.max(start, nextEndIndex)')
-    expect(boundarySource).toContain('flowEndStep.value = hardenFlowSteps[boundedEndIndex].name')
+    expect(boundarySource).not.toContain(
+      'flowStartStep.value = hardenFlowSteps[start + 1].name',
+    )
+    expect(boundarySource).toContain(
+      'const nextEndIndex = index === end && end > start ? end - 1 : index',
+    )
+    expect(boundarySource).toContain(
+      'const boundedEndIndex = Math.max(start, nextEndIndex)',
+    )
+    expect(boundarySource).toContain(
+      'flowEndStep.value = hardenFlowSteps[boundedEndIndex].name',
+    )
   })
 
   it('keeps SDC in Design Files and removes it from PDK Config', () => {
@@ -269,7 +298,7 @@ describe('NewProjectWizard workspace wizard redesign', () => {
     expect(source).toContain('normalizePdkConfigMode')
     expect(source).toContain('props.initialConfig?.source_config?.pdk_config_mode')
     expect(source).toContain("pdk_config_mode: 'default'")
-    expect(source).toContain("mode: pdkConfigMode.value")
+    expect(source).toContain('mode: pdkConfigMode.value')
     expect(source).toContain("pdkConfigMode.value === 'default'")
   })
 
@@ -311,9 +340,15 @@ describe('NewProjectWizard workspace wizard redesign', () => {
   })
 
   it('allows compressed and uncompressed design file imports', () => {
-    expect(source).toContain('Supports .v, .sv, .vhd, .vhdl, and .gz-compressed RTL files')
-    expect(source).toContain('Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).')
-    expect(source).toContain("extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz']")
+    expect(source).toContain(
+      'Supports .v, .sv, .vhd, .vhdl, and .gz-compressed RTL files',
+    )
+    expect(source).toContain(
+      'Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).',
+    )
+    expect(source).toContain(
+      "extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz']",
+    )
     expect(source).toContain("extensions: ['sdc', 'gz']")
     expect(source).toContain("extensions: ['def', 'gz']")
     expect(source).toContain("extensions: ['v', 'sv', 'vg', 'gz']")

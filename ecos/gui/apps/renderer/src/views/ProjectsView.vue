@@ -25,17 +25,34 @@
       :class="{ maximized: isDialogMaximized }"
       aria-labelledby="project-manager-title"
     >
-      <div class="manager-window-controls" aria-label="Project management window controls">
+      <div
+        class="manager-window-controls"
+        aria-label="Project management window controls"
+      >
         <button
           type="button"
           class="manager-window-button"
-          :aria-label="isDialogMaximized ? 'Restore project management window' : 'Maximize project management window'"
+          :aria-label="
+            isDialogMaximized
+              ? 'Restore project management window'
+              : 'Maximize project management window'
+          "
           :title="isDialogMaximized ? 'Restore' : 'Maximize'"
           @click="toggleDialogMaximized"
         >
-          <i :class="isDialogMaximized ? 'ri-collapse-diagonal-line' : 'ri-expand-diagonal-line'"></i>
+          <i
+            :class="
+              isDialogMaximized ? 'ri-collapse-diagonal-line' : 'ri-expand-diagonal-line'
+            "
+          ></i>
         </button>
-        <button type="button" class="manager-window-button" aria-label="Close project management" title="Close" @click="goBack">
+        <button
+          type="button"
+          class="manager-window-button"
+          aria-label="Close project management"
+          title="Close"
+          @click="goBack"
+        >
           <i class="ri-close-line"></i>
         </button>
       </div>
@@ -75,7 +92,11 @@
             </div>
             <div class="resource-search sidebar-search">
               <i class="ri-search-line"></i>
-              <input v-model="searchQuery" type="text" placeholder="Search project or workspace" />
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="Search project or workspace"
+              />
             </div>
 
             <div class="project-list" aria-label="Project list">
@@ -99,7 +120,9 @@
                   </span>
                   <span class="resource-copy">
                     <strong>{{ project.model.name }}</strong>
-                    <small>{{ workspaceCountLabel(project.model.workspaces.length) }}</small>
+                    <small>{{
+                      workspaceCountLabel(project.model.workspaces.length)
+                    }}</small>
                   </span>
                   <span class="project-tree-actions">
                     <button
@@ -133,7 +156,10 @@
                 </div>
 
                 <div
-                  v-if="project.model.id === selectedProjectId && project.model.workspaces.length > 0"
+                  v-if="
+                    project.model.id === selectedProjectId &&
+                    project.model.workspaces.length > 0
+                  "
                   class="workspace-tree-list"
                   aria-label="Project workspaces"
                 >
@@ -144,13 +170,24 @@
                     :class="flowStatusHintClass(workspace.flowStatusHint.state)"
                     :style="workspaceDepthStyle(workspace)"
                   >
-                    <div class="workspace-tree-row" @click="selectWorkspace(workspace.id)">
+                    <div
+                      class="workspace-tree-row"
+                      @click="selectWorkspace(workspace.id)"
+                    >
                       <span class="workspace-tree-copy">
                         <strong>{{ workspace.id }}</strong>
-                        <small>{{ workspace.startStep }} -> {{ workspace.endStep }}</small>
-                        <em v-if="workspace.sourceWorkspaceId">from {{ workspace.sourceWorkspaceId }} / {{ workspace.branchStep }}</em>
+                        <small
+                          >{{ workspace.startStep }} -> {{ workspace.endStep }}</small
+                        >
+                        <em v-if="workspace.sourceWorkspaceId"
+                          >from {{ workspace.sourceWorkspaceId }} /
+                          {{ workspace.branchStep }}</em
+                        >
                       </span>
-                      <span class="workspace-flow-hint" :class="flowStatusHintClass(workspace.flowStatusHint.state)">
+                      <span
+                        class="workspace-flow-hint"
+                        :class="flowStatusHintClass(workspace.flowStatusHint.state)"
+                      >
                         {{ workspace.flowStatusHint.label }}
                       </span>
                       <span class="workspace-tree-actions">
@@ -185,7 +222,9 @@
                     </div>
 
                     <div
-                      v-if="popoverWorkspaceId === workspace.id && selectedPopoverWorkspace"
+                      v-if="
+                        popoverWorkspaceId === workspace.id && selectedPopoverWorkspace
+                      "
                       class="workspace-flow-popover"
                       :class="workspacePopoverPlacementClass(workspace.id)"
                       role="dialog"
@@ -193,7 +232,11 @@
                     >
                       <header>
                         <strong>Workspace Flow Steps</strong>
-                        <small>{{ selectedPopoverWorkspace.id }} · {{ selectedPopoverWorkspace.startStep }} -> {{ selectedPopoverWorkspace.endStep }}</small>
+                        <small
+                          >{{ selectedPopoverWorkspace.id }} ·
+                          {{ selectedPopoverWorkspace.startStep }} ->
+                          {{ selectedPopoverWorkspace.endStep }}</small
+                        >
                       </header>
                       <button
                         v-for="cell in workspaceConfiguredSteps(selectedPopoverWorkspace)"
@@ -201,7 +244,13 @@
                         type="button"
                         class="popover-step-row"
                         :disabled="!cell.canCreateWorkspace"
-                        @click.stop="cell.canCreateWorkspace && startWorkspaceFromPopoverStep(selectedPopoverWorkspace.id, cell.step)"
+                        @click.stop="
+                          cell.canCreateWorkspace &&
+                          startWorkspaceFromPopoverStep(
+                            selectedPopoverWorkspace.id,
+                            cell.step,
+                          )
+                        "
                       >
                         <span>{{ cell.step }}</span>
                         <em :class="stepStatusClass(cell.status)">{{ cell.label }}</em>
@@ -230,14 +279,24 @@
 
         <main class="manager-table-panel">
           <div class="project-analysis-shell">
-            <section class="analysis-panel mockup-analysis-panel" aria-labelledby="project-analysis-title">
+            <section
+              class="analysis-panel mockup-analysis-panel"
+              aria-labelledby="project-analysis-title"
+            >
               <div class="panel-title-row analysis-heading">
                 <div>
                   <h3 id="project-analysis-title">Project Analysis</h3>
-                  <p>{{ selectedProject.workspaces.length }} workspaces · {{ selectedStep }} comparison</p>
+                  <p>
+                    {{ selectedProject.workspaces.length }} workspaces ·
+                    {{ selectedStep }} comparison
+                  </p>
                 </div>
                 <div class="analysis-header-actions">
-                  <div class="analysis-tabs" role="tablist" aria-label="Project analysis pages">
+                  <div
+                    class="analysis-tabs"
+                    role="tablist"
+                    aria-label="Project analysis pages"
+                  >
                     <button
                       type="button"
                       role="tab"
@@ -260,17 +319,29 @@
                 </div>
               </div>
 
-              <div v-if="hasProjectData && selectedAnalysisTab === 'dashboard'" class="dashboard-grid">
+              <div
+                v-if="hasProjectData && selectedAnalysisTab === 'dashboard'"
+                class="dashboard-grid"
+              >
                 <section class="dashboard-card dashboard-run-state-card">
                   <span>Workspace Run State</span>
                   <div class="run-state-layout">
-                    <div class="run-state-pie" :style="{ background: runStatePieBackground }" aria-hidden="true"></div>
+                    <div
+                      class="run-state-pie"
+                      :style="{ background: runStatePieBackground }"
+                      aria-hidden="true"
+                    ></div>
                     <div class="run-state-copy">
                       <div class="dashboard-stat-row">
-                        <strong>{{ selectedProject.dashboardSummary.workspaceCount }}</strong>
+                        <strong>{{
+                          selectedProject.dashboardSummary.workspaceCount
+                        }}</strong>
                         <small>workspaces</small>
                       </div>
-                      <div class="run-state-legend" aria-label="Workspace run state pie legend">
+                      <div
+                        class="run-state-legend"
+                        aria-label="Workspace run state pie legend"
+                      >
                         <span
                           v-for="slice in selectedProject.dashboardSummary.runStateSlices"
                           :key="slice.state"
@@ -282,9 +353,18 @@
                     </div>
                   </div>
                   <div class="dashboard-pill-row">
-                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.drcCleanCount }} DRC clean</span>
-                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.timingCleanCount }} timing clean</span>
-                    <span class="dashboard-pill info">{{ selectedProject.dashboardSummary.signoffReadyCount }} signoff ready</span>
+                    <span class="dashboard-pill success"
+                      >{{ selectedProject.dashboardSummary.drcCleanCount }} DRC
+                      clean</span
+                    >
+                    <span class="dashboard-pill success"
+                      >{{ selectedProject.dashboardSummary.timingCleanCount }} timing
+                      clean</span
+                    >
+                    <span class="dashboard-pill info"
+                      >{{ selectedProject.dashboardSummary.signoffReadyCount }} signoff
+                      ready</span
+                    >
                   </div>
                 </section>
 
@@ -298,7 +378,10 @@
                       <span>Best Frequency Workspace</span>
                       <strong>{{ bestFrequencyWorkspace?.workspaceId ?? 'N/A' }}</strong>
                     </div>
-                    <span class="dashboard-pill success">{{ selectedProject.dashboardSummary.drcCleanCount }} DRC clean</span>
+                    <span class="dashboard-pill success"
+                      >{{ selectedProject.dashboardSummary.drcCleanCount }} DRC
+                      clean</span
+                    >
                   </div>
                   <div v-if="bestWorkspacePpaMetrics.length > 0" class="best-ppa-grid">
                     <div
@@ -307,7 +390,9 @@
                       class="best-ppa-item"
                     >
                       <span>{{ metric.label }}</span>
-                      <strong :class="metricValueClass(metric.state)">{{ metric.display }}</strong>
+                      <strong :class="metricValueClass(metric.state)">{{
+                        metric.display
+                      }}</strong>
                     </div>
                   </div>
                   <div v-else class="dashboard-empty-note">
@@ -315,17 +400,23 @@
                   </div>
                 </section>
 
-                <section class="dashboard-card dashboard-chart-card dashboard-key-metric-card">
+                <section
+                  class="dashboard-card dashboard-chart-card dashboard-key-metric-card"
+                >
                   <header>
                     <span>Key Metric Snapshot</span>
                     <small>workspace comparison table</small>
                   </header>
                   <div
                     class="dashboard-key-metric-table"
-                    :style="{ '--dashboard-metric-count': String(dashboardMetricRows.length) }"
+                    :style="{
+                      '--dashboard-metric-count': String(dashboardMetricRows.length),
+                    }"
                     aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], WNS, TNS, DRC, Runtime, Memory"
                   >
-                    <div class="dashboard-key-header dashboard-key-workspace-header">Workspace</div>
+                    <div class="dashboard-key-header dashboard-key-workspace-header">
+                      Workspace
+                    </div>
                     <div
                       v-for="metric in dashboardMetricRows"
                       :key="metric.id"
@@ -356,7 +447,11 @@
                       >
                         <strong>{{ cell.point.label }}</strong>
                         <span class="metric-track">
-                          <i :style="{ width: `${metricInlineWidth(cell.point, cell.metric.points)}%` }"></i>
+                          <i
+                            :style="{
+                              width: `${metricInlineWidth(cell.point, cell.metric.points)}%`,
+                            }"
+                          ></i>
                         </span>
                       </button>
                     </template>
@@ -381,7 +476,9 @@
                   <div class="step-compare-overview">
                     <div>
                       <span>Configured</span>
-                      <strong>{{ selectedStepCompareSummary?.configuredCount ?? 0 }}</strong>
+                      <strong>{{
+                        selectedStepCompareSummary?.configuredCount ?? 0
+                      }}</strong>
                     </div>
                     <div>
                       <span>Success</span>
@@ -395,10 +492,16 @@
 
                   <div
                     class="step-compare-metric-table"
-                    :style="{ '--step-compare-metric-count': String(selectedStepCompareMetrics.length) }"
+                    :style="{
+                      '--step-compare-metric-count': String(
+                        selectedStepCompareMetrics.length,
+                      ),
+                    }"
                     aria-label="Selected step metrics by workspace"
                   >
-                    <div class="step-compare-header step-compare-workspace-header">Workspace</div>
+                    <div class="step-compare-header step-compare-workspace-header">
+                      Workspace
+                    </div>
                     <div
                       v-for="metric in selectedStepCompareMetrics"
                       :key="metric.id"
@@ -430,30 +533,44 @@
                       >
                         <strong>{{ cell.point.label }}</strong>
                         <span class="metric-track">
-                          <i :style="{ width: `${metricInlineWidth(cell.point, cell.metric.points)}%` }"></i>
+                          <i
+                            :style="{
+                              width: `${metricInlineWidth(cell.point, cell.metric.points)}%`,
+                            }"
+                          ></i>
                         </span>
                       </button>
                     </template>
                   </div>
-
                 </div>
               </div>
 
               <div v-else class="metrics-empty-state">
                 <i class="ri-line-chart-line"></i>
                 <strong>No project data available</strong>
-                <span>Build or import a project manifest to populate project analysis.</span>
+                <span
+                  >Build or import a project manifest to populate project analysis.</span
+                >
               </div>
             </section>
           </div>
         </main>
-
       </div>
     </section>
 
     <div v-if="showNewProjectDialog" class="project-modal-scrim" role="presentation">
-      <section class="project-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
-        <button type="button" class="manager-close modal-close" aria-label="Close new project" @click="closeNewProjectDialog">
+      <section
+        class="project-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-project-title"
+      >
+        <button
+          type="button"
+          class="manager-close modal-close"
+          aria-label="Close new project"
+          @click="closeNewProjectDialog"
+        >
           <i class="ri-close-line"></i>
         </button>
         <header>
@@ -484,7 +601,9 @@
         <p v-if="projectRootError" class="modal-error">{{ projectRootError }}</p>
 
         <footer class="modal-actions">
-          <button type="button" class="secondary-button" @click="closeNewProjectDialog">Cancel</button>
+          <button type="button" class="secondary-button" @click="closeNewProjectDialog">
+            Cancel
+          </button>
           <button type="button" class="primary-button" @click="createProjectFolderDraft">
             <i class="ri-check-line"></i>
             <span>Create</span>
@@ -494,8 +613,18 @@
     </div>
 
     <div v-if="branchDraft" class="project-modal-scrim" role="presentation">
-      <section class="project-modal-dialog branch-draft-dialog" role="dialog" aria-modal="true" aria-labelledby="branch-draft-title">
-        <button type="button" class="manager-close modal-close" aria-label="Close create workspace dialog" @click="closeWorkspaceDraftDialog">
+      <section
+        class="project-modal-dialog branch-draft-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="branch-draft-title"
+      >
+        <button
+          type="button"
+          class="manager-close modal-close"
+          aria-label="Close create workspace dialog"
+          @click="closeWorkspaceDraftDialog"
+        >
           <i class="ri-close-line"></i>
         </button>
         <header>
@@ -529,7 +658,13 @@
         </div>
 
         <footer class="modal-actions">
-          <button type="button" class="secondary-button" @click="closeWorkspaceDraftDialog">Cancel</button>
+          <button
+            type="button"
+            class="secondary-button"
+            @click="closeWorkspaceDraftDialog"
+          >
+            Cancel
+          </button>
           <button type="button" class="primary-button" @click="continueWorkspaceDraft">
             <i class="ri-arrow-right-line"></i>
             <span>Continue</span>
@@ -539,8 +674,18 @@
     </div>
 
     <div v-if="pendingDeleteWorkspaceId" class="project-modal-scrim" role="presentation">
-      <section class="project-modal-dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-workspace-title">
-        <button type="button" class="manager-close modal-close" aria-label="Close delete workspace dialog" @click="closeDeleteWorkspaceDialog">
+      <section
+        class="project-modal-dialog confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-workspace-title"
+      >
+        <button
+          type="button"
+          class="manager-close modal-close"
+          aria-label="Close delete workspace dialog"
+          @click="closeDeleteWorkspaceDialog"
+        >
           <i class="ri-close-line"></i>
         </button>
         <header>
@@ -548,23 +693,36 @@
           <h2 id="delete-workspace-title">Delete Workspace</h2>
         </header>
         <p class="modal-help">
-          Remove {{ pendingDeleteWorkspaceId }} from project.json? Keep workspace data is checked by default.
+          Remove {{ pendingDeleteWorkspaceId }} from project.json? Keep workspace data is
+          checked by default.
         </p>
         <label class="workspace-delete-option">
           <input v-model="keepWorkspaceDataOnDelete" type="checkbox" />
           <span>
             <strong>Keep workspace data</strong>
             <small v-if="keepWorkspaceDataOnDelete">
-              Workspace folder will remain at {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
+              Workspace folder will remain at
+              {{ pendingDeleteWorkspace?.workspacePath || '-' }}.
             </small>
             <small v-else>
-              Workspace folder {{ pendingDeleteWorkspace?.workspacePath || '-' }} will be deleted.
+              Workspace folder {{ pendingDeleteWorkspace?.workspacePath || '-' }} will be
+              deleted.
             </small>
           </span>
         </label>
         <footer class="modal-actions">
-          <button type="button" class="secondary-button" @click="closeDeleteWorkspaceDialog">Cancel</button>
-          <button type="button" class="secondary-button danger" @click="confirmDeleteWorkspace">
+          <button
+            type="button"
+            class="secondary-button"
+            @click="closeDeleteWorkspaceDialog"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="secondary-button danger"
+            @click="confirmDeleteWorkspace"
+          >
             <i class="ri-delete-bin-line"></i>
             <span>Delete</span>
           </button>
@@ -573,8 +731,18 @@
     </div>
 
     <div v-if="pendingDeleteProject" class="project-modal-scrim" role="presentation">
-      <section class="project-modal-dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-project-title">
-        <button type="button" class="manager-close modal-close" aria-label="Close delete project dialog" @click="closeDeleteProjectDialog">
+      <section
+        class="project-modal-dialog confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-project-title"
+      >
+        <button
+          type="button"
+          class="manager-close modal-close"
+          aria-label="Close delete project dialog"
+          @click="closeDeleteProjectDialog"
+        >
           <i class="ri-close-line"></i>
         </button>
         <header>
@@ -582,11 +750,22 @@
           <h2 id="delete-project-title">Delete Project</h2>
         </header>
         <p class="modal-help">
-          Remove {{ pendingDeleteProject.name }} from Project Management? This will not delete the project directory.
+          Remove {{ pendingDeleteProject.name }} from Project Management? This will not
+          delete the project directory.
         </p>
         <footer class="modal-actions">
-          <button type="button" class="secondary-button" @click="closeDeleteProjectDialog">Cancel</button>
-          <button type="button" class="secondary-button danger" @click="confirmDeleteProject">
+          <button
+            type="button"
+            class="secondary-button"
+            @click="closeDeleteProjectDialog"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="secondary-button danger"
+            @click="confirmDeleteProject"
+          >
             <i class="ri-delete-bin-line"></i>
             <span>Delete</span>
           </button>
@@ -630,7 +809,11 @@ import {
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
-import { readOptionalProjectTextFile, removeProjectDirectory, writeProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFile,
+  removeProjectDirectory,
+  writeProjectTextFile,
+} from '@/utils/projectFiles'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
@@ -640,10 +823,7 @@ import {
 type BranchDraft = WorkspaceBranchDraft
 
 const router = useRouter()
-const {
-  openProject,
-  showToast,
-} = useWorkspace()
+const { openProject, showToast } = useWorkspace()
 
 const searchQuery = ref('')
 const selectedProjectId = ref<string | null>(null)
@@ -660,7 +840,9 @@ const isDialogMaximized = ref(false)
 const projectHistory = ref<Project[]>([])
 const projectManifests = ref<Record<string, ProjectManifest>>({})
 const workspaceFlowStates = ref<Record<string, ProjectWorkspaceFlowStatesById>>({})
-const workspaceAnalysisInputs = ref<Record<string, ProjectWorkspaceAnalysisInputsById>>({})
+const workspaceAnalysisInputs = ref<Record<string, ProjectWorkspaceAnalysisInputsById>>(
+  {},
+)
 const showNewProjectDialog = ref(false)
 const projectRootError = ref('')
 const projectRootDraft = ref({
@@ -673,7 +855,8 @@ onMounted(async () => {
   document.addEventListener('keydown', handleWorkspacePopoverKeydown)
   projectHistory.value = await loadProjectHistory()
   await refreshProjectManifests()
-  if (!selectedProjectId.value) selectedProjectId.value = projectCards.value[0]?.model.id ?? selectedProject.value.id
+  if (!selectedProjectId.value)
+    selectedProjectId.value = projectCards.value[0]?.model.id ?? selectedProject.value.id
 })
 
 onBeforeUnmount(() => {
@@ -686,8 +869,11 @@ const projectSources = computed<Project[]>(() => projectHistory.value)
 const projectCards = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   const cards = [...projectSources.value]
-    .sort((left, right) => new Date(right.lastOpened).getTime() - new Date(left.lastOpened).getTime())
-    .map(project => ({
+    .sort(
+      (left, right) =>
+        new Date(right.lastOpened).getTime() - new Date(left.lastOpened).getTime(),
+    )
+    .map((project) => ({
       source: project,
       model: buildProjectManagementProject(
         project,
@@ -698,7 +884,7 @@ const projectCards = computed(() => {
     }))
 
   if (!query) return cards
-  return cards.filter(project => projectCardMatchesSearch(project, query))
+  return cards.filter((project) => projectCardMatchesSearch(project, query))
 })
 
 function projectCardMatchesSearch(
@@ -713,8 +899,10 @@ function projectCardMatchesSearch(
     project.model.name,
     project.model.path,
   ]
-  return projectFields.some(value => textMatchesSearch(value, query))
-    || project.model.workspaces.some(workspace => workspaceMatchesSearch(workspace, query))
+  return (
+    projectFields.some((value) => textMatchesSearch(value, query)) ||
+    project.model.workspaces.some((workspace) => workspaceMatchesSearch(workspace, query))
+  )
 }
 
 function workspaceMatchesSearch(workspace: ProjectWorkspace, query: string): boolean {
@@ -727,7 +915,7 @@ function workspaceMatchesSearch(workspace: ProjectWorkspace, query: string): boo
     workspace.startStep,
     workspace.endStep,
     workspace.flowStatusHint.label,
-  ].some(value => textMatchesSearch(value, query))
+  ].some((value) => textMatchesSearch(value, query))
 }
 
 function textMatchesSearch(value: unknown, query: string): boolean {
@@ -735,45 +923,74 @@ function textMatchesSearch(value: unknown, query: string): boolean {
 }
 
 const selectedProject = computed<ProjectManagementProject>(() => {
-  const selected = projectCards.value.find(project => project.model.id === selectedProjectId.value)
-  return selected?.model ?? projectCards.value[0]?.model ?? buildProjectManagementProject(null)
+  const selected = projectCards.value.find(
+    (project) => project.model.id === selectedProjectId.value,
+  )
+  return (
+    selected?.model ?? projectCards.value[0]?.model ?? buildProjectManagementProject(null)
+  )
 })
 
 const selectedWorkspace = computed<ProjectWorkspace | null>(() => {
-  return selectedProject.value.workspaces.find(workspace => workspace.id === selectedWorkspaceId.value)
-    ?? selectedProject.value.workspaces.find(workspace => workspace.id === selectedProject.value.bestWorkspaceId)
-    ?? selectedProject.value.workspaces[0]
-    ?? null
+  return (
+    selectedProject.value.workspaces.find(
+      (workspace) => workspace.id === selectedWorkspaceId.value,
+    ) ??
+    selectedProject.value.workspaces.find(
+      (workspace) => workspace.id === selectedProject.value.bestWorkspaceId,
+    ) ??
+    selectedProject.value.workspaces[0] ??
+    null
+  )
 })
 
 const selectedPopoverWorkspace = computed<ProjectWorkspace | null>(() => {
-  return selectedProject.value.workspaces.find(workspace => workspace.id === popoverWorkspaceId.value) ?? null
+  return (
+    selectedProject.value.workspaces.find(
+      (workspace) => workspace.id === popoverWorkspaceId.value,
+    ) ?? null
+  )
 })
 const pendingDeleteWorkspace = computed<ProjectWorkspace | null>(() => {
-  return selectedProject.value.workspaces.find(workspace => workspace.id === pendingDeleteWorkspaceId.value) ?? null
+  return (
+    selectedProject.value.workspaces.find(
+      (workspace) => workspace.id === pendingDeleteWorkspaceId.value,
+    ) ?? null
+  )
 })
 
 const hasProjectData = computed(() => selectedProject.value.workspaces.length > 0)
-const selectedProjectManifest = computed(() => projectManifests.value[selectedProject.value.path] ?? null)
+const selectedProjectManifest = computed(
+  () => projectManifests.value[selectedProject.value.path] ?? null,
+)
 const selectedStepCompareSummary = computed(() => {
-  return selectedProject.value.stepCompareSummaries.find(summary => summary.step === selectedStep.value)
-    ?? selectedProject.value.stepCompareSummaries[0]
-    ?? null
+  return (
+    selectedProject.value.stepCompareSummaries.find(
+      (summary) => summary.step === selectedStep.value,
+    ) ??
+    selectedProject.value.stepCompareSummaries[0] ??
+    null
+  )
 })
-const selectedStepCompareMetrics = computed<ProjectStepCompareMetric[]>(() => selectedStepCompareSummary.value?.metrics ?? [])
+const selectedStepCompareMetrics = computed<ProjectStepCompareMetric[]>(
+  () => selectedStepCompareSummary.value?.metrics ?? [],
+)
 const selectedStepWorkspaceMetricRows = computed(() => {
-  return selectedProject.value.workspaces.map(workspace => ({
+  return selectedProject.value.workspaces.map((workspace) => ({
     workspaceId: workspace.id,
-    cells: selectedStepCompareMetrics.value.map(metric => ({
+    cells: selectedStepCompareMetrics.value.map((metric) => ({
       metric,
-      point: metric.points.find(point => point.workspaceId === workspace.id) ?? pendingMetricPoint(workspace.id),
+      point:
+        metric.points.find((point) => point.workspaceId === workspace.id) ??
+        pendingMetricPoint(workspace.id),
     })),
   }))
 })
 const dashboardMetricRows = computed<ProjectMetricRow[]>(() => {
   const metricOrder = ['die_area', 'core_util', 'frequency', 'wns', 'tns', 'drc']
-  const chipMetricRows = metricOrder.flatMap(metricId =>
-    selectedProject.value.metricsRows.find(metric => metric.id === metricId) ?? [],
+  const chipMetricRows = metricOrder.flatMap(
+    (metricId) =>
+      selectedProject.value.metricsRows.find((metric) => metric.id === metricId) ?? [],
   )
   return [
     ...chipMetricRows,
@@ -794,37 +1011,47 @@ const dashboardMetricRows = computed<ProjectMetricRow[]>(() => {
   ]
 })
 const dashboardWorkspaceMetricRows = computed(() => {
-  return selectedProject.value.workspaces.map(workspace => ({
+  return selectedProject.value.workspaces.map((workspace) => ({
     workspaceId: workspace.id,
-    cells: dashboardMetricRows.value.map(metric => ({
+    cells: dashboardMetricRows.value.map((metric) => ({
       metric,
-      point: metric.points.find(point => point.workspaceId === workspace.id) ?? pendingMetricPoint(workspace.id),
+      point:
+        metric.points.find((point) => point.workspaceId === workspace.id) ??
+        pendingMetricPoint(workspace.id),
     })),
   }))
 })
 const bestFrequencyWorkspace = computed<ProjectMetricPoint | null>(() => {
-  const frequency = dashboardMetricRows.value.find(metric => metric.id === 'frequency')
-  return frequency?.points
-    .filter((point): point is ProjectMetricPoint & { value: number } => point.value !== null)
-    .sort((left, right) => right.value - left.value)[0] ?? null
+  const frequency = dashboardMetricRows.value.find((metric) => metric.id === 'frequency')
+  return (
+    frequency?.points
+      .filter(
+        (point): point is ProjectMetricPoint & { value: number } => point.value !== null,
+      )
+      .sort((left, right) => right.value - left.value)[0] ?? null
+  )
 })
 const bestWorkspacePpaMetrics = computed(() => {
   const workspaceId = bestFrequencyWorkspace.value?.workspaceId
   if (!workspaceId) return []
   const metricIds = ['frequency', 'wns', 'tns', 'drc', 'die_area', 'core_util']
-  return metricIds.flatMap(metricId => {
-    const metric = dashboardMetricRows.value.find(row => row.id === metricId)
-    const point = metric?.points.find(item => item.workspaceId === workspaceId)
+  return metricIds.flatMap((metricId) => {
+    const metric = dashboardMetricRows.value.find((row) => row.id === metricId)
+    const point = metric?.points.find((item) => item.workspaceId === workspaceId)
     if (!metric || !point) return []
-    return [{
-      id: metric.id,
-      label: metric.label,
-      display: point.label,
-      state: point.state,
-    }]
+    return [
+      {
+        id: metric.id,
+        label: metric.label,
+        display: point.label,
+        state: point.state,
+      },
+    ]
   })
 })
-const runStatePieBackground = computed(() => buildRunStatePieBackground(selectedProject.value.dashboardSummary.runStateSlices))
+const runStatePieBackground = computed(() =>
+  buildRunStatePieBackground(selectedProject.value.dashboardSummary.runStateSlices),
+)
 
 const projectManifestPreview = computed(() => {
   const root = normalizePath(projectRootDraft.value.directory.trim())
@@ -832,26 +1059,27 @@ const projectManifestPreview = computed(() => {
   return `${root}/project.json`
 })
 
-const WORKSPACE_ANALYSIS_FILE_SPECS: Array<{ key: ProjectFeatureFileKey; path: string }> = [
-  { key: 'synthesisStat', path: 'Synthesis_yosys/feature/Synthesis_stat.json' },
-  { key: 'floorplanDb', path: 'Floorplan_ecc/feature/Floorplan.db.json' },
-  { key: 'fanoutDb', path: 'fixFanout_ecc/feature/fixFanout.db.json' },
-  { key: 'fanoutStep', path: 'fixFanout_ecc/feature/fixFanout.step.json' },
-  { key: 'placeDb', path: 'place_dreamplace/feature/place.db.json' },
-  { key: 'placeMap', path: 'place_dreamplace/feature/place.map.json' },
-  { key: 'ctsDb', path: 'CTS_ecc/feature/CTS.db.json' },
-  { key: 'ctsStep', path: 'CTS_ecc/feature/CTS.step.json' },
-  { key: 'ctsMap', path: 'CTS_ecc/feature/CTS.map.json' },
-  { key: 'legalDb', path: 'legalization_dreamplace/feature/legalization.db.json' },
-  { key: 'routeDb', path: 'route_ecc/feature/route.db.json' },
-  { key: 'routeStep', path: 'route_ecc/feature/route.step.json' },
-  { key: 'drcDb', path: 'drc_ecc/feature/drc.db.json' },
-  { key: 'drcStep', path: 'drc_ecc/feature/drc.step.json' },
-  { key: 'fillerDb', path: 'filler_ecc/feature/filler.db.json' },
-  { key: 'fillerStep', path: 'filler_ecc/feature/filler.step.json' },
-  { key: 'rcxDb', path: 'RCX_ecc/feature/RCX.db.json' },
-  { key: 'staDb', path: 'sta_ecc/feature/sta.db.json' },
-]
+const WORKSPACE_ANALYSIS_FILE_SPECS: Array<{ key: ProjectFeatureFileKey; path: string }> =
+  [
+    { key: 'synthesisStat', path: 'Synthesis_yosys/feature/Synthesis_stat.json' },
+    { key: 'floorplanDb', path: 'Floorplan_ecc/feature/Floorplan.db.json' },
+    { key: 'fanoutDb', path: 'fixFanout_ecc/feature/fixFanout.db.json' },
+    { key: 'fanoutStep', path: 'fixFanout_ecc/feature/fixFanout.step.json' },
+    { key: 'placeDb', path: 'place_dreamplace/feature/place.db.json' },
+    { key: 'placeMap', path: 'place_dreamplace/feature/place.map.json' },
+    { key: 'ctsDb', path: 'CTS_ecc/feature/CTS.db.json' },
+    { key: 'ctsStep', path: 'CTS_ecc/feature/CTS.step.json' },
+    { key: 'ctsMap', path: 'CTS_ecc/feature/CTS.map.json' },
+    { key: 'legalDb', path: 'legalization_dreamplace/feature/legalization.db.json' },
+    { key: 'routeDb', path: 'route_ecc/feature/route.db.json' },
+    { key: 'routeStep', path: 'route_ecc/feature/route.step.json' },
+    { key: 'drcDb', path: 'drc_ecc/feature/drc.db.json' },
+    { key: 'drcStep', path: 'drc_ecc/feature/drc.step.json' },
+    { key: 'fillerDb', path: 'filler_ecc/feature/filler.db.json' },
+    { key: 'fillerStep', path: 'filler_ecc/feature/filler.step.json' },
+    { key: 'rcxDb', path: 'RCX_ecc/feature/RCX.db.json' },
+    { key: 'staDb', path: 'sta_ecc/feature/sta.db.json' },
+  ]
 
 const WORKSPACE_STEP_METRICS_FILE_SPECS: Array<{ step: FlowStep; path: string }> = [
   { step: 'Synth', path: 'Synthesis_yosys/analysis/Synthesis_metrics.json' },
@@ -884,14 +1112,18 @@ const STA_CORNER_PATHS = [
   'WCL_m40/RCworst',
 ]
 
-watch(selectedProject, (project) => {
-  const selection = createSelectionState(project)
-  selectedWorkspaceId.value = selection.selectedWorkspaceId
-  selectedStep.value = selection.selectedStep
-  hasOpenedStepAnalysis.value = false
-  popoverWorkspaceId.value = ''
-  branchDraft.value = null
-}, { immediate: true })
+watch(
+  selectedProject,
+  (project) => {
+    const selection = createSelectionState(project)
+    selectedWorkspaceId.value = selection.selectedWorkspaceId
+    selectedStep.value = selection.selectedStep
+    hasOpenedStepAnalysis.value = false
+    popoverWorkspaceId.value = ''
+    branchDraft.value = null
+  },
+  { immediate: true },
+)
 
 watch(projectSources, () => {
   void refreshProjectManifests()
@@ -962,7 +1194,9 @@ function startWorkspaceFromPopoverStep(workspaceId: string, step: FlowStep) {
   closeWorkspaceFlowPopover()
 }
 
-function workspaceConfiguredSteps(workspace: ProjectWorkspace): ProjectWorkspace['steps'] {
+function workspaceConfiguredSteps(
+  workspace: ProjectWorkspace,
+): ProjectWorkspace['steps'] {
   const startIndex = FLOW_STEPS.indexOf(workspace.startStep)
   const endIndex = FLOW_STEPS.indexOf(workspace.endStep)
   if (startIndex < 0 || endIndex < startIndex) return workspace.steps
@@ -1021,26 +1255,39 @@ async function openWorkspace(workspace: ProjectWorkspace) {
 }
 
 async function refreshProjectManifests() {
-  const entries = await Promise.all(projectSources.value.map(async (project) => {
-    try {
-      const projectRoot = await registerProjectRootForProjectManagement(project.path)
-      if (!projectRoot) return null
-      const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: projectRoot })
-      if (!manifestText) return null
-      const manifest = parseProjectManifest(manifestText)
-      const flowStates = await readWorkspaceFlowStates(manifest)
-      const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
-      return [project.path, manifest, flowStates, analysisInputs] as const
-    } catch (error) {
-      console.warn(`Failed to load project manifest: ${project.path}`, error)
-      return null
-    }
-  }))
+  const entries = await Promise.all(
+    projectSources.value.map(async (project) => {
+      try {
+        const projectRoot = await registerProjectRootForProjectManagement(project.path)
+        if (!projectRoot) return null
+        const manifestText = await readOptionalProjectTextFile('project.json', {
+          projectPath: projectRoot,
+        })
+        if (!manifestText) return null
+        const manifest = parseProjectManifest(manifestText)
+        const flowStates = await readWorkspaceFlowStates(manifest)
+        const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
+        return [project.path, manifest, flowStates, analysisInputs] as const
+      } catch (error) {
+        console.warn(`Failed to load project manifest: ${project.path}`, error)
+        return null
+      }
+    }),
+  )
 
-  const validEntries = entries.filter(entry => entry !== null)
-  projectManifests.value = Object.fromEntries(validEntries.map(([path, manifest]) => [path, manifest]))
-  workspaceFlowStates.value = Object.fromEntries(validEntries.map(([path, _manifest, flowStates]) => [path, flowStates]))
-  workspaceAnalysisInputs.value = Object.fromEntries(validEntries.map(([path, _manifest, _flowStates, analysisInputs]) => [path, analysisInputs]))
+  const validEntries = entries.filter((entry) => entry !== null)
+  projectManifests.value = Object.fromEntries(
+    validEntries.map(([path, manifest]) => [path, manifest]),
+  )
+  workspaceFlowStates.value = Object.fromEntries(
+    validEntries.map(([path, _manifest, flowStates]) => [path, flowStates]),
+  )
+  workspaceAnalysisInputs.value = Object.fromEntries(
+    validEntries.map(([path, _manifest, _flowStates, analysisInputs]) => [
+      path,
+      analysisInputs,
+    ]),
+  )
 }
 
 async function importProject() {
@@ -1056,7 +1303,8 @@ async function importProject() {
       showToast({
         severity: 'warn',
         summary: 'Project not imported',
-        detail: 'The selected project folder could not be registered for local file access.',
+        detail:
+          'The selected project folder could not be registered for local file access.',
       })
       return
     }
@@ -1106,8 +1354,9 @@ async function importWorkspaceIntoProject(project: ProjectManagementProject) {
       return
     }
 
-    const manifest = projectManifests.value[project.path]
-      ?? await readOrCreateProjectManifest(projectRoot, project.name)
+    const manifest =
+      projectManifests.value[project.path] ??
+      (await readOrCreateProjectManifest(projectRoot, project.name))
     const updated = registerWorkspaceInManifest(manifest, {
       projectRoot,
       projectName: project.name,
@@ -1177,9 +1426,14 @@ async function deleteWorkspace(
 ): Promise<boolean> {
   if (!workspaceId || !selectedProject.value.path) return false
   try {
-    const workspace = selectedProject.value.workspaces.find(item => item.id === workspaceId) ?? null
-    const manifest = selectedProjectManifest.value
-      ?? await readOrCreateProjectManifest(selectedProject.value.path, selectedProject.value.name)
+    const workspace =
+      selectedProject.value.workspaces.find((item) => item.id === workspaceId) ?? null
+    const manifest =
+      selectedProjectManifest.value ??
+      (await readOrCreateProjectManifest(
+        selectedProject.value.path,
+        selectedProject.value.name,
+      ))
     const updated = deleteWorkspaceFromManifest(manifest, workspaceId)
     await writeSelectedProjectManifest(updated, selectedProject.value.path)
     if (!options.keepWorkspaceData && workspace?.workspacePath) {
@@ -1194,7 +1448,12 @@ async function deleteWorkspace(
         })
       }
     }
-    if (selectedWorkspaceId.value === workspaceId || !updated.workspaces.some(workspace => workspace.workspace_id === selectedWorkspaceId.value)) {
+    if (
+      selectedWorkspaceId.value === workspaceId ||
+      !updated.workspaces.some(
+        (workspace) => workspace.workspace_id === selectedWorkspaceId.value,
+      )
+    ) {
       selectedWorkspaceId.value = updated.workspaces[0]?.workspace_id ?? ''
     }
     branchDraft.value = null
@@ -1249,9 +1508,8 @@ async function selectProjectStorageLocation() {
     })
     if (directory) projectRootDraft.value.directory = normalizePath(directory)
   } catch {
-    const manualPath = typeof window !== 'undefined'
-      ? window.prompt('Project Storage Location')
-      : null
+    const manualPath =
+      typeof window !== 'undefined' ? window.prompt('Project Storage Location') : null
     if (manualPath) projectRootDraft.value.directory = normalizePath(manualPath)
   }
 }
@@ -1274,12 +1532,15 @@ async function createProjectFolderDraft() {
     return
   }
 
-  const name = projectRootDraft.value.name.trim() || basenamePath(projectRoot) || 'project'
+  const name =
+    projectRootDraft.value.name.trim() || basenamePath(projectRoot) || 'project'
   const manifest = createProjectManifestDraft({
     rootPath: projectRoot,
     name,
   })
-  await writeProjectTextFile('project.json', serializeProjectManifest(manifest), { projectPath: projectRoot })
+  await writeProjectTextFile('project.json', serializeProjectManifest(manifest), {
+    projectPath: projectRoot,
+  })
   const createdProject: Project = {
     id: projectRoot,
     name,
@@ -1392,9 +1653,14 @@ function joinProjectPath(rootPath: string, name: string): string {
   return root ? `${root}/${child}` : child
 }
 
-function metricInlineWidth(point: ProjectMetricPoint, points: ProjectMetricPoint[] = []): number {
+function metricInlineWidth(
+  point: ProjectMetricPoint,
+  points: ProjectMetricPoint[] = [],
+): number {
   if (point.value === null) return 28
-  const values = points.map(item => Math.abs(item.value ?? 0)).filter(value => value > 0)
+  const values = points
+    .map((item) => Math.abs(item.value ?? 0))
+    .filter((value) => value > 0)
   const maxValue = Math.max(...values, 0)
   if (maxValue === 0) return 8
   return Math.max(8, Math.min(100, (Math.abs(point.value) / maxValue) * 100))
@@ -1406,7 +1672,9 @@ async function loadProjectFromRoot(projectRoot: string): Promise<Project> {
   return projectFromManifest(manifest, root)
 }
 
-async function registerProjectRootForProjectManagement(projectRoot: string): Promise<string | null> {
+async function registerProjectRootForProjectManagement(
+  projectRoot: string,
+): Promise<string | null> {
   try {
     const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
     const registeredRoot = await desktopApi.workspace.registerProjectRoot(projectRoot)
@@ -1418,59 +1686,102 @@ async function registerProjectRootForProjectManagement(projectRoot: string): Pro
 }
 
 async function readProjectManifest(projectRoot: string): Promise<ProjectManifest> {
-  const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: projectRoot })
+  const manifestText = await readOptionalProjectTextFile('project.json', {
+    projectPath: projectRoot,
+  })
   if (!manifestText) throw new Error('Project manifest does not exist.')
   return parseProjectManifest(manifestText)
 }
 
-async function readWorkspaceFlowStates(manifest: ProjectManifest): Promise<ProjectWorkspaceFlowStatesById> {
-  const entries = await Promise.all(manifest.workspaces.map(async (workspace) => {
-    try {
-      const flowText = await readOptionalProjectTextFile('home/flow.json', { projectPath: workspace.workspace_path })
-      return [
-        workspace.workspace_id,
-        flowText ? parseWorkspaceFlowStateMap(flowText) : {},
-      ] as const
-    } catch (error) {
-      console.warn(`Failed to load workspace flow.json: ${workspace.workspace_path}`, error)
-      return [workspace.workspace_id, {}] as const
-    }
-  }))
+async function readWorkspaceFlowStates(
+  manifest: ProjectManifest,
+): Promise<ProjectWorkspaceFlowStatesById> {
+  const entries = await Promise.all(
+    manifest.workspaces.map(async (workspace) => {
+      try {
+        const flowText = await readOptionalProjectTextFile('home/flow.json', {
+          projectPath: workspace.workspace_path,
+        })
+        return [
+          workspace.workspace_id,
+          flowText ? parseWorkspaceFlowStateMap(flowText) : {},
+        ] as const
+      } catch (error) {
+        console.warn(
+          `Failed to load workspace flow.json: ${workspace.workspace_path}`,
+          error,
+        )
+        return [workspace.workspace_id, {}] as const
+      }
+    }),
+  )
 
   return Object.fromEntries(entries)
 }
 
-async function readWorkspaceAnalysisInputs(manifest: ProjectManifest): Promise<ProjectWorkspaceAnalysisInputsById> {
-  const designName = normalizeArtifactDesignName(manifest.base_design.top_module || manifest.name || 'design')
-  const entries = await Promise.all(manifest.workspaces.map(async (workspace) => {
-    try {
-      return [
-        workspace.workspace_id,
-        await readWorkspaceAnalysisInput(workspace.workspace_path, designName),
-      ] as const
-    } catch (error) {
-      console.warn(`Failed to load workspace feature summary: ${workspace.workspace_path}`, error)
-      return [workspace.workspace_id, {}] as const
-    }
-  }))
+async function readWorkspaceAnalysisInputs(
+  manifest: ProjectManifest,
+): Promise<ProjectWorkspaceAnalysisInputsById> {
+  const designName = normalizeArtifactDesignName(
+    manifest.base_design.top_module || manifest.name || 'design',
+  )
+  const entries = await Promise.all(
+    manifest.workspaces.map(async (workspace) => {
+      try {
+        return [
+          workspace.workspace_id,
+          await readWorkspaceAnalysisInput(workspace.workspace_path, designName),
+        ] as const
+      } catch (error) {
+        console.warn(
+          `Failed to load workspace feature summary: ${workspace.workspace_path}`,
+          error,
+        )
+        return [workspace.workspace_id, {}] as const
+      }
+    }),
+  )
 
   return Object.fromEntries(entries)
 }
 
-async function readWorkspaceAnalysisInput(workspacePath: string, designName: string): Promise<ProjectWorkspaceAnalysisInput> {
-  const [fileEntries, stepMetricEntries, staReports, flowText, checklistText, parametersText] = await Promise.all([
-    Promise.all(WORKSPACE_ANALYSIS_FILE_SPECS.map(async (spec) => {
-      const content = await readOptionalProjectTextFile(spec.path, { projectPath: workspacePath })
-      return [spec.key, content] as const
-    })),
-    Promise.all(WORKSPACE_STEP_METRICS_FILE_SPECS.map(async (spec) => {
-      const content = await readOptionalProjectTextFile(spec.path, { projectPath: workspacePath })
-      return [spec.step, content] as const
-    })),
-    Promise.all(STA_CORNER_PATHS.map(async (corner) => {
-      const content = await readOptionalProjectTextFile(`sta_ecc/output/${corner}/${designName}.rpt.json`, { projectPath: workspacePath })
-      return { corner, content }
-    })),
+async function readWorkspaceAnalysisInput(
+  workspacePath: string,
+  designName: string,
+): Promise<ProjectWorkspaceAnalysisInput> {
+  const [
+    fileEntries,
+    stepMetricEntries,
+    staReports,
+    flowText,
+    checklistText,
+    parametersText,
+  ] = await Promise.all([
+    Promise.all(
+      WORKSPACE_ANALYSIS_FILE_SPECS.map(async (spec) => {
+        const content = await readOptionalProjectTextFile(spec.path, {
+          projectPath: workspacePath,
+        })
+        return [spec.key, content] as const
+      }),
+    ),
+    Promise.all(
+      WORKSPACE_STEP_METRICS_FILE_SPECS.map(async (spec) => {
+        const content = await readOptionalProjectTextFile(spec.path, {
+          projectPath: workspacePath,
+        })
+        return [spec.step, content] as const
+      }),
+    ),
+    Promise.all(
+      STA_CORNER_PATHS.map(async (corner) => {
+        const content = await readOptionalProjectTextFile(
+          `sta_ecc/output/${corner}/${designName}.rpt.json`,
+          { projectPath: workspacePath },
+        )
+        return { corner, content }
+      }),
+    ),
     readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('home/checklist.json', { projectPath: workspacePath }),
     readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
@@ -1486,8 +1797,13 @@ async function readWorkspaceAnalysisInput(workspacePath: string, designName: str
   }
 }
 
-async function readOrCreateProjectManifest(projectRoot: string, projectName: string): Promise<ProjectManifest> {
-  const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: projectRoot })
+async function readOrCreateProjectManifest(
+  projectRoot: string,
+  projectName: string,
+): Promise<ProjectManifest> {
+  const manifestText = await readOptionalProjectTextFile('project.json', {
+    projectPath: projectRoot,
+  })
   if (manifestText) return parseProjectManifest(manifestText)
   return createProjectManifestDraft({
     rootPath: projectRoot,
@@ -1495,15 +1811,23 @@ async function readOrCreateProjectManifest(projectRoot: string, projectName: str
   })
 }
 
-async function writeSelectedProjectManifest(manifest: ProjectManifest, projectRoot: string) {
+async function writeSelectedProjectManifest(
+  manifest: ProjectManifest,
+  projectRoot: string,
+) {
   await writeProjectManifestForProject(manifest, projectRoot)
 }
 
-async function writeProjectManifestForProject(manifest: ProjectManifest, projectRoot: string) {
+async function writeProjectManifestForProject(
+  manifest: ProjectManifest,
+  projectRoot: string,
+) {
   const registeredProjectRoot = await registerProjectRootForProjectManagement(projectRoot)
   if (!registeredProjectRoot) throw new Error('Project root could not be registered.')
 
-  await writeProjectTextFile('project.json', serializeProjectManifest(manifest), { projectPath: registeredProjectRoot })
+  await writeProjectTextFile('project.json', serializeProjectManifest(manifest), {
+    projectPath: registeredProjectRoot,
+  })
   const normalizedRoot = normalizePath(registeredProjectRoot)
   const flowStates = await readWorkspaceFlowStates(manifest)
   const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
@@ -1522,7 +1846,7 @@ async function writeProjectManifestForProject(manifest: ProjectManifest, project
     [projectRoot]: analysisInputs,
     [normalizedRoot]: analysisInputs,
   }
-  projectHistory.value = projectHistory.value.map(project =>
+  projectHistory.value = projectHistory.value.map((project) =>
     project.path === projectRoot || project.path === normalizedRoot
       ? {
           ...project,
@@ -1539,7 +1863,11 @@ function workspaceRouteQuery(workspacePath?: string, workspaceId?: string) {
   return {
     projectRoot: selectedProject.value.path,
     projectName: selectedProject.value.name,
-    workspaceId: workspaceId || basenamePath(workspacePath ?? '') || selectedWorkspace.value?.id || '',
+    workspaceId:
+      workspaceId ||
+      basenamePath(workspacePath ?? '') ||
+      selectedWorkspace.value?.id ||
+      '',
   }
 }
 
@@ -1557,10 +1885,17 @@ function projectFromManifest(manifest: ProjectManifest, fallbackRoot: string): P
 }
 
 function projectStatusFromManifest(manifest: ProjectManifest): ProjectStatus {
-  if (manifest.workspaces.some(workspace => workspace.status === 'running')) return 'running'
-  if (manifest.workspaces.some(workspace => workspace.status === 'failed')) return 'failed'
-  if (manifest.workspaces.some(workspace => workspace.status === 'in_progress')) return 'in_progress'
-  if (manifest.workspaces.length > 0 && manifest.workspaces.every(workspace => workspace.status === 'success')) return 'success'
+  if (manifest.workspaces.some((workspace) => workspace.status === 'running'))
+    return 'running'
+  if (manifest.workspaces.some((workspace) => workspace.status === 'failed'))
+    return 'failed'
+  if (manifest.workspaces.some((workspace) => workspace.status === 'in_progress'))
+    return 'in_progress'
+  if (
+    manifest.workspaces.length > 0 &&
+    manifest.workspaces.every((workspace) => workspace.status === 'success')
+  )
+    return 'success'
   return manifest.workspaces.length > 0 ? 'in_progress' : 'not_started'
 }
 
@@ -1611,11 +1946,26 @@ function normalizeArtifactDesignName(value: string): string {
   filter: blur(1.5px) brightness(0.82);
   transform: translateZ(0) scale(1.006);
   background:
-    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%),
-    linear-gradient(color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent-color) 12%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
     var(--bg-secondary);
-  background-size: auto, 52px 52px, 52px 52px, auto;
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
 }
 
 .blurred-brand {
@@ -1698,7 +2048,10 @@ function normalizeArtifactDesignName(value: string): string {
   border-radius: 14px;
   background: var(--bg-primary);
   box-shadow: 0 18px 28px rgba(17, 24, 39, 0.12);
-  transition: width 0.18s ease, height 0.18s ease, border-radius 0.18s ease;
+  transition:
+    width 0.18s ease,
+    height 0.18s ease,
+    border-radius 0.18s ease;
 }
 
 .manager-dialog.maximized {
@@ -1727,7 +2080,9 @@ function normalizeArtifactDesignName(value: string): string {
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .manager-window-button:hover {
@@ -1748,7 +2103,9 @@ function normalizeArtifactDesignName(value: string): string {
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .manager-close:hover {
@@ -1935,7 +2292,7 @@ function normalizeArtifactDesignName(value: string): string {
   width: 5px;
   border-radius: 10px 0 0 10px;
   background: var(--accent-color);
-  content: "";
+  content: '';
 }
 
 .project-tree-row {
@@ -1980,7 +2337,9 @@ function normalizeArtifactDesignName(value: string): string {
   background: color-mix(in srgb, var(--bg-primary) 52%, var(--bg-secondary));
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .resource-row:hover,
@@ -2005,7 +2364,10 @@ function normalizeArtifactDesignName(value: string): string {
   background: transparent;
   cursor: pointer;
   opacity: 0.68;
-  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .row-remove-btn:hover {
@@ -2040,7 +2402,7 @@ function normalizeArtifactDesignName(value: string): string {
   left: 14px;
   width: 1.3px;
   background: color-mix(in srgb, var(--text-secondary) 30%, transparent);
-  content: "";
+  content: '';
 }
 
 .workspace-tree-item {
@@ -2058,7 +2420,7 @@ function normalizeArtifactDesignName(value: string): string {
   left: -14px;
   width: 14px;
   border-top: 1.3px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
-  content: "";
+  content: '';
 }
 
 .workspace-tree-item::after {
@@ -2069,7 +2431,7 @@ function normalizeArtifactDesignName(value: string): string {
   height: 8px;
   border-radius: 999px;
   background: var(--text-secondary);
-  content: "";
+  content: '';
 }
 
 .workspace-tree-item.flow-hint-success::after {
@@ -2096,7 +2458,9 @@ function normalizeArtifactDesignName(value: string): string {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-primary) 74%, var(--bg-secondary));
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .workspace-tree-item.flow-hint-failed .workspace-tree-row {
@@ -2188,7 +2552,11 @@ function normalizeArtifactDesignName(value: string): string {
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-primary) 70%, var(--bg-secondary));
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
 .circle-action:hover,
@@ -2223,7 +2591,7 @@ function normalizeArtifactDesignName(value: string): string {
 .circle-glyph::before,
 .circle-glyph::after {
   position: absolute;
-  content: "";
+  content: '';
 }
 
 .circle-glyph.add::before,
@@ -2298,7 +2666,7 @@ function normalizeArtifactDesignName(value: string): string {
   border: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
   border-radius: 12px;
   background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
-  box-shadow: 0 10px 18px rgba(17, 24, 39, 0.10);
+  box-shadow: 0 10px 18px rgba(17, 24, 39, 0.1);
 }
 
 .workspace-flow-popover::before {
@@ -2308,9 +2676,10 @@ function normalizeArtifactDesignName(value: string): string {
   width: 20px;
   height: 20px;
   border-left: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
   background: color-mix(in srgb, var(--bg-primary) 98%, transparent);
-  content: "";
+  content: '';
   transform: rotate(45deg);
 }
 
@@ -2711,7 +3080,7 @@ function normalizeArtifactDesignName(value: string): string {
   inset: 22px;
   border-radius: inherit;
   background: var(--bg-primary);
-  content: "";
+  content: '';
 }
 
 .run-state-copy {
@@ -2741,11 +3110,21 @@ function normalizeArtifactDesignName(value: string): string {
   border-radius: 999px;
 }
 
-.run-state-success { background: var(--success-color); }
-.run-state-failed { background: var(--danger-color); }
-.run-state-running { background: var(--warn-color); }
-.run-state-unstart { background: color-mix(in srgb, var(--text-secondary) 62%, transparent); }
-.run-state-skipped { background: color-mix(in srgb, var(--text-secondary) 36%, transparent); }
+.run-state-success {
+  background: var(--success-color);
+}
+.run-state-failed {
+  background: var(--danger-color);
+}
+.run-state-running {
+  background: var(--warn-color);
+}
+.run-state-unstart {
+  background: color-mix(in srgb, var(--text-secondary) 62%, transparent);
+}
+.run-state-skipped {
+  background: color-mix(in srgb, var(--text-secondary) 36%, transparent);
+}
 
 .dashboard-chart-card {
   min-height: 246px;
@@ -2758,7 +3137,10 @@ function normalizeArtifactDesignName(value: string): string {
 
 .dashboard-key-metric-table {
   display: grid;
-  grid-template-columns: minmax(132px, 0.9fr) repeat(var(--dashboard-metric-count), minmax(92px, 1fr));
+  grid-template-columns: minmax(132px, 0.9fr) repeat(
+      var(--dashboard-metric-count),
+      minmax(92px, 1fr)
+    );
   min-width: min(100%, calc(132px + (var(--dashboard-metric-count) * 92px)));
   overflow: auto;
   border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
@@ -2930,7 +3312,10 @@ function normalizeArtifactDesignName(value: string): string {
 
 .step-compare-metric-table {
   display: grid;
-  grid-template-columns: minmax(132px, 0.9fr) repeat(var(--step-compare-metric-count), minmax(92px, 1fr));
+  grid-template-columns: minmax(132px, 0.9fr) repeat(
+      var(--step-compare-metric-count),
+      minmax(92px, 1fr)
+    );
   grid-auto-rows: 42px;
   min-height: 0;
   min-width: min(100%, calc(132px + (var(--step-compare-metric-count) * 92px)));
@@ -3141,10 +3526,18 @@ function normalizeArtifactDesignName(value: string): string {
   background: currentColor;
 }
 
-.metric-good { color: var(--success-color); }
-.metric-warn { color: var(--warn-color); }
-.metric-bad { color: var(--danger-color); }
-.metric-pending { color: var(--text-secondary); }
+.metric-good {
+  color: var(--success-color);
+}
+.metric-warn {
+  color: var(--warn-color);
+}
+.metric-bad {
+  color: var(--danger-color);
+}
+.metric-pending {
+  color: var(--text-secondary);
+}
 
 .legend-list {
   display: flex;
@@ -3168,12 +3561,24 @@ function normalizeArtifactDesignName(value: string): string {
   border-radius: 3px;
 }
 
-.legend-success { background: var(--success-color); }
-.legend-reused { background: #7a8798; }
-.legend-skipped { background: #303846; }
-.legend-unstart { background: #596679; }
-.legend-running { background: var(--info-color); }
-.legend-failed { background: var(--danger-color); }
+.legend-success {
+  background: var(--success-color);
+}
+.legend-reused {
+  background: #7a8798;
+}
+.legend-skipped {
+  background: #303846;
+}
+.legend-unstart {
+  background: #596679;
+}
+.legend-running {
+  background: var(--info-color);
+}
+.legend-failed {
+  background: var(--danger-color);
+}
 
 .flow-scroll {
   min-height: 0;
@@ -3289,7 +3694,9 @@ function normalizeArtifactDesignName(value: string): string {
   border: 1px solid color-mix(in srgb, var(--border-color) 85%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-primary) 90%, transparent);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .workspace-cell {
@@ -3337,7 +3744,7 @@ function normalizeArtifactDesignName(value: string): string {
   inset: -6px 4px;
   border: 1px solid color-mix(in srgb, var(--success-color) 58%, transparent);
   border-radius: 8px;
-  content: "";
+  content: '';
   pointer-events: none;
 }
 
@@ -3352,19 +3759,39 @@ function normalizeArtifactDesignName(value: string): string {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   font-weight: 800;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .flow-cell:hover {
   transform: translateY(-1px);
 }
 
-.step-success { color: var(--success-color); background: var(--success-bg); }
-.step-reused { color: #7a8798; background: color-mix(in srgb, #7a8798 16%, transparent); }
-.step-skipped { color: color-mix(in srgb, var(--text-secondary) 60%, transparent); background: color-mix(in srgb, var(--bg-secondary) 58%, transparent); }
-.step-unstart { color: #596679; background: color-mix(in srgb, #596679 14%, transparent); }
-.step-running { color: var(--info-color); background: var(--info-bg); }
-.step-failed { color: var(--danger-color); background: var(--danger-bg); }
+.step-success {
+  color: var(--success-color);
+  background: var(--success-bg);
+}
+.step-reused {
+  color: #7a8798;
+  background: color-mix(in srgb, #7a8798 16%, transparent);
+}
+.step-skipped {
+  color: color-mix(in srgb, var(--text-secondary) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 58%, transparent);
+}
+.step-unstart {
+  color: #596679;
+  background: color-mix(in srgb, #596679 14%, transparent);
+}
+.step-running {
+  color: var(--info-color);
+  background: var(--info-bg);
+}
+.step-failed {
+  color: var(--danger-color);
+  background: var(--danger-bg);
+}
 
 .cell-add-button {
   position: absolute;
@@ -3398,7 +3825,10 @@ function normalizeArtifactDesignName(value: string): string {
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-primary) 84%, transparent);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .row-action-btn {

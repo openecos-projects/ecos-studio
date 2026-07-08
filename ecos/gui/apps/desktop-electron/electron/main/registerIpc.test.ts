@@ -658,14 +658,12 @@ describe('registerIpc', () => {
         '/tmp/project/ws_0001',
       ),
     ).resolves.toEqual(replacement)
-    await handlers.get(desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement)?.(
-      event,
-      replacement,
-    )
-    await handlers.get(desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement)?.(
-      event,
-      replacement,
-    )
+    await handlers.get(
+      desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+    )?.(event, replacement)
+    await handlers.get(
+      desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+    )?.(event, replacement)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceScanPdkDirectory)?.(event, '/tmp/pdk'),
     ).resolves.toMatchObject({

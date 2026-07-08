@@ -5,7 +5,9 @@ describe('App workspace reconfiguration wizard wiring', () => {
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {
     expect(appSource).toContain(':initial-config="workspaceWizardInitialConfig"')
     expect(appSource).toContain(':title="workspaceWizardTitle"')
-    expect(appSource).toContain("return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'")
+    expect(appSource).toContain(
+      "return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'",
+    )
     expect(appSource).toContain('reconfigureWorkspace: openWorkspaceReconfigureWizard')
     expect(appSource).toContain('buildReconfigureWizardInitialConfig')
     expect(appSource).toContain('replaceExistingWorkspace: true')
@@ -59,7 +61,9 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain("'origin/filelist'")
     expect(appSource).toContain("fileName === 'filelist'")
     expect(appSource).toContain("hasAnySuffix(filePath, ['.def', '.def.gz'])")
-    expect(appSource).toContain("hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])")
+    expect(appSource).toContain(
+      "hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])",
+    )
     const existsStart = appSource.indexOf('async function workspaceTextFileExists')
     const existsEnd = appSource.indexOf('function optionalRecord', existsStart)
     const existsSource = appSource.slice(existsStart, existsEnd)

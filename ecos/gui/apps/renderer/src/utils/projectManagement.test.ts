@@ -169,7 +169,7 @@ describe('project management model', () => {
       state: 'bad',
     })
     expect(model.workspaces).toHaveLength(2)
-    expect(model.workspaces.map(workspace => [workspace.id, workspace.depth])).toEqual([
+    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
       ['ws_0001', 0],
       ['ws_0002', 1],
     ])
@@ -188,9 +188,15 @@ describe('project management model', () => {
         label: 'DRC failed',
       },
     })
-    expect(model.workspaces[1].steps.find(cell => cell.step === 'Floor')?.status).toBe('reused')
-    expect(model.workspaces[1].steps.find(cell => cell.step === 'Fanout')?.status).toBe('success')
-    expect(model.workspaces[1].steps.find(cell => cell.step === 'STA')?.status).toBe('skipped')
+    expect(model.workspaces[1].steps.find((cell) => cell.step === 'Floor')?.status).toBe(
+      'reused',
+    )
+    expect(model.workspaces[1].steps.find((cell) => cell.step === 'Fanout')?.status).toBe(
+      'success',
+    )
+    expect(model.workspaces[1].steps.find((cell) => cell.step === 'STA')?.status).toBe(
+      'skipped',
+    )
     expect(model.branchLinks).toEqual([
       {
         fromWorkspaceId: 'ws_0001',
@@ -199,7 +205,7 @@ describe('project management model', () => {
         toStep: 'Fanout',
       },
     ])
-    expect(model.metricsRows.find(row => row.id === 'drc')?.points).toContainEqual({
+    expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
       workspaceId: 'ws_0002',
       label: '9',
       value: 9,
@@ -287,8 +293,20 @@ describe('project management model', () => {
           routeStep: JSON.stringify({
             route: {
               DR: [
-                { iter: 1, total_violation_num: 12, total_wire_length: 5200, total_via_num: 1510, total_patch_num: 49 },
-                { iter: 2, total_violation_num: 2, total_wire_length: 5198, total_via_num: 1506, total_patch_num: 45 },
+                {
+                  iter: 1,
+                  total_violation_num: 12,
+                  total_wire_length: 5200,
+                  total_via_num: 1510,
+                  total_patch_num: 49,
+                },
+                {
+                  iter: 2,
+                  total_violation_num: 2,
+                  total_wire_length: 5198,
+                  total_via_num: 1506,
+                  total_patch_num: 45,
+                },
               ],
             },
           }),
@@ -297,11 +315,15 @@ describe('project management model', () => {
         staReports: [
           {
             corner: 'MAX_125/Cworst',
-            content: JSON.stringify({ slack: [{ delay_type: 'max', WNS: '8.100', TNS: '0.000' }] }),
+            content: JSON.stringify({
+              slack: [{ delay_type: 'max', WNS: '8.100', TNS: '0.000' }],
+            }),
           },
           {
             corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({ slack: [{ delay_type: 'min', WNS: '0.080', TNS: '0.000' }] }),
+            content: JSON.stringify({
+              slack: [{ delay_type: 'min', WNS: '0.080', TNS: '0.000' }],
+            }),
           },
         ],
       },
@@ -329,8 +351,20 @@ describe('project management model', () => {
           routeStep: JSON.stringify({
             route: {
               DR: [
-                { iter: 1, total_violation_num: 10, total_wire_length: 5199.1, total_via_num: 1512, total_patch_num: 47 },
-                { iter: 2, total_violation_num: 0, total_wire_length: 5196.3, total_via_num: 1502, total_patch_num: 44 },
+                {
+                  iter: 1,
+                  total_violation_num: 10,
+                  total_wire_length: 5199.1,
+                  total_via_num: 1512,
+                  total_patch_num: 47,
+                },
+                {
+                  iter: 2,
+                  total_violation_num: 0,
+                  total_wire_length: 5196.3,
+                  total_via_num: 1502,
+                  total_patch_num: 44,
+                },
               ],
             },
           }),
@@ -339,35 +373,52 @@ describe('project management model', () => {
         staReports: [
           {
             corner: 'MAX_125/Cworst',
-            content: JSON.stringify({ slack: [{ delay_type: 'max', WNS: '8.500', TNS: '0.000' }] }),
+            content: JSON.stringify({
+              slack: [{ delay_type: 'max', WNS: '8.500', TNS: '0.000' }],
+            }),
           },
           {
             corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({ slack: [{ delay_type: 'min', WNS: '0.095', TNS: '0.000' }] }),
+            content: JSON.stringify({
+              slack: [{ delay_type: 'min', WNS: '0.095', TNS: '0.000' }],
+            }),
           },
         ],
       },
     }
 
-    const model = buildProjectManagementProject(recentProject, manifest, {}, featureInputs)
-    const workspaceSummary = model.workspaceSummaries.find(summary => summary.workspaceId === 'ws_0007')
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      featureInputs,
+    )
+    const workspaceSummary = model.workspaceSummaries.find(
+      (summary) => summary.workspaceId === 'ws_0007',
+    )
 
     expect(workspaceSummary?.finalMetrics.drcCount?.value).toBe(0)
     expect(workspaceSummary?.finalMetrics.setupWns?.value).toBe(8.5)
     expect(workspaceSummary?.finalMetrics.holdWns?.value).toBe(0.095)
     expect(workspaceSummary?.finalMetrics.area?.value).toBe(758.24)
-    expect(workspaceSummary?.steps.find(step => step.step === 'Route')?.metrics).toEqual([])
-    expect(model.metricsRows.find(row => row.id === 'drc')?.points).toContainEqual({
+    expect(
+      workspaceSummary?.steps.find((step) => step.step === 'Route')?.metrics,
+    ).toEqual([])
+    expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
       workspaceId: 'ws_0007',
       label: '0',
       value: 0,
       state: 'good',
     })
 
-    const staCompare = model.stepCompareSummaries.find(summary => summary.step === 'STA')
+    const staCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'STA',
+    )
     expect(staCompare?.metrics).toEqual([])
 
-    const drcCompare = model.stepCompareSummaries.find(summary => summary.step === 'DRC')
+    const drcCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'DRC',
+    )
     expect(drcCompare?.metrics).toEqual([])
     expect(drcCompare?.missingCount).toBe(2)
   })
@@ -414,40 +465,64 @@ describe('project management model', () => {
       },
     )
 
-    const model = buildProjectManagementProject(recentProject, manifest, {}, {
-      baseline: {
-        stepMetricTexts: {
-          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5196.258, num_via: 1502 }),
-          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      {
+        baseline: {
+          stepMetricTexts: {
+            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5196.258, num_via: 1502 }),
+            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+          },
+        },
+        ws_0008: {
+          stepMetricTexts: {
+            Route: JSON.stringify({ Tool: 'ecc', wire_len: 4800.5, num_via: 1330 }),
+            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
+          },
         },
       },
-      ws_0008: {
-        stepMetricTexts: {
-          Route: JSON.stringify({ Tool: 'ecc', wire_len: 4800.5, num_via: 1330 }),
-          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
-        },
-      },
-    })
+    )
 
-    const routeCompare = model.stepCompareSummaries.find(summary => summary.step === 'Route')
-    expect(routeCompare?.metrics.map(metric => metric.label)).toEqual(['wire len', 'num via'])
-    expect(routeCompare?.metrics.find(metric => metric.id === 'wire_len')?.points.map(point => [point.workspaceId, point.value, point.label])).toEqual([
+    const routeCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'Route',
+    )
+    expect(routeCompare?.metrics.map((metric) => metric.label)).toEqual([
+      'wire len',
+      'num via',
+    ])
+    expect(
+      routeCompare?.metrics
+        .find((metric) => metric.id === 'wire_len')
+        ?.points.map((point) => [point.workspaceId, point.value, point.label]),
+    ).toEqual([
       ['baseline', 5196.258, '5196.258'],
       ['ws_0008', 4800.5, '4800.5'],
     ])
-    expect(routeCompare?.metrics.find(metric => metric.id === 'num_via')?.points.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      routeCompare?.metrics
+        .find((metric) => metric.id === 'num_via')
+        ?.points.map((point) => [point.workspaceId, point.value]),
+    ).toEqual([
       ['baseline', 1502],
       ['ws_0008', 1330],
     ])
 
-    const drcCompare = model.stepCompareSummaries.find(summary => summary.step === 'DRC')
-    expect(drcCompare?.metrics.map(metric => metric.label)).toEqual(['drc num'])
-    expect(drcCompare?.points.map(point => [point.workspaceId, point.value, point.state])).toEqual([
+    const drcCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'DRC',
+    )
+    expect(drcCompare?.metrics.map((metric) => metric.label)).toEqual(['drc num'])
+    expect(
+      drcCompare?.points.map((point) => [point.workspaceId, point.value, point.state]),
+    ).toEqual([
       ['baseline', 0, 'good'],
       ['ws_0008', 2, 'warn'],
     ])
 
-    const legalCompare = model.stepCompareSummaries.find(summary => summary.step === 'Legal')
+    const legalCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'Legal',
+    )
     expect(legalCompare?.metrics).toEqual([])
     expect(legalCompare?.missingCount).toBe(2)
   })
@@ -474,25 +549,27 @@ describe('project management model', () => {
       step_metrics: {},
     })
 
-    const flowStates = parseWorkspaceFlowStateMap(JSON.stringify({
-      steps: [
-        { name: 'Synthesis', state: 'Success' },
-        { name: 'Floorplan', state: 'Unstart' },
-        { name: 'fixFanout', state: 'Ongoing' },
-        { name: 'place', state: 'Invalid' },
-      ],
-    }))
+    const flowStates = parseWorkspaceFlowStateMap(
+      JSON.stringify({
+        steps: [
+          { name: 'Synthesis', state: 'Success' },
+          { name: 'Floorplan', state: 'Unstart' },
+          { name: 'fixFanout', state: 'Ongoing' },
+          { name: 'place', state: 'Invalid' },
+        ],
+      }),
+    )
     const model = buildProjectManagementProject(recentProject, manifest, {
       rtl_2_harden: flowStates,
     })
     const workspace = model.workspaces[0]
 
-    expect(workspace.steps.find(cell => cell.step === 'Synth')?.status).toBe('success')
-    expect(workspace.steps.find(cell => cell.step === 'Floor')?.status).toBe('unstart')
-    expect(workspace.steps.find(cell => cell.step === 'Floor')?.label).toBe('U')
-    expect(workspace.steps.find(cell => cell.step === 'Fanout')?.status).toBe('running')
-    expect(workspace.steps.find(cell => cell.step === 'Place')?.status).toBe('failed')
-    expect(workspace.steps.find(cell => cell.step === 'CTS')?.status).toBe('success')
+    expect(workspace.steps.find((cell) => cell.step === 'Synth')?.status).toBe('success')
+    expect(workspace.steps.find((cell) => cell.step === 'Floor')?.status).toBe('unstart')
+    expect(workspace.steps.find((cell) => cell.step === 'Floor')?.label).toBe('U')
+    expect(workspace.steps.find((cell) => cell.step === 'Fanout')?.status).toBe('running')
+    expect(workspace.steps.find((cell) => cell.step === 'Place')?.status).toBe('failed')
+    expect(workspace.steps.find((cell) => cell.step === 'CTS')?.status).toBe('success')
     expect(workspace.flowStatusHint).toEqual({
       state: 'unstart',
       step: 'Floor',
@@ -542,68 +619,71 @@ describe('project management model', () => {
       },
     )
 
-    const model = buildProjectManagementProject(recentProject, manifest, {}, {
-      ws_0001: {
-        flowText: JSON.stringify({
-          steps: [
-            { name: 'Synthesis', runtime: '0:0:7', 'peak memory (mb)': 10 },
-            { name: 'Floorplan', runtime: '0:1:2', 'peak memory (mb)': 128 },
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      {
+        ws_0001: {
+          flowText: JSON.stringify({
+            steps: [
+              { name: 'Synthesis', runtime: '0:0:7', 'peak memory (mb)': 10 },
+              { name: 'Floorplan', runtime: '0:1:2', 'peak memory (mb)': 128 },
+            ],
+          }),
+          parametersText: JSON.stringify({
+            Die: { Area: 2250 },
+            Core: { Utilitization: 0.63 },
+          }),
+          checklistText: JSON.stringify({
+            checklist: [{ state: 'Passed' }, { state: 'Failed' }, { state: 'Warning' }],
+          }),
+        },
+        ws_0002: {
+          flowText: JSON.stringify({
+            steps: [
+              { name: 'fixFanout', runtime: '12.5s', 'peak memory (mb)': 512 },
+              { name: 'place', runtime: 4, 'peak memory (mb)': 256 },
+            ],
+          }),
+          parametersText: JSON.stringify({
+            Die: { Area: 2300 },
+            Core: { Utilization: 0.71 },
+          }),
+          staReports: [
+            {
+              corner: 'MAX_125/Cworst',
+              content: JSON.stringify({
+                summary: [
+                  { delay_type: 'max', freq: '870' },
+                  { delay_type: 'min', freq: 'NA' },
+                ],
+              }),
+            },
+            {
+              corner: 'MIN_m40/Cbest',
+              content: JSON.stringify({
+                summary: [
+                  { delay_type: 'max', freq: '830' },
+                  { delay_type: 'max', freq: '820' },
+                ],
+              }),
+            },
           ],
-        }),
-        parametersText: JSON.stringify({
-          Die: { Area: 2250 },
-          Core: { Utilitization: 0.63 },
-        }),
-        checklistText: JSON.stringify({
-          checklist: [
-            { state: 'Passed' },
-            { state: 'Failed' },
-            { state: 'Warning' },
-          ],
-        }),
+          checklistText: JSON.stringify({
+            checklist: [{ state: 'Passed' }, { state: 'Passed' }, { state: 'Warn' }],
+          }),
+        },
       },
-      ws_0002: {
-        flowText: JSON.stringify({
-          steps: [
-            { name: 'fixFanout', runtime: '12.5s', 'peak memory (mb)': 512 },
-            { name: 'place', runtime: 4, 'peak memory (mb)': 256 },
-          ],
-        }),
-        parametersText: JSON.stringify({
-          Die: { Area: 2300 },
-          Core: { Utilization: 0.71 },
-        }),
-        staReports: [
-          {
-            corner: 'MAX_125/Cworst',
-            content: JSON.stringify({
-              summary: [
-                { delay_type: 'max', freq: '870' },
-                { delay_type: 'min', freq: 'NA' },
-              ],
-            }),
-          },
-          {
-            corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({
-              summary: [
-                { delay_type: 'max', freq: '830' },
-                { delay_type: 'max', freq: '820' },
-              ],
-            }),
-          },
-        ],
-        checklistText: JSON.stringify({
-          checklist: [
-            { state: 'Passed' },
-            { state: 'Passed' },
-            { state: 'Warn' },
-          ],
-        }),
-      },
-    })
+    )
 
-    expect(model.workspaceSummaries.map(summary => [summary.workspaceId, summary.flowMetrics.totalRuntimeSec, summary.flowMetrics.peakMemoryMb])).toEqual([
+    expect(
+      model.workspaceSummaries.map((summary) => [
+        summary.workspaceId,
+        summary.flowMetrics.totalRuntimeSec,
+        summary.flowMetrics.peakMemoryMb,
+      ]),
+    ).toEqual([
       ['ws_0001', 69, 128],
       ['ws_0002', 16.5, 512],
     ])
@@ -615,27 +695,52 @@ describe('project management model', () => {
       checklistWarning: 2,
       checklistTotal: 6,
     })
-    expect(model.dashboardSummary.flowMetricSummary.runtimePoints.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      model.dashboardSummary.flowMetricSummary.runtimePoints.map((point) => [
+        point.workspaceId,
+        point.value,
+      ]),
+    ).toEqual([
       ['ws_0001', 69],
       ['ws_0002', 16.5],
     ])
-    expect(model.dashboardSummary.flowMetricSummary.memoryPoints.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      model.dashboardSummary.flowMetricSummary.memoryPoints.map((point) => [
+        point.workspaceId,
+        point.value,
+      ]),
+    ).toEqual([
       ['ws_0001', 128],
       ['ws_0002', 512],
     ])
-    expect(model.metricsRows.find(row => row.id === 'die_area')?.points.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      model.metricsRows
+        .find((row) => row.id === 'die_area')
+        ?.points.map((point) => [point.workspaceId, point.value]),
+    ).toEqual([
       ['ws_0001', 2250],
       ['ws_0002', 2300],
     ])
-    expect(model.metricsRows.find(row => row.id === 'core_util')?.points.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      model.metricsRows
+        .find((row) => row.id === 'core_util')
+        ?.points.map((point) => [point.workspaceId, point.value]),
+    ).toEqual([
       ['ws_0001', 0.63],
       ['ws_0002', 0.71],
     ])
-    expect(model.metricsRows.find(row => row.id === 'frequency')?.points.map(point => [point.workspaceId, point.value])).toEqual([
+    expect(
+      model.metricsRows
+        .find((row) => row.id === 'frequency')
+        ?.points.map((point) => [point.workspaceId, point.value]),
+    ).toEqual([
       ['ws_0001', null],
       ['ws_0002', 820],
     ])
-    expect(model.workspaceSummaries.find(summary => summary.workspaceId === 'ws_0002')?.finalMetrics.frequency?.value).toBe(820)
+    expect(
+      model.workspaceSummaries.find((summary) => summary.workspaceId === 'ws_0002')
+        ?.finalMetrics.frequency?.value,
+    ).toBe(820)
   })
 
   it('keeps child workspaces close to their source workspace in lineage order', () => {
@@ -690,7 +795,7 @@ describe('project management model', () => {
 
     const model = buildProjectManagementProject(recentProject, manifest)
 
-    expect(model.workspaces.map(workspace => [workspace.id, workspace.depth])).toEqual([
+    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
       ['ws_0001', 0],
       ['ws_0002', 1],
       ['ws_0003', 0],
@@ -730,9 +835,12 @@ describe('project management model', () => {
       targetStartStep: 'Fanout',
       targetEndStep: 'Harden',
       sourceOutputType: 'def',
-      sourceOutputPath: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      originDef: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      originVerilog: '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.v.gz',
+      sourceOutputPath:
+        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+      originDef:
+        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+      originVerilog:
+        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.v.gz',
       originSdc: '/projects/gcd/workspaces/ws_0001/origin/gcd.sdc',
     })
     expect(serializeProjectManifest(manifest)).toContain('"workspaces"')
@@ -889,12 +997,25 @@ describe('project management model', () => {
     )
     manifest.best_workspace = { workspace_id: 'ws_0002', reason: 'experimental' }
 
-    const archived = archiveWorkspaceInManifest(manifest, 'ws_0002', '2026-07-02T10:00:00.000Z')
-    expect(archived.workspaces.find(workspace => workspace.workspace_id === 'ws_0002')?.status).toBe('archived')
+    const archived = archiveWorkspaceInManifest(
+      manifest,
+      'ws_0002',
+      '2026-07-02T10:00:00.000Z',
+    )
+    expect(
+      archived.workspaces.find((workspace) => workspace.workspace_id === 'ws_0002')
+        ?.status,
+    ).toBe('archived')
     expect(archived.best_workspace).toBeNull()
 
-    const deleted = deleteWorkspaceFromManifest(archived, 'ws_0002', '2026-07-02T11:00:00.000Z')
-    expect(deleted.workspaces.map(workspace => workspace.workspace_id)).toEqual(['ws_0001'])
+    const deleted = deleteWorkspaceFromManifest(
+      archived,
+      'ws_0002',
+      '2026-07-02T11:00:00.000Z',
+    )
+    expect(deleted.workspaces.map((workspace) => workspace.workspace_id)).toEqual([
+      'ws_0001',
+    ])
     expect(deleted.workspaces[0].branch_from).toBeNull()
   })
 })

@@ -15,11 +15,32 @@ export const FLOW_STEPS = [
   'Harden',
 ] as const
 
-export type FlowStep = typeof FLOW_STEPS[number]
-export type ProjectStepStatus = 'success' | 'reused' | 'skipped' | 'unstart' | 'running' | 'failed'
-export type ProjectWorkspaceStatus = 'success' | 'failed' | 'running' | 'in_progress' | 'not_started' | 'archived'
+export type FlowStep = (typeof FLOW_STEPS)[number]
+export type ProjectStepStatus =
+  | 'success'
+  | 'reused'
+  | 'skipped'
+  | 'unstart'
+  | 'running'
+  | 'failed'
+export type ProjectWorkspaceStatus =
+  | 'success'
+  | 'failed'
+  | 'running'
+  | 'in_progress'
+  | 'not_started'
+  | 'archived'
 export type MetricsRowKind = 'line' | 'bar'
-export type ProjectMetricId = 'wns' | 'tns' | 'drc' | 'area' | 'runtime' | 'memory' | 'die_area' | 'core_util' | 'frequency'
+export type ProjectMetricId =
+  | 'wns'
+  | 'tns'
+  | 'drc'
+  | 'area'
+  | 'runtime'
+  | 'memory'
+  | 'die_area'
+  | 'core_util'
+  | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
 export type ProjectFeatureFileKey =
@@ -76,7 +97,10 @@ export interface ProjectWorkspaceAnalysisInput {
   parametersText?: string | null
 }
 
-export type ProjectWorkspaceAnalysisInputsById = Record<string, ProjectWorkspaceAnalysisInput>
+export type ProjectWorkspaceAnalysisInputsById = Record<
+  string,
+  ProjectWorkspaceAnalysisInput
+>
 
 export interface ProjectWorkspaceManifest {
   workspace_id: string
@@ -373,10 +397,13 @@ const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
   harden: 'Harden',
 }
 
-const RUNTIME_STEP_ARTIFACTS: Record<FlowStep, {
-  directory: string
-  outputName: string
-}> = {
+const RUNTIME_STEP_ARTIFACTS: Record<
+  FlowStep,
+  {
+    directory: string
+    outputName: string
+  }
+> = {
   Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
   Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
   Fanout: { directory: 'fixFanout_ecc', outputName: 'fixFanout' },
@@ -399,13 +426,49 @@ const METRIC_DEFINITIONS: Array<{
   manifestKey: keyof ProjectMetricSummary
 }> = [
   { id: 'wns', label: 'WNS', hint: 'timing slack', kind: 'line', manifestKey: 'wns' },
-  { id: 'tns', label: 'TNS', hint: 'total negative slack', kind: 'line', manifestKey: 'tns' },
-  { id: 'drc', label: 'DRC', hint: 'violation count', kind: 'bar', manifestKey: 'drc_count' },
+  {
+    id: 'tns',
+    label: 'TNS',
+    hint: 'total negative slack',
+    kind: 'line',
+    manifestKey: 'tns',
+  },
+  {
+    id: 'drc',
+    label: 'DRC',
+    hint: 'violation count',
+    kind: 'bar',
+    manifestKey: 'drc_count',
+  },
   { id: 'area', label: 'Area', hint: 'cell area', kind: 'bar', manifestKey: 'area' },
-  { id: 'runtime', label: 'Runtime', hint: 'total runtime', kind: 'bar', manifestKey: 'runtime_sec' },
-  { id: 'die_area', label: 'Die Area', hint: 'die area from parameters', kind: 'bar', manifestKey: 'die_area' },
-  { id: 'core_util', label: 'Core Util', hint: 'core utilization from parameters', kind: 'bar', manifestKey: 'core_util' },
-  { id: 'frequency', label: 'Frequency [MHz]', hint: 'worst frequency across STA corners', kind: 'bar', manifestKey: 'frequency_mhz' },
+  {
+    id: 'runtime',
+    label: 'Runtime',
+    hint: 'total runtime',
+    kind: 'bar',
+    manifestKey: 'runtime_sec',
+  },
+  {
+    id: 'die_area',
+    label: 'Die Area',
+    hint: 'die area from parameters',
+    kind: 'bar',
+    manifestKey: 'die_area',
+  },
+  {
+    id: 'core_util',
+    label: 'Core Util',
+    hint: 'core utilization from parameters',
+    kind: 'bar',
+    manifestKey: 'core_util',
+  },
+  {
+    id: 'frequency',
+    label: 'Frequency [MHz]',
+    hint: 'worst frequency across STA corners',
+    kind: 'bar',
+    manifestKey: 'frequency_mhz',
+  },
 ]
 
 export function buildProjectManagementProject(
@@ -422,15 +485,24 @@ export function buildProjectManagementProject(
     ? buildEffectiveWorkspaceMetrics(manifest.workspaces, workspaceAnalysisInputs)
     : []
   const lineageItems = sortWorkspacesByLineage(effectiveWorkspaces)
-  const sortedEffectiveWorkspaces = lineageItems.map(item => item.workspace)
+  const sortedEffectiveWorkspaces = lineageItems.map((item) => item.workspace)
   const workspaces = lineageItems.map(({ workspace, depth }) =>
-    buildProjectWorkspace(workspace, workspaceFlowStates[workspace.workspace_id] ?? {}, depth),
+    buildProjectWorkspace(
+      workspace,
+      workspaceFlowStates[workspace.workspace_id] ?? {},
+      depth,
+    ),
   )
   const comparisonSummary = manifest
     ? buildComparisonSummary({ ...manifest, workspaces: sortedEffectiveWorkspaces })
     : emptyComparisonSummary()
   const workspaceSummaries = manifest
-    ? buildWorkspaceSummaries(sortedEffectiveWorkspaces, workspaces, workspaceAnalysisInputs, comparisonSummary)
+    ? buildWorkspaceSummaries(
+        sortedEffectiveWorkspaces,
+        workspaces,
+        workspaceAnalysisInputs,
+        comparisonSummary,
+      )
     : []
 
   return {
@@ -444,21 +516,31 @@ export function buildProjectManagementProject(
     workspaces,
     metricsRows: manifest ? buildMetricRows(sortedEffectiveWorkspaces) : [],
     workspaceSummaries,
-    stepCompareSummaries: manifest ? buildStepCompareSummaries(sortedEffectiveWorkspaces, workspaces, workspaceSummaries) : [],
+    stepCompareSummaries: manifest
+      ? buildStepCompareSummaries(
+          sortedEffectiveWorkspaces,
+          workspaces,
+          workspaceSummaries,
+        )
+      : [],
     dashboardSummary: buildProjectDashboardSummary(workspaces, workspaceSummaries),
     branchLinks: manifest ? buildBranchLinks(sortedEffectiveWorkspaces) : [],
     comparisonSummary,
   }
 }
 
-export function createSelectionState(project: ProjectManagementProject): ProjectSelectionState {
+export function createSelectionState(
+  project: ProjectManagementProject,
+): ProjectSelectionState {
   return {
     selectedWorkspaceId: project.bestWorkspaceId || project.workspaces[0]?.id || '',
     selectedStep: 'DRC',
   }
 }
 
-export function createProjectManifestDraft(input: ProjectManifestDraftInput): ProjectManifest {
+export function createProjectManifestDraft(
+  input: ProjectManifestDraftInput,
+): ProjectManifest {
   const now = input.now ?? new Date().toISOString()
   return {
     schema_version: 1,
@@ -499,8 +581,12 @@ export function parseProjectManifest(content: string): ProjectManifest {
   return parsed
 }
 
-export function parseWorkspaceFlowStateMap(content: string): ProjectWorkspaceFlowStateMap {
-  const parsed = JSON.parse(content) as { steps?: Array<{ name?: unknown; state?: unknown }> }
+export function parseWorkspaceFlowStateMap(
+  content: string,
+): ProjectWorkspaceFlowStateMap {
+  const parsed = JSON.parse(content) as {
+    steps?: Array<{ name?: unknown; state?: unknown }>
+  }
   if (!Array.isArray(parsed.steps)) return {}
 
   return parsed.steps.reduce<ProjectWorkspaceFlowStateMap>((stateMap, step) => {
@@ -515,7 +601,7 @@ export function parseWorkspaceFlowStateMap(content: string): ProjectWorkspaceFlo
 
 export function nextWorkspaceId(project: ProjectManagementProject): string {
   const numbers = project.workspaces
-    .map(workspace => Number(workspace.id.replace(/^ws_/, '')))
+    .map((workspace) => Number(workspace.id.replace(/^ws_/, '')))
     .filter(Number.isFinite)
   const next = Math.max(0, ...numbers) + 1
   return `ws_${String(next).padStart(4, '0')}`
@@ -527,18 +613,26 @@ export function createWorkspaceBranchDraft(
   step: FlowStep,
 ): WorkspaceBranchDraft {
   const targetWorkspaceId = nextWorkspaceId(project)
-  const sourceWorkspace = project.workspaces.find(workspace => workspace.id === sourceWorkspaceId)
+  const sourceWorkspace = project.workspaces.find(
+    (workspace) => workspace.id === sourceWorkspaceId,
+  )
   const sourceOutputType = step === 'Synth' ? 'verilog' : 'def'
-  const sourceWorkspacePath = sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
+  const sourceWorkspacePath =
+    sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
   const designName = projectArtifactDesignName(project)
   const sourceOutputPath = sourceStepOutputPath(sourceWorkspacePath, step, designName)
   const originSdc = sourceWorkspaceSdcPath(sourceWorkspacePath, designName)
-  const artifactOrigin = sourceOutputType === 'verilog'
-    ? { originVerilog: sourceOutputPath }
-    : {
-        originDef: sourceOutputPath,
-        originVerilog: sourceStepOutputVerilogPath(sourceWorkspacePath, step, designName),
-      }
+  const artifactOrigin =
+    sourceOutputType === 'verilog'
+      ? { originVerilog: sourceOutputPath }
+      : {
+          originDef: sourceOutputPath,
+          originVerilog: sourceStepOutputVerilogPath(
+            sourceWorkspacePath,
+            step,
+            designName,
+          ),
+        }
 
   return {
     sourceWorkspaceId,
@@ -562,19 +656,27 @@ export function registerWorkspaceInManifest(
   const now = input.now ?? new Date().toISOString()
   const workspacePath = normalizePath(input.workspacePath)
   const workspaceId = basenamePath(workspacePath) || nextManifestWorkspaceId(manifest)
-  const existingWorkspace = manifest.workspaces.find(workspace =>
-    workspace.workspace_id === workspaceId || normalizePath(workspace.workspace_path) === workspacePath,
+  const existingWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id === workspaceId ||
+      normalizePath(workspace.workspace_path) === workspacePath,
   )
   const sourceStep = input.sourceStep ? normalizeFlowStep(input.sourceStep) : null
-  const sourceWorkspaceId = input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
-  const branchFrom = sourceWorkspaceId && sourceStep
-    ? {
-        source_workspace_id: sourceWorkspaceId,
-        source_step: sourceStep,
-        source_output_type: input.sourceOutputType || existingWorkspace?.branch_from?.source_output_type || defaultSourceOutputType(sourceStep),
-        source_output_path: input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
-      }
-    : existingWorkspace?.branch_from ?? null
+  const sourceWorkspaceId =
+    input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
+  const branchFrom =
+    sourceWorkspaceId && sourceStep
+      ? {
+          source_workspace_id: sourceWorkspaceId,
+          source_step: sourceStep,
+          source_output_type:
+            input.sourceOutputType ||
+            existingWorkspace?.branch_from?.source_output_type ||
+            defaultSourceOutputType(sourceStep),
+          source_output_path:
+            input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
+        }
+      : (existingWorkspace?.branch_from ?? null)
   const startStep = input.startStep
     ? normalizeFlowStep(input.startStep)
     : sourceStep
@@ -583,15 +685,19 @@ export function registerWorkspaceInManifest(
   const endStep = input.endStep
     ? normalizeFlowStep(input.endStep)
     : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
-  const workspaceName = optionalString(input.config?.parameters?.design)
-    || existingWorkspace?.name
-    || workspaceId
+  const workspaceName =
+    optionalString(input.config?.parameters?.design) ||
+    existingWorkspace?.name ||
+    workspaceId
   const parameterPatch = input.config?.parameters
     ? {
-        ...(existingWorkspace?.parameter_patch ?? {}),
-        ...buildParameterPatch(manifest.base_design.parameters ?? {}, input.config.parameters),
+        ...existingWorkspace?.parameter_patch,
+        ...buildParameterPatch(
+          manifest.base_design.parameters ?? {},
+          input.config.parameters,
+        ),
       }
-    : existingWorkspace?.parameter_patch ?? {}
+    : (existingWorkspace?.parameter_patch ?? {})
 
   const workspace: ProjectWorkspaceManifest = {
     workspace_id: workspaceId,
@@ -610,7 +716,7 @@ export function registerWorkspaceInManifest(
   }
 
   const workspaces = existingWorkspace
-    ? manifest.workspaces.map(item =>
+    ? manifest.workspaces.map((item) =>
         item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
       )
     : [...manifest.workspaces, workspace]
@@ -633,8 +739,11 @@ export function archiveWorkspaceInManifest(
   return {
     ...manifest,
     updated_at: now,
-    best_workspace: manifest.best_workspace?.workspace_id === workspaceId ? null : manifest.best_workspace,
-    workspaces: manifest.workspaces.map(workspace =>
+    best_workspace:
+      manifest.best_workspace?.workspace_id === workspaceId
+        ? null
+        : manifest.best_workspace,
+    workspaces: manifest.workspaces.map((workspace) =>
       workspace.workspace_id === workspaceId
         ? {
             ...workspace,
@@ -654,26 +763,42 @@ export function deleteWorkspaceFromManifest(
   return {
     ...manifest,
     updated_at: now,
-    best_workspace: manifest.best_workspace?.workspace_id === workspaceId ? null : manifest.best_workspace,
+    best_workspace:
+      manifest.best_workspace?.workspace_id === workspaceId
+        ? null
+        : manifest.best_workspace,
     workspaces: manifest.workspaces
-      .filter(workspace => workspace.workspace_id !== workspaceId)
-      .map(workspace => {
-        const clearsSource = workspace.source_workspace_id === workspaceId || workspace.branch_from?.source_workspace_id === workspaceId
+      .filter((workspace) => workspace.workspace_id !== workspaceId)
+      .map((workspace) => {
+        const clearsSource =
+          workspace.source_workspace_id === workspaceId ||
+          workspace.branch_from?.source_workspace_id === workspaceId
         if (!clearsSource) return workspace
 
         return {
           ...workspace,
-          source_workspace_id: workspace.source_workspace_id === workspaceId ? null : workspace.source_workspace_id,
-          branch_from: workspace.branch_from?.source_workspace_id === workspaceId ? null : workspace.branch_from,
+          source_workspace_id:
+            workspace.source_workspace_id === workspaceId
+              ? null
+              : workspace.source_workspace_id,
+          branch_from:
+            workspace.branch_from?.source_workspace_id === workspaceId
+              ? null
+              : workspace.branch_from,
           updated_at: now,
         }
       }),
   }
 }
 
-function buildObjective(project?: Project | null, manifest?: ProjectManifest | null): string {
+function buildObjective(
+  project?: Project | null,
+  manifest?: ProjectManifest | null,
+): string {
   if (manifest?.objectives.primary) return `${manifest.objectives.primary} objective`
-  return project?.frequencyTarget ? `timing · ${project.frequencyTarget}MHz` : 'No project data'
+  return project?.frequencyTarget
+    ? `timing · ${project.frequencyTarget}MHz`
+    : 'No project data'
 }
 
 function buildProjectWorkspace(
@@ -683,9 +808,13 @@ function buildProjectWorkspace(
 ): ProjectWorkspace {
   const startStep = normalizeFlowStep(workspace.start_step)
   const endStep = normalizeFlowStep(workspace.end_step)
-  const branchStep = workspace.branch_from ? normalizeFlowStep(workspace.branch_from.source_step) : null
+  const branchStep = workspace.branch_from
+    ? normalizeFlowStep(workspace.branch_from.source_step)
+    : null
 
-  const steps = FLOW_STEPS.map(step => buildStepCell(workspace, step, startStep, endStep, branchStep, flowStateMap))
+  const steps = FLOW_STEPS.map((step) =>
+    buildStepCell(workspace, step, startStep, endStep, branchStep, flowStateMap),
+  )
 
   return {
     id: workspace.workspace_id,
@@ -709,12 +838,13 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
   workspace: ProjectWorkspaceManifest
   depth: number
 }> {
-  const byId = new Map(workspaces.map(workspace => [workspace.workspace_id, workspace]))
+  const byId = new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace]))
   const childrenBySource = new Map<string, ProjectWorkspaceManifest[]>()
   const roots: ProjectWorkspaceManifest[] = []
 
   for (const workspace of workspaces) {
-    const sourceWorkspaceId = workspace.branch_from?.source_workspace_id ?? workspace.source_workspace_id
+    const sourceWorkspaceId =
+      workspace.branch_from?.source_workspace_id ?? workspace.source_workspace_id
     if (sourceWorkspaceId && byId.has(sourceWorkspaceId)) {
       const children = childrenBySource.get(sourceWorkspaceId) ?? []
       children.push(workspace)
@@ -724,9 +854,12 @@ function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<
     }
   }
 
-  const sortByCreatedAt = (left: ProjectWorkspaceManifest, right: ProjectWorkspaceManifest) =>
-    new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
-      || left.workspace_id.localeCompare(right.workspace_id)
+  const sortByCreatedAt = (
+    left: ProjectWorkspaceManifest,
+    right: ProjectWorkspaceManifest,
+  ) =>
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
+    left.workspace_id.localeCompare(right.workspace_id)
 
   roots.sort(sortByCreatedAt)
   for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
@@ -757,11 +890,11 @@ function buildFlowStatusHint(
 ): ProjectFlowStatusHint {
   const startIndex = FLOW_STEPS.indexOf(startStep)
   const endIndex = FLOW_STEPS.indexOf(endStep)
-  const configuredSteps = steps.filter(cell => {
+  const configuredSteps = steps.filter((cell) => {
     const stepIndex = FLOW_STEPS.indexOf(cell.step)
     return stepIndex >= startIndex && stepIndex <= endIndex
   })
-  const firstIncomplete = configuredSteps.find(cell => cell.status !== 'success')
+  const firstIncomplete = configuredSteps.find((cell) => cell.status !== 'success')
   if (!firstIncomplete) {
     return {
       state: 'success',
@@ -811,9 +944,10 @@ function buildStepCell(
   } else if (workspace.status === 'archived') {
     status = 'skipped'
   } else if (isBeforeStart) {
-    status = workspace.branch_from && branchStep && stepIndex <= FLOW_STEPS.indexOf(branchStep)
-      ? 'reused'
-      : 'skipped'
+    status =
+      workspace.branch_from && branchStep && stepIndex <= FLOW_STEPS.indexOf(branchStep)
+        ? 'reused'
+        : 'skipped'
   } else if (isAfterEnd) {
     status = 'skipped'
   } else if (workspace.status === 'running') {
@@ -838,22 +972,29 @@ function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | nul
   const normalized = optionalString(state).toLowerCase()
   if (!normalized) return null
 
-  if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized)) return 'success'
+  if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
+    return 'success'
   if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
-  if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized)) return 'failed'
-  if (['unstart', 'unstarted', 'not_started', 'not started', 'pending', 'created'].includes(normalized)) return 'unstart'
+  if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized))
+    return 'failed'
+  if (
+    ['unstart', 'unstarted', 'not_started', 'not started', 'pending', 'created'].includes(
+      normalized,
+    )
+  )
+    return 'unstart'
   return null
 }
 
 function buildMetricRows(workspaces: ProjectWorkspaceManifest[]): ProjectMetricRow[] {
   if (workspaces.length === 0) return []
 
-  return METRIC_DEFINITIONS.map(definition => ({
+  return METRIC_DEFINITIONS.map((definition) => ({
     id: definition.id,
     label: definition.label,
     hint: definition.hint,
     kind: definition.kind,
-    points: workspaces.map(workspace => {
+    points: workspaces.map((workspace) => {
       const value = asNumber(workspace.metrics_summary[definition.manifestKey])
       return {
         workspaceId: workspace.workspace_id,
@@ -866,14 +1007,16 @@ function buildMetricRows(workspaces: ProjectWorkspaceManifest[]): ProjectMetricR
 }
 
 function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranchLink[] {
-  return workspaces.flatMap(workspace => {
+  return workspaces.flatMap((workspace) => {
     if (!workspace.branch_from) return []
-    return [{
-      fromWorkspaceId: workspace.branch_from.source_workspace_id,
-      fromStep: normalizeFlowStep(workspace.branch_from.source_step),
-      toWorkspaceId: workspace.workspace_id,
-      toStep: normalizeFlowStep(workspace.start_step),
-    }]
+    return [
+      {
+        fromWorkspaceId: workspace.branch_from.source_workspace_id,
+        fromStep: normalizeFlowStep(workspace.branch_from.source_step),
+        toWorkspaceId: workspace.workspace_id,
+        toStep: normalizeFlowStep(workspace.start_step),
+      },
+    ]
   })
 }
 
@@ -881,8 +1024,10 @@ function buildEffectiveWorkspaceMetrics(
   workspaces: ProjectWorkspaceManifest[],
   workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById,
 ): ProjectWorkspaceManifest[] {
-  return workspaces.map(workspace => {
-    const extracted = extractMetricSummary(workspaceAnalysisInputs[workspace.workspace_id])
+  return workspaces.map((workspace) => {
+    const extracted = extractMetricSummary(
+      workspaceAnalysisInputs[workspace.workspace_id],
+    )
     return {
       ...workspace,
       metrics_summary: {
@@ -899,18 +1044,53 @@ function buildWorkspaceSummaries(
   workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById,
   comparisonSummary: ProjectComparisonSummary,
 ): ProjectWorkspaceSummary[] {
-  return manifestWorkspaces.map(workspace => {
-    const projectWorkspace = workspaces.find(item => item.id === workspace.workspace_id)
+  return manifestWorkspaces.map((workspace) => {
+    const projectWorkspace = workspaces.find((item) => item.id === workspace.workspace_id)
     const workspaceAnalysisInput = workspaceAnalysisInputs[workspace.workspace_id]
     const extracted = extractAnalysisSummary(workspaceAnalysisInput)
     const flowMetrics = extractFlowMetrics(workspaceAnalysisInput)
     const metrics = {
       ...extracted.metrics,
-      area: extracted.metrics.area ?? metricFromNumber('area', 'Area', asNumber(workspace.metrics_summary.area), metricState('area', asNumber(workspace.metrics_summary.area))),
-      drcCount: extracted.metrics.drcCount ?? metricFromNumber('drc', 'DRC', asNumber(workspace.metrics_summary.drc_count), metricState('drc', asNumber(workspace.metrics_summary.drc_count))),
-      setupWns: extracted.metrics.setupWns ?? metricFromNumber('setup_wns', 'Setup WNS', asNumber(workspace.metrics_summary.wns), metricState('wns', asNumber(workspace.metrics_summary.wns))),
-      setupTns: extracted.metrics.setupTns ?? metricFromNumber('setup_tns', 'Setup TNS', asNumber(workspace.metrics_summary.tns), metricState('tns', asNumber(workspace.metrics_summary.tns))),
-      frequency: extracted.metrics.frequency ?? metricFromNumber('frequency', 'Frequency [MHz]', asNumber(workspace.metrics_summary.frequency_mhz), metricState('frequency', asNumber(workspace.metrics_summary.frequency_mhz))),
+      area:
+        extracted.metrics.area ??
+        metricFromNumber(
+          'area',
+          'Area',
+          asNumber(workspace.metrics_summary.area),
+          metricState('area', asNumber(workspace.metrics_summary.area)),
+        ),
+      drcCount:
+        extracted.metrics.drcCount ??
+        metricFromNumber(
+          'drc',
+          'DRC',
+          asNumber(workspace.metrics_summary.drc_count),
+          metricState('drc', asNumber(workspace.metrics_summary.drc_count)),
+        ),
+      setupWns:
+        extracted.metrics.setupWns ??
+        metricFromNumber(
+          'setup_wns',
+          'Setup WNS',
+          asNumber(workspace.metrics_summary.wns),
+          metricState('wns', asNumber(workspace.metrics_summary.wns)),
+        ),
+      setupTns:
+        extracted.metrics.setupTns ??
+        metricFromNumber(
+          'setup_tns',
+          'Setup TNS',
+          asNumber(workspace.metrics_summary.tns),
+          metricState('tns', asNumber(workspace.metrics_summary.tns)),
+        ),
+      frequency:
+        extracted.metrics.frequency ??
+        metricFromNumber(
+          'frequency',
+          'Frequency [MHz]',
+          asNumber(workspace.metrics_summary.frequency_mhz),
+          metricState('frequency', asNumber(workspace.metrics_summary.frequency_mhz)),
+        ),
     }
 
     return {
@@ -919,12 +1099,15 @@ function buildWorkspaceSummaries(
       workspacePath: workspace.workspace_path,
       finalMetrics: metrics,
       flowMetrics,
-      steps: FLOW_STEPS.map(step => {
-        const status = projectWorkspace?.steps.find(cell => cell.step === step)?.status ?? 'skipped'
+      steps: FLOW_STEPS.map((step) => {
+        const status =
+          projectWorkspace?.steps.find((cell) => cell.step === step)?.status ?? 'skipped'
         return buildStepSummary(step, status, extracted)
       }),
-      deltaSummaries: comparisonSummary.metricDiffs.filter(diff =>
-        diff.fromWorkspaceId === workspace.workspace_id || diff.toWorkspaceId === workspace.workspace_id,
+      deltaSummaries: comparisonSummary.metricDiffs.filter(
+        (diff) =>
+          diff.fromWorkspaceId === workspace.workspace_id ||
+          diff.toWorkspaceId === workspace.workspace_id,
       ),
     }
   })
@@ -950,14 +1133,16 @@ function buildStepCompareSummaries(
   workspaces: ProjectWorkspace[],
   workspaceSummaries: ProjectWorkspaceSummary[],
 ): ProjectStepCompareSummary[] {
-  return FLOW_STEPS.map(step => {
+  return FLOW_STEPS.map((step) => {
     const definitions = stepMetricDefinitions(step, workspaceSummaries)
-    const metrics = definitions.map(definition => ({
+    const metrics = definitions.map((definition) => ({
       id: definition.id,
       label: definition.label,
       hint: definition.hint,
-      points: manifestWorkspaces.map(workspace => {
-        const summary = workspaceSummaries.find(item => item.workspaceId === workspace.workspace_id)
+      points: manifestWorkspaces.map((workspace) => {
+        const summary = workspaceSummaries.find(
+          (item) => item.workspaceId === workspace.workspace_id,
+        )
         const metric = stepMetricFromSummary(summary, step, definition.id)
         const value = metric?.value ?? null
         return {
@@ -972,20 +1157,24 @@ function buildStepCompareSummaries(
       id: 'none',
       label: 'metric',
       hint: 'No metric available',
-      points: manifestWorkspaces.map(workspace => ({
+      points: manifestWorkspaces.map((workspace) => ({
         workspaceId: workspace.workspace_id,
         label: 'N/A',
         value: null,
         state: 'pending' as const,
       })),
     }
-    const configuredCount = workspaces.filter(workspace =>
-      workspace.steps.find(cell => cell.step === step)?.status !== 'skipped',
+    const configuredCount = workspaces.filter(
+      (workspace) =>
+        workspace.steps.find((cell) => cell.step === step)?.status !== 'skipped',
     ).length
-    const successCount = workspaces.filter(workspace =>
-      workspace.steps.find(cell => cell.step === step)?.status === 'success',
+    const successCount = workspaces.filter(
+      (workspace) =>
+        workspace.steps.find((cell) => cell.step === step)?.status === 'success',
     ).length
-    const missingCount = primaryMetric.points.filter(point => point.value === null).length
+    const missingCount = primaryMetric.points.filter(
+      (point) => point.value === null,
+    ).length
 
     return {
       step,
@@ -1005,39 +1194,55 @@ function buildProjectDashboardSummary(
   workspaces: ProjectWorkspace[],
   workspaceSummaries: ProjectWorkspaceSummary[],
 ): ProjectDashboardSummary {
-  const configuredCells = workspaces.flatMap(workspace =>
-    workspace.steps.filter(cell => cell.status !== 'skipped'),
+  const configuredCells = workspaces.flatMap((workspace) =>
+    workspace.steps.filter((cell) => cell.status !== 'skipped'),
   )
-  const successStepCount = configuredCells.filter(cell =>
-    cell.status === 'success' || cell.status === 'reused',
+  const successStepCount = configuredCells.filter(
+    (cell) => cell.status === 'success' || cell.status === 'reused',
   ).length
-  const failedStepCount = configuredCells.filter(cell => cell.status === 'failed').length
-  const runningStepCount = configuredCells.filter(cell => cell.status === 'running').length
+  const failedStepCount = configuredCells.filter(
+    (cell) => cell.status === 'failed',
+  ).length
+  const runningStepCount = configuredCells.filter(
+    (cell) => cell.status === 'running',
+  ).length
   const configuredStepCount = configuredCells.length
-  const flowSuccessRatio = configuredStepCount === 0
-    ? 0
-    : Math.round((successStepCount / configuredStepCount) * 100)
-  const drcCleanCount = workspaceSummaries.filter(summary =>
-    summary.finalMetrics.drcCount?.value === 0,
+  const flowSuccessRatio =
+    configuredStepCount === 0
+      ? 0
+      : Math.round((successStepCount / configuredStepCount) * 100)
+  const drcCleanCount = workspaceSummaries.filter(
+    (summary) => summary.finalMetrics.drcCount?.value === 0,
   ).length
-  const timingCleanCount = workspaceSummaries.filter(summary => {
+  const timingCleanCount = workspaceSummaries.filter((summary) => {
     const setupWns = summary.finalMetrics.setupWns?.value
     const setupTns = summary.finalMetrics.setupTns?.value
-    return setupWns !== undefined && setupWns !== null && setupWns >= 0
-      && (setupTns === undefined || setupTns === null || setupTns >= 0)
+    return (
+      setupWns !== undefined &&
+      setupWns !== null &&
+      setupWns >= 0 &&
+      (setupTns === undefined || setupTns === null || setupTns >= 0)
+    )
   }).length
-  const signoffReadyCount = workspaceSummaries.filter(summary => {
+  const signoffReadyCount = workspaceSummaries.filter((summary) => {
     const drc = summary.finalMetrics.drcCount?.value
     const setupWns = summary.finalMetrics.setupWns?.value
     const setupTns = summary.finalMetrics.setupTns?.value
-    return drc === 0
-      && setupWns !== undefined && setupWns !== null && setupWns >= 0
-      && (setupTns === undefined || setupTns === null || setupTns >= 0)
+    return (
+      drc === 0 &&
+      setupWns !== undefined &&
+      setupWns !== null &&
+      setupWns >= 0 &&
+      (setupTns === undefined || setupTns === null || setupTns >= 0)
+    )
   }).length
   const blockingCounts = new Map<FlowStep, number>()
   for (const workspace of workspaces) {
-    const blockedStep = workspace.steps.find(cell =>
-      cell.status === 'failed' || cell.status === 'running' || cell.status === 'unstart',
+    const blockedStep = workspace.steps.find(
+      (cell) =>
+        cell.status === 'failed' ||
+        cell.status === 'running' ||
+        cell.status === 'unstart',
     )
     if (!blockedStep) continue
     blockingCounts.set(blockedStep.step, (blockingCounts.get(blockedStep.step) ?? 0) + 1)
@@ -1058,7 +1263,11 @@ function buildProjectDashboardSummary(
     runStateSlices,
     flowMetricSummary,
     topBlockingSteps: [...blockingCounts.entries()]
-      .sort((left, right) => right[1] - left[1] || FLOW_STEPS.indexOf(left[0]) - FLOW_STEPS.indexOf(right[0]))
+      .sort(
+        (left, right) =>
+          right[1] - left[1] ||
+          FLOW_STEPS.indexOf(left[0]) - FLOW_STEPS.indexOf(right[0]),
+      )
       .slice(0, 3)
       .map(([step, count]) => ({ step, count })),
   }
@@ -1079,39 +1288,53 @@ function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSli
     return map
   }, new Map<ProjectFlowStatusHint['state'], number>())
 
-  return (['success', 'failed', 'running', 'unstart', 'skipped'] satisfies ProjectFlowStatusHint['state'][])
-    .flatMap(state => {
-      const count = counts.get(state) ?? 0
-      if (count === 0) return []
-      return [{
+  return (
+    [
+      'success',
+      'failed',
+      'running',
+      'unstart',
+      'skipped',
+    ] satisfies ProjectFlowStatusHint['state'][]
+  ).flatMap((state) => {
+    const count = counts.get(state) ?? 0
+    if (count === 0) return []
+    return [
+      {
         state,
         label: labels[state],
         count,
         percent: total === 0 ? 0 : Math.round((count / total) * 100),
-      }]
-    })
+      },
+    ]
+  })
 }
 
-function buildFlowMetricSummary(workspaceSummaries: ProjectWorkspaceSummary[]): ProjectFlowMetricSummary {
+function buildFlowMetricSummary(
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): ProjectFlowMetricSummary {
   const empty = emptyFlowMetrics()
-  const totals = workspaceSummaries.reduce((summary, workspace) => ({
-    totalRuntimeSec: summary.totalRuntimeSec + workspace.flowMetrics.totalRuntimeSec,
-    peakMemoryMb: Math.max(summary.peakMemoryMb, workspace.flowMetrics.peakMemoryMb),
-    checklistPassed: summary.checklistPassed + workspace.flowMetrics.checklistPassed,
-    checklistFailed: summary.checklistFailed + workspace.flowMetrics.checklistFailed,
-    checklistWarning: summary.checklistWarning + workspace.flowMetrics.checklistWarning,
-    checklistTotal: summary.checklistTotal + workspace.flowMetrics.checklistTotal,
-  }), empty)
+  const totals = workspaceSummaries.reduce(
+    (summary, workspace) => ({
+      totalRuntimeSec: summary.totalRuntimeSec + workspace.flowMetrics.totalRuntimeSec,
+      peakMemoryMb: Math.max(summary.peakMemoryMb, workspace.flowMetrics.peakMemoryMb),
+      checklistPassed: summary.checklistPassed + workspace.flowMetrics.checklistPassed,
+      checklistFailed: summary.checklistFailed + workspace.flowMetrics.checklistFailed,
+      checklistWarning: summary.checklistWarning + workspace.flowMetrics.checklistWarning,
+      checklistTotal: summary.checklistTotal + workspace.flowMetrics.checklistTotal,
+    }),
+    empty,
+  )
 
   return {
     ...totals,
-    runtimePoints: workspaceSummaries.map(summary => ({
+    runtimePoints: workspaceSummaries.map((summary) => ({
       workspaceId: summary.workspaceId,
       label: formatRuntimeLabel(summary.flowMetrics.totalRuntimeSec),
       value: summary.flowMetrics.totalRuntimeSec,
       state: summary.flowMetrics.totalRuntimeSec > 0 ? 'good' : 'pending',
     })),
-    memoryPoints: workspaceSummaries.map(summary => ({
+    memoryPoints: workspaceSummaries.map((summary) => ({
       workspaceId: summary.workspaceId,
       label: `${formatMetricValue(summary.flowMetrics.peakMemoryMb)} MB`,
       value: summary.flowMetrics.peakMemoryMb,
@@ -1125,7 +1348,9 @@ interface ExtractedWorkspaceAnalysis {
   stepMetrics: Partial<Record<FlowStep, ProjectSummaryMetric[]>>
 }
 
-function extractMetricSummary(input?: ProjectWorkspaceAnalysisInput): ProjectMetricSummary {
+function extractMetricSummary(
+  input?: ProjectWorkspaceAnalysisInput,
+): ProjectMetricSummary {
   const extracted = extractAnalysisSummary(input)
   return compactMetricSummary({
     area: extracted.metrics.area?.value ?? undefined,
@@ -1138,10 +1363,14 @@ function extractMetricSummary(input?: ProjectWorkspaceAnalysisInput): ProjectMet
   })
 }
 
-function extractFlowMetrics(input?: ProjectWorkspaceAnalysisInput): ProjectWorkspaceFlowMetrics {
+function extractFlowMetrics(
+  input?: ProjectWorkspaceAnalysisInput,
+): ProjectWorkspaceFlowMetrics {
   const metrics = emptyFlowMetrics()
   const flow = parseJsonRecord(input?.flowText)
-  const steps = arrayAt(flow, 'steps').map(recordValue).filter((step): step is Record<string, unknown> => Boolean(step))
+  const steps = arrayAt(flow, 'steps')
+    .map(recordValue)
+    .filter((step): step is Record<string, unknown> => Boolean(step))
 
   for (const step of steps) {
     metrics.totalRuntimeSec += runtimeSeconds(step.runtime)
@@ -1178,7 +1407,9 @@ function emptyFlowMetrics(): ProjectWorkspaceFlowMetrics {
   }
 }
 
-function extractAnalysisSummary(input?: ProjectWorkspaceAnalysisInput): ExtractedWorkspaceAnalysis {
+function extractAnalysisSummary(
+  input?: ProjectWorkspaceAnalysisInput,
+): ExtractedWorkspaceAnalysis {
   const files = input?.files ?? {}
   const synthesis = parseJsonRecord(files.synthesisStat)
   const floorplanDb = parseJsonRecord(files.floorplanDb)
@@ -1195,20 +1426,67 @@ function extractAnalysisSummary(input?: ProjectWorkspaceAnalysisInput): Extracte
   const staLayout = extractDbLayout(staDb)
   const parameterLayout = extractParameterLayout(parameters)
   const area = synthesisArea ?? floorplanInstances.area ?? null
-  const dieArea = parameterLayout.dieArea ?? floorplanLayout.dieArea ?? staLayout.dieArea ?? null
-  const coreUtil = parameterLayout.coreUtil ?? floorplanLayout.coreUsage ?? staLayout.coreUsage ?? null
+  const dieArea =
+    parameterLayout.dieArea ?? floorplanLayout.dieArea ?? staLayout.dieArea ?? null
+  const coreUtil =
+    parameterLayout.coreUtil ?? floorplanLayout.coreUsage ?? staLayout.coreUsage ?? null
 
   return {
     metrics: {
-      drcCount: metricFromNumber('drc', 'DRC', numberAt(drc, 'number'), metricState('drc', numberAt(drc, 'number'))),
-      setupWns: metricFromNumber('setup_wns', 'Setup WNS', sta.setupWns, metricState('wns', sta.setupWns), sta.worstSetupCorner),
-      setupTns: metricFromNumber('setup_tns', 'Setup TNS', sta.setupTns, metricState('tns', sta.setupTns), sta.worstSetupCorner),
-      holdWns: metricFromNumber('hold_wns', 'Hold WNS', sta.holdWns, sta.holdWns === null ? 'pending' : sta.holdWns >= 0 ? 'good' : 'bad', sta.worstHoldCorner),
-      holdTns: metricFromNumber('hold_tns', 'Hold TNS', sta.holdTns, sta.holdTns === null ? 'pending' : sta.holdTns >= 0 ? 'good' : 'bad', sta.worstHoldCorner),
+      drcCount: metricFromNumber(
+        'drc',
+        'DRC',
+        numberAt(drc, 'number'),
+        metricState('drc', numberAt(drc, 'number')),
+      ),
+      setupWns: metricFromNumber(
+        'setup_wns',
+        'Setup WNS',
+        sta.setupWns,
+        metricState('wns', sta.setupWns),
+        sta.worstSetupCorner,
+      ),
+      setupTns: metricFromNumber(
+        'setup_tns',
+        'Setup TNS',
+        sta.setupTns,
+        metricState('tns', sta.setupTns),
+        sta.worstSetupCorner,
+      ),
+      holdWns: metricFromNumber(
+        'hold_wns',
+        'Hold WNS',
+        sta.holdWns,
+        sta.holdWns === null ? 'pending' : sta.holdWns >= 0 ? 'good' : 'bad',
+        sta.worstHoldCorner,
+      ),
+      holdTns: metricFromNumber(
+        'hold_tns',
+        'Hold TNS',
+        sta.holdTns,
+        sta.holdTns === null ? 'pending' : sta.holdTns >= 0 ? 'good' : 'bad',
+        sta.worstHoldCorner,
+      ),
       area: metricFromNumber('area', 'Area', area, metricState('area', area)),
-      dieArea: metricFromNumber('die_area', 'Die Area', dieArea, dieArea === null ? 'pending' : 'good'),
-      coreUtil: metricFromNumber('core_util', 'Core Util', coreUtil, coreUtil === null ? 'pending' : 'good'),
-      frequency: metricFromNumber('frequency', 'Frequency [MHz]', sta.worstFrequency, metricState('frequency', sta.worstFrequency), sta.worstFrequencyCorner),
+      dieArea: metricFromNumber(
+        'die_area',
+        'Die Area',
+        dieArea,
+        dieArea === null ? 'pending' : 'good',
+      ),
+      coreUtil: metricFromNumber(
+        'core_util',
+        'Core Util',
+        coreUtil,
+        coreUtil === null ? 'pending' : 'good',
+      ),
+      frequency: metricFromNumber(
+        'frequency',
+        'Frequency [MHz]',
+        sta.worstFrequency,
+        metricState('frequency', sta.worstFrequency),
+        sta.worstFrequencyCorner,
+      ),
     },
     stepMetrics: extractStepMetrics(input?.stepMetricTexts ?? {}),
   }
@@ -1244,21 +1522,25 @@ function extractStepMetrics(
   )
 }
 
-function stepMetricsFromRecord(record: Record<string, unknown> | null): ProjectSummaryMetric[] {
+function stepMetricsFromRecord(
+  record: Record<string, unknown> | null,
+): ProjectSummaryMetric[] {
   if (!record) return []
   return Object.entries(record).flatMap(([key, rawValue]) => {
     if (key.trim().toLowerCase() === 'tool') return []
     const value = flexibleNumber(rawValue)
     if (value === null) return []
     const id = metricIdFromAnalysisKey(key)
-    return [{
-      id,
-      label: metricLabelFromAnalysisKey(key),
-      value,
-      display: formatRawMetricValue(value),
-      state: compareMetricState(id, value),
-      hint: key,
-    }]
+    return [
+      {
+        id,
+        label: metricLabelFromAnalysisKey(key),
+        value,
+        display: formatRawMetricValue(value),
+        state: compareMetricState(id, value),
+        hint: key,
+      },
+    ]
   })
 }
 
@@ -1303,7 +1585,13 @@ function extractParameterLayout(parameters: Record<string, unknown> | null): {
   const core = recordAt(parameters, 'Core')
   return {
     dieArea: numberAtAny(die, ['Area', 'area', 'die_area']),
-    coreUtil: numberAtAny(core, ['Utilitization', 'Utilization', 'utilitization', 'utilization', 'core_usage']),
+    coreUtil: numberAtAny(core, [
+      'Utilitization',
+      'Utilization',
+      'utilitization',
+      'utilization',
+      'core_usage',
+    ]),
   }
 }
 
@@ -1317,9 +1605,10 @@ function runtimeSeconds(value: unknown): number {
     return Number.isFinite(seconds) ? seconds : 0
   }
 
-  const colonParts = normalized.split(':').map(part => Number(part.trim()))
+  const colonParts = normalized.split(':').map((part) => Number(part.trim()))
   if (colonParts.length > 1 && colonParts.every(Number.isFinite)) {
-    if (colonParts.length === 3) return colonParts[0] * 3600 + colonParts[1] * 60 + colonParts[2]
+    if (colonParts.length === 3)
+      return colonParts[0] * 3600 + colonParts[1] * 60 + colonParts[2]
     if (colonParts.length === 2) return colonParts[0] * 60 + colonParts[1]
   }
 
@@ -1327,17 +1616,23 @@ function runtimeSeconds(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
-function checklistItems(checklist: Record<string, unknown> | null): Record<string, unknown>[] {
+function checklistItems(
+  checklist: Record<string, unknown> | null,
+): Record<string, unknown>[] {
   if (!checklist) return []
   const rows = Array.isArray(checklist.checklist)
     ? checklist.checklist
     : Array.isArray(checklist.items)
       ? checklist.items
       : []
-  return rows.map(recordValue).filter((item): item is Record<string, unknown> => Boolean(item))
+  return rows
+    .map(recordValue)
+    .filter((item): item is Record<string, unknown> => Boolean(item))
 }
 
-function checklistStateBucket(item: Record<string, unknown>): 'passed' | 'failed' | 'warning' | null {
+function checklistStateBucket(
+  item: Record<string, unknown>,
+): 'passed' | 'failed' | 'warning' | null {
   const state = optionalString(
     item.status ?? item.state ?? item.result ?? item.level,
   ).toLowerCase()
@@ -1382,22 +1677,33 @@ function extractStaSummary(reports: ProjectStaReportInput[]): {
   return reports.reduce((summary, report) => {
     const parsed = parseJsonRecord(report.content)
     const reportFrequency = extractReportFrequency(parsed)
-    if (reportFrequency !== null && (summary.worstFrequency === null || reportFrequency < summary.worstFrequency)) {
+    if (
+      reportFrequency !== null &&
+      (summary.worstFrequency === null || reportFrequency < summary.worstFrequency)
+    ) {
       summary.worstFrequency = reportFrequency
       summary.worstFrequencyCorner = report.corner
     }
     const slackRows = arrayAt(parsed, 'slack')
-    slackRows.forEach(rowValue => {
+    slackRows.forEach((rowValue) => {
       const row = recordValue(rowValue)
       const delayType = optionalString(row?.delay_type).toLowerCase()
       const wns = flexibleNumber(row?.WNS)
       const tns = flexibleNumber(row?.TNS)
-      if (delayType === 'max' && wns !== null && (summary.setupWns === null || wns < summary.setupWns)) {
+      if (
+        delayType === 'max' &&
+        wns !== null &&
+        (summary.setupWns === null || wns < summary.setupWns)
+      ) {
         summary.setupWns = wns
         summary.setupTns = tns
         summary.worstSetupCorner = report.corner
       }
-      if (delayType === 'min' && wns !== null && (summary.holdWns === null || wns < summary.holdWns)) {
+      if (
+        delayType === 'min' &&
+        wns !== null &&
+        (summary.holdWns === null || wns < summary.holdWns)
+      ) {
         summary.holdWns = wns
         summary.holdTns = tns
         summary.worstHoldCorner = report.corner
@@ -1415,7 +1721,7 @@ function extractReportFrequency(report: Record<string, unknown> | null): number 
 
   if (!Array.isArray(summaryValue)) return null
   const values = summaryValue
-    .map(rowValue => flexibleNumber(recordValue(rowValue)?.freq))
+    .map((rowValue) => flexibleNumber(recordValue(rowValue)?.freq))
     .filter((value): value is number => value !== null)
   return values.length > 0 ? Math.min(...values) : null
 }
@@ -1432,7 +1738,7 @@ function stepMetricDefinitions(
 ): StepCompareDefinition[] {
   const definitions = new Map<string, StepCompareDefinition>()
   for (const summary of workspaceSummaries) {
-    const stepSummary = summary.steps.find(item => item.step === step)
+    const stepSummary = summary.steps.find((item) => item.step === step)
     for (const metric of stepSummary?.metrics ?? []) {
       if (definitions.has(metric.id)) continue
       definitions.set(metric.id, {
@@ -1450,12 +1756,15 @@ function stepMetricFromSummary(
   step: FlowStep,
   metricId: string,
 ): ProjectSummaryMetric | undefined {
-  return summary
-    ?.steps.find(item => item.step === step)
-    ?.metrics.find(metric => metric.id === metricId)
+  return summary?.steps
+    .find((item) => item.step === step)
+    ?.metrics.find((metric) => metric.id === metricId)
 }
 
-function compareMetricState(metricId: string, value: number | null): ProjectMetricPoint['state'] {
+function compareMetricState(
+  metricId: string,
+  value: number | null,
+): ProjectMetricPoint['state'] {
   if (value === null) return 'pending'
   const normalized = metricId.toLowerCase()
   if (normalized.includes('drc') || normalized.includes('violation')) {
@@ -1463,7 +1772,8 @@ function compareMetricState(metricId: string, value: number | null): ProjectMetr
     if (value <= 3) return 'warn'
     return 'bad'
   }
-  if (normalized.includes('wns') || normalized.includes('slack')) return value >= 0 ? 'good' : 'bad'
+  if (normalized.includes('wns') || normalized.includes('slack'))
+    return value >= 0 ? 'good' : 'bad'
   return 'good'
 }
 
@@ -1496,9 +1806,13 @@ function emptyComparisonSummary(): ProjectComparisonSummary {
 }
 
 function buildComparisonSummary(manifest: ProjectManifest): ProjectComparisonSummary {
-  const activeWorkspaces = manifest.workspaces.filter(workspace => workspace.status !== 'archived')
+  const activeWorkspaces = manifest.workspaces.filter(
+    (workspace) => workspace.status !== 'archived',
+  )
   const explicitBest = manifest.best_workspace
-    ? activeWorkspaces.find(workspace => workspace.workspace_id === manifest.best_workspace?.workspace_id)
+    ? activeWorkspaces.find(
+        (workspace) => workspace.workspace_id === manifest.best_workspace?.workspace_id,
+      )
     : null
   const bestWorkspace = explicitBest ?? chooseBestWorkspace(activeWorkspaces)
   const baselineWorkspace = activeWorkspaces[0] ?? null
@@ -1506,7 +1820,7 @@ function buildComparisonSummary(manifest: ProjectManifest): ProjectComparisonSum
   return {
     bestWorkspaceId: bestWorkspace?.workspace_id ?? '',
     bestReason: explicitBest
-      ? manifest.best_workspace?.reason ?? ''
+      ? (manifest.best_workspace?.reason ?? '')
       : bestWorkspace
         ? `Selected by ${manifest.objectives.primary || 'project'} objective`
         : '',
@@ -1516,9 +1830,13 @@ function buildComparisonSummary(manifest: ProjectManifest): ProjectComparisonSum
   }
 }
 
-function chooseBestWorkspace(workspaces: ProjectWorkspaceManifest[]): ProjectWorkspaceManifest | null {
+function chooseBestWorkspace(
+  workspaces: ProjectWorkspaceManifest[],
+): ProjectWorkspaceManifest | null {
   if (workspaces.length === 0) return null
-  return [...workspaces].sort((left, right) => workspaceScore(right) - workspaceScore(left))[0]
+  return [...workspaces].sort(
+    (left, right) => workspaceScore(right) - workspaceScore(left),
+  )[0]
 }
 
 function workspaceScore(workspace: ProjectWorkspaceManifest): number {
@@ -1534,28 +1852,40 @@ function workspaceScore(workspace: ProjectWorkspaceManifest): number {
   const tns = asNumber(workspace.metrics_summary.tns) ?? -100
   const drc = asNumber(workspace.metrics_summary.drc_count) ?? 999
   const area = asNumber(workspace.metrics_summary.area) ?? 0
-  return statusScore[workspace.status] + (wns * 100) + (tns * 4) - (drc * 5) - (area * 0.0001)
+  return statusScore[workspace.status] + wns * 100 + tns * 4 - drc * 5 - area * 0.0001
 }
 
 function buildRiskLabels(workspaces: ProjectWorkspaceManifest[]): string[] {
   const risks: string[] = []
-  if (workspaces.some(workspace => (asNumber(workspace.metrics_summary.drc_count) ?? 0) > 0)) {
+  if (
+    workspaces.some(
+      (workspace) => (asNumber(workspace.metrics_summary.drc_count) ?? 0) > 0,
+    )
+  ) {
     risks.push('DRC violations present')
   }
-  if (workspaces.some(workspace => (asNumber(workspace.metrics_summary.wns) ?? 0) < 0)) {
+  if (
+    workspaces.some((workspace) => (asNumber(workspace.metrics_summary.wns) ?? 0) < 0)
+  ) {
     risks.push('Negative WNS')
   }
-  if (workspaces.some(workspace => workspace.status === 'failed')) {
+  if (workspaces.some((workspace) => workspace.status === 'failed')) {
     risks.push('Failed workspace present')
   }
-  if (workspaces.some(workspace => workspace.status === 'running' || workspace.status === 'in_progress')) {
+  if (
+    workspaces.some(
+      (workspace) => workspace.status === 'running' || workspace.status === 'in_progress',
+    )
+  ) {
     risks.push('Workspace still running')
   }
   return risks
 }
 
-function buildParameterDiffs(workspaces: ProjectWorkspaceManifest[]): ProjectComparisonParameterDiff[] {
-  return workspaces.flatMap(workspace =>
+function buildParameterDiffs(
+  workspaces: ProjectWorkspaceManifest[],
+): ProjectComparisonParameterDiff[] {
+  return workspaces.flatMap((workspace) =>
     Object.entries(workspace.parameter_patch ?? {}).map(([name, patch]) => {
       const values = parameterPatchValues(patch)
       return {
@@ -1572,20 +1902,27 @@ function buildMetricDiffs(
   baselineWorkspace: ProjectWorkspaceManifest | null,
   targetWorkspace: ProjectWorkspaceManifest | null,
 ): ProjectComparisonMetricDiff[] {
-  if (!baselineWorkspace || !targetWorkspace || baselineWorkspace.workspace_id === targetWorkspace.workspace_id) return []
+  if (
+    !baselineWorkspace ||
+    !targetWorkspace ||
+    baselineWorkspace.workspace_id === targetWorkspace.workspace_id
+  )
+    return []
 
-  return METRIC_DEFINITIONS.flatMap(definition => {
+  return METRIC_DEFINITIONS.flatMap((definition) => {
     const from = asNumber(baselineWorkspace.metrics_summary[definition.manifestKey])
     const to = asNumber(targetWorkspace.metrics_summary[definition.manifestKey])
     if (from === null || to === null) return []
     const delta = Number((to - from).toFixed(4))
-    return [{
-      metric: definition.label,
-      fromWorkspaceId: baselineWorkspace.workspace_id,
-      toWorkspaceId: targetWorkspace.workspace_id,
-      delta,
-      state: metricDeltaState(definition.id, delta),
-    }]
+    return [
+      {
+        metric: definition.label,
+        fromWorkspaceId: baselineWorkspace.workspace_id,
+        toWorkspaceId: targetWorkspace.workspace_id,
+        delta,
+        state: metricDeltaState(definition.id, delta),
+      },
+    ]
   })
 }
 
@@ -1602,17 +1939,34 @@ function diffValueLabel(value: unknown): string | undefined {
   return String(value)
 }
 
-function metricDeltaState(metricId: ProjectMetricId, delta: number): ProjectComparisonMetricDiff['state'] {
+function metricDeltaState(
+  metricId: ProjectMetricId,
+  delta: number,
+): ProjectComparisonMetricDiff['state'] {
   if (delta === 0) return 'warn'
-  if (metricId === 'wns' || metricId === 'tns' || metricId === 'frequency') return delta > 0 ? 'good' : 'bad'
+  if (metricId === 'wns' || metricId === 'tns' || metricId === 'frequency')
+    return delta > 0 ? 'good' : 'bad'
   return delta < 0 ? 'good' : 'bad'
 }
 
-function sourceStepOutputPath(workspacePath: string, step: FlowStep, designName: string): string {
-  return sourceStepArtifactPath(workspacePath, step, defaultSourceOutputType(step), designName)
+function sourceStepOutputPath(
+  workspacePath: string,
+  step: FlowStep,
+  designName: string,
+): string {
+  return sourceStepArtifactPath(
+    workspacePath,
+    step,
+    defaultSourceOutputType(step),
+    designName,
+  )
 }
 
-function sourceStepOutputVerilogPath(workspacePath: string, step: FlowStep, designName: string): string {
+function sourceStepOutputVerilogPath(
+  workspacePath: string,
+  step: FlowStep,
+  designName: string,
+): string {
   return sourceStepArtifactPath(workspacePath, step, 'verilog', designName)
 }
 
@@ -1632,9 +1986,8 @@ function sourceStepArtifactPath(
     return joinPath(workspacePath, step, 'output', fileName)
   }
 
-  const suffix = artifactType === 'verilog'
-    ? step === 'Synth' ? '_fixed.v.gz' : '.v.gz'
-    : '.def.gz'
+  const suffix =
+    artifactType === 'verilog' ? (step === 'Synth' ? '_fixed.v.gz' : '.v.gz') : '.def.gz'
   return joinPath(
     workspacePath,
     artifact.directory,
@@ -1644,7 +1997,10 @@ function sourceStepArtifactPath(
 }
 
 function projectArtifactDesignName(project: ProjectManagementProject): string {
-  return normalizeArtifactDesignName(project.topModule) || normalizeArtifactDesignName(project.name)
+  return (
+    normalizeArtifactDesignName(project.topModule) ||
+    normalizeArtifactDesignName(project.name)
+  )
 }
 
 function normalizeArtifactDesignName(value: string | undefined): string {
@@ -1659,12 +2015,19 @@ function buildParameterPatch(
   baseParameters: Record<string, unknown>,
   nextParameters: Record<string, unknown>,
 ): Record<string, { from: unknown; to: unknown }> {
-  return Object.fromEntries(Object.entries(nextParameters)
-    .filter(([key, value]) => baseParameters[key] !== value)
-    .map(([key, value]) => [key, {
-      from: Object.prototype.hasOwnProperty.call(baseParameters, key) ? baseParameters[key] : undefined,
-      to: value,
-    }]))
+  return Object.fromEntries(
+    Object.entries(nextParameters)
+      .filter(([key, value]) => baseParameters[key] !== value)
+      .map(([key, value]) => [
+        key,
+        {
+          from: Object.prototype.hasOwnProperty.call(baseParameters, key)
+            ? baseParameters[key]
+            : undefined,
+          to: value,
+        },
+      ]),
+  )
 }
 
 function normalizeFlowStep(step: FlowStep | string): FlowStep {
@@ -1679,7 +2042,7 @@ function nextFlowStep(step: FlowStep): FlowStep {
 
 function nextManifestWorkspaceId(manifest: ProjectManifest): string {
   const numbers = manifest.workspaces
-    .map(workspace => Number(workspace.workspace_id.replace(/^ws_/, '')))
+    .map((workspace) => Number(workspace.workspace_id.replace(/^ws_/, '')))
     .filter(Number.isFinite)
   const next = Math.max(0, ...numbers) + 1
   return `ws_${String(next).padStart(4, '0')}`
@@ -1695,7 +2058,7 @@ function mergeBaseDesignConfig(
   const next: ProjectManifestBaseDesign = {
     ...baseDesign,
     parameters: {
-      ...(baseDesign.parameters ?? {}),
+      ...baseDesign.parameters,
       ...parameters,
     },
   }
@@ -1717,7 +2080,9 @@ function mergeBaseDesignConfig(
   return next
 }
 
-function parseJsonRecord(content: string | null | undefined): Record<string, unknown> | null {
+function parseJsonRecord(
+  content: string | null | undefined,
+): Record<string, unknown> | null {
   if (!content) return null
   try {
     return recordValue(JSON.parse(content))
@@ -1726,29 +2091,41 @@ function parseJsonRecord(content: string | null | undefined): Record<string, unk
   }
 }
 
-function recordAt(record: Record<string, unknown> | null | undefined, key: string): Record<string, unknown> | null {
+function recordAt(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): Record<string, unknown> | null {
   if (!record) return null
   return recordValue(record[key])
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null
 }
 
-function arrayAt(record: Record<string, unknown> | null | undefined, key: string): unknown[] {
+function arrayAt(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): unknown[] {
   if (!record) return []
   const value = record[key]
   return Array.isArray(value) ? value : []
 }
 
-function numberAt(record: Record<string, unknown> | null | undefined, key: string): number | null {
+function numberAt(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): number | null {
   if (!record) return null
   return flexibleNumber(record[key])
 }
 
-function numberAtAny(record: Record<string, unknown> | null | undefined, keys: string[]): number | null {
+function numberAtAny(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+): number | null {
   if (!record) return null
   for (const key of keys) {
     const value = flexibleNumber(record[key])
@@ -1772,7 +2149,10 @@ function formatRuntimeLabel(seconds: number): string {
   return `${Number(seconds.toFixed(1))} s`
 }
 
-function formatMetricValue(value: number, format: 'default' | 'percent' | 'compact' = 'default'): string {
+function formatMetricValue(
+  value: number,
+  format: 'default' | 'percent' | 'compact' = 'default',
+): string {
   if (format === 'percent') return `${Number((value * 100).toFixed(1))}%`
   if (format === 'compact') {
     if (Math.abs(value) >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
@@ -1805,7 +2185,10 @@ function labelForStepStatus(status: ProjectStepStatus): string {
   return map[status]
 }
 
-function metricState(metricId: ProjectMetricId, value: number | null): ProjectMetricPoint['state'] {
+function metricState(
+  metricId: ProjectMetricId,
+  value: number | null,
+): ProjectMetricPoint['state'] {
   if (value === null) return 'pending'
   if (metricId === 'drc') {
     if (value === 0) return 'good'
@@ -1822,7 +2205,11 @@ function asNumber(value: unknown): number | null {
 }
 
 function slugify(value: string): string {
-  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
   return slug || 'project'
 }
 
@@ -1833,7 +2220,9 @@ function normalizePath(path: string): string {
 function joinPath(...parts: string[]): string {
   const joined = parts
     .filter(Boolean)
-    .map((part, index) => index === 0 ? part.replace(/\/+$/g, '') : part.replace(/^\/+|\/+$/g, ''))
+    .map((part, index) =>
+      index === 0 ? part.replace(/\/+$/g, '') : part.replace(/^\/+|\/+$/g, ''),
+    )
     .join('/')
   return normalizePath(joined)
 }

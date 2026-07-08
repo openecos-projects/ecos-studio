@@ -44,7 +44,10 @@ describe('ProjectScopeService fallback PDK naming', () => {
       isDirectory: () => true,
     })
     readdir.mockImplementation(async (path: string) => {
-      const entries: Record<string, Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>> = {
+      const entries: Record<
+        string,
+        Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>
+      > = {
         '/pdks/ics55': [
           { name: 'IP', isDirectory: () => true, isFile: () => false },
           { name: 'prtech', isDirectory: () => true, isFile: () => false },

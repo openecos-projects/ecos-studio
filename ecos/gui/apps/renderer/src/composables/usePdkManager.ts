@@ -197,7 +197,8 @@ export function usePdkManager() {
 
         if (
           desktopApi &&
-          (deduped.length !== saved.length || JSON.stringify(refreshed) !== JSON.stringify(deduped))
+          (deduped.length !== saved.length ||
+            JSON.stringify(refreshed) !== JSON.stringify(deduped))
         ) {
           await savePdks(desktopApi)
         }

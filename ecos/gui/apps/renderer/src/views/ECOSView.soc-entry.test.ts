@@ -17,12 +17,14 @@ type GlobalKey =
   | 'SVGElement'
   | 'DocumentFragment'
 
-const { push, loadRecentProjects, openProject, recentProjectFixtures } = vi.hoisted(() => ({
-  push: vi.fn(),
-  loadRecentProjects: vi.fn(async () => {}),
-  openProject: vi.fn(async () => true),
-  recentProjectFixtures: [] as Array<Record<string, unknown>>,
-}))
+const { push, loadRecentProjects, openProject, recentProjectFixtures } = vi.hoisted(
+  () => ({
+    push: vi.fn(),
+    loadRecentProjects: vi.fn(async () => {}),
+    openProject: vi.fn(async () => true),
+    recentProjectFixtures: [] as Array<Record<string, unknown>>,
+  }),
+)
 
 const originalGlobals = {
   document: globalThis.document,

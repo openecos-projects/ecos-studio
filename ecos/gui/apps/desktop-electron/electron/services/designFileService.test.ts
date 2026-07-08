@@ -60,7 +60,9 @@ describe('designFileService', () => {
 
     expect(result.added).toHaveLength(1)
     expect(result.skipped).toEqual([])
-    expect(await readFile(getWorkspaceFilelistPath(workspaceRoot), 'utf8')).toBe('top.v.gz\n')
+    expect(await readFile(getWorkspaceFilelistPath(workspaceRoot), 'utf8')).toBe(
+      'top.v.gz\n',
+    )
 
     const listed = await listWorkspaceDesignFiles(workspaceRoot)
     expect(listed).toHaveLength(1)

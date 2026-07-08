@@ -227,8 +227,8 @@ export function useWorkspace() {
     backupPath: string,
   ): string[] | undefined => {
     if (!values) return values
-    return values.map((value) =>
-      rewriteReplacementPath(value, targetPath, backupPath) ?? value,
+    return values.map(
+      (value) => rewriteReplacementPath(value, targetPath, backupPath) ?? value,
     )
   }
 
@@ -263,10 +263,9 @@ export function useWorkspace() {
       const registeredProjectRoot = normalizePath(
         await desktopApi.workspace.registerProjectRoot(projectRoot),
       )
-      const manifestText =
-        await desktopApi.workspace.readOptionalProjectTextFile(
-          `${registeredProjectRoot}/project.json`,
-        )
+      const manifestText = await desktopApi.workspace.readOptionalProjectTextFile(
+        `${registeredProjectRoot}/project.json`,
+      )
       if (!manifestText) return
 
       const manifest = parseProjectManifest(manifestText)
@@ -274,13 +273,16 @@ export function useWorkspace() {
       const backupPath = normalizePath(replacement.backupPath)
       const backupWorkspaceId = pathLeaf(backupPath)
       const replacementWorkspaceId = pathLeaf(replacement.targetPath)
-      const existingBackup = manifest.workspaces.find(workspace =>
-        workspace.workspace_id === backupWorkspaceId ||
-        normalizePath(workspace.workspace_path) === backupPath,
+      const existingBackup = manifest.workspaces.find(
+        (workspace) =>
+          workspace.workspace_id === backupWorkspaceId ||
+          normalizePath(workspace.workspace_path) === backupPath,
       )
-      const replacedWorkspace = manifest.workspaces.find(workspace =>
-        workspace.workspace_id === replacementWorkspaceId ||
-        normalizePath(workspace.workspace_path) === normalizePath(replacement.targetPath),
+      const replacedWorkspace = manifest.workspaces.find(
+        (workspace) =>
+          workspace.workspace_id === replacementWorkspaceId ||
+          normalizePath(workspace.workspace_path) ===
+            normalizePath(replacement.targetPath),
       )
       const backupWorkspace: ProjectWorkspaceManifest = {
         workspace_id: backupWorkspaceId,
@@ -288,7 +290,8 @@ export function useWorkspace() {
         workspace_path: backupPath,
         source_workspace_id: replacedWorkspace?.source_workspace_id ?? null,
         branch_from: replacedWorkspace?.branch_from ?? null,
-        start_step: replacedWorkspace?.start_step || config.flow_config?.start_step || 'Synth',
+        start_step:
+          replacedWorkspace?.start_step || config.flow_config?.start_step || 'Synth',
         end_step: replacedWorkspace?.end_step || config.flow_config?.end_step || 'Harden',
         status: 'archived',
         created_at: existingBackup?.created_at ?? now,
@@ -302,7 +305,7 @@ export function useWorkspace() {
         ...manifest,
         updated_at: now,
         workspaces: existingBackup
-          ? manifest.workspaces.map(workspace =>
+          ? manifest.workspaces.map((workspace) =>
               workspace.workspace_id === existingBackup.workspace_id
                 ? backupWorkspace
                 : workspace,
@@ -319,7 +322,8 @@ export function useWorkspace() {
       showToast({
         severity: 'warn',
         summary: 'Backup manifest not updated',
-        detail: 'The original workspace backup was kept, but project.json could not be updated.',
+        detail:
+          'The original workspace backup was kept, but project.json could not be updated.',
         life: 5000,
       })
     }
@@ -781,32 +785,42 @@ export function useWorkspace() {
         const parsed = Number(value)
         return Number.isFinite(parsed) ? parsed : fallback
       }
-      const dieAreaMode = frontendParams.die_area_mode === 'width_height'
-        ? 'width_height'
-        : 'utilitization_margin'
-      const dieArea = dieAreaMode === 'width_height'
-        ? {
-          mode: dieAreaMode,
-          width: toNumber(frontendParams.die_width, 100),
-          height: toNumber(frontendParams.die_height, 100),
-        }
-        : {
-          mode: dieAreaMode,
-          utilitization: toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6),
-          margin: toNumber(frontendParams.margin, 0),
-        }
+      const dieAreaMode =
+        frontendParams.die_area_mode === 'width_height'
+          ? 'width_height'
+          : 'utilitization_margin'
+      const dieArea =
+        dieAreaMode === 'width_height'
+          ? {
+              mode: dieAreaMode,
+              width: toNumber(frontendParams.die_width, 100),
+              height: toNumber(frontendParams.die_height, 100),
+            }
+          : {
+              mode: dieAreaMode,
+              utilitization: toNumber(
+                frontendParams.utilitization ?? frontendParams.core_utilization,
+                0.6,
+              ),
+              margin: toNumber(frontendParams.margin, 0),
+            }
       const backendParameters = {
-        Design: frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+        Design:
+          frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
         'Top module': frontendParams.top_module || 'top',
-        'Clock': frontendParams.clock || 'clk',
+        Clock: frontendParams.clock || 'clk',
         'Die Area': dieArea,
         'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
         'Max fanout': toNumber(frontendParams.max_fanout, 20),
         PDK: pdkName,
         Core: {
-          Utilitization: dieAreaMode === 'utilitization_margin'
-            ? toNumber(frontendParams.utilitization ?? frontendParams.core_utilization, 0.6)
-            : toNumber(frontendParams.core_utilization, 0.5),
+          Utilitization:
+            dieAreaMode === 'utilitization_margin'
+              ? toNumber(
+                  frontendParams.utilitization ?? frontendParams.core_utilization,
+                  0.6,
+                )
+              : toNumber(frontendParams.core_utilization, 0.5),
         },
       }
 

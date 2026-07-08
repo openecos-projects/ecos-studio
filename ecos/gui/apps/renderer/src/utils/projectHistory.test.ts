@@ -41,55 +41,67 @@ describe('project history', () => {
   })
 
   it('loads project roots from project_history rather than workspace recent_projects', async () => {
-    settings.set('recent_projects', [{
-      id: '/work/ws_0001',
-      name: 'workspace',
-      path: '/work/ws_0001',
-      lastOpened: '2026-07-02T07:00:00.000Z',
-    }])
-    settings.set('project_history', [{
-      id: '/projects/gcd',
-      name: 'gcd',
-      path: '/projects/gcd/',
-      lastOpened: '2026-07-02T08:00:00.000Z',
-      pdk: 'ics55',
-      topModule: 'gcd',
-    }])
+    settings.set('recent_projects', [
+      {
+        id: '/work/ws_0001',
+        name: 'workspace',
+        path: '/work/ws_0001',
+        lastOpened: '2026-07-02T07:00:00.000Z',
+      },
+    ])
+    settings.set('project_history', [
+      {
+        id: '/projects/gcd',
+        name: 'gcd',
+        path: '/projects/gcd/',
+        lastOpened: '2026-07-02T08:00:00.000Z',
+        pdk: 'ics55',
+        topModule: 'gcd',
+      },
+    ])
 
     const history = await loadProjectHistory()
 
     expect(settingsGet).toHaveBeenCalledWith('project_history')
     expect(settingsGet).not.toHaveBeenCalledWith('recent_projects')
-    expect(history).toEqual([expect.objectContaining({
-      id: '/projects/gcd',
-      name: 'gcd',
-      path: '/projects/gcd',
-      lastOpened: new Date('2026-07-02T08:00:00.000Z'),
-      pdk: 'ics55',
-      topModule: 'gcd',
-    })])
+    expect(history).toEqual([
+      expect.objectContaining({
+        id: '/projects/gcd',
+        name: 'gcd',
+        path: '/projects/gcd',
+        lastOpened: new Date('2026-07-02T08:00:00.000Z'),
+        pdk: 'ics55',
+        topModule: 'gcd',
+      }),
+    ])
   })
 
   it('remembers project roots without writing workspace recent_projects', async () => {
-    await rememberProjectHistoryEntry(project({
-      name: 'gcd',
-      path: '/projects/gcd/',
-      lastOpened: new Date('2026-07-02T08:00:00.000Z'),
-    }))
-    await rememberProjectHistoryEntry(project({
-      name: 'gcd updated',
-      path: '/projects/gcd',
-      lastOpened: new Date('2026-07-02T09:00:00.000Z'),
-      pdk: 'ics55',
-    }))
+    await rememberProjectHistoryEntry(
+      project({
+        name: 'gcd',
+        path: '/projects/gcd/',
+        lastOpened: new Date('2026-07-02T08:00:00.000Z'),
+      }),
+    )
+    await rememberProjectHistoryEntry(
+      project({
+        name: 'gcd updated',
+        path: '/projects/gcd',
+        lastOpened: new Date('2026-07-02T09:00:00.000Z'),
+        pdk: 'ics55',
+      }),
+    )
 
-    expect(settingsSet).toHaveBeenCalledWith('project_history', [expect.objectContaining({
-      id: '/projects/gcd',
-      name: 'gcd updated',
-      path: '/projects/gcd',
-      lastOpened: '2026-07-02T09:00:00.000Z',
-      pdk: 'ics55',
-    })])
+    expect(settingsSet).toHaveBeenCalledWith('project_history', [
+      expect.objectContaining({
+        id: '/projects/gcd',
+        name: 'gcd updated',
+        path: '/projects/gcd',
+        lastOpened: '2026-07-02T09:00:00.000Z',
+        pdk: 'ics55',
+      }),
+    ])
     expect(settings.has('recent_projects')).toBe(false)
     expect(await loadProjectHistory()).toHaveLength(1)
   })
@@ -113,9 +125,11 @@ describe('project history', () => {
     const history = await removeProjectHistoryEntry('/projects/gcd')
 
     expect(history).toEqual([expect.objectContaining({ path: '/projects/uart' })])
-    expect(settingsSet).toHaveBeenCalledWith('project_history', [expect.objectContaining({
-      id: '/projects/uart',
-      path: '/projects/uart',
-    })])
+    expect(settingsSet).toHaveBeenCalledWith('project_history', [
+      expect.objectContaining({
+        id: '/projects/uart',
+        path: '/projects/uart',
+      }),
+    ])
   })
 })

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import source from './ProjectsView.vue?raw'
 
+const normalizedSource = source.replace(/\s+/g, ' ')
+
 describe('ProjectsView project management surface', () => {
   it('renders the project tree and project analysis surface instead of the old flow matrix', () => {
     expect(source).toContain('Project Analysis')
@@ -30,12 +32,16 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('matches the analysis brainstorm mockup proportions and popover anchoring', () => {
-    expect(source).not.toContain('Workspace lineage tree with row actions + Project Analysis dashboard')
+    expect(source).not.toContain(
+      'Workspace lineage tree with row actions + Project Analysis dashboard',
+    )
     expect(source).not.toContain('<p>Workspace lineage tree')
     expect(source).toContain('class="project-list-title"')
     expect(source).toContain('<h2>Projects</h2>')
     expect(source).toContain('class="project-list-actions"')
-    expect(source).toContain('grid-template-columns: minmax(330px, 390px) minmax(780px, 1fr);')
+    expect(source).toContain(
+      'grid-template-columns: minmax(330px, 390px) minmax(780px, 1fr);',
+    )
     expect(source).toContain('.manager-scrim {')
     expect(source).toContain('display: none;')
     expect(source).toContain('.workspace-flow-popover::before')
@@ -44,13 +50,19 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('class="analysis-panel mockup-analysis-panel"')
     expect(source).toContain('class="dashboard-card dashboard-run-state-card"')
     expect(source).toContain('class="dashboard-card dashboard-best-card"')
-    expect(source).toContain('class="dashboard-card dashboard-chart-card dashboard-key-metric-card"')
+    expect(source).toContain(
+      'class="dashboard-card dashboard-chart-card dashboard-key-metric-card"',
+    )
   })
 
   it('uses theme-mixed colors for the Projects list background', () => {
-    expect(source).toContain('--project-list-bg: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));')
+    expect(source).toContain(
+      '--project-list-bg: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));',
+    )
     expect(source).toContain('background: var(--project-list-bg);')
-    expect(source).toContain('--project-tree-bg: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));')
+    expect(source).toContain(
+      '--project-tree-bg: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));',
+    )
     expect(source).not.toContain('--mockup-soft: #f3f4f6')
     expect(source).not.toContain('--mockup-bg: #f9fafb')
   })
@@ -64,7 +76,9 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('puts project-level workspace actions on each project item using circle icons', () => {
-    const projectRowStart = source.indexOf('class="resource-row project-tree-row mockup-project-row"')
+    const projectRowStart = source.indexOf(
+      'class="resource-row project-tree-row mockup-project-row"',
+    )
     const projectRowEnd = source.indexOf('class="workspace-tree-list"', projectRowStart)
     const rowSource = source.slice(projectRowStart, projectRowEnd)
 
@@ -133,16 +147,26 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('selectedPopoverWorkspace')
     expect(source).toContain('workspaceConfiguredSteps(selectedPopoverWorkspace)')
     expect(source).toContain('cell.canCreateWorkspace')
-    expect(source).toContain('startWorkspaceFromPopoverStep(selectedPopoverWorkspace.id, cell.step)')
+    expect(source).toMatch(
+      /startWorkspaceFromPopoverStep\(\s*selectedPopoverWorkspace\.id,\s*cell\.step,\s*\)/,
+    )
     expect(source).toContain('Workspace Flow Steps')
   })
 
   it('closes the workspace flow popover from outside clicks or Escape', () => {
     expect(source).toContain('workspace-flow-trigger')
-    expect(source).toContain("document.addEventListener('pointerdown', handleWorkspacePopoverPointerDown)")
-    expect(source).toContain("document.addEventListener('keydown', handleWorkspacePopoverKeydown)")
-    expect(source).toContain("document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)")
-    expect(source).toContain("document.removeEventListener('keydown', handleWorkspacePopoverKeydown)")
+    expect(source).toContain(
+      "document.addEventListener('pointerdown', handleWorkspacePopoverPointerDown)",
+    )
+    expect(source).toContain(
+      "document.addEventListener('keydown', handleWorkspacePopoverKeydown)",
+    )
+    expect(source).toContain(
+      "document.removeEventListener('pointerdown', handleWorkspacePopoverPointerDown)",
+    )
+    expect(source).toContain(
+      "document.removeEventListener('keydown', handleWorkspacePopoverKeydown)",
+    )
     expect(source).toContain("target.closest('.workspace-flow-popover')")
     expect(source).toContain("target.closest('.workspace-flow-trigger')")
     expect(source).toContain("event.key !== 'Escape'")
@@ -160,7 +184,7 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('Keep workspace data')
     expect(source).toContain('checked by default')
     expect(source).toContain('removeProjectDirectory')
-    expect(source).toContain('This will not delete the project directory')
+    expect(normalizedSource).toContain('This will not delete the project directory')
   })
 
   it('searches both projects and their workspaces', () => {
@@ -177,9 +201,15 @@ describe('ProjectsView project management surface', () => {
     expect(continueSource).toContain('originDef: branchDraft.value.originDef')
     expect(continueSource).toContain('originVerilog: branchDraft.value.originVerilog')
     expect(continueSource).toContain('sdc: branchDraft.value.originSdc')
-    expect(continueSource).toContain('sourceWorkspacePath: branchDraft.value.sourceWorkspacePath')
-    expect(continueSource).toContain('sourceOutputPath: branchDraft.value.sourceOutputPath')
-    expect(continueSource).toContain('sourceOutputType: branchDraft.value.sourceOutputType')
+    expect(continueSource).toContain(
+      'sourceWorkspacePath: branchDraft.value.sourceWorkspacePath',
+    )
+    expect(continueSource).toContain(
+      'sourceOutputPath: branchDraft.value.sourceOutputPath',
+    )
+    expect(continueSource).toContain(
+      'sourceOutputType: branchDraft.value.sourceOutputType',
+    )
     expect(continueSource).toContain('startStep: branchDraft.value.targetStartStep')
     expect(continueSource).toContain('endStep: branchDraft.value.targetEndStep')
   })
@@ -194,7 +224,7 @@ describe('ProjectsView project management surface', () => {
     const createStart = source.indexOf('async function createProjectFolderDraft')
     const createEnd = source.indexOf('const goBack =', createStart)
     const createSource = source.slice(createStart, createEnd)
-    expect(createSource).not.toContain("router.push({")
+    expect(createSource).not.toContain('router.push({')
     expect(createSource).not.toContain("path: '/ecc'")
     expect(createSource).not.toContain('workspacePath')
     expect(createSource).not.toContain("workspaces', 'ws_0001'")
@@ -232,7 +262,9 @@ describe('ProjectsView project management surface', () => {
   it('renders dashboard and step analysis charts from derived project data', () => {
     expect(source).toContain('selectedProject.dashboardSummary')
     expect(source).not.toContain('Flow Success Ratio')
-    expect(source).not.toContain('class="dashboard-card dashboard-ratio-card mockup-dashboard-card"')
+    expect(source).not.toContain(
+      'class="dashboard-card dashboard-ratio-card mockup-dashboard-card"',
+    )
     expect(source).not.toContain('flowSuccessRatio * 100')
     expect(source).toContain('runStateSlices')
     expect(source).toContain('class="dashboard-card dashboard-run-state-card"')
@@ -246,7 +278,9 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('dashboardMetricRows')
     expect(source).toContain('dashboardWorkspaceMetricRows')
     expect(source).toContain('dashboard-key-metric-table')
-    expect(source).toContain("const metricOrder = ['die_area', 'core_util', 'frequency', 'wns', 'tns', 'drc']")
+    expect(source).toContain(
+      "const metricOrder = ['die_area', 'core_util', 'frequency', 'wns', 'tns', 'drc']",
+    )
     expect(source).toContain('Die Area')
     expect(source).toContain('Core Util')
     expect(source).toContain('Frequency [MHz]')
@@ -262,8 +296,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('step-compare-metric-table')
     expect(source).toContain('step-compare-workspace-cell')
     expect(source).toContain('step-compare-metric-cell')
-    expect(source).toContain("aria-label=\"Selected step metrics by workspace\"")
-    expect(source).toContain('repeat(var(--step-compare-metric-count), minmax(92px, 1fr))')
+    expect(source).toContain('aria-label="Selected step metrics by workspace"')
+    expect(source).toMatch(
+      /repeat\(\s*var\(--step-compare-metric-count\),\s*minmax\(92px,\s*1fr\)\s*\)/,
+    )
     expect(source).toContain('grid-auto-rows: 42px;')
     expect(source).not.toContain('align-self: stretch;')
     expect(source).not.toContain('step-compare-metric-card')
@@ -279,7 +315,10 @@ describe('ProjectsView project management surface', () => {
 
   it('keeps only Dashboard and Step Analysis tabs on the right side of the project analysis header', () => {
     const analysisStart = source.indexOf('class="panel-title-row analysis-heading"')
-    const analysisEnd = source.indexOf('</div>', source.indexOf('class="analysis-header-actions"', analysisStart))
+    const analysisEnd = source.indexOf(
+      '</div>',
+      source.indexOf('class="analysis-header-actions"', analysisStart),
+    )
     const analysisHeaderSource = source.slice(analysisStart, analysisEnd + 6)
 
     expect(analysisHeaderSource).toContain('class="analysis-header-actions"')
@@ -319,20 +358,38 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('desktopApi.workspace.registerProjectRoot')
 
     const createStart = source.indexOf('async function createProjectFolderDraft')
-    const createRegister = source.indexOf('await registerProjectRootForProjectManagement(directory)', createStart)
-    const createWrite = source.indexOf("await writeProjectTextFile('project.json'", createStart)
+    const createRegister = source.indexOf(
+      'await registerProjectRootForProjectManagement(directory)',
+      createStart,
+    )
+    const createWrite = source.indexOf(
+      "await writeProjectTextFile('project.json'",
+      createStart,
+    )
     expect(createRegister).toBeGreaterThan(createStart)
     expect(createWrite).toBeGreaterThan(createRegister)
 
     const importStart = source.indexOf('async function importProject')
-    const importRegister = source.indexOf('await registerProjectRootForProjectManagement(directory)', importStart)
-    const importRead = source.indexOf('await loadProjectFromRoot(projectRoot)', importStart)
+    const importRegister = source.indexOf(
+      'await registerProjectRootForProjectManagement(directory)',
+      importStart,
+    )
+    const importRead = source.indexOf(
+      'await loadProjectFromRoot(projectRoot)',
+      importStart,
+    )
     expect(importRegister).toBeGreaterThan(importStart)
     expect(importRead).toBeGreaterThan(importRegister)
 
     const refreshStart = source.indexOf('async function refreshProjectManifests')
-    const refreshRegister = source.indexOf('await registerProjectRootForProjectManagement(project.path)', refreshStart)
-    const refreshRead = source.indexOf("await readOptionalProjectTextFile('project.json'", refreshStart)
+    const refreshRegister = source.indexOf(
+      'await registerProjectRootForProjectManagement(project.path)',
+      refreshStart,
+    )
+    const refreshRead = source.indexOf(
+      "await readOptionalProjectTextFile('project.json'",
+      refreshStart,
+    )
     expect(refreshRegister).toBeGreaterThan(refreshStart)
     expect(refreshRead).toBeGreaterThan(refreshRegister)
   })

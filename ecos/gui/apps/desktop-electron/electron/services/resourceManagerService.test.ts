@@ -270,18 +270,33 @@ describe('ResourceManagerService', () => {
   it('recursively detects PDK LEF and Liberty files with relative directory paths', async () => {
     const root = await createTempDir('ecos-resources-')
     const pdkRoot = join(root, 'local', 'ics55')
-    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef'), { recursive: true })
-    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty'), { recursive: true })
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef'), {
+      recursive: true,
+    })
+    await mkdir(join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty'), {
+      recursive: true,
+    })
     await mkdir(join(pdkRoot, 'prtech', 'techLEF'), { recursive: true })
     await writeFile(join(pdkRoot, 'README.md'), 'fixture pdk\n', 'utf8')
-    await writeFile(join(pdkRoot, 'prtech', 'techLEF', 'N551P6M.lef'), 'VERSION 5.8 ;\n', 'utf8')
+    await writeFile(
+      join(pdkRoot, 'prtech', 'techLEF', 'N551P6M.lef'),
+      'VERSION 5.8 ;\n',
+      'utf8',
+    )
     await writeFile(
       join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'lef', 'ics55_LLSC_H7CH.lef'),
       'VERSION 5.8 ;\n',
       'utf8',
     )
     await writeFile(
-      join(pdkRoot, 'IP', 'STD_cell', 'ics55_LLSC_H7CH', 'liberty', 'ics55_LLSC_H7CH_typ.lib'),
+      join(
+        pdkRoot,
+        'IP',
+        'STD_cell',
+        'ics55_LLSC_H7CH',
+        'liberty',
+        'ics55_LLSC_H7CH_typ.lib',
+      ),
       'library(test) {}\n',
       'utf8',
     )
@@ -295,10 +310,13 @@ describe('ResourceManagerService', () => {
     const manifest = JSON.parse(
       await readFile(join(dirs.resourcesDir, 'manifest.json'), 'utf8'),
     ) as {
-      installed: Record<string, {
-        detected_file_groups?: { directories: string[]; files: string[] }
-        detected_files?: string[]
-      }>
+      installed: Record<
+        string,
+        {
+          detected_file_groups?: { directories: string[]; files: string[] }
+          detected_files?: string[]
+        }
+      >
     }
     const pdkEntry = manifest.installed['pdk:ics55']
     expect(pdkEntry?.detected_file_groups?.files).toEqual([

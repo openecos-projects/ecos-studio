@@ -1830,9 +1830,9 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(true)
 
     expect(desktopApi.workspace.registerProjectRoot).toHaveBeenNthCalledWith(1, '/work')
-    expect(
-      desktopApi.workspace.prepareProjectDirectoryReplacement,
-    ).toHaveBeenCalledWith('/work/demo')
+    expect(desktopApi.workspace.prepareProjectDirectoryReplacement).toHaveBeenCalledWith(
+      '/work/demo',
+    )
     expect(createWorkspaceApiMock).toHaveBeenCalledWith(
       expect.objectContaining({
         directory: '/work/demo',
@@ -1843,12 +1843,10 @@ describe('useWorkspace openProject', () => {
         pdk_json: '/work/.demo.replace-backup-1/home/pdk.json',
       }),
     )
-    expect(
-      desktopApi.workspace.finalizeProjectDirectoryReplacement,
-    ).toHaveBeenCalledWith(replacement)
-    expect(
-      desktopApi.workspace.restoreProjectDirectoryReplacement,
-    ).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement,
+    )
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
   it('keeps replacement backup and records it in project.json when requested', async () => {
@@ -1860,31 +1858,33 @@ describe('useWorkspace openProject', () => {
     vi.mocked(
       desktopApi.workspace.prepareProjectDirectoryReplacement,
     ).mockResolvedValueOnce(replacement)
-    vi.mocked(desktopApi.workspace.readOptionalProjectTextFile).mockResolvedValueOnce(JSON.stringify({
-      schema_version: 1,
-      project_id: 'proj_work',
-      name: 'work',
-      description: '',
-      root_path: '/work',
-      created_at: '2026-07-08T00:00:00.000Z',
-      updated_at: '2026-07-08T00:00:00.000Z',
-      base_design: {
-        parameters: {},
-        rtl_list: [],
-      },
-      objectives: {
-        primary: 'timing',
-        directions: {
-          wns: 'maximize',
-          tns: 'maximize',
-          area: 'minimize',
-          drc_count: 'minimize',
-          power: 'minimize',
+    vi.mocked(desktopApi.workspace.readOptionalProjectTextFile).mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: 1,
+        project_id: 'proj_work',
+        name: 'work',
+        description: '',
+        root_path: '/work',
+        created_at: '2026-07-08T00:00:00.000Z',
+        updated_at: '2026-07-08T00:00:00.000Z',
+        base_design: {
+          parameters: {},
+          rtl_list: [],
         },
-      },
-      workspaces: [],
-      best_workspace: null,
-    }))
+        objectives: {
+          primary: 'timing',
+          directions: {
+            wns: 'maximize',
+            tns: 'maximize',
+            area: 'minimize',
+            drc_count: 'minimize',
+            power: 'minimize',
+          },
+        },
+        workspaces: [],
+        best_workspace: null,
+      }),
+    )
     createWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',
       data: {
@@ -1929,9 +1929,7 @@ describe('useWorkspace openProject', () => {
       '/work/project.json',
       expect.stringContaining('"status": "archived"'),
     )
-    expect(
-      desktopApi.workspace.restoreProjectDirectoryReplacement,
-    ).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
 
   it('restores the original workspace backup when replacement creation fails', async () => {
@@ -1966,9 +1964,9 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(false)
 
-    expect(
-      desktopApi.workspace.restoreProjectDirectoryReplacement,
-    ).toHaveBeenCalledWith(replacement)
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement,
+    )
     expect(
       desktopApi.workspace.finalizeProjectDirectoryReplacement,
     ).not.toHaveBeenCalled()

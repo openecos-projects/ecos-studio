@@ -67,8 +67,8 @@
           <p class="workspace-update-backup-eyebrow">Update Workspace</p>
           <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
           <p>
-            Keep a copy of the current workspace before replacing it. If backup is selected,
-            the backup workspace will be recorded in project.json.
+            Keep a copy of the current workspace before replacing it. If backup is
+            selected, the backup workspace will be recorded in project.json.
           </p>
           <div class="workspace-update-backup-actions">
             <button
@@ -252,7 +252,8 @@ function confirmWorkspaceUpdateBackup() {
 
 async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
   const config = pendingWorkspaceUpdateConfig.value
-  const targetReconfigurePath = pendingWorkspaceUpdatePath.value || reconfigureWorkspacePath.value
+  const targetReconfigurePath =
+    pendingWorkspaceUpdatePath.value || reconfigureWorkspacePath.value
   if (!config || !targetReconfigurePath) {
     cancelWorkspaceUpdateBackup()
     return
@@ -291,8 +292,9 @@ async function openWorkspaceReconfigureWizard() {
     desktopApi.value = api
     await api.workspace.registerProjectRoot(normalizedWorkspacePath)
 
-    workspaceWizardInitialConfig.value =
-      await buildReconfigureWizardInitialConfig(normalizedWorkspacePath)
+    workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
+      normalizedWorkspacePath,
+    )
     reconfigureWorkspacePath.value = normalizedWorkspacePath
     showNewProjectWizard.value = true
   } catch (error) {
@@ -322,10 +324,7 @@ async function buildReconfigureWizardInitialConfig(
   const pdkJson = parseOptionalJson(pdkText)
   const dbConfigJson = parseOptionalJson(dbConfigText)
   const flowConfig = normalizeWorkspaceFlowConfig(flowText)
-  const normalizedParameters = normalizeWorkspaceParameters(
-    parametersJson,
-    workspacePath,
-  )
+  const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)
   const dbInput = optionalRecord(dbConfigJson?.INPUT)
   const pdkConfig = normalizePdkConfig(pdkJson, dbConfigJson)
   const designName =
@@ -334,8 +333,7 @@ async function buildReconfigureWizardInitialConfig(
     getPathLeafName(workspacePath)
   const projectRoot =
     queryString(route.query.projectRoot) || parentLocalPath(workspacePath)
-  const projectName =
-    queryString(route.query.projectName) || getPathLeafName(projectRoot)
+  const projectName = queryString(route.query.projectName) || getPathLeafName(projectRoot)
   const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
   const rtlList =
     flowConfig.start_step === 'Synthesis'
@@ -408,8 +406,7 @@ async function buildReconfigureWizardInitialConfig(
     origin_verilog: originVerilog,
     rtl_list: rtlList,
     filelist,
-    design_input_mode:
-      flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
     sdc,
     pdk_config_mode: pdkConfig.mode,
     pdk_config: pdkConfig,
@@ -476,9 +473,9 @@ function normalizeWorkspaceParameters(
   }
 }
 
-function normalizeWorkspaceFlowConfig(flowText: string | null): NonNullable<
-  WorkspaceConfig['flow_config']
-> {
+function normalizeWorkspaceFlowConfig(
+  flowText: string | null,
+): NonNullable<WorkspaceConfig['flow_config']> {
   const flowJson = parseOptionalJson(flowText)
   const steps = Array.isArray(flowJson?.steps)
     ? flowJson.steps
@@ -510,18 +507,13 @@ function normalizePdkConfig(
       dbInput?.tech_lef_path,
   )
   const cellLef = stringList(
-    pdkJson?.cell_lef ??
-      pdkJson?.lefs ??
-      pdkJson?.cell_lef_list ??
-      dbInput?.lef_paths,
+    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
   )
   const liberty = stringList(
-    pdkJson?.liberty ??
-      pdkJson?.libs ??
-      pdkJson?.liberty_list ??
-      dbInput?.lib_path,
+    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
   )
-  const hasManualResources = techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
+  const hasManualResources =
+    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
 
   return {
     mode: hasManualResources ? 'manual' : 'default',
@@ -575,9 +567,7 @@ async function scanWorkspaceOriginDesignInputs(
         inputs.rtlFiles.push(filePath)
         inputs.verilogFiles.push(filePath)
       }
-      if (
-        hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])
-      ) {
+      if (hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])) {
         inputs.rtlFiles.push(filePath)
       }
       if (hasAnySuffix(filePath, ['.sdc', '.sdc.gz'])) {
@@ -672,14 +662,14 @@ function normalizeDieAreaMode(
   value: unknown,
   fallback: NonNullable<WorkspaceConfig['parameters']['die_area_mode']>,
 ): NonNullable<WorkspaceConfig['parameters']['die_area_mode']> {
-  return value === 'width_height' || value === 'utilitization_margin'
-    ? value
-    : fallback
+  return value === 'width_height' || value === 'utilitization_margin' ? value : fallback
 }
 
 function stringList(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.trim() !== '',
+    )
   }
   if (typeof value === 'string' && value.trim()) return [value.trim()]
   return []

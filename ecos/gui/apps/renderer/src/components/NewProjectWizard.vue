@@ -8,17 +8,21 @@
     >
       <button
         @click="closeWizard"
-        class="absolute right-5 top-5 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/60 text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary) hover:text-(--text-primary)"
+        class="absolute top-5 right-5 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/60 text-(--text-secondary) transition-colors duration-200 hover:bg-(--bg-secondary) hover:text-(--text-primary)"
         title="Close"
       >
         <i class="ri-close-line text-lg"></i>
       </button>
 
       <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside class="flex w-full shrink-0 flex-col border-b border-(--border-color) bg-(--bg-secondary)/35 p-6 md:w-72 md:border-b-0 md:border-r">
+        <aside
+          class="flex w-full shrink-0 flex-col border-b border-(--border-color) bg-(--bg-secondary)/35 p-6 md:w-72 md:border-r md:border-b-0"
+        >
           <div class="mb-7">
             <h1 class="text-2xl font-bold text-(--text-primary)">{{ wizardTitle }}</h1>
-            <p class="mt-1 text-sm text-(--text-secondary)">Build a project-scoped RTL2GDS workspace.</p>
+            <p class="mt-1 text-sm text-(--text-secondary)">
+              Build a project-scoped RTL2GDS workspace.
+            </p>
             <div
               v-if="sourceContext"
               class="mt-4 rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-3 text-xs"
@@ -43,7 +47,7 @@
                   ? 'border-(--accent-color) bg-(--accent-color)/10 text-(--text-primary)'
                   : step.id <= highestStep
                     ? 'border-(--border-color) bg-(--bg-primary)/65 text-(--text-primary) hover:border-(--accent-color)/50'
-                    : 'border-(--border-color)/70 bg-transparent text-(--text-secondary)'
+                    : 'border-(--border-color)/70 bg-transparent text-(--text-secondary)',
               ]"
               @click="handleStepClick(step.id)"
             >
@@ -54,7 +58,7 @@
                     ? 'border-(--accent-color) bg-(--accent-color) text-white'
                     : currentStep === step.id
                       ? 'border-(--accent-color) bg-(--accent-color) text-white'
-                      : 'border-(--border-color) bg-(--bg-secondary)/55'
+                      : 'border-(--border-color) bg-(--bg-secondary)/55',
                 ]"
               >
                 <i v-if="currentStep > step.id" class="ri-check-line text-base"></i>
@@ -62,7 +66,11 @@
               </span>
               <span class="min-w-0">
                 <span class="block truncate text-sm font-semibold">{{ step.title }}</span>
-                <span v-if="currentStep === step.id" class="mt-0.5 block text-[11px] font-semibold uppercase tracking-wide text-(--accent-color)">Active</span>
+                <span
+                  v-if="currentStep === step.id"
+                  class="mt-0.5 block text-[11px] font-semibold tracking-wide text-(--accent-color) uppercase"
+                  >Active</span
+                >
               </span>
             </button>
           </div>
@@ -70,22 +78,41 @@
 
         <main class="flex min-w-0 flex-1 flex-col">
           <section
-            class="min-h-0 flex-1 custom-scrollbar"
-            :class="currentStep === 5 ? 'overflow-hidden p-4 md:p-5' : 'overflow-y-auto p-6 md:p-8'"
+            class="custom-scrollbar min-h-0 flex-1"
+            :class="
+              currentStep === 5
+                ? 'overflow-hidden p-4 md:p-5'
+                : 'overflow-y-auto p-6 md:p-8'
+            "
           >
             <Transition name="fade-slide" mode="out-in">
-              <div v-if="currentStep === 1" key="project-setup" class="mx-auto w-full max-w-3xl">
+              <div
+                v-if="currentStep === 1"
+                key="project-setup"
+                class="mx-auto w-full max-w-3xl"
+              >
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Project Setup</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">Choose the project that will own this workspace, or define a project root for a new project.</p>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    Choose the project that will own this workspace, or define a project
+                    root for a new project.
+                  </p>
                 </header>
 
-                <div class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
-                  <div class="mb-5 inline-flex rounded-lg border border-(--border-color) bg-(--bg-primary)/80 p-1">
+                <div
+                  class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
+                  <div
+                    class="mb-5 inline-flex rounded-lg border border-(--border-color) bg-(--bg-primary)/80 p-1"
+                  >
                     <button
                       type="button"
                       class="rounded-md px-4 py-2 text-sm font-semibold transition-colors duration-200"
-                      :class="projectContext.mode === 'select' ? 'bg-(--accent-color) text-white' : 'text-(--text-secondary) hover:text-(--text-primary)'"
+                      :class="
+                        projectContext.mode === 'select'
+                          ? 'bg-(--accent-color) text-white'
+                          : 'text-(--text-secondary) hover:text-(--text-primary)'
+                      "
                       @click="setProjectMode('select')"
                     >
                       Select Project
@@ -93,7 +120,11 @@
                     <button
                       type="button"
                       class="rounded-md px-4 py-2 text-sm font-semibold transition-colors duration-200"
-                      :class="projectContext.mode === 'create' ? 'bg-(--accent-color) text-white' : 'text-(--text-secondary) hover:text-(--text-primary)'"
+                      :class="
+                        projectContext.mode === 'create'
+                          ? 'bg-(--accent-color) text-white'
+                          : 'text-(--text-secondary) hover:text-(--text-primary)'
+                      "
                       @click="setProjectMode('create')"
                     >
                       Create Project
@@ -102,7 +133,10 @@
 
                   <div v-if="projectContext.mode === 'select'" class="space-y-5">
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Project Root <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Project Root <span class="text-red-500">*</span></label
+                      >
                       <div class="flex gap-3">
                         <input
                           :value="projectContext.project_root"
@@ -123,37 +157,70 @@
                       </div>
                     </div>
 
-                    <div v-if="projectHistory.length > 0" class="rounded-lg border border-(--border-color) bg-(--bg-primary)/55 p-3">
+                    <div
+                      v-if="projectHistory.length > 0"
+                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/55 p-3"
+                    >
                       <div class="mb-3 flex items-center justify-between gap-3">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Recent Projects</span>
-                        <span class="text-[11px] text-(--text-secondary)">{{ projectHistory.length }} projects</span>
+                        <span
+                          class="text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                          >Recent Projects</span
+                        >
+                        <span class="text-[11px] text-(--text-secondary)"
+                          >{{ projectHistory.length }} projects</span
+                        >
                       </div>
-                      <div class="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1">
+                      <div
+                        class="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1"
+                      >
                         <button
                           v-for="project in projectHistory"
                           :key="project.path"
                           type="button"
                           class="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors duration-200"
-                          :class="normalizePath(projectContext.project_root) === normalizePath(project.path) ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-secondary)/35 hover:border-(--accent-color)/45'"
+                          :class="
+                            normalizePath(projectContext.project_root) ===
+                            normalizePath(project.path)
+                              ? 'border-(--accent-color) bg-(--accent-color)/10'
+                              : 'border-(--border-color) bg-(--bg-secondary)/35 hover:border-(--accent-color)/45'
+                          "
                           @click="selectProjectFromHistory(project)"
                         >
                           <span class="min-w-0">
-                            <span class="block truncate text-sm font-semibold text-(--text-primary)">{{ project.name }}</span>
-                            <span class="mt-0.5 block truncate font-mono text-[11px] text-(--text-secondary)" :title="project.path">{{ project.path }}</span>
+                            <span
+                              class="block truncate text-sm font-semibold text-(--text-primary)"
+                              >{{ project.name }}</span
+                            >
+                            <span
+                              class="mt-0.5 block truncate font-mono text-[11px] text-(--text-secondary)"
+                              :title="project.path"
+                              >{{ project.path }}</span
+                            >
                           </span>
-                          <i class="ri-arrow-right-s-line shrink-0 text-(--text-secondary)"></i>
+                          <i
+                            class="ri-arrow-right-s-line shrink-0 text-(--text-secondary)"
+                          ></i>
                         </button>
                       </div>
                     </div>
-                    <p v-else-if="isLoadingProjectHistory" class="text-xs text-(--text-secondary)">
+                    <p
+                      v-else-if="isLoadingProjectHistory"
+                      class="text-xs text-(--text-secondary)"
+                    >
                       Loading recent projects...
                     </p>
-                    <p v-else-if="projectHistoryError" class="text-xs text-(--text-secondary)">
+                    <p
+                      v-else-if="projectHistoryError"
+                      class="text-xs text-(--text-secondary)"
+                    >
                       {{ projectHistoryError }}
                     </p>
 
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Project Name</label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Project Name</label
+                      >
                       <input
                         v-model="projectContext.project_name"
                         type="text"
@@ -165,18 +232,26 @@
 
                   <div v-else class="space-y-5">
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Project Name <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Project Name <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model="projectContext.project_name"
                         type="text"
                         placeholder="gcd_backend"
                         class="w-full rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
                       />
-                      <p v-if="projectNameError" class="mt-2 text-xs text-red-500">{{ projectNameError }}</p>
+                      <p v-if="projectNameError" class="mt-2 text-xs text-red-500">
+                        {{ projectNameError }}
+                      </p>
                     </div>
 
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Project Parent Path <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Project Parent Path <span class="text-red-500">*</span></label
+                      >
                       <div class="flex gap-3">
                         <input
                           v-model="projectParentPath"
@@ -198,44 +273,82 @@
                     </div>
                   </div>
 
-                  <div class="mt-6 rounded-lg border border-(--border-color) bg-(--bg-primary)/70 p-4">
+                  <div
+                    class="mt-6 rounded-lg border border-(--border-color) bg-(--bg-primary)/70 p-4"
+                  >
                     <div class="grid gap-3 text-sm md:grid-cols-2">
                       <div>
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Project Path</span>
-                        <p class="mt-1 truncate font-mono text-(--text-primary)" :title="projectContext.project_root">{{ projectContext.project_root || '-' }}</p>
+                        <span
+                          class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                          >Project Path</span
+                        >
+                        <p
+                          class="mt-1 truncate font-mono text-(--text-primary)"
+                          :title="projectContext.project_root"
+                        >
+                          {{ projectContext.project_root || '-' }}
+                        </p>
                       </div>
                       <div>
-                        <span class="block text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Project Metadata</span>
-                        <p class="mt-1 truncate font-mono text-(--text-primary)" :title="projectContext.project_json_path">{{ projectContext.project_json_path || '-' }}</p>
+                        <span
+                          class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                          >Project Metadata</span
+                        >
+                        <p
+                          class="mt-1 truncate font-mono text-(--text-primary)"
+                          :title="projectContext.project_json_path"
+                        >
+                          {{ projectContext.project_json_path || '-' }}
+                        </p>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 2" key="basic-info" class="mx-auto w-full max-w-3xl">
+              <div
+                v-else-if="currentStep === 2"
+                key="basic-info"
+                class="mx-auto w-full max-w-3xl"
+              >
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Basic Info</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">Name the workspace and confirm where it will be created.</p>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    Name the workspace and confirm where it will be created.
+                  </p>
                 </header>
 
-                <div class="space-y-6 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
+                <div
+                  class="space-y-6 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
                   <div>
-                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Workspace Name <span class="text-red-500">*</span></label>
+                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                      >Workspace Name <span class="text-red-500">*</span></label
+                    >
                     <input
                       v-model="workspaceName"
                       type="text"
                       placeholder="density_065_from_floorplan"
                       :disabled="lockWorkspaceDirectory"
-                      class="w-full rounded-lg border px-3 py-2.5 text-sm text-(--text-primary) outline-none transition-colors duration-200"
-                      :class="workspaceNameError ? 'border-red-500 bg-red-500/5' : lockWorkspaceDirectory ? 'border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary)' : 'border-(--border-color) bg-(--bg-primary)/75 focus:border-(--accent-color)'"
+                      class="w-full rounded-lg border px-3 py-2.5 text-sm text-(--text-primary) transition-colors duration-200 outline-none"
+                      :class="
+                        workspaceNameError
+                          ? 'border-red-500 bg-red-500/5'
+                          : lockWorkspaceDirectory
+                            ? 'border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary)'
+                            : 'border-(--border-color) bg-(--bg-primary)/75 focus:border-(--accent-color)'
+                      "
                       @input="workspaceNameTouched = true"
                     />
-                    <p v-if="workspaceNameError" class="mt-2 text-xs text-red-500">{{ workspaceNameError }}</p>
+                    <p v-if="workspaceNameError" class="mt-2 text-xs text-red-500">
+                      {{ workspaceNameError }}
+                    </p>
                   </div>
 
                   <div>
-                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Description</label>
+                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                      >Description</label
+                    >
                     <textarea
                       v-model="config.parameters.description"
                       rows="3"
@@ -245,35 +358,79 @@
                   </div>
 
                   <div>
-                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Workspace Location</label>
-                    <div class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-3">
-                      <p class="truncate font-mono text-sm text-(--text-primary)" :title="workspaceLocation">{{ workspaceLocation || '-' }}</p>
-                      <p class="mt-2 text-xs text-(--text-secondary)">project root + Workspace Name</p>
+                    <label class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                      >Workspace Location</label
+                    >
+                    <div
+                      class="rounded-lg border border-(--border-color) bg-(--bg-primary)/75 px-3 py-3"
+                    >
+                      <p
+                        class="truncate font-mono text-sm text-(--text-primary)"
+                        :title="workspaceLocation"
+                      >
+                        {{ workspaceLocation || '-' }}
+                      </p>
+                      <p class="mt-2 text-xs text-(--text-secondary)">
+                        project root + Workspace Name
+                      </p>
                     </div>
-                    <p v-if="workspaceLocationError" class="mt-2 text-xs text-red-500">{{ workspaceLocationError }}</p>
+                    <p v-if="workspaceLocationError" class="mt-2 text-xs text-red-500">
+                      {{ workspaceLocationError }}
+                    </p>
+                    <p
+                      v-else-if="managedWorkspacePreview"
+                      class="mt-2 text-xs text-(--text-secondary)"
+                    >
+                      Workspace will be created at {{ managedWorkspacePreview }}.
+                    </p>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 3" key="flow-setup" class="mx-auto w-full max-w-5xl">
+              <div
+                v-else-if="currentStep === 3"
+                key="flow-setup"
+                class="mx-auto w-full max-w-5xl"
+              >
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Flow Setup</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">Select a continuous harden flow range. Step order remains fixed.</p>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    Select a continuous harden flow range. Step order remains fixed.
+                  </p>
                 </header>
 
-                <div class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
-                  <div class="mb-5 grid gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/70 p-4 text-sm md:grid-cols-3">
+                <div
+                  class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
+                  <div
+                    class="mb-5 grid gap-3 rounded-lg border border-(--border-color) bg-(--bg-primary)/70 p-4 text-sm md:grid-cols-3"
+                  >
                     <div>
-                      <span class="block text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Start Step</span>
-                      <p class="mt-1 font-semibold text-(--text-primary)">{{ flowStartStep }}</p>
+                      <span
+                        class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                        >Start Step</span
+                      >
+                      <p class="mt-1 font-semibold text-(--text-primary)">
+                        {{ flowStartStep }}
+                      </p>
                     </div>
                     <div>
-                      <span class="block text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">End Step</span>
-                      <p class="mt-1 font-semibold text-(--text-primary)">{{ flowEndStep }}</p>
+                      <span
+                        class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                        >End Step</span
+                      >
+                      <p class="mt-1 font-semibold text-(--text-primary)">
+                        {{ flowEndStep }}
+                      </p>
                     </div>
                     <div>
-                      <span class="block text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Selected Steps</span>
-                      <p class="mt-1 font-semibold text-(--text-primary)">{{ selectedFlowSteps.length }}</p>
+                      <span
+                        class="block text-xs font-semibold tracking-wide text-(--text-secondary) uppercase"
+                        >Selected Steps</span
+                      >
+                      <p class="mt-1 font-semibold text-(--text-primary)">
+                        {{ selectedFlowSteps.length }}
+                      </p>
                     </div>
                   </div>
 
@@ -282,8 +439,9 @@
                     class="mb-5 rounded-lg border border-(--border-color) bg-(--bg-primary)/60 px-4 py-3 text-xs text-(--text-secondary)"
                   >
                     Cannot select steps before the source output. This workspace starts at
-                    {{ sourceContext.startStep || flowStartStep }} and reuses previous results
-                    from {{ sourceContext.workspaceName || sourceContext.workspaceId }}.
+                    {{ sourceContext.startStep || flowStartStep }} and reuses previous
+                    results from
+                    {{ sourceContext.workspaceName || sourceContext.workspaceId }}.
                   </p>
 
                   <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -309,11 +467,17 @@
                           <span class="flex items-center gap-2">
                             <span
                               class="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold"
-                              :class="isFlowStepSelected(step.name) ? 'border-(--accent-color) bg-(--accent-color) text-white' : 'border-(--border-color) text-(--text-secondary)'"
+                              :class="
+                                isFlowStepSelected(step.name)
+                                  ? 'border-(--accent-color) bg-(--accent-color) text-white'
+                                  : 'border-(--border-color) text-(--text-secondary)'
+                              "
                             >
                               <span>{{ index + 1 }}</span>
                             </span>
-                            <span class="font-semibold text-(--text-primary)">{{ step.name }}</span>
+                            <span class="font-semibold text-(--text-primary)">{{
+                              step.name
+                            }}</span>
                           </span>
                           <input
                             type="checkbox"
@@ -322,7 +486,9 @@
                             readonly
                           />
                         </span>
-                        <span class="text-xs leading-5 text-(--text-secondary)">{{ step.description }}</span>
+                        <span class="text-xs leading-5 text-(--text-secondary)">{{
+                          step.description
+                        }}</span>
                         <span
                           v-if="isFlowStepLocked(step.name)"
                           class="mt-2 text-[11px] font-semibold text-(--text-secondary)"
@@ -343,27 +509,52 @@
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 4" key="design-files" class="mx-auto w-full max-w-5xl">
+              <div
+                v-else-if="currentStep === 4"
+                key="design-files"
+                class="mx-auto w-full max-w-5xl"
+              >
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Design Files</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">Inputs adapt to the first selected flow step. Constraints are imported here.</p>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    Inputs adapt to the first selected flow step. Constraints are imported
+                    here.
+                  </p>
                 </header>
 
-                <div class="grid min-h-[520px] overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 lg:grid-cols-[240px_1fr]">
-                  <nav class="border-b border-(--border-color) bg-(--bg-primary)/60 p-3 lg:border-b-0 lg:border-r">
+                <div
+                  class="grid min-h-[520px] overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 lg:grid-cols-[240px_1fr]"
+                >
+                  <nav
+                    class="border-b border-(--border-color) bg-(--bg-primary)/60 p-3 lg:border-r lg:border-b-0"
+                  >
                     <button
                       v-for="item in designInputTypes"
                       :key="item.key"
                       type="button"
                       class="mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border px-3 py-3 text-left transition-colors duration-200"
-                      :class="activeDesignInputType === item.key ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-transparent hover:border-(--border-color) hover:bg-(--bg-secondary)/60'"
+                      :class="
+                        activeDesignInputType === item.key
+                          ? 'border-(--accent-color) bg-(--accent-color)/10'
+                          : 'border-transparent hover:border-(--border-color) hover:bg-(--bg-secondary)/60'
+                      "
                       @click="activeDesignInputType = item.key"
                     >
                       <span>
-                        <span class="block text-sm font-semibold text-(--text-primary)">{{ item.label }}</span>
-                        <span class="mt-1 block text-xs text-(--text-secondary)">{{ item.required ? 'Required' : 'Optional' }}</span>
+                        <span class="block text-sm font-semibold text-(--text-primary)">{{
+                          item.label
+                        }}</span>
+                        <span class="mt-1 block text-xs text-(--text-secondary)">{{
+                          item.required ? 'Required' : 'Optional'
+                        }}</span>
                       </span>
-                      <i :class="[getDesignInputStatus(item.key) ? 'ri-checkbox-circle-fill text-green-500' : 'ri-circle-line text-(--text-secondary)']"></i>
+                      <i
+                        :class="[
+                          getDesignInputStatus(item.key)
+                            ? 'ri-checkbox-circle-fill text-green-500'
+                            : 'ri-circle-line text-(--text-secondary)',
+                        ]"
+                      ></i>
                     </button>
                   </nav>
 
@@ -374,13 +565,24 @@
                         @dragleave.prevent="isDraggingFiles = false"
                         @drop.prevent="handleFileDrop"
                         class="rounded-xl border-2 border-dashed p-8 text-center transition-colors duration-200"
-                        :class="isDraggingFiles ? 'border-(--accent-color) bg-(--accent-color)/5' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
+                        :class="
+                          isDraggingFiles
+                            ? 'border-(--accent-color) bg-(--accent-color)/5'
+                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                        "
                       >
-                        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-(--border-color) bg-(--bg-secondary)/50 text-(--text-secondary)">
+                        <div
+                          class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-(--border-color) bg-(--bg-secondary)/50 text-(--text-secondary)"
+                        >
                           <i class="ri-upload-cloud-2-line text-3xl"></i>
                         </div>
-                        <h3 class="text-base font-bold text-(--text-primary)">Add RTL Design Files</h3>
-                        <p class="mt-2 text-sm text-(--text-secondary)">Supports .v, .sv, .vhd, .vhdl, and .gz-compressed RTL files or a design folder.</p>
+                        <h3 class="text-base font-bold text-(--text-primary)">
+                          Add RTL Design Files
+                        </h3>
+                        <p class="mt-2 text-sm text-(--text-secondary)">
+                          Supports .v, .sv, .vhd, .vhdl, and .gz-compressed RTL files or a
+                          design folder.
+                        </p>
                         <div class="relative mt-5 inline-block">
                           <button
                             type="button"
@@ -388,11 +590,14 @@
                             @click="toggleBrowseMenu"
                           >
                             Browse
-                            <i class="ri-arrow-down-s-line" :class="{ 'rotate-180': showBrowseMenu }"></i>
+                            <i
+                              class="ri-arrow-down-s-line"
+                              :class="{ 'rotate-180': showBrowseMenu }"
+                            ></i>
                           </button>
                           <div
                             v-if="showBrowseMenu"
-                            class="absolute left-1/2 top-[calc(100%+0.5rem)] z-20 w-60 -translate-x-1/2 overflow-hidden rounded-lg border border-(--border-color) bg-(--bg-primary) shadow-lg"
+                            class="absolute top-[calc(100%+0.5rem)] left-1/2 z-20 w-60 -translate-x-1/2 overflow-hidden rounded-lg border border-(--border-color) bg-(--bg-primary) shadow-lg"
                           >
                             <button
                               type="button"
@@ -412,9 +617,19 @@
                             </button>
                           </div>
                         </div>
-                        <p v-if="manualFilePickError" class="mt-5 text-xs text-red-500">{{ manualFilePickError }}</p>
-                        <p v-else-if="directoryScanError" class="mt-5 text-xs text-red-500">{{ directoryScanError }}</p>
-                        <p v-else-if="isScanningDirectory" class="mt-5 text-xs text-(--text-secondary)">
+                        <p v-if="manualFilePickError" class="mt-5 text-xs text-red-500">
+                          {{ manualFilePickError }}
+                        </p>
+                        <p
+                          v-else-if="directoryScanError"
+                          class="mt-5 text-xs text-red-500"
+                        >
+                          {{ directoryScanError }}
+                        </p>
+                        <p
+                          v-else-if="isScanningDirectory"
+                          class="mt-5 text-xs text-(--text-secondary)"
+                        >
                           <i class="ri-loader-4-line animate-spin"></i>
                           Scanning RTL files in the selected directory...
                         </p>
@@ -428,20 +643,36 @@
                         @update:selected-files="updateDirectorySelectedFiles"
                       />
 
-                      <div v-if="manuallyAddedFiles.length > 0" class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4">
+                      <div
+                        v-if="manuallyAddedFiles.length > 0"
+                        class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4"
+                      >
                         <div class="mb-3 flex items-center justify-between">
-                          <h4 class="text-sm font-semibold text-(--text-primary)">Added RTL Files</h4>
-                          <span class="rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)">{{ manuallyAddedFiles.length }}</span>
+                          <h4 class="text-sm font-semibold text-(--text-primary)">
+                            Added RTL Files
+                          </h4>
+                          <span
+                            class="rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                            >{{ manuallyAddedFiles.length }}</span
+                          >
                         </div>
-                        <div class="max-h-44 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+                        <div
+                          class="custom-scrollbar max-h-44 space-y-2 overflow-y-auto pr-1"
+                        >
                           <div
                             v-for="file in manuallyAddedFiles"
                             :key="file"
                             class="flex items-center justify-between gap-3 rounded-lg border border-(--border-color) bg-(--bg-secondary)/25 px-3 py-2"
                           >
                             <div class="min-w-0">
-                              <p class="truncate text-sm font-medium text-(--text-primary)">{{ getFileName(file) }}</p>
-                              <p class="truncate text-xs text-(--text-secondary)">{{ file }}</p>
+                              <p
+                                class="truncate text-sm font-medium text-(--text-primary)"
+                              >
+                                {{ getFileName(file) }}
+                              </p>
+                              <p class="truncate text-xs text-(--text-secondary)">
+                                {{ file }}
+                              </p>
                             </div>
                             <button
                               type="button"
@@ -455,13 +686,22 @@
                       </div>
                     </div>
 
-                    <div v-else class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-5">
+                    <div
+                      v-else
+                      class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-5"
+                    >
                       <div class="mb-5 flex items-start justify-between gap-4">
                         <div>
-                          <h3 class="text-lg font-bold text-(--text-primary)">{{ activeDesignInput?.label }}</h3>
-                          <p class="mt-1 text-sm text-(--text-secondary)">{{ activeDesignInput?.description }}</p>
+                          <h3 class="text-lg font-bold text-(--text-primary)">
+                            {{ activeDesignInput?.label }}
+                          </h3>
+                          <p class="mt-1 text-sm text-(--text-secondary)">
+                            {{ activeDesignInput?.description }}
+                          </p>
                         </div>
-                        <span class="rounded-md border border-(--border-color) bg-(--bg-secondary)/55 px-2 py-1 text-xs font-semibold text-(--text-secondary)">
+                        <span
+                          class="rounded-md border border-(--border-color) bg-(--bg-secondary)/55 px-2 py-1 text-xs font-semibold text-(--text-secondary)"
+                        >
                           {{ activeDesignInput?.required ? 'Required' : 'Optional' }}
                         </span>
                       </div>
@@ -480,26 +720,50 @@
                           @click="importDesignInput(activeDesignInputType)"
                         >
                           <i class="ri-upload-2-line"></i>
-                          {{ activeDesignInputType === 'sdc' ? 'Import SDC' : `Import ${activeDesignInput?.label || 'File'}` }}
+                          {{
+                            activeDesignInputType === 'sdc'
+                              ? 'Import SDC'
+                              : `Import ${activeDesignInput?.label || 'File'}`
+                          }}
                         </button>
                       </div>
-                      <p v-if="activeDesignInputType === 'sdc'" class="mt-3 text-xs text-(--text-secondary)">SDC is optional and stored with the design inputs.</p>
-                      <p v-if="designFileError" class="mt-3 text-xs text-red-500">{{ designFileError }}</p>
+                      <p
+                        v-if="activeDesignInputType === 'sdc'"
+                        class="mt-3 text-xs text-(--text-secondary)"
+                      >
+                        SDC is optional and stored with the design inputs.
+                      </p>
+                      <p v-if="designFileError" class="mt-3 text-xs text-red-500">
+                        {{ designFileError }}
+                      </p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 5" key="pdk-config" class="mx-auto flex h-full w-full max-w-5xl flex-col">
+              <div
+                v-else-if="currentStep === 5"
+                key="pdk-config"
+                class="mx-auto flex h-full w-full max-w-5xl flex-col"
+              >
                 <header class="mb-4 shrink-0">
                   <h2 class="text-xl font-bold text-(--text-primary)">PDK Config</h2>
-                  <p class="mt-1 text-xs text-(--text-secondary)">Select an imported PDK, then use ECC defaults or customize PDK resource files.</p>
+                  <p class="mt-1 text-xs text-(--text-secondary)">
+                    Select an imported PDK, then use ECC defaults or customize PDK
+                    resource files.
+                  </p>
                 </header>
 
-                <div class="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-3">
-                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                <div
+                  class="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-3"
+                >
+                  <section
+                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                  >
                     <div class="mb-3 flex items-center justify-between gap-3">
-                      <h3 class="text-sm font-bold text-(--text-primary)">Process Design Kit</h3>
+                      <h3 class="text-sm font-bold text-(--text-primary)">
+                        Process Design Kit
+                      </h3>
                       <button
                         type="button"
                         class="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-(--accent-color) transition-colors duration-200 hover:bg-(--accent-color)/10"
@@ -510,27 +774,47 @@
                       </button>
                     </div>
 
-                    <div v-if="importedPdks.length > 0" class="grid max-h-[132px] gap-2 overflow-y-auto pr-1 md:grid-cols-2 custom-scrollbar">
+                    <div
+                      v-if="importedPdks.length > 0"
+                      class="custom-scrollbar grid max-h-[132px] gap-2 overflow-y-auto pr-1 md:grid-cols-2"
+                    >
                       <button
                         v-for="pdk in importedPdks"
                         :key="pdk.id"
                         type="button"
                         class="relative cursor-pointer rounded-lg border p-3 text-left transition-colors duration-200"
-                        :class="selectedPdkId === pdk.id ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
+                        :class="
+                          selectedPdkId === pdk.id
+                            ? 'border-(--accent-color) bg-(--accent-color)/10'
+                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                        "
                         @click="selectPdk(pdk)"
                       >
                         <span class="mb-1 flex items-start justify-between gap-3">
                           <span>
-                            <span class="block font-semibold text-(--text-primary)">{{ pdk.name }}</span>
-                            <span v-if="pdk.techNode" class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)">{{ pdk.techNode }}</span>
+                            <span class="block font-semibold text-(--text-primary)">{{
+                              pdk.name
+                            }}</span>
+                            <span
+                              v-if="pdk.techNode"
+                              class="mt-1 inline-block rounded-md bg-(--bg-secondary) px-2 py-0.5 text-xs text-(--text-secondary)"
+                              >{{ pdk.techNode }}</span
+                            >
                           </span>
-                          <i v-if="selectedPdkId === pdk.id" class="ri-checkbox-circle-fill text-xl text-green-500"></i>
+                          <i
+                            v-if="selectedPdkId === pdk.id"
+                            class="ri-checkbox-circle-fill text-xl text-green-500"
+                          ></i>
                         </span>
-                        <span class="block truncate font-mono text-xs text-(--text-secondary)" :title="pdk.path">{{ pdk.path }}</span>
+                        <span
+                          class="block truncate font-mono text-xs text-(--text-secondary)"
+                          :title="pdk.path"
+                          >{{ pdk.path }}</span
+                        >
                         <button
                           v-if="selectedPdkId !== pdk.id"
                           type="button"
-                          class="absolute right-3 top-3 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-(--text-secondary) opacity-0 transition-colors duration-200 hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
+                          class="absolute top-3 right-3 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-(--text-secondary) opacity-0 transition-colors duration-200 group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-500"
                           title="Remove PDK"
                           @click.stop="handleRemovePdk(pdk.id)"
                         >
@@ -539,8 +823,13 @@
                       </button>
                     </div>
 
-                    <div v-else class="rounded-lg border border-dashed border-(--border-color) bg-(--bg-primary)/55 p-8 text-center">
-                      <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-(--accent-color)/10 text-(--accent-color)">
+                    <div
+                      v-else
+                      class="rounded-lg border border-dashed border-(--border-color) bg-(--bg-primary)/55 p-8 text-center"
+                    >
+                      <div
+                        class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-(--accent-color)/10 text-(--accent-color)"
+                      >
                         <i class="ri-database-2-line text-2xl"></i>
                       </div>
                       <h4 class="font-semibold text-(--text-primary)">No PDK Imported</h4>
@@ -555,107 +844,180 @@
                     </div>
                   </section>
 
-                  <section class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                  <section
+                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                  >
                     <div class="mb-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Config Mode</h3>
-                      <p class="mt-1 text-xs text-(--text-secondary)">Default Config uses ECC default PDK config. Manual Config lets you choose Tech LEF, Cell LEF, and Liberty.</p>
+                      <p class="mt-1 text-xs text-(--text-secondary)">
+                        Default Config uses ECC default PDK config. Manual Config lets you
+                        choose Tech LEF, Cell LEF, and Liberty.
+                      </p>
                     </div>
                     <div class="grid gap-2 md:grid-cols-2">
                       <button
                         type="button"
                         class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
-                        :class="pdkConfigMode === 'default' ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
+                        :class="
+                          pdkConfigMode === 'default'
+                            ? 'border-(--accent-color) bg-(--accent-color)/10'
+                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                        "
                         @click="pdkConfigMode = 'default'"
                       >
                         <span
                           class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
-                          :class="pdkConfigMode === 'default' ? 'border-(--accent-color) bg-(--accent-color) text-white' : 'border-(--border-color) text-(--text-secondary)'"
+                          :class="
+                            pdkConfigMode === 'default'
+                              ? 'border-(--accent-color) bg-(--accent-color) text-white'
+                              : 'border-(--border-color) text-(--text-secondary)'
+                          "
                         >
                           <i v-if="pdkConfigMode === 'default'" class="ri-check-line"></i>
                           <i v-else class="ri-circle-line"></i>
                         </span>
                         <span>
-                          <span class="block text-sm font-bold text-(--text-primary)">Default Config</span>
-                          <span class="mt-1 block text-xs leading-5 text-(--text-secondary)">Use ECC default PDK config for the selected PDK.</span>
+                          <span class="block text-sm font-bold text-(--text-primary)"
+                            >Default Config</span
+                          >
+                          <span
+                            class="mt-1 block text-xs leading-5 text-(--text-secondary)"
+                            >Use ECC default PDK config for the selected PDK.</span
+                          >
                         </span>
                       </button>
 
                       <button
                         type="button"
                         class="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors duration-200"
-                        :class="pdkConfigMode === 'manual' ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'"
+                        :class="
+                          pdkConfigMode === 'manual'
+                            ? 'border-(--accent-color) bg-(--accent-color)/10'
+                            : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/45'
+                        "
                         @click="pdkConfigMode = 'manual'"
                       >
                         <span
                           class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
-                          :class="pdkConfigMode === 'manual' ? 'border-(--accent-color) bg-(--accent-color) text-white' : 'border-(--border-color) text-(--text-secondary)'"
+                          :class="
+                            pdkConfigMode === 'manual'
+                              ? 'border-(--accent-color) bg-(--accent-color) text-white'
+                              : 'border-(--border-color) text-(--text-secondary)'
+                          "
                         >
                           <i v-if="pdkConfigMode === 'manual'" class="ri-check-line"></i>
                           <i v-else class="ri-circle-line"></i>
                         </span>
                         <span>
-                          <span class="block text-sm font-bold text-(--text-primary)">Manual Config</span>
-                          <span class="mt-1 block text-xs leading-5 text-(--text-secondary)">Customize Tech LEF, Cell LEF, and Liberty.</span>
+                          <span class="block text-sm font-bold text-(--text-primary)"
+                            >Manual Config</span
+                          >
+                          <span
+                            class="mt-1 block text-xs leading-5 text-(--text-secondary)"
+                            >Customize Tech LEF, Cell LEF, and Liberty.</span
+                          >
                         </span>
                       </button>
                     </div>
                   </section>
 
-                  <section v-if="pdkConfigMode === 'default'" class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
-                    <div class="rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-4">
+                  <section
+                    v-if="pdkConfigMode === 'default'"
+                    class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                  >
+                    <div
+                      class="rounded-lg border border-(--accent-color)/35 bg-(--accent-color)/10 p-4"
+                    >
                       <div class="mb-3 flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-(--accent-color) text-white">
+                        <div
+                          class="flex h-10 w-10 items-center justify-center rounded-lg bg-(--accent-color) text-white"
+                        >
                           <i class="ri-check-double-line text-xl"></i>
                         </div>
                         <div>
-                          <h3 class="text-base font-bold text-(--text-primary)">Use ECC default PDK config</h3>
-                          <p class="mt-1 text-sm text-(--text-secondary)">Tech LEF, Cell LEF, and Liberty will be resolved by ECC defaults for the selected PDK.</p>
+                          <h3 class="text-base font-bold text-(--text-primary)">
+                            Use ECC default PDK config
+                          </h3>
+                          <p class="mt-1 text-sm text-(--text-secondary)">
+                            Tech LEF, Cell LEF, and Liberty will be resolved by ECC
+                            defaults for the selected PDK.
+                          </p>
                         </div>
                       </div>
-                      <p class="text-xs text-(--text-secondary)">Switch to Manual Config only when this workspace needs a custom PDK resource set.</p>
+                      <p class="text-xs text-(--text-secondary)">
+                        Switch to Manual Config only when this workspace needs a custom
+                        PDK resource set.
+                      </p>
                     </div>
                   </section>
 
-                  <section v-else class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                  <section
+                    v-else
+                    class="flex min-h-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                  >
                     <div class="mb-3 flex items-start justify-between gap-4">
                       <div>
-                        <h3 class="text-sm font-bold text-(--text-primary)">Manual PDK Resources</h3>
+                        <h3 class="text-sm font-bold text-(--text-primary)">
+                          Manual PDK Resources
+                        </h3>
                         <p class="mt-1 text-xs text-(--text-secondary)">
-                          Review each resource type on the left, then update the selection from the current PDK folder when needed.
+                          Review each resource type on the left, then update the selection
+                          from the current PDK folder when needed.
                         </p>
                       </div>
-                      <span class="rounded-md bg-(--bg-primary)/70 px-2 py-1 text-xs text-(--text-secondary)">
+                      <span
+                        class="rounded-md bg-(--bg-primary)/70 px-2 py-1 text-xs text-(--text-secondary)"
+                      >
                         {{ activeManualPdkSelections.length }} selected
                       </span>
                     </div>
 
-                    <div class="pdk-manual-resource-shell grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[200px_minmax(0,1fr)]">
+                    <div
+                      class="pdk-manual-resource-shell grid min-h-0 flex-1 gap-3 overflow-hidden xl:grid-cols-[200px_minmax(0,1fr)]"
+                    >
                       <aside class="pdk-resource-category-list grid content-start gap-2">
                         <button
                           v-for="item in pdkWizardSteps"
                           :key="item.key"
                           type="button"
                           class="flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-3 py-3 text-left transition-colors duration-200"
-                          :class="activePdkWizardStep === item.key ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/40'"
+                          :class="
+                            activePdkWizardStep === item.key
+                              ? 'border-(--accent-color) bg-(--accent-color)/10'
+                              : 'border-(--border-color) bg-(--bg-primary)/65 hover:border-(--accent-color)/40'
+                          "
                           @click="activePdkWizardStep = item.key"
                         >
                           <span class="min-w-0">
-                            <span class="block text-sm font-bold text-(--text-primary)">{{ item.title }}</span>
-                            <span class="mt-1 block text-xs leading-5 text-(--text-secondary)">{{ item.description }}</span>
+                            <span class="block text-sm font-bold text-(--text-primary)">{{
+                              item.title
+                            }}</span>
+                            <span
+                              class="mt-1 block text-xs leading-5 text-(--text-secondary)"
+                              >{{ item.description }}</span
+                            >
                           </span>
                           <span
                             class="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold"
-                            :class="activePdkWizardStep === item.key ? 'bg-(--accent-color) text-white' : 'bg-(--bg-secondary)/60 text-(--text-secondary)'"
+                            :class="
+                              activePdkWizardStep === item.key
+                                ? 'bg-(--accent-color) text-white'
+                                : 'bg-(--bg-secondary)/60 text-(--text-secondary)'
+                            "
                           >
                             {{ pdkSelections[item.key].length }}
                           </span>
                         </button>
                       </aside>
 
-                      <section class="pdk-resource-detail-panel flex min-h-0 flex-col rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-3">
+                      <section
+                        class="pdk-resource-detail-panel flex min-h-0 flex-col rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-3"
+                      >
                         <header class="mb-3 flex items-start justify-between gap-4">
                           <div class="min-w-0">
-                            <h4 class="text-sm font-bold text-(--text-primary)">{{ activePdkStep?.title }}</h4>
+                            <h4 class="text-sm font-bold text-(--text-primary)">
+                              {{ activePdkStep?.title }}
+                            </h4>
                             <p class="mt-1 text-xs leading-5 text-(--text-secondary)">
                               {{ activePdkStep?.description }}
                             </p>
@@ -664,23 +1026,35 @@
                             type="button"
                             class="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary) transition-colors duration-200 hover:border-(--accent-color)/45 hover:bg-(--accent-color)/10 hover:text-(--text-primary)"
                             title="Update selection"
-                            @click="activePdkStep && openPdkResourcePicker(activePdkStep.key)"
+                            @click="
+                              activePdkStep && openPdkResourcePicker(activePdkStep.key)
+                            "
                           >
                             <i class="ri-refresh-line text-base"></i>
                           </button>
                         </header>
 
-                        <div class="flex min-h-0 flex-1 flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3">
+                        <div
+                          class="flex min-h-0 flex-1 flex-col rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-3"
+                        >
                           <div class="mb-3 flex items-center justify-between gap-3">
                             <div>
-                              <h5 class="text-xs font-bold uppercase tracking-wide text-(--text-secondary)">Selected Files</h5>
+                              <h5
+                                class="text-xs font-bold tracking-wide text-(--text-secondary) uppercase"
+                              >
+                                Selected Files
+                              </h5>
                             </div>
-                            <span class="rounded-md bg-(--bg-primary)/75 px-2 py-1 text-[11px] font-semibold text-(--text-secondary)">
+                            <span
+                              class="rounded-md bg-(--bg-primary)/75 px-2 py-1 text-[11px] font-semibold text-(--text-secondary)"
+                            >
                               {{ activeManualPdkSelections.length }}
                             </span>
                           </div>
 
-                          <div class="pdk-resource-selected-list custom-scrollbar min-h-0 flex-1 space-y-2 pr-1">
+                          <div
+                            class="pdk-resource-selected-list custom-scrollbar min-h-0 flex-1 space-y-2 pr-1"
+                          >
                             <p
                               v-if="activeManualPdkSelections.length === 0"
                               class="rounded-lg border border-dashed border-(--border-color) px-4 py-6 text-center text-xs text-(--text-secondary)"
@@ -694,12 +1068,18 @@
                               class="flex w-full cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-200"
                               :title="file"
                             >
-                              <i class="ri-file-list-3-line mt-0.5 shrink-0 text-(--accent-color)"></i>
+                              <i
+                                class="ri-file-list-3-line mt-0.5 shrink-0 text-(--accent-color)"
+                              ></i>
                               <span class="min-w-0">
-                                <span class="block truncate text-sm font-semibold text-(--text-primary)">
+                                <span
+                                  class="block truncate text-sm font-semibold text-(--text-primary)"
+                                >
                                   {{ displayPdkResourceName(file) }}
                                 </span>
-                                <span class="mt-1 block break-all font-mono text-[11px] leading-5 text-(--text-secondary)">
+                                <span
+                                  class="mt-1 block font-mono text-[11px] leading-5 break-all text-(--text-secondary)"
+                                >
                                   {{ file }}
                                 </span>
                               </span>
@@ -712,16 +1092,27 @@
                 </div>
               </div>
 
-              <div v-else-if="currentStep === 6" key="spec-setting" class="mx-auto w-full max-w-4xl">
+              <div
+                v-else-if="currentStep === 6"
+                key="spec-setting"
+                class="mx-auto w-full max-w-4xl"
+              >
                 <header class="mb-7">
                   <h2 class="text-2xl font-bold text-(--text-primary)">Spec Setting</h2>
-                  <p class="mt-2 text-sm text-(--text-secondary)">These values are saved into the workspace home parameters.json.</p>
+                  <p class="mt-2 text-sm text-(--text-secondary)">
+                    These values are saved into the workspace home parameters.json.
+                  </p>
                 </header>
 
-                <div class="space-y-5 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5">
+                <div
+                  class="space-y-5 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
+                >
                   <div class="grid gap-5 md:grid-cols-2">
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Design Name <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Design Name <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model="config.parameters.design"
                         type="text"
@@ -731,7 +1122,10 @@
                       />
                     </div>
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Top Module Name <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Top Module Name <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model="config.parameters.top_module"
                         type="text"
@@ -740,7 +1134,10 @@
                       />
                     </div>
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Clock Signal Name <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Clock Signal Name <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model="config.parameters.clock"
                         type="text"
@@ -749,7 +1146,10 @@
                       />
                     </div>
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Frequency max [MHz] <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Frequency max [MHz] <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model.number="config.parameters.frequency_max"
                         type="number"
@@ -759,7 +1159,10 @@
                       />
                     </div>
                     <div>
-                      <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Max Fanout <span class="text-red-500">*</span></label>
+                      <label
+                        class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                        >Max Fanout <span class="text-red-500">*</span></label
+                      >
                       <input
                         v-model.number="config.parameters.max_fanout"
                         type="number"
@@ -770,14 +1173,22 @@
                     </div>
                   </div>
 
-                  <div class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4">
+                  <div
+                    class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4"
+                  >
                     <div class="mb-4 flex items-center justify-between gap-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Die Area</h3>
-                      <div class="inline-flex rounded-lg border border-(--border-color) bg-(--bg-secondary)/40 p-1">
+                      <div
+                        class="inline-flex rounded-lg border border-(--border-color) bg-(--bg-secondary)/40 p-1"
+                      >
                         <button
                           type="button"
                           class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors duration-200"
-                          :class="dieAreaMode === 'width_height' ? 'bg-(--accent-color) text-white' : 'text-(--text-secondary) hover:text-(--text-primary)'"
+                          :class="
+                            dieAreaMode === 'width_height'
+                              ? 'bg-(--accent-color) text-white'
+                              : 'text-(--text-secondary) hover:text-(--text-primary)'
+                          "
                           @click="dieAreaMode = 'width_height'"
                         >
                           Width / Height
@@ -785,7 +1196,11 @@
                         <button
                           type="button"
                           class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors duration-200"
-                          :class="dieAreaMode === 'utilitization_margin' ? 'bg-(--accent-color) text-white' : 'text-(--text-secondary) hover:text-(--text-primary)'"
+                          :class="
+                            dieAreaMode === 'utilitization_margin'
+                              ? 'bg-(--accent-color) text-white'
+                              : 'text-(--text-secondary) hover:text-(--text-primary)'
+                          "
                           @click="dieAreaMode = 'utilitization_margin'"
                         >
                           Utilitization / Margin
@@ -793,9 +1208,15 @@
                       </div>
                     </div>
 
-                    <div v-if="dieAreaMode === 'width_height'" class="grid gap-5 md:grid-cols-2">
+                    <div
+                      v-if="dieAreaMode === 'width_height'"
+                      class="grid gap-5 md:grid-cols-2"
+                    >
                       <div>
-                        <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Width</label>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Width</label
+                        >
                         <input
                           v-model.number="config.parameters.die_width"
                           type="number"
@@ -805,7 +1226,10 @@
                         />
                       </div>
                       <div>
-                        <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Height</label>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Height</label
+                        >
                         <input
                           v-model.number="config.parameters.die_height"
                           type="number"
@@ -818,7 +1242,10 @@
 
                     <div v-else class="grid gap-5 md:grid-cols-2">
                       <div>
-                        <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Utilitization</label>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Utilitization</label
+                        >
                         <input
                           v-model.number="config.parameters.utilitization"
                           type="number"
@@ -829,7 +1256,10 @@
                         />
                       </div>
                       <div>
-                        <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Margin</label>
+                        <label
+                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                          >Margin</label
+                        >
                         <input
                           v-model.number="config.parameters.margin"
                           type="number"
@@ -845,7 +1275,9 @@
             </Transition>
           </section>
 
-          <footer class="flex shrink-0 items-center justify-between border-t border-(--border-color) bg-(--bg-primary) px-6 py-4 md:px-8">
+          <footer
+            class="flex shrink-0 items-center justify-between border-t border-(--border-color) bg-(--bg-primary) px-6 py-4 md:px-8"
+          >
             <button
               v-if="currentStep > 1"
               type="button"
@@ -1031,13 +1463,15 @@ const designNameTouched = ref(
 )
 const flowStartStep = ref<FlowStepName>(
   normalizeFlowStepName(
-    props.initialConfig?.flow_config?.start_step ?? props.initialConfig?.parameters?.start_step,
+    props.initialConfig?.flow_config?.start_step ??
+      props.initialConfig?.parameters?.start_step,
     'Synthesis',
   ),
 )
 const flowEndStep = ref<FlowStepName>(
   normalizeFlowStepName(
-    props.initialConfig?.flow_config?.end_step ?? props.initialConfig?.parameters?.end_step,
+    props.initialConfig?.flow_config?.end_step ??
+      props.initialConfig?.parameters?.end_step,
     'Harden',
   ),
 )
@@ -1045,12 +1479,17 @@ const activeDesignInputType = ref<DesignInputKey>(
   initialDesignInputType(flowStartStep.value),
 )
 const pdkConfigMode = ref<'default' | 'manual'>(
-  normalizePdkConfigMode(props.initialConfig?.pdk_config_mode ?? props.initialConfig?.source_config?.pdk_config_mode),
+  normalizePdkConfigMode(
+    props.initialConfig?.pdk_config_mode ??
+      props.initialConfig?.source_config?.pdk_config_mode,
+  ),
 )
 const activePdkWizardStep = ref<PdkResourceKey>('tech_lef')
 const pdkResourcePickerOpen = ref(false)
 const filelistPath = ref(initialFilelistPath)
-const sdcPath = ref(props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '')
+const sdcPath = ref(
+  props.initialConfig?.sdc ?? props.initialConfig?.source_config?.sdc ?? '',
+)
 const dieAreaMode = ref<DieAreaMode>(
   normalizeDieAreaMode(props.initialConfig?.parameters?.die_area_mode),
 )
@@ -1097,12 +1536,9 @@ const pdkWizardSteps: PdkWizardStep[] = [
   },
 ]
 
-const projectContext = ref<ProjectContext>({
-  mode: 'select',
-  project_name: '',
-  project_root: '',
-  project_json_path: '',
-})
+const projectContext = ref<ProjectContext>(
+  createInitialProjectContext(props.initialConfig),
+)
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
 const sourceContext = computed<SourceContext | null>(() => {
@@ -1132,12 +1568,26 @@ const selectedPdkId = ref<string>(
 const hasLoadedPdks = ref(false)
 
 const pdkSelections = ref<Record<PdkResourceKey, string[]>>({
-  tech_lef: [...(props.initialConfig?.pdk_config?.tech_lef ?? props.initialConfig?.source_config?.pdk_config?.tech_lef ?? [])],
-  cell_lef: [...(props.initialConfig?.pdk_config?.cell_lef ?? props.initialConfig?.source_config?.pdk_config?.cell_lef ?? [])],
-  liberty: [...(props.initialConfig?.pdk_config?.liberty ?? props.initialConfig?.source_config?.pdk_config?.liberty ?? [])],
+  tech_lef: [
+    ...(props.initialConfig?.pdk_config?.tech_lef ??
+      props.initialConfig?.source_config?.pdk_config?.tech_lef ??
+      []),
+  ],
+  cell_lef: [
+    ...(props.initialConfig?.pdk_config?.cell_lef ??
+      props.initialConfig?.source_config?.pdk_config?.cell_lef ??
+      []),
+  ],
+  liberty: [
+    ...(props.initialConfig?.pdk_config?.liberty ??
+      props.initialConfig?.source_config?.pdk_config?.liberty ??
+      []),
+  ],
 })
 
-function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): WorkspaceConfig {
+function createInitialConfig(
+  initialConfig?: WorkspaceWizardInitialConfig,
+): WorkspaceConfig {
   const source_config = initialConfig?.source_config
   const startStep = flowStartStep.value
   const endStep = flowEndStep.value
@@ -1147,10 +1597,14 @@ function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): Work
     cell_lef: [],
     liberty: [],
   }
+  const defaultPdkConfigMode = {
+    pdk_config_mode: 'default' as const,
+  }
 
   return {
     directory: normalizePath(
-      initialConfig?.directory ?? joinPath(projectContext.value.project_root, workspaceName.value),
+      initialConfig?.directory ??
+        joinPath(projectContext.value.project_root, workspaceName.value),
     ),
     pdk: initialConfig?.pdk ?? source_config?.pdk ?? 'ics55',
     pdk_root: initialConfig?.pdk_root ?? source_config?.pdk_root ?? '',
@@ -1166,25 +1620,33 @@ function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): Work
       die_height: 100,
       utilitization: 0.6,
       margin: 0,
-      ...(source_config?.parameters ?? {}),
-      ...(initialConfig?.parameters ?? {}),
+      ...source_config?.parameters,
+      ...initialConfig?.parameters,
     },
-    origin_def: startStep === 'Synthesis' || startStep === 'Floorplan'
-      ? ''
-      : initialConfig?.origin_def ?? source_config?.origin_def ?? '',
+    origin_def:
+      startStep === 'Synthesis' || startStep === 'Floorplan'
+        ? ''
+        : (initialConfig?.origin_def ?? source_config?.origin_def ?? ''),
     origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
-    rtl_list: initialConfig?.rtl_list ? [...initialConfig.rtl_list] : source_config?.rtl_list ? [...source_config.rtl_list] : [],
+    rtl_list: initialConfig?.rtl_list
+      ? [...initialConfig.rtl_list]
+      : source_config?.rtl_list
+        ? [...source_config.rtl_list]
+        : [],
     filelist: initialConfig?.filelist ?? source_config?.filelist ?? filelistPath.value,
     design_input_mode: startStep === 'Synthesis' ? 'rtl' : 'post_synthesis',
     sdc: initialConfig?.sdc ?? source_config?.sdc ?? sdcPath.value,
     pdk_config_mode:
-      initialConfig?.pdk_config_mode ?? source_config?.pdk_config_mode ?? 'default',
+      initialConfig?.pdk_config_mode ??
+      source_config?.pdk_config_mode ??
+      defaultPdkConfigMode.pdk_config_mode,
     flow_config: initialConfig?.flow_config ?? {
       start_step: startStep,
       end_step: endStep,
       steps: flowStepsBetween(startStep, endStep),
     },
-    pdk_config: initialConfig?.pdk_config ?? source_config?.pdk_config ?? defaultPdkConfig,
+    pdk_config:
+      initialConfig?.pdk_config ?? source_config?.pdk_config ?? defaultPdkConfig,
     pdk_json: initialConfig?.pdk_json ?? source_config?.pdk_json ?? '',
     project_context: initialConfig?.project_context ?? projectContext.value,
     source_context: initialConfig?.source_context,
@@ -1226,7 +1688,9 @@ function defaultWorkspaceName() {
 }
 
 function nextWorkspaceNameForProject(manifest: ProjectManifest | null) {
-  return manifest ? nextWorkspaceName(workspaceNamesFromManifest(manifest)) : defaultWorkspaceName()
+  return manifest
+    ? nextWorkspaceName(workspaceNamesFromManifest(manifest))
+    : defaultWorkspaceName()
 }
 
 function workspaceNamesFromManifest(manifest: ProjectManifest) {
@@ -1246,11 +1710,15 @@ function nextWorkspaceName(workspaceNames: string[]) {
   return `ws_${String(next).padStart(4, '0')}`
 }
 
-async function readProjectManifestForProject(projectRoot: string): Promise<ProjectManifest | null> {
+async function readProjectManifestForProject(
+  projectRoot: string,
+): Promise<ProjectManifest | null> {
   const root = normalizePath(projectRoot)
   if (!root) return null
   try {
-    const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: root })
+    const manifestText = await readOptionalProjectTextFile('project.json', {
+      projectPath: root,
+    })
     if (!manifestText) return null
     return parseProjectManifest(manifestText)
   } catch (error) {
@@ -1353,7 +1821,10 @@ function syncManagedWorkspaceDirectory() {
   projectContext.value.project_root = managedWorkspaceRoot.value
   projectContext.value.project_name =
     projectContext.value.project_name || getFileName(managedWorkspaceRoot.value)
-  projectContext.value.project_json_path = joinPath(managedWorkspaceRoot.value, 'project.json')
+  projectContext.value.project_json_path = joinPath(
+    managedWorkspaceRoot.value,
+    'project.json',
+  )
   syncWorkspaceConfig()
 }
 const CHINESE_CHAR_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/
@@ -1361,8 +1832,12 @@ const HAS_SPACE_RE = /\s/
 const DIRECTORY_UPLOAD_FAILURE_MESSAGE =
   'Folders cannot be uploaded from Select RTL files. Use Select design folder to scan a folder.'
 
-const projectNameError = computed(() => validateName(projectContext.value.project_name, 'Project name'))
-const workspaceNameError = computed(() => validateName(workspaceName.value, 'Workspace name'))
+const projectNameError = computed(() =>
+  validateName(projectContext.value.project_name, 'Project name'),
+)
+const workspaceNameError = computed(() =>
+  validateName(workspaceName.value, 'Workspace name'),
+)
 const workspaceLocation = computed(() =>
   lockWorkspaceDirectory.value && props.initialConfig?.directory
     ? normalizePath(props.initialConfig.directory)
@@ -1370,16 +1845,25 @@ const workspaceLocation = computed(() =>
 )
 const workspaceLocationError = computed(() => {
   if (!workspaceLocation.value) return ''
-  if (HAS_SPACE_RE.test(workspaceLocation.value)) return 'Workspace location cannot contain spaces'
-  if (CHINESE_CHAR_RE.test(workspaceLocation.value)) return 'Workspace location cannot contain Chinese characters'
+  if (HAS_SPACE_RE.test(workspaceLocation.value))
+    return 'Workspace location cannot contain spaces'
+  if (CHINESE_CHAR_RE.test(workspaceLocation.value))
+    return 'Workspace location cannot contain Chinese characters'
   return ''
 })
 
-const flowStartIndex = computed(() => hardenFlowSteps.findIndex((step) => step.name === flowStartStep.value))
-const flowEndIndex = computed(() => hardenFlowSteps.findIndex((step) => step.name === flowEndStep.value))
+const flowStartIndex = computed(() =>
+  hardenFlowSteps.findIndex((step) => step.name === flowStartStep.value),
+)
+const flowEndIndex = computed(() =>
+  hardenFlowSteps.findIndex((step) => step.name === flowEndStep.value),
+)
 const lockedFlowStepNames = computed(() => {
   if (!sourceContext.value?.startStep) return []
-  const startStep = normalizeFlowStepName(sourceContext.value.startStep, flowStartStep.value)
+  const startStep = normalizeFlowStepName(
+    sourceContext.value.startStep,
+    flowStartStep.value,
+  )
   const startIndex = hardenFlowSteps.findIndex((step) => step.name === startStep)
   if (startIndex <= 0) return []
   return hardenFlowSteps.slice(0, startIndex).map((step) => step.name)
@@ -1391,44 +1875,96 @@ const selectedFlowSteps = computed(() => {
 })
 const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
 const startsFromFloorplan = computed(() => flowStartStep.value === 'Floorplan')
-const hasSelectedPdkConfig = computed(() =>
-  selectedPdkId.value.trim() !== ''
-  || config.value.pdk.trim() !== ''
-  || config.value.pdk_root.trim() !== '',
+const hasSelectedPdkConfig = computed(
+  () =>
+    selectedPdkId.value.trim() !== '' ||
+    config.value.pdk.trim() !== '' ||
+    config.value.pdk_root.trim() !== '',
 )
 
 const designInputTypes = computed<DesignInputType[]>(() => {
   if (startsFromSynthesis.value) {
     return [
-      { key: 'rtl', label: 'RTL', required: true, description: 'Import RTL source files or scan an RTL source folder.' },
-      { key: 'filelist', label: 'Filelist', required: false, description: 'Use an existing filelist instead of manually selecting every RTL file.' },
-      { key: 'sdc', label: 'SDC', required: false, description: 'Import optional timing constraints.' },
+      {
+        key: 'rtl',
+        label: 'RTL',
+        required: true,
+        description: 'Import RTL source files or scan an RTL source folder.',
+      },
+      {
+        key: 'filelist',
+        label: 'Filelist',
+        required: false,
+        description:
+          'Use an existing filelist instead of manually selecting every RTL file.',
+      },
+      {
+        key: 'sdc',
+        label: 'SDC',
+        required: false,
+        description: 'Import optional timing constraints.',
+      },
     ]
   }
 
   if (startsFromFloorplan.value) {
     return [
-      { key: 'verilog', label: 'Verilog', required: true, description: 'Import the synthesized Verilog netlist for floorplan.' },
-      { key: 'sdc', label: 'SDC', required: false, description: 'Import optional timing constraints.' },
+      {
+        key: 'verilog',
+        label: 'Verilog',
+        required: true,
+        description: 'Import the synthesized Verilog netlist for floorplan.',
+      },
+      {
+        key: 'sdc',
+        label: 'SDC',
+        required: false,
+        description: 'Import optional timing constraints.',
+      },
     ]
   }
 
   return [
-    { key: 'def', label: 'DEF', required: true, description: 'Import the starting DEF file for post-synthesis flow.' },
-    { key: 'verilog', label: 'Verilog', required: true, description: 'Import the synthesized Verilog netlist.' },
-    { key: 'sdc', label: 'SDC', required: false, description: 'Import optional timing constraints.' },
+    {
+      key: 'def',
+      label: 'DEF',
+      required: true,
+      description: 'Import the starting DEF file for post-synthesis flow.',
+    },
+    {
+      key: 'verilog',
+      label: 'Verilog',
+      required: true,
+      description: 'Import the synthesized Verilog netlist.',
+    },
+    {
+      key: 'sdc',
+      label: 'SDC',
+      required: false,
+      description: 'Import optional timing constraints.',
+    },
   ]
 })
 
-const activeDesignInput = computed(() => designInputTypes.value.find((item) => item.key === activeDesignInputType.value))
-const activePdkStep = computed(() => pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value))
-const selectedPdk = computed(() => importedPdks.value.find((pdk) => pdk.id === selectedPdkId.value))
+const activeDesignInput = computed(() =>
+  designInputTypes.value.find((item) => item.key === activeDesignInputType.value),
+)
+const activePdkStep = computed(() =>
+  pdkWizardSteps.find((item) => item.key === activePdkWizardStep.value),
+)
+const selectedPdk = computed(() =>
+  importedPdks.value.find((pdk) => pdk.id === selectedPdkId.value),
+)
 const manualPdkDetectedFiles = ref<PdkDetectedFiles | null>(null)
-const currentPdkDetectedFiles = computed<PdkDetectedFiles>(() =>
-  manualPdkDetectedFiles.value ?? selectedPdk.value?.detectedFiles ?? { directories: [], files: [] },
+const currentPdkDetectedFiles = computed<PdkDetectedFiles>(
+  () =>
+    manualPdkDetectedFiles.value ??
+    selectedPdk.value?.detectedFiles ?? { directories: [], files: [] },
 )
 const detectedPdkDirectories = computed(() => currentPdkDetectedFiles.value.directories)
-const activeManualPdkSelections = computed(() => pdkSelections.value[activePdkWizardStep.value] ?? [])
+const activeManualPdkSelections = computed(
+  () => pdkSelections.value[activePdkWizardStep.value] ?? [],
+)
 
 const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
   const files = currentPdkDetectedFiles.value.files
@@ -1445,14 +1981,18 @@ const detectedPdkFiles = computed<Record<PdkResourceKey, string[]>>(() => {
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
-      return projectContext.value.project_root.trim() !== '' &&
+      return (
+        projectContext.value.project_root.trim() !== '' &&
         projectContext.value.project_name.trim() !== '' &&
         !projectNameError.value
+      )
     case 2:
-      return workspaceName.value.trim() !== '' &&
+      return (
+        workspaceName.value.trim() !== '' &&
         workspaceLocation.value.trim() !== '' &&
         !workspaceNameError.value &&
         !workspaceLocationError.value
+      )
     case 3:
       return selectedFlowSteps.value.length > 0
     case 4:
@@ -1460,9 +2000,11 @@ const canProceed = computed(() => {
     case 5:
       if (!hasSelectedPdkConfig.value) return false
       if (pdkConfigMode.value === 'default') return true
-      return pdkSelections.value.tech_lef.length > 0 &&
+      return (
+        pdkSelections.value.tech_lef.length > 0 &&
         pdkSelections.value.cell_lef.length > 0 &&
         pdkSelections.value.liberty.length > 0
+      )
     case 6:
       return specReady()
     default:
@@ -1470,19 +2012,31 @@ const canProceed = computed(() => {
   }
 })
 
-watch(projectContext, () => {
-  if (projectContext.value.mode === 'create') {
-    projectContext.value.project_root = joinPath(projectParentPath.value, projectContext.value.project_name)
-  }
-  projectContext.value.project_json_path = projectContext.value.project_root
-    ? joinPath(projectContext.value.project_root, 'project.json')
-    : ''
-  syncWorkspaceConfig()
-}, { deep: true })
+watch(
+  projectContext,
+  () => {
+    if (projectContext.value.mode === 'create') {
+      projectContext.value.project_root = joinPath(
+        projectParentPath.value,
+        projectContext.value.project_name,
+      )
+    }
+    projectContext.value.project_json_path = projectContext.value.project_root
+      ? joinPath(projectContext.value.project_root, 'project.json')
+      : ''
+    syncWorkspaceConfig()
+  },
+  { deep: true },
+)
+
+watch(managedWorkspaceRoot, syncManagedWorkspaceDirectory, { immediate: true })
 
 watch(projectParentPath, () => {
   if (projectContext.value.mode === 'create') {
-    projectContext.value.project_root = joinPath(projectParentPath.value, projectContext.value.project_name)
+    projectContext.value.project_root = joinPath(
+      projectParentPath.value,
+      projectContext.value.project_name,
+    )
   }
 })
 
@@ -1526,15 +2080,15 @@ function validateName(name: string, label: string) {
 }
 
 function joinPath(...parts: Array<string | undefined | null>) {
-  const cleaned = parts
-    .map((part) => (part || '').trim())
-    .filter(Boolean)
+  const cleaned = parts.map((part) => (part || '').trim()).filter(Boolean)
   if (cleaned.length === 0) return ''
   const [first, ...rest] = cleaned
   return [
     first.replace(/\/+$/, ''),
     ...rest.map((part) => part.replace(/^\/+|\/+$/g, '')),
-  ].filter(Boolean).join('/')
+  ]
+    .filter(Boolean)
+    .join('/')
 }
 
 function getFileName(path: string) {
@@ -1556,12 +2110,14 @@ function hasExtension(path: string, extensions: string[]) {
 
 function isTechLefFile(path: string) {
   const lower = path.replace(/\\/g, '/').toLowerCase()
-  return lower.includes('/prtech/')
-    || lower.includes('/techlef/')
-    || lower.includes('/tech_lef/')
-    || lower.includes('/tlef/')
-    || /(^|[/\\])(tech|technology|tlef|.*tech.*)\.lef$/i.test(path)
-    || /tech/i.test(getFileName(path))
+  return (
+    lower.includes('/prtech/') ||
+    lower.includes('/techlef/') ||
+    lower.includes('/tech_lef/') ||
+    lower.includes('/tlef/') ||
+    /(^|[/\\])(tech|technology|tlef|.*tech.*)\.lef$/i.test(path) ||
+    /tech/i.test(getFileName(path))
+  )
 }
 
 function resolvePdkFile(file: string) {
@@ -1600,7 +2156,8 @@ async function applyProjectDefaultsForProject(projectRoot: string) {
 
 function applyProjectManifestDefaults(manifest: ProjectManifest) {
   const baseDesign = manifest.base_design
-  const baseDesignRecord = baseDesign as ProjectManifest['base_design'] & Record<string, unknown>
+  const baseDesignRecord = baseDesign as ProjectManifest['base_design'] &
+    Record<string, unknown>
   const parameters = isRecord(baseDesign.parameters) ? baseDesign.parameters : {}
 
   applyProjectFlowDefaults(baseDesignRecord, parameters)
@@ -1651,7 +2208,12 @@ function applyProjectDesignFileDefaults(
   }
 
   const projectFilelist = firstString(baseDesign.filelist, parameters.filelist)
-  if (startsFromSynthesis.value && projectFilelist && !filelistPath.value && !hasInitialConfigValue('filelist')) {
+  if (
+    startsFromSynthesis.value &&
+    projectFilelist &&
+    !filelistPath.value &&
+    !hasInitialConfigValue('filelist')
+  ) {
     filelistPath.value = projectFilelist
   }
 
@@ -1660,10 +2222,21 @@ function applyProjectDesignFileDefaults(
     sdcPath.value = projectSdc
   }
 
-  if (!startsFromSynthesis.value && !config.value.origin_verilog && baseDesign.origin_verilog && !hasInitialConfigValue('origin_verilog')) {
+  if (
+    !startsFromSynthesis.value &&
+    !config.value.origin_verilog &&
+    baseDesign.origin_verilog &&
+    !hasInitialConfigValue('origin_verilog')
+  ) {
     config.value.origin_verilog = baseDesign.origin_verilog
   }
-  if (!startsFromSynthesis.value && !startsFromFloorplan.value && !config.value.origin_def && baseDesign.origin_def && !hasInitialConfigValue('origin_def')) {
+  if (
+    !startsFromSynthesis.value &&
+    !startsFromFloorplan.value &&
+    !config.value.origin_def &&
+    baseDesign.origin_def &&
+    !hasInitialConfigValue('origin_def')
+  ) {
     config.value.origin_def = baseDesign.origin_def
   }
 }
@@ -1687,19 +2260,56 @@ function applyProjectParameterDefaults(
   manifest: ProjectManifest,
   parameters: Record<string, unknown>,
 ) {
-  setStringParameterDefault('top_module', firstString(parameters.top_module, parameters.Top, parameters['Top Module'], manifest.base_design.top_module))
-  setStringParameterDefault('clock', firstString(parameters.clock, parameters.Clock, manifest.base_design.clock))
-  setStringParameterDefault('design', firstString(parameters.design, parameters.Design, manifest.name))
+  setStringParameterDefault(
+    'top_module',
+    firstString(
+      parameters.top_module,
+      parameters.Top,
+      parameters['Top Module'],
+      manifest.base_design.top_module,
+    ),
+  )
+  setStringParameterDefault(
+    'clock',
+    firstString(parameters.clock, parameters.Clock, manifest.base_design.clock),
+  )
+  setStringParameterDefault(
+    'design',
+    firstString(parameters.design, parameters.Design, manifest.name),
+  )
 
-  setNumberParameterDefault('frequency_max', firstNumber(parameters.frequency_max, parameters['Frequency max [MHz]']))
-  setNumberParameterDefault('max_fanout', firstNumber(parameters.max_fanout, parameters['Max Fanout']))
-  setNumberParameterDefault('die_width', firstNumber(parameters.die_width, parameters['Die Width']))
-  setNumberParameterDefault('die_height', firstNumber(parameters.die_height, parameters['Die Height']))
-  setNumberParameterDefault('utilitization', firstNumber(parameters.utilitization, parameters.core_utilization, parameters['Core Utilization']))
+  setNumberParameterDefault(
+    'frequency_max',
+    firstNumber(parameters.frequency_max, parameters['Frequency max [MHz]']),
+  )
+  setNumberParameterDefault(
+    'max_fanout',
+    firstNumber(parameters.max_fanout, parameters['Max Fanout']),
+  )
+  setNumberParameterDefault(
+    'die_width',
+    firstNumber(parameters.die_width, parameters['Die Width']),
+  )
+  setNumberParameterDefault(
+    'die_height',
+    firstNumber(parameters.die_height, parameters['Die Height']),
+  )
+  setNumberParameterDefault(
+    'utilitization',
+    firstNumber(
+      parameters.utilitization,
+      parameters.core_utilization,
+      parameters['Core Utilization'],
+    ),
+  )
   setNumberParameterDefault('margin', firstNumber(parameters.margin, parameters.Margin))
 
   const projectDieAreaMode = firstString(parameters.die_area_mode)
-  if ((projectDieAreaMode === 'width_height' || projectDieAreaMode === 'utilitization_margin') && !hasInitialParameterValue('die_area_mode')) {
+  if (
+    (projectDieAreaMode === 'width_height' ||
+      projectDieAreaMode === 'utilitization_margin') &&
+    !hasInitialParameterValue('die_area_mode')
+  ) {
     dieAreaMode.value = projectDieAreaMode
   }
 }
@@ -1728,23 +2338,34 @@ function setNumberParameterDefault(key: string, value: unknown) {
 
   const currentValue = config.value.parameters[key]
   const defaultValue = SYSTEM_PARAMETER_DEFAULTS[key]
-  if (currentValue === undefined || currentValue === '' || Number(currentValue) === defaultValue) {
+  if (
+    currentValue === undefined ||
+    currentValue === '' ||
+    Number(currentValue) === defaultValue
+  ) {
     config.value.parameters[key] = nextValue
   }
 }
 
 function hasInitialConfigValue(key: keyof WorkspaceConfig) {
-  return props.initialConfig?.[key] !== undefined || props.initialConfig?.source_config?.[key] !== undefined
+  return (
+    props.initialConfig?.[key] !== undefined ||
+    props.initialConfig?.source_config?.[key] !== undefined
+  )
 }
 
 function hasInitialParameterValue(key: string) {
-  return props.initialConfig?.parameters?.[key] !== undefined ||
+  return (
+    props.initialConfig?.parameters?.[key] !== undefined ||
     props.initialConfig?.source_config?.parameters?.[key] !== undefined
+  )
 }
 
 function hasInitialRtlList() {
-  return (props.initialConfig?.rtl_list?.length ?? 0) > 0 ||
+  return (
+    (props.initialConfig?.rtl_list?.length ?? 0) > 0 ||
     (props.initialConfig?.source_config?.rtl_list?.length ?? 0) > 0
+  )
 }
 
 function firstString(...values: unknown[]) {
@@ -1768,7 +2389,9 @@ function firstNumber(...values: unknown[]) {
 
 function stringArray(value: unknown) {
   return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    ? value.filter(
+        (item): item is string => typeof item === 'string' && item.trim() !== '',
+      )
     : []
 }
 
@@ -1779,7 +2402,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function setProjectMode(mode: ProjectMode) {
   projectContext.value.mode = mode
   if (mode === 'create') {
-    projectContext.value.project_root = joinPath(projectParentPath.value, projectContext.value.project_name)
+    projectContext.value.project_root = joinPath(
+      projectParentPath.value,
+      projectContext.value.project_name,
+    )
   }
   if (mode === 'select') {
     void applyProjectDefaultsForProject(projectContext.value.project_root)
@@ -1837,10 +2463,11 @@ async function ensurePdksLoaded() {
   hasLoadedPdks.value = true
   await loadPdks()
   if (config.value.pdk || config.value.pdk_root) {
-    const matchedPdk = importedPdks.value.find((pdk) =>
-      pdk.id === selectedPdkId.value
-      || pdk.pdkId === config.value.pdk
-      || pdk.path === config.value.pdk_root,
+    const matchedPdk = importedPdks.value.find(
+      (pdk) =>
+        pdk.id === selectedPdkId.value ||
+        pdk.pdkId === config.value.pdk ||
+        pdk.path === config.value.pdk_root,
     )
     if (matchedPdk) {
       selectPdk(matchedPdk)
@@ -1860,7 +2487,12 @@ function applySourceWorkspaceDefaults(initialConfig?: WorkspaceWizardInitialConf
   const source_config = initialConfig?.source_config
   if (!source_config) return
 
-  if (!startsFromSynthesis.value && !startsFromFloorplan.value && !config.value.origin_def && source_config.origin_def) {
+  if (
+    !startsFromSynthesis.value &&
+    !startsFromFloorplan.value &&
+    !config.value.origin_def &&
+    source_config.origin_def
+  ) {
     config.value.origin_def = source_config.origin_def
   }
   if (!config.value.origin_verilog && source_config.origin_verilog) {
@@ -1914,9 +2546,8 @@ async function browseRtlFiles() {
       showDirectoryUploadFailurePrompt()
       return
     }
-    manualFilePickError.value = error instanceof Error
-      ? error.message
-      : 'Failed to select RTL design files.'
+    manualFilePickError.value =
+      error instanceof Error ? error.message : 'Failed to select RTL design files.'
     return
   }
 
@@ -1928,7 +2559,8 @@ async function browseRtlFiles() {
 
   const hdlFiles = result.files.filter((path) => isHdlFilePath(path))
   if (hdlFiles.length === 0) {
-    manualFilePickError.value = 'Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).'
+    manualFilePickError.value =
+      'Please select RTL design files only (.v, .sv, .vhd, .vhdl, or .gz-compressed HDL).'
     return
   }
 
@@ -1946,9 +2578,8 @@ async function browseRtlFolder() {
       title: 'Select RTL Design Folder',
     })
   } catch (error) {
-    directoryScanError.value = error instanceof Error
-      ? error.message
-      : 'Please select a folder, not a file.'
+    directoryScanError.value =
+      error instanceof Error ? error.message : 'Please select a folder, not a file.'
     return
   }
 
@@ -1966,9 +2597,8 @@ async function loadRtlDirectory(directoryPath: string) {
     directorySelectedFiles.value = [...scanned.files]
     syncRtlList()
   } catch (error) {
-    directoryScanError.value = error instanceof Error
-      ? error.message
-      : 'Failed to scan the selected directory.'
+    directoryScanError.value =
+      error instanceof Error ? error.message : 'Failed to scan the selected directory.'
   } finally {
     isScanningDirectory.value = false
   }
@@ -1999,7 +2629,8 @@ function handleFileDrop(event: DragEvent) {
     .filter((path) => isHdlFilePath(path))
 
   if (paths.length === 0) {
-    manualFilePickError.value = 'Only RTL design files can be dropped here. Use Browse to select a folder.'
+    manualFilePickError.value =
+      'Only RTL design files can be dropped here. Use Browse to select a folder.'
     return
   }
 
@@ -2007,10 +2638,7 @@ function handleFileDrop(event: DragEvent) {
 }
 
 function addManualFiles(paths: string[]) {
-  const existing = new Set([
-    ...manuallyAddedFiles.value,
-    ...directorySelectedFiles.value,
-  ])
+  const existing = new Set([...manuallyAddedFiles.value, ...directorySelectedFiles.value])
   for (const path of paths) {
     if (!existing.has(path)) {
       manuallyAddedFiles.value.push(path)
@@ -2034,7 +2662,8 @@ async function importDesignInput(type: DesignInputKey) {
   try {
     picked = await getDesktopApi().dialog.pickFiles(fileOptions)
   } catch (error) {
-    designFileError.value = error instanceof Error ? error.message : 'Failed to import file.'
+    designFileError.value =
+      error instanceof Error ? error.message : 'Failed to import file.'
     return
   }
 
@@ -2057,13 +2686,34 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
   const common = { multiple: false }
   switch (type) {
     case 'filelist':
-      return { ...common, title: 'Select Filelist', filters: [{ name: 'Filelist', extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz'] }] }
+      return {
+        ...common,
+        title: 'Select Filelist',
+        filters: [
+          {
+            name: 'Filelist',
+            extensions: ['f', 'fl', 'flist', 'filelist', 'lst', 'txt', 'gz'],
+          },
+        ],
+      }
     case 'sdc':
-      return { ...common, title: 'Select SDC File', filters: [{ name: 'SDC Files', extensions: ['sdc', 'gz'] }] }
+      return {
+        ...common,
+        title: 'Select SDC File',
+        filters: [{ name: 'SDC Files', extensions: ['sdc', 'gz'] }],
+      }
     case 'def':
-      return { ...common, title: 'Select DEF File', filters: [{ name: 'DEF Files', extensions: ['def', 'gz'] }] }
+      return {
+        ...common,
+        title: 'Select DEF File',
+        filters: [{ name: 'DEF Files', extensions: ['def', 'gz'] }],
+      }
     case 'verilog':
-      return { ...common, title: 'Select Verilog Netlist', filters: [{ name: 'Verilog Files', extensions: ['v', 'sv', 'vg', 'gz'] }] }
+      return {
+        ...common,
+        title: 'Select Verilog Netlist',
+        filters: [{ name: 'Verilog Files', extensions: ['v', 'sv', 'vg', 'gz'] }],
+      }
     default:
       return null
   }
@@ -2071,9 +2721,11 @@ function getDesignFileOptions(type: DesignInputKey): DesktopFileDialogOptions | 
 
 function isAllowedDesignInputPath(type: DesignInputKey, path: string) {
   const lowerPath = path.toLowerCase()
-  const matches = (extensions: string[]) => extensions.some((extension) => (
-    lowerPath.endsWith(`.${extension}`) || lowerPath.endsWith(`.${extension}.gz`)
-  ))
+  const matches = (extensions: string[]) =>
+    extensions.some(
+      (extension) =>
+        lowerPath.endsWith(`.${extension}`) || lowerPath.endsWith(`.${extension}.gz`),
+    )
 
   if (type === 'filelist') return matches(['f', 'fl', 'flist', 'filelist', 'lst', 'txt'])
   if (type === 'sdc') return matches(['sdc'])
@@ -2102,7 +2754,9 @@ function designFilesReady() {
   if (startsFromFloorplan.value) {
     return config.value.origin_verilog.trim() !== ''
   }
-  return config.value.origin_def.trim() !== '' && config.value.origin_verilog.trim() !== ''
+  return (
+    config.value.origin_def.trim() !== '' && config.value.origin_verilog.trim() !== ''
+  )
 }
 
 function selectPdk(pdk: import('../types').ImportedPdk) {
@@ -2145,7 +2799,8 @@ async function scanManualPdkResources() {
     showToast({
       severity: 'error',
       summary: 'PDK Scan Failed',
-      detail: error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
+      detail:
+        error instanceof Error ? error.message : 'Failed to scan the current PDK folder.',
       life: 5000,
     })
   }
@@ -2167,7 +2822,8 @@ function updatePdkResourceSelection(files: string[]) {
 
 function specReady() {
   const params = config.value.parameters
-  const hasCoreFields = String(params.design || '').trim() !== '' &&
+  const hasCoreFields =
+    String(params.design || '').trim() !== '' &&
     String(params.top_module || '').trim() !== '' &&
     String(params.clock || '').trim() !== '' &&
     Number(params.frequency_max) > 0 &&
@@ -2272,7 +2928,9 @@ async function createWorkspace() {
 
 .fade-slide-enter-active,
 .fade-slide-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 
 .fade-slide-enter-from {

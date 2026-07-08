@@ -331,7 +331,8 @@ describe('WorkspaceService', () => {
       workspaceDirectory,
     )
 
-    const replacement = await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
 
     expect(replacement?.targetPath).toBe(workspaceDirectory)
     expect(replacement?.backupPath).toContain('.ws_0001.replace-backup-')
@@ -370,7 +371,9 @@ describe('WorkspaceService', () => {
     await expect(readFile(join(targetPath, 'origin', 'top.v'), 'utf8')).resolves.toBe(
       'module top; endmodule',
     )
-    await expect(readFile(join(backupPath, 'origin', 'top.v'), 'utf8')).rejects.toMatchObject({
+    await expect(
+      readFile(join(backupPath, 'origin', 'top.v'), 'utf8'),
+    ).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
@@ -389,7 +392,9 @@ describe('WorkspaceService', () => {
       service.finalizeProjectDirectoryReplacement({ targetPath, backupPath }),
     ).resolves.toBeUndefined()
 
-    await expect(readFile(join(backupPath, 'origin', 'top.v'), 'utf8')).rejects.toMatchObject({
+    await expect(
+      readFile(join(backupPath, 'origin', 'top.v'), 'utf8'),
+    ).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })

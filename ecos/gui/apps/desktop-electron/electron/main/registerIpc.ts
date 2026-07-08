@@ -630,19 +630,13 @@ export function registerIpc(
     },
   )
 
-  handle(
-    desktopApiIpcChannels.workspaceListProjectDirectory,
-    async (_event, path) => {
-      return await services.workspaceService.listProjectDirectory(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceListProjectDirectory, async (_event, path) => {
+    return await services.workspaceService.listProjectDirectory(path as string)
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceRemoveProjectDirectory,
-    async (_event, path) => {
-      await services.workspaceService.removeProjectDirectory(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceRemoveProjectDirectory, async (_event, path) => {
+    await services.workspaceService.removeProjectDirectory(path as string)
+  })
 
   handle(
     desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,

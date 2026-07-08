@@ -26,18 +26,23 @@ export async function loadProjectHistory(): Promise<Project[]> {
 export async function rememberProjectHistoryEntry(project: Project): Promise<Project[]> {
   const history = await loadProjectHistory()
   const normalizedProject = normalizeProjectHistoryEntry(project)
-  const filtered = history.filter(item => normalizePath(item.path) !== normalizedProject.path)
+  const filtered = history.filter(
+    (item) => normalizePath(item.path) !== normalizedProject.path,
+  )
   const nextHistory = [normalizedProject, ...filtered]
 
   await saveProjectHistory(nextHistory)
   return nextHistory
 }
 
-export async function removeProjectHistoryEntry(projectIdOrPath: string): Promise<Project[]> {
+export async function removeProjectHistoryEntry(
+  projectIdOrPath: string,
+): Promise<Project[]> {
   const target = normalizePath(projectIdOrPath)
   const history = await loadProjectHistory()
-  const nextHistory = history.filter(project =>
-    normalizePath(project.id) !== target && normalizePath(project.path) !== target,
+  const nextHistory = history.filter(
+    (project) =>
+      normalizePath(project.id) !== target && normalizePath(project.path) !== target,
   )
 
   await saveProjectHistory(nextHistory)
@@ -45,7 +50,10 @@ export async function removeProjectHistoryEntry(projectIdOrPath: string): Promis
 }
 
 async function saveProjectHistory(projects: Project[]): Promise<void> {
-  await setSetting(PROJECT_HISTORY_SETTING_KEY, projects.map(serializeProjectHistoryEntry))
+  await setSetting(
+    PROJECT_HISTORY_SETTING_KEY,
+    projects.map(serializeProjectHistoryEntry),
+  )
 }
 
 async function getSetting<T>(key: string): Promise<T | null> {
@@ -115,11 +123,11 @@ function asString(value: unknown): string | undefined {
 
 function asProjectStatus(value: unknown): ProjectStatus | undefined {
   if (
-    value === 'success'
-    || value === 'failed'
-    || value === 'running'
-    || value === 'in_progress'
-    || value === 'not_started'
+    value === 'success' ||
+    value === 'failed' ||
+    value === 'running' ||
+    value === 'in_progress' ||
+    value === 'not_started'
   ) {
     return value
   }

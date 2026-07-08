@@ -92,10 +92,10 @@ describe('preload desktop bridge contract', () => {
     )
     await expect(
       bridge.workspace.listProjectDirectory('/work/demo/origin'),
-    ).resolves.toEqual([
-      { name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' },
-    ])
-    await expect(bridge.workspace.removeProjectDirectory('ws_0001')).resolves.toBeUndefined()
+    ).resolves.toEqual([{ name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' }])
+    await expect(
+      bridge.workspace.removeProjectDirectory('ws_0001'),
+    ).resolves.toBeUndefined()
     const replacement = {
       targetPath: '/work/demo',
       backupPath: '/work/.demo.replace-backup',

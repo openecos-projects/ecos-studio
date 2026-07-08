@@ -23,7 +23,10 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain('endStep')
 
     const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
-    const prefillEnd = source.indexOf('function projectManagedWizardInitialConfig', prefillStart)
+    const prefillEnd = source.indexOf(
+      'function projectManagedWizardInitialConfig',
+      prefillStart,
+    )
     const prefillSource = source.slice(prefillStart, prefillEnd)
     expect(prefillSource).toContain('origin_def: originDef')
     expect(prefillSource).toContain('origin_verilog: originVerilog')
@@ -36,7 +39,9 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain("readOptionalProjectTextFile('home/parameters.json'")
     expect(source).not.toContain("readOptionalProjectTextFile('home/flow.json'")
     expect(source).toContain("readOptionalProjectTextFile('home/pdk.json'")
-    expect(source).toContain("readOptionalProjectTextFile('config/db_default_config.json'")
+    expect(source).toContain(
+      "readOptionalProjectTextFile('config/db_default_config.json'",
+    )
     expect(source).toContain('tech_lef_path')
     expect(source).toContain('lef_paths')
     expect(source).toContain('lib_path')
@@ -82,7 +87,10 @@ describe('ECCView project management handoff', () => {
     expect(closeSource).toContain("router.push('/projects')")
 
     const createStart = source.indexOf('const handleWizardCreate')
-    const createEnd = source.indexOf('async function registerProjectManagedWorkspace', createStart)
+    const createEnd = source.indexOf(
+      'async function registerProjectManagedWorkspace',
+      createStart,
+    )
     const createSource = source.slice(createStart, createEnd)
     expect(createSource).toContain('resetWizard()')
     expect(createSource).not.toContain('closeWizard()')
@@ -104,10 +112,22 @@ describe('ECCView project management handoff', () => {
     expect(source).toContain('desktopApi.workspace.registerProjectRoot')
 
     const updateStart = source.indexOf('async function registerProjectManagedWorkspace')
-    const registerIndex = source.indexOf('await registerProjectRootForProjectManagement(projectRoot)', updateStart)
-    const readIndex = source.indexOf("await readOptionalProjectTextFile('project.json'", updateStart)
-    const writeIndex = source.indexOf("await writeProjectTextFile('project.json'", updateStart)
-    const outputPathIndex = source.indexOf('sourceOutputPath: queryString(route.query.sourceOutputPath)', updateStart)
+    const registerIndex = source.indexOf(
+      'await registerProjectRootForProjectManagement(projectRoot)',
+      updateStart,
+    )
+    const readIndex = source.indexOf(
+      "await readOptionalProjectTextFile('project.json'",
+      updateStart,
+    )
+    const writeIndex = source.indexOf(
+      "await writeProjectTextFile('project.json'",
+      updateStart,
+    )
+    const outputPathIndex = source.indexOf(
+      'sourceOutputPath: queryString(route.query.sourceOutputPath)',
+      updateStart,
+    )
 
     expect(registerIndex).toBeGreaterThan(updateStart)
     expect(readIndex).toBeGreaterThan(registerIndex)
@@ -117,33 +137,60 @@ describe('ECCView project management handoff', () => {
 
   it('restores the created workspace root after project manifest access before opening Home', () => {
     const createStart = source.indexOf('const handleWizardCreate')
-    const workspacePathIndex = source.indexOf('const workspacePath = currentProject.value?.path ?? config.directory', createStart)
-    const registerCallIndex = source.indexOf('await registerProjectManagedWorkspace({', createStart)
-    const routeQueryIndex = source.indexOf('query: workspaceRouteQuery(workspacePath, projectContext)', createStart)
+    const workspacePathIndex = source.indexOf(
+      'const workspacePath = currentProject.value?.path ?? config.directory',
+      createStart,
+    )
+    const registerCallIndex = source.indexOf(
+      'await registerProjectManagedWorkspace({',
+      createStart,
+    )
+    const routeQueryIndex = source.indexOf(
+      'query: workspaceRouteQuery(workspacePath, projectContext)',
+      createStart,
+    )
     expect(workspacePathIndex).toBeGreaterThan(createStart)
     expect(registerCallIndex).toBeGreaterThan(workspacePathIndex)
     expect(routeQueryIndex).toBeGreaterThan(registerCallIndex)
 
     const updateStart = source.indexOf('async function registerProjectManagedWorkspace')
-    const writeIndex = source.indexOf("await writeProjectTextFile('project.json'", updateStart)
+    const writeIndex = source.indexOf(
+      "await writeProjectTextFile('project.json'",
+      updateStart,
+    )
     const finallyIndex = source.indexOf('} finally {', updateStart)
-    const restoreIndex = source.indexOf('await restoreWorkspaceRootForWorkspaceView(workspacePath)', updateStart)
+    const restoreIndex = source.indexOf(
+      'await restoreWorkspaceRootForWorkspaceView(workspacePath)',
+      updateStart,
+    )
     expect(finallyIndex).toBeGreaterThan(writeIndex)
     expect(restoreIndex).toBeGreaterThan(finallyIndex)
 
-    const restoreStart = source.indexOf('async function restoreWorkspaceRootForWorkspaceView')
-    const restoreEnd = source.indexOf('async function registerLocalProjectRoot', restoreStart)
+    const restoreStart = source.indexOf(
+      'async function restoreWorkspaceRootForWorkspaceView',
+    )
+    const restoreEnd = source.indexOf(
+      'async function registerLocalProjectRoot',
+      restoreStart,
+    )
     const restoreSource = source.slice(restoreStart, restoreEnd)
-    expect(restoreSource).toContain("registerLocalProjectRoot(workspacePath, 'workspace view')")
+    expect(restoreSource).toContain(
+      "registerLocalProjectRoot(workspacePath, 'workspace view')",
+    )
   })
 
   it('keeps project context after creating a workspace from the Backend Design entry', () => {
     expect(source).toContain('projectContextFromWorkspaceConfig')
 
     const createStart = source.indexOf('const handleWizardCreate')
-    const createEnd = source.indexOf('async function registerProjectManagedWorkspace', createStart)
+    const createEnd = source.indexOf(
+      'async function registerProjectManagedWorkspace',
+      createStart,
+    )
     const createSource = source.slice(createStart, createEnd)
-    expect(createSource).toContain('const projectContext = projectContextFromWorkspaceConfig(config)')
+    expect(createSource).toContain(
+      'const projectContext = projectContextFromWorkspaceConfig(config)',
+    )
     expect(createSource).toContain('projectContext,')
     expect(createSource).toContain('workspaceRouteQuery(workspacePath, projectContext)')
 
@@ -154,7 +201,10 @@ describe('ECCView project management handoff', () => {
     expect(registerSource).toContain('input.projectContext?.projectName')
 
     const routeStart = source.indexOf('function workspaceRouteQuery')
-    const routeEnd = source.indexOf('async function registerProjectRootForProjectManagement', routeStart)
+    const routeEnd = source.indexOf(
+      'async function registerProjectRootForProjectManagement',
+      routeStart,
+    )
     const routeSource = source.slice(routeStart, routeEnd)
     expect(routeSource).toContain('projectContext?.projectRoot')
     expect(routeSource).toContain('projectContext?.projectName')

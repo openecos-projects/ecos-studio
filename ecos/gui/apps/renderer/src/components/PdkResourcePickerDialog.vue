@@ -9,10 +9,17 @@
       aria-modal="true"
       aria-labelledby="pdk-resource-picker-title"
     >
-      <header class="flex shrink-0 items-start justify-between gap-4 border-b border-(--border-color) px-5 py-4">
+      <header
+        class="flex shrink-0 items-start justify-between gap-4 border-b border-(--border-color) px-5 py-4"
+      >
         <div class="min-w-0">
-          <p class="text-xs font-bold uppercase tracking-wide text-(--accent-color)">PDK Resource Selection</p>
-          <h2 id="pdk-resource-picker-title" class="mt-1 text-xl font-bold text-(--text-primary)">
+          <p class="text-xs font-bold tracking-wide text-(--accent-color) uppercase">
+            PDK Resource Selection
+          </p>
+          <h2
+            id="pdk-resource-picker-title"
+            class="mt-1 text-xl font-bold text-(--text-primary)"
+          >
             {{ resourceTitle }}
           </h2>
           <p class="mt-1 text-xs text-(--text-secondary)">
@@ -29,8 +36,12 @@
         </button>
       </header>
 
-      <div class="flex shrink-0 items-center gap-3 border-b border-(--border-color) bg-(--bg-secondary)/20 px-5 py-3">
-        <label class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/80 px-3 py-2">
+      <div
+        class="flex shrink-0 items-center gap-3 border-b border-(--border-color) bg-(--bg-secondary)/20 px-5 py-3"
+      >
+        <label
+          class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-(--border-color) bg-(--bg-primary)/80 px-3 py-2"
+        >
           <i class="ri-search-line text-(--text-secondary)"></i>
           <input
             v-model="searchQuery"
@@ -44,12 +55,20 @@
         </span>
       </div>
 
-      <div class="grid min-h-0 flex-1 gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)]">
-        <section class="flex min-w-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20">
-          <div class="flex items-center justify-between gap-3 border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-3">
+      <div
+        class="grid min-h-0 flex-1 gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_72px_minmax(0,1fr)]"
+      >
+        <section
+          class="flex min-w-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20"
+        >
+          <div
+            class="flex items-center justify-between gap-3 border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-3"
+          >
             <div>
               <h3 class="text-sm font-bold text-(--text-primary)">PDK Folder Browser</h3>
-              <p class="mt-0.5 text-xs text-(--text-secondary)">{{ filteredAvailableFiles.length }} available files</p>
+              <p class="mt-0.5 text-xs text-(--text-secondary)">
+                {{ filteredAvailableFiles.length }} available files
+              </p>
             </div>
           </div>
           <div class="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
@@ -91,11 +110,17 @@
           </button>
         </div>
 
-        <section class="flex min-w-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20">
-          <div class="flex items-center justify-between gap-3 border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-3">
+        <section
+          class="flex min-w-0 flex-col overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary)/20"
+        >
+          <div
+            class="flex items-center justify-between gap-3 border-b border-(--border-color)/60 bg-(--bg-secondary)/40 px-4 py-3"
+          >
             <div>
               <h3 class="text-sm font-bold text-(--text-primary)">Selected Paths</h3>
-              <p class="mt-0.5 text-xs text-(--text-secondary)">{{ draftSelectedFiles.length }} selected</p>
+              <p class="mt-0.5 text-xs text-(--text-secondary)">
+                {{ draftSelectedFiles.length }} selected
+              </p>
             </div>
           </div>
           <div class="custom-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
@@ -120,15 +145,22 @@
             >
               <i class="ri-file-list-3-line shrink-0 text-(--accent-color)"></i>
               <span class="min-w-0">
-                <span class="block truncate text-sm text-(--text-primary)">{{ displayRelativePath(file) }}</span>
-                <span class="mt-1 block break-all font-mono text-[11px] text-(--text-secondary)">{{ file }}</span>
+                <span class="block truncate text-sm text-(--text-primary)">{{
+                  displayRelativePath(file)
+                }}</span>
+                <span
+                  class="mt-1 block font-mono text-[11px] break-all text-(--text-secondary)"
+                  >{{ file }}</span
+                >
               </span>
             </button>
           </div>
         </section>
       </div>
 
-      <footer class="flex shrink-0 items-center justify-end gap-3 border-t border-(--border-color) px-5 py-4">
+      <footer
+        class="flex shrink-0 items-center justify-end gap-3 border-t border-(--border-color) px-5 py-4"
+      >
         <button
           type="button"
           class="rounded-md border border-(--border-color) bg-(--bg-primary)/75 px-4 py-2 text-xs font-semibold text-(--text-primary) transition-colors duration-200 hover:border-(--accent-color)/45"
@@ -184,7 +216,9 @@ const filteredAvailableFiles = computed(() => {
   )
 })
 
-const directoryTree = computed(() => buildRtlFileTree(props.rootPath, filteredAvailableFiles.value))
+const directoryTree = computed(() =>
+  buildRtlFileTree(props.rootPath, filteredAvailableFiles.value),
+)
 
 watch(
   () => props.selectedFiles,
@@ -197,17 +231,14 @@ watch(
   { immediate: true },
 )
 
-watch(
-  [filteredAvailableFiles, draftSelectedFiles],
-  () => {
-    availableSelection.value = availableSelection.value.filter((file) =>
-      filteredAvailableFiles.value.includes(file),
-    )
-    selectedSelection.value = selectedSelection.value.filter((file) =>
-      draftSelectedFiles.value.includes(file),
-    )
-  },
-)
+watch([filteredAvailableFiles, draftSelectedFiles], () => {
+  availableSelection.value = availableSelection.value.filter((file) =>
+    filteredAvailableFiles.value.includes(file),
+  )
+  selectedSelection.value = selectedSelection.value.filter((file) =>
+    draftSelectedFiles.value.includes(file),
+  )
+})
 
 function closeDialog() {
   emit('close')
@@ -228,7 +259,9 @@ function uniquePaths(paths: string[]): string[] {
 
 function addFiles(files: string[]) {
   draftSelectedFiles.value = uniquePaths([...draftSelectedFiles.value, ...files])
-  availableSelection.value = availableSelection.value.filter((file) => !files.includes(file))
+  availableSelection.value = availableSelection.value.filter(
+    (file) => !files.includes(file),
+  )
 }
 
 function addFile(file: string) {
@@ -241,7 +274,9 @@ function addSelected() {
 
 function removeSelected() {
   const selected = new Set(selectedSelection.value)
-  draftSelectedFiles.value = draftSelectedFiles.value.filter((file) => !selected.has(file))
+  draftSelectedFiles.value = draftSelectedFiles.value.filter(
+    (file) => !selected.has(file),
+  )
   selectedSelection.value = []
 }
 
