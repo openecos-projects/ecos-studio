@@ -12503,3 +12503,36 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `difftest_wrapper.sv` 现在是空占位模块；这符合当前“示例只提供 CPU top contract”的方向，但如果后续需要在示例 RTL 内直接做 Chisel/FIRRTL 原生 difftest，需要重新引入独立资源或专用示例。
+
+# 第 203 次 开发
+
+## 开发目标
+
+排查 `ecc-fe` push 后 `ecos-resource-assets/releases` 没有更新的问题，并修复 release archive 内容检查仍要求旧 `examples/cl3_std` 目录的问题。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - `ecc-fe-examples-latest` 归档检查不再要求 `examples/cl3_std/filelist.cpu.f` 和 `examples/cl3_std/cl3_verilog/cpu_top.sv`。
+  - 新增禁止 `ecc-fe-examples-latest/examples/cl3_std/` 前缀的检查，确保 release 中只保留一套 `examples/cl3` 示例。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CI/release 未更新原因和检查脚本修复。
+
+## 验证情况
+
+- 已执行 `bash -n .github/scripts/check-release-archives.sh`，通过。
+- 已执行 `rg -n "cl3_std|difftest_info_pkg|difftest\\.sv" .github/scripts/check-release-archives.sh .github/workflows/release-latest.yml examples test README.md fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`，确认只剩“禁止/不存在”类断言。
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 下的 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 本次未执行 commit、push、merge、rebase、reset、clean。
+
+## 已知后续风险
+
+- 本次修复还未推送到 `ecc-fe main`，因此远端 release workflow 尚未重新触发；需要提交并推送后，`ecos-resource-assets` 的 latest releases 才会更新。
