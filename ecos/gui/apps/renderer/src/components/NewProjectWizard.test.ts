@@ -33,7 +33,43 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(source).toContain('joinPath(managedWorkspaceRoot.value, workspaceName)')
   })
 
+  it('offers project history entries when selecting a project', () => {
+    expect(source).toContain('loadProjectHistory')
+    expect(source).toContain('projectHistory')
+    expect(source).toContain('Recent Projects')
+    expect(source).toContain('selectProjectFromHistory')
+    expect(source).toContain('v-for="project in projectHistory"')
+  })
+
+  it('uses the project workspace naming rule for the default workspace name', () => {
+    expect(source).toContain('defaultWorkspaceName')
+    expect(source).toContain('nextWorkspaceNameForProject')
+    expect(source).toContain("readOptionalProjectTextFile('project.json'")
+    expect(source).toContain('parseProjectManifest')
+    expect(source).toContain("`ws_${String(next).padStart(4, '0')}`")
+  })
+
+  it('applies project.json defaults after selecting a project history entry', () => {
+    expect(source).toContain('applyProjectDefaultsForProject')
+    expect(source).toContain('readProjectManifestForProject')
+    expect(source).toContain('applyProjectManifestDefaults')
+    expect(source).toContain('manifest.base_design')
+    expect(source).toContain('config.value.pdk = baseDesign.pdk')
+    expect(source).toContain('config.value.pdk_root = baseDesign.pdk_root')
+    expect(source).toContain("setStringParameterDefault('top_module'")
+    expect(source).toContain("setStringParameterDefault('clock'")
+    expect(source).toContain("setStringParameterDefault('design'")
+
+    const selectStart = source.indexOf('async function selectProjectFromHistory')
+    const selectEnd = source.indexOf('async function selectProjectRoot', selectStart)
+    const selectSource = source.slice(selectStart, selectEnd)
+    expect(selectSource).toContain('await applyProjectDefaultsForProject(projectRoot)')
+  })
+
   it('can lock the workspace directory when reconfiguring an existing workspace', () => {
+    expect(source).toContain('title?: string')
+    expect(source).toContain('wizardTitle')
+    expect(source).toContain('{{ wizardTitle }}')
     expect(source).toContain('lockWorkspaceDirectory')
     expect(source).toContain(':disabled="lockWorkspaceDirectory"')
     expect(source).toContain('normalizePath(props.initialConfig.directory)')
@@ -98,6 +134,39 @@ describe('NewProjectWizard RTL browsing', () => {
       "return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'",
     )
   })
+
+  it('does not require DEF when the flow starts from Floorplan', () => {
+    expect(source).toContain('startsFromFloorplan')
+    expect(source).toContain("if (startStep === 'Floorplan') return 'verilog'")
+
+    const designTypesStart = source.indexOf('const designInputTypes = computed<DesignInputType[]>')
+    const designTypesEnd = source.indexOf('const activeDesignInput', designTypesStart)
+    const designTypesSource = source.slice(designTypesStart, designTypesEnd)
+    expect(designTypesSource).toContain('startsFromFloorplan.value')
+    expect(designTypesSource).toContain("key: 'verilog'")
+    expect(designTypesSource).toContain('Import the synthesized Verilog netlist for floorplan.')
+
+    const floorplanBranchStart = designTypesSource.indexOf('startsFromFloorplan.value')
+    const floorplanBranchEnd = designTypesSource.indexOf("return [\n    { key: 'def'", floorplanBranchStart)
+    const floorplanBranchSource = designTypesSource.slice(floorplanBranchStart, floorplanBranchEnd)
+    expect(floorplanBranchSource).not.toContain("key: 'def'")
+
+    const readyStart = source.indexOf('function designFilesReady')
+    const readyEnd = source.indexOf('function selectPdk', readyStart)
+    const readySource = source.slice(readyStart, readyEnd)
+    expect(readySource).toContain('if (startsFromFloorplan.value)')
+    expect(readySource).toContain("return config.value.origin_verilog.trim() !== ''")
+
+    const initialConfigStart = source.indexOf('function createInitialConfig')
+    const initialConfigEnd = source.indexOf('function createInitialProjectContext', initialConfigStart)
+    const initialConfigSource = source.slice(initialConfigStart, initialConfigEnd)
+    expect(initialConfigSource).toContain("startStep === 'Synthesis' || startStep === 'Floorplan'")
+
+    const sourceDefaultsStart = source.indexOf('function applySourceWorkspaceDefaults')
+    const sourceDefaultsEnd = source.indexOf('function closeBrowseMenu', sourceDefaultsStart)
+    const sourceDefaultsSource = source.slice(sourceDefaultsStart, sourceDefaultsEnd)
+    expect(sourceDefaultsSource).toContain('!startsFromFloorplan.value')
+  })
 })
 
 describe('NewProjectWizard workspace wizard redesign', () => {
@@ -148,6 +217,26 @@ describe('NewProjectWizard workspace wizard redesign', () => {
 
     expect(source).toContain('selectedFlowSteps')
     expect(source).toContain('setFlowBoundary')
+  })
+
+  it('uses neutral connector lines between flow setup step cards', () => {
+    expect(source).toContain('flow-step-connector')
+    expect(source).toContain('flow-step-connector-line')
+    expect(source).toContain('flow-step-connector-dot')
+    expect(source).toContain('aria-hidden="true"')
+    expect(source).not.toContain('ri-corner-right-down-line')
+    expect(source).not.toContain('ri-corner-right-up-line')
+  })
+
+  it('keeps flow setup order numbers visible for selected steps', () => {
+    const stepCardStart = source.indexOf('v-for="(step, index) in hardenFlowSteps"')
+    const stepCardEnd = source.indexOf('flow-step-connector', stepCardStart)
+    const stepCardSource = source.slice(stepCardStart, stepCardEnd)
+
+    expect(stepCardSource).toContain('{{ index + 1 }}')
+    expect(stepCardSource).not.toContain('ri-check-line')
+    expect(stepCardSource).not.toContain('v-if="isFlowStepSelected(step.name)"')
+    expect(stepCardSource).not.toContain('v-else>{{ index + 1 }}</span>')
   })
 
   it('keeps the first selected flow step fixed and deselects from the end', () => {

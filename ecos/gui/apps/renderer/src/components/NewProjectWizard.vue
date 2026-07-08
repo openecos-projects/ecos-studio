@@ -17,7 +17,7 @@
       <div class="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside class="flex w-full shrink-0 flex-col border-b border-(--border-color) bg-(--bg-secondary)/35 p-6 md:w-72 md:border-b-0 md:border-r">
           <div class="mb-7">
-            <h1 class="text-2xl font-bold text-(--text-primary)">New Workspace</h1>
+            <h1 class="text-2xl font-bold text-(--text-primary)">{{ wizardTitle }}</h1>
             <p class="mt-1 text-sm text-(--text-secondary)">Build a project-scoped RTL2GDS workspace.</p>
             <div
               v-if="sourceContext"
@@ -123,6 +123,35 @@
                       </div>
                     </div>
 
+                    <div v-if="projectHistory.length > 0" class="rounded-lg border border-(--border-color) bg-(--bg-primary)/55 p-3">
+                      <div class="mb-3 flex items-center justify-between gap-3">
+                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">Recent Projects</span>
+                        <span class="text-[11px] text-(--text-secondary)">{{ projectHistory.length }} projects</span>
+                      </div>
+                      <div class="custom-scrollbar max-h-40 space-y-2 overflow-y-auto pr-1">
+                        <button
+                          v-for="project in projectHistory"
+                          :key="project.path"
+                          type="button"
+                          class="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors duration-200"
+                          :class="normalizePath(projectContext.project_root) === normalizePath(project.path) ? 'border-(--accent-color) bg-(--accent-color)/10' : 'border-(--border-color) bg-(--bg-secondary)/35 hover:border-(--accent-color)/45'"
+                          @click="selectProjectFromHistory(project)"
+                        >
+                          <span class="min-w-0">
+                            <span class="block truncate text-sm font-semibold text-(--text-primary)">{{ project.name }}</span>
+                            <span class="mt-0.5 block truncate font-mono text-[11px] text-(--text-secondary)" :title="project.path">{{ project.path }}</span>
+                          </span>
+                          <i class="ri-arrow-right-s-line shrink-0 text-(--text-secondary)"></i>
+                        </button>
+                      </div>
+                    </div>
+                    <p v-else-if="isLoadingProjectHistory" class="text-xs text-(--text-secondary)">
+                      Loading recent projects...
+                    </p>
+                    <p v-else-if="projectHistoryError" class="text-xs text-(--text-secondary)">
+                      {{ projectHistoryError }}
+                    </p>
+
                     <div>
                       <label class="mb-2 block text-sm font-semibold text-(--text-primary)">Project Name</label>
                       <input
@@ -200,6 +229,7 @@
                       :disabled="lockWorkspaceDirectory"
                       class="w-full rounded-lg border px-3 py-2.5 text-sm text-(--text-primary) outline-none transition-colors duration-200"
                       :class="workspaceNameError ? 'border-red-500 bg-red-500/5' : lockWorkspaceDirectory ? 'border-(--border-color) bg-(--bg-secondary)/45 text-(--text-secondary)' : 'border-(--border-color) bg-(--bg-primary)/75 focus:border-(--accent-color)'"
+                      @input="workspaceNameTouched = true"
                     />
                     <p v-if="workspaceNameError" class="mt-2 text-xs text-red-500">{{ workspaceNameError }}</p>
                   </div>
@@ -281,8 +311,7 @@
                               class="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-bold"
                               :class="isFlowStepSelected(step.name) ? 'border-(--accent-color) bg-(--accent-color) text-white' : 'border-(--border-color) text-(--text-secondary)'"
                             >
-                              <i v-if="isFlowStepSelected(step.name)" class="ri-check-line"></i>
-                              <span v-else>{{ index + 1 }}</span>
+                              <span>{{ index + 1 }}</span>
                             </span>
                             <span class="font-semibold text-(--text-primary)">{{ step.name }}</span>
                           </span>
@@ -301,11 +330,14 @@
                           Reused from source
                         </span>
                       </button>
-                      <i
-                        v-if="index < hardenFlowSteps.length - 1"
-                        class="pointer-events-none absolute -right-3 top-1/2 hidden -translate-y-1/2 text-xl text-(--text-secondary) xl:block"
-                        :class="index % 2 === 0 ? 'ri-corner-right-down-line' : 'ri-corner-right-up-line'"
-                      ></i>
+                      <span
+                        v-if="index < hardenFlowSteps.length - 1 && (index + 1) % 4 !== 0"
+                        class="flow-step-connector"
+                        aria-hidden="true"
+                      >
+                        <span class="flow-step-connector-line"></span>
+                        <span class="flow-step-connector-dot"></span>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -874,10 +906,13 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { WorkspaceConfig } from '../types'
+import type { Project, WorkspaceConfig } from '../types'
 import { usePdkManager } from '../composables/usePdkManager'
 import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
+import { loadProjectHistory } from '@/utils/projectHistory'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { parseProjectManifest, type ProjectManifest } from '@/utils/projectManagement'
 import {
   isHdlFilePath,
   type DesktopFileDialogOptions,
@@ -900,6 +935,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
 
 interface Props {
   initialConfig?: WorkspaceWizardInitialConfig
+  title?: string
 }
 type ProjectMode = 'select' | 'create'
 type FlowStepName =
@@ -951,9 +987,13 @@ interface SourceContext {
 }
 
 const emit = defineEmits<Emits>()
+const props = defineProps<Props>()
+const wizardTitle = computed(() => props.title || 'New Workspace')
 
 onMounted(() => {
   document.addEventListener('keydown', handleWizardKeydown)
+  void loadProjectHistoryEntries()
+  void applyProjectDefaultsForProject(projectContext.value.project_root)
 })
 
 onBeforeUnmount(() => {
@@ -979,7 +1019,12 @@ const initialFilelistPath =
   props.initialConfig?.filelist ?? props.initialConfig?.source_config?.filelist ?? ''
 const manuallyAddedFiles = ref<string[]>([...initialRtlFiles])
 const showBrowseMenu = ref(false)
-const workspaceName = ref(initialWorkspaceName(props.initialConfig))
+const initialWorkspaceNameValue = initialWorkspaceName(props.initialConfig)
+const workspaceName = ref(initialWorkspaceNameValue || defaultWorkspaceName())
+const workspaceNameTouched = ref(initialWorkspaceNameValue !== '')
+const projectHistory = ref<Project[]>([])
+const isLoadingProjectHistory = ref(false)
+const projectHistoryError = ref('')
 const projectParentPath = ref(parentPath(initialProjectRoot(props.initialConfig)))
 const designNameTouched = ref(
   String(props.initialConfig?.parameters?.design ?? '').trim() !== '',
@@ -1124,7 +1169,9 @@ function createInitialConfig(initialConfig?: WorkspaceWizardInitialConfig): Work
       ...(source_config?.parameters ?? {}),
       ...(initialConfig?.parameters ?? {}),
     },
-    origin_def: initialConfig?.origin_def ?? source_config?.origin_def ?? '',
+    origin_def: startStep === 'Synthesis' || startStep === 'Floorplan'
+      ? ''
+      : initialConfig?.origin_def ?? source_config?.origin_def ?? '',
     origin_verilog: initialConfig?.origin_verilog ?? source_config?.origin_verilog ?? '',
     rtl_list: initialConfig?.rtl_list ? [...initialConfig.rtl_list] : source_config?.rtl_list ? [...source_config.rtl_list] : [],
     filelist: initialConfig?.filelist ?? source_config?.filelist ?? filelistPath.value,
@@ -1174,7 +1221,55 @@ function initialWorkspaceName(initialConfig?: WorkspaceWizardInitialConfig) {
   return String(initialConfig?.parameters?.design ?? '').trim()
 }
 
+function defaultWorkspaceName() {
+  return nextWorkspaceName([])
+}
+
+function nextWorkspaceNameForProject(manifest: ProjectManifest | null) {
+  return manifest ? nextWorkspaceName(workspaceNamesFromManifest(manifest)) : defaultWorkspaceName()
+}
+
+function workspaceNamesFromManifest(manifest: ProjectManifest) {
+  return manifest.workspaces.flatMap((workspace) => [
+    workspace.workspace_id,
+    getFileName(workspace.workspace_path),
+  ])
+}
+
+function nextWorkspaceName(workspaceNames: string[]) {
+  const numbers = workspaceNames
+    .map((name) => /^ws_(\d+)$/.exec(name)?.[1])
+    .filter((value): value is string => Boolean(value))
+    .map(Number)
+    .filter(Number.isFinite)
+  const next = Math.max(0, ...numbers) + 1
+  return `ws_${String(next).padStart(4, '0')}`
+}
+
+async function readProjectManifestForProject(projectRoot: string): Promise<ProjectManifest | null> {
+  const root = normalizePath(projectRoot)
+  if (!root) return null
+  try {
+    const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: root })
+    if (!manifestText) return null
+    return parseProjectManifest(manifestText)
+  } catch (error) {
+    console.warn('Failed to read project manifest for New Workspace defaults.', error)
+    return null
+  }
+}
+
+const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
+  frequency_max: 50,
+  max_fanout: 32,
+  die_width: 100,
+  die_height: 100,
+  utilitization: 0.6,
+  margin: 0,
+}
+
 function initialDesignInputType(startStep: FlowStepName): DesignInputKey {
+  if (startStep === 'Floorplan') return 'verilog'
   if (startStep !== 'Synthesis') return 'def'
   return initialRtlFiles.length > 0 || !initialFilelistPath ? 'rtl' : 'filelist'
 }
@@ -1295,6 +1390,7 @@ const selectedFlowSteps = computed(() => {
   return hardenFlowSteps.slice(start, end + 1).map((step) => step.name)
 })
 const startsFromSynthesis = computed(() => flowStartStep.value === 'Synthesis')
+const startsFromFloorplan = computed(() => flowStartStep.value === 'Floorplan')
 const hasSelectedPdkConfig = computed(() =>
   selectedPdkId.value.trim() !== ''
   || config.value.pdk.trim() !== ''
@@ -1306,6 +1402,13 @@ const designInputTypes = computed<DesignInputType[]>(() => {
     return [
       { key: 'rtl', label: 'RTL', required: true, description: 'Import RTL source files or scan an RTL source folder.' },
       { key: 'filelist', label: 'Filelist', required: false, description: 'Use an existing filelist instead of manually selecting every RTL file.' },
+      { key: 'sdc', label: 'SDC', required: false, description: 'Import optional timing constraints.' },
+    ]
+  }
+
+  if (startsFromFloorplan.value) {
+    return [
+      { key: 'verilog', label: 'Verilog', required: true, description: 'Import the synthesized Verilog netlist for floorplan.' },
       { key: 'sdc', label: 'SDC', required: false, description: 'Import optional timing constraints.' },
     ]
   }
@@ -1400,6 +1503,9 @@ watch([flowStartStep, flowEndStep], () => {
   } else {
     config.value.rtl_list = []
     filelistPath.value = ''
+    if (startsFromFloorplan.value) {
+      config.value.origin_def = ''
+    }
   }
   syncWorkspaceConfig()
 })
@@ -1468,11 +1574,225 @@ function getCurrentPdkRoot() {
   return selectedPdk.value?.path || config.value.pdk_root || ''
 }
 
+async function loadProjectHistoryEntries() {
+  isLoadingProjectHistory.value = true
+  projectHistoryError.value = ''
+  try {
+    projectHistory.value = await loadProjectHistory()
+  } catch (error) {
+    console.warn('Failed to load project history for New Workspace wizard.', error)
+    projectHistoryError.value = 'Recent projects are unavailable.'
+  } finally {
+    isLoadingProjectHistory.value = false
+  }
+}
+
+async function applyProjectDefaultsForProject(projectRoot: string) {
+  const manifest = await readProjectManifestForProject(projectRoot)
+  if (!lockWorkspaceDirectory.value && !workspaceNameTouched.value) {
+    workspaceName.value = nextWorkspaceNameForProject(manifest)
+  }
+  if (manifest) {
+    applyProjectManifestDefaults(manifest)
+  }
+  syncWorkspaceConfig()
+}
+
+function applyProjectManifestDefaults(manifest: ProjectManifest) {
+  const baseDesign = manifest.base_design
+  const baseDesignRecord = baseDesign as ProjectManifest['base_design'] & Record<string, unknown>
+  const parameters = isRecord(baseDesign.parameters) ? baseDesign.parameters : {}
+
+  applyProjectFlowDefaults(baseDesignRecord, parameters)
+
+  if (baseDesign.pdk && !hasInitialConfigValue('pdk')) {
+    config.value.pdk = baseDesign.pdk
+    selectedPdkId.value = baseDesign.pdk
+  }
+  if (baseDesign.pdk_root && !hasInitialConfigValue('pdk_root')) {
+    config.value.pdk_root = baseDesign.pdk_root
+  }
+
+  applyProjectDesignFileDefaults(baseDesignRecord, parameters)
+  applyProjectPdkResourceDefaults(baseDesignRecord)
+  applyProjectParameterDefaults(manifest, parameters)
+}
+
+function applyProjectFlowDefaults(
+  baseDesign: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+) {
+  if (props.initialConfig?.flow_config || props.initialConfig?.source_context) return
+
+  const nextStart = firstString(parameters.start_step, baseDesign.start_step)
+  const nextEnd = firstString(parameters.end_step, baseDesign.end_step)
+  if (nextStart) {
+    flowStartStep.value = normalizeFlowStepName(nextStart, flowStartStep.value)
+  }
+  if (nextEnd) {
+    flowEndStep.value = normalizeFlowStepName(nextEnd, flowEndStep.value)
+  }
+  activeDesignInputType.value = initialDesignInputType(flowStartStep.value)
+}
+
+function applyProjectDesignFileDefaults(
+  baseDesign: ProjectManifest['base_design'] & Record<string, unknown>,
+  parameters: Record<string, unknown>,
+) {
+  if (
+    startsFromSynthesis.value &&
+    Array.isArray(baseDesign.rtl_list) &&
+    baseDesign.rtl_list.length > 0 &&
+    !hasInitialRtlList()
+  ) {
+    const rtlList = uniquePaths(baseDesign.rtl_list)
+    manuallyAddedFiles.value = rtlList
+    config.value.rtl_list = rtlList
+  }
+
+  const projectFilelist = firstString(baseDesign.filelist, parameters.filelist)
+  if (startsFromSynthesis.value && projectFilelist && !filelistPath.value && !hasInitialConfigValue('filelist')) {
+    filelistPath.value = projectFilelist
+  }
+
+  const projectSdc = firstString(baseDesign.sdc, parameters.sdc)
+  if (projectSdc && !sdcPath.value && !hasInitialConfigValue('sdc')) {
+    sdcPath.value = projectSdc
+  }
+
+  if (!startsFromSynthesis.value && !config.value.origin_verilog && baseDesign.origin_verilog && !hasInitialConfigValue('origin_verilog')) {
+    config.value.origin_verilog = baseDesign.origin_verilog
+  }
+  if (!startsFromSynthesis.value && !startsFromFloorplan.value && !config.value.origin_def && baseDesign.origin_def && !hasInitialConfigValue('origin_def')) {
+    config.value.origin_def = baseDesign.origin_def
+  }
+}
+
+function applyProjectPdkResourceDefaults(baseDesign: Record<string, unknown>) {
+  const projectPdkConfig = baseDesign.pdk_config
+  if (!isRecord(projectPdkConfig) || hasInitialConfigValue('pdk_config')) return
+
+  const mode = firstString(baseDesign.pdk_config_mode, projectPdkConfig.mode)
+  if (mode === 'manual' || mode === 'default') {
+    pdkConfigMode.value = mode
+  }
+  pdkSelections.value = {
+    tech_lef: stringArray(projectPdkConfig.tech_lef),
+    cell_lef: stringArray(projectPdkConfig.cell_lef),
+    liberty: stringArray(projectPdkConfig.liberty),
+  }
+}
+
+function applyProjectParameterDefaults(
+  manifest: ProjectManifest,
+  parameters: Record<string, unknown>,
+) {
+  setStringParameterDefault('top_module', firstString(parameters.top_module, parameters.Top, parameters['Top Module'], manifest.base_design.top_module))
+  setStringParameterDefault('clock', firstString(parameters.clock, parameters.Clock, manifest.base_design.clock))
+  setStringParameterDefault('design', firstString(parameters.design, parameters.Design, manifest.name))
+
+  setNumberParameterDefault('frequency_max', firstNumber(parameters.frequency_max, parameters['Frequency max [MHz]']))
+  setNumberParameterDefault('max_fanout', firstNumber(parameters.max_fanout, parameters['Max Fanout']))
+  setNumberParameterDefault('die_width', firstNumber(parameters.die_width, parameters['Die Width']))
+  setNumberParameterDefault('die_height', firstNumber(parameters.die_height, parameters['Die Height']))
+  setNumberParameterDefault('utilitization', firstNumber(parameters.utilitization, parameters.core_utilization, parameters['Core Utilization']))
+  setNumberParameterDefault('margin', firstNumber(parameters.margin, parameters.Margin))
+
+  const projectDieAreaMode = firstString(parameters.die_area_mode)
+  if ((projectDieAreaMode === 'width_height' || projectDieAreaMode === 'utilitization_margin') && !hasInitialParameterValue('die_area_mode')) {
+    dieAreaMode.value = projectDieAreaMode
+  }
+}
+
+function setStringParameterDefault(key: string, value: unknown) {
+  const nextValue = firstString(value)
+  if (!nextValue || hasInitialParameterValue(key)) return
+
+  if (key === 'design') {
+    if (!designNameTouched.value) {
+      config.value.parameters.design = nextValue
+      designNameTouched.value = true
+    }
+    return
+  }
+
+  const currentValue = String(config.value.parameters[key] ?? '').trim()
+  if (!currentValue) {
+    config.value.parameters[key] = nextValue
+  }
+}
+
+function setNumberParameterDefault(key: string, value: unknown) {
+  const nextValue = firstNumber(value)
+  if (nextValue === null || hasInitialParameterValue(key)) return
+
+  const currentValue = config.value.parameters[key]
+  const defaultValue = SYSTEM_PARAMETER_DEFAULTS[key]
+  if (currentValue === undefined || currentValue === '' || Number(currentValue) === defaultValue) {
+    config.value.parameters[key] = nextValue
+  }
+}
+
+function hasInitialConfigValue(key: keyof WorkspaceConfig) {
+  return props.initialConfig?.[key] !== undefined || props.initialConfig?.source_config?.[key] !== undefined
+}
+
+function hasInitialParameterValue(key: string) {
+  return props.initialConfig?.parameters?.[key] !== undefined ||
+    props.initialConfig?.source_config?.parameters?.[key] !== undefined
+}
+
+function hasInitialRtlList() {
+  return (props.initialConfig?.rtl_list?.length ?? 0) > 0 ||
+    (props.initialConfig?.source_config?.rtl_list?.length ?? 0) > 0
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  }
+  return ''
+}
+
+function firstNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return null
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    : []
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function setProjectMode(mode: ProjectMode) {
   projectContext.value.mode = mode
   if (mode === 'create') {
     projectContext.value.project_root = joinPath(projectParentPath.value, projectContext.value.project_name)
   }
+  if (mode === 'select') {
+    void applyProjectDefaultsForProject(projectContext.value.project_root)
+  }
+}
+
+async function selectProjectFromHistory(project: Project) {
+  const projectRoot = normalizePath(project.path)
+  projectContext.value.mode = 'select'
+  projectContext.value.project_root = projectRoot
+  projectContext.value.project_name = project.name || getFileName(projectRoot)
+  projectContext.value.project_json_path = joinPath(projectRoot, 'project.json')
+  await applyProjectDefaultsForProject(projectRoot)
 }
 
 async function selectProjectRoot() {
@@ -1480,9 +1800,12 @@ async function selectProjectRoot() {
     title: 'Select Project Root',
   })
   if (!result) return
+  const projectRoot = normalizePath(result)
   projectContext.value.mode = 'select'
-  projectContext.value.project_root = result
-  projectContext.value.project_name = projectContext.value.project_name || getFileName(result)
+  projectContext.value.project_root = projectRoot
+  projectContext.value.project_name = getFileName(projectRoot)
+  projectContext.value.project_json_path = joinPath(projectRoot, 'project.json')
+  await applyProjectDefaultsForProject(projectRoot)
 }
 
 async function selectProjectParentPath() {
@@ -1537,7 +1860,7 @@ function applySourceWorkspaceDefaults(initialConfig?: WorkspaceWizardInitialConf
   const source_config = initialConfig?.source_config
   if (!source_config) return
 
-  if (!config.value.origin_def && source_config.origin_def) {
+  if (!startsFromSynthesis.value && !startsFromFloorplan.value && !config.value.origin_def && source_config.origin_def) {
     config.value.origin_def = source_config.origin_def
   }
   if (!config.value.origin_verilog && source_config.origin_verilog) {
@@ -1776,6 +2099,9 @@ function designFilesReady() {
   if (startsFromSynthesis.value) {
     return config.value.rtl_list.length > 0 || filelistPath.value.trim() !== ''
   }
+  if (startsFromFloorplan.value) {
+    return config.value.origin_verilog.trim() !== ''
+  }
   return config.value.origin_def.trim() !== '' && config.value.origin_verilog.trim() !== ''
 }
 
@@ -1964,6 +2290,43 @@ async function createWorkspace() {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+}
+
+.flow-step-connector {
+  pointer-events: none;
+  position: absolute;
+  right: -1rem;
+  top: 50%;
+  display: none;
+  width: 1.25rem;
+  height: 10px;
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: center;
+}
+
+.flow-step-connector-line {
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  opacity: 0.48;
+}
+
+.flow-step-connector-dot {
+  position: absolute;
+  right: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+
+@media (min-width: 1280px) {
+  .flow-step-connector {
+    display: flex;
+  }
 }
 
 .custom-scrollbar::-webkit-scrollbar {

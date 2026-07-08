@@ -45,10 +45,57 @@
     <!-- 全局新建工程向导 -->
     <NewProjectWizard
       v-if="showNewProjectWizard"
+      :title="workspaceWizardTitle"
       :initial-config="workspaceWizardInitialConfig"
       @close="handleWizardClose"
       @create="handleWizardCreate"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="showWorkspaceUpdateBackupDialog"
+        class="workspace-update-backup-overlay"
+        role="presentation"
+        @click.self="cancelWorkspaceUpdateBackup"
+      >
+        <section
+          class="workspace-update-backup-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="workspace-update-backup-title"
+        >
+          <p class="workspace-update-backup-eyebrow">Update Workspace</p>
+          <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
+          <p>
+            Keep a copy of the current workspace before replacing it. If backup is selected,
+            the backup workspace will be recorded in project.json.
+          </p>
+          <div class="workspace-update-backup-actions">
+            <button
+              type="button"
+              class="workspace-update-backup-secondary"
+              @click="cancelWorkspaceUpdateBackup"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="workspace-update-backup-secondary"
+              @click="runWorkspaceUpdate(false)"
+            >
+              Do Not Backup
+            </button>
+            <button
+              type="button"
+              class="workspace-update-backup-primary"
+              @click="confirmWorkspaceUpdateBackup"
+            >
+              Backup Original
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <AboutDialog v-model="showAboutDialog" />
 
@@ -134,6 +181,12 @@ const documentationUrl =
 const showNewProjectWizard = ref(false)
 const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
 const reconfigureWorkspacePath = ref('')
+const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+const pendingWorkspaceUpdatePath = ref('')
+const showWorkspaceUpdateBackupDialog = ref(false)
+const workspaceWizardTitle = computed(() => {
+  return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'
+})
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')
@@ -157,6 +210,9 @@ function resetWorkspaceWizard() {
   showNewProjectWizard.value = false
   workspaceWizardInitialConfig.value = undefined
   reconfigureWorkspacePath.value = ''
+  pendingWorkspaceUpdateConfig.value = null
+  pendingWorkspaceUpdatePath.value = ''
+  showWorkspaceUpdateBackupDialog.value = false
 }
 
 function handleWizardClose() {
@@ -171,25 +227,50 @@ function showCreateWorkspaceWizard() {
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
   const targetReconfigurePath = reconfigureWorkspacePath.value
-  resetWorkspaceWizard()
 
   if (targetReconfigurePath) {
-    const success = await newProject({
-      ...config,
-      directory: normalizeLocalPath(targetReconfigurePath),
-      replaceExistingWorkspace: true,
-    })
-    if (success) {
-      router.push({
-        path: route.path.startsWith('/workspace') ? route.path : '/workspace',
-        query: route.query,
-      })
-    }
+    pendingWorkspaceUpdateConfig.value = config
+    pendingWorkspaceUpdatePath.value = targetReconfigurePath
+    showWorkspaceUpdateBackupDialog.value = true
     return
   }
 
+  resetWorkspaceWizard()
   const success = await newProject(config)
   if (success) router.push('/workspace')
+}
+
+function cancelWorkspaceUpdateBackup() {
+  showWorkspaceUpdateBackupDialog.value = false
+  pendingWorkspaceUpdateConfig.value = null
+  pendingWorkspaceUpdatePath.value = ''
+}
+
+function confirmWorkspaceUpdateBackup() {
+  void runWorkspaceUpdate(true)
+}
+
+async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
+  const config = pendingWorkspaceUpdateConfig.value
+  const targetReconfigurePath = pendingWorkspaceUpdatePath.value || reconfigureWorkspacePath.value
+  if (!config || !targetReconfigurePath) {
+    cancelWorkspaceUpdateBackup()
+    return
+  }
+
+  resetWorkspaceWizard()
+  const success = await newProject({
+    ...config,
+    directory: normalizeLocalPath(targetReconfigurePath),
+    replaceExistingWorkspace: true,
+    keepReplacementBackup,
+  })
+  if (success) {
+    router.push({
+      path: route.path.startsWith('/workspace') ? route.path : '/workspace',
+      query: route.query,
+    })
+  }
 }
 
 async function openWorkspaceReconfigureWizard() {
@@ -198,7 +279,7 @@ async function openWorkspaceReconfigureWizard() {
     showToast({
       severity: 'warn',
       summary: 'Workspace Required',
-      detail: 'Open a workspace before reconfiguring it.',
+      detail: 'Open a workspace before updating it.',
       life: 3000,
     })
     return
@@ -218,7 +299,7 @@ async function openWorkspaceReconfigureWizard() {
     console.error('Failed to prepare workspace reconfiguration:', error)
     showToast({
       severity: 'error',
-      summary: 'Failed to Reconfigure Workspace',
+      summary: 'Failed to Update Workspace',
       detail: error instanceof Error ? error.message : String(error),
       life: 5000,
     })
@@ -1030,6 +1111,91 @@ body.window-maximized .app-container {
   display: block;
   height: var(--terminal-panel-height);
   pointer-events: none;
+}
+
+.workspace-update-backup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.workspace-update-backup-dialog {
+  width: min(460px, 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.42);
+  padding: 22px;
+  color: var(--text-primary);
+}
+
+.workspace-update-backup-eyebrow {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+
+.workspace-update-backup-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 750;
+}
+
+.workspace-update-backup-dialog p:not(.workspace-update-backup-eyebrow) {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.workspace-update-backup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.workspace-update-backup-primary,
+.workspace-update-backup-secondary {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    opacity 0.15s;
+}
+
+.workspace-update-backup-primary {
+  border: 1px solid var(--accent-color);
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.workspace-update-backup-primary:hover {
+  opacity: 0.9;
+}
+
+.workspace-update-backup-secondary {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.workspace-update-backup-secondary:hover {
+  border-color: var(--accent-color);
 }
 
 /* 调整大小的边缘区域 */

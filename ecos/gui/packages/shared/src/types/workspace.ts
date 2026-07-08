@@ -65,6 +65,7 @@ export interface WorkspaceConfig {
   }
   pdk_json?: string
   replaceExistingWorkspace?: boolean
+  keepReplacementBackup?: boolean
   project_context?: {
     mode: 'select' | 'create'
     project_name: string

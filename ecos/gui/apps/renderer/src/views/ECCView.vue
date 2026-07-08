@@ -178,6 +178,11 @@ type ProjectWorkspaceInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
 }
 
+interface RouteProjectContext {
+  projectRoot: string
+  projectName: string
+}
+
 const initialWizardConfig = ref<ProjectWorkspaceInitialConfig | undefined>(undefined)
 
 const displayedProjects = computed(() => {
@@ -460,21 +465,24 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   if (!success) return
 
   const workspacePath = currentProject.value?.path ?? config.directory
+  const projectContext = projectContextFromWorkspaceConfig(config)
   await registerProjectManagedWorkspace({
     workspacePath,
     config,
+    projectContext,
   })
   router.push({
     path: '/workspace/home',
-    query: workspaceRouteQuery(workspacePath),
+    query: workspaceRouteQuery(workspacePath, projectContext),
   })
 }
 
 async function registerProjectManagedWorkspace(input: {
   workspacePath?: string
   config?: WorkspaceConfig
+  projectContext?: RouteProjectContext | null
 }) {
-  const projectRoot = queryString(route.query.projectRoot)
+  const projectRoot = input.projectContext?.projectRoot || queryString(route.query.projectRoot)
   const workspacePath = input.workspacePath
   if (!projectRoot || !workspacePath) return
 
@@ -489,7 +497,8 @@ async function registerProjectManagedWorkspace(input: {
       return
     }
 
-    const projectName = queryString(route.query.projectName)
+    const projectName = input.projectContext?.projectName
+      || queryString(route.query.projectName)
       || registeredProjectRoot.split('/').filter(Boolean).pop()
       || 'project'
     const manifestText = await readOptionalProjectTextFile('project.json', { projectPath: registeredProjectRoot })
@@ -522,14 +531,28 @@ async function registerProjectManagedWorkspace(input: {
   }
 }
 
-function workspaceRouteQuery(workspacePath?: string) {
-  const projectRoot = queryString(route.query.projectRoot)
+function workspaceRouteQuery(
+  workspacePath?: string,
+  projectContext?: RouteProjectContext | null,
+) {
+  const projectRoot = projectContext?.projectRoot || queryString(route.query.projectRoot)
   if (!projectRoot) return {}
 
   return {
     projectRoot,
-    projectName: queryString(route.query.projectName),
+    projectName: projectContext?.projectName || queryString(route.query.projectName),
     workspaceId: queryString(route.query.workspaceId) || workspacePath?.split('/').filter(Boolean).pop() || '',
+  }
+}
+
+function projectContextFromWorkspaceConfig(config: WorkspaceConfig): RouteProjectContext | null {
+  const projectContext = optionalRecord(config.project_context)
+  const projectRoot = optionalString(projectContext?.project_root)
+  if (!projectRoot) return null
+
+  return {
+    projectRoot: normalizePath(projectRoot),
+    projectName: optionalString(projectContext?.project_name),
   }
 }
 

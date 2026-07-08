@@ -1851,6 +1851,89 @@ describe('useWorkspace openProject', () => {
     ).not.toHaveBeenCalled()
   })
 
+  it('keeps replacement backup and records it in project.json when requested', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    vi.mocked(desktopApi.workspace.readOptionalProjectTextFile).mockResolvedValueOnce(JSON.stringify({
+      schema_version: 1,
+      project_id: 'proj_work',
+      name: 'work',
+      description: '',
+      root_path: '/work',
+      created_at: '2026-07-08T00:00:00.000Z',
+      updated_at: '2026-07-08T00:00:00.000Z',
+      base_design: {
+        parameters: {},
+        rtl_list: [],
+      },
+      objectives: {
+        primary: 'timing',
+        directions: {
+          wns: 'maximize',
+          tns: 'maximize',
+          area: 'minimize',
+          drc_count: 'minimize',
+          power: 'minimize',
+        },
+      },
+      workspaces: [],
+      best_workspace: null,
+    }))
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '/work/demo/origin/demo.def',
+        origin_verilog: '/work/demo/origin/demo.v',
+        rtl_list: ['/work/demo/origin/demo.v'],
+        project_context: {
+          mode: 'select',
+          project_name: 'work',
+          project_root: '/work',
+          project_json_path: '/work/project.json',
+        },
+      }),
+    ).resolves.toBe(true)
+
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.writeProjectTextFile).toHaveBeenCalledWith(
+      '/work/project.json',
+      expect.stringContaining('/work/.demo.replace-backup-1'),
+    )
+    expect(desktopApi.workspace.writeProjectTextFile).toHaveBeenCalledWith(
+      '/work/project.json',
+      expect.stringContaining('"status": "archived"'),
+    )
+    expect(
+      desktopApi.workspace.restoreProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+  })
+
   it('restores the original workspace backup when replacement creation fails', async () => {
     const workspace = useWorkspace()
     const replacement = {

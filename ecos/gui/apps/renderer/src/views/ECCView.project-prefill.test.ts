@@ -119,7 +119,7 @@ describe('ECCView project management handoff', () => {
     const createStart = source.indexOf('const handleWizardCreate')
     const workspacePathIndex = source.indexOf('const workspacePath = currentProject.value?.path ?? config.directory', createStart)
     const registerCallIndex = source.indexOf('await registerProjectManagedWorkspace({', createStart)
-    const routeQueryIndex = source.indexOf('query: workspaceRouteQuery(workspacePath)', createStart)
+    const routeQueryIndex = source.indexOf('query: workspaceRouteQuery(workspacePath, projectContext)', createStart)
     expect(workspacePathIndex).toBeGreaterThan(createStart)
     expect(registerCallIndex).toBeGreaterThan(workspacePathIndex)
     expect(routeQueryIndex).toBeGreaterThan(registerCallIndex)
@@ -135,5 +135,28 @@ describe('ECCView project management handoff', () => {
     const restoreEnd = source.indexOf('async function registerLocalProjectRoot', restoreStart)
     const restoreSource = source.slice(restoreStart, restoreEnd)
     expect(restoreSource).toContain("registerLocalProjectRoot(workspacePath, 'workspace view')")
+  })
+
+  it('keeps project context after creating a workspace from the Backend Design entry', () => {
+    expect(source).toContain('projectContextFromWorkspaceConfig')
+
+    const createStart = source.indexOf('const handleWizardCreate')
+    const createEnd = source.indexOf('async function registerProjectManagedWorkspace', createStart)
+    const createSource = source.slice(createStart, createEnd)
+    expect(createSource).toContain('const projectContext = projectContextFromWorkspaceConfig(config)')
+    expect(createSource).toContain('projectContext,')
+    expect(createSource).toContain('workspaceRouteQuery(workspacePath, projectContext)')
+
+    const registerStart = source.indexOf('async function registerProjectManagedWorkspace')
+    const registerEnd = source.indexOf('function workspaceRouteQuery', registerStart)
+    const registerSource = source.slice(registerStart, registerEnd)
+    expect(registerSource).toContain('input.projectContext?.projectRoot')
+    expect(registerSource).toContain('input.projectContext?.projectName')
+
+    const routeStart = source.indexOf('function workspaceRouteQuery')
+    const routeEnd = source.indexOf('async function registerProjectRootForProjectManagement', routeStart)
+    const routeSource = source.slice(routeStart, routeEnd)
+    expect(routeSource).toContain('projectContext?.projectRoot')
+    expect(routeSource).toContain('projectContext?.projectName')
   })
 })

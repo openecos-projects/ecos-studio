@@ -26,6 +26,12 @@ import {
   clearHomeRunArtifactResetAwaitingBackendStart,
   requestHomeRunArtifactReset,
 } from './homeRunArtifacts'
+import {
+  parseProjectManifest,
+  serializeProjectManifest,
+  type ProjectManifest,
+  type ProjectWorkspaceManifest,
+} from '@/utils/projectManagement'
 
 interface SerializedProject {
   id: string
@@ -196,6 +202,10 @@ export function useWorkspace() {
     return normalized.startsWith('/') ? `/${parent}` : parent
   }
 
+  const pathLeaf = (path: string): string => {
+    return normalizePath(path).split('/').filter(Boolean).pop() || normalizePath(path)
+  }
+
   const rewriteReplacementPath = (
     value: string | undefined,
     targetPath: string,
@@ -236,6 +246,82 @@ export function useWorkspace() {
       filelist: rewriteReplacementPath(config.filelist, targetPath, backupPath),
       sdc: rewriteReplacementPath(config.sdc, targetPath, backupPath),
       pdk_json: rewriteReplacementPath(config.pdk_json, targetPath, backupPath),
+    }
+  }
+
+  const recordReplacementBackupInProjectManifest = async (
+    replacement: WorkspaceDirectoryReplacement,
+    config: WorkspaceConfig,
+  ) => {
+    const projectRoot = normalizePath(
+      config.project_context?.project_root || parentPath(replacement.targetPath),
+    )
+    if (!projectRoot) return
+
+    try {
+      const desktopApi = await waitForDesktopApi()
+      const registeredProjectRoot = normalizePath(
+        await desktopApi.workspace.registerProjectRoot(projectRoot),
+      )
+      const manifestText =
+        await desktopApi.workspace.readOptionalProjectTextFile(
+          `${registeredProjectRoot}/project.json`,
+        )
+      if (!manifestText) return
+
+      const manifest = parseProjectManifest(manifestText)
+      const now = new Date().toISOString()
+      const backupPath = normalizePath(replacement.backupPath)
+      const backupWorkspaceId = pathLeaf(backupPath)
+      const replacementWorkspaceId = pathLeaf(replacement.targetPath)
+      const existingBackup = manifest.workspaces.find(workspace =>
+        workspace.workspace_id === backupWorkspaceId ||
+        normalizePath(workspace.workspace_path) === backupPath,
+      )
+      const replacedWorkspace = manifest.workspaces.find(workspace =>
+        workspace.workspace_id === replacementWorkspaceId ||
+        normalizePath(workspace.workspace_path) === normalizePath(replacement.targetPath),
+      )
+      const backupWorkspace: ProjectWorkspaceManifest = {
+        workspace_id: backupWorkspaceId,
+        name: `${replacedWorkspace?.name || replacementWorkspaceId} backup`,
+        workspace_path: backupPath,
+        source_workspace_id: replacedWorkspace?.source_workspace_id ?? null,
+        branch_from: replacedWorkspace?.branch_from ?? null,
+        start_step: replacedWorkspace?.start_step || config.flow_config?.start_step || 'Synth',
+        end_step: replacedWorkspace?.end_step || config.flow_config?.end_step || 'Harden',
+        status: 'archived',
+        created_at: existingBackup?.created_at ?? now,
+        updated_at: now,
+        parameter_patch: replacedWorkspace?.parameter_patch ?? {},
+        metrics_summary: replacedWorkspace?.metrics_summary ?? {},
+        step_metrics: replacedWorkspace?.step_metrics ?? {},
+      }
+
+      const updated: ProjectManifest = {
+        ...manifest,
+        updated_at: now,
+        workspaces: existingBackup
+          ? manifest.workspaces.map(workspace =>
+              workspace.workspace_id === existingBackup.workspace_id
+                ? backupWorkspace
+                : workspace,
+            )
+          : [...manifest.workspaces, backupWorkspace],
+      }
+
+      await desktopApi.workspace.writeProjectTextFile(
+        `${registeredProjectRoot}/project.json`,
+        serializeProjectManifest(updated),
+      )
+    } catch (error) {
+      console.warn('Failed to record workspace replacement backup:', error)
+      showToast({
+        severity: 'warn',
+        summary: 'Backup manifest not updated',
+        detail: 'The original workspace backup was kept, but project.json could not be updated.',
+        life: 5000,
+      })
     }
   }
 
@@ -796,7 +882,13 @@ export function useWorkspace() {
         // 添加到最近项目列表（包含路径标准化和持久化）
         await addToRecent(createdProject)
 
-        await finalizeReplacement()
+        if (replacement && config?.keepReplacementBackup) {
+          committedReplacement = true
+          await recordReplacementBackupInProjectManifest(replacement, config)
+          replacement = null
+        } else {
+          await finalizeReplacement()
+        }
 
         return true
       } else {

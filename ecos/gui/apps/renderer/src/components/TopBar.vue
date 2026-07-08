@@ -164,12 +164,7 @@
         <button
           type="button"
           class="quick-dropdown-item"
-          :disabled="!hasWorkspaceProjectContext"
-          :title="
-            hasWorkspaceProjectContext
-              ? 'Return to Project Management'
-              : 'This workspace is not linked to a project'
-          "
+          title="Return to Project Management"
           @click="goToProjectManagement"
         >
           <i class="ri-folder-chart-line item-icon"></i>
@@ -210,7 +205,6 @@ const isEcosHome = computed(() => route.name === 'ECOS')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
 const workspaceProjectRoot = computed(() => queryString(route.query.projectRoot))
 const workspaceProjectName = computed(() => queryString(route.query.projectName))
-const hasWorkspaceProjectContext = computed(() => workspaceProjectRoot.value.trim() !== '')
 // ---- Props & Emits ----
 const props = defineProps<{
   projectName?: string | null
@@ -252,28 +246,13 @@ const menus = computed<Menu[]>(() => [
         event: appMenuActionIds.openProject,
       },
       {
-        label: 'Reconfigure Workspace...',
+        label: 'Update Workspace',
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
         disabled: !props.hasWorkspace,
       },
     ],
   },
-  ...(props.hasWorkspace
-    ? [
-        {
-          label: 'Design',
-          action: 'design',
-          children: [
-            {
-              label: 'Manage RTL Files...',
-              icon: 'ri-file-code-line',
-              event: appMenuActionIds.manageDesignFiles,
-            },
-          ],
-        },
-      ]
-    : []),
   {
     label: 'Help',
     action: 'help',
@@ -343,13 +322,15 @@ const toggleQuickMenu = async () => {
 
 const goToProjectManagement = () => {
   quickMenuOpen.value = false
-  if (!hasWorkspaceProjectContext.value) return
+  const query = workspaceProjectRoot.value
+    ? {
+        projectRoot: workspaceProjectRoot.value,
+        projectName: workspaceProjectName.value || undefined,
+      }
+    : {}
   router.push({
     path: '/projects',
-    query: {
-      projectRoot: workspaceProjectRoot.value,
-      projectName: workspaceProjectName.value || undefined,
-    },
+    query,
   })
 }
 

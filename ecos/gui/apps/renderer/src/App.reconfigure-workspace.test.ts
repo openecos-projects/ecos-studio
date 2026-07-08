@@ -4,11 +4,24 @@ import appSource from './App.vue?raw'
 describe('App workspace reconfiguration wizard wiring', () => {
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {
     expect(appSource).toContain(':initial-config="workspaceWizardInitialConfig"')
+    expect(appSource).toContain(':title="workspaceWizardTitle"')
+    expect(appSource).toContain("return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'")
     expect(appSource).toContain('reconfigureWorkspace: openWorkspaceReconfigureWizard')
     expect(appSource).toContain('buildReconfigureWizardInitialConfig')
     expect(appSource).toContain('replaceExistingWorkspace: true')
+    expect(appSource).toContain('keepReplacementBackup')
     expect(appSource).toContain('lockWorkspaceDirectory: true')
     expect(appSource).toContain('readOptionalProjectTextFile')
+  })
+
+  it('asks whether to keep the old workspace backup before running update workspace', () => {
+    expect(appSource).toContain('showWorkspaceUpdateBackupDialog')
+    expect(appSource).toContain('pendingWorkspaceUpdateConfig')
+    expect(appSource).toContain('confirmWorkspaceUpdateBackup')
+    expect(appSource).toContain('runWorkspaceUpdate(true)')
+    expect(appSource).toContain('runWorkspaceUpdate(false)')
+    expect(appSource).toContain('Backup Original')
+    expect(appSource).toContain('Do Not Backup')
   })
 
   it('prefers the current workspace origin files when building reconfigure defaults', () => {

@@ -132,60 +132,6 @@
           </div>
         </div>
       </div>
-      <!-- Continue Working -->
-      <div v-if="lastProject" class="mb-8 w-full max-w-2xl">
-        <button
-          @click="handleResume"
-          class="group flex w-full cursor-pointer items-center gap-4 rounded-xl border border-(--border-color) bg-(--bg-secondary) px-6 py-4 transition-all duration-200 hover:border-(--accent-color)"
-          :class="
-            lastProject.workspaceRecognized === false
-              ? 'pointer-events-none opacity-50'
-              : 'hover:shadow-(--accent-color)/5 hover:shadow-lg'
-          "
-        >
-          <div
-            class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-(--accent-color)/10 transition-colors group-hover:bg-(--accent-color)/20"
-          >
-            <i class="ri-folder-line text-xl text-(--accent-color)"></i>
-          </div>
-          <div class="min-w-0 flex-1 text-left">
-            <div class="flex items-center gap-2">
-              <span class="truncate font-medium text-(--text-primary)">{{
-                lastProject.name
-              }}</span>
-              <span
-                v-if="lastProject.pdk"
-                class="shrink-0 rounded bg-(--accent-color)/10 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-color)"
-              >
-                {{ lastProject.pdk }}
-              </span>
-              <span
-                v-if="lastProject.status"
-                :class="statusBadgeClass(lastProject.status)"
-                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
-              >
-                {{ statusLabel(lastProject.status) }}
-              </span>
-            </div>
-            <div class="mt-1 flex items-center gap-3 text-xs text-(--text-secondary)">
-              <span v-if="lastProject.completedSteps != null && lastProject.totalSteps">
-                {{ lastProject.completedSteps }}/{{ lastProject.totalSteps }} steps
-              </span>
-              <span>{{ formatDate(lastProject.lastOpened) }}</span>
-              <span v-if="lastProject.workspaceRecognized === false" class="text-red-400"
-                >Workspace not recognized</span
-              >
-            </div>
-          </div>
-          <div
-            class="flex shrink-0 items-center gap-2 text-(--text-secondary) transition-colors group-hover:text-(--accent-color)"
-          >
-            <span class="text-sm">Resume</span>
-            <i class="ri-arrow-right-line"></i>
-          </div>
-        </button>
-      </div>
-
       <!-- Project Management entry -->
       <button
         @click="navigateToProjects"
@@ -204,21 +150,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import type { ProjectStatus } from '../types'
-import { useWorkspace } from '../composables/useWorkspace'
 
 const router = useRouter()
-const { recentProjects, openProject, loadRecentProjects } = useWorkspace()
-
-onMounted(async () => {
-  await loadRecentProjects()
-})
-
-const lastProject = computed(() => {
-  return recentProjects.value.length > 0 ? recentProjects.value[0] : null
-})
 
 const navigateToECC = () => router.push('/ecc')
 const navigateToSoc = () => router.push('/soc')
@@ -226,44 +160,5 @@ const navigateToProjects = () => router.push('/projects')
 const navigateToTools = () => router.push('/tools')
 const handleNotReady = () => {
   /* placeholder */
-}
-
-const handleResume = async () => {
-  if (!lastProject.value || lastProject.value.workspaceRecognized === false) return
-  const success = await openProject(lastProject.value)
-  if (success) router.push('/workspace')
-}
-
-function statusBadgeClass(status: ProjectStatus): string {
-  const map: Record<ProjectStatus, string> = {
-    success: 'bg-emerald-500/15 text-emerald-400',
-    failed: 'bg-red-500/15 text-red-400',
-    running: 'bg-blue-500/15 text-blue-400',
-    in_progress: 'bg-amber-500/15 text-amber-400',
-    not_started: 'bg-gray-500/15 text-gray-400',
-  }
-  return map[status] || 'bg-gray-500/15 text-gray-400'
-}
-
-function statusLabel(status: ProjectStatus): string {
-  const map: Record<ProjectStatus, string> = {
-    success: 'Success',
-    failed: 'Failed',
-    running: 'Running',
-    in_progress: 'In Progress',
-    not_started: 'Not Started',
-  }
-  return map[status] || 'Unknown'
-}
-
-function formatDate(date: Date): string {
-  const now = new Date()
-  const diff = now.getTime() - new Date(date).getTime()
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days} days ago`
-  if (days < 30) return `${Math.floor(days / 7)} weeks ago`
-  return new Date(date).toLocaleDateString('en-US')
 }
 </script>

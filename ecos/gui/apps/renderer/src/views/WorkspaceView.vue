@@ -1,53 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onMounted, onUnmounted } from 'vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import DrawingArea from '../components/DrawingArea.vue'
 import ChatInspectorPanel from '../components/ChatInspectorPanel.vue'
 import ThumbnailGallery from '../components/ThumbnailGallery.vue'
 
-const route = useRoute()
-const router = useRouter()
 let isResizing = false
-
-const projectContext = computed(() => {
-  const projectRoot = queryString(route.query.projectRoot)
-  if (!projectRoot) return null
-
-  return {
-    projectRoot,
-    projectName: queryString(route.query.projectName) || basenamePath(projectRoot),
-    workspaceId: queryString(route.query.workspaceId),
-  }
-})
-
-function backToProject() {
-  router.push('/projects')
-}
-
-function createWorkspaceFromCurrentStep() {
-  if (!projectContext.value) return
-  const sourceStep = queryString(route.params.step) || 'Synth'
-  router.push({
-    path: '/ecc',
-    query: {
-      projectRoot: projectContext.value.projectRoot,
-      projectName: projectContext.value.projectName,
-      sourceWorkspace: projectContext.value.workspaceId,
-      sourceStep,
-    },
-  })
-}
-
-function queryString(value: unknown): string {
-  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
-  return typeof value === 'string' ? value : ''
-}
-
-function basenamePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/g, '').split('/').filter(Boolean).pop() ?? ''
-}
 
 const handleMouseDown = (e: MouseEvent) => {
   const target = e.target as HTMLElement
@@ -101,23 +60,6 @@ onUnmounted(() => {
 </script>
 <template>
   <div class="editor-view">
-    <div v-if="projectContext" class="project-context-strip">
-      <div class="project-context-copy">
-        <strong>{{ projectContext.projectName }}</strong>
-        <span>{{ projectContext.workspaceId || 'workspace' }}</span>
-      </div>
-      <div class="project-context-actions">
-        <button type="button" @click="backToProject">
-          <i class="ri-arrow-left-line"></i>
-          <span>Back to Project</span>
-        </button>
-        <button type="button" @click="createWorkspaceFromCurrentStep">
-          <i class="ri-add-line"></i>
-          <span>Create Workspace From Current Step</span>
-        </button>
-      </div>
-    </div>
-
     <Splitter class="flex-1 h-full border-none min-w-0">
       <SplitterPanel :size="75" :minSize="35" class="flex flex-col min-w-0">
         <Splitter layout="vertical" class="h-full border-none">
@@ -143,68 +85,6 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 100%;
   height: 100%;
-}
-
-.project-context-strip {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-color);
-  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
-}
-
-.project-context-copy {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.project-context-copy strong,
-.project-context-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-context-copy strong {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.project-context-copy span {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.project-context-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.project-context-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-secondary) 46%, transparent);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.project-context-actions button:hover {
-  color: var(--accent-color);
-  border-color: color-mix(in srgb, var(--accent-color) 58%, transparent);
 }
 
 :deep(.p-splitter) {

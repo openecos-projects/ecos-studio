@@ -46,11 +46,12 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('ri-more-2-line')
   })
 
-  it('only enables Project Management return when the workspace has project context', () => {
+  it('always enables Project Management return from a workspace route', () => {
     expect(topBarSource).toContain('isWorkspaceRoute')
-    expect(topBarSource).toContain('hasWorkspaceProjectContext')
     expect(topBarSource).toContain('route.query.projectRoot')
-    expect(topBarSource).toContain(':disabled="!hasWorkspaceProjectContext"')
+    expect(topBarSource).not.toContain('hasWorkspaceProjectContext')
+    expect(topBarSource).not.toContain(':disabled="!hasWorkspaceProjectContext"')
+    expect(topBarSource).not.toContain("if (!hasWorkspaceProjectContext.value) return")
     expect(topBarSource).toContain('goToProjectManagement')
     expect(topBarSource).toContain("path: '/projects'")
   })
@@ -65,9 +66,17 @@ describe('TopBar drag region layout', () => {
   })
 
   it('adds a File menu action for reconfiguring the active workspace', () => {
-    expect(topBarSource).toContain('Reconfigure Workspace...')
+    expect(topBarSource).toContain('Update Workspace')
+    expect(topBarSource).not.toContain('Reconfigure Workspace...')
     expect(topBarSource).toContain('ri-settings-3-line')
     expect(topBarSource).toContain('appMenuActionIds.reconfigureWorkspace')
     expect(topBarSource).toContain('disabled: !props.hasWorkspace')
+  })
+
+  it('does not render the workspace Design menu', () => {
+    expect(topBarSource).not.toContain("label: 'Design'")
+    expect(topBarSource).not.toContain("action: 'design'")
+    expect(topBarSource).not.toContain('Manage RTL Files...')
+    expect(topBarSource).not.toContain('appMenuActionIds.manageDesignFiles')
   })
 })
