@@ -378,6 +378,34 @@ describe('WorkspaceService', () => {
     })
   })
 
+  it('refuses to restore when the replacement backup is missing', async () => {
+    const directory = await createTempDir(
+      'ecos-workspace-service-restore-missing-backup-',
+    )
+    const targetPath = join(directory, 'ws_0001')
+    const backupPath = join(directory, '.ws_0001.replace-backup')
+    await mkdir(join(targetPath, 'home'), { recursive: true })
+    await writeFile(join(targetPath, 'home', 'parameters.json'), '{}', 'utf8')
+
+    const projectScopeProvider = createProjectScopeProvider(directory, targetPath)
+    vi.mocked(projectScopeProvider.requestProjectPathAccess).mockImplementation(
+      async (path: string) => {
+        if (path === targetPath) return targetPath
+        if (path === backupPath) return backupPath
+        return path
+      },
+    )
+    const service = new WorkspaceService({ projectScopeProvider })
+
+    await expect(
+      service.restoreProjectDirectoryReplacement({ targetPath, backupPath }),
+    ).rejects.toThrow('Workspace replacement backup is missing')
+
+    await expect(
+      readFile(join(targetPath, 'home', 'parameters.json'), 'utf8'),
+    ).resolves.toBe('{}')
+  })
+
   it('finalizes a prepared replacement by removing the backup directory', async () => {
     const directory = await createTempDir('ecos-workspace-service-finalize-dir-')
     const targetPath = join(directory, 'ws_0001')

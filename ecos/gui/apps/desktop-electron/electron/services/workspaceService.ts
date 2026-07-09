@@ -448,13 +448,21 @@ export class WorkspaceService {
       replacement.backupPath,
     )
 
+    if (!(await pathExists(canonicalBackup))) {
+      throw new Error(
+        `Workspace replacement backup is missing: ${canonicalBackup}. Refusing to delete ${canonicalTarget}.`,
+      )
+    }
+
     await rm(canonicalTarget, { force: true, recursive: true })
 
     try {
       await rename(canonicalBackup, canonicalTarget)
     } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) return
-      throw error
+      throw new Error(
+        `Failed to restore workspace replacement backup from ${canonicalBackup} to ${canonicalTarget}.`,
+        { cause: error },
+      )
     }
   }
 
