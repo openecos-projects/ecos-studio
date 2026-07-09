@@ -75,6 +75,20 @@ describe('project management model', () => {
     expect(model.metricsRows).toEqual([])
   })
 
+  it('uses the normalized project root path as the UI selection id', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+    })
+
+    const model = buildProjectManagementProject(recentProject, manifest)
+
+    expect(manifest.project_id).toBe('proj_gcd')
+    expect(recentProject.id).toBe('/projects/gcd')
+    expect(model.id).toBe('/projects/gcd')
+    expect(model.id).toBe(model.path)
+  })
+
   it('maps project.json workspaces into lineage tree rows, status hints, metrics, and branch links', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
@@ -147,7 +161,7 @@ describe('project management model', () => {
 
     const model = buildProjectManagementProject(recentProject, manifest)
 
-    expect(model.id).toBe('proj_gcd')
+    expect(model.id).toBe('/projects/gcd')
     expect(model.name).toBe('gcd')
     expect(model.pdk).toBe('ics55')
     expect(model.topModule).toBe('gcd')

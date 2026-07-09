@@ -506,7 +506,7 @@ export function buildProjectManagementProject(
     : []
 
   return {
-    id: manifest?.project_id ?? project?.id ?? '',
+    id: path,
     name,
     path,
     pdk,
