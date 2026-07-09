@@ -393,4 +393,17 @@ describe('ProjectsView project management surface', () => {
     expect(refreshRegister).toBeGreaterThan(refreshStart)
     expect(refreshRead).toBeGreaterThan(refreshRegister)
   })
+
+  it('persists project history when project.json is updated', () => {
+    const writeStart = source.indexOf('async function writeProjectManifestForProject')
+    const writeRemember = source.indexOf('await rememberProjectHistoryEntry(', writeStart)
+    const writeProjectFromManifest = source.indexOf(
+      'projectFromManifest(manifest, normalizedRoot)',
+      writeStart,
+    )
+
+    expect(writeRemember).toBeGreaterThan(writeStart)
+    expect(writeProjectFromManifest).toBeGreaterThan(writeStart)
+    expect(source).not.toContain('projectHistory.value = projectHistory.value.map')
+  })
 })

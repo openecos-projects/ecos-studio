@@ -1846,16 +1846,8 @@ async function writeProjectManifestForProject(
     [projectRoot]: analysisInputs,
     [normalizedRoot]: analysisInputs,
   }
-  projectHistory.value = projectHistory.value.map((project) =>
-    project.path === projectRoot || project.path === normalizedRoot
-      ? {
-          ...project,
-          pdk: manifest.base_design.pdk,
-          topModule: manifest.base_design.top_module,
-          status: projectStatusFromManifest(manifest),
-          lastOpened: new Date(),
-        }
-      : project,
+  projectHistory.value = await rememberProjectHistoryEntry(
+    projectFromManifest(manifest, normalizedRoot),
   )
 }
 
