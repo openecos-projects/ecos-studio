@@ -538,6 +538,42 @@ export function createSelectionState(
   }
 }
 
+export type ProjectSelectionUpdateMode = 'reset' | 'reconcile-workspace' | 'keep'
+
+export function resolveProjectSelectionUpdate(
+  previousProjectKey: string | null,
+  project: ProjectManagementProject,
+  currentWorkspaceId: string,
+): {
+  nextProjectKey: string
+  mode: ProjectSelectionUpdateMode
+  selection?: ProjectSelectionState
+  nextWorkspaceId?: string
+} {
+  const nextProjectKey = project.path || project.id
+  if (nextProjectKey !== previousProjectKey) {
+    return {
+      nextProjectKey,
+      mode: 'reset',
+      selection: createSelectionState(project),
+    }
+  }
+
+  const workspaceIds = project.workspaces.map((workspace) => workspace.id)
+  if (currentWorkspaceId && workspaceIds.includes(currentWorkspaceId)) {
+    return {
+      nextProjectKey,
+      mode: 'keep',
+    }
+  }
+
+  return {
+    nextProjectKey,
+    mode: 'reconcile-workspace',
+    nextWorkspaceId: project.bestWorkspaceId || project.workspaces[0]?.id || '',
+  }
+}
+
 export function createProjectManifestDraft(
   input: ProjectManifestDraftInput,
 ): ProjectManifest {

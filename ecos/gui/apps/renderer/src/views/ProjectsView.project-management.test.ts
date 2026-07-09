@@ -406,4 +406,11 @@ describe('ProjectsView project management surface', () => {
     expect(writeProjectFromManifest).toBeGreaterThan(writeStart)
     expect(source).not.toContain('projectHistory.value = projectHistory.value.map')
   })
+
+  it('only resets workspace selection when the active project changes', () => {
+    expect(source).toContain('resolveProjectSelectionUpdate')
+    expect(source).toContain('let activeProjectKey: string | null = null')
+    expect(source).toContain("update.mode === 'reset'")
+    expect(source).toContain("update.mode === 'reconcile-workspace'")
+  })
 })

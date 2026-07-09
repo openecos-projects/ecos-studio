@@ -3,6 +3,7 @@ import {
   FLOW_STEPS,
   buildProjectManagementProject,
   createSelectionState,
+  resolveProjectSelectionUpdate,
   createProjectManifestDraft,
   createWorkspaceBranchDraft,
   parseWorkspaceFlowStateMap,
@@ -64,6 +65,76 @@ describe('project management model', () => {
 
     expect(selection.selectedWorkspaceId).toBe('')
     expect(selection.selectedStep).toBe('DRC')
+  })
+
+  it('resets selection only when the active project changes', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+    })
+    manifest.workspaces.push({
+      workspace_id: 'ws_0001',
+      name: 'baseline',
+      workspace_path: '/projects/gcd/ws_0001',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:00:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+    manifest.best_workspace = { workspace_id: 'ws_0002', reason: 'Better timing' }
+    manifest.workspaces.push({
+      workspace_id: 'ws_0002',
+      name: 'branch',
+      workspace_path: '/projects/gcd/ws_0002',
+      source_workspace_id: 'ws_0001',
+      branch_from: {
+        source_workspace_id: 'ws_0001',
+        source_step: 'DRC',
+        source_output_type: 'def',
+      },
+      start_step: 'Legal',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T09:00:00.000Z',
+      updated_at: '2026-07-02T09:00:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+
+    const model = buildProjectManagementProject(recentProject, manifest)
+
+    expect(resolveProjectSelectionUpdate(null, model, '')).toEqual({
+      nextProjectKey: '/projects/gcd',
+      mode: 'reset',
+      selection: {
+        selectedWorkspaceId: 'ws_0002',
+        selectedStep: 'DRC',
+      },
+    })
+    expect(resolveProjectSelectionUpdate('/projects/gcd', model, 'ws_0001')).toEqual({
+      nextProjectKey: '/projects/gcd',
+      mode: 'keep',
+    })
+    expect(resolveProjectSelectionUpdate('/projects/gcd', model, 'ws_missing')).toEqual({
+      nextProjectKey: '/projects/gcd',
+      mode: 'reconcile-workspace',
+      nextWorkspaceId: 'ws_0002',
+    })
+    expect(resolveProjectSelectionUpdate('/projects/uart', model, 'ws_0001')).toEqual({
+      nextProjectKey: '/projects/gcd',
+      mode: 'reset',
+      selection: {
+        selectedWorkspaceId: 'ws_0002',
+        selectedStep: 'DRC',
+      },
+    })
   })
 
   it('uses a neutral empty project when no source project exists', () => {

@@ -784,10 +784,10 @@ import { waitForDesktopApi } from '@/platform/desktop'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
-  createSelectionState,
   createProjectManifestDraft,
   createWorkspaceBranchDraft,
   deleteWorkspaceFromManifest,
+  resolveProjectSelectionUpdate,
   nextWorkspaceId,
   parseWorkspaceFlowStateMap,
   parseProjectManifest,
@@ -1112,15 +1112,30 @@ const STA_CORNER_PATHS = [
   'WCL_m40/RCworst',
 ]
 
+let activeProjectKey: string | null = null
+
 watch(
   selectedProject,
   (project) => {
-    const selection = createSelectionState(project)
-    selectedWorkspaceId.value = selection.selectedWorkspaceId
-    selectedStep.value = selection.selectedStep
-    hasOpenedStepAnalysis.value = false
-    popoverWorkspaceId.value = ''
-    branchDraft.value = null
+    const update = resolveProjectSelectionUpdate(
+      activeProjectKey,
+      project,
+      selectedWorkspaceId.value,
+    )
+    activeProjectKey = update.nextProjectKey
+
+    if (update.mode === 'reset' && update.selection) {
+      selectedWorkspaceId.value = update.selection.selectedWorkspaceId
+      selectedStep.value = update.selection.selectedStep
+      hasOpenedStepAnalysis.value = false
+      popoverWorkspaceId.value = ''
+      branchDraft.value = null
+      return
+    }
+
+    if (update.mode === 'reconcile-workspace') {
+      selectedWorkspaceId.value = update.nextWorkspaceId ?? ''
+    }
   },
   { immediate: true },
 )
