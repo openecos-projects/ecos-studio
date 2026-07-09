@@ -208,14 +208,12 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
-  createProjectManifestDraft,
-  parseProjectManifest,
-  registerWorkspaceInManifest,
-  serializeProjectManifest,
-} from '@/utils/projectManagement'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
-import { waitForDesktopApi } from '@/platform/desktop'
+  projectContextFromWorkspaceConfig,
+  registerProjectManagedWorkspace,
+  type ProjectRouteContext,
+} from '@/utils/projectManifestRegistration'
 
 const router = useRouter()
 const route = useRoute()
@@ -236,11 +234,6 @@ type ProjectWorkspaceInitialConfig = Partial<WorkspaceConfig> & {
   deriveDirectoryFromDesign?: boolean
 }
 
-interface RouteProjectContext {
-  projectRoot: string
-  projectName: string
-}
-
 const initialWizardConfig = ref<ProjectWorkspaceInitialConfig | undefined>(undefined)
 
 const displayedProjects = computed(() => {
@@ -258,15 +251,16 @@ const goBack = () => {
 
 const handleOpenProject = async () => {
   const success = await openProject()
-  if (success) {
-    await registerProjectManagedWorkspace({
-      workspacePath: currentProject.value?.path,
-    })
-    router.push({
-      path: '/workspace/home',
-      query: workspaceRouteQuery(currentProject.value?.path),
-    })
-  }
+  if (!success || !currentProject.value?.path) return
+
+  await registerProjectManagedWorkspace({
+    workspacePath: currentProject.value.path,
+    routeQuery: route.query,
+  })
+  router.push({
+    path: '/workspace/home',
+    query: workspaceRouteQuery(currentProject.value.path),
+  })
 }
 
 const handleOpenRecent = async (project: Project) => {
@@ -551,6 +545,14 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
     workspacePath,
     config,
     projectContext,
+    routeQuery: route.query,
+    onWarning: (summary, detail) => {
+      showToast({
+        severity: 'warn',
+        summary,
+        detail,
+      })
+    },
   })
   router.push({
     path: '/workspace/home',
@@ -558,71 +560,9 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
   })
 }
 
-async function registerProjectManagedWorkspace(input: {
-  workspacePath?: string
-  config?: WorkspaceConfig
-  projectContext?: RouteProjectContext | null
-}) {
-  const projectRoot =
-    input.projectContext?.projectRoot || queryString(route.query.projectRoot)
-  const workspacePath = input.workspacePath
-  if (!projectRoot || !workspacePath) return
-
-  try {
-    const registeredProjectRoot =
-      await registerProjectRootForProjectManagement(projectRoot)
-    if (!registeredProjectRoot) {
-      showToast({
-        severity: 'warn',
-        summary: 'Project manifest not updated',
-        detail:
-          'Workspace was created, but the project root could not be registered for manifest access.',
-      })
-      return
-    }
-
-    const projectName =
-      input.projectContext?.projectName ||
-      queryString(route.query.projectName) ||
-      registeredProjectRoot.split('/').filter(Boolean).pop() ||
-      'project'
-    const manifestText = await readOptionalProjectTextFile('project.json', {
-      projectPath: registeredProjectRoot,
-    })
-    const manifest = manifestText
-      ? parseProjectManifest(manifestText)
-      : createProjectManifestDraft({ rootPath: registeredProjectRoot, name: projectName })
-    const updated = registerWorkspaceInManifest(manifest, {
-      projectRoot: registeredProjectRoot,
-      projectName,
-      workspacePath,
-      sourceWorkspaceId: queryString(route.query.sourceWorkspace) || undefined,
-      sourceStep: queryString(route.query.sourceStep) || undefined,
-      sourceOutputPath: queryString(route.query.sourceOutputPath) || undefined,
-      sourceOutputType: queryString(route.query.sourceOutputType) || undefined,
-      startStep: queryString(route.query.startStep) || undefined,
-      endStep: queryString(route.query.endStep) || undefined,
-      config: input.config,
-    })
-
-    await writeProjectTextFile('project.json', serializeProjectManifest(updated), {
-      projectPath: registeredProjectRoot,
-    })
-  } catch (error) {
-    console.warn('Failed to update project manifest after workspace creation.', error)
-    showToast({
-      severity: 'warn',
-      summary: 'Project manifest not updated',
-      detail: 'Workspace was created, but project.json could not be updated.',
-    })
-  } finally {
-    await restoreWorkspaceRootForWorkspaceView(workspacePath)
-  }
-}
-
 function workspaceRouteQuery(
   workspacePath?: string,
-  projectContext?: RouteProjectContext | null,
+  projectContext?: ProjectRouteContext | null,
 ) {
   const projectRoot = projectContext?.projectRoot || queryString(route.query.projectRoot)
   if (!projectRoot) return {}
@@ -634,50 +574,6 @@ function workspaceRouteQuery(
       queryString(route.query.workspaceId) ||
       workspacePath?.split('/').filter(Boolean).pop() ||
       '',
-  }
-}
-
-function projectContextFromWorkspaceConfig(
-  config: WorkspaceConfig,
-): RouteProjectContext | null {
-  const projectContext = optionalRecord(config.project_context)
-  const projectRoot = optionalString(projectContext?.project_root)
-  if (!projectRoot) return null
-
-  return {
-    projectRoot: normalizePath(projectRoot),
-    projectName: optionalString(projectContext?.project_name),
-  }
-}
-
-async function registerProjectRootForProjectManagement(
-  projectRoot: string,
-): Promise<string | null> {
-  return registerLocalProjectRoot(projectRoot, 'Project Management')
-}
-
-async function restoreWorkspaceRootForWorkspaceView(workspacePath: string) {
-  const workspaceRoot = await registerLocalProjectRoot(workspacePath, 'workspace view')
-  if (!workspaceRoot) {
-    showToast({
-      severity: 'warn',
-      summary: 'Workspace view not refreshed',
-      detail: 'The workspace root could not be restored for Home resources.',
-    })
-  }
-}
-
-async function registerLocalProjectRoot(
-  rootPath: string,
-  context: string,
-): Promise<string | null> {
-  try {
-    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
-    const registeredRoot = await desktopApi.workspace.registerProjectRoot(rootPath)
-    return normalizePath(registeredRoot || rootPath)
-  } catch (error) {
-    console.warn(`Failed to register project root for ${context}.`, error)
-    return null
   }
 }
 

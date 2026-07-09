@@ -149,6 +149,10 @@ import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  projectContextFromWorkspaceConfig,
+  registerProjectManagedWorkspace,
+} from '@/utils/projectManifestRegistration'
 
 type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
@@ -237,7 +241,10 @@ const handleWizardCreate = async (config: WorkspaceConfig) => {
 
   resetWorkspaceWizard()
   const success = await newProject(config)
-  if (success) router.push('/workspace')
+  if (!success) return
+
+  await syncProjectManagedWorkspace(config)
+  router.push('/workspace')
 }
 
 function cancelWorkspaceUpdateBackup() {
@@ -267,11 +274,34 @@ async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
     keepReplacementBackup,
   })
   if (success) {
+    await syncProjectManagedWorkspace(config, normalizeLocalPath(targetReconfigurePath))
     router.push({
       path: route.path.startsWith('/workspace') ? route.path : '/workspace',
       query: route.query,
     })
   }
+}
+
+async function syncProjectManagedWorkspace(
+  config: WorkspaceConfig,
+  workspacePath?: string,
+) {
+  const projectContext = projectContextFromWorkspaceConfig(config)
+  if (!projectContext) return
+
+  await registerProjectManagedWorkspace({
+    workspacePath: workspacePath ?? currentProject.value?.path ?? config.directory,
+    config,
+    projectContext,
+    routeQuery: route.query,
+    onWarning: (summary, detail) => {
+      showToast({
+        severity: 'warn',
+        summary,
+        detail,
+      })
+    },
+  })
 }
 
 async function openWorkspaceReconfigureWizard() {

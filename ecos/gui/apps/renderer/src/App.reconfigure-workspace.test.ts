@@ -76,4 +76,18 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain('function handleWizardClose()')
     expect(appSource).toContain('resetWorkspaceWizard()')
   })
+
+  it('records project-managed workspaces into project.json after wizard create and reconfigure', () => {
+    expect(appSource).toContain('registerProjectManagedWorkspace')
+    expect(appSource).toContain('syncProjectManagedWorkspace')
+    expect(appSource).toContain('projectContextFromWorkspaceConfig')
+    expect(appSource).toContain('await syncProjectManagedWorkspace(config)')
+
+    const updateStart = appSource.indexOf('async function runWorkspaceUpdate')
+    const updateSync = appSource.indexOf(
+      'await syncProjectManagedWorkspace(config, normalizeLocalPath(targetReconfigurePath))',
+      updateStart,
+    )
+    expect(updateSync).toBeGreaterThan(updateStart)
+  })
 })
