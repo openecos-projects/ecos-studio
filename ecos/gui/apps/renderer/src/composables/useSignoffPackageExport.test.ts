@@ -242,6 +242,28 @@ describe('useSignoffPackageExport menu eligibility', () => {
       )
     })
   })
+
+  it('handles a rejected native menu disable without an unhandled rejection', async () => {
+    const api = createApi()
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    api.setActionEnabled.mockRejectedValueOnce(new Error('menu unavailable'))
+    const mounted = mountComposable(ref(null))
+    scope = mounted.scope
+
+    await vi.waitFor(() => {
+      expect(consoleWarn).toHaveBeenCalledWith(
+        '[signoff-export] Failed to update native menu state:',
+        expect.objectContaining({ message: 'menu unavailable' }),
+      )
+    })
+
+    expect(api.setActionEnabled).toHaveBeenCalledWith(
+      appMenuActionIds.exportSignoffPackage,
+      false,
+    )
+    expect(api.readFlow).not.toHaveBeenCalled()
+    consoleWarn.mockRestore()
+  })
 })
 
 describe('useSignoffPackageExport export action', () => {
@@ -254,6 +276,29 @@ describe('useSignoffPackageExport export action', () => {
   afterEach(() => {
     scope?.stop()
     scope = undefined
+  })
+
+  it('warns and stays disabled when export is requested without an active workspace', async () => {
+    const api = createApi()
+    const mounted = mountComposable(ref(null))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.setActionEnabled).toHaveBeenCalledTimes(1))
+
+    await mounted.result.exportSignoffPackage()
+
+    expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+      appMenuActionIds.exportSignoffPackage,
+      false,
+    )
+    expect(api.readFlow).not.toHaveBeenCalled()
+    expect(api.saveFile).not.toHaveBeenCalled()
+    expect(api.execute).not.toHaveBeenCalled()
+    expect(mounted.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warn',
+        detail: expect.stringContaining('Open an eligible workspace'),
+      }),
+    )
   })
 
   it('rejects a stale ineligible flow without opening the save dialog', async () => {
@@ -353,6 +398,40 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
+  it('uses fallback details when the CLI failure has no message', async () => {
+    const api = createApi()
+    api.execute.mockResolvedValueOnce(cliResult(false))
+    const mounted = mountComposable()
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    await mounted.result.exportSignoffPackage()
+
+    expect(mounted.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        detail: 'Export failed.',
+      }),
+    )
+  })
+
+  it('converts a non-Error rejection into useful error details', async () => {
+    const api = createApi()
+    api.saveFile.mockRejectedValueOnce('dialog bridge unavailable')
+    const mounted = mountComposable()
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    await mounted.result.exportSignoffPackage()
+
+    expect(mounted.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        detail: 'dialog bridge unavailable',
+      }),
+    )
+  })
+
   it.each([
     ['flow read', 'readFlow'],
     ['parameters read', 'readParameters'],
@@ -386,6 +465,24 @@ describe('useSignoffPackageExport export action', () => {
     const exportPromise = mounted.result.exportSignoffPackage()
     mounted.currentProject.value = { path: '/workspaces/b' }
     exportRead.resolve(successfulFlow())
+    await exportPromise
+
+    expect(api.saveFile).not.toHaveBeenCalled()
+    expect(api.execute).not.toHaveBeenCalled()
+  })
+
+  it('does not open the dialog when the workspace switches during parameter loading', async () => {
+    const api = createApi()
+    const parametersRead = deferred<Record<string, unknown> | null>()
+    api.readParameters.mockImplementationOnce(() => parametersRead.promise)
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    const exportPromise = mounted.result.exportSignoffPackage()
+    await vi.waitFor(() => expect(api.readParameters).toHaveBeenCalledTimes(1))
+    mounted.currentProject.value = { path: '/workspaces/b' }
+    parametersRead.resolve({ Design: 'workspace_a' })
     await exportPromise
 
     expect(api.saveFile).not.toHaveBeenCalled()
