@@ -12681,3 +12681,36 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - mutable latest 资产发布后、registry CI 提交新静态锁之前会存在短暂校验失败窗口；后续 release 可靠性改造将进一步缩小该窗口。
+
+# 第 208 次 开发
+
+## 开发目标
+
+修复 `ecc-fe-examples` 在 `cl3_std` 已删除后仍被 Resource Manager 判定为损坏的问题，使健康检查与唯一保留的 `examples/cl3` release 内容一致。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - examples 健康标记改为 `examples/cl3/filelist.cpu.f` 和 `examples/cl3/cl3_verilog/cpu_top.sv`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - fixture 删除 `cl3_std`，改为构造当前 release 的单一 CL3 示例结构。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 examples 健康检查修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron test -- resourceManagerService.test.ts`；37 个测试文件、261 个测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- examples 健康检查目前验证关键入口文件存在，不对整套 RTL 逐文件做内容校验；归档完整性仍由静态 SHA 和 release CI 保证。

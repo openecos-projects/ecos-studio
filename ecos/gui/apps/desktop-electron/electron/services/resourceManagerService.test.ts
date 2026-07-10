@@ -138,10 +138,9 @@ async function createEccFeExamplesArchive(root: string): Promise<{ path: string;
   const sourceRoot = join(root, 'ecc-fe-examples-source')
   const sourceDir = join(sourceRoot, 'ecc-fe-examples')
   const archive = join(root, 'ecc-fe-examples.tar')
-  await mkdir(join(sourceDir, 'examples', 'cl3'), { recursive: true })
-  await mkdir(join(sourceDir, 'examples', 'cl3_std'), { recursive: true })
-  await writeFile(join(sourceDir, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
-  await writeFile(join(sourceDir, 'examples', 'cl3_std', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
+  await mkdir(join(sourceDir, 'examples', 'cl3', 'cl3_verilog'), { recursive: true })
+  await writeFile(join(sourceDir, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/cpu_top.sv\n', 'utf8')
+  await writeFile(join(sourceDir, 'examples', 'cl3', 'cl3_verilog', 'cpu_top.sv'), 'module cpu_top; endmodule\n', 'utf8')
   await runFixtureCommand('tar', ['-cf', archive, '-C', sourceRoot, 'ecc-fe-examples'])
   const size = Buffer.byteLength(await readFile(archive))
   return {
@@ -460,8 +459,7 @@ describe('ResourceManagerService', () => {
     await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
     await createInstalledEccFeRoot(eccFeRoot)
     await createInstalledEccFeSocRoot(eccFeSocRoot)
-    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3'), { recursive: true })
-    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3_std'), { recursive: true })
+    await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3', 'cl3_verilog'), { recursive: true })
     await mkdir(join(riscvRoot, 'bin'), { recursive: true })
     await mkdir(surferRoot, { recursive: true })
     await mkdir(join(duplicateRoot, 'bin'), { recursive: true })
@@ -473,8 +471,8 @@ describe('ResourceManagerService', () => {
     await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), '#!/bin/sh\n', 'utf8')
-    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
-    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3_std', 'filelist.cpu.f'), 'cl3_verilog/CL3Top.sv\n', 'utf8')
+    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'cl3_verilog/cpu_top.sv\n', 'utf8')
+    await writeFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'cl3_verilog', 'cpu_top.sv'), 'module cpu_top; endmodule\n', 'utf8')
     await writeFile(join(surferRoot, 'index.html'), '<!doctype html>\n', 'utf8')
     await writeFile(join(surferRoot, 'integration.js'), 'function register_message_listener() {}\n', 'utf8')
     await writeFile(join(surferRoot, 'surfer.js'), 'export default async function init() {}\n', 'utf8')
@@ -1120,7 +1118,7 @@ describe('ResourceManagerService', () => {
     await expect(readFile(join(eccFeRoot, 'bin', 'ecc-fe'), 'utf8')).resolves.toContain('#!/bin/sh')
     await expect(readFile(join(eccFeRoot, 'fecompiler', '__init__.py'), 'utf8')).resolves.toBe('')
     await expect(readFile(join(eccFeSocRoot, 'ecos_sim_top.v'), 'utf8')).resolves.toContain('module ecos_sim_top')
-    await expect(readFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'utf8')).resolves.toContain('CL3Top.sv')
+    await expect(readFile(join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'), 'utf8')).resolves.toContain('cpu_top.sv')
 
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),

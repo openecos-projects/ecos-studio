@@ -2319,7 +2319,7 @@ function requiredToolMarkers(normalizedName: string): string[] {
     return ['tools/riscv32-spike-so']
   }
   if (normalizedName === 'ecc-fe-examples') {
-    return ['examples/cl3/filelist.cpu.f', 'examples/cl3_std/filelist.cpu.f']
+    return ['examples/cl3/filelist.cpu.f', 'examples/cl3/cl3_verilog/cpu_top.sv']
   }
   if (normalizedName.startsWith('ecc-fe-test-')) {
     return ['tests']
