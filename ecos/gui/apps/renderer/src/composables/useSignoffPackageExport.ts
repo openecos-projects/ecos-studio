@@ -130,10 +130,13 @@ export function useSignoffPackageExport({
     }
 
     const isActiveWorkspace = () => currentProject.value?.path === workspacePath
+    let flowReadCompleted = false
+    let cliExecutionStarted = false
 
     try {
       const api = getDesktopApi()
       const flow = await api.workspaceResources.readFlow()
+      flowReadCompleted = true
       if (!isActiveWorkspace()) return
 
       if (!canExportSignoffPackage(flow)) {
@@ -163,6 +166,7 @@ export function useSignoffPackageExport({
       })
       if (!outputPath || !isActiveWorkspace()) return
 
+      cliExecutionStarted = true
       const result = await api.cli.execute({
         cmd: 'export_signoff_package',
         data: {
@@ -188,6 +192,8 @@ export function useSignoffPackageExport({
         detail: `Saved to ${outputPath}`,
       })
     } catch (error) {
+      if (!cliExecutionStarted && !isActiveWorkspace()) return
+      if (!flowReadCompleted) await setMenuEnabled(false)
       showToast({
         severity: 'error',
         summary: 'Failed to Export Signoff Package',

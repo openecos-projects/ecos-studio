@@ -441,7 +441,12 @@ describe('useSignoffPackageExport export action', () => {
     const api = createApi()
     const mounted = mountComposable()
     scope = mounted.scope
-    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => {
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        true,
+      )
+    })
     api[method].mockRejectedValueOnce(new Error(`${method} exploded`))
 
     await mounted.result.exportSignoffPackage()
@@ -452,6 +457,12 @@ describe('useSignoffPackageExport export action', () => {
         detail: expect.stringContaining(`${method} exploded`),
       }),
     )
+    if (method === 'readFlow') {
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        false,
+      )
+    }
   })
 
   it('does not open the dialog when the workspace switches during flow validation', async () => {
@@ -485,6 +496,25 @@ describe('useSignoffPackageExport export action', () => {
     parametersRead.resolve({ Design: 'workspace_a' })
     await exportPromise
 
+    expect(api.saveFile).not.toHaveBeenCalled()
+    expect(api.execute).not.toHaveBeenCalled()
+  })
+
+  it('suppresses a rejected parameter read after the workspace switches', async () => {
+    const api = createApi()
+    const parametersRead = deferred<Record<string, unknown> | null>()
+    api.readParameters.mockImplementationOnce(() => parametersRead.promise)
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    const exportPromise = mounted.result.exportSignoffPackage()
+    await vi.waitFor(() => expect(api.readParameters).toHaveBeenCalledTimes(1))
+    mounted.currentProject.value = { path: '/workspaces/b' }
+    parametersRead.reject(new Error('stale workspace read failed'))
+    await exportPromise
+
+    expect(mounted.showToast).not.toHaveBeenCalled()
     expect(api.saveFile).not.toHaveBeenCalled()
     expect(api.execute).not.toHaveBeenCalled()
   })
