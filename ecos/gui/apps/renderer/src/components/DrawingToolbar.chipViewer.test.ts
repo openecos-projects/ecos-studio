@@ -10,4 +10,11 @@ describe('DrawingToolbar chip viewer action', () => {
     expect(source).toContain('ri-cpu-line')
     expect(source).toContain('showNativeLayoutViewer')
   })
+
+  it('exposes a separate edit-mode button for launching the chip viewer edit loop', () => {
+    expect(source).toContain('chipViewerEditBusy')
+    expect(source).toContain('openChipViewerEdit')
+    expect(source).toContain('打开 Chip Viewer 编辑模式')
+    expect(source).toContain('ri-edit-box-line')
+  })
 })

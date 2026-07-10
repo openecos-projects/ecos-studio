@@ -3,7 +3,8 @@ use std::path::Path;
 
 use anyhow::Result;
 use chipgeom_format::{
-    GeometryViewTileRecord, OwnerRef, OwnerType, Rect32, ShapeId, ShapeRecord, ShapeState,
+    GeometryViewTileRecord, OwnerRef, OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord,
+    ShapeState,
 };
 use chipgeom_reader::GeometrySnapshot;
 
@@ -91,6 +92,26 @@ impl LayerShapeIndex {
             .flat_map(|indices| indices.iter().copied())
             .filter(|index| shapes[*index].bbox.intersects(bbox))
             .collect()
+    }
+
+    pub fn pick_top_rect(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_ids: &[u16],
+        point: Point32,
+    ) -> Option<ShapeId> {
+        layer_ids
+            .iter()
+            .filter_map(|layer_id| self.by_layer.get(layer_id))
+            .flat_map(|indices| indices.iter().copied())
+            .filter(|index| {
+                let shape = &shapes[*index];
+                shape.state == ShapeState::Alive as u8
+                    && shape.kind == ShapeKind::Rect as u8
+                    && rect_contains_point(shape.bbox, point)
+            })
+            .max()
+            .map(|index| shapes[index].id)
     }
 }
 
@@ -226,6 +247,10 @@ pub fn layer_summaries_from_shapes(shapes: &[ShapeRecord]) -> Vec<LayerSummary> 
         .collect()
 }
 
+fn rect_contains_point(rect: Rect32, point: Point32) -> bool {
+    point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
+}
+
 impl ChipViewDb {
     pub fn open(manifest_path: impl AsRef<Path>) -> Result<Self> {
         let snapshot = GeometrySnapshot::open(manifest_path)?;
@@ -313,6 +338,11 @@ impl ChipViewDb {
 
     pub fn query_owner_name(&self, name: &str) -> Vec<ShapeId> {
         self.name_index.query(name)
+    }
+
+    pub fn pick_top_rect(&self, layer_ids: &[u16], point: Point32) -> Option<ShapeId> {
+        self.layer_index
+            .pick_top_rect(self.snapshot.shapes(), layer_ids, point)
     }
 
     pub fn owner_name(&self, owner: &OwnerRef) -> Option<&str> {
@@ -578,5 +608,54 @@ mod tests {
             index.name_for_owner(OwnerType::InstanceBBox as u8, 21),
             None
         );
+    }
+
+    #[test]
+    fn layer_shape_index_picks_top_rect_from_visible_layers_without_scanning_all_layers() {
+        let shapes = [
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(2, 2)
+            },
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(3, 1)
+            },
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                state: ShapeState::Deleted as u8,
+                ..shape(4, 1)
+            },
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+        let point = chipgeom_format::Point32 { x: 5, y: 5 };
+
+        assert_eq!(index.pick_top_rect(&shapes, &[1], point), Some(3));
+        assert_eq!(index.pick_top_rect(&shapes, &[2], point), Some(2));
+        assert_eq!(index.pick_top_rect(&shapes, &[3], point), None);
     }
 }

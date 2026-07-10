@@ -3,7 +3,7 @@ import {
   spawn as spawnProcessCallback,
 } from 'node:child_process'
 import { existsSync, type FSWatcher, watch as watchFsDirectoryCallback } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import {
   normalizeLocalPath,
@@ -25,6 +25,7 @@ interface ExecFileResult {
 type ExecFileRunner = (file: string, args: string[]) => Promise<ExecFileResult>
 type GetFileModifiedTime = (path: string) => Promise<number | null>
 type ReadTextFile = (path: string) => Promise<string>
+type RenameFile = (from: string, to: string) => Promise<void>
 type WriteTextFile = (path: string, content: string) => Promise<void>
 type DirectoryWatcher = Pick<FSWatcher, 'close'>
 type WatchDirectory = (
@@ -57,6 +58,7 @@ export interface ChipViewerServiceOptions {
   isPackaged: boolean
   platform?: NodeJS.Platform
   readTextFile?: ReadTextFile
+  renameFile?: RenameFile
   resourcesPath?: string
   spawnProcess?: SpawnProcess
   watchDirectory?: WatchDirectory
@@ -208,6 +210,7 @@ export class ChipViewerService {
   private readonly isPackaged: boolean
   private readonly platform: NodeJS.Platform
   private readonly readTextFile: ReadTextFile
+  private readonly renameFile: RenameFile
   private readonly resourcesPath?: string
   private readonly spawnProcess: SpawnProcess
   private readonly watchDirectory: WatchDirectory
@@ -228,6 +231,7 @@ export class ChipViewerService {
     this.isPackaged = options.isPackaged
     this.platform = options.platform ?? process.platform
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
+    this.renameFile = options.renameFile ?? rename
     this.resourcesPath = options.resourcesPath
     this.spawnProcess = options.spawnProcess ?? spawnProcessCallback
     this.watchDirectory = options.watchDirectory ?? defaultWatchDirectory
@@ -404,6 +408,7 @@ export class ChipViewerService {
       snapshotInputs.editResultDirectory,
       fileName.replace(/^command-/, 'result-'),
     )
+    const temporaryResultPath = `${resultPath}.tmp`
 
     try {
       await this.execFile(
@@ -413,9 +418,10 @@ export class ChipViewerService {
           snapshotInputs,
           'apply-edit',
           commandPath,
-          resultPath,
+          temporaryResultPath,
         ),
       )
+      await this.renameFile(temporaryResultPath, resultPath)
     } catch (error) {
       await this.writeRejectedEditResult(commandPath, resultPath, error)
     }

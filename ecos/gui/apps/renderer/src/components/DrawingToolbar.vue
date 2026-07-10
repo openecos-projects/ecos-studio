@@ -12,6 +12,8 @@ interface Props {
   showChipViewer?: boolean
   /** Chip Viewer 拉起中 */
   chipViewerBusy?: boolean
+  /** Chip Viewer edit 拉起中 */
+  chipViewerEditBusy?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -20,11 +22,13 @@ const props = withDefaults(defineProps<Props>(), {
   nativeLayoutViewerBusy: false,
   showChipViewer: false,
   chipViewerBusy: false,
+  chipViewerEditBusy: false,
 })
 
 const emit = defineEmits<{
   openNativeLayoutViewer: []
   openChipViewer: []
+  openChipViewerEdit: []
 }>()
 
 const isRulerEnabled = ref(true)
@@ -109,10 +113,10 @@ onUnmounted(() => {
       <button
         v-if="showChipViewer"
         type="button"
-        :disabled="chipViewerBusy"
+        :disabled="chipViewerBusy || chipViewerEditBusy"
         class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
         :class="
-          chipViewerBusy
+          chipViewerBusy || chipViewerEditBusy
             ? 'text-(--text-secondary)'
             : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
         "
@@ -121,6 +125,25 @@ onUnmounted(() => {
         @click="emit('openChipViewer')"
       >
         <i class="ri-cpu-line text-base" :class="{ 'animate-pulse': chipViewerBusy }"></i>
+      </button>
+      <button
+        v-if="showChipViewer"
+        type="button"
+        :disabled="chipViewerBusy || chipViewerEditBusy"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
+        :class="
+          chipViewerBusy || chipViewerEditBusy
+            ? 'text-(--text-secondary)'
+            : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
+        "
+        title="打开 Chip Viewer 编辑模式"
+        aria-label="打开 Chip Viewer 编辑模式"
+        @click="emit('openChipViewerEdit')"
+      >
+        <i
+          class="ri-edit-box-line text-base"
+          :class="{ 'animate-pulse': chipViewerEditBusy }"
+        ></i>
       </button>
     </div>
 

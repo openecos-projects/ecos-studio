@@ -36,8 +36,40 @@ build_layout_viewer() {
     -p ecos-layout-packer
 }
 
+build_chip_viewer() {
+  cd "$REPO_ROOT/ecos/chip-viewer"
+
+  cargo build --release \
+    -p chip-viewer-native
+}
+
+build_geometry_snapshot() {
+  cmake --build "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build" \
+    --target ecc_geometry_snapshot
+}
+
+resolve_geometry_snapshot_binary() {
+  local candidates=(
+    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build/src/apps/geometry_snapshot/ecc-geometry-snapshot"
+    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/bin/ecc-geometry-snapshot"
+    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build/bin/ecc-geometry-snapshot"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  printf 'ecc-geometry-snapshot binary was not found after build\n' >&2
+  return 1
+}
+
 build_ecc
 build_layout_viewer
+build_chip_viewer
+build_geometry_snapshot
 
 cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
@@ -45,3 +77,5 @@ mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/layout-viewer/target/release/ecos-layout-packer ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/layout-viewer/target/release/layout-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
+cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
+cp "$(resolve_geometry_snapshot_binary)" ecos/gui/apps/desktop-electron/resources/binaries

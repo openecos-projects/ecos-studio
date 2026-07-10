@@ -38,6 +38,8 @@ describe('runGuiDoctor', () => {
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
         join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [
         ['pnpm --version', { stdout: '11.0.9\n' }],
@@ -97,6 +99,8 @@ describe('runGuiDoctor', () => {
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
         join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [['pnpm --version', { stdout: '11.0.9\n' }]],
     })
@@ -115,6 +119,36 @@ describe('runGuiDoctor', () => {
         expect.objectContaining({
           name: 'Nix',
           status: 'warning',
+        }),
+      ]),
+    )
+  })
+
+  it('requires packaged chip viewer resources alongside legacy layout viewer resources', async () => {
+    const cwd = '/repo/ecos/gui'
+
+    const report = await createDoctorFixture({
+      cwd,
+      existingPaths: [
+        join(cwd, 'node_modules/.modules.yaml'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
+        join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
+      ],
+      commands: [
+        ['pnpm --version', { stdout: '11.0.9\n' }],
+        ['ecc --version', { stdout: 'ecc 0.1.0a5\n' }],
+        ['nix --version', { stdout: 'nix (Nix) 2.24.0\n' }],
+      ],
+    })
+
+    expect(report.summary.errors).toBe(1)
+    expect(report.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'native resources',
+          status: 'error',
+          message:
+            'Missing native resources: ecc-geometry-snapshot, chip-viewer-native',
         }),
       ]),
     )

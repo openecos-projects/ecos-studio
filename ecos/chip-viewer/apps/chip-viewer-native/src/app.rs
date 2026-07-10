@@ -2,12 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::Duration;
 
 use chip_display::LayerStyle;
 use chip_view_db::{ChipViewDb, SnapshotStats};
 use chipgeom_format::{
-    GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, Rect32,
-    ShapeId, ShapeKind, ShapeState,
+    GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId,
+    OwnerType, Rect32, ShapeId, ShapeKind, ShapeState,
 };
 use eframe::egui;
 
@@ -27,6 +28,7 @@ struct LoadedViewer {
     search_text: String,
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
+    edit_tool: EditTool,
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     last_edit_result: Option<String>,
@@ -47,6 +49,7 @@ struct EditDraft {
     command_id: u64,
     shape_id: ShapeId,
     expected_version: u32,
+    op: GeometryEditOp,
     original_bbox: Rect32,
     requested_bbox: Rect32,
 }
@@ -54,6 +57,21 @@ struct EditDraft {
 struct PendingEdit {
     shape_id: ShapeId,
     result_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditTool {
+    Move,
+    Resize,
+}
+
+impl EditTool {
+    fn op(self) -> GeometryEditOp {
+        match self {
+            EditTool::Move => GeometryEditOp::MoveShape,
+            EditTool::Resize => GeometryEditOp::ResizeRect,
+        }
+    }
 }
 
 enum ViewerState {
@@ -139,6 +157,7 @@ impl LoadedViewer {
             search_text: String::new(),
             highlighted: BTreeSet::new(),
             selected: None,
+            edit_tool: EditTool::Move,
             draft: None,
             pending_edit: None,
             last_edit_result: None,
@@ -199,6 +218,10 @@ impl LoadedViewer {
         if self.edit_enabled {
             ui.separator();
             ui.label("Edit");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.edit_tool, EditTool::Move, "Move");
+                ui.selectable_value(&mut self.edit_tool, EditTool::Resize, "Resize");
+            });
             if self.edit_command_dir.is_none() || self.edit_result_dir.is_none() {
                 ui.colored_label(egui::Color32::YELLOW, "edit channel is not configured");
             }
@@ -426,6 +449,17 @@ impl LoadedViewer {
         {
             return;
         }
+        let Some(owner) = self.db.owner_for_shape(shape) else {
+            return;
+        };
+        if !edit_tool_is_allowed(owner.owner_type, self.edit_tool) {
+            self.last_edit_result = Some(format!(
+                "{:?} is not supported for {}",
+                self.edit_tool,
+                ChipViewDb::owner_type_label(owner.owner_type)
+            ));
+            return;
+        }
         let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
         if !screen.contains(pos) {
             return;
@@ -437,6 +471,7 @@ impl LoadedViewer {
             command_id: self.allocate_command_id(),
             shape_id,
             expected_version,
+            op: self.edit_tool.op(),
             original_bbox,
             requested_bbox: original_bbox,
         });
@@ -447,7 +482,11 @@ impl LoadedViewer {
             return;
         };
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
-        draft.requested_bbox = translate_rect(draft.original_bbox, dx, dy);
+        draft.requested_bbox = match draft.op {
+            GeometryEditOp::MoveShape => translate_rect(draft.original_bbox, dx, dy),
+            GeometryEditOp::ResizeRect => resize_rect_from_delta(draft.original_bbox, dx, dy),
+            GeometryEditOp::ReplaceLine => draft.original_bbox,
+        };
     }
 
     fn commit_draft(&mut self) {
@@ -467,7 +506,7 @@ impl LoadedViewer {
             command_id: draft.command_id,
             shape_id: draft.shape_id,
             expected_version: draft.expected_version,
-            op: GeometryEditOp::MoveShape,
+            op: draft.op,
             requested_bbox: draft.requested_bbox,
         };
         let command_path = command_dir.join(format!("command-{}.json", command.command_id));
@@ -574,17 +613,21 @@ impl LoadedViewer {
         canvas: egui::Rect,
         visible_layers: &BTreeMap<LayerId, LayerStyle>,
     ) -> Option<ShapeId> {
-        self.db.snapshot().shapes().iter().rev().find_map(|shape| {
-            if shape.state != ShapeState::Alive as u8
-                || shape.kind != ShapeKind::Rect as u8
-                || !visible_layers.contains_key(&shape.layer_id)
-            {
-                return None;
-            }
-            world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan)
-                .contains(pos)
-                .then_some(shape.id)
-        })
+        let hit = screen_to_world_rect(
+            egui::Rect::from_min_max(pos, pos),
+            world,
+            canvas,
+            self.zoom,
+            self.pan,
+        );
+        let layer_ids: Vec<LayerId> = visible_layers.keys().copied().collect();
+        self.db.pick_top_rect(
+            &layer_ids,
+            chipgeom_format::Point32 {
+                x: hit.lx,
+                y: hit.ly,
+            },
+        )
     }
 }
 
@@ -592,6 +635,9 @@ impl eframe::App for ChipViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.poll_edit_result();
+            if let Some(interval) = edit_poll_repaint_interval(loaded.pending_edit.is_some()) {
+                ctx.request_repaint_after(interval);
+            }
         }
         egui::SidePanel::left("chip_viewer_layers")
             .resizable(true)
@@ -686,17 +732,28 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
     }
 }
 
+fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
+    let min_hx = rect.lx.saturating_add(1);
+    let min_hy = rect.ly.saturating_add(1);
+    Rect32 {
+        lx: rect.lx,
+        ly: rect.ly,
+        hx: rect.hx.saturating_add(dx).max(min_hx),
+        hy: rect.hy.saturating_add(dy).max(min_hy),
+    }
+}
+
 fn should_use_view_tiles_for_state(
     view_tile_count: usize,
     has_highlight: bool,
     has_selection: bool,
     has_draft: bool,
-    edit_enabled: bool,
+    _edit_enabled: bool,
     zoom: f32,
     viewport: Rect32,
     world: Rect32,
 ) -> bool {
-    if view_tile_count == 0 || has_highlight || has_selection || has_draft || edit_enabled {
+    if view_tile_count == 0 || has_highlight || has_selection || has_draft {
         return false;
     }
 
@@ -708,6 +765,25 @@ fn should_use_view_tiles_for_state(
     let world_area = world_width.saturating_mul(world_height).max(1);
 
     zoom <= 1.0 || viewport_area.saturating_mul(4) >= world_area
+}
+
+fn edit_poll_repaint_interval(has_pending_edit: bool) -> Option<Duration> {
+    has_pending_edit.then_some(Duration::from_millis(100))
+}
+
+fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
+    match tool {
+        EditTool::Move => matches!(
+            OwnerType::from_raw(owner_type),
+            Some(
+                OwnerType::InstanceBBox
+                    | OwnerType::NetWireSegment
+                    | OwnerType::SpecialWireSegment
+                    | OwnerType::Blockage
+            )
+        ),
+        EditTool::Resize => matches!(OwnerType::from_raw(owner_type), Some(OwnerType::Blockage)),
+    }
 }
 
 fn overlay_shape_ids(
@@ -837,6 +913,46 @@ mod tests {
     }
 
     #[test]
+    fn resize_rect_anchors_lower_left_corner() {
+        let rect = chipgeom_format::Rect32 {
+            lx: 10,
+            ly: 20,
+            hx: 30,
+            hy: 40,
+        };
+
+        assert_eq!(
+            resize_rect_from_delta(rect, 5, -8),
+            chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 35,
+                hy: 32,
+            }
+        );
+    }
+
+    #[test]
+    fn resize_rect_keeps_a_positive_extent() {
+        let rect = chipgeom_format::Rect32 {
+            lx: 10,
+            ly: 20,
+            hx: 30,
+            hy: 40,
+        };
+
+        assert_eq!(
+            resize_rect_from_delta(rect, -100, -100),
+            chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 11,
+                hy: 21,
+            }
+        );
+    }
+
+    #[test]
     fn overview_uses_view_tiles_when_no_exact_overlay_is_active() {
         let world = chipgeom_format::Rect32 {
             lx: 0,
@@ -847,6 +963,26 @@ mod tests {
 
         assert!(should_use_view_tiles_for_state(
             16, false, false, false, false, 1.0, world, world,
+        ));
+    }
+
+    #[test]
+    fn edit_mode_overview_still_uses_view_tiles_until_an_exact_overlay_is_active() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1000,
+            hy: 1000,
+        };
+
+        assert!(should_use_view_tiles_for_state(
+            16, false, false, false, true, 1.0, world, world,
+        ));
+        assert!(!should_use_view_tiles_for_state(
+            16, false, true, false, true, 1.0, world, world,
+        ));
+        assert!(!should_use_view_tiles_for_state(
+            16, false, false, true, true, 1.0, world, world,
         ));
     }
 
@@ -896,5 +1032,38 @@ mod tests {
         let pan = drag.apply(pan, egui::vec2(4.0, 0.0));
 
         assert_eq!(pan, egui::vec2(24.0, 0.0));
+    }
+
+    #[test]
+    fn pending_edit_polling_requests_periodic_repaint() {
+        assert_eq!(
+            edit_poll_repaint_interval(true),
+            Some(std::time::Duration::from_millis(100))
+        );
+        assert_eq!(edit_poll_repaint_interval(false), None);
+    }
+
+    #[test]
+    fn edit_tool_allows_only_supported_owner_operations() {
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::InstanceBBox as u8,
+            EditTool::Move
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::NetWireSegment as u8,
+            EditTool::Move
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Blockage as u8,
+            EditTool::Resize
+        ));
+        assert!(!edit_tool_is_allowed(
+            chipgeom_format::OwnerType::InstanceBBox as u8,
+            EditTool::Resize
+        ));
+        assert!(!edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Fill as u8,
+            EditTool::Move
+        ));
     }
 }

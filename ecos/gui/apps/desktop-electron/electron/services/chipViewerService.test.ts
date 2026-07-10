@@ -67,6 +67,7 @@ function createService(options: {
       close: vi.fn(),
     }),
   )
+  const renameFile = vi.fn(async () => undefined)
   const writeTextFile = vi.fn(async () => undefined)
   const workspaceResourceService = {
     resolveStepInfo: vi.fn(async (request: { id: 'layout'; step: string }) => {
@@ -104,6 +105,7 @@ function createService(options: {
       }
       return text
     },
+    renameFile,
     resourcesPath: options.resourcesPath,
     spawnProcess,
     watchDirectory,
@@ -117,6 +119,7 @@ function createService(options: {
     service,
     spawnProcess,
     unref,
+    renameFile,
     watchDirectory,
     writeTextFile,
     workspaceResourceService,
@@ -319,7 +322,7 @@ describe('ChipViewerService', () => {
 
   it('bridges native edit command files through ecc geometry apply-edit', async () => {
     const devBinaries = devChipViewerPaths()
-    const { execFile, service, watchDirectory } = createService({
+    const { execFile, renameFile, service, watchDirectory } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.snapshot,
@@ -358,10 +361,14 @@ describe('ChipViewerService', () => {
         '--edit-command',
         join(EDIT_COMMAND_DIR, 'command-42.json'),
         '--edit-result',
-        join(EDIT_RESULT_DIR, 'result-42.json'),
+        join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
         '--write-def',
         DEF_PATH,
       ])
+      expect(renameFile).toHaveBeenCalledWith(
+        join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
+        join(EDIT_RESULT_DIR, 'result-42.json'),
+      )
     })
   })
 

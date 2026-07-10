@@ -25,9 +25,11 @@ const loadingMessage = ref('')
 const cursorEda = ref<{ x: number; y: number } | null>(null)
 const nativeLayoutViewerBusy = ref(false)
 const chipViewerBusy = ref(false)
+const chipViewerEditBusy = ref(false)
 
 const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'
 const CHIP_VIEWER_LOADING_MESSAGE = 'Preparing Chip Viewer geometry...'
+const CHIP_VIEWER_EDIT_LOADING_MESSAGE = 'Preparing Chip Viewer edit geometry...'
 
 const currentStepKey = computed(() => {
   const pathParts = route.path.split('/')
@@ -40,6 +42,10 @@ const isPreparingNativeLayoutViewer = computed(
 
 const isPreparingChipViewer = computed(
   () => chipViewerBusy.value && loadingState.value === 'loading',
+)
+
+const isPreparingChipViewerEdit = computed(
+  () => chipViewerEditBusy.value && loadingState.value === 'loading',
 )
 
 const showNativeLayoutViewer = computed(
@@ -181,7 +187,7 @@ async function onOpenNativeLayoutViewer(): Promise<void> {
 }
 
 async function onOpenChipViewer(): Promise<void> {
-  if (chipViewerBusy.value) return
+  if (chipViewerBusy.value || chipViewerEditBusy.value) return
   const projectPath = currentProject.value?.path
   const stepEnum = currentStepEnum.value
   if (!projectPath || !stepEnum || !isDesktopRuntime()) return
@@ -205,6 +211,37 @@ async function onOpenChipViewer(): Promise<void> {
     if (
       loadingState.value === 'loading' &&
       loadingMessage.value === CHIP_VIEWER_LOADING_MESSAGE
+    ) {
+      resetLoadingState()
+    }
+  }
+}
+
+async function onOpenChipViewerEdit(): Promise<void> {
+  if (chipViewerBusy.value || chipViewerEditBusy.value) return
+  const projectPath = currentProject.value?.path
+  const stepEnum = currentStepEnum.value
+  if (!projectPath || !stepEnum || !isDesktopRuntime()) return
+
+  chipViewerEditBusy.value = true
+  loadingState.value = 'loading'
+  loadingMessage.value = CHIP_VIEWER_EDIT_LOADING_MESSAGE
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.chipViewer.open({
+      mode: 'edit',
+      projectPath,
+      step: stepEnum,
+    })
+  } catch (err) {
+    console.error('Failed to open chip viewer edit mode:', err)
+    loadingState.value = 'error'
+    loadingMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    chipViewerEditBusy.value = false
+    if (
+      loadingState.value === 'loading' &&
+      loadingMessage.value === CHIP_VIEWER_EDIT_LOADING_MESSAGE
     ) {
       resetLoadingState()
     }
@@ -324,8 +361,10 @@ onUnmounted(() => {
       :native-layout-viewer-busy="nativeLayoutViewerBusy"
       :show-chip-viewer="showChipViewer"
       :chip-viewer-busy="chipViewerBusy"
+      :chip-viewer-edit-busy="chipViewerEditBusy"
       @openNativeLayoutViewer="onOpenNativeLayoutViewer"
       @openChipViewer="onOpenChipViewer"
+      @openChipViewerEdit="onOpenChipViewerEdit"
     />
 
     <div class="relative flex-1 overflow-hidden">
@@ -334,7 +373,7 @@ onUnmounted(() => {
       <div
         v-if="loadingState === 'loading'"
         :data-testid="
-          isPreparingChipViewer
+          isPreparingChipViewer || isPreparingChipViewerEdit
             ? 'chip-viewer-loading'
             : isPreparingNativeLayoutViewer
               ? 'native-layout-viewer-loading'
@@ -344,7 +383,12 @@ onUnmounted(() => {
       >
         <div
           class="flex min-w-64 flex-col items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-5 py-4 text-center text-sm text-white/80 shadow-2xl backdrop-blur-sm"
-          :class="{ 'gap-3': isPreparingNativeLayoutViewer || isPreparingChipViewer }"
+          :class="{
+            'gap-3':
+              isPreparingNativeLayoutViewer ||
+              isPreparingChipViewer ||
+              isPreparingChipViewerEdit,
+          }"
         >
           <div
             class="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white/80"
@@ -359,7 +403,14 @@ onUnmounted(() => {
             Preparing Native Layout Viewer package before opening the window.
           </span>
           <span
-            v-if="isPreparingChipViewer"
+            v-if="isPreparingChipViewerEdit"
+            data-testid="chip-viewer-loading"
+            class="max-w-72 text-xs leading-5 text-white/55"
+          >
+            Preparing editable geometry snapshot before opening Chip Viewer.
+          </span>
+          <span
+            v-else-if="isPreparingChipViewer"
             data-testid="chip-viewer-loading"
             class="max-w-72 text-xs leading-5 text-white/55"
           >

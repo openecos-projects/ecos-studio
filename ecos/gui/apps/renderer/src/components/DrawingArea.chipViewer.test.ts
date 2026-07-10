@@ -21,4 +21,13 @@ describe('DrawingArea chip viewer bridge', () => {
     expect(source).toContain('data-testid="chip-viewer-loading"')
     expect(source).toContain('Preparing geometry snapshot before opening Chip Viewer.')
   })
+
+  it('wires an edit-mode launch to the desktop chip viewer API', () => {
+    expect(source).toContain('chipViewerEditBusy')
+    expect(source).toContain('onOpenChipViewerEdit')
+    expect(source).toContain(':chip-viewer-edit-busy="chipViewerEditBusy"')
+    expect(source).toContain('@openChipViewerEdit="onOpenChipViewerEdit"')
+    expect(source).toContain("mode: 'edit'")
+    expect(source).toContain('Preparing editable geometry snapshot before opening Chip Viewer.')
+  })
 })
