@@ -21,15 +21,14 @@ const {
   showOpenDialog,
   showSaveDialog,
   statMock,
-} =
-  vi.hoisted(() => ({
-    fromWebContents: vi.fn(),
-    getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
-    openExternal: vi.fn(),
-    showOpenDialog: vi.fn(),
-    showSaveDialog: vi.fn(),
-    statMock: vi.fn(),
-  }))
+} = vi.hoisted(() => ({
+  fromWebContents: vi.fn(),
+  getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
+  openExternal: vi.fn(),
+  showOpenDialog: vi.fn(),
+  showSaveDialog: vi.fn(),
+  statMock: vi.fn(),
+}))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -141,6 +140,7 @@ function registerHandlers() {
     eccRuntimeService: {
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
+      exportSignoff: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
@@ -1005,6 +1005,23 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.runStep).toHaveBeenCalledWith(request)
+  })
+
+  it('exports ECC signoff through the runtime service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = {
+      outputPath: '/exports/custom package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
+    }
+    const result = { outputPath: request.outputPath }
+    services.eccRuntimeService.exportSignoff.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccWorkspaceExportSignoff)?.(event, request),
+    ).resolves.toEqual(result)
+
+    expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
   })
 
   it('broadcasts ECC runtime events to live renderer windows', () => {

@@ -13,6 +13,11 @@ interface SignoffResourceVersions {
   all: number
 }
 
+interface SignoffWorkspaceSession {
+  state: string
+  workspaceId: string
+}
+
 interface ToastOptions {
   severity?: 'success' | 'info' | 'warn' | 'error' | 'secondary' | 'contrast'
   summary: string
@@ -24,6 +29,7 @@ interface SignoffPackageExportDependencies {
   currentProject: Readonly<Ref<SignoffProject | null | undefined>>
   resourceVersions: Readonly<Ref<SignoffResourceVersions>>
   showToast(options: ToastOptions): void
+  workspaceSession: Readonly<Ref<SignoffWorkspaceSession>>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -58,6 +64,7 @@ export function useSignoffPackageExport({
   currentProject,
   resourceVersions,
   showToast,
+  workspaceSession,
 }: SignoffPackageExportDependencies) {
   let syncGeneration = 0
   let watcherGeneration = 0
@@ -78,16 +85,26 @@ export function useSignoffPackageExport({
   async function syncMenuEligibility(): Promise<void> {
     const generation = ++syncGeneration
     const workspacePath = currentProject.value?.path
+    const workspaceHandle =
+      workspaceSession.value.state === 'active' ? workspaceSession.value.workspaceId : ''
     await setMenuEnabled(false)
 
-    if (!workspacePath || unmounted || generation !== syncGeneration) return
+    if (
+      !workspacePath ||
+      !workspaceHandle ||
+      unmounted ||
+      generation !== syncGeneration
+    ) {
+      return
+    }
 
     try {
       const flow = await getDesktopApi().workspaceResources.readFlow()
       if (
         unmounted ||
         generation !== syncGeneration ||
-        currentProject.value?.path !== workspacePath
+        currentProject.value?.path !== workspacePath ||
+        workspaceSession.value.workspaceId !== workspaceHandle
       ) {
         return
       }
@@ -162,6 +179,8 @@ export function useSignoffPackageExport({
       currentProject.value?.path,
       resourceVersions.value.flow,
       resourceVersions.value.all,
+      workspaceSession.value.state,
+      workspaceSession.value.workspaceId,
     ],
     () => {
       void syncMenuEligibility()
@@ -186,7 +205,9 @@ export function useSignoffPackageExport({
 
   async function exportSignoffPackage(): Promise<void> {
     const workspacePath = currentProject.value?.path
-    if (!workspacePath) {
+    const workspaceHandle =
+      workspaceSession.value.state === 'active' ? workspaceSession.value.workspaceId : ''
+    if (!workspacePath || !workspaceHandle) {
       await setMenuEnabled(false)
       showToast({
         severity: 'warn',
@@ -196,9 +217,12 @@ export function useSignoffPackageExport({
       return
     }
 
-    const isActiveWorkspace = () => currentProject.value?.path === workspacePath
+    const isActiveWorkspace = () =>
+      currentProject.value?.path === workspacePath &&
+      workspaceSession.value.state === 'active' &&
+      workspaceSession.value.workspaceId === workspaceHandle
     let flowReadCompleted = false
-    let cliExecutionStarted = false
+    let rpcExecutionStarted = false
 
     try {
       const api = getDesktopApi()
@@ -233,38 +257,24 @@ export function useSignoffPackageExport({
       })
       if (!outputPath || !isActiveWorkspace()) return
 
-      cliExecutionStarted = true
-      const result = await api.cli.execute({
-        cmd: 'export_signoff_package',
-        data: {
-          directory: workspacePath,
-          output_path: outputPath,
-        },
-        source: 'menu',
+      rpcExecutionStarted = true
+      const result = await api.ecc.workspace.exportSignoff({
+        outputPath,
+        workspaceHandle,
       })
-
-      if (!result.ok) {
-        showToast({
-          severity: 'error',
-          summary: 'Failed to Export Signoff Package',
-          detail:
-            result.message.length > 0 ? result.message.join('\n') : 'Export failed.',
-        })
-        return
-      }
 
       showToast({
         severity: 'success',
         summary: 'Signoff Package Exported',
-        detail: `Saved to ${outputPath}`,
+        detail: `Saved to ${result.outputPath}`,
       })
     } catch (error) {
-      if (!cliExecutionStarted && !isActiveWorkspace()) return
+      if (!rpcExecutionStarted && !isActiveWorkspace()) return
       if (!flowReadCompleted) await setMenuEnabled(false)
       showToast({
         severity: 'error',
         summary: 'Failed to Export Signoff Package',
-        detail: errorDetail(error),
+        detail: errorDetail(error) || 'Export failed.',
       })
     }
   }

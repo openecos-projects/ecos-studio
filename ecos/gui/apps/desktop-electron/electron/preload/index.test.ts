@@ -40,6 +40,9 @@ async function loadDesktopBridge() {
       flow: {
         runStep(request: unknown): Promise<unknown>
       }
+      workspace: {
+        exportSignoff(request: unknown): Promise<unknown>
+      }
     }
     dialog: {
       saveFile(options: unknown): Promise<unknown>
@@ -184,6 +187,25 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
+      request,
+    )
+  })
+
+  it('routes ECC signoff export through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      outputPath: '/exports/custom package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      outputPath: request.outputPath,
+    })
+
+    await expect(bridge.ecc.workspace.exportSignoff(request)).resolves.toEqual({
+      outputPath: request.outputPath,
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccWorkspaceExportSignoff,
       request,
     )
   })

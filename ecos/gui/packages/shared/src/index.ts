@@ -39,6 +39,8 @@ export type {
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceExportSignoffRequest,
+  EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,

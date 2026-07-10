@@ -11,6 +11,8 @@ import type {
   EccWorkspaceCloseResult,
   EccWorkspaceCreateRequest,
   EccWorkspaceCreateResult,
+  EccWorkspaceExportSignoffRequest,
+  EccWorkspaceExportSignoffResult,
   EccWorkspaceHandleRequest,
   EccWorkspaceHomeResult,
   EccWorkspaceInfoRequest,
@@ -238,6 +240,23 @@ export class EccRpcRuntimeService {
       return await client.call<EccWorkspaceResetFlowResult>('workspace.reset_flow', {
         workspaceId,
       })
+    })
+  }
+
+  exportSignoff(
+    request: EccWorkspaceExportSignoffRequest,
+  ): Promise<EccWorkspaceExportSignoffResult> {
+    return this.enqueue('workspace.export_signoff', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call<EccWorkspaceExportSignoffResult>(
+        'workspace.export_signoff',
+        {
+          outputPath: request.outputPath,
+          workspaceId,
+        },
+        { timeoutMs: 0 },
+      )
     })
   }
 

@@ -18,6 +18,7 @@ import {
   type EccFlowRunStepRequest,
   type EccRuntimeEvent,
   type EccWorkspaceCreateRequest,
+  type EccWorkspaceExportSignoffRequest,
   type EccWorkspaceHandleRequest,
   type EccWorkspaceInfoRequest,
   type EccWorkspaceOpenRequest,
@@ -181,6 +182,7 @@ export interface DesktopBridgeServices {
   eccRuntimeService: {
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
+    exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -943,6 +945,12 @@ export function registerIpc(
   handle(desktopApiIpcChannels.eccWorkspaceResetFlow, async (_event, request) => {
     return await services.eccRuntimeService.resetFlow(
       request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceExportSignoff, async (_event, request) => {
+    return await services.eccRuntimeService.exportSignoff(
+      request as EccWorkspaceExportSignoffRequest,
     )
   })
 

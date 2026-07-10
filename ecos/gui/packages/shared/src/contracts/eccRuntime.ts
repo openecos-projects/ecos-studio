@@ -43,6 +43,10 @@ export interface EccWorkspaceSyncConfigRequest extends EccWorkspaceHandleRequest
   configPath: string
 }
 
+export interface EccWorkspaceExportSignoffRequest extends EccWorkspaceHandleRequest {
+  outputPath: string
+}
+
 export interface EccWorkspaceOpenResult {
   directory: string
   workspaceHandle: string
@@ -78,6 +82,10 @@ export interface EccWorkspaceSyncConfigResult {
 
 export interface EccWorkspaceResetFlowResult {
   directory: string
+}
+
+export interface EccWorkspaceExportSignoffResult {
+  outputPath: string
 }
 
 export interface EccFlowRunRequest extends EccWorkspaceHandleRequest {
@@ -168,6 +176,9 @@ export interface EccRuntimeApi {
   workspace: {
     close(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult>
     create(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult>
+    exportSignoff(
+      request: EccWorkspaceExportSignoffRequest,
+    ): Promise<EccWorkspaceExportSignoffResult>
     home(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult>
     info(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult>
     open(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>

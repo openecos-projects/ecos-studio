@@ -169,6 +169,7 @@ const {
   loadRecentProjects,
   currentProject,
   resourceVersions,
+  workspaceSession,
   openProject,
   newProject,
   closeProject,
@@ -184,6 +185,7 @@ const { exportSignoffPackage } = useSignoffPackageExport({
   currentProject,
   resourceVersions,
   showToast,
+  workspaceSession,
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const documentationUrl =

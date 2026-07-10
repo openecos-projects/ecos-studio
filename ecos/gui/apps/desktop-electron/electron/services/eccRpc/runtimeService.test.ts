@@ -141,6 +141,32 @@ describe('EccRpcRuntimeService', () => {
     })
   })
 
+  it('exports signoff through the stored ECC workspace id and preserves the output path', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { outputPath: '/exports/custom package.tar.gz' },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await expect(
+      service.exportSignoff({
+        outputPath: '/exports/custom package.tar.gz',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toEqual({ outputPath: '/exports/custom package.tar.gz' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.export_signoff',
+      options: { timeoutMs: 0 },
+      params: {
+        outputPath: '/exports/custom package.tar.gz',
+        workspaceId: 'workspace-1',
+      },
+    })
+  })
+
   it('emits rerun metadata when a full flow rerun starts', async () => {
     const { client, events, service } = createService()
     client.responses.push(

@@ -28,6 +28,7 @@ import {
 
 type ProjectRef = Ref<{ path: string } | null>
 type VersionsRef = Ref<{ flow: number; all: number }>
+type WorkspaceSessionRef = Ref<{ state: string; workspaceId: string }>
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -48,22 +49,14 @@ function successfulFlow() {
   }
 }
 
-function cliResult(ok: boolean, message: string[] = []) {
-  return {
-    ok,
-    cmd: 'export_signoff_package' as const,
-    response: ok ? ('success' as const) : ('failed' as const),
-    data: {},
-    message,
-  }
-}
-
 function createApi() {
   const setActionEnabled = vi.fn().mockResolvedValue(undefined)
   const readFlow = vi.fn().mockResolvedValue(successfulFlow())
   const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
-  const execute = vi.fn().mockResolvedValue(cliResult(true, ['exported']))
+  const exportSignoff = vi.fn(async (request: { outputPath: string }) => ({
+    outputPath: request.outputPath,
+  }))
   const requestProjectPathAccess = vi.fn(async (path: string) => path)
   const fileWatchers: Array<{
     listener: (event: { subscriptionId: string; path: string; eventType: string }) => void
@@ -90,11 +83,11 @@ function createApi() {
     workspaceResources: { readFlow, readParameters },
     workspace: { requestProjectPathAccess, watchProjectFile },
     dialog: { saveFile },
-    cli: { execute },
+    ecc: { workspace: { exportSignoff } },
   } as unknown as DesktopApi
 
   return {
-    execute,
+    exportSignoff,
     fileWatchers,
     readFlow,
     readParameters,
@@ -108,13 +101,29 @@ function createApi() {
 function mountComposable(
   currentProject: ProjectRef = ref({ path: '/workspaces/chip' }),
   resourceVersions: VersionsRef = ref({ flow: 0, all: 0 }),
+  workspaceSession: WorkspaceSessionRef = ref({
+    state: 'active',
+    workspaceId: 'workspace-handle-1',
+  }),
 ) {
   const scope = effectScope()
   const showToast = vi.fn()
   const result = scope.run(() =>
-    useSignoffPackageExport({ currentProject, resourceVersions, showToast }),
+    useSignoffPackageExport({
+      currentProject,
+      resourceVersions,
+      showToast,
+      workspaceSession,
+    }),
   )!
-  return { currentProject, resourceVersions, result, scope, showToast }
+  return {
+    currentProject,
+    resourceVersions,
+    result,
+    scope,
+    showToast,
+    workspaceSession,
+  }
 }
 
 describe('canExportSignoffPackage', () => {
@@ -467,7 +476,7 @@ describe('useSignoffPackageExport export action', () => {
     )
     expect(api.readFlow).not.toHaveBeenCalled()
     expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'warn',
@@ -504,11 +513,11 @@ describe('useSignoffPackageExport export action', () => {
 
     await mounted.result.exportSignoffPackage()
 
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
     expect(mounted.showToast).not.toHaveBeenCalled()
   })
 
-  it('uses Design for the default name and sends the exact selected paths to the CLI', async () => {
+  it('uses Design for the default name and sends the exact selected path to ECC RPC', async () => {
     const api = createApi()
     api.readParameters.mockResolvedValueOnce({ Design: 'rocket_core' })
     api.saveFile.mockResolvedValueOnce('/tmp/rocket package.tar.gz')
@@ -523,13 +532,9 @@ describe('useSignoffPackageExport export action', () => {
       defaultPath: 'rocket_core_signoff_package.tar.gz',
       filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
     })
-    expect(api.execute).toHaveBeenCalledWith({
-      cmd: 'export_signoff_package',
-      data: {
-        directory: '/workspaces/active path',
-        output_path: '/tmp/rocket package.tar.gz',
-      },
-      source: 'menu',
+    expect(api.exportSignoff).toHaveBeenCalledWith({
+      outputPath: '/tmp/rocket package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
     })
     expect(mounted.showToast).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -553,9 +558,9 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
-  it('shows CLI failure details', async () => {
+  it('shows ECC RPC failure details', async () => {
     const api = createApi()
-    api.execute.mockResolvedValueOnce(cliResult(false, ['archive failed', 'disk full']))
+    api.exportSignoff.mockRejectedValueOnce(new Error('archive failed\ndisk full'))
     const mounted = mountComposable()
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
@@ -573,9 +578,9 @@ describe('useSignoffPackageExport export action', () => {
     )
   })
 
-  it('uses fallback details when the CLI failure has no message', async () => {
+  it('uses fallback details when the ECC RPC failure has no message', async () => {
     const api = createApi()
-    api.execute.mockResolvedValueOnce(cliResult(false))
+    api.exportSignoff.mockRejectedValueOnce(new Error(''))
     const mounted = mountComposable()
     scope = mounted.scope
     await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
@@ -611,7 +616,7 @@ describe('useSignoffPackageExport export action', () => {
     ['flow read', 'readFlow'],
     ['parameters read', 'readParameters'],
     ['save dialog', 'saveFile'],
-    ['CLI execution', 'execute'],
+    ['ECC RPC execution', 'exportSignoff'],
   ] as const)('shows an error toast when %s throws', async (_label, method) => {
     const api = createApi()
     const mounted = mountComposable()
@@ -654,7 +659,7 @@ describe('useSignoffPackageExport export action', () => {
     await exportPromise
 
     expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
   it('does not open the dialog when the workspace switches during parameter loading', async () => {
@@ -672,7 +677,7 @@ describe('useSignoffPackageExport export action', () => {
     await exportPromise
 
     expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
   it('suppresses a rejected parameter read after the workspace switches', async () => {
@@ -691,7 +696,7 @@ describe('useSignoffPackageExport export action', () => {
 
     expect(mounted.showToast).not.toHaveBeenCalled()
     expect(api.saveFile).not.toHaveBeenCalled()
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 
   it('does not execute when the workspace switches while the dialog is open', async () => {
@@ -708,6 +713,6 @@ describe('useSignoffPackageExport export action', () => {
     dialogResult.resolve('/tmp/a.tar.gz')
     await exportPromise
 
-    expect(api.execute).not.toHaveBeenCalled()
+    expect(api.exportSignoff).not.toHaveBeenCalled()
   })
 })

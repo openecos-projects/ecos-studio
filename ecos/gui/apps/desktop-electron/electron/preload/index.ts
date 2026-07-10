@@ -317,6 +317,8 @@ const desktopApi: DesktopApi = {
       close: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceClose, request),
       create: (request) =>
         invokeDesktop(desktopApiIpcChannels.eccWorkspaceCreate, request),
+      exportSignoff: (request) =>
+        invokeDesktop(desktopApiIpcChannels.eccWorkspaceExportSignoff, request),
       home: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceHome, request),
       info: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceInfo, request),
       open: (request) => invokeDesktop(desktopApiIpcChannels.eccWorkspaceOpen, request),
