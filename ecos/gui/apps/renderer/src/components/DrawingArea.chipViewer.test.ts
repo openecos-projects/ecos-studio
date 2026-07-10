@@ -28,6 +28,8 @@ describe('DrawingArea chip viewer bridge', () => {
     expect(source).toContain(':chip-viewer-edit-busy="chipViewerEditBusy"')
     expect(source).toContain('@openChipViewerEdit="onOpenChipViewerEdit"')
     expect(source).toContain("mode: 'edit'")
-    expect(source).toContain('Preparing editable geometry snapshot before opening Chip Viewer.')
+    expect(source).toContain(
+      'Preparing editable geometry snapshot before opening Chip Viewer.',
+    )
   })
 })

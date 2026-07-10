@@ -147,8 +147,7 @@ describe('runGuiDoctor', () => {
         expect.objectContaining({
           name: 'native resources',
           status: 'error',
-          message:
-            'Missing native resources: ecc-geometry-snapshot, chip-viewer-native',
+          message: 'Missing native resources: ecc-geometry-snapshot, chip-viewer-native',
         }),
       ]),
     )

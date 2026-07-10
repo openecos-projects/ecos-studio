@@ -33,7 +33,7 @@ pub struct GeometryManifest {
     pub names: PathBuf,
     pub name_index: PathBuf,
     pub sidmap: PathBuf,
-    pub delta: PathBuf,
+    pub delta: Option<PathBuf>,
     pub view: PathBuf,
 }
 
@@ -73,8 +73,29 @@ pub struct GeometrySnapshot {
     names: Mmap,
     name_index: Mmap,
     sidmap: Mmap,
-    delta: Mmap,
+    delta: GeometryDeltaStorage,
     view: Mmap,
+}
+
+enum GeometryDeltaStorage {
+    Mapped(Mmap),
+    LegacyEmpty(Vec<u8>),
+}
+
+impl GeometryDeltaStorage {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Mapped(mmap) => mmap,
+            Self::LegacyEmpty(bytes) => bytes,
+        }
+    }
+
+    fn mapped_len(&self) -> usize {
+        match self {
+            Self::Mapped(mmap) => mmap.len(),
+            Self::LegacyEmpty(_) => 0,
+        }
+    }
 }
 
 impl GeometrySnapshot {
@@ -107,11 +128,17 @@ impl GeometrySnapshot {
             GeometryFileKind::SidMap,
             core::mem::size_of::<GeometrySidMapRecord>() as u32,
         )?;
-        let delta = mmap_checked(
-            &manifest.delta,
-            GeometryFileKind::Delta,
-            core::mem::size_of::<GeometryDeltaRecord>() as u32,
-        )?;
+        let delta = match &manifest.delta {
+            Some(delta_path) => GeometryDeltaStorage::Mapped(mmap_checked(
+                delta_path,
+                GeometryFileKind::Delta,
+                core::mem::size_of::<GeometryDeltaRecord>() as u32,
+            )?),
+            None => GeometryDeltaStorage::LegacyEmpty(empty_geometry_file_bytes(
+                GeometryFileKind::Delta,
+                core::mem::size_of::<GeometryDeltaRecord>() as u32,
+            )),
+        };
         let view = mmap_checked(
             &manifest.view,
             GeometryFileKind::View,
@@ -171,7 +198,7 @@ impl GeometrySnapshot {
     }
 
     pub fn delta_records(&self) -> &[GeometryDeltaRecord] {
-        cast_records(&self.delta)
+        cast_records(self.delta.as_bytes())
     }
 
     pub fn mapped_bytes(&self) -> GeometryMappedBytes {
@@ -183,7 +210,7 @@ impl GeometrySnapshot {
             names: self.names.len(),
             name_index: self.name_index.len(),
             sidmap: self.sidmap.len(),
-            delta: self.delta.len(),
+            delta: self.delta.mapped_len(),
             view: self.view.len(),
         }
     }
@@ -260,9 +287,21 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         names: base.join(required("names")?),
         name_index: base.join(required("name_index")?),
         sidmap: base.join(required("sidmap")?),
-        delta: base.join(required("delta")?),
+        delta: values.get("delta").map(|value| base.join(value)),
         view: base.join(required("view")?),
     })
+}
+
+fn empty_geometry_file_bytes(file_kind: GeometryFileKind, record_size: u32) -> Vec<u8> {
+    let header = GeometryFileHeader {
+        magic: GEOMETRY_FILE_MAGIC,
+        schema_version: GEOMETRY_SCHEMA_VERSION,
+        header_size: GEOMETRY_FILE_HEADER_SIZE as u32,
+        file_kind: file_kind as u16,
+        record_size,
+        ..GeometryFileHeader::default()
+    };
+    bytemuck::bytes_of(&header).to_vec()
 }
 
 fn mmap_checked(
@@ -327,6 +366,8 @@ fn payload_bytes(mmap: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn mapped_bytes_total_includes_every_geometry_file() {
@@ -343,5 +384,123 @@ mod tests {
         };
 
         assert_eq!(mapped.total(), 450);
+    }
+
+    #[test]
+    fn opens_legacy_manifest_without_delta_file_as_empty_delta_log() {
+        let snapshot_dir = temp_snapshot_dir("legacy-no-delta");
+        write_geometry_file(
+            &snapshot_dir.join("geometry.meta.bin"),
+            GeometryFileKind::Meta,
+            core::mem::size_of::<GeometryMetaRecord>() as u32,
+            bytemuck::bytes_of(&GeometryMetaRecord {
+                next_shape_id: 1,
+                ..GeometryMetaRecord::default()
+            }),
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.shapes.bin"),
+            GeometryFileKind::Shapes,
+            core::mem::size_of::<ShapeRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.owners.bin"),
+            GeometryFileKind::Owners,
+            core::mem::size_of::<OwnerRef>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.payload.bin"),
+            GeometryFileKind::Payload,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.names.bin"),
+            GeometryFileKind::Names,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.name_index.bin"),
+            GeometryFileKind::NameIndex,
+            core::mem::size_of::<GeometryNameRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.sidmap.bin"),
+            GeometryFileKind::SidMap,
+            core::mem::size_of::<GeometrySidMapRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.view.bin"),
+            GeometryFileKind::View,
+            core::mem::size_of::<GeometryViewTileRecord>() as u32,
+            &[],
+        );
+        std::fs::write(
+            snapshot_dir.join("geometry.manifest"),
+            "schema_version=1\n\
+             shape_count=0\n\
+             owner_count=0\n\
+             payload_size=0\n\
+             meta=geometry.meta.bin\n\
+             shapes=geometry.shapes.bin\n\
+             owners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\n\
+             names=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\n\
+             sidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n",
+        )
+        .unwrap();
+
+        let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
+
+        assert!(snapshot.delta_records().is_empty());
+        assert_eq!(snapshot.mapped_bytes().delta, 0);
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    fn temp_snapshot_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "chipgeom-reader-{test_name}-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_geometry_file(
+        path: &Path,
+        file_kind: GeometryFileKind,
+        record_size: u32,
+        payload: &[u8],
+    ) {
+        let record_count = if record_size == 0 {
+            0
+        } else {
+            payload.len() as u64 / record_size as u64
+        };
+        let header = GeometryFileHeader {
+            magic: GEOMETRY_FILE_MAGIC,
+            schema_version: GEOMETRY_SCHEMA_VERSION,
+            header_size: GEOMETRY_FILE_HEADER_SIZE as u32,
+            file_kind: file_kind as u16,
+            record_size,
+            record_count,
+            payload_size: payload.len() as u64,
+            ..GeometryFileHeader::default()
+        };
+        let mut file = File::create(path).unwrap();
+        file.write_all(bytemuck::bytes_of(&header)).unwrap();
+        file.write_all(payload).unwrap();
     }
 }

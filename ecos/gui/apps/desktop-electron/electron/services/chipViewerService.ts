@@ -226,8 +226,7 @@ export class ChipViewerService {
     this.ensureDirectory = options.ensureDirectory ?? defaultEnsureDirectory
     this.execFile = options.execFile ?? defaultExecFile
     this.fileExists = options.fileExists ?? existsSync
-    this.getFileModifiedTime =
-      options.getFileModifiedTime ?? defaultGetFileModifiedTime
+    this.getFileModifiedTime = options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged
     this.platform = options.platform ?? process.platform
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
@@ -564,10 +563,7 @@ export class ChipViewerService {
 
     for (const sourcePath of sourcePaths) {
       const sourceModifiedTime = await this.getFileModifiedTime(sourcePath)
-      if (
-        sourceModifiedTime !== null &&
-        sourceModifiedTime > manifestModifiedTime
-      ) {
+      if (sourceModifiedTime !== null && sourceModifiedTime > manifestModifiedTime) {
         return true
       }
     }
