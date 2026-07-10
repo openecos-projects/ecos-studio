@@ -690,6 +690,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chip-display",
+ "chip-render",
  "chip-view-db",
  "chipgeom-format",
  "clap",

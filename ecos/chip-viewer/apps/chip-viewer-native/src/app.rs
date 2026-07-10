@@ -5,6 +5,7 @@ use std::process;
 use std::time::Duration;
 
 use chip_display::LayerStyle;
+use chip_render::RenderPlanCache;
 use chip_view_db::{ChipViewDb, SnapshotStats};
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId,
@@ -32,6 +33,7 @@ struct LoadedViewer {
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     last_edit_result: Option<String>,
+    render_cache: RenderPlanCache,
     next_command_counter: u32,
     zoom: f32,
     pan: egui::Vec2,
@@ -57,6 +59,13 @@ struct EditDraft {
 struct PendingEdit {
     shape_id: ShapeId,
     result_path: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct EditResultAction {
+    reload_snapshot: bool,
+    selected_shape_id: Option<ShapeId>,
+    message: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +170,7 @@ impl LoadedViewer {
             draft: None,
             pending_edit: None,
             last_edit_result: None,
+            render_cache: RenderPlanCache::default(),
             next_command_counter: 1,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
@@ -340,7 +350,13 @@ impl LoadedViewer {
                 continue;
             }
 
-            for shape in self.db.query_layer_intersect_records(*layer_id, viewport) {
+            for shape_id in self
+                .render_cache
+                .visible_shape_ids(&self.db, *layer_id, viewport)
+            {
+                let Some(shape) = self.db.find_shape(shape_id) else {
+                    continue;
+                };
                 if shape.kind != ShapeKind::Rect as u8 {
                     continue;
                 }
@@ -546,13 +562,9 @@ impl LoadedViewer {
             }
         };
 
-        self.selected = Some(result.shape_id);
-        if matches!(
-            result.status,
-            GeometryEditStatus::Accepted
-                | GeometryEditStatus::AdjustedAccepted
-                | GeometryEditStatus::Conflict
-        ) {
+        let action = edit_result_action(&result);
+        self.selected = action.selected_shape_id;
+        if action.reload_snapshot {
             match ChipViewDb::open(&self.db.snapshot().manifest().path) {
                 Ok(db) => self.replace_db(db),
                 Err(err) => {
@@ -563,10 +575,7 @@ impl LoadedViewer {
             }
         }
 
-        self.last_edit_result = Some(format!(
-            "edit {:?}: shape {} version {}",
-            result.status, result.shape_id, result.new_version
-        ));
+        self.last_edit_result = Some(action.message);
         self.pending_edit = None;
     }
 
@@ -588,6 +597,7 @@ impl LoadedViewer {
             })
             .collect();
         self.db = db;
+        self.render_cache.clear();
         self.refresh_highlight();
     }
 
@@ -771,6 +781,50 @@ fn edit_poll_repaint_interval(has_pending_edit: bool) -> Option<Duration> {
     has_pending_edit.then_some(Duration::from_millis(100))
 }
 
+fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
+    let (reload_snapshot, message) = match result.status {
+        GeometryEditStatus::Accepted => (
+            true,
+            format!(
+                "edit accepted: shape {} version {}",
+                result.shape_id, result.new_version
+            ),
+        ),
+        GeometryEditStatus::AdjustedAccepted => (
+            true,
+            format!(
+                "edit adjusted: shape {} version {} bbox {} {} {} {}",
+                result.shape_id,
+                result.new_version,
+                result.committed_bbox.lx,
+                result.committed_bbox.ly,
+                result.committed_bbox.hx,
+                result.committed_bbox.hy
+            ),
+        ),
+        GeometryEditStatus::Rejected => (
+            false,
+            format!(
+                "edit rejected: shape {} restored to original geometry",
+                result.shape_id
+            ),
+        ),
+        GeometryEditStatus::Conflict => (
+            true,
+            format!(
+                "edit conflict: shape {} refreshed; retry the edit",
+                result.shape_id
+            ),
+        ),
+    };
+
+    EditResultAction {
+        reload_snapshot,
+        selected_shape_id: Some(result.shape_id),
+        message,
+    }
+}
+
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
     match tool {
         EditTool::Move => matches!(
@@ -782,7 +836,10 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
                     | OwnerType::Blockage
             )
         ),
-        EditTool::Resize => matches!(OwnerType::from_raw(owner_type), Some(OwnerType::Blockage)),
+        EditTool::Resize => matches!(
+            OwnerType::from_raw(owner_type),
+            Some(OwnerType::NetWireSegment | OwnerType::SpecialWireSegment | OwnerType::Blockage)
+        ),
     }
 }
 
@@ -1054,6 +1111,14 @@ mod tests {
             EditTool::Move
         ));
         assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::NetWireSegment as u8,
+            EditTool::Resize
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::SpecialWireSegment as u8,
+            EditTool::Resize
+        ));
+        assert!(edit_tool_is_allowed(
             chipgeom_format::OwnerType::Blockage as u8,
             EditTool::Resize
         ));
@@ -1065,5 +1130,43 @@ mod tests {
             chipgeom_format::OwnerType::Fill as u8,
             EditTool::Move
         ));
+    }
+
+    #[test]
+    fn edit_result_action_reloads_for_accepted_adjusted_and_conflict() {
+        let accepted = edit_result_action(&edit_result(GeometryEditStatus::Accepted));
+        let adjusted = edit_result_action(&edit_result(GeometryEditStatus::AdjustedAccepted));
+        let conflict = edit_result_action(&edit_result(GeometryEditStatus::Conflict));
+
+        assert!(accepted.reload_snapshot);
+        assert!(adjusted.reload_snapshot);
+        assert!(conflict.reload_snapshot);
+        assert!(conflict.message.contains("retry"));
+        assert_eq!(conflict.selected_shape_id, Some(7));
+    }
+
+    #[test]
+    fn edit_result_action_does_not_reload_for_rejected() {
+        let rejected = edit_result_action(&edit_result(GeometryEditStatus::Rejected));
+
+        assert!(!rejected.reload_snapshot);
+        assert!(rejected.message.contains("rejected"));
+        assert!(rejected.message.contains("restored"));
+        assert_eq!(rejected.selected_shape_id, Some(7));
+    }
+
+    fn edit_result(status: GeometryEditStatus) -> GeometryEditResult {
+        GeometryEditResult {
+            command_id: 1,
+            shape_id: 7,
+            new_version: 3,
+            status,
+            committed_bbox: chipgeom_format::Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 10,
+                hy: 10,
+            },
+        }
     }
 }

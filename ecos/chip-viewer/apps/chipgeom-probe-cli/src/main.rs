@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Result;
-use chip_view_db::{ChipViewDb, SnapshotStats};
+use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, SnapshotStats};
 use chipgeom_format::{Rect32, ShapeKind, ShapeState};
 use clap::Parser;
-use serde_json::json;
+use serde_json::{json, Value};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -33,6 +33,8 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let db = ChipViewDb::open(&args.manifest)?;
     let stats = db.stats();
+    let memory_stats = db.memory_stats();
+    let delta_stats = db.delta_stats();
     let bbox = args.bbox.as_deref().map(parse_bbox_values).transpose()?;
     let bench_report = if args.bench_viewport {
         let layer_id = args
@@ -65,6 +67,8 @@ fn main() -> Result<()> {
     println!("name_count={}", stats.name_count);
     println!("layer_count={}", db.layer_summaries().len());
     println!("view_tile_count={}", db.view_tile_count());
+    print_memory_stats(&memory_stats);
+    print_delta_stats(&delta_stats);
     if let Some(bbox) = stats.bbox {
         println!("bbox={} {} {} {}", bbox.lx, bbox.ly, bbox.hx, bbox.hy);
     }
@@ -235,6 +239,82 @@ fn percentile_nanos(samples: &[u128], percentile: f64) -> u128 {
     sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
 }
 
+fn print_memory_stats(stats: &ChipViewMemoryStats) {
+    println!("mmap_bytes.total={}", stats.mapped_bytes.total());
+    println!("mmap_bytes.meta={}", stats.mapped_bytes.meta);
+    println!("mmap_bytes.shapes={}", stats.mapped_bytes.shapes);
+    println!("mmap_bytes.owners={}", stats.mapped_bytes.owners);
+    println!("mmap_bytes.payload={}", stats.mapped_bytes.payload);
+    println!("mmap_bytes.names={}", stats.mapped_bytes.names);
+    println!("mmap_bytes.name_index={}", stats.mapped_bytes.name_index);
+    println!("mmap_bytes.sidmap={}", stats.mapped_bytes.sidmap);
+    println!("mmap_bytes.delta={}", stats.mapped_bytes.delta);
+    println!("mmap_bytes.view={}", stats.mapped_bytes.view);
+    println!("index_bytes.total={}", stats.index_bytes.total_bytes);
+    println!("index_bytes.layer={}", stats.index_bytes.layer_index_bytes);
+    println!("index_bytes.shape={}", stats.index_bytes.shape_index_bytes);
+    println!("index_bytes.view={}", stats.index_bytes.view_index_bytes);
+    println!("index_bytes.name={}", stats.index_bytes.name_index_bytes);
+    println!("mapped_plus_index_bytes={}", stats.mapped_plus_index_bytes);
+}
+
+fn print_delta_stats(stats: &DeltaStats) {
+    println!("delta_count={}", stats.record_count);
+    if let Some(sequence_id) = stats.latest_sequence_id {
+        println!("delta_latest.sequence_id={sequence_id}");
+    }
+    if let Some(command_id) = stats.latest_command_id {
+        println!("delta_latest.command_id={command_id}");
+    }
+    if let Some(shape_id) = stats.latest_shape_id {
+        println!("delta_latest.shape_id={shape_id}");
+    }
+    if let Some(old_version) = stats.latest_old_version {
+        println!("delta_latest.old_version={old_version}");
+    }
+    if let Some(new_version) = stats.latest_new_version {
+        println!("delta_latest.new_version={new_version}");
+    }
+}
+
+fn memory_stats_json(stats: &ChipViewMemoryStats) -> Value {
+    json!({
+        "mmap_bytes": {
+            "total": stats.mapped_bytes.total(),
+            "meta": stats.mapped_bytes.meta,
+            "shapes": stats.mapped_bytes.shapes,
+            "owners": stats.mapped_bytes.owners,
+            "payload": stats.mapped_bytes.payload,
+            "names": stats.mapped_bytes.names,
+            "name_index": stats.mapped_bytes.name_index,
+            "sidmap": stats.mapped_bytes.sidmap,
+            "delta": stats.mapped_bytes.delta,
+            "view": stats.mapped_bytes.view,
+        },
+        "index_bytes": {
+            "total": stats.index_bytes.total_bytes,
+            "layer": stats.index_bytes.layer_index_bytes,
+            "shape": stats.index_bytes.shape_index_bytes,
+            "view": stats.index_bytes.view_index_bytes,
+            "name": stats.index_bytes.name_index_bytes,
+        },
+        "mapped_plus_index_bytes": stats.mapped_plus_index_bytes,
+    })
+}
+
+fn delta_stats_json(stats: &DeltaStats) -> Value {
+    json!({
+        "count": stats.record_count,
+        "latest": stats.latest_sequence_id.map(|sequence_id| json!({
+            "sequence_id": sequence_id,
+            "command_id": stats.latest_command_id,
+            "shape_id": stats.latest_shape_id,
+            "old_version": stats.latest_old_version,
+            "new_version": stats.latest_new_version,
+        })),
+    })
+}
+
 fn print_json(
     args: &Args,
     db: &ChipViewDb,
@@ -261,6 +341,8 @@ fn print_json(
         "shape_count": stats.shape_count,
         "owner_count": stats.owner_count,
         "name_count": stats.name_count,
+        "memory": memory_stats_json(&db.memory_stats()),
+        "delta": delta_stats_json(&db.delta_stats()),
         "layer_count": db.layer_summaries().len(),
         "view_tile_count": db.view_tile_count(),
         "name_query": args.name.as_ref().map(|name| json!({
@@ -339,5 +421,56 @@ mod tests {
     fn percentile_nanos_uses_nearest_rank() {
         assert_eq!(percentile_nanos(&[10, 20, 30, 40], 50.0), 20);
         assert_eq!(percentile_nanos(&[10, 20, 30, 40], 95.0), 40);
+    }
+
+    #[test]
+    fn memory_stats_json_reports_mmap_and_index_totals() {
+        let value = memory_stats_json(&chip_view_db::ChipViewMemoryStats {
+            mapped_bytes: chip_view_db::GeometryMappedBytes {
+                meta: 1,
+                shapes: 2,
+                owners: 3,
+                payload: 4,
+                names: 5,
+                name_index: 6,
+                sidmap: 7,
+                delta: 8,
+                view: 9,
+            },
+            index_bytes: chip_view_db::ChipViewIndexMemoryStats {
+                layer_index_bytes: 10,
+                shape_index_bytes: 20,
+                view_index_bytes: 30,
+                name_index_bytes: 40,
+                total_bytes: 100,
+            },
+            mapped_plus_index_bytes: 145,
+        });
+
+        assert_eq!(value["mmap_bytes"]["total"], 45);
+        assert_eq!(value["mmap_bytes"]["delta"], 8);
+        assert_eq!(value["mmap_bytes"]["view"], 9);
+        assert_eq!(value["index_bytes"]["total"], 100);
+        assert_eq!(value["index_bytes"]["name"], 40);
+        assert_eq!(value["mapped_plus_index_bytes"], 145);
+    }
+
+    #[test]
+    fn delta_stats_json_reports_latest_delta_record() {
+        let value = delta_stats_json(&chip_view_db::DeltaStats {
+            latest_command_id: Some(77),
+            latest_new_version: Some(4),
+            latest_old_version: Some(3),
+            latest_sequence_id: Some(12),
+            latest_shape_id: Some(99),
+            record_count: 2,
+        });
+
+        assert_eq!(value["count"], 2);
+        assert_eq!(value["latest"]["sequence_id"], 12);
+        assert_eq!(value["latest"]["command_id"], 77);
+        assert_eq!(value["latest"]["shape_id"], 99);
+        assert_eq!(value["latest"]["old_version"], 3);
+        assert_eq!(value["latest"]["new_version"], 4);
     }
 }

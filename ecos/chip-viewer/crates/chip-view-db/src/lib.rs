@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
+use std::mem::size_of;
 use std::path::Path;
 
 use anyhow::Result;
 use chipgeom_format::{
-    GeometryViewTileRecord, OwnerRef, OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord,
-    ShapeState,
+    GeometryDeltaRecord, GeometryViewTileRecord, OwnerRef, OwnerType, Point32, Rect32, ShapeId,
+    ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
+pub use chipgeom_reader::GeometryMappedBytes;
 use chipgeom_reader::GeometrySnapshot;
 
 pub struct ChipViewDb {
@@ -23,6 +25,32 @@ pub struct SnapshotStats {
     pub name_count: usize,
     pub bbox: Option<Rect32>,
     pub owner_type_counts: BTreeMap<u8, usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChipViewIndexMemoryStats {
+    pub layer_index_bytes: usize,
+    pub shape_index_bytes: usize,
+    pub view_index_bytes: usize,
+    pub name_index_bytes: usize,
+    pub total_bytes: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChipViewMemoryStats {
+    pub mapped_bytes: GeometryMappedBytes,
+    pub index_bytes: ChipViewIndexMemoryStats,
+    pub mapped_plus_index_bytes: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DeltaStats {
+    pub record_count: usize,
+    pub latest_sequence_id: Option<u64>,
+    pub latest_command_id: Option<u64>,
+    pub latest_shape_id: Option<ShapeId>,
+    pub latest_old_version: Option<ShapeVersion>,
+    pub latest_new_version: Option<ShapeVersion>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +94,19 @@ impl LayerShapeIndex {
 
     pub fn candidate_count(&self, layer_id: u16) -> usize {
         self.by_layer.get(&layer_id).map_or(0, std::vec::Vec::len)
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self
+                .by_layer
+                .values()
+                .map(|indices| {
+                    size_of::<u16>()
+                        + size_of::<Vec<usize>>()
+                        + indices.capacity() * size_of::<usize>()
+                })
+                .sum::<usize>()
     }
 
     pub fn query_layer_intersect(
@@ -124,6 +165,10 @@ impl ShapeIdIndex {
         Self { by_id }
     }
 
+    pub fn estimated_heap_bytes(&self) -> usize {
+        size_of::<Self>() + self.by_id.len() * size_of::<(ShapeId, usize)>()
+    }
+
     pub fn find<'a>(
         &self,
         shapes: &'a [ShapeRecord],
@@ -148,6 +193,19 @@ impl ViewTileIndex {
                 .push(index);
         }
         Self { by_lod_layer }
+    }
+
+    pub fn estimated_heap_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self
+                .by_lod_layer
+                .values()
+                .map(|indices| {
+                    size_of::<(u8, u16)>()
+                        + size_of::<Vec<usize>>()
+                        + indices.capacity() * size_of::<usize>()
+                })
+                .sum::<usize>()
     }
 
     pub fn query_tiles<'a>(
@@ -223,10 +281,53 @@ impl OwnerNameIndex {
         self.by_name.get(name).cloned().unwrap_or_default()
     }
 
+    pub fn estimated_heap_bytes(&self) -> usize {
+        let by_name_bytes = self
+            .by_name
+            .iter()
+            .map(|(name, shape_ids)| {
+                size_of::<String>()
+                    + name.capacity()
+                    + size_of::<Vec<ShapeId>>()
+                    + shape_ids.capacity() * size_of::<ShapeId>()
+            })
+            .sum::<usize>();
+        let name_by_owner_bytes = self
+            .name_by_owner
+            .values()
+            .map(|name| size_of::<(u8, u64)>() + size_of::<String>() + name.capacity())
+            .sum::<usize>();
+        size_of::<Self>() + by_name_bytes + name_by_owner_bytes
+    }
+
     pub fn name_for_owner(&self, owner_type: u8, owner_id: u64) -> Option<&str> {
         self.name_by_owner
             .get(&(owner_type, owner_id))
             .map(String::as_str)
+    }
+}
+
+impl ChipViewIndexMemoryStats {
+    pub fn from_indexes(
+        layer_index: &LayerShapeIndex,
+        shape_index: &ShapeIdIndex,
+        view_index: &ViewTileIndex,
+        name_index: &OwnerNameIndex,
+    ) -> Self {
+        let layer_index_bytes = layer_index.estimated_heap_bytes();
+        let shape_index_bytes = shape_index.estimated_heap_bytes();
+        let view_index_bytes = view_index.estimated_heap_bytes();
+        let name_index_bytes = name_index.estimated_heap_bytes();
+        Self {
+            layer_index_bytes,
+            shape_index_bytes,
+            view_index_bytes,
+            name_index_bytes,
+            total_bytes: layer_index_bytes
+                + shape_index_bytes
+                + view_index_bytes
+                + name_index_bytes,
+        }
     }
 }
 
@@ -245,6 +346,18 @@ pub fn layer_summaries_from_shapes(shapes: &[ShapeRecord]) -> Vec<LayerSummary> 
             shape_count,
         })
         .collect()
+}
+
+pub fn delta_stats_from_records(records: &[GeometryDeltaRecord]) -> DeltaStats {
+    let latest = records.iter().max_by_key(|record| record.sequence_id);
+    DeltaStats {
+        record_count: records.len(),
+        latest_sequence_id: latest.map(|record| record.sequence_id),
+        latest_command_id: latest.map(|record| record.command_id),
+        latest_shape_id: latest.map(|record| record.shape_id),
+        latest_old_version: latest.map(|record| record.old_version),
+        latest_new_version: latest.map(|record| record.new_version),
+    }
 }
 
 fn rect_contains_point(rect: Rect32, point: Point32) -> bool {
@@ -324,6 +437,25 @@ impl ChipViewDb {
 
     pub fn view_tile_count(&self) -> usize {
         self.snapshot.view_tile_records().len()
+    }
+
+    pub fn memory_stats(&self) -> ChipViewMemoryStats {
+        let mapped_bytes = self.snapshot.mapped_bytes();
+        let index_bytes = ChipViewIndexMemoryStats::from_indexes(
+            &self.layer_index,
+            &self.shape_index,
+            &self.view_index,
+            &self.name_index,
+        );
+        ChipViewMemoryStats {
+            mapped_plus_index_bytes: mapped_bytes.total() + index_bytes.total_bytes,
+            mapped_bytes,
+            index_bytes,
+        }
+    }
+
+    pub fn delta_stats(&self) -> DeltaStats {
+        delta_stats_from_records(self.snapshot.delta_records())
     }
 
     pub fn query_view_tiles(
@@ -608,6 +740,114 @@ mod tests {
             index.name_for_owner(OwnerType::InstanceBBox as u8, 21),
             None
         );
+    }
+
+    #[test]
+    fn index_memory_estimates_include_heap_backing_storage() {
+        let shapes = [
+            shape(40, 7),
+            shape(10, 7),
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 100,
+                    ly: 100,
+                    hx: 120,
+                    hy: 120,
+                },
+                ..shape(25, 8)
+            },
+        ];
+        let tiles = [
+            GeometryViewTileRecord {
+                lod_level: 2,
+                layer_id: 4,
+                shape_count: 10,
+                ..GeometryViewTileRecord::default()
+            },
+            GeometryViewTileRecord {
+                lod_level: 2,
+                layer_id: 4,
+                shape_count: 4,
+                ..GeometryViewTileRecord::default()
+            },
+        ];
+        let owners = [OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            owner_id: 10,
+            ..OwnerRef::default()
+        }];
+        let named_shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(2, 1)
+            },
+        ];
+
+        let layer_index = LayerShapeIndex::from_shapes(&shapes);
+        let shape_index = ShapeIdIndex::from_shapes(&shapes);
+        let view_index = ViewTileIndex::from_tiles(&tiles);
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &named_shapes,
+            &owners,
+            [(
+                OwnerType::NetWireSegment as u8,
+                10,
+                "synthetic_clk".to_string(),
+            )],
+        );
+        let stats = ChipViewIndexMemoryStats::from_indexes(
+            &layer_index,
+            &shape_index,
+            &view_index,
+            &name_index,
+        );
+
+        assert!(stats.layer_index_bytes >= 3 * core::mem::size_of::<usize>());
+        assert!(stats.shape_index_bytes >= 3 * core::mem::size_of::<(ShapeId, usize)>());
+        assert!(stats.view_index_bytes >= 2 * core::mem::size_of::<usize>());
+        assert!(stats.name_index_bytes >= "synthetic_clk".len());
+        assert_eq!(
+            stats.total_bytes,
+            stats.layer_index_bytes
+                + stats.shape_index_bytes
+                + stats.view_index_bytes
+                + stats.name_index_bytes
+        );
+    }
+
+    #[test]
+    fn delta_stats_report_latest_delta_record() {
+        let records = [
+            GeometryDeltaRecord {
+                sequence_id: 1,
+                command_id: 10,
+                shape_id: 40,
+                old_version: 1,
+                new_version: 2,
+                ..GeometryDeltaRecord::default()
+            },
+            GeometryDeltaRecord {
+                sequence_id: 2,
+                command_id: 11,
+                shape_id: 41,
+                old_version: 3,
+                new_version: 4,
+                ..GeometryDeltaRecord::default()
+            },
+        ];
+
+        let stats = delta_stats_from_records(&records);
+
+        assert_eq!(stats.record_count, 2);
+        assert_eq!(stats.latest_sequence_id, Some(2));
+        assert_eq!(stats.latest_command_id, Some(11));
+        assert_eq!(stats.latest_shape_id, Some(41));
+        assert_eq!(stats.latest_old_version, Some(3));
+        assert_eq!(stats.latest_new_version, Some(4));
     }
 
     #[test]

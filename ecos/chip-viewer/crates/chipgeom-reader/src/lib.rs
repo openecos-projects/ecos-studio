@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chipgeom_format::{
-    GeometryFileHeader, GeometryFileKind, GeometryMetaRecord, GeometryNameRecord,
-    GeometrySidMapRecord, GeometryViewTileRecord, OwnerRef, ShapeRecord, GEOMETRY_FILE_HEADER_SIZE,
-    GEOMETRY_FILE_MAGIC, GEOMETRY_SCHEMA_VERSION,
+    GeometryDeltaRecord, GeometryFileHeader, GeometryFileKind, GeometryMetaRecord,
+    GeometryNameRecord, GeometrySidMapRecord, GeometryViewTileRecord, OwnerRef, ShapeRecord,
+    GEOMETRY_FILE_HEADER_SIZE, GEOMETRY_FILE_MAGIC, GEOMETRY_SCHEMA_VERSION,
 };
 use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
@@ -33,7 +33,35 @@ pub struct GeometryManifest {
     pub names: PathBuf,
     pub name_index: PathBuf,
     pub sidmap: PathBuf,
+    pub delta: PathBuf,
     pub view: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GeometryMappedBytes {
+    pub meta: usize,
+    pub shapes: usize,
+    pub owners: usize,
+    pub payload: usize,
+    pub names: usize,
+    pub name_index: usize,
+    pub sidmap: usize,
+    pub delta: usize,
+    pub view: usize,
+}
+
+impl GeometryMappedBytes {
+    pub fn total(self) -> usize {
+        self.meta
+            + self.shapes
+            + self.owners
+            + self.payload
+            + self.names
+            + self.name_index
+            + self.sidmap
+            + self.delta
+            + self.view
+    }
 }
 
 pub struct GeometrySnapshot {
@@ -45,6 +73,7 @@ pub struct GeometrySnapshot {
     names: Mmap,
     name_index: Mmap,
     sidmap: Mmap,
+    delta: Mmap,
     view: Mmap,
 }
 
@@ -78,6 +107,11 @@ impl GeometrySnapshot {
             GeometryFileKind::SidMap,
             core::mem::size_of::<GeometrySidMapRecord>() as u32,
         )?;
+        let delta = mmap_checked(
+            &manifest.delta,
+            GeometryFileKind::Delta,
+            core::mem::size_of::<GeometryDeltaRecord>() as u32,
+        )?;
         let view = mmap_checked(
             &manifest.view,
             GeometryFileKind::View,
@@ -93,6 +127,7 @@ impl GeometrySnapshot {
             names,
             name_index,
             sidmap,
+            delta,
             view,
         };
         snapshot.validate_manifest_counts()?;
@@ -133,6 +168,24 @@ impl GeometrySnapshot {
 
     pub fn view_tile_records(&self) -> &[GeometryViewTileRecord] {
         cast_records(&self.view)
+    }
+
+    pub fn delta_records(&self) -> &[GeometryDeltaRecord] {
+        cast_records(&self.delta)
+    }
+
+    pub fn mapped_bytes(&self) -> GeometryMappedBytes {
+        GeometryMappedBytes {
+            meta: self.meta.len(),
+            shapes: self.shapes.len(),
+            owners: self.owners.len(),
+            payload: self.payload.len(),
+            names: self.names.len(),
+            name_index: self.name_index.len(),
+            sidmap: self.sidmap.len(),
+            delta: self.delta.len(),
+            view: self.view.len(),
+        }
     }
 
     pub fn owner_name(&self, record: &GeometryNameRecord) -> Option<&str> {
@@ -207,6 +260,7 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         names: base.join(required("names")?),
         name_index: base.join(required("name_index")?),
         sidmap: base.join(required("sidmap")?),
+        delta: base.join(required("delta")?),
         view: base.join(required("view")?),
     })
 }
@@ -268,4 +322,26 @@ fn cast_records<T: bytemuck::Pod>(mmap: &[u8]) -> &[T] {
 
 fn payload_bytes(mmap: &[u8]) -> &[u8] {
     &mmap[GEOMETRY_FILE_HEADER_SIZE..]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mapped_bytes_total_includes_every_geometry_file() {
+        let mapped = GeometryMappedBytes {
+            meta: 10,
+            shapes: 20,
+            owners: 30,
+            payload: 40,
+            names: 50,
+            name_index: 60,
+            sidmap: 70,
+            delta: 80,
+            view: 90,
+        };
+
+        assert_eq!(mapped.total(), 450);
+    }
 }
