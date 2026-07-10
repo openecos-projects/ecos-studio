@@ -12825,3 +12825,50 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 当前轻量 parser 只计算数字常量 packed range；参数化端口宽度需要未来引入 elaborator AST 或先展开参数后再校验。
+
+# 第 212 次 开发
+
+## 开发目标
+
+将用户 CPU 的 reset PC、普通程序链接地址和 bootloader payload 地址从隐含实现约束提升为 catalog/workspace 的显式契约。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/soc_harnesses.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/catalog.json`
+  - 声明 CPU reset vector `0x20000000`、默认程序入口 `0x20000000` 和 bootloader payload 入口 `0x80000000`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/compatibility.py`
+  - CPU 与 SoC 同时声明 reset vector 时要求一致。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - 检查并向 catalog 客户端暴露地址契约。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/data/workspace.py`
+  - 创建项目时把地址契约写入 workspace，且普通程序默认使用 catalog link base。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 说明普通测试和 RT-Thread bootloader 的地址关系。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 验证 normalized catalog 中的 reset/link/payload 地址。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次启动地址契约改造。
+
+## 验证情况
+
+- 已执行三个 catalog JSON 文件的 `python3 -m json.tool` 和相关 Python 文件的 `py_compile`，通过。
+- 已执行 catalog compatibility、catalog contract、workspace data 测试，34 个测试通过。
+- 已执行 engine catalog/link-base 聚焦测试，4 个测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `2179bd1`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- RTL 静态分析不能可靠证明任意用户 CPU 内部 PC 的 reset 实现；错误实现会在 elaboration/simulation 阶段因无法达到显式成功条件而失败。
