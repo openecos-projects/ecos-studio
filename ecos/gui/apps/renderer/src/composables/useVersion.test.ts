@@ -221,6 +221,13 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       onData: () => () => undefined,
       onExit: () => () => undefined,
     },
+    chipViewer: {
+      open: async () => ({
+        geometryManifestPath: '/tmp/geometry/geometry.manifest',
+        spawned: true,
+        workspaceStepDirectory: '/tmp/Floorplan_ecc',
+      }),
+    },
   } satisfies DesktopApi
 }
 

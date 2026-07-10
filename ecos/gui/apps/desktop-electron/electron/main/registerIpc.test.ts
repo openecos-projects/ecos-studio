@@ -169,6 +169,9 @@ function registerHandlers() {
       resize: vi.fn(),
       write: vi.fn(),
     },
+    chipViewerService: {
+      open: vi.fn(),
+    },
     layoutViewerService: {
       open: vi.fn(),
     },
@@ -984,6 +987,34 @@ describe('registerIpc', () => {
     })
 
     expect(services.layoutViewerService.open).toHaveBeenCalledWith(request)
+  })
+
+  it('delegates chip viewer launches to the chip viewer service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = {
+      mode: 'edit',
+      projectPath: '/tmp/project',
+      rebuildGeometry: true,
+      step: 'Floorplan',
+    }
+    services.chipViewerService.open.mockResolvedValue({
+      geometryManifestPath:
+        '/tmp/project/Floorplan_ecc/output/geometry/geometry.manifest',
+      spawned: true,
+      workspaceStepDirectory: '/tmp/project/Floorplan_ecc',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.chipViewerOpen)?.(event, request),
+    ).resolves.toEqual({
+      geometryManifestPath:
+        '/tmp/project/Floorplan_ecc/output/geometry/geometry.manifest',
+      spawned: true,
+      workspaceStepDirectory: '/tmp/project/Floorplan_ecc',
+    })
+
+    expect(services.chipViewerService.open).toHaveBeenCalledWith(request)
   })
 
   it('delegates workspace resource calls to the resource service', async () => {

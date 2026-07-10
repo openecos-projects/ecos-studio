@@ -1,0 +1,15 @@
+[package]
+name = "chipgeom-reader"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+chipgeom-format = { path = "../chipgeom-format" }
+memmap2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.10"

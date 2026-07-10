@@ -1,5 +1,6 @@
 ws
 build
+ecos/chip-viewer/target/
 .pnpm-store
 .vscode
 .setup-done

@@ -15,6 +15,7 @@ import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
+import { ChipViewerService } from '../services/chipViewerService'
 import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
@@ -52,6 +53,7 @@ let services: {
   projectManifestService: ProjectManifestService
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
+  chipViewerService: ChipViewerService
   layoutViewerService: LayoutViewerService
   shellService: ShellPtyService
   workspaceResourceService: WorkspaceResourceService
@@ -158,9 +160,19 @@ function getDesktopServices() {
     platform: process.platform,
     resourcesPath: process.resourcesPath,
   })
+  const chipViewerService = new ChipViewerService({
+    appPath: app.getAppPath(),
+    cwd: process.cwd(),
+    env: runtimeEnv,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    workspaceResourceService,
+  })
 
   services = {
     appInfoService,
+    chipViewerService,
     eccRuntimeService,
     remoteContentService,
     projectManifestService,
@@ -200,6 +212,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       remoteContentService: desktopServices.remoteContentService,
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
+      chipViewerService: desktopServices.chipViewerService,
       layoutViewerService: desktopServices.layoutViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,

@@ -24,8 +24,10 @@ const loadingState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const loadingMessage = ref('')
 const cursorEda = ref<{ x: number; y: number } | null>(null)
 const nativeLayoutViewerBusy = ref(false)
+const chipViewerBusy = ref(false)
 
 const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'
+const CHIP_VIEWER_LOADING_MESSAGE = 'Preparing Chip Viewer geometry...'
 
 const currentStepKey = computed(() => {
   const pathParts = route.path.split('/')
@@ -36,11 +38,24 @@ const isPreparingNativeLayoutViewer = computed(
   () => nativeLayoutViewerBusy.value && loadingState.value === 'loading',
 )
 
+const isPreparingChipViewer = computed(
+  () => chipViewerBusy.value && loadingState.value === 'loading',
+)
+
 const showNativeLayoutViewer = computed(
   () =>
     isDesktopRuntime() &&
     currentProject.value?.path != null &&
     currentViewJsonPackageRoot.value != null,
+)
+
+const currentStepEnum = computed(() => getStepEnumFromPath(currentStepKey.value))
+
+const showChipViewer = computed(
+  () =>
+    isDesktopRuntime() &&
+    currentProject.value?.path != null &&
+    currentStepEnum.value != null,
 )
 
 const stepEnumValues = Object.values(StepEnum)
@@ -165,6 +180,37 @@ async function onOpenNativeLayoutViewer(): Promise<void> {
   }
 }
 
+async function onOpenChipViewer(): Promise<void> {
+  if (chipViewerBusy.value) return
+  const projectPath = currentProject.value?.path
+  const stepEnum = currentStepEnum.value
+  if (!projectPath || !stepEnum || !isDesktopRuntime()) return
+
+  chipViewerBusy.value = true
+  loadingState.value = 'loading'
+  loadingMessage.value = CHIP_VIEWER_LOADING_MESSAGE
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.chipViewer.open({
+      mode: 'view',
+      projectPath,
+      step: stepEnum,
+    })
+  } catch (err) {
+    console.error('Failed to open chip viewer:', err)
+    loadingState.value = 'error'
+    loadingMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    chipViewerBusy.value = false
+    if (
+      loadingState.value === 'loading' &&
+      loadingMessage.value === CHIP_VIEWER_LOADING_MESSAGE
+    ) {
+      resetLoadingState()
+    }
+  }
+}
+
 const handleStageChange = async (stage: string) => {
   if (!preview.value || !stage) return
   const guard = createDrawingAsyncGuard(stage)
@@ -276,7 +322,10 @@ onUnmounted(() => {
       :preview="preview"
       :show-native-layout-viewer="showNativeLayoutViewer"
       :native-layout-viewer-busy="nativeLayoutViewerBusy"
+      :show-chip-viewer="showChipViewer"
+      :chip-viewer-busy="chipViewerBusy"
       @openNativeLayoutViewer="onOpenNativeLayoutViewer"
+      @openChipViewer="onOpenChipViewer"
     />
 
     <div class="relative flex-1 overflow-hidden">
@@ -285,13 +334,17 @@ onUnmounted(() => {
       <div
         v-if="loadingState === 'loading'"
         :data-testid="
-          isPreparingNativeLayoutViewer ? 'native-layout-viewer-loading' : undefined
+          isPreparingChipViewer
+            ? 'chip-viewer-loading'
+            : isPreparingNativeLayoutViewer
+              ? 'native-layout-viewer-loading'
+              : undefined
         "
         class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 transition-opacity duration-200"
       >
         <div
           class="flex min-w-64 flex-col items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-5 py-4 text-center text-sm text-white/80 shadow-2xl backdrop-blur-sm"
-          :class="{ 'gap-3': isPreparingNativeLayoutViewer }"
+          :class="{ 'gap-3': isPreparingNativeLayoutViewer || isPreparingChipViewer }"
         >
           <div
             class="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white/80"
@@ -304,6 +357,13 @@ onUnmounted(() => {
             class="max-w-72 text-xs leading-5 text-white/55"
           >
             Preparing Native Layout Viewer package before opening the window.
+          </span>
+          <span
+            v-if="isPreparingChipViewer"
+            data-testid="chip-viewer-loading"
+            class="max-w-72 text-xs leading-5 text-white/55"
+          >
+            Preparing geometry snapshot before opening Chip Viewer.
           </span>
         </div>
       </div>

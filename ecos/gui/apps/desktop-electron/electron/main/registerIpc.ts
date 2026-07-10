@@ -34,6 +34,8 @@ import {
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
+  type ChipViewerOpenRequest,
+  type ChipViewerOpenResult,
   type LayoutViewerOpenRequest,
   type LayoutViewerOpenResult,
   type RemoteContentFile,
@@ -166,6 +168,9 @@ export interface DesktopBridgeServices {
   }
   layoutViewerService: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
+  }
+  chipViewerService: {
+    open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
   }
   workspaceResourceService: {
     getIndex(): Promise<WorkspaceResourceIndex>
@@ -1113,6 +1118,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.layoutViewerOpen, async (_event, request) => {
     return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
+  })
+
+  handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
+    return await services.chipViewerService.open(request as ChipViewerOpenRequest)
   })
 
   handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {

@@ -17,6 +17,8 @@ export type {
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   DesktopSettingsValue,
+  ChipViewerOpenRequest,
+  ChipViewerOpenResult,
   LayoutViewerOpenRequest,
   LayoutViewerOpenResult,
   PdkDetectedFiles,

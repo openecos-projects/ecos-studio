@@ -8,16 +8,23 @@ interface Props {
   showNativeLayoutViewer?: boolean
   /** Native viewer 拉起中 */
   nativeLayoutViewerBusy?: boolean
+  /** 是否显示「打开 Chip Viewer」工具 */
+  showChipViewer?: boolean
+  /** Chip Viewer 拉起中 */
+  chipViewerBusy?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   preview: null,
   showNativeLayoutViewer: false,
   nativeLayoutViewerBusy: false,
+  showChipViewer: false,
+  chipViewerBusy: false,
 })
 
 const emit = defineEmits<{
   openNativeLayoutViewer: []
+  openChipViewer: []
 }>()
 
 const isRulerEnabled = ref(true)
@@ -98,6 +105,22 @@ onUnmounted(() => {
           class="ri-window-line text-base"
           :class="{ 'animate-pulse': nativeLayoutViewerBusy }"
         ></i>
+      </button>
+      <button
+        v-if="showChipViewer"
+        type="button"
+        :disabled="chipViewerBusy"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
+        :class="
+          chipViewerBusy
+            ? 'text-(--text-secondary)'
+            : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
+        "
+        title="打开 Chip Viewer"
+        aria-label="打开 Chip Viewer"
+        @click="emit('openChipViewer')"
+      >
+        <i class="ri-cpu-line text-base" :class="{ 'animate-pulse': chipViewerBusy }"></i>
       </button>
     </div>
 

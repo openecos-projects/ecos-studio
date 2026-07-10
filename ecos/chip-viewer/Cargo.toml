@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/chipgeom-format",
+  "crates/chipgeom-reader",
+  "crates/chip-view-db",
+  "crates/chip-display",
+  "crates/chip-render",
+  "apps/chipgeom-probe-cli",
+  "apps/chip-viewer-native",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+bytemuck = { version = "1.19", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
+eframe = "0.31"
+egui = "0.31"
+memmap2 = "0.9"
+rstar = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

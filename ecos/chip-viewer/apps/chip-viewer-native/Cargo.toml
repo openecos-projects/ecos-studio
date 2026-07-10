@@ -1,0 +1,15 @@
+[package]
+name = "chip-viewer-native"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chip-display = { path = "../../crates/chip-display" }
+chip-view-db = { path = "../../crates/chip-view-db" }
+chipgeom-format = { path = "../../crates/chipgeom-format" }
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+serde_json.workspace = true

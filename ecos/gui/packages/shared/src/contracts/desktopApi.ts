@@ -143,6 +143,21 @@ export interface LayoutViewerOpenResult {
   spawned: boolean
 }
 
+export interface ChipViewerOpenRequest {
+  projectPath: string
+  step: string
+  mode?: 'view' | 'edit'
+  rebuildGeometry?: boolean
+}
+
+export interface ChipViewerOpenResult {
+  editCommandDirectory?: string
+  editResultDirectory?: string
+  geometryManifestPath: string
+  workspaceStepDirectory: string
+  spawned: boolean
+}
+
 export interface WorkspaceDirectoryReplacement {
   id: string
   targetPath: string
@@ -250,6 +265,9 @@ export interface DesktopApi {
   }
   layoutViewer: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
+  }
+  chipViewer: {
+    open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
   }
   workspaceResources: {
     getIndex(): Promise<WorkspaceResourceIndex>

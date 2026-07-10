@@ -1,0 +1,9 @@
+[package]
+name = "chipgeom-format"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+serde.workspace = true
