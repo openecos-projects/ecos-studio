@@ -13211,3 +13211,61 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 未来升级 ics55 版本或其 Makefile 新增 release 文件时，必须同步增加新的静态补充资产锁；否则 post-install 应失败而不是回退到未校验安装。
 - `supplemental_assets` 是 registry schema 的新增字段，所有消费该 registry 的安装器应升级到本次实现后再安装依赖补充资产的 PDK。
+
+# 第 221 次 开发
+
+## 开发目标
+
+提高 ECC-FE latest 资源发布流程的确定性、效率和并发安全性：阻止重叠发布，只重建受源码路径影响的资源，并缩短多个 split release 串行更新形成的混合版本窗口。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/package-release-assets.sh`
+  - 将 workflow 内联打包逻辑提取为按资源执行的脚本。
+  - 使用固定 locale/umask、commit timestamp、排序 tar、numeric owner 和 `gzip -n` 生成可复现归档及 metadata。
+  - 在临时目录组装资源并统一清理 Git 元数据、Python cache、仿真输出和波形文件。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/select-release-packages.sh`
+  - 根据 push 前后 commit 的路径差异选择 runtime、SoC、CPU RTL、difftest reference 和 examples。
+  - workflow/release 基础设施变化、手动触发、缺失 before commit 或 force-push 场景保守地重建全部资源。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/test-release-selection.sh`
+  - 覆盖 docs/test-only no-op、runtime、SoC/examples、difftest、CPU RTL、release 基础设施和强制全量选择。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/.github/workflows/release-latest.yml`
+  - 增加固定 concurrency group，禁止两个 latest release workflow 同时发布。
+  - 初次 checkout 不再递归下载全部 submodule；仅 CPU RTL 被选中时初始化 CPU submodule。
+  - 只打包和上传被选中的资源，每个资源使用独立短期 artifact。
+  - 使用 matrix 并行更新多个 release，缩短串行发布窗口。
+  - 每个 release 先发布 archive 与 `.sha256`，成功后最后发布 `.metadata.json`，保证 registry CI 只会在 archive 就绪后看到新锁信息。
+  - 为 package/publish job 增加超时和 fail-closed artifact 检查。
+- `/home/luyoung/ecos-studio/ecc-fe/.github/scripts/check-release-archives.sh`
+  - 支持只检查本次选择的资源，并保留无参数时全量检查的兼容行为。
+  - 额外禁止 `.mypy_cache` 和 `.ruff_cache` 进入 release。
+- `/home/luyoung/ecos-studio/ecc-fe`
+  - 主仓 submodule 指针更新到 ECC-FE 提交 `1a45167`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 latest release 可靠性改造。
+
+## 验证情况
+
+- 已对 5 个 release Bash 脚本执行 `bash -n`，全部通过。
+- 已执行 `.github/scripts/test-release-selection.sh`，7 组资源路径分类全部通过。
+- 已用真实 `HEAD^..HEAD` diff 验证选择器，只选择受影响的 runtime。
+- 已执行 `.github/scripts/check-no-tracked-waveforms.sh`，通过。
+- 已验证 archive checker 的选择性参数解析；缺失 runtime archive 时准确 fail-closed，未将 `dist` 误判为资源名。
+- 已使用 Ruby YAML parser 检查 workflow，确认 `package` 和 `publish` job 结构可解析。
+- 已执行 `git diff --check`，通过。
+- `/home/luyoung/ecos-studio/ecc-fe` 已提交 `1a45167`（`Harden selective latest releases`）。
+
+## 未执行项
+
+- 按项目约束，未执行实际 release 打包、`make`、Bazel build、pnpm build/dev、GUI 启动或 Electron 打包命令。
+- 未执行 GitHub Actions；matrix artifact 上传和跨仓 release 发布需要 commit/push 后由远端验证。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 确定性 tar/gzip 格式会让首次新 workflow 生成的 latest 归档 SHA 与旧包不同；release 成功后 registry lock CI 必须提交新的静态 SHA/size，客户端才能安装新包。
+- GitHub Releases 不支持跨多个 tag 的原子事务；本次通过 workflow concurrency、并行发布和 metadata-last 将窗口缩短并保持 fail-closed，但不能从平台层面完全消除窗口。
+- 本地按约束未实际生成大体积 CPU RTL release；归档内容契约仍会在远端 package job 中由 `check-release-archives.sh` 验证。
