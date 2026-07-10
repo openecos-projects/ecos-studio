@@ -449,7 +449,7 @@ class TestResourceRegistryV1:
                             "platforms": {
                                 "all-platform": {
                                     "url": "https://example.com/ics55-1.01.tar.gz",
-                                    "sha256": "abc123",
+                                    "sha256": "a" * 64,
                                     "size": 1024,
                                     "strip_prefix": "ics55",
                                 }
@@ -497,7 +497,7 @@ class TestResourceRegistryV1:
                 platforms={
                     "all-platform": {
                         "url": "https://example.com/ics55-1.01.tar.gz",
-                        "sha256": "abc123",
+                        "sha256": "a" * 64,
                         "size": 1024,
                     }
                 },
@@ -521,7 +521,7 @@ class TestResourceRegistryV1:
                             "platforms": {
                                 "all-platform": {
                                     "url": "https://example.com/ics55-1.01.tar.gz",
-                                    "sha256": "abc123",
+                                    "sha256": "a" * 64,
                                     "size": 1024,
                                     "strip_prefix": "ics55",
                                 }

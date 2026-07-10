@@ -13068,3 +13068,47 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 显式设置 `ECOS_FE_DEV_ROOT` 会有意覆盖 Resource Manager runtime；该环境变量应只用于开发和联调环境。
+
+# 第 218 次 开发
+
+## 开发目标
+
+统一 Python server 与 Electron Resource Manager 的资产锁和更新检查语义：安装只信任 registry 静态锁，远端 metadata/sidecar 只用于后台更新判断。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_asset_resolution.py`
+  - 覆盖 release metadata 解析、metadata 优先级、sidecar-only 安装拒绝和静态 size 要求。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/schemas.py`
+  - platform asset 强制包含 64 位十六进制 `sha256` 和正整数 `size`。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/asset_resolution.py`
+  - 安装解析只验证静态 registry lock，不再联网补全校验值。
+  - 更新检查优先解析 `metadata_url` 的 SHA/size，并兼容回退 `sha256_url`。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/router.py`
+  - Python 更新检查支持 metadata URL，并用统一 `update_url` 缓存和判断同版本 rolling asset 更新。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_router.py`
+  - 将 rolling release 夹具补全为静态 lock，并覆盖 metadata 更新和非阻塞列表加载。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_tools.py`
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_registry.py`
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_schemas.py`
+  - 更新测试资产为合法静态 SHA lock，并验证安装清单记录该 lock。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Python Resource Manager 资产语义修复。
+
+## 验证情况
+
+- 已执行相关 Python 文件的 `python3 -m py_compile`，通过。
+- 已执行 `.venv/bin/python -m pytest -q tests/resource`，275 个测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- `metadata_url` 不参与安装完整性校验；rolling release 变化后必须由 registry CI 提交新的静态 SHA/size，客户端才能安装新资产。

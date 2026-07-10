@@ -54,7 +54,7 @@ def _mock_registry_data() -> dict:
                         "platforms": {
                             "linux-x86_64": {
                                 "url": "https://example.com/yosys.tar.gz",
-                                "sha256": "abc123",
+                                "sha256": "a" * 64,
                                 "size": 52428800,
                             }
                         },
@@ -74,7 +74,7 @@ def _mock_registry_data_with_versions() -> dict:
             "platforms": {
                 "linux-x86_64": {
                     "url": "https://example.com/yosys-0.60.tar.gz",
-                    "sha256": "def456",
+                    "sha256": "b" * 64,
                     "size": 41943040,
                 }
             },
@@ -90,9 +90,30 @@ def _mock_registry_data_with_latest_sha_sidecar() -> dict:
         {
             "version": "latest",
             "platforms": {
+                        "linux-x86_64": {
+                            "url": "https://example.com/yosys-latest.tar.gz",
+                            "sha256": "a" * 64,
+                            "size": 52428800,
+                            "sha256_url": "https://example.com/yosys-latest.tar.gz.sha256",
+                }
+            },
+            "requires": [],
+        }
+    ]
+    return data
+
+
+def _mock_registry_data_with_latest_metadata() -> dict:
+    data = _mock_registry_data()
+    data["tools"][0]["versions"] = [
+        {
+            "version": "latest",
+            "platforms": {
                 "linux-x86_64": {
                     "url": "https://example.com/yosys-latest.tar.gz",
-                    "sha256_url": "https://example.com/yosys-latest.tar.gz.sha256",
+                    "sha256": "a" * 64,
+                    "size": 52428800,
+                    "metadata_url": "https://example.com/yosys-latest.metadata.json",
                 }
             },
             "requires": [],
@@ -586,14 +607,14 @@ class TestListResources:
             managed=True,
         )
 
-        with patch("ecos_server.resource.router.fetch_asset_sha256") as fetch_sha:
+        with patch("ecos_server.resource.router.fetch_asset_update_sha256") as fetch_sha:
             resp = client.get("/api/resources")
 
         assert resp.status_code == 200
         fetch_sha.assert_not_called()
         tool = next(r for r in resp.json()["resources"] if r["id"] == "tool:yosys")
         assert tool["status"] == "installed"
-        assert tool["size"] is None
+        assert tool["size"] == 52428800
         assert "update" not in tool["actions"]
         assert "update_check" not in tool["health"]
 
@@ -1190,7 +1211,7 @@ class TestResourceUpdateChecks:
         )
 
         with patch(
-            "ecos_server.resource.router.fetch_asset_sha256",
+            "ecos_server.resource.router.fetch_asset_update_sha256",
             AsyncMock(return_value=latest_sha),
         ) as fetch_sha:
             resp = client.post("/api/resources/check-updates")
@@ -1208,6 +1229,7 @@ class TestResourceUpdateChecks:
                 "status": "checked",
                 "update_available": True,
                 "error": None,
+                "update_url": "https://example.com/yosys-latest.tar.gz.sha256",
                 "sha256_url": "https://example.com/yosys-latest.tar.gz.sha256",
             }
         ]
@@ -1219,6 +1241,37 @@ class TestResourceUpdateChecks:
         assert tool["status"] == "update_available"
         assert "update" in tool["actions"]
         assert tool["health"]["update_check"]["sha256"] == latest_sha
+
+    def test_check_updates_uses_release_metadata(self, client: TestClient) -> None:
+        import ecos_server.resource.router as router_mod
+
+        latest_sha = "c" * 64
+        _patch_registry(client, _mock_registry_data_with_latest_metadata())
+        router_mod._inventory.add_tool(
+            name="yosys",
+            version="latest",
+            path="/tmp/ecos/tools/yosys/latest",
+            sha256="a" * 64,
+            detected_executables=["bin/yosys"],
+            active=True,
+            managed=True,
+        )
+
+        with patch(
+            "ecos_server.resource.router.fetch_asset_update_sha256",
+            AsyncMock(return_value=latest_sha),
+        ) as fetch_sha:
+            resp = client.post("/api/resources/check-updates")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["checked_count"] == 1
+        assert data["update_count"] == 1
+        assert data["resources"][0]["update_url"] == (
+            "https://example.com/yosys-latest.metadata.json"
+        )
+        assert data["resources"][0]["sha256_url"] is None
+        fetch_sha.assert_awaited_once()
 
     def test_check_updates_refreshes_registry_when_requested(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod
@@ -1235,7 +1288,7 @@ class TestResourceUpdateChecks:
         )
 
         with patch(
-            "ecos_server.resource.router.fetch_asset_sha256",
+            "ecos_server.resource.router.fetch_asset_update_sha256",
             AsyncMock(return_value="a" * 64),
         ):
             resp = client.post("/api/resources/check-updates", json={"refresh_registry": True})

@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from ecos_server.sse import event_manager
 
-from .asset_resolution import fetch_asset_sha256
+from .asset_resolution import asset_update_url, fetch_asset_update_sha256
 from .inventory import InventoryService, PdkInventoryEntry, ToolInventoryEntry
 from .jobs import JobTracker
 from .pdks import PdkResourceService
@@ -72,12 +72,13 @@ def _latest_has_update(
         return False
     if latest_version != installed_version:
         return True
-    if latest_version == "latest" and asset is not None and asset.sha256_url:
+    update_url = asset_update_url(asset) if asset is not None else None
+    if asset is not None and update_url:
         check = _update_check_cache.get(resource_id)
         return (
             check is not None
             and check.get("status") == "checked"
-            and check.get("sha256_url") == asset.sha256_url
+            and (check.get("update_url") or check.get("sha256_url")) == update_url
             and bool(check.get("sha256"))
             and check.get("sha256") != installed_sha256
         )
@@ -442,7 +443,7 @@ async def refresh_registry():
 
 @router.post("/check-updates")
 async def check_resource_updates(body: dict | None = None):
-    """Check installed rolling-release resources against remote .sha256 sidecars."""
+    """Check installed resources against release metadata or SHA256 sidecars."""
     refresh_registry_first = bool((body or {}).get("refresh_registry"))
     registry_svc = _require_registry()
     state = await (registry_svc.refresh() if refresh_registry_first else registry_svc.fetch())
@@ -462,7 +463,8 @@ async def check_resource_updates(body: dict | None = None):
     results: list[dict[str, object]] = []
 
     async def check_one(resource_id: str, installed_sha256: str, asset) -> None:
-        sha256 = await fetch_asset_sha256(asset)
+        update_url = asset_update_url(asset)
+        sha256 = await fetch_asset_update_sha256(asset)
         if not sha256:
             item = {
                 "resource_id": resource_id,
@@ -470,7 +472,8 @@ async def check_resource_updates(body: dict | None = None):
                 "sha256": None,
                 "status": "error",
                 "update_available": False,
-                "error": f"Unable to fetch SHA256 from {asset.sha256_url}",
+                "error": f"Unable to fetch update checksum from {update_url}",
+                "update_url": update_url,
                 "sha256_url": asset.sha256_url,
             }
         else:
@@ -481,6 +484,7 @@ async def check_resource_updates(body: dict | None = None):
                 "status": "checked",
                 "update_available": sha256 != installed_sha256,
                 "error": None,
+                "update_url": update_url,
                 "sha256_url": asset.sha256_url,
             }
         _update_check_cache[resource_id] = item
@@ -492,7 +496,7 @@ async def check_resource_updates(body: dict | None = None):
         if latest is None or inst is None or latest.version != inst.version:
             continue
         _, asset = _select_platform_asset(latest)
-        if asset is None or not asset.sha256_url:
+        if asset is None or not asset_update_url(asset):
             continue
         await check_one(f"{_TOOL_PREFIX}{tool.name}", inst.sha256, asset)
 
@@ -502,7 +506,7 @@ async def check_resource_updates(body: dict | None = None):
         if latest is None or inst is None or latest.version != inst.version:
             continue
         _, asset = _select_platform_asset(latest)
-        if asset is None or not asset.sha256_url:
+        if asset is None or not asset_update_url(asset):
             continue
         await check_one(f"{_PDK_PREFIX}{pdk.id}", inst.sha256, asset)
 

@@ -25,7 +25,7 @@ def _make_registry_fixture() -> dict:
                         "platforms": {
                             "linux-x86_64": {
                                 "url": "https://example.com/yosys-0.61.tar.gz",
-                                "sha256": "abc123",
+                                "sha256": "a" * 64,
                                 "size": 52428800,
                             }
                         },
@@ -50,7 +50,7 @@ def _make_pdk_fixture() -> dict:
                 "platforms": {
                     "all-platform": {
                         "url": "https://example.com/ics55-1.01.tar.gz",
-                        "sha256": "abc123",
+                        "sha256": "b" * 64,
                         "size": 1024,
                         "strip_prefix": "ics55",
                     }

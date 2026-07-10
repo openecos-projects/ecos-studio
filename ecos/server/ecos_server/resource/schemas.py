@@ -88,12 +88,27 @@ class PostInstallStep(BaseModel):
 
 class PlatformAsset(BaseModel):
     url: str
-    sha256: str = ""
+    sha256: str
     sha256_url: str | None = None
     metadata_url: str | None = None
-    size: int | None = None
+    size: int
     strip_prefix: str | None = None
     post_install: list[PostInstallStep] = Field(default_factory=list)
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+            raise ValueError("sha256 must contain exactly 64 hexadecimal characters")
+        return normalized
+
+    @field_validator("size")
+    @classmethod
+    def validate_size(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("size must be greater than zero")
+        return value
 
 
 class RegistryToolVersion(BaseModel):

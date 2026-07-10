@@ -2,6 +2,7 @@
 
 import logging
 import re
+from typing import Any
 
 import httpx
 
@@ -20,23 +21,55 @@ def parse_sha256_text(value: str) -> str | None:
     return None
 
 
-async def fetch_asset_sha256(asset: PlatformAsset) -> str | None:
-    if not asset.sha256_url:
+def parse_release_metadata(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
         return None
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(asset.sha256_url)
-            resp.raise_for_status()
-            return parse_sha256_text(resp.text)
-    except Exception as exc:
-        logger.debug("Failed to fetch SHA256 %s: %s", asset.sha256_url, exc)
+    sha256 = parse_sha256_text(str(value.get("sha256", "")))
+    size = value.get("size")
+    if not sha256 or not isinstance(size, int) or isinstance(size, bool) or size <= 0:
         return None
+    return {
+        "sha256": sha256,
+        "size": size,
+        "commit": str(value.get("commit", "")),
+        "built_at": str(value.get("built_at", "")),
+    }
+
+
+def asset_update_url(asset: PlatformAsset) -> str | None:
+    return asset.metadata_url or asset.sha256_url
+
+
+async def fetch_asset_update_sha256(asset: PlatformAsset) -> str | None:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        if asset.metadata_url:
+            try:
+                resp = await client.get(asset.metadata_url)
+                resp.raise_for_status()
+                metadata = parse_release_metadata(resp.json())
+                if metadata is not None:
+                    return str(metadata["sha256"])
+                logger.debug("Invalid release metadata from %s", asset.metadata_url)
+            except Exception as exc:
+                logger.debug("Failed to fetch metadata %s: %s", asset.metadata_url, exc)
+
+        if asset.sha256_url:
+            try:
+                resp = await client.get(asset.sha256_url)
+                resp.raise_for_status()
+                return parse_sha256_text(resp.text)
+            except Exception as exc:
+                logger.debug("Failed to fetch SHA256 %s: %s", asset.sha256_url, exc)
+    return None
 
 
 async def resolve_asset(asset: PlatformAsset) -> PlatformAsset:
-    sha256 = asset.sha256 or await fetch_asset_sha256(asset)
+    """Validate and return the immutable registry lock used for installation."""
+    sha256 = parse_sha256_text(asset.sha256)
     if not sha256:
-        raise ValueError("Resource asset has no sha256 or reachable sha256_url")
+        raise ValueError("Resource asset has no valid static sha256 lock")
+    if asset.size is None or asset.size <= 0:
+        raise ValueError("Resource asset has no valid static size lock")
     return PlatformAsset(
         url=asset.url,
         sha256=sha256,

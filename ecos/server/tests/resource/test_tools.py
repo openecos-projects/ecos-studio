@@ -74,7 +74,7 @@ def service(installer: MagicMock, inventory: InventoryService) -> ToolResourceSe
 def asset() -> PlatformAsset:
     return PlatformAsset(
         url="https://example.com/yosys-0.61.tar.gz",
-        sha256="abc123",
+        sha256="a" * 64,
         size=52428800,
     )
 
@@ -96,7 +96,7 @@ class TestToolInstall:
         assert entry is not None
         assert entry.name == "yosys"
         assert entry.version == "0.61"
-        assert entry.sha256 == "abc123"
+        assert entry.sha256 == "a" * 64
         assert entry.active is True
         assert entry.managed is True
         assert entry.detected_executables == ["bin/yosys"]
