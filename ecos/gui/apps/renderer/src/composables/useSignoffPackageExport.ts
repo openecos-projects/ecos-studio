@@ -1,6 +1,8 @@
 import { onUnmounted, watch, type Ref } from 'vue'
 import { appMenuActionIds } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
+import { resolveProjectFilePath, watchProjectFile } from '@/utils/projectFiles'
+import { resolveProjectPathAccess } from '@/utils/projectFs'
 
 interface SignoffProject {
   path?: string
@@ -58,6 +60,8 @@ export function useSignoffPackageExport({
   showToast,
 }: SignoffPackageExportDependencies) {
   let syncGeneration = 0
+  let watcherGeneration = 0
+  let unwatchFlowFile: (() => void) | null = null
   let unmounted = false
 
   async function setMenuEnabled(enabled: boolean): Promise<void> {
@@ -99,6 +103,60 @@ export function useSignoffPackageExport({
     }
   }
 
+  function cleanupFlowWatcher(): void {
+    watcherGeneration += 1
+    unwatchFlowFile?.()
+    unwatchFlowFile = null
+  }
+
+  async function startFlowWatcher(): Promise<void> {
+    cleanupFlowWatcher()
+    const generation = watcherGeneration
+    const workspacePath = currentProject.value?.path
+    if (!workspacePath || unmounted) return
+
+    try {
+      const flowPath = resolveProjectFilePath('home/flow.json', workspacePath)
+      const resolvedFlowPath = await resolveProjectPathAccess(flowPath)
+      if (
+        !resolvedFlowPath ||
+        unmounted ||
+        generation !== watcherGeneration ||
+        currentProject.value?.path !== workspacePath
+      ) {
+        return
+      }
+
+      const unwatch = await watchProjectFile(resolvedFlowPath, () => {
+        if (
+          unmounted ||
+          generation !== watcherGeneration ||
+          currentProject.value?.path !== workspacePath
+        ) {
+          return
+        }
+        void syncMenuEligibility()
+      })
+      if (
+        unmounted ||
+        generation !== watcherGeneration ||
+        currentProject.value?.path !== workspacePath
+      ) {
+        unwatch?.()
+        return
+      }
+      unwatchFlowFile = unwatch
+    } catch (error) {
+      if (
+        !unmounted &&
+        generation === watcherGeneration &&
+        currentProject.value?.path === workspacePath
+      ) {
+        console.warn('[signoff-export] Failed to watch home/flow.json:', error)
+      }
+    }
+  }
+
   watch(
     () => [
       currentProject.value?.path,
@@ -111,9 +169,18 @@ export function useSignoffPackageExport({
     { immediate: true },
   )
 
+  watch(
+    () => currentProject.value?.path,
+    () => {
+      void startFlowWatcher()
+    },
+    { immediate: true },
+  )
+
   onUnmounted(() => {
     unmounted = true
     syncGeneration += 1
+    cleanupFlowWatcher()
     void setMenuEnabled(false)
   })
 

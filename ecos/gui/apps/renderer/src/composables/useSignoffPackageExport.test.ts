@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope, type Ref } from 'vue'
 import { appMenuActionIds, type DesktopApi } from '@ecos-studio/shared'
 
@@ -64,15 +64,45 @@ function createApi() {
   const readParameters = vi.fn().mockResolvedValue({ Design: 'chip_top' })
   const saveFile = vi.fn().mockResolvedValue('/exports/chip_top_signoff_package.tar.gz')
   const execute = vi.fn().mockResolvedValue(cliResult(true, ['exported']))
+  const requestProjectPathAccess = vi.fn(async (path: string) => path)
+  const fileWatchers: Array<{
+    listener: (event: { subscriptionId: string; path: string; eventType: string }) => void
+    path: string
+    unwatch: Mock<() => void>
+  }> = []
+  const watchProjectFile = vi.fn(
+    async (
+      path: string,
+      listener: (event: {
+        subscriptionId: string
+        path: string
+        eventType: string
+      }) => void,
+    ) => {
+      const unwatch = vi.fn<() => void>()
+      fileWatchers.push({ listener, path, unwatch })
+      return unwatch
+    },
+  )
 
   testState.api = {
     menu: { setActionEnabled },
     workspaceResources: { readFlow, readParameters },
+    workspace: { requestProjectPathAccess, watchProjectFile },
     dialog: { saveFile },
     cli: { execute },
   } as unknown as DesktopApi
 
-  return { execute, readFlow, readParameters, saveFile, setActionEnabled }
+  return {
+    execute,
+    fileWatchers,
+    readFlow,
+    readParameters,
+    requestProjectPathAccess,
+    saveFile,
+    setActionEnabled,
+    watchProjectFile,
+  }
 }
 
 function mountComposable(
@@ -141,6 +171,148 @@ describe('useSignoffPackageExport menu eligibility', () => {
         true,
       )
     })
+  })
+
+  it('tracks flow eligibility as home/flow.json changes on disk', async () => {
+    const api = createApi()
+    api.readFlow
+      .mockResolvedValueOnce({ steps: [{ name: 'Harden', state: 'Running' }] })
+      .mockResolvedValueOnce(successfulFlow())
+      .mockResolvedValueOnce({ steps: [{ name: 'Harden', state: 'Failed' }] })
+    const mounted = mountComposable()
+    scope = mounted.scope
+
+    await vi.waitFor(() => {
+      expect(api.watchProjectFile).toHaveBeenCalledWith(
+        '/workspaces/chip/home/flow.json',
+        expect.any(Function),
+      )
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        false,
+      )
+    })
+
+    const watcher = api.fileWatchers[0]!
+    watcher.listener({
+      subscriptionId: 'flow-watch',
+      path: watcher.path,
+      eventType: 'change',
+    })
+    await vi.waitFor(() => {
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        true,
+      )
+    })
+
+    watcher.listener({
+      subscriptionId: 'flow-watch',
+      path: watcher.path,
+      eventType: 'change',
+    })
+    await vi.waitFor(() => {
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        false,
+      )
+    })
+  })
+
+  it('cleans the old watcher and ignores its callback after switching workspaces', async () => {
+    const api = createApi()
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.fileWatchers).toHaveLength(1))
+    const oldWatcher = api.fileWatchers[0]!
+
+    mounted.currentProject.value = { path: '/workspaces/b' }
+    await nextTick()
+
+    await vi.waitFor(() => {
+      expect(oldWatcher.unwatch).toHaveBeenCalledTimes(1)
+      expect(api.fileWatchers).toHaveLength(2)
+      expect(api.fileWatchers[1]?.path).toBe('/workspaces/b/home/flow.json')
+    })
+    const readCount = api.readFlow.mock.calls.length
+    oldWatcher.listener({
+      subscriptionId: 'old-flow-watch',
+      path: oldWatcher.path,
+      eventType: 'change',
+    })
+    await nextTick()
+
+    expect(api.readFlow).toHaveBeenCalledTimes(readCount)
+  })
+
+  it('cleans a delayed watcher registration after switching workspaces', async () => {
+    const api = createApi()
+    const firstRegistration = deferred<Mock<() => void>>()
+    const staleUnwatch = vi.fn<() => void>()
+    api.watchProjectFile.mockImplementationOnce(() => firstRegistration.promise)
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.watchProjectFile).toHaveBeenCalledTimes(1))
+    const staleListener = api.watchProjectFile.mock.calls[0]![1]
+
+    mounted.currentProject.value = { path: '/workspaces/b' }
+    await nextTick()
+    await vi.waitFor(() => expect(api.watchProjectFile).toHaveBeenCalledTimes(2))
+    firstRegistration.resolve(staleUnwatch)
+
+    await vi.waitFor(() => expect(staleUnwatch).toHaveBeenCalledTimes(1))
+    const readCount = api.readFlow.mock.calls.length
+    staleListener({
+      subscriptionId: 'stale-flow-watch',
+      path: '/workspaces/a/home/flow.json',
+      eventType: 'change',
+    })
+    await nextTick()
+    expect(api.readFlow).toHaveBeenCalledTimes(readCount)
+  })
+
+  it('cleans a delayed watcher registration after unmount', async () => {
+    const api = createApi()
+    const registration = deferred<Mock<() => void>>()
+    const unwatch = vi.fn<() => void>()
+    api.watchProjectFile.mockImplementationOnce(() => registration.promise)
+    const mounted = mountComposable()
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.watchProjectFile).toHaveBeenCalledTimes(1))
+
+    testState.unmountCallbacks.forEach((callback) => callback())
+    registration.resolve(unwatch)
+
+    await vi.waitFor(() => expect(unwatch).toHaveBeenCalledTimes(1))
+  })
+
+  it('keeps resource-version synchronization after watcher registration fails', async () => {
+    const api = createApi()
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    api.readFlow
+      .mockResolvedValueOnce({ steps: [{ name: 'Harden', state: 'Running' }] })
+      .mockResolvedValueOnce(successfulFlow())
+    api.watchProjectFile.mockRejectedValueOnce(new Error('watch unavailable'))
+    const mounted = mountComposable()
+    scope = mounted.scope
+
+    await vi.waitFor(() => {
+      expect(consoleWarn).toHaveBeenCalledWith(
+        '[signoff-export] Failed to watch home/flow.json:',
+        expect.objectContaining({ message: 'watch unavailable' }),
+      )
+    })
+    mounted.resourceVersions.value.flow += 1
+    await nextTick()
+
+    await vi.waitFor(() => {
+      expect(api.setActionEnabled).toHaveBeenLastCalledWith(
+        appMenuActionIds.exportSignoffPackage,
+        true,
+      )
+    })
+    expect(mounted.showToast).not.toHaveBeenCalled()
+    consoleWarn.mockRestore()
   })
 
   it('disables export without reading when no workspace is active', async () => {
@@ -232,6 +404,8 @@ describe('useSignoffPackageExport menu eligibility', () => {
         true,
       )
     })
+    await vi.waitFor(() => expect(api.fileWatchers).toHaveLength(1))
+    const watcher = api.fileWatchers[0]!
 
     testState.unmountCallbacks.forEach((callback) => callback())
 
@@ -240,6 +414,7 @@ describe('useSignoffPackageExport menu eligibility', () => {
         appMenuActionIds.exportSignoffPackage,
         false,
       )
+      expect(watcher.unwatch).toHaveBeenCalledTimes(1)
     })
   })
 
