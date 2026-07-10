@@ -12571,3 +12571,36 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 本次修复还未推送到 `ecc-fe main`，因此远端 release workflow 尚未重新触发；需要提交并推送后，`ecos-resource-assets` 的 latest releases 才会更新。
+
+# 第 205 次 开发
+
+## 开发目标
+
+修复 ECC-FE 仿真仅凭进程返回码为零就判定通过的问题，使普通 CPU 测试必须报告明确的 GOOD TRAP，同时保留 RT-Thread 和 CoreMark 已有的套件专用成功条件。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - 普通仿真只有在返回码为零、出现 `HIT GOOD TRAP`、且不存在 BAD TRAP、timeout 或错误标记时才判定通过。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加 GOOD TRAP、BAD TRAP、timeout 和非零返回码的判定测试，并更新成功 fixture 使用明确成功标记。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次仿真成功语义修复。
+
+## 验证情况
+
+- 已执行 `PYTHONPATH=. pytest -q test/test_engine_flow.py -k 'generic_simulation_requires_explicit_good_trap or sim_supports_extra_cpp_flags_and_runtime_args or sim_resolves_relative_include_flag_from_workspace_root or sim_runs_multiple_images_with_separate_logs or sim_single_image_args_still_writes_cases_structure or sim_can_reuse_existing_binary_without_recompile or rtthread_run_does_not_reuse_previous_cpu_tests_cases or rtthread_terminal_markers_are_required_for_success or coremark_sim_log_includes_readable_result_summary'`，9 个聚焦测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `787648b`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- SoC 顶层 trap 信号和 difftest 提交接口仍需后续修复；本次先保证报告层不会把无成功证据的普通仿真标记为 PASS。
