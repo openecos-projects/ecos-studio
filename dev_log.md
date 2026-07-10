@@ -12910,3 +12910,40 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 指纹覆盖 filelist 文件和其中显式引用的 RTL/header 文件；只存在于 include 目录、且未被 filelist 显式列出的间接 header 仍由后续工具读取，不会改变 prepare 的 RTL 路径清单。
+
+# 第 214 次 开发
+
+## 开发目标
+
+修复 Slang elaboration 只按日志文本判断成功、可能忽略 subprocess 非零退出码的问题。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/runner.py`
+  - 将 `elab_summary.json` 作为 elaboration 的持久化结果依据，同时要求 `status=pass`、`returncode=0` 且日志无错误。
+  - summary 缺失、损坏或 returncode 非法时失败关闭。
+  - step report 的 pass/fail 与 subprocess 返回码和 summary 状态保持一致。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 覆盖非零退出码但日志不含 `error:` 的失败场景。
+  - 更新成功/失败结果测试，使其包含真实运行路径会生成的 summary。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Slang 返回码修复。
+
+## 验证情况
+
+- 已执行相关 Python 文件的 `python3 -m py_compile`，通过。
+- 已执行 `PYTHONPATH=. pytest -q test/test_engine_flow.py -k 'elab_check_result or elab_parses or elab_scans or slang_defines'`，7 个测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `bbe6cd4`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- Slang 可执行文件不可用时会稳定返回失败；本修复不会提供工具回退路径，用户仍需通过 Resource Manager 安装 Slang 或显式配置可执行文件。
