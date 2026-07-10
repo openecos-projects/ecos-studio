@@ -13026,3 +13026,45 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 创建失败可能已由后端在目标目录留下部分 workspace 文件；本修复保留用户表单以便修正和重试，但不自动删除后端产生的文件。
+
+# 第 217 次 开发
+
+## 开发目标
+
+防止 Electron frontend adapter 静默用仓库内 ECC-FE 源码覆盖 Resource Manager 已安装 runtime，确保 GUI 测试和用户安装版本一致。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendAwareRuntimeAdapter.test.ts`
+  - 验证不再隐式扫描源码 checkout，并只接受包含 `fecompiler` 的显式开发根目录。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendAwareRuntimeAdapter.ts`
+  - 删除从 cwd 和 Electron 文件位置向上自动发现 `ecc-fe` 的逻辑。
+  - 仅通过 `ECOS_FE_DEV_ROOT` 或调用方显式 `frontendRoot` 启用源码覆盖。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.ts`
+  - 每次执行时默认使用 Resource Manager 动态环境中的 `ECOS_FE_COMPILER_ROOT`。
+  - 只有存在有效 frontend root 时才允许 Python module fallback，避免缺少安装时意外导入附近源码。
+  - subprocess cwd、compiler root 和 Python path 使用同一个已选 runtime 根目录。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.test.ts`
+  - 覆盖安装 runtime 默认优先和显式开发 root 覆盖两种路径。
+- `/home/luyoung/ecos-studio/ecos/gui/README.md`
+  - 记录 `ECOS_FE_DEV_ROOT` 开发覆盖方式和默认安装 runtime 语义。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次运行时来源隔离修复。
+
+## 验证情况
+
+- 已执行 `pnpm run typecheck`，通过。
+- 已执行 `pnpm exec vitest run electron/services/frontendCliAdapter.test.ts electron/services/frontendAwareRuntimeAdapter.test.ts`，10 个测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 显式设置 `ECOS_FE_DEV_ROOT` 会有意覆盖 Resource Manager runtime；该环境变量应只用于开发和联调环境。

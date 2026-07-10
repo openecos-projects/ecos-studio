@@ -358,7 +358,7 @@ export class FrontendCliAdapter {
   private readonly hasExplicitCommand: boolean
   private readonly env: NodeJS.ProcessEnv
   private readonly envProvider?: RuntimeEnvProvider
-  private readonly frontendRoot: string
+  private readonly frontendRoot?: string
   private readonly moduleArgs: string[]
   private readonly spawnImpl: SpawnLike
   private readonly tempDir: string
@@ -368,9 +368,7 @@ export class FrontendCliAdapter {
     this.hasExplicitCommand = Boolean(options.command)
     this.env = { ...(options.env ?? process.env) }
     this.envProvider = options.envProvider
-    this.frontendRoot = options.frontendRoot
-      ?? process.env.ECOS_FE_COMPILER_ROOT
-      ?? join(process.cwd(), 'ecc-fe')
+    this.frontendRoot = options.frontendRoot?.trim() || undefined
     this.command = options.command ?? DEFAULT_FRONTEND_CLI_COMMAND
     this.moduleArgs = options.moduleArgs ?? defaultModuleArgsForCommand(this.command)
     this.spawnImpl = options.spawn ?? spawnChild
@@ -540,6 +538,8 @@ export class FrontendCliAdapter {
     context: DesktopRuntimeAdapterContext,
   ): Promise<DesktopCliCommandResult> {
     const baseEnv = this.envProvider ? await this.resolveProvidedEnv() : this.env
+    const frontendRoot = this.frontendRoot
+      ?? readString(baseEnv.ECOS_FE_COMPILER_ROOT).trim()
     const runtimeCommandOverride = readString(baseEnv.ECOS_FE_CLI).trim()
     const command = !this.hasExplicitCommand && runtimeCommandOverride
       ? runtimeCommandOverride
@@ -547,17 +547,19 @@ export class FrontendCliAdapter {
     const moduleArgs = !this.hasExplicitCommand && runtimeCommandOverride
       ? defaultModuleArgsForCommand(command)
       : this.moduleArgs
-    const lookupEnv = frontendRuntimeEnv(baseEnv, this.frontendRoot, { includePythonPath: false })
+    const lookupEnv = frontendRuntimeEnv(baseEnv, frontendRoot, { includePythonPath: false })
     const resolvedCommand = resolveCommandFromPath(command, lookupEnv)
+    const hasFrontendRoot = Boolean(frontendRoot && existsSync(join(frontendRoot, 'fecompiler')))
     const shouldUsePythonFallback = !this.hasExplicitCommand
       && !runtimeCommandOverride
       && command === DEFAULT_FRONTEND_CLI_COMMAND
       && resolvedCommand === '(not found)'
-    const env = frontendRuntimeEnv(baseEnv, this.frontendRoot, {
+      && hasFrontendRoot
+    const env = frontendRuntimeEnv(baseEnv, frontendRoot, {
       includePythonPath: shouldUsePythonFallback || isPythonCommand(command),
     })
     const spawnCommand = shouldUsePythonFallback
-      ? resolveFrontendPythonCommand(env, this.frontendRoot)
+      ? resolveFrontendPythonCommand(env, frontendRoot)
       : command
     const spawnArgs = [
       ...(shouldUsePythonFallback ? PYTHON_FRONTEND_MODULE_ARGS : moduleArgs),
@@ -579,11 +581,11 @@ export class FrontendCliAdapter {
         shouldUsePythonFallback ? resolveCommandFromPath(spawnCommand, env) : resolvedCommand,
         spawnArgs.join(' '),
         pathHeadForEnv(env),
-        this.frontendRoot,
+        frontendRoot || '(none)',
       )
 
       const child = this.spawnImpl(spawnCommand, spawnArgs, {
-        cwd: existsSync(this.frontendRoot) ? this.frontendRoot : undefined,
+        cwd: hasFrontendRoot ? frontendRoot : undefined,
         detached: process.platform !== 'win32',
         env,
         stdio: ['ignore', 'pipe', 'pipe'],

@@ -12,6 +12,11 @@ interface SpawnCall {
   command: string
 }
 
+interface SpawnOptions {
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+}
+
 class FakeChild extends EventEmitter {
   readonly stdout = new EventEmitter()
   readonly stderr = new EventEmitter()
@@ -32,9 +37,11 @@ function request(
 function createSpawnHarness() {
   const children: FakeChild[] = []
   const calls: SpawnCall[] = []
-  const spawn = vi.fn((command: string, args: string[]) => {
+  const options: SpawnOptions[] = []
+  const spawn = vi.fn((command: string, args: string[], spawnOptions?: SpawnOptions) => {
     const child = new FakeChild()
     calls.push({ args, command })
+    options.push(spawnOptions ?? {})
     children.push(child)
     return child as never
   })
@@ -42,6 +49,7 @@ function createSpawnHarness() {
   return {
     calls,
     children,
+    options,
     spawn: spawn as unknown as typeof spawnChild,
   }
 }
@@ -339,5 +347,74 @@ describe('FrontendCliAdapter', () => {
       ok: true,
       response: 'success',
     })
+  })
+
+  it('uses the Resource Manager frontend root without a source-tree override', async () => {
+    const tempDir = createTempDir()
+    const installedRoot = join(tempDir, 'installed-ecc-fe')
+    const installedCli = join(installedRoot, 'bin', 'ecc-fe')
+    mkdirSync(join(installedRoot, 'fecompiler'), { recursive: true })
+    mkdirSync(join(installedRoot, 'bin'), { recursive: true })
+    writeFileSync(installedCli, '')
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      env: { PATH: '' },
+      envProvider: async () => ({
+        ECOS_FE_CLI: installedCli,
+        ECOS_FE_COMPILER_ROOT: installedRoot,
+        PATH: '',
+      }),
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    await vi.waitFor(() => expect(harness.calls).toHaveLength(1))
+    expect(harness.calls[0].command).toBe(installedCli)
+    expect(harness.options[0].cwd).toBe(installedRoot)
+    expect(harness.options[0].env?.ECOS_FE_COMPILER_ROOT).toBe(installedRoot)
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+    await expect(listPromise).resolves.toMatchObject({ response: 'success' })
+  })
+
+  it('only overrides the installed frontend root when a development root is explicit', async () => {
+    const tempDir = createTempDir()
+    const installedRoot = join(tempDir, 'installed-ecc-fe')
+    const developmentRoot = join(tempDir, 'development-ecc-fe')
+    const installedCli = join(installedRoot, 'bin', 'ecc-fe')
+    mkdirSync(join(installedRoot, 'fecompiler'), { recursive: true })
+    mkdirSync(join(installedRoot, 'bin'), { recursive: true })
+    mkdirSync(join(developmentRoot, 'fecompiler'), { recursive: true })
+    writeFileSync(installedCli, '')
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      envProvider: async () => ({
+        ECOS_FE_CLI: installedCli,
+        ECOS_FE_COMPILER_ROOT: installedRoot,
+        PATH: '',
+      }),
+      frontendRoot: developmentRoot,
+      spawn: harness.spawn,
+    })
+
+    const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
+
+    await vi.waitFor(() => expect(harness.calls).toHaveLength(1))
+    expect(harness.options[0].cwd).toBe(developmentRoot)
+    expect(harness.options[0].env?.ECOS_FE_COMPILER_ROOT).toBe(developmentRoot)
+
+    complete(harness.children[0], {
+      cmd: 'catalog_list',
+      data: {},
+      message: ['catalog loaded'],
+      response: 'success',
+    })
+    await expect(listPromise).resolves.toMatchObject({ response: 'success' })
   })
 })
