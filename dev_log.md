@@ -13200,7 +13200,7 @@ fatal error: driver/difftest.h: No such file or directory
 - 已执行 Electron TypeScript typecheck，通过。
 - 已执行 Electron 全量 Vitest，38 个测试文件、270 个测试全部通过。
 - 已执行相关 Python 文件的 Ruff check，并通过 `git diff --check`。
-- `/home/luyoung/ecos-registry` 已提交 `1b46994`（`fix: lock PDK supplemental assets`）。
+- `/home/luyoung/ecos-registry` 已提交并 rebase 为 `4412398`（`fix: lock PDK supplemental assets`）。
 
 ## 未执行项
 
