@@ -5,6 +5,7 @@ interface AppMenuActionDependencies {
   navigateToWorkspace(): void
   openDocumentation(): Promise<void>
   openProject(): Promise<boolean | undefined>
+  exportSignoffPackage?(): void | Promise<void>
   reconfigureWorkspace?(): void | Promise<void>
   showAboutDialog(): void
   showNewProjectWizard(): void
@@ -15,6 +16,7 @@ export function useAppMenuActions({
   navigateToWorkspace,
   openDocumentation,
   openProject,
+  exportSignoffPackage,
   reconfigureWorkspace,
   showAboutDialog,
   showNewProjectWizard,
@@ -35,6 +37,9 @@ export function useAppMenuActions({
         break
       case appMenuActionIds.reconfigureWorkspace:
         await reconfigureWorkspace?.()
+        break
+      case appMenuActionIds.exportSignoffPackage:
+        await exportSignoffPackage?.()
         break
       case appMenuActionIds.documentation:
         await openDocumentation()
@@ -65,6 +70,9 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.reconfigureWorkspace]: () => {
       void handleMenuAction(appMenuActionIds.reconfigureWorkspace)
+    },
+    [appMenuActionIds.exportSignoffPackage]: () => {
+      void handleMenuAction(appMenuActionIds.exportSignoffPackage)
     },
   })
 

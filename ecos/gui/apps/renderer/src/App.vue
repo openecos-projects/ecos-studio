@@ -129,6 +129,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
+import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
@@ -167,6 +168,7 @@ const isWelcome = computed(() => route.path === '/')
 const {
   loadRecentProjects,
   currentProject,
+  resourceVersions,
   openProject,
   newProject,
   closeProject,
@@ -178,6 +180,11 @@ const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
+const { exportSignoffPackage } = useSignoffPackageExport({
+  currentProject,
+  resourceVersions,
+  showToast,
+})
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
@@ -767,6 +774,7 @@ const { handleMenuAction } = useAppMenuActions({
   },
   showNewProjectWizard: showCreateWorkspaceWizard,
   reconfigureWorkspace: openWorkspaceReconfigureWizard,
+  exportSignoffPackage,
   manageDesignFiles: openManageDialog,
 })
 useAppWindowClose(closeProject)
