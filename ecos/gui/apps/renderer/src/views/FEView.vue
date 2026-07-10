@@ -125,7 +125,12 @@
 
     </div>
 
-    <FrontendProjectWizard v-if="showWizard" @close="showWizard = false" @create="handleWizardCreate" />
+    <FrontendProjectWizard
+      v-if="showWizard"
+      :creating="wizardCreating"
+      @close="closeWizard"
+      @create="handleWizardCreate"
+    />
   </div>
 </template>
 
@@ -146,6 +151,7 @@ const {
 } = useWorkspace()
 
 const showWizard = ref(false)
+const wizardCreating = ref(false)
 const showAllProjects = ref(false)
 
 const frontendProjects = computed(() => {
@@ -179,12 +185,23 @@ const handleRemoveRecent = async (projectId: string) => {
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
-  showWizard.value = false
-  const success = await newProject({
-    ...config,
-    designTool: 'frontend'
-  })
-  if (success) router.push('/workspace')
+  if (wizardCreating.value) return
+  wizardCreating.value = true
+  try {
+    const success = await newProject({
+      ...config,
+      designTool: 'frontend'
+    })
+    if (!success) return
+    showWizard.value = false
+    await router.push('/workspace')
+  } finally {
+    wizardCreating.value = false
+  }
+}
+
+const closeWizard = () => {
+  if (!wizardCreating.value) showWizard.value = false
 }
 
 const formatDate = (date: Date) => {

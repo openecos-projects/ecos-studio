@@ -5,8 +5,9 @@
       <div class="absolute left-0 right-0 top-0 h-1 bg-(--accent-color)"></div>
 
       <button
-        class="absolute right-6 top-6 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-(--bg-secondary)/80 text-(--text-secondary) transition-colors hover:bg-(--border-color) hover:text-(--text-primary)"
-        @click="$emit('close')"
+        class="absolute right-6 top-6 z-20 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-(--bg-secondary)/80 text-(--text-secondary) transition-colors hover:bg-(--border-color) hover:text-(--text-primary) disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="isCreating"
+        @click="requestClose"
       >
         <i class="ri-close-line text-lg"></i>
       </button>
@@ -391,8 +392,9 @@
 
             <div class="flex items-center gap-4">
               <button
-                class="cursor-pointer rounded-xl px-6 py-3 font-semibold text-(--text-secondary) transition-colors hover:bg-(--bg-secondary)/50 hover:text-(--text-primary)"
-                @click="$emit('close')"
+                class="cursor-pointer rounded-xl px-6 py-3 font-semibold text-(--text-secondary) transition-colors hover:bg-(--bg-secondary)/50 hover:text-(--text-primary) disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="isCreating"
+                @click="requestClose"
               >
                 Cancel
               </button>
@@ -458,6 +460,13 @@ interface Emits {
   (e: 'create', config: WorkspaceConfig): void
 }
 
+interface Props {
+  creating?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  creating: false,
+})
 const emit = defineEmits<Emits>()
 
 function createEmptyCatalog(): FrontendCatalogPayload {
@@ -479,7 +488,7 @@ function createEmptyCatalog(): FrontendCatalogPayload {
 
 const currentStep = ref(1)
 const highestStep = ref(1)
-const isCreating = ref(false)
+const isCreating = computed(() => props.creating)
 const catalogLoading = ref(false)
 const catalogError = ref('')
 const validationBusy = ref(false)
@@ -926,29 +935,28 @@ const handleStepClick = (targetStep: number) => {
   }
 }
 
-const createProject = async () => {
-  if (!validationOk.value || !selectedCore.value || !selectedSocHarness.value) return
+const createProject = () => {
+  if (isCreating.value || !validationOk.value || !selectedCore.value || !selectedSocHarness.value) return
   syncParameters()
-  isCreating.value = true
-  try {
-    emit('create', {
-      ...config.value,
-      designTool: 'frontend',
-      parameters: {
-        ...config.value.parameters,
-        frontend_core_id: selectedCore.value.id,
-        core_id: selectedCore.value.id,
-        soc_harness_id: selectedSocHarness.value.id,
-        soc_variant: config.value.parameters.soc_variant || String(selectedSocHarness.value.variant || 'soc1'),
-        toolchain_id: selectedToolchainId.value,
-        test_suite_id: selectedTestSuiteId.value,
-        sim_program_link_base: validation.value?.normalized?.core_sim_program_link_base || stringField(selectedCore.value, 'sim_program_link_base'),
-      },
-      rtl_list: [],
-    })
-  } finally {
-    isCreating.value = false
-  }
+  emit('create', {
+    ...config.value,
+    designTool: 'frontend',
+    parameters: {
+      ...config.value.parameters,
+      frontend_core_id: selectedCore.value.id,
+      core_id: selectedCore.value.id,
+      soc_harness_id: selectedSocHarness.value.id,
+      soc_variant: config.value.parameters.soc_variant || String(selectedSocHarness.value.variant || 'soc1'),
+      toolchain_id: selectedToolchainId.value,
+      test_suite_id: selectedTestSuiteId.value,
+      sim_program_link_base: validation.value?.normalized?.core_sim_program_link_base || stringField(selectedCore.value, 'sim_program_link_base'),
+    },
+    rtl_list: [],
+  })
+}
+
+const requestClose = () => {
+  if (!isCreating.value) emit('close')
 }
 
 const CatalogCard = defineComponent({

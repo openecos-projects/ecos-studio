@@ -12988,3 +12988,41 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 新 GUI 需要 catalog 提供 `required_cpu_top_port_contract` 才会展示完整 IO 示例；字段缺失或损坏时会隐藏示例，而不会回退到可能过期的静态端口副本。
+
+# 第 216 次 开发
+
+## 开发目标
+
+修复 frontend workspace 创建失败时向导被提前卸载、用户输入丢失的问题，并让创建中的 loading/防重复提交状态反映真实异步任务。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FEView.creation.test.ts`
+  - 检查向导只在创建成功后关闭，并覆盖创建期间的重复提交和关闭保护。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FEView.vue`
+  - 在父视图持有 workspace 创建状态。
+  - `newProject()` 失败时保留向导实例及全部表单状态，成功后才关闭并跳转。
+  - 创建期间拒绝重复创建和关闭请求。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 由父组件 `creating` prop 驱动真实 loading 状态，不再在同步 `emit()` 后立即清除状态。
+  - 创建期间禁用提交、取消和关闭按钮。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次向导状态保留修复。
+
+## 验证情况
+
+- 已执行 `pnpm run typecheck`，通过。
+- 已执行 `pnpm exec vitest run src/views/FEView.creation.test.ts`，2 个测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 创建失败可能已由后端在目标目录留下部分 workspace 文件；本修复保留用户表单以便修正和重试，但不自动删除后端产生的文件。
