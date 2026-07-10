@@ -2550,22 +2550,28 @@ describe('ResourceManagerService', () => {
     })
   })
 
-  it('pre-downloads PDK release assets before running Makefile post-install steps', async () => {
+  it('downloads and verifies locked PDK supplemental assets before post-install', async () => {
     const root = await createTempDir('ecos-resources-')
-    const archive = await createPdkArchive(root, {
-      makefileContent: [
-        'RELEASE_FILE_LIB := ics55_mock_liberty.tar.bz2 \\',
-        '                    ics55_mock_gds.tar.bz2',
-        'RELEASE_FILE := $(RELEASE_FILE_LIB)',
-        '',
-        'unzip:',
-        '\t@echo unzip',
-        '',
-      ].join('\n'),
-    })
+    const archive = await createPdkArchive(root)
     const archiveBytes = await readFile(archive.path)
     const registryPath = join(root, 'registry.json')
     const archiveUrl = 'https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz'
+    const supplemental = [
+      {
+        path: 'ics55_mock_liberty.tar.bz2',
+        url: 'https://example.com/ics55_mock_liberty.tar.bz2',
+        payload: Buffer.from('locked liberty payload'),
+      },
+      {
+        path: 'nested/ics55_mock_gds.tar.bz2',
+        url: 'https://example.com/ics55_mock_gds.tar.bz2',
+        payload: Buffer.from('locked gds payload'),
+      },
+    ].map((asset) => ({
+      ...asset,
+      sha256: createHash('sha256').update(asset.payload).digest('hex'),
+      size: asset.payload.byteLength,
+    }))
     const fetchedUrls: string[] = []
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const requestUrl = String(url)
@@ -2573,12 +2579,16 @@ describe('ResourceManagerService', () => {
       if (requestUrl === archiveUrl) {
         return new Response(archiveBytes)
       }
-      return new Response(new TextEncoder().encode(`payload for ${requestUrl}`))
+      const asset = supplemental.find((candidate) => candidate.url === requestUrl)
+      return asset ? new Response(asset.payload) : new Response(null, { status: 404 })
     })
     const postInstallRunner = vi.fn(async (_command: string, _args: string[], options?: { cwd?: string }) => {
       const cwd = options?.cwd ?? root
-      await expect(readFile(join(cwd, 'ics55_mock_liberty.tar.bz2'), 'utf8')).resolves.toContain('payload for')
-      await expect(readFile(join(cwd, 'ics55_mock_gds.tar.bz2'), 'utf8')).resolves.toContain('payload for')
+      await expect(readFile(join(cwd, supplemental[0].path))).resolves.toEqual(supplemental[0].payload)
+      await expect(readFile(join(cwd, supplemental[1].path))).resolves.toEqual(supplemental[1].payload)
+    })
+    const verifySha256 = vi.fn(async (path: string, expected: string) => {
+      return createHash('sha256').update(await readFile(path)).digest('hex') === expected
     })
     await writeFile(registryPath, JSON.stringify({
       schema_version: 2,
@@ -2593,9 +2603,15 @@ describe('ResourceManagerService', () => {
               platforms: {
                 'all-platform': {
                   url: archiveUrl,
-                  sha256: 'fixture-pdk-sha',
+                  sha256: createHash('sha256').update(archiveBytes).digest('hex'),
                   size: archiveBytes.byteLength,
                   strip_prefix: 'icsprout55-pdk-1.10.100',
+                  supplemental_assets: supplemental.map(({ path, url, sha256, size }) => ({
+                    path,
+                    url,
+                    sha256,
+                    size,
+                  })),
                   post_install: [
                     {
                       command: ['make', 'unzip'],
@@ -2616,17 +2632,130 @@ describe('ResourceManagerService', () => {
       pdksDir: join(root, 'data', 'pdks'),
       commandRunner: postInstallRunner,
       fetchImpl: fetchImpl as typeof fetch,
-      sha256Verifier: vi.fn(async () => true),
+      sha256Verifier: verifySha256,
     })
 
     await service.installResource('pdk:ics55', '1.10.100')
 
-    expect(fetchedUrls).toEqual(expect.arrayContaining([
+    expect(fetchedUrls).toEqual([
       archiveUrl,
-      'https://github.com/openecos-projects/icsprout55-pdk/releases/download/v1.10.100/ics55_mock_liberty.tar.bz2',
-      'https://github.com/openecos-projects/icsprout55-pdk/releases/download/v1.10.100/ics55_mock_gds.tar.bz2',
-    ]))
+      supplemental[0].url,
+      supplemental[1].url,
+    ])
+    expect(verifySha256).toHaveBeenCalledTimes(3)
     expect(postInstallRunner).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects malformed or unlocked PDK supplemental assets before post-install', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const commandRunner = vi.fn(async () => undefined)
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [],
+      pdks: [
+        {
+          id: 'ics55',
+          display_name: 'ICsprout 55nm PDK',
+          versions: [
+            {
+              version: '1.10.100',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'icsprout55-pdk-1.10.100',
+                  supplemental_assets: [
+                    {
+                      path: '../outside.tar.bz2',
+                      url: 'https://example.com/outside.tar.bz2',
+                      sha256: 'a'.repeat(64),
+                      size: 10,
+                    },
+                  ],
+                  post_install: [{ command: ['make', 'unzip'], cwd: '.' }],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      commandRunner,
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(service.installResource('pdk:ics55', '1.10.100')).rejects.toThrow(
+      'Invalid supplemental asset path: ../outside.tar.bz2',
+    )
+    expect(commandRunner).not.toHaveBeenCalled()
+    await expect(readFile(join(root, 'outside.tar.bz2'))).rejects.toThrow()
+  })
+
+  it('rejects PDK supplemental asset size and checksum mismatches', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const payload = Buffer.from('supplemental payload')
+    const cases = [
+      { name: 'size', size: payload.byteLength + 1, sha256: createHash('sha256').update(payload).digest('hex'), error: 'size mismatch' },
+      { name: 'sha', size: payload.byteLength, sha256: '0'.repeat(64), error: 'SHA256 verification failed' },
+    ]
+
+    for (const mismatch of cases) {
+      const caseRoot = join(root, mismatch.name)
+      const registryPath = join(caseRoot, 'registry.json')
+      await mkdir(caseRoot, { recursive: true })
+      await writeFile(registryPath, JSON.stringify({
+        schema_version: 2,
+        tools: [],
+        pdks: [{
+          id: 'ics55',
+          display_name: 'ICsprout 55nm PDK',
+          versions: [{
+            version: '1.10.100',
+            platforms: {
+              'all-platform': {
+                url: `file://${archive.path}`,
+                sha256: archive.sha256,
+                size: archive.size,
+                strip_prefix: 'icsprout55-pdk-1.10.100',
+                supplemental_assets: [{
+                  path: 'locked.tar.bz2',
+                  url: 'https://example.com/locked.tar.bz2',
+                  sha256: mismatch.sha256,
+                  size: mismatch.size,
+                }],
+                post_install: [{ command: ['make', 'unzip'], cwd: '.' }],
+              },
+            },
+          }],
+        }],
+      }), 'utf8')
+      const commandRunner = vi.fn(async () => undefined)
+      const verifySha256 = vi.fn(async (path: string, expected: string) => {
+        if (expected === archive.sha256) return true
+        return createHash('sha256').update(await readFile(path)).digest('hex') === expected
+      })
+      const service = new ResourceManagerService({
+        registryUrl: `file://${registryPath}`,
+        resourcesDir: join(caseRoot, 'state', 'resources'),
+        toolsDir: join(caseRoot, 'data', 'tools'),
+        pdksDir: join(caseRoot, 'data', 'pdks'),
+        commandRunner,
+        fetchImpl: vi.fn(async () => new Response(payload)) as typeof fetch,
+        sha256Verifier: verifySha256,
+      })
+
+      await expect(service.installResource('pdk:ics55', '1.10.100')).rejects.toThrow(mismatch.error)
+      expect(commandRunner).not.toHaveBeenCalled()
+    }
   })
 
   it('keeps post-install command failures concise when commands emit large output', async () => {

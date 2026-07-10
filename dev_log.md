@@ -13151,3 +13151,63 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - registry 的 `requires` 当前只包含资源 ID、不包含版本范围；依赖始终按对应资源的 registry 最新版本和静态 lock 解析。
+
+# 第 220 次 开发
+
+## 开发目标
+
+修复 ics55 PDK 安装期间由 Makefile 隐式下载未校验 release 文件的问题，将所有补充资产纳入 registry 静态锁，并让 Electron 与 Python Resource Manager 在 post-install 前执行一致的路径、大小和 SHA-256 校验。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-registry/tool-registry.json`
+  - 为 ics55 v1.10.100 固定 7 个补充 release 资产的相对路径、URL、SHA-256 和精确大小。
+- `/home/luyoung/ecos-registry/.github/scripts/validate_registry.py`
+  - 增加 `supplemental_assets` schema 校验、重复路径检查、跨平台路径安全检查和 URL 可达性检查。
+- `/home/luyoung/ecos-registry/tests/test_validate_registry.py`
+  - 覆盖补充资产缺字段、未知字段、路径穿越、重复路径和非法静态锁。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 删除根据 PDK Makefile 和 GitHub tag 动态推导下载 URL 的逻辑。
+  - 改为只下载 registry 明确列出的补充资产，在 staging 内校验精确大小与 SHA-256 后原子放置，再运行 post-install。
+  - 拒绝重复、越界、Windows drive/ADS、含空白或控制字符的补充资产路径，并在失败时清理临时文件和 staging。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 覆盖锁定补充资产成功安装、post-install 顺序、路径穿越、size 不匹配和 SHA-256 不匹配。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/schemas.py`
+  - 增加 `SupplementalAsset` 模型和严格的相对路径、SHA-256、正整数 size 校验。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/asset_resolution.py`
+  - 安装锁解析时保留补充资产清单。
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/pdks.py`
+  - Python PDK 安装路径在 post-install 前下载、验证并原子放置全部补充资产，失败时不注册或替换 PDK。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_asset_resolution.py`
+  - 覆盖安装锁解析保留补充资产。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_pdks.py`
+  - 覆盖 Python 补充资产安装顺序、成功校验、size/SHA 失败及 staging 清理。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_schemas.py`
+  - 覆盖补充资产路径和 size 的严格模型校验。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 PDK 补充资产锁定修复。
+
+## 验证情况
+
+- 已执行 registry 离线 validator 和 `tests.test_validate_registry`，19 个测试全部通过。
+- 已执行 registry `--check-urls`，主资产、sidecar 和 7 个 ics55 补充资产 URL 全部可达。
+- 已通过 GitHub release API 核对 7 个 ics55 文件的名称、size 和 SHA-256 digest，全部与 registry 一致。
+- 已执行 Python server `tests/resource` 全量测试，299 个测试全部通过。
+- 已执行 Electron TypeScript typecheck，通过。
+- 已执行 Electron 全量 Vitest，38 个测试文件、270 个测试全部通过。
+- 已执行相关 Python 文件的 Ruff check，并通过 `git diff --check`。
+- `/home/luyoung/ecos-registry` 已提交 `1b46994`（`fix: lock PDK supplemental assets`）。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 未来升级 ics55 版本或其 Makefile 新增 release 文件时，必须同步增加新的静态补充资产锁；否则 post-install 应失败而不是回退到未校验安装。
+- `supplemental_assets` 是 registry schema 的新增字段，所有消费该 registry 的安装器应升级到本次实现后再安装依赖补充资产的 PDK。

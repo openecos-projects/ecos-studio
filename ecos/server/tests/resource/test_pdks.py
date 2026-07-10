@@ -8,7 +8,12 @@ import pytest
 
 from ecos_server.resource.inventory import InventoryService
 from ecos_server.resource.pdks import PdkResourceService
-from ecos_server.resource.schemas import PlatformAsset, PostInstallStep, ResourceAction
+from ecos_server.resource.schemas import (
+    PlatformAsset,
+    PostInstallStep,
+    ResourceAction,
+    SupplementalAsset,
+)
 
 
 def _make_pdk_tarball(tmp_path: Path, prefix: str = "ics55-pdk") -> tuple[Path, str, int]:
@@ -508,6 +513,132 @@ async def test_install_managed_pdk_runs_post_install_before_scan(tmp_path: Path)
         "post_install",
         "done",
     ]
+
+
+@pytest.mark.asyncio
+async def test_install_managed_pdk_verifies_supplemental_assets_before_post_install(
+    tmp_path: Path,
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    supplemental_data = b"locked supplemental payload"
+    supplemental_sha = hashlib.sha256(supplemental_data).hexdigest()
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract") as extract,
+        patch("ecos_server.resource.pdks.subprocess.run") as run,
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(
+                supplemental_data if url.endswith("locked.tar.bz2") else archive.read_bytes()
+            )
+
+        def fake_extract(archive_path, dest_dir, strip_prefix):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "prtech").mkdir()
+            (dest_dir / "IP").mkdir()
+
+        def assert_supplemental_present(command, *, cwd, **kwargs):
+            assert command == ["make", "unzip"]
+            assert (cwd / "release" / "locked.tar.bz2").read_bytes() == supplemental_data
+
+        download.side_effect = fake_download
+        extract.side_effect = fake_extract
+        run.side_effect = assert_supplemental_present
+
+        await service.install_managed_pdk(
+            pdk_id="ics55",
+            display_name="ICSPROUT 55nm PDK",
+            version="1.10.100",
+            asset=PlatformAsset(
+                url="https://example.com/ics55.tar.gz",
+                sha256=sha,
+                size=size,
+                strip_prefix="ics55-pdk",
+                supplemental_assets=[
+                    SupplementalAsset(
+                        path="release/locked.tar.bz2",
+                        url="https://example.com/locked.tar.bz2",
+                        sha256=supplemental_sha,
+                        size=len(supplemental_data),
+                    )
+                ],
+                post_install=[PostInstallStep(command=["make", "unzip"])],
+            ),
+        )
+
+    destination = pdks_dir / "ics55" / "1.10.100"
+    assert (destination / "release" / "locked.tar.bz2").read_bytes() == supplemental_data
+    run.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", ["size", "sha256"])
+async def test_install_managed_pdk_rejects_invalid_supplemental_asset(
+    tmp_path: Path,
+    mismatch: str,
+) -> None:
+    archive, sha, size = _make_pdk_tarball(tmp_path)
+    supplemental_data = b"locked supplemental payload"
+    supplemental_sha = hashlib.sha256(supplemental_data).hexdigest()
+    pdks_dir = tmp_path / "managed-pdks"
+    inventory = InventoryService(
+        resource_manifest_path=tmp_path / "resources" / "manifest.json",
+        pdks_dir=pdks_dir,
+    )
+    service = PdkResourceService(inventory=inventory)
+
+    with (
+        patch.object(service._installer, "download") as download,
+        patch.object(service._installer, "extract") as extract,
+        patch("ecos_server.resource.pdks.subprocess.run") as run,
+    ):
+
+        async def fake_download(url, dest, expected_size=None, on_progress=None):
+            dest.write_bytes(
+                supplemental_data if url.endswith("locked.tar.bz2") else archive.read_bytes()
+            )
+
+        def fake_extract(archive_path, dest_dir, strip_prefix):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / "prtech").mkdir()
+            (dest_dir / "IP").mkdir()
+
+        download.side_effect = fake_download
+        extract.side_effect = fake_extract
+        supplemental = SupplementalAsset(
+            path="locked.tar.bz2",
+            url="https://example.com/locked.tar.bz2",
+            sha256="0" * 64 if mismatch == "sha256" else supplemental_sha,
+            size=len(supplemental_data) + 1 if mismatch == "size" else len(supplemental_data),
+        )
+
+        with pytest.raises(ValueError, match="size mismatch|SHA256 verification failed"):
+            await service.install_managed_pdk(
+                pdk_id="ics55",
+                display_name="ICSPROUT 55nm PDK",
+                version="1.10.100",
+                asset=PlatformAsset(
+                    url="https://example.com/ics55.tar.gz",
+                    sha256=sha,
+                    size=size,
+                    strip_prefix="ics55-pdk",
+                    supplemental_assets=[supplemental],
+                    post_install=[PostInstallStep(command=["make", "unzip"])],
+                ),
+            )
+
+    assert inventory.get_pdk("ics55") is None
+    assert not (pdks_dir / "ics55" / "1.10.100").exists()
+    assert not (pdks_dir / "ics55" / ".staging-1.10.100").exists()
+    run.assert_not_called()
 
 
 @pytest.mark.asyncio

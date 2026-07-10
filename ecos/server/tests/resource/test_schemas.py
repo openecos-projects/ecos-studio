@@ -10,6 +10,7 @@ from ecos_server.resource.schemas import (
     ResourceRegistryV1,
     ResourceStatus,
     ResourceType,
+    SupplementalAsset,
     ToolRegistry,
 )
 
@@ -48,6 +49,52 @@ class TestResourceAction:
         assert ResourceAction.validate == "validate"
         assert ResourceAction.activate == "activate"
         assert ResourceAction.remove_reference == "remove_reference"
+
+
+class TestSupplementalAsset:
+    def test_accepts_locked_nested_relative_path(self) -> None:
+        asset = SupplementalAsset(
+            path="release/liberty.tar.bz2",
+            url="https://example.com/liberty.tar.bz2",
+            sha256="A" * 64,
+            size=123,
+        )
+
+        assert asset.path == "release/liberty.tar.bz2"
+        assert asset.sha256 == "a" * 64
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "",
+            ".",
+            "..",
+            "../asset.tar.bz2",
+            "/tmp/asset",
+            "C:\\tmp\\asset",
+            "a/../b",
+            "dir/file:stream",
+            "dir/asset name.tar.bz2",
+        ],
+    )
+    def test_rejects_unsafe_or_non_normalized_paths(self, path: str) -> None:
+        with pytest.raises(ValidationError, match="normalized relative path"):
+            SupplementalAsset(
+                path=path,
+                url="https://example.com/asset.tar.bz2",
+                sha256="a" * 64,
+                size=123,
+            )
+
+    @pytest.mark.parametrize("size", [True, "123", 0, -1])
+    def test_rejects_non_integer_or_non_positive_size(self, size: object) -> None:
+        with pytest.raises(ValidationError, match="greater than zero"):
+            SupplementalAsset(
+                path="asset.tar.bz2",
+                url="https://example.com/asset.tar.bz2",
+                sha256="a" * 64,
+                size=size,
+            )
 
 
 class TestResourceJob:

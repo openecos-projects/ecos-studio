@@ -43,6 +43,7 @@ interface PlatformAsset {
   size: number | null
   metadata_url?: string | null
   strip_prefix?: string | null
+  supplemental_assets: RegistrySupplementalAsset[]
   post_install: RegistryPostInstallStep[]
 }
 
@@ -104,6 +105,13 @@ interface ResourceUpdateCheckCache {
 interface RegistryPostInstallStep {
   command: string[]
   cwd: string
+}
+
+interface RegistrySupplementalAsset {
+  path: string
+  url: string
+  sha256: string
+  size: number
 }
 
 interface RegistryToolVersion {
@@ -995,7 +1003,15 @@ export class ResourceManagerService {
         await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
       })
       throwIfAborted(controller.signal)
-      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, tempExtract, version, resolvedAsset, listener, controller.signal)
+      await this.downloadSupplementalAssets(
+        resourceId,
+        action,
+        displayName,
+        tempExtract,
+        resolvedAsset.supplemental_assets,
+        listener,
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
       await this.runPostInstallSteps(resourceId, action, displayName, tempExtract, resolvedAsset.post_install, listener)
       throwIfAborted(controller.signal)
@@ -1103,33 +1119,53 @@ export class ResourceManagerService {
     }
   }
 
-  private async preDownloadPdkReleaseAssets(
+  private async downloadSupplementalAssets(
     resourceId: string,
     action: ResourceAction,
     name: string,
     destination: string,
-    version: string,
-    asset: PlatformAsset,
+    assets: RegistrySupplementalAsset[],
     listener?: (event: ResourceJob) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (asset.post_install.length === 0) return
-    const assetNames = await readPdkReleaseAssetNames(destination)
-    const baseUrl = releaseDownloadBaseUrl(asset.url, version)
-    if (!baseUrl || assetNames.length === 0) return
+    const seenPaths = new Set<string>()
+    const targets = assets.map((asset) => {
+      validateSupplementalAsset(asset)
+      if (seenPaths.has(asset.path)) {
+        throw new Error(`Duplicate supplemental asset path: ${asset.path}`)
+      }
+      seenPaths.add(asset.path)
+      return resolveSupplementalAssetTarget(destination, asset.path)
+    })
 
-    for (const [index, assetName] of assetNames.entries()) {
-      const targetPath = join(destination, assetName)
-      if (await pathExists(targetPath)) continue
-      const downloadUrl = `${baseUrl}/${encodeURIComponent(assetName)}`
+    for (const [index, asset] of assets.entries()) {
+      const targetPath = targets[index]
+      await mkdir(dirname(targetPath), { recursive: true })
+      const temporaryPath = join(dirname(targetPath), `.${basename(targetPath)}.download-${randomUUID()}`)
       this.publish(listener, {
         resource_id: resourceId,
         action,
         phase: 'post_install',
         progress: 0.98,
-        message: `Downloading ${name} post-install asset ${index + 1}/${assetNames.length}: ${assetName}`,
+        message: `Downloading ${name} supplemental asset ${index + 1}/${assets.length}: ${asset.path}`,
       })
-      await downloadAsset(downloadUrl, targetPath, this.fetchImpl, null, undefined, signal)
+      try {
+        await downloadAsset(asset.url, temporaryPath, this.fetchImpl, asset.size, undefined, signal)
+        const actualSize = await stat(temporaryPath).then((value) => value.size)
+        if (actualSize !== asset.size) {
+          throw new Error(
+            `Supplemental asset size mismatch for ${asset.path}: expected ${asset.size}, got ${actualSize}`,
+          )
+        }
+        const verified = await this.sha256Verifier(temporaryPath, asset.sha256)
+        if (!verified) {
+          throw new Error(`SHA256 verification failed for supplemental asset ${asset.path}`)
+        }
+        throwIfAborted(signal)
+        await rename(temporaryPath, targetPath)
+      } finally {
+        await rm(temporaryPath, { force: true }).catch(() => undefined)
+      }
     }
   }
 
@@ -1811,10 +1847,24 @@ function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
       size: readOptionalPositiveNumber(asset.size) ?? null,
       metadata_url: readOptionalString(asset.metadata_url),
       strip_prefix: typeof asset.strip_prefix === 'string' ? asset.strip_prefix : null,
+      supplemental_assets: parseSupplementalAssets(asset.supplemental_assets),
       post_install: parsePostInstallSteps(asset.post_install),
     }
   }
   return assets
+}
+
+function parseSupplementalAssets(value: unknown): RegistrySupplementalAsset[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const record = readRecord(item)
+    return {
+      path: readString(record.path).trim(),
+      url: readString(record.url).trim(),
+      sha256: readString(record.sha256).trim().toLowerCase(),
+      size: readNumber(record.size),
+    }
+  })
 }
 
 function normalizeRegistryAssetUrl(url: string): string {
@@ -2746,75 +2796,37 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function readPdkReleaseAssetNames(destination: string): Promise<string[]> {
-  const makefilePath = join(destination, 'Makefile')
-  const makefile = await readFile(makefilePath, 'utf8').catch(() => '')
-  if (!makefile) return []
-  return parseMakefileReleaseAssetNames(makefile)
-}
-
-function parseMakefileReleaseAssetNames(makefile: string): string[] {
-  const variables = new Map<string, string[]>()
-  const assignmentPattern = /^([A-Za-z0-9_]+)\s*(?::=|=)\s*(.*)$/
-  const lines = makefile.split(/\r?\n/)
-
-  for (let index = 0; index < lines.length; index += 1) {
-    let line = lines[index].replace(/#.*$/, '').trimEnd()
-    if (!assignmentPattern.test(line.trimStart())) continue
-    while (line.endsWith('\\') && index + 1 < lines.length) {
-      line = `${line.slice(0, -1)} ${lines[index + 1].replace(/#.*$/, '').trim()}`
-      index += 1
-    }
-    const match = line.trim().match(assignmentPattern)
-    if (!match) continue
-    const [, name, rawValue] = match
-    variables.set(name, expandMakefileWords(rawValue, variables))
+function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
+  if (!asset.url) {
+    throw new Error(`Missing URL for supplemental asset ${asset.path || '(unknown)'}`)
   }
-
-  const releaseFiles = variables.get('RELEASE_FILE')
-    ?? Array.from(variables.entries())
-      .filter(([name]) => name.startsWith('RELEASE_FILE'))
-      .flatMap(([, value]) => value)
-  return Array.from(new Set(releaseFiles.filter(isDownloadableReleaseAssetName)))
-}
-
-function expandMakefileWords(rawValue: string, variables: Map<string, string[]>): string[] {
-  const words: string[] = []
-  for (const token of rawValue.split(/\s+/).filter(Boolean)) {
-    const variableMatch = token.match(/^\$\(([^)]+)\)$/)
-    if (variableMatch) {
-      words.push(...(variables.get(variableMatch[1]) ?? []))
-      continue
-    }
-    words.push(token)
+  if (!/^[0-9a-f]{64}$/.test(asset.sha256)) {
+    throw new Error(`Invalid SHA256 checksum for supplemental asset ${asset.path || '(unknown)'}`)
   }
-  return words
-}
-
-function isDownloadableReleaseAssetName(name: string): boolean {
-  return /^[A-Za-z0-9._+-]+\.tar\.bz2$/.test(name)
-}
-
-function releaseDownloadBaseUrl(sourceUrl: string, version: string): string | null {
-  const parsed = parseGithubArchiveUrl(sourceUrl)
-  if (!parsed) return null
-  return `https://github.com/${parsed.owner}/${parsed.repo}/releases/download/${parsed.tag || `v${version}`}`
-}
-
-function parseGithubArchiveUrl(sourceUrl: string): { owner: string; repo: string; tag: string | null } | null {
-  let url: URL
-  try {
-    url = new URL(sourceUrl)
-  } catch {
-    return null
+  if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
+    throw new Error(`Invalid size for supplemental asset ${asset.path || '(unknown)'}`)
   }
-  if (url.hostname !== 'github.com') return null
-  const parts = url.pathname.split('/').filter(Boolean)
-  if (parts.length < 2) return null
-  const [owner, repo] = parts
-  const refsIndex = parts.findIndex((part, index) => part === 'refs' && parts[index + 1] === 'tags')
-  const tag = refsIndex >= 0 ? parts[refsIndex + 2]?.replace(/\.tar\.gz$|\.zip$/, '') ?? null : null
-  return { owner, repo, tag }
+}
+
+function resolveSupplementalAssetTarget(root: string, assetPath: string): string {
+  const normalized = assetPath.trim()
+  const parts = normalized.split('/')
+  if (
+    !normalized
+    || normalized.includes('\\')
+    || normalized.startsWith('/')
+    || /^[A-Za-z]:/.test(normalized)
+    || parts.some((part) => {
+      return !part
+        || part === '.'
+        || part === '..'
+        || part.includes(':')
+        || [...part].some((char) => /\s/.test(char) || char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+    })
+  ) {
+    throw new Error(`Invalid supplemental asset path: ${assetPath || '(empty)'}`)
+  }
+  return resolveInside(root, normalized)
 }
 
 function archiveExtensionFromUrl(sourceUrl: string): string {

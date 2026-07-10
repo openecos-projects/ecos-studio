@@ -7,7 +7,7 @@ from ecos_server.resource.asset_resolution import (
     parse_release_metadata,
     resolve_asset,
 )
-from ecos_server.resource.schemas import PlatformAsset
+from ecos_server.resource.schemas import PlatformAsset, SupplementalAsset
 
 
 def _mock_async_client(response: MagicMock) -> MagicMock:
@@ -19,12 +19,14 @@ def _mock_async_client(response: MagicMock) -> MagicMock:
 
 
 def test_parse_release_metadata_requires_sha256_and_positive_size() -> None:
-    metadata = parse_release_metadata({
-        "sha256": "A" * 64,
-        "size": 123,
-        "commit": "deadbeef",
-        "built_at": "2026-07-10T00:00:00Z",
-    })
+    metadata = parse_release_metadata(
+        {
+            "sha256": "A" * 64,
+            "size": 123,
+            "commit": "deadbeef",
+            "built_at": "2026-07-10T00:00:00Z",
+        }
+    )
 
     assert metadata == {
         "sha256": "a" * 64,
@@ -81,3 +83,23 @@ async def test_install_resolution_requires_static_size() -> None:
 
     with pytest.raises(ValueError, match="static size"):
         await resolve_asset(asset)
+
+
+@pytest.mark.asyncio
+async def test_install_resolution_preserves_supplemental_asset_locks() -> None:
+    supplemental = SupplementalAsset(
+        path="locked.tar.bz2",
+        url="https://example.com/locked.tar.bz2",
+        sha256="b" * 64,
+        size=123,
+    )
+    asset = PlatformAsset(
+        url="https://example.com/pdk.tar.gz",
+        sha256="a" * 64,
+        size=456,
+        supplemental_assets=[supplemental],
+    )
+
+    resolved = await resolve_asset(asset)
+
+    assert resolved.supplemental_assets == [supplemental]

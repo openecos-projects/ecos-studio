@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import ntpath
+import posixpath
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
@@ -86,6 +88,48 @@ class PostInstallStep(BaseModel):
     cwd: str = "."
 
 
+class SupplementalAsset(BaseModel):
+    path: str
+    url: str
+    sha256: str
+    size: int
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalized = value.strip()
+        portable = normalized.replace("\\", "/")
+        if (
+            not normalized
+            or normalized != portable
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in normalized)
+            or portable.startswith("/")
+            or ntpath.isabs(normalized)
+            or ntpath.splitdrive(normalized)[0]
+            or posixpath.normpath(portable) != portable
+            or portable in (".", "..")
+            or portable.startswith("../")
+            or any(":" in part for part in portable.split("/"))
+        ):
+            raise ValueError("path must be a normalized relative path")
+        return normalized
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+            raise ValueError("sha256 must contain exactly 64 hexadecimal characters")
+        return normalized
+
+    @field_validator("size", mode="before")
+    @classmethod
+    def validate_size(cls, value: object) -> object:
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError("size must be greater than zero")
+        return value
+
+
 class PlatformAsset(BaseModel):
     url: str
     sha256: str
@@ -93,6 +137,7 @@ class PlatformAsset(BaseModel):
     metadata_url: str | None = None
     size: int
     strip_prefix: str | None = None
+    supplemental_assets: list[SupplementalAsset] = Field(default_factory=list)
     post_install: list[PostInstallStep] = Field(default_factory=list)
 
     @field_validator("sha256")
@@ -103,10 +148,10 @@ class PlatformAsset(BaseModel):
             raise ValueError("sha256 must contain exactly 64 hexadecimal characters")
         return normalized
 
-    @field_validator("size")
+    @field_validator("size", mode="before")
     @classmethod
-    def validate_size(cls, value: int) -> int:
-        if value <= 0:
+    def validate_size(cls, value: object) -> object:
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise ValueError("size must be greater than zero")
         return value
 

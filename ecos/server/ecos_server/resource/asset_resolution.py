@@ -77,5 +77,6 @@ async def resolve_asset(asset: PlatformAsset) -> PlatformAsset:
         metadata_url=asset.metadata_url,
         size=asset.size,
         strip_prefix=asset.strip_prefix,
+        supplemental_assets=asset.supplemental_assets,
         post_install=asset.post_install,
     )

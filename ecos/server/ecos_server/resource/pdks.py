@@ -9,11 +9,12 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from .asset_resolution import resolve_asset
 from .installer import InstallerService
 from .inventory import InventoryService, PdkInventoryEntry
-from .schemas import PlatformAsset, ResourceAction, ResourceJob
+from .schemas import PlatformAsset, ResourceAction, ResourceJob, SupplementalAsset
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,77 @@ class PdkResourceService:
                     detail = f"{detail}\n{output}"
                 raise RuntimeError(detail) from exc
 
+    @staticmethod
+    def _resolve_supplemental_target(root: Path, asset: SupplementalAsset) -> Path:
+        root_resolved = root.resolve(strict=False)
+        candidate = (root / asset.path).resolve(strict=False)
+        try:
+            candidate.relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError(f"Supplemental asset path escapes PDK root: {asset.path}") from exc
+        return candidate
+
+    async def _install_supplemental_assets(
+        self,
+        *,
+        root: Path,
+        pdk_id: str,
+        display_name: str,
+        action: ResourceAction,
+        assets: list[SupplementalAsset],
+        publish: Callable[[ResourceJob], None],
+    ) -> None:
+        seen_paths: set[str] = set()
+        targets: list[Path] = []
+        for supplemental in assets:
+            if supplemental.path in seen_paths:
+                raise ValueError(f"Duplicate supplemental asset path: {supplemental.path}")
+            seen_paths.add(supplemental.path)
+            targets.append(self._resolve_supplemental_target(root, supplemental))
+
+        for index, supplemental in enumerate(assets):
+            target = targets[index]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.parent / f".{target.name}.download-{uuid4().hex}"
+            label = f"{index + 1}/{len(assets)}"
+
+            publish(
+                ResourceJob(
+                    resource_id=f"pdk:{pdk_id}",
+                    action=action,
+                    phase="post_install",
+                    progress=0.0,
+                    message=(
+                        f"Downloading {display_name or pdk_id} supplemental asset "
+                        f"{label}: {supplemental.path}"
+                    ),
+                )
+            )
+            try:
+                await self._installer.download(
+                    url=supplemental.url,
+                    dest=temporary,
+                    expected_size=supplemental.size,
+                )
+                actual_size = temporary.stat().st_size
+                if actual_size != supplemental.size:
+                    raise ValueError(
+                        f"Supplemental asset size mismatch for {supplemental.path}: "
+                        f"expected {supplemental.size}, got {actual_size}"
+                    )
+                verified = await asyncio.to_thread(
+                    InstallerService.verify_sha256,
+                    temporary,
+                    supplemental.sha256,
+                )
+                if not verified:
+                    raise ValueError(
+                        f"SHA256 verification failed for supplemental asset {supplemental.path}"
+                    )
+                temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
+
     # ── Import ─────────────────────────────────────────────────────────
 
     def import_pdk(self, path: str) -> PdkInventoryEntry:
@@ -277,6 +349,15 @@ class PdkResourceService:
             )
 
         try:
+            if asset.supplemental_assets:
+                await self._install_supplemental_assets(
+                    root=staging_dir,
+                    pdk_id=pdk_id,
+                    display_name=display_name,
+                    action=action,
+                    assets=asset.supplemental_assets,
+                    publish=_publish,
+                )
             if asset.post_install:
                 _publish(
                     ResourceJob(
