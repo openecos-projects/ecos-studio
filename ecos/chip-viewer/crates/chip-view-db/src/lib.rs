@@ -10,6 +10,7 @@ use chipgeom_reader::GeometrySnapshot;
 pub struct ChipViewDb {
     layer_index: LayerShapeIndex,
     name_index: OwnerNameIndex,
+    shape_index: ShapeIdIndex,
     snapshot: GeometrySnapshot,
     view_index: ViewTileIndex,
 }
@@ -35,6 +36,11 @@ pub struct LayerShapeIndex {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct ShapeIdIndex {
+    by_id: BTreeMap<ShapeId, usize>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct ViewTileIndex {
     by_lod_layer: BTreeMap<(u8, u16), Vec<usize>>,
 }
@@ -42,6 +48,7 @@ pub struct ViewTileIndex {
 #[derive(Clone, Debug, Default)]
 pub struct OwnerNameIndex {
     by_name: BTreeMap<String, Vec<ShapeId>>,
+    name_by_owner: BTreeMap<(u8, u64), String>,
 }
 
 impl LayerShapeIndex {
@@ -84,6 +91,26 @@ impl LayerShapeIndex {
             .flat_map(|indices| indices.iter().copied())
             .filter(|index| shapes[*index].bbox.intersects(bbox))
             .collect()
+    }
+}
+
+impl ShapeIdIndex {
+    pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
+        let mut by_id = BTreeMap::<ShapeId, usize>::new();
+        for (index, shape) in shapes.iter().enumerate() {
+            by_id.entry(shape.id).or_insert(index);
+        }
+        Self { by_id }
+    }
+
+    pub fn find<'a>(
+        &self,
+        shapes: &'a [ShapeRecord],
+        shape_id: ShapeId,
+    ) -> Option<&'a ShapeRecord> {
+        self.by_id
+            .get(&shape_id)
+            .and_then(|index| shapes.get(*index))
     }
 }
 
@@ -151,7 +178,11 @@ impl OwnerNameIndex {
         }
 
         let mut by_name = BTreeMap::<String, Vec<ShapeId>>::new();
+        let mut name_by_owner = BTreeMap::<(u8, u64), String>::new();
         for (owner_type, owner_id, name) in owner_names {
+            name_by_owner
+                .entry((owner_type, owner_id))
+                .or_insert_with(|| name.clone());
             let Some(shape_ids) = shapes_by_owner.get(&(owner_type, owner_id)) else {
                 continue;
             };
@@ -161,11 +192,20 @@ impl OwnerNameIndex {
             shape_ids.sort_unstable();
             shape_ids.dedup();
         }
-        Self { by_name }
+        Self {
+            by_name,
+            name_by_owner,
+        }
     }
 
     pub fn query(&self, name: &str) -> Vec<ShapeId> {
         self.by_name.get(name).cloned().unwrap_or_default()
+    }
+
+    pub fn name_for_owner(&self, owner_type: u8, owner_id: u64) -> Option<&str> {
+        self.name_by_owner
+            .get(&(owner_type, owner_id))
+            .map(String::as_str)
     }
 }
 
@@ -191,10 +231,12 @@ impl ChipViewDb {
         let snapshot = GeometrySnapshot::open(manifest_path)?;
         let layer_index = LayerShapeIndex::from_shapes(snapshot.shapes());
         let name_index = OwnerNameIndex::from_snapshot(&snapshot);
+        let shape_index = ShapeIdIndex::from_shapes(snapshot.shapes());
         let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
         Ok(Self {
             layer_index,
             name_index,
+            shape_index,
             snapshot,
             view_index,
         })
@@ -227,10 +269,7 @@ impl ChipViewDb {
     }
 
     pub fn find_shape(&self, shape_id: ShapeId) -> Option<&ShapeRecord> {
-        self.snapshot
-            .shapes()
-            .iter()
-            .find(|shape| shape.id == shape_id)
+        self.shape_index.find(self.snapshot.shapes(), shape_id)
     }
 
     pub fn owner_for_shape(&self, shape: &ShapeRecord) -> Option<&OwnerRef> {
@@ -276,6 +315,11 @@ impl ChipViewDb {
         self.name_index.query(name)
     }
 
+    pub fn owner_name(&self, owner: &OwnerRef) -> Option<&str> {
+        self.name_index
+            .name_for_owner(owner.owner_type, owner.owner_id)
+    }
+
     pub fn owner_type_label(owner_type: u8) -> &'static str {
         match OwnerType::from_raw(owner_type) {
             Some(OwnerType::Die) => "die",
@@ -285,11 +329,15 @@ impl ChipViewDb {
             Some(OwnerType::InstanceHalo) => "instance_halo",
             Some(OwnerType::NetWireSegment) => "net_wire_segment",
             Some(OwnerType::SpecialWireSegment) => "special_wire_segment",
+            Some(OwnerType::Via) => "via",
             Some(OwnerType::PinPortShape) => "pin_port_shape",
             Some(OwnerType::Blockage) => "blockage",
             Some(OwnerType::Fill) => "fill",
             Some(OwnerType::Region) => "region",
             Some(OwnerType::Slot) => "slot",
+            Some(OwnerType::TrackGrid) => "track_grid",
+            Some(OwnerType::GCellGrid) => "gcell_grid",
+            Some(OwnerType::Obs) => "obs",
             _ => "other",
         }
     }
@@ -373,11 +421,35 @@ mod tests {
     }
 
     #[test]
+    fn shape_id_index_finds_records_by_id() {
+        let shapes = [shape(40, 7), shape(10, 7), shape(25, 8)];
+        let index = ShapeIdIndex::from_shapes(&shapes);
+
+        assert_eq!(index.find(&shapes, 10).map(|shape| shape.id), Some(10));
+        assert_eq!(index.find(&shapes, 25).map(|shape| shape.layer_id), Some(8));
+        assert!(index.find(&shapes, 999).is_none());
+    }
+
+    #[test]
     fn owner_type_label_includes_instance_halo() {
         assert_eq!(
             ChipViewDb::owner_type_label(OwnerType::InstanceHalo as u8),
             "instance_halo"
         );
+    }
+
+    #[test]
+    fn owner_type_label_includes_via_overlays_and_obs() {
+        assert_eq!(ChipViewDb::owner_type_label(OwnerType::Via as u8), "via");
+        assert_eq!(
+            ChipViewDb::owner_type_label(OwnerType::TrackGrid as u8),
+            "track_grid"
+        );
+        assert_eq!(
+            ChipViewDb::owner_type_label(OwnerType::GCellGrid as u8),
+            "gcell_grid"
+        );
+        assert_eq!(ChipViewDb::owner_type_label(OwnerType::Obs as u8), "obs");
     }
 
     #[test]
@@ -488,5 +560,23 @@ mod tests {
         assert_eq!(index.query("synthetic_clk"), vec![1, 2]);
         assert_eq!(index.query("u0"), vec![3]);
         assert!(index.query("missing").is_empty());
+    }
+
+    #[test]
+    fn owner_name_index_returns_name_for_owner() {
+        let index = OwnerNameIndex::from_shapes_and_names(
+            &[],
+            &[],
+            [(OwnerType::InstanceBBox as u8, 20, "u0".to_string())],
+        );
+
+        assert_eq!(
+            index.name_for_owner(OwnerType::InstanceBBox as u8, 20),
+            Some("u0")
+        );
+        assert_eq!(
+            index.name_for_owner(OwnerType::InstanceBBox as u8, 21),
+            None
+        );
     }
 }

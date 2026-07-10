@@ -85,6 +85,8 @@ pub enum OwnerType {
 #[serde(rename_all = "snake_case")]
 pub enum GeometryEditOp {
     MoveShape,
+    ResizeRect,
+    ReplaceLine,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,5 +284,13 @@ mod tests {
         assert_eq!(core::mem::size_of::<GeometryDeltaRecord>(), 72);
         assert_eq!(GeometryFileKind::View as u16, 9);
         assert_eq!(core::mem::size_of::<GeometryViewTileRecord>(), 36);
+    }
+
+    #[test]
+    fn edit_op_deserializes_resize_rect() {
+        assert_eq!(
+            serde_json::from_str::<GeometryEditOp>("\"resize_rect\"").unwrap(),
+            GeometryEditOp::ResizeRect
+        );
     }
 }

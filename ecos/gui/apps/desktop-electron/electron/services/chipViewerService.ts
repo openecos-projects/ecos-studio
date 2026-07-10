@@ -3,7 +3,7 @@ import {
   spawn as spawnProcessCallback,
 } from 'node:child_process'
 import { existsSync, type FSWatcher, watch as watchFsDirectoryCallback } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import {
   normalizeLocalPath,
@@ -23,6 +23,7 @@ interface ExecFileResult {
   stderr: string
 }
 type ExecFileRunner = (file: string, args: string[]) => Promise<ExecFileResult>
+type GetFileModifiedTime = (path: string) => Promise<number | null>
 type ReadTextFile = (path: string) => Promise<string>
 type WriteTextFile = (path: string, content: string) => Promise<void>
 type DirectoryWatcher = Pick<FSWatcher, 'close'>
@@ -52,6 +53,7 @@ export interface ChipViewerServiceOptions {
   execFile?: ExecFileRunner
   ensureDirectory?: EnsureDirectory
   fileExists?: FileExists
+  getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
   platform?: NodeJS.Platform
   readTextFile?: ReadTextFile
@@ -106,6 +108,14 @@ async function defaultWriteTextFile(path: string, content: string): Promise<void
 
 async function defaultEnsureDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true })
+}
+
+async function defaultGetFileModifiedTime(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mtimeMs
+  } catch {
+    return null
+  }
 }
 
 function defaultWatchDirectory(
@@ -194,6 +204,7 @@ export class ChipViewerService {
   private readonly ensureDirectory: EnsureDirectory
   private readonly execFile: ExecFileRunner
   private readonly fileExists: FileExists
+  private readonly getFileModifiedTime: GetFileModifiedTime
   private readonly isPackaged: boolean
   private readonly platform: NodeJS.Platform
   private readonly readTextFile: ReadTextFile
@@ -212,6 +223,8 @@ export class ChipViewerService {
     this.ensureDirectory = options.ensureDirectory ?? defaultEnsureDirectory
     this.execFile = options.execFile ?? defaultExecFile
     this.fileExists = options.fileExists ?? existsSync
+    this.getFileModifiedTime =
+      options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged
     this.platform = options.platform ?? process.platform
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
@@ -227,14 +240,26 @@ export class ChipViewerService {
     const mode = request.mode ?? 'view'
     const binaries = this.resolveBinaries()
     const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
+    const dbConfigPath = join(projectPath, DB_CONFIG_RELATIVE_PATH)
     let dbConfig: DbGeometryConfig | null = null
     const readDbConfig = async () => {
-      const dbConfigPath = join(projectPath, DB_CONFIG_RELATIVE_PATH)
       return parseDbGeometryConfig(await this.readTextFile(dbConfigPath), dbConfigPath)
     }
 
-    if (request.rebuildGeometry || !this.fileExists(snapshotInputs.manifestPath)) {
+    let shouldBuildSnapshot =
+      request.rebuildGeometry || !this.fileExists(snapshotInputs.manifestPath)
+    if (!shouldBuildSnapshot) {
       dbConfig = await readDbConfig()
+      shouldBuildSnapshot = await this.isSnapshotStale(snapshotInputs.manifestPath, [
+        snapshotInputs.defPath,
+        dbConfigPath,
+        dbConfig.techLefPath,
+        ...dbConfig.lefPaths,
+      ])
+    }
+
+    if (shouldBuildSnapshot) {
+      dbConfig ??= await readDbConfig()
       await this.execFile(
         binaries.snapshotPath,
         this.snapshotArgs(dbConfig, snapshotInputs, 'snapshot'),
@@ -520,5 +545,27 @@ export class ChipViewerService {
     throw new Error(
       `Unable to locate ecos/chip-viewer from ${this.appPath}. ${BUILD_HINT}`,
     )
+  }
+
+  private async isSnapshotStale(
+    manifestPath: string,
+    sourcePaths: string[],
+  ): Promise<boolean> {
+    const manifestModifiedTime = await this.getFileModifiedTime(manifestPath)
+    if (manifestModifiedTime === null) {
+      return true
+    }
+
+    for (const sourcePath of sourcePaths) {
+      const sourceModifiedTime = await this.getFileModifiedTime(sourcePath)
+      if (
+        sourceModifiedTime !== null &&
+        sourceModifiedTime > manifestModifiedTime
+      ) {
+        return true
+      }
+    }
+
+    return false
   }
 }

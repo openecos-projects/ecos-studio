@@ -33,6 +33,7 @@ struct LoadedViewer {
     next_command_counter: u32,
     zoom: f32,
     pan: egui::Vec2,
+    pan_drag: PanDragState,
 }
 
 struct LayerUiState {
@@ -144,6 +145,7 @@ impl LoadedViewer {
             next_command_counter: 1,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            pan_drag: PanDragState::default(),
         }
     }
 
@@ -183,6 +185,9 @@ impl LoadedViewer {
                         ChipViewDb::owner_type_label(owner.owner_type),
                         owner.owner_id
                     ));
+                    if let Some(name) = self.db.owner_name(owner) {
+                        ui.label(format!("name: {name}"));
+                    }
                     ui.label(format!(
                         "path: {} {} {} {}",
                         owner.path0, owner.path1, owner.path2, owner.path3
@@ -209,6 +214,7 @@ impl LoadedViewer {
         if ui.button("Fit").clicked() {
             self.zoom = 1.0;
             self.pan = egui::Vec2::ZERO;
+            self.pan_drag.reset();
         }
         ui.separator();
         ui.label("Layers");
@@ -257,9 +263,12 @@ impl LoadedViewer {
             .collect();
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
 
-        if response.drag_started() && self.edit_enabled {
-            if let Some(pos) = response.interact_pointer_pos() {
-                self.begin_edit_drag(pos, world, canvas, &visible_layers);
+        if response.drag_started() {
+            self.pan_drag.reset();
+            if self.edit_enabled {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    self.begin_edit_drag(pos, world, canvas, &visible_layers);
+                }
             }
         }
         if response.dragged() {
@@ -267,12 +276,15 @@ impl LoadedViewer {
                 self.update_edit_drag(response.drag_delta(), world, canvas);
                 ui.ctx().request_repaint();
             } else {
-                self.pan += response.drag_delta();
+                self.pan = self.pan_drag.apply(self.pan, response.drag_delta());
                 ui.ctx().request_repaint();
             }
         }
-        if response.drag_stopped() && self.draft.is_some() {
-            self.commit_draft();
+        if response.drag_stopped() {
+            if self.draft.is_some() {
+                self.commit_draft();
+            }
+            self.pan_drag.reset();
         }
 
         if response.clicked() {
@@ -315,23 +327,36 @@ impl LoadedViewer {
                 }
                 let color = color32(style.rgba);
                 painter.rect_filled(screen, 0.0, color);
-                if self.selected == Some(shape.id) {
-                    painter.rect_stroke(
-                        screen.expand(2.0),
-                        0.0,
-                        egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 220, 255)),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if self.highlighted.contains(&shape.id) {
-                    painter.rect_stroke(
-                        screen.expand(1.5),
-                        0.0,
-                        egui::Stroke::new(2.0, egui::Color32::YELLOW),
-                        egui::StrokeKind::Inside,
-                    );
-                }
                 drawn += 1;
+            }
+        }
+
+        for shape_id in overlay_shape_ids(self.selected, &self.highlighted) {
+            let Some(shape) = self.db.find_shape(shape_id) else {
+                continue;
+            };
+            if shape.state != ShapeState::Alive as u8 || shape.kind != ShapeKind::Rect as u8 {
+                continue;
+            }
+            let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
+            if !screen.is_positive() || !screen.intersects(canvas) {
+                continue;
+            }
+            if self.highlighted.contains(&shape_id) {
+                painter.rect_stroke(
+                    screen.expand(1.5),
+                    0.0,
+                    egui::Stroke::new(2.0, egui::Color32::YELLOW),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if self.selected == Some(shape_id) {
+                painter.rect_stroke(
+                    screen.expand(2.0),
+                    0.0,
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 220, 255)),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
 
@@ -685,6 +710,42 @@ fn should_use_view_tiles_for_state(
     zoom <= 1.0 || viewport_area.saturating_mul(4) >= world_area
 }
 
+fn overlay_shape_ids(
+    selected: Option<ShapeId>,
+    highlighted: &BTreeSet<ShapeId>,
+) -> BTreeSet<ShapeId> {
+    let mut overlay = highlighted.clone();
+    if let Some(shape_id) = selected {
+        overlay.insert(shape_id);
+    }
+    overlay
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PanDragState {
+    previous_drag_delta: egui::Vec2,
+}
+
+impl Default for PanDragState {
+    fn default() -> Self {
+        Self {
+            previous_drag_delta: egui::Vec2::ZERO,
+        }
+    }
+}
+
+impl PanDragState {
+    fn apply(&mut self, pan: egui::Vec2, current_drag_delta: egui::Vec2) -> egui::Vec2 {
+        let incremental_delta = current_drag_delta - self.previous_drag_delta;
+        self.previous_drag_delta = current_drag_delta;
+        pan + incremental_delta
+    }
+
+    fn reset(&mut self) {
+        self.previous_drag_delta = egui::Vec2::ZERO;
+    }
+}
+
 fn write_edit_command(path: &Path, command: &GeometryEditCommand) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -801,5 +862,39 @@ mod tests {
         assert!(!should_use_view_tiles_for_state(
             16, true, false, false, false, 0.25, world, world,
         ));
+    }
+
+    #[test]
+    fn overlay_shape_ids_include_highlight_and_selection() {
+        let highlighted = BTreeSet::from([10, 20]);
+
+        assert_eq!(
+            overlay_shape_ids(Some(30), &highlighted),
+            BTreeSet::from([10, 20, 30])
+        );
+    }
+
+    #[test]
+    fn pan_drag_uses_incremental_delta() {
+        let mut drag = PanDragState::default();
+        let pan = drag.apply(egui::Vec2::ZERO, egui::vec2(10.0, 2.0));
+        assert_eq!(pan, egui::vec2(10.0, 2.0));
+
+        let pan = drag.apply(pan, egui::vec2(18.0, -1.0));
+
+        assert_eq!(pan, egui::vec2(18.0, -1.0));
+    }
+
+    #[test]
+    fn pan_drag_state_resets_between_gestures() {
+        let mut drag = PanDragState::default();
+        let pan = drag.apply(egui::Vec2::ZERO, egui::vec2(10.0, 0.0));
+        let pan = drag.apply(pan, egui::vec2(20.0, 0.0));
+        assert_eq!(pan, egui::vec2(20.0, 0.0));
+
+        drag.reset();
+        let pan = drag.apply(pan, egui::vec2(4.0, 0.0));
+
+        assert_eq!(pan, egui::vec2(24.0, 0.0));
     }
 }

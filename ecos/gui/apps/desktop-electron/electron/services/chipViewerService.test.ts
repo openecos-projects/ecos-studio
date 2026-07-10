@@ -47,10 +47,12 @@ function createService(options: {
   existingPaths?: string[]
   files?: Record<string, string>
   isPackaged?: boolean
+  modifiedTimes?: Record<string, number>
   resourcesPath?: string
 }) {
   const files = new Map(Object.entries(options.files ?? {}))
   const existingPaths = new Set([...(options.existingPaths ?? []), ...files.keys()])
+  const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
   const execFile =
     options.execFile ??
     vi.fn(async () => ({
@@ -88,6 +90,11 @@ function createService(options: {
     ensureDirectory,
     execFile,
     fileExists: (path) => existingPaths.has(path),
+    getFileModifiedTime: async (path) => {
+      const modifiedTime = modifiedTimes.get(path)
+      if (modifiedTime !== undefined) return modifiedTime
+      return existingPaths.has(path) ? 100 : null
+    },
     isPackaged: options.isPackaged ?? false,
     platform: 'linux',
     readTextFile: async (path) => {
@@ -217,6 +224,97 @@ describe('ChipViewerService', () => {
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.any(Object),
     )
+  })
+
+  it('regenerates an existing geometry snapshot when the source DEF is newer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      modifiedTimes: {
+        [DB_CONFIG_PATH]: 200,
+        [DEF_PATH]: 300,
+        [GEOMETRY_MANIFEST]: 250,
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
+      expect.any(Object),
+    )
+  })
+
+  it('regenerates an existing geometry snapshot when a LEF input is newer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        TECH_LEF,
+        LEF_A,
+        LEF_B,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      modifiedTimes: {
+        [DB_CONFIG_PATH]: 200,
+        [DEF_PATH]: 200,
+        [GEOMETRY_MANIFEST]: 250,
+        [TECH_LEF]: 200,
+        [LEF_A]: 400,
+        [LEF_B]: 200,
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
   })
 
   it('bridges native edit command files through ecc geometry apply-edit', async () => {
