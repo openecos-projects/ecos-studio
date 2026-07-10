@@ -14,6 +14,7 @@ from ecos_server.resource.router import (
     init_registry,
 )
 from ecos_server.resource.schemas import (
+    ResourceAction,
     ToolRegistry,
 )
 
@@ -120,6 +121,39 @@ def _mock_registry_data_with_latest_metadata() -> dict:
         }
     ]
     return data
+
+
+def _mock_registry_data_with_dependencies() -> dict:
+    def tool(name: str, sha: str, requires: list[str]) -> dict:
+        return {
+            "name": name,
+            "display_name": name,
+            "description": "test resource",
+            "category": "test",
+            "homepage": "https://example.com",
+            "versions": [
+                {
+                    "version": "latest",
+                    "platforms": {
+                        "linux-x86_64": {
+                            "url": f"https://example.com/{name}.tar.gz",
+                            "sha256": sha,
+                            "size": 1024,
+                        }
+                    },
+                    "requires": requires,
+                }
+            ],
+        }
+
+    return {
+        "schema_version": 2,
+        "tools": [
+            tool("dep-a", "a" * 64, []),
+            tool("dep-b", "b" * 64, ["tool:dep-a"]),
+            tool("parent", "c" * 64, ["tool:dep-b", "tool:dep-a"]),
+        ],
+    }
 
 
 def _mock_registry_data_with_pdk() -> dict:
@@ -848,6 +882,126 @@ class TestInstall:
         _patch_registry(client, {"schema_version": 2, "tools": []})
         resp = client.post("/api/resources/tool:nonexistent/install")
         assert resp.status_code == 404
+
+    def test_install_traverses_dependencies_once_in_topological_order(
+        self, client: TestClient
+    ) -> None:
+        _patch_registry(client, _mock_registry_data_with_dependencies())
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:parent/install")
+
+        assert resp.status_code == 200
+        assert [call.args[0] for call in installer.await_args_list] == [
+            "dep-a",
+            "dep-b",
+            "parent",
+        ]
+        assert [call.kwargs["action"] for call in installer.await_args_list] == [
+            ResourceAction.install,
+            ResourceAction.install,
+            ResourceAction.install,
+        ]
+
+    def test_install_updates_dependency_when_registry_lock_changed(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        data = _mock_registry_data_with_dependencies()
+        data["tools"][2]["versions"][0]["requires"] = ["tool:dep-a"]
+        _patch_registry(client, data)
+        dependency_root = tmp_path / "dep-a"
+        dependency_root.mkdir()
+        router_mod._inventory.add_tool(
+            name="dep-a",
+            version="latest",
+            path=str(dependency_root),
+            sha256="d" * 64,
+            detected_executables=[],
+            active=True,
+            managed=True,
+        )
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:parent/install")
+
+        assert resp.status_code == 200
+        assert [call.args[0] for call in installer.await_args_list] == ["dep-a", "parent"]
+        assert installer.await_args_list[0].kwargs["action"] == ResourceAction.update
+
+    def test_install_checks_transitive_dependencies_of_satisfied_resources(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        data = _mock_registry_data_with_dependencies()
+        data["tools"][2]["versions"][0]["requires"] = ["tool:dep-b"]
+        _patch_registry(client, data)
+        dependency_root = tmp_path / "dep-b"
+        dependency_root.mkdir()
+        router_mod._inventory.add_tool(
+            name="dep-b",
+            version="latest",
+            path=str(dependency_root),
+            sha256="b" * 64,
+            detected_executables=[],
+            active=True,
+            managed=True,
+        )
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:parent/install")
+
+        assert resp.status_code == 200
+        assert [call.args[0] for call in installer.await_args_list] == ["dep-a", "parent"]
+
+    def test_install_rejects_dependency_cycles_before_starting_downloads(
+        self, client: TestClient
+    ) -> None:
+        data = _mock_registry_data_with_dependencies()
+        data["tools"][0]["versions"][0]["requires"] = ["tool:parent"]
+        _patch_registry(client, data)
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:parent/install")
+
+        assert resp.status_code == 400
+        assert "dependency cycle" in resp.json()["detail"]
+        installer.assert_not_awaited()
+
+    def test_install_rejects_missing_dependencies_before_starting_downloads(
+        self, client: TestClient
+    ) -> None:
+        data = _mock_registry_data_with_dependencies()
+        data["tools"][2]["versions"][0]["requires"] = ["tool:missing"]
+        _patch_registry(client, data)
+        installer = _patch_installer()
+
+        resp = client.post("/api/resources/tool:parent/install")
+
+        assert resp.status_code == 404
+        assert "Tool 'missing' not found" in resp.json()["detail"]
+        installer.assert_not_awaited()
+
+    def test_install_reports_dependency_job_conflicts_and_releases_parent_job(
+        self, client: TestClient
+    ) -> None:
+        import ecos_server.resource.router as router_mod
+
+        data = _mock_registry_data_with_dependencies()
+        data["tools"][2]["versions"][0]["requires"] = ["tool:dep-a"]
+        _patch_registry(client, data)
+        router_mod._job_tracker.start("tool:dep-a", action=ResourceAction.install)
+        try:
+            resp = client.post("/api/resources/tool:parent/install")
+        finally:
+            router_mod._job_tracker.finish("tool:dep-a")
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["resource_id"] == "tool:dep-a"
+        assert resp.json()["detail"]["required_by"] == "tool:parent"
+        assert router_mod._job_tracker.is_active("tool:parent") is False
 
     def test_install_pdk_starts_job(self, client: TestClient) -> None:
         import ecos_server.resource.router as router_mod

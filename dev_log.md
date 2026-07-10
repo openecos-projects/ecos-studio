@@ -13112,3 +13112,42 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - `metadata_url` 不参与安装完整性校验；rolling release 变化后必须由 registry CI 提交新的静态 SHA/size，客户端才能安装新资产。
+
+# 第 219 次 开发
+
+## 开发目标
+
+让 Python server Resource Manager 实际执行 registry `requires` 依赖遍历，与 Electron 安装器的资源切分语义一致。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/server/ecos_server/resource/router.py`
+  - 将资源依赖展开为去重、依赖优先的安装计划，并在下载前拒绝缺失依赖、非法资源 ID、平台不支持和依赖循环。
+  - 已符合版本、静态 SHA 和目录健康 lock 的依赖不重复安装，但仍递归检查其传递依赖。
+  - lock 过期的已安装依赖自动执行 update，缺失依赖执行 install，最后再安装父资源。
+  - 预占依赖 job，冲突时返回依赖 ID、父资源 ID 和现有 job 信息，并释放已预占任务。
+  - 依赖进度同时发布到依赖资源和父资源事件流；批量安装复用同一条依赖感知路径。
+- `/home/luyoung/ecos-studio/ecos/server/tests/resource/test_router.py`
+  - 覆盖拓扑安装顺序与去重、依赖 lock 更新、已安装中间节点的传递依赖、循环、缺失依赖及并发 job 冲突。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Python 依赖遍历修复。
+
+## 验证情况
+
+- 已执行相关 Python 文件的 `python3 -m py_compile`，通过。
+- 已执行 `.venv/bin/python -m pytest -q tests/resource`，281 个测试全部通过。
+- 已执行 `.venv/bin/python -m pytest -q tests/resource/test_router.py -k 'dependencies or dependency'`，6 个聚焦测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- registry 的 `requires` 当前只包含资源 ID、不包含版本范围；依赖始终按对应资源的 registry 最新版本和静态 lock 解析。

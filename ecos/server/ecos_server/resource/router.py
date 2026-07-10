@@ -3,7 +3,9 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,12 +19,14 @@ from .jobs import JobTracker
 from .pdks import PdkResourceService
 from .registry import RegistryService
 from .schemas import (
+    PlatformAsset,
     ResourceAction,
     ResourceInfo,
     ResourceJob,
     ResourceList,
     ResourceStatus,
     ResourceType,
+    ToolRegistry,
     ToolInstallRequest,
 )
 from .tools import ToolResourceService
@@ -104,6 +108,171 @@ def _select_platform_asset(version_entry) -> tuple[str, Any | None]:
     if fallback_asset is not None:
         return _ALL_PLATFORM, fallback_asset
     return platform_id, None
+
+
+@dataclass(frozen=True)
+class _InstallTarget:
+    resource_id: str
+    kind: ResourceType
+    name: str
+    display_name: str
+    version: str
+    asset: PlatformAsset
+    requires: tuple[str, ...]
+
+
+class _InstallPlanError(ValueError):
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def _resolve_install_target(
+    registry: ToolRegistry,
+    resource_id: str,
+    requested_version: str | None = None,
+) -> _InstallTarget:
+    if resource_id.startswith(_TOOL_PREFIX):
+        name = resource_id[len(_TOOL_PREFIX) :]
+        resource = next((tool for tool in registry.tools if tool.name == name), None)
+        if resource is None:
+            raise _InstallPlanError(404, f"Tool '{name}' not found")
+        version = resource.versions[0] if resource.versions else None
+        if requested_version is not None:
+            version = next(
+                (candidate for candidate in resource.versions if candidate.version == requested_version),
+                None,
+            )
+        if version is None:
+            detail = (
+                f"Tool '{name}' v{requested_version} not found"
+                if requested_version is not None
+                else f"No versions available for '{name}'"
+            )
+            raise _InstallPlanError(404, detail)
+        platform_id, asset = _select_platform_asset(version)
+        if asset is None:
+            raise _InstallPlanError(
+                400,
+                f"Tool '{name}' v{version.version} not available for {platform_id}",
+            )
+        return _InstallTarget(
+            resource_id=resource_id,
+            kind=ResourceType.tool,
+            name=name,
+            display_name=resource.display_name,
+            version=version.version,
+            asset=asset,
+            requires=tuple(version.requires),
+        )
+
+    if resource_id.startswith(_PDK_PREFIX):
+        pdk_id = resource_id[len(_PDK_PREFIX) :]
+        resource = next((pdk for pdk in registry.pdks if pdk.id == pdk_id), None)
+        if resource is None:
+            raise _InstallPlanError(404, f"PDK '{pdk_id}' not found")
+        version = resource.versions[0] if resource.versions else None
+        if requested_version is not None:
+            version = next(
+                (candidate for candidate in resource.versions if candidate.version == requested_version),
+                None,
+            )
+        if version is None:
+            detail = (
+                f"PDK '{pdk_id}' v{requested_version} not found"
+                if requested_version is not None
+                else f"No versions available for PDK '{pdk_id}'"
+            )
+            raise _InstallPlanError(404, detail)
+        platform_id, asset = _select_platform_asset(version)
+        if asset is None:
+            raise _InstallPlanError(
+                400,
+                f"PDK '{pdk_id}' v{version.version} not available for {platform_id} or {_ALL_PLATFORM}",
+            )
+        return _InstallTarget(
+            resource_id=resource_id,
+            kind=ResourceType.pdk,
+            name=pdk_id,
+            display_name=resource.display_name,
+            version=version.version,
+            asset=asset,
+            requires=(),
+        )
+
+    raise _InstallPlanError(400, f"Unsupported resource dependency: {resource_id}")
+
+
+def _target_matches_registry_lock(target: _InstallTarget) -> bool:
+    if target.kind == ResourceType.tool:
+        entry = _tool_service.get_installed().get(target.name)
+        return bool(
+            entry
+            and entry.managed
+            and entry.active
+            and entry.version == target.version
+            and entry.sha256 == target.asset.sha256
+            and Path(entry.path).is_dir()
+        )
+
+    entry = _pdk_service.list_pdks().get(target.name)
+    return bool(
+        entry
+        and entry.managed
+        and entry.health == "ok"
+        and entry.version == target.version
+        and entry.sha256 == target.asset.sha256
+        and Path(entry.canonical_path).is_dir()
+    )
+
+
+def _build_install_plan(
+    registry: ToolRegistry,
+    root_resource_id: str,
+    requested_version: str | None = None,
+) -> list[_InstallTarget]:
+    plan: list[_InstallTarget] = []
+    visited: set[str] = set()
+    visiting: list[str] = []
+
+    def visit(target: _InstallTarget, *, is_root: bool = False) -> None:
+        if target.resource_id in visiting:
+            cycle_start = visiting.index(target.resource_id)
+            cycle = [*visiting[cycle_start:], target.resource_id]
+            raise _InstallPlanError(
+                400,
+                f"Resource dependency cycle detected: {' -> '.join(cycle)}",
+            )
+        if target.resource_id in visited:
+            return
+
+        visiting.append(target.resource_id)
+        for dependency_id in target.requires:
+            dependency = _resolve_install_target(registry, dependency_id)
+            visit(dependency)
+        visiting.pop()
+        visited.add(target.resource_id)
+        if is_root or not _target_matches_registry_lock(target):
+            plan.append(target)
+
+    root = _resolve_install_target(registry, root_resource_id, requested_version)
+    visit(root, is_root=True)
+    return plan
+
+
+def _target_action(
+    target: _InstallTarget,
+    root_resource_id: str,
+    root_action: ResourceAction,
+) -> ResourceAction:
+    if target.resource_id == root_resource_id:
+        return root_action
+    if target.kind == ResourceType.tool:
+        installed = target.name in _tool_service.get_installed()
+    else:
+        installed = target.name in _pdk_service.list_pdks()
+    return ResourceAction.update if installed else ResourceAction.install
 
 
 def _pdk_health(entry: PdkInventoryEntry) -> dict[str, object]:
@@ -526,69 +695,25 @@ async def check_resource_updates(body: dict | None = None):
 
 async def _batch_install(rid: str, action: ResourceAction = ResourceAction.install) -> dict:
     """Look up tool in registry, check platform, and start install/update job."""
-    action_value = action.value
-    running_status = "updating" if action == ResourceAction.update else "installing"
-    name = rid[5:]
     try:
-        registry_svc = _require_registry()
-    except HTTPException as e:
+        detail = await _start_tool_install_or_update(rid, action)
         return {
             "resource_id": rid,
-            "action": action_value,
-            "status": e.status_code,
-            "error": str(e.detail),
+            "action": action.value,
+            "status": 200,
+            "detail": detail,
         }
-
-    try:
-        _job_tracker.start(rid, action=action)
-    except KeyError:
-        existing = _job_tracker.get_active(rid)
-        return {
+    except HTTPException as exc:
+        response = {
             "resource_id": rid,
-            "action": action_value,
-            "status": 409,
-            "detail": {"existing_job_id": existing.job_id if existing else None},
+            "action": action.value,
+            "status": exc.status_code,
         }
-
-    state = await registry_svc.fetch()
-
-    if state.registry is None:
-        _job_tracker.finish(rid)
-        return {
-            "resource_id": rid,
-            "action": action_value,
-            "status": 503,
-            "error": "Registry unavailable",
-        }
-
-    reg_tool = next((t for t in state.registry.tools if t.name == name), None)
-    if reg_tool is None or not reg_tool.versions:
-        _job_tracker.finish(rid)
-        return {
-            "resource_id": rid,
-            "action": action_value,
-            "status": 404,
-            "error": f"Tool '{name}' not found",
-        }
-
-    version_entry = reg_tool.versions[0]
-    plat, asset = _select_platform_asset(version_entry)
-    if asset is None:
-        _job_tracker.finish(rid)
-        return {
-            "resource_id": rid,
-            "action": action_value,
-            "status": 400,
-            "error": f"Not available for {plat}",
-        }
-
-    asyncio.create_task(_run_install(rid, name, version_entry.version, asset, action))
-    return {
-        "resource_id": rid,
-        "action": action_value,
-        "status": 200,
-        "detail": {"status": running_status, "version": version_entry.version},
-    }
+        if isinstance(exc.detail, dict):
+            response["detail"] = exc.detail
+        else:
+            response["error"] = str(exc.detail)
+        return response
 
 
 async def _batch_update(rid: str) -> dict:
@@ -1138,7 +1263,6 @@ async def _start_tool_install_or_update(
         verb = "updated" if action == ResourceAction.update else "installed"
         raise HTTPException(status_code=400, detail=f"Only tools can be {verb}")
 
-    name = resource_id[5:]
     running_status = "updating" if action == ResourceAction.update else "installing"
     registry_svc = _require_registry()
 
@@ -1157,69 +1281,117 @@ async def _start_tool_install_or_update(
             },
         ) from e
 
-    state = await registry_svc.fetch()
+    try:
+        state = await registry_svc.fetch()
+    except Exception:
+        _job_tracker.finish(resource_id)
+        raise
     if state.registry is None:
         _job_tracker.finish(resource_id)
         raise HTTPException(status_code=503, detail="Registry unavailable")
 
-    reg_tool = next((t for t in state.registry.tools if t.name == name), None)
-    if reg_tool is None:
+    try:
+        plan = _build_install_plan(state.registry, resource_id, requested_version)
+    except _InstallPlanError as exc:
         _job_tracker.finish(resource_id)
-        raise HTTPException(status_code=404, detail=f"Tool '{name}' not found")
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    if not reg_tool.versions:
-        _job_tracker.finish(resource_id)
-        raise HTTPException(status_code=404, detail=f"No versions available for '{name}'")
-
-    version_entry = reg_tool.versions[0]
-    if requested_version is not None:
-        version_entry = next((v for v in reg_tool.versions if v.version == requested_version), None)
-        if version_entry is None:
+    actions = {
+        target.resource_id: _target_action(target, resource_id, action)
+        for target in plan
+    }
+    reserved_dependencies: list[str] = []
+    for target in plan:
+        if target.resource_id == resource_id:
+            continue
+        dependency_action = actions[target.resource_id]
+        try:
+            _job_tracker.start(target.resource_id, action=dependency_action)
+            reserved_dependencies.append(target.resource_id)
+        except KeyError as exc:
+            existing = _job_tracker.get_active(target.resource_id)
+            for reserved_id in reserved_dependencies:
+                _job_tracker.finish(reserved_id)
             _job_tracker.finish(resource_id)
             raise HTTPException(
-                status_code=404,
-                detail=f"Tool '{name}' v{requested_version} not found",
-            )
+                status_code=409,
+                detail={
+                    "resource_id": target.resource_id,
+                    "required_by": resource_id,
+                    "action": existing.action.value if existing else dependency_action.value,
+                    "status": "conflict",
+                    "existing_job_id": existing.job_id if existing else None,
+                    "event_url": existing.event_url if existing else None,
+                },
+            ) from exc
 
-    plat, asset = _select_platform_asset(version_entry)
-    if asset is None:
-        _job_tracker.finish(resource_id)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Tool '{name}' v{version_entry.version} not available for {plat}",
-        )
-
-    version = version_entry.version
-
-    asyncio.create_task(_run_install(resource_id, name, version_entry.version, asset, action))
+    version = plan[-1].version
+    asyncio.create_task(_run_install_plan(resource_id, plan, actions))
 
     return {"status": running_status, "resource_id": resource_id, "version": version}
 
 
-async def _run_install(
-    resource_id: str, name: str, version: str, asset, action: ResourceAction
+async def _run_install_plan(
+    root_resource_id: str,
+    plan: list[_InstallTarget],
+    actions: dict[str, ResourceAction],
 ) -> None:
-    """Shared install runner used by single and batch install/update routes."""
-
-    def _on_progress(job: ResourceJob) -> None:
-        _job_tracker.publish(job)
+    """Install an ordered dependency plan and publish dependency progress."""
 
     try:
-        await _tool_service.install(name, version, asset, action=action, on_progress=_on_progress)
-    except Exception:
-        logger.exception("Install failed for %s", name)
+        for target in plan:
+            target_action = actions[target.resource_id]
+
+            def _on_progress(job: ResourceJob, *, current=target) -> None:
+                _job_tracker.publish(job)
+                if current.resource_id == root_resource_id:
+                    return
+                _job_tracker.publish(
+                    job.model_copy(
+                        update={
+                            "id": "",
+                            "resource_id": root_resource_id,
+                            "action": actions[root_resource_id],
+                            "phase": "installing_dependency",
+                            "progress": min(0.2, max(0.0, job.progress) * 0.2),
+                            "message": f"{current.resource_id}: {job.message}",
+                        }
+                    )
+                )
+
+            if target.kind == ResourceType.tool:
+                await _tool_service.install(
+                    target.name,
+                    target.version,
+                    target.asset,
+                    action=target_action,
+                    on_progress=_on_progress,
+                )
+            else:
+                await _pdk_service.install_managed_pdk(
+                    pdk_id=target.name,
+                    display_name=target.display_name,
+                    version=target.version,
+                    asset=target.asset,
+                    action=target_action,
+                    on_progress=_on_progress,
+                )
+    except Exception as exc:
+        logger.exception("Install plan failed for %s", root_resource_id)
+        detail = str(exc).strip() or f"Installation failed for {root_resource_id}"
         _job_tracker.publish(
             ResourceJob(
-                resource_id=resource_id,
-                action=action,
+                resource_id=root_resource_id,
+                action=actions[root_resource_id],
                 phase="error",
                 progress=0.0,
-                message=f"Installation failed for {name}",
-                error=f"Installation failed for {name}",
+                message=detail,
+                error=detail,
             )
         )
     finally:
-        _job_tracker.finish(resource_id)
+        for target in plan:
+            _job_tracker.finish(target.resource_id)
 
 
 @router.post("/{resource_id}/uninstall")
