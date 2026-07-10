@@ -12787,3 +12787,41 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - registry 当前 `requires` 只表达资源 ID，没有显式版本范围；本实现按依赖资源的 registry 第一版本和静态 SHA 作为目标 lock。
+
+# 第 211 次 开发
+
+## 开发目标
+
+将用户 `cpu_top` 校验从端口名字集合扩展为名称、方向和位宽的完整结构化契约，防止错误 IO 在创建项目时通过、到 elaboration 才失败。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 为 39 个固定 CPU socket 端口增加 `name/direction/width` 契约，同时保留旧名字列表兼容现有客户端。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - 增加可处理参数列表、继承方向声明和嵌套分隔符的模块端口解析。
+  - 用户 CPU 校验增加方向和位宽错误诊断，并在 normalized catalog 中返回完整契约。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 覆盖方向错误、位宽错误及仓库 CL3 示例与完整契约一致的场景。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CPU IO 契约增强。
+
+## 验证情况
+
+- 已执行 `python3 -m json.tool` 和 `python3 -m py_compile`，通过。
+- 已执行 `PYTHONPATH=. pytest -q test/test_catalog_compatibility.py`，16 个测试通过。
+- 已执行 catalog contract 与 examples 测试，12 个测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `ad8ba97`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前轻量 parser 只计算数字常量 packed range；参数化端口宽度需要未来引入 elaborator AST 或先展开参数后再校验。
