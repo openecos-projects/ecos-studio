@@ -260,13 +260,14 @@ export class ResourceManagerService {
     const installedPdks = getInstalledPdks(manifest)
     const toolHealth = await checkInstalledToolHealth(installedTools)
     const resources: ResourceInfo[] = []
+    const registry = state.registry
 
-    for (const tool of state.registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, installedTools, manifest, updateChecks, toolHealth))
+    for (const tool of registry?.tools ?? []) {
+      resources.push(this.registryToolToResource(tool, registry, installedTools, manifest, updateChecks, toolHealth))
     }
-    for (const pdk of state.registry?.pdks ?? []) {
+    for (const pdk of registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
-      if (!local) resources.push(this.registryPdkToResource(pdk, manifest, toolHealth))
+      if (!local) resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
     }
     for (const [name, entry] of Object.entries(installedTools)) {
       if (!resources.some((resource) => resource.id === `tool:${name}`)) {
@@ -274,7 +275,7 @@ export class ResourceManagerService {
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id), manifest, updateChecks, toolHealth))
+      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(registry, id), registry, manifest, updateChecks, toolHealth))
     }
 
     return {
@@ -482,34 +483,35 @@ export class ResourceManagerService {
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
       const dependencies = this.registryRequiresForResource(state.registry, resourceId, version)
-      const missingDependencies = dependencies.filter((dependencyId) => {
-        return !isInstalledResource(manifest, dependencyId, toolHealth)
+      const unsatisfiedDependencies = dependencies.filter((dependencyId) => {
+        return !resourceMatchesRegistryLock(state.registry, manifest, dependencyId, toolHealth)
       })
 
-      if (missingDependencies.length > 0) {
+      if (unsatisfiedDependencies.length > 0) {
         this.publish(listener, {
           resource_id: resourceId,
           action,
           phase: 'resolving_dependencies',
           progress: 0,
-          message: `Installing ${missingDependencies.length} required resource${missingDependencies.length === 1 ? '' : 's'}...`,
+          message: `Installing or updating ${unsatisfiedDependencies.length} required resource${unsatisfiedDependencies.length === 1 ? '' : 's'}...`,
         })
       }
 
-      for (const [index, dependencyId] of missingDependencies.entries()) {
+      for (const [index, dependencyId] of unsatisfiedDependencies.entries()) {
         const latestManifest = await this.readManifest()
         const latestToolHealth = await checkInstalledToolHealth(getInstalledTools(latestManifest))
-        if (isInstalledResource(latestManifest, dependencyId, latestToolHealth)) {
+        if (resourceMatchesRegistryLock(state.registry, latestManifest, dependencyId, latestToolHealth)) {
           continue
         }
+        const dependencyAction: ResourceAction = latestManifest.installed[dependencyId] ? 'update' : 'install'
         this.publish(listener, {
           resource_id: resourceId,
           action,
           phase: 'installing_dependency',
-          progress: Math.min(0.2, (index / Math.max(missingDependencies.length, 1)) * 0.2),
-          message: `Installing required resource ${index + 1}/${missingDependencies.length}: ${resourceNameFromAnyId(dependencyId)}`,
+          progress: Math.min(0.2, (index / Math.max(unsatisfiedDependencies.length, 1)) * 0.2),
+          message: `${dependencyAction === 'update' ? 'Updating' : 'Installing'} required resource ${index + 1}/${unsatisfiedDependencies.length}: ${resourceNameFromAnyId(dependencyId)}`,
         })
-        await this.installResourceWithDependencies(dependencyId, undefined, 'install', listener, visiting)
+        await this.installResourceWithDependencies(dependencyId, undefined, dependencyAction, listener, visiting)
       }
 
       if (resourceId.startsWith('tool:')) {
@@ -1312,6 +1314,7 @@ export class ResourceManagerService {
 
   private registryToolToResource(
     tool: RegistryTool,
+    registry: ResourceRegistry | null,
     installed: Record<string, ToolInventoryEntry>,
     manifest: ResourceManifest,
     updateChecks: ResourceUpdateCheckCache | null,
@@ -1324,7 +1327,7 @@ export class ResourceManagerService {
     const resourceId = `tool:${tool.name}`
     const localHealth = local ? toolHealth[resourceId] ?? unknownToolHealth(local) : null
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, manifest, toolHealth)
+    const requirementState = dependencyStateFor(requirements, registry, manifest, toolHealth)
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
 
@@ -1464,6 +1467,7 @@ export class ResourceManagerService {
 
   private registryPdkToResource(
     pdk: RegistryPdk,
+    registry: ResourceRegistry | null,
     manifest: ResourceManifest,
     toolHealth: ToolHealthByResourceId = {},
   ): ResourceInfo {
@@ -1472,7 +1476,7 @@ export class ResourceManagerService {
     const resourceId = `pdk:${pdk.id}`
     const isActive = this.activeJobs.has(resourceId)
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, manifest, toolHealth)
+    const requirementState = dependencyStateFor(requirements, registry, manifest, toolHealth)
     return {
       id: resourceId,
       type: 'pdk',
@@ -1503,6 +1507,7 @@ export class ResourceManagerService {
   private pdkEntryToResource(
     entry: PdkInventoryEntry,
     registryPdk?: RegistryPdk,
+    registry?: ResourceRegistry | null,
     manifest?: ResourceManifest,
     updateChecks?: ResourceUpdateCheckCache | null,
     toolHealth: ToolHealthByResourceId = {},
@@ -1513,8 +1518,8 @@ export class ResourceManagerService {
       ? selectPlatformAsset(registryVersion)
       : { platform: null, asset: null }
     const requirements = registryVersion?.requires ?? []
-    const requirementState = manifest
-      ? dependencyStateFor(requirements, manifest, toolHealth)
+    const requirementState = manifest && registry
+      ? dependencyStateFor(requirements, registry, manifest, toolHealth)
       : { installed: [], missing: [] }
     const hasUpdate = entry.managed
       && entry.health === 'ok'
@@ -1669,16 +1674,49 @@ function selectRegistryVersion<T extends { version: string }>(
 
 function dependencyStateFor(
   dependencies: string[],
+  registry: ResourceRegistry | null,
   manifest: ResourceManifest,
   toolHealth: ToolHealthByResourceId = {},
 ): { installed: string[]; missing: string[] } {
   const installed: string[] = []
   const missing: string[] = []
   for (const dependencyId of dependencies) {
-    if (isInstalledResource(manifest, dependencyId, toolHealth)) installed.push(dependencyId)
+    if (resourceMatchesRegistryLock(registry, manifest, dependencyId, toolHealth)) installed.push(dependencyId)
     else missing.push(dependencyId)
   }
   return { installed, missing }
+}
+
+function resourceMatchesRegistryLock(
+  registry: ResourceRegistry | null,
+  manifest: ResourceManifest,
+  resourceId: string,
+  toolHealth: ToolHealthByResourceId = {},
+): boolean {
+  if (!registry || !isInstalledResource(manifest, resourceId, toolHealth)) return false
+  const lock = registryLockForResource(registry, resourceId)
+  const entry = manifest.installed[resourceId]
+  if (!lock || !entry || !lock.sha256) return false
+  return entry.version === lock.version && entry.sha256.toLowerCase() === lock.sha256.toLowerCase()
+}
+
+function registryLockForResource(
+  registry: ResourceRegistry,
+  resourceId: string,
+): { version: string; sha256: string } | null {
+  if (resourceId.startsWith('tool:')) {
+    const name = resourceId.slice('tool:'.length)
+    const version = registry.tools.find((tool) => tool.name === name)?.versions[0]
+    const { asset } = version ? selectPlatformAsset(version) : { asset: null }
+    return version && asset ? { version: version.version, sha256: asset.sha256 } : null
+  }
+  if (resourceId.startsWith('pdk:')) {
+    const id = resourceId.slice('pdk:'.length)
+    const version = registry.pdks.find((pdk) => pdk.id === id)?.versions[0]
+    const { asset } = version ? selectPlatformAsset(version) : { asset: null }
+    return version && asset ? { version: version.version, sha256: asset.sha256 } : null
+  }
+  return null
 }
 
 function isInstalledResource(

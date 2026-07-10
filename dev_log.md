@@ -12752,3 +12752,38 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 文件系统目录替换和 manifest 文件替换无法组成单一 OS 事务；当前通过同盘 staging、备份和回滚覆盖常见失败路径，极端断电仍需启动时恢复机制进一步处理。
+
+# 第 210 次 开发
+
+## 开发目标
+
+修复父资源更新只安装缺失依赖、不会更新已安装但 SHA/版本落后依赖的问题，保证拆分后的 ECC-FE 资源集合与当前 registry lock 一致。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 依赖满足条件增加健康状态、registry 版本和静态 SHA 三项比较。
+  - 已存在但 lock 不匹配的依赖使用 update 动作按依赖顺序更新。
+  - Resource Manager 列表中的 `installed_requires/missing_requires` 同样按当前 lock 判断。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 将依赖回归测试改为“目录健康但静态 SHA 过期”，验证父资源安装会更新依赖和 manifest。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次依赖一致性修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron test -- resourceManagerService.test.ts`；37 个测试文件、264 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron run typecheck`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- registry 当前 `requires` 只表达资源 ID，没有显式版本范围；本实现按依赖资源的 registry 第一版本和静态 SHA 作为目标 lock。

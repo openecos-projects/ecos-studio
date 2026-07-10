@@ -1219,15 +1219,19 @@ describe('ResourceManagerService', () => {
     ]))
   })
 
-  it('reinstalls unhealthy managed dependencies before installing a dependent resource', async () => {
+  it('updates healthy managed dependencies whose registry lock has changed', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const cpuRtlArchive = await createEccFeCpuRtlArchive(root)
     const registryPath = join(root, 'registry.json')
     const resourcesDir = join(root, 'state', 'resources')
     const toolsDir = join(root, 'data', 'tools')
-    const brokenCpuRtlRoot = join(toolsDir, 'ecc-fe-cpu-rtl', 'latest')
-    await mkdir(join(brokenCpuRtlRoot, 'thirdparty', 'cv32e40p'), { recursive: true })
+    const staleCpuRtlRoot = join(toolsDir, 'ecc-fe-cpu-rtl', 'latest')
+    for (const name of ['cv32e40p', 'cva6', 'darkriscv', 'ibex', 'learn-fpga', 'picorv32', 'rt-thread-am', 'scr1', 'serv', 'vexriscv']) {
+      await mkdir(join(staleCpuRtlRoot, 'thirdparty', name), { recursive: true })
+    }
+    await writeFile(join(staleCpuRtlRoot, 'thirdparty', 'README'), 'stale bundle\n', 'utf8')
+    await writeFile(join(staleCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'), '# stale helper\n', 'utf8')
     await mkdir(resourcesDir, { recursive: true })
     await writeFile(registryPath, JSON.stringify({
       schema_version: 2,
@@ -1284,7 +1288,7 @@ describe('ResourceManagerService', () => {
           type: 'tool',
           name: 'ecc-fe-cpu-rtl',
           version: 'latest',
-          path: brokenCpuRtlRoot,
+          path: staleCpuRtlRoot,
           installed_at: '2026-06-30T00:00:00Z',
           sha256: 'old-cpu-rtl-sha',
           executable: '',
@@ -1319,7 +1323,7 @@ describe('ResourceManagerService', () => {
     expect(manifest.installed['tool:ecc-fe-cpu-rtl']).toMatchObject({
       sha256: cpuRtlArchive.sha256,
     })
-    await expect(readFile(join(brokenCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'), 'utf8')).resolves.toContain('fixture helper')
+    await expect(readFile(join(staleCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'), 'utf8')).resolves.toContain('fixture helper')
     expect(verifySha256).toHaveBeenCalledTimes(2)
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({
       resource_id: 'tool:ecc-fe',
