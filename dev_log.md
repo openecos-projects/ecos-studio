@@ -12947,3 +12947,44 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - Slang 可执行文件不可用时会稳定返回失败；本修复不会提供工具回退路径，用户仍需通过 Resource Manager 安装 Slang 或显式配置可执行文件。
+
+# 第 215 次 开发
+
+## 开发目标
+
+让 Frontend Project Wizard 由 ECC-FE catalog 的结构化数据展示 CPU IO、reset 和链接地址契约，消除 renderer 内写死的 39 个端口副本。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/frontendCpuContract.ts`
+  - 校验 catalog 端口的名称、方向和位宽，并动态生成 Verilog/SystemVerilog 顶层模块示例。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/frontendCpuContract.test.ts`
+  - 覆盖结构化端口规范化、非法项过滤和模块声明生成。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/frontendCatalog.ts`
+  - 为 catalog/validation payload 增加 CPU 端口、reset vector、普通程序链接地址和 bootloader payload 地址类型。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 删除硬编码 CPU IO 声明，改由 `required_cpu_top_port_contract` 动态渲染名称、方向和位宽。
+  - 展示 CPU reset PC、普通程序链接基址和 bootloader payload 基址，并在创建前 review 中复核。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 防止未来重新在 renderer 中写死 CPU 端口，并检查地址契约字段由 catalog 提供。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GUI catalog 契约修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 renderer Vitest；新增 `frontendCpuContract.test.ts` 2 项和 `FrontendProjectWizard.catalog.test.ts` 2 项均通过。
+- Vitest 脚本实际运行全套 397 项，396 项通过；唯一失败为既有 `useWorkspace.test.ts` 对 `loadWorkspaceApiMock('/work/demo')` 的单参数期望与当前双参数调用不一致，与本次修改无关。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 新 GUI 需要 catalog 提供 `required_cpu_top_port_contract` 才会展示完整 IO 示例；字段缺失或损坏时会隐藏示例，而不会回退到可能过期的静态端口副本。

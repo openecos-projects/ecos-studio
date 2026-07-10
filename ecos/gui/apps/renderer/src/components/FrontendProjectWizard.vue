@@ -278,15 +278,30 @@
                         </div>
                         <div class="cpu-top-contract-metric col-span-2 sm:col-span-1">
                           <span>Match</span>
-                          <strong>Module + IO names</strong>
+                          <strong>Name + direction + width</strong>
                         </div>
+                      </div>
+                    </div>
+
+                    <div v-if="showAddressContract" class="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                      <div class="cpu-top-contract-metric">
+                        <span>CPU Reset PC</span>
+                        <strong>{{ requiredCpuResetVector || '-' }}</strong>
+                      </div>
+                      <div class="cpu-top-contract-metric">
+                        <span>Program Link Base</span>
+                        <strong>{{ defaultProgramLinkBase || '-' }}</strong>
+                      </div>
+                      <div class="cpu-top-contract-metric">
+                        <span>Boot Payload Base</span>
+                        <strong>{{ bootloaderPayloadLinkBase || '-' }}</strong>
                       </div>
                     </div>
 
                     <div class="mt-4 overflow-hidden rounded-xl border border-(--border-color)/70 bg-(--bg-primary)/65">
                       <div class="flex items-center justify-between gap-3 border-b border-(--border-color)/70 px-4 py-2.5">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">cpu_top.sv</span>
-                        <span class="text-xs font-medium text-(--text-secondary)">module name and IO names must match</span>
+                        <span class="text-xs font-semibold uppercase tracking-wide text-(--text-secondary)">{{ requiredCpuTopModule }}.sv</span>
+                        <span class="text-xs font-medium text-(--text-secondary)">module and complete IO contract must match</span>
                       </div>
                       <pre class="custom-scrollbar max-h-72 overflow-auto p-4 text-[11px] leading-relaxed text-(--text-primary)"><code>{{ cpuTopExample }}</code></pre>
                     </div>
@@ -337,6 +352,9 @@
                     <ReviewItem label="Toolchain" :value="selectedToolchain?.name || '-'" />
                     <ReviewItem label="Test Suite" :value="selectedTestSuite?.name || '-'" />
                     <ReviewItem label="CPU Filelist" :value="effectiveCpuFilelist || '-'" monospace wide />
+                    <ReviewItem label="CPU Reset PC" :value="requiredCpuResetVector || '-'" monospace />
+                    <ReviewItem label="Program Link Base" :value="defaultProgramLinkBase || '-'" monospace />
+                    <ReviewItem label="Boot Payload Base" :value="bootloaderPayloadLinkBase || '-'" monospace wide />
                     <ReviewItem label="Default Flow" value="prepare -> elab -> lint -> sim" monospace wide />
                   </ReviewSection>
 
@@ -412,52 +430,9 @@ import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'v
 import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendCompatibilityEntry, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
+import { formatCpuTopModule, normalizeCpuPortContract } from './frontendCpuContract'
 
 const FINAL_STEP = 3
-const CPU_TOP_MODULE_FALLBACK = 'cpu_top'
-const CPU_TOP_PORT_DECLARATIONS = `  input         clock,
-  input         reset,
-  input         io_extIrq,
-  input         io_timerIrq,
-  input         io_master_aw_ready,
-  output        io_master_aw_valid,
-  output [31:0] io_master_aw_bits_awaddr,
-  output [3:0]  io_master_aw_bits_awid,
-  output [7:0]  io_master_aw_bits_awlen,
-  output [2:0]  io_master_aw_bits_awsize,
-  output [1:0]  io_master_aw_bits_awburst,
-  output        io_master_aw_bits_awlock,
-  output [3:0]  io_master_aw_bits_awcache,
-  output [2:0]  io_master_aw_bits_awprot,
-  input         io_master_w_ready,
-  output        io_master_w_valid,
-  output [31:0] io_master_w_bits_wdata,
-  output [3:0]  io_master_w_bits_wstrb,
-  output        io_master_w_bits_wlast,
-  output        io_master_b_ready,
-  input         io_master_b_valid,
-  input  [1:0]  io_master_b_bits_bresp,
-  input  [3:0]  io_master_b_bits_bid,
-  input         io_master_ar_ready,
-  output        io_master_ar_valid,
-  output [31:0] io_master_ar_bits_araddr,
-  output [3:0]  io_master_ar_bits_arid,
-  output [7:0]  io_master_ar_bits_arlen,
-  output [2:0]  io_master_ar_bits_arsize,
-  output [1:0]  io_master_ar_bits_arburst,
-  output        io_master_ar_bits_arlock,
-  output [3:0]  io_master_ar_bits_arcache,
-  output [2:0]  io_master_ar_bits_arprot,
-  output        io_master_r_ready,
-  input         io_master_r_valid,
-  input  [1:0]  io_master_r_bits_rresp,
-  input  [31:0] io_master_r_bits_rdata,
-  input         io_master_r_bits_rlast,
-  input  [3:0]  io_master_r_bits_rid`
-const CPU_TOP_PORT_COUNT = CPU_TOP_PORT_DECLARATIONS
-  .split('\n')
-  .filter((line) => /^\s*(input|output)\b/.test(line))
-  .length
 
 interface FrontendParameters extends Record<string, unknown> {
   design: string
@@ -561,18 +536,43 @@ const effectiveCpuFilelist = computed(() =>
   || '',
 )
 const requiredCpuTopModule = computed(() =>
-  stringField(selectedCore.value, 'required_cpu_top_module')
-  || validation.value?.normalized?.required_cpu_top_module
-  || CPU_TOP_MODULE_FALLBACK,
+  validation.value?.normalized?.required_cpu_top_module
+  || selectedCore.value?.required_cpu_top_module
+  || '',
 )
+const requiredCpuTopPortContract = computed(() => normalizeCpuPortContract(
+  validation.value?.normalized?.required_cpu_top_port_contract
+  || selectedCore.value?.required_cpu_top_port_contract,
+))
 const showCpuTopContract = computed(() =>
-  selectedCoreId.value === 'custom-filelist'
-  || Boolean(stringField(selectedCore.value, 'required_cpu_top_module') || validation.value?.normalized?.required_cpu_top_module),
+  Boolean(requiredCpuTopModule.value && requiredCpuTopPortContract.value.length),
 )
 const cpuTopExample = computed(() =>
-  `module ${requiredCpuTopModule.value} (\n${CPU_TOP_PORT_DECLARATIONS}\n);`,
+  formatCpuTopModule(requiredCpuTopModule.value, requiredCpuTopPortContract.value),
 )
-const cpuTopPortCount = computed(() => CPU_TOP_PORT_COUNT)
+const cpuTopPortCount = computed(() => requiredCpuTopPortContract.value.length)
+const requiredCpuResetVector = computed(() =>
+  validation.value?.normalized?.required_cpu_reset_vector
+  || selectedCore.value?.cpu_reset_vector
+  || validation.value?.normalized?.soc_cpu_reset_vector
+  || selectedSocHarness.value?.cpu_reset_vector
+  || '',
+)
+const defaultProgramLinkBase = computed(() =>
+  validation.value?.normalized?.core_sim_program_link_base
+  || selectedCore.value?.sim_program_link_base
+  || validation.value?.normalized?.soc_default_program_link_base
+  || selectedSocHarness.value?.default_program_link_base
+  || '',
+)
+const bootloaderPayloadLinkBase = computed(() =>
+  validation.value?.normalized?.soc_bootloader_payload_link_base
+  || selectedSocHarness.value?.bootloader_payload_link_base
+  || '',
+)
+const showAddressContract = computed(() => Boolean(
+  requiredCpuResetVector.value || defaultProgramLinkBase.value || bootloaderPayloadLinkBase.value,
+))
 const combinationSummary = computed(() =>
   validation.value?.normalized?.compatibility_summary
   || selectedCompatibility.value?.summary

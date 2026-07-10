@@ -2,6 +2,12 @@ import { toDesktopCliData } from './desktopPayload'
 import { getDesktopApi } from '@/platform/desktop'
 import type { ResponseData } from './type'
 
+export interface FrontendCpuPortContract {
+  name: string
+  direction: 'input' | 'output' | 'inout'
+  width: number
+}
+
 export interface FrontendCatalogEntry {
   id: string
   name: string
@@ -10,6 +16,12 @@ export interface FrontendCatalogEntry {
   integration_level?: string
   isa?: string[]
   tags?: string[]
+  required_cpu_top_module?: string
+  required_cpu_top_port_contract?: FrontendCpuPortContract[]
+  cpu_reset_vector?: string
+  sim_program_link_base?: string
+  default_program_link_base?: string
+  bootloader_payload_link_base?: string
   [key: string]: unknown
 }
 
@@ -69,6 +81,8 @@ export interface FrontendValidationResult {
     cpu_wrapper_top?: string
     required_cpu_top_module?: string
     required_cpu_top_ports?: string[]
+    required_cpu_top_port_contract?: FrontendCpuPortContract[]
+    required_cpu_reset_vector?: string
     cpu_standard_top?: string
     cpu_wrapper_generation?: string
     cpu_supports_difftest?: boolean
@@ -78,6 +92,9 @@ export interface FrontendValidationResult {
     soc_wrapper_contract?: string
     soc_wrapper_top?: string
     soc_cpu_socket_contract?: string
+    soc_cpu_reset_vector?: string
+    soc_default_program_link_base?: string
+    soc_bootloader_payload_link_base?: string
     soc_supports_difftest?: boolean
     soc_supported_test_suites?: string[]
     required_capability?: string

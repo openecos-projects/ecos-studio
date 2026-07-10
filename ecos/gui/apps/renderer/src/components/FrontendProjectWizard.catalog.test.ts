@@ -9,4 +9,12 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).not.toContain("id: 'cva6'")
     expect(wizardSource).not.toContain("id: 'ysyx-am-soc'")
   })
+
+  it('renders CPU IO and address contracts from catalog data', () => {
+    expect(wizardSource).not.toContain('CPU_TOP_PORT_DECLARATIONS')
+    expect(wizardSource).not.toContain('io_master_aw_bits_awaddr')
+    expect(wizardSource).toContain('required_cpu_top_port_contract')
+    expect(wizardSource).toContain('required_cpu_reset_vector')
+    expect(wizardSource).toContain('soc_bootloader_payload_link_base')
+  })
 })
