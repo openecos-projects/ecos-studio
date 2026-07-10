@@ -613,6 +613,84 @@ describe('project management model', () => {
     expect(legalCompare?.missingCount).toBe(2)
   })
 
+  it('exposes QoR trend summary from step analysis metrics only', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.workspaces.push(
+      {
+        workspace_id: 'baseline',
+        name: 'baseline',
+        workspace_path: '/projects/gcd/baseline',
+        source_workspace_id: null,
+        branch_from: null,
+        start_step: 'Synth',
+        end_step: 'Harden',
+        status: 'success',
+        created_at: '2026-07-02T08:00:00.000Z',
+        updated_at: '2026-07-02T08:30:00.000Z',
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
+      },
+      {
+        workspace_id: 'ws_0002',
+        name: 'ws_0002',
+        workspace_path: '/projects/gcd/ws_0002',
+        source_workspace_id: 'baseline',
+        branch_from: { source_workspace_id: 'baseline', source_step: 'Floor' },
+        start_step: 'Fanout',
+        end_step: 'Harden',
+        status: 'success',
+        created_at: '2026-07-02T09:00:00.000Z',
+        updated_at: '2026-07-02T09:30:00.000Z',
+        parameter_patch: {},
+        metrics_summary: {},
+        step_metrics: {},
+      },
+    )
+
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      {
+        baseline: {
+          files: {
+            routeStep: JSON.stringify({ route: { DR: [{ total_wire_length: 1 }] } }),
+          },
+          stepMetricTexts: {
+            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
+            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+          },
+        },
+        ws_0002: {
+          files: {
+            routeStep: JSON.stringify({
+              route: { DR: [{ total_wire_length: 999999 }] },
+            }),
+          },
+          stepMetricTexts: {
+            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5300, num_via: 1500 }),
+            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
+          },
+        },
+      },
+    )
+
+    expect(model.qorTrendSummary.workspaces).toHaveLength(2)
+    expect(model.qorTrendSummary.workspaces[1]).toMatchObject({
+      workspaceId: 'ws_0002',
+      status: 'Orange',
+      hardGateCap: 60,
+    })
+    expect(model.qorTrendSummary.regressions).toContainEqual(
+      expect.objectContaining({ metricName: 'drc_count', priority: 'P0' }),
+    )
+  })
+
   it('uses workspace home flow.json states for tree status hints and step cells when available', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
