@@ -38,6 +38,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     menu: {
       onAction: () => () => undefined,
+      setActionEnabled: async () => undefined,
     },
     system: {
       openExternal: async (_url: string) => undefined,
@@ -56,6 +57,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       pickDirectory: async () => null,
       pickFiles: async () => null,
       pickRtlSources: async () => null,
+      saveFile: async () => null,
     },
     workspace: {
       isProjectDirectory: async () => false,

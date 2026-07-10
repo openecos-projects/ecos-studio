@@ -118,6 +118,7 @@ const desktopBridge = {
   },
   menu: {
     onAction: () => () => undefined,
+    setActionEnabled: async () => undefined,
   },
   system: {
     openExternal: async (_url: string) => undefined,
@@ -138,6 +139,7 @@ const desktopBridge = {
     pickDirectory,
     pickFiles: async () => null,
     pickRtlSources: async () => null,
+    saveFile: async () => null,
   },
   workspace: {
     isProjectDirectory: async () => false,

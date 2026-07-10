@@ -9,6 +9,7 @@ export type {
   DesktopDirectoryDialogOptions,
   DesktopFileDialogFilter,
   DesktopFileDialogOptions,
+  DesktopSaveFileDialogOptions,
   DesktopRtlSourceDialogOptions,
   PickedRtlSources,
   DesktopProjectLogTailSubscriptionOptions,

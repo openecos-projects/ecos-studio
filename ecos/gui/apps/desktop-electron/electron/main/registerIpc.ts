@@ -24,6 +24,7 @@ import {
   type EccWorkspaceSyncConfigRequest,
   type DesktopFileDialogOptions,
   type DesktopMenuEventId,
+  type DesktopSaveFileDialogOptions,
   type DesktopRtlSourceDialogOptions,
   type PickedRtlSources,
   type DesktopProjectTextFileTail,
@@ -51,7 +52,6 @@ import {
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
-import type { DesktopSaveFileDialogOptions } from '../../../../packages/shared/src/contracts/desktopApi.ts'
 import {
   closeWindow,
   confirmWindowClose,
