@@ -12872,3 +12872,41 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - RTL 静态分析不能可靠证明任意用户 CPU 内部 PC 的 reset 实现；错误实现会在 elaboration/simulation 阶段因无法达到显式成功条件而失败。
+
+# 第 213 次 开发
+
+## 开发目标
+
+让 frontend prepare 状态跟踪 filelist 及其引用 RTL 的实际内容，避免源码内容变化但路径不变时继续复用过期的 prepare 结果。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/rtl_inputs.py`
+  - 为 prepare 输入路径增加内容 SHA-256 指纹。
+  - 递归跟踪 `-f`/`-F` 嵌套 filelist，并将引用的 Verilog/SystemVerilog 源文件内容纳入指纹。
+  - 对缺失输入生成稳定的失败关闭指纹，输入恢复后会自动判定 prepare 过期。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加 filelist 和引用 RTL 内容变化使 prepare manifest 失效的回归测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 prepare 内容指纹修复。
+
+## 验证情况
+
+- 已执行相关 Python 文件的 `python3 -m py_compile`，通过。
+- 已执行 `PYTHONPATH=. pytest -q test/test_engine_flow.py -k 'prepare_fingerprint or prepared or catalog_contract'`，1 个聚焦测试通过。
+- 已执行 `PYTHONPATH=. pytest -q test/test_catalog_contract.py test/test_catalog_compatibility.py`，21 个测试通过。
+- 已执行 `git diff --check`，通过。
+- 完整 `test/test_engine_flow.py` 有 5 个既有环境/测试契约失败：本机 Slang elaboration 不可用、两个测试仍使用已被新 CPU 契约禁止的空 filelist，以及 run-all 测试受前置 review 失败影响；与本次指纹变更无因果关系。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `ff4ddbc`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 指纹覆盖 filelist 文件和其中显式引用的 RTL/header 文件；只存在于 include 目录、且未被 filelist 显式列出的间接 header 仍由后续工具读取，不会改变 prepare 的 RTL 路径清单。
