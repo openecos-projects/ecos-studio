@@ -318,6 +318,12 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
       'First version computes from loaded workspace analysis snapshots without a persistent cache.',
     status: '待后续开发',
   },
+  {
+    id: 'qor_report_export',
+    label: 'QoR trend report export',
+    reason: 'Project-level qor_trend.json and report export are not generated yet.',
+    status: '待后续开发',
+  },
 ]
 
 export function normalizeLegacyStepMetrics(

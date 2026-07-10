@@ -129,6 +129,37 @@
           <span>Missing Analysis</span>
           <small>Unsupported module status</small>
         </div>
+        <div v-if="selectedWorkspace" class="qor-missing-grid">
+          <div class="qor-missing-block">
+            <span>Missing Step Analysis</span>
+            <div
+              v-if="selectedWorkspace.missingAnalysisSteps.length > 0"
+              class="qor-chip-row"
+            >
+              <span
+                v-for="step in selectedWorkspace.missingAnalysisSteps"
+                :key="step"
+                class="qor-chip"
+              >
+                {{ step }}
+              </span>
+            </div>
+            <small v-else>Complete for supported steps</small>
+          </div>
+          <div class="qor-missing-block">
+            <span>Missing Supported Metrics</span>
+            <div v-if="selectedWorkspace.missingMetrics.length > 0" class="qor-chip-row">
+              <span
+                v-for="metric in selectedWorkspace.missingMetrics"
+                :key="metric"
+                class="qor-chip"
+              >
+                {{ metric }}
+              </span>
+            </div>
+            <small v-else>All supported metrics found</small>
+          </div>
+        </div>
         <ul class="qor-module-list">
           <li v-for="module in qorTrendSummary.unsupportedModules" :key="module.id">
             <div>
@@ -287,6 +318,7 @@ function formatDelta(delta: number | null): string {
 .qor-section-title small,
 .qor-summary-card small,
 .qor-empty-note,
+.qor-missing-block small,
 .qor-delta-list small,
 .qor-module-list small {
   color: var(--text-secondary);
@@ -338,6 +370,7 @@ function formatDelta(delta: number | null): string {
 .qor-summary-card span,
 .qor-section-title span,
 .qor-dimension-row span,
+.qor-missing-block > span,
 .qor-delta-list span,
 .qor-module-list span {
   font-size: 12px;
@@ -385,6 +418,7 @@ function formatDelta(delta: number | null): string {
 
 .qor-trend-points,
 .qor-dimension-list,
+.qor-missing-grid,
 .qor-delta-list,
 .qor-module-list {
   display: flex;
@@ -394,6 +428,7 @@ function formatDelta(delta: number | null): string {
 
 .qor-trend-point,
 .qor-dimension-row,
+.qor-missing-block,
 .qor-delta-list li,
 .qor-module-list li {
   display: flex;
@@ -426,9 +461,37 @@ function formatDelta(delta: number | null): string {
 }
 
 .qor-dimension-row,
+.qor-missing-block,
 .qor-delta-list li,
 .qor-module-list li {
   padding: 9px 10px;
+}
+
+.qor-missing-grid {
+  margin-bottom: 10px;
+}
+
+.qor-missing-block {
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.qor-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.qor-chip {
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary));
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .qor-delta-list,

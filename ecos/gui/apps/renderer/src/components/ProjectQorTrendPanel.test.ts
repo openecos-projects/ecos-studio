@@ -8,6 +8,9 @@ describe('ProjectQorTrendPanel', () => {
     expect(source).toContain('Top Regressions')
     expect(source).toContain('Missing Analysis')
     expect(source).toContain('待后续开发')
+    expect(source).toContain('missingAnalysisSteps')
+    expect(source).toContain('missingMetrics')
+    expect(source).toContain('qor-missing-block')
     expect(source).toContain('unsupportedModules')
   })
 

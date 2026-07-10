@@ -150,6 +150,7 @@ describe('project QoR trend model', () => {
       'qor_hotspots',
       'golden_baseline',
       'project_qor_cache',
+      'qor_report_export',
     ])
     expect(summary.workspaces[0].dimensionScores.timing).toBeUndefined()
     expect(summary.workspaces[0].dimensionScores.power_integrity).toBeUndefined()
