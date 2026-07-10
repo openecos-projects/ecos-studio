@@ -570,96 +570,97 @@ export class ResourceManagerService {
     }
 
     const name = resourceId.slice('tool:'.length)
-    const manifest = await this.readManifest()
-    const entry = manifest.installed[resourceId]
-    if (!isToolEntry(entry)) {
-      throw new Error(`Tool '${name}' is not installed`)
-    }
-    if (!entry.managed) {
-      throw new Error(`Tool '${name}' is unmanaged and cannot be uninstalled`)
-    }
-    await rm(entry.path, { force: true, recursive: true })
-    delete manifest.installed[resourceId]
-    await this.writeManifest(manifest)
+    await this.mutateManifest(async (manifest) => {
+      const entry = manifest.installed[resourceId]
+      if (!isToolEntry(entry)) {
+        throw new Error(`Tool '${name}' is not installed`)
+      }
+      if (!entry.managed) {
+        throw new Error(`Tool '${name}' is unmanaged and cannot be uninstalled`)
+      }
+      await rm(entry.path, { force: true, recursive: true })
+      delete manifest.installed[resourceId]
+    })
     return { status: 'uninstalled', resource_id: resourceId }
   }
 
   async activatePdk(resourceId: string): Promise<ResourceOperationResult> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
-    const manifest = await this.readManifest()
-    const entry = manifest.installed[`pdk:${pdkId}`]
-    if (!isPdkEntry(entry)) {
-      throw new Error(`PDK '${pdkId}' not found in inventory`)
-    }
-    for (const [id, candidate] of Object.entries(manifest.installed)) {
-      if (isPdkEntry(candidate)) {
-        candidate.active = id === `pdk:${pdkId}`
+    await this.mutateManifest((manifest) => {
+      const entry = manifest.installed[`pdk:${pdkId}`]
+      if (!isPdkEntry(entry)) {
+        throw new Error(`PDK '${pdkId}' not found in inventory`)
       }
-    }
-    await this.writeManifest(manifest)
+      for (const [id, candidate] of Object.entries(manifest.installed)) {
+        if (isPdkEntry(candidate)) {
+          candidate.active = id === `pdk:${pdkId}`
+        }
+      }
+    })
     return { status: 'activated', resource_id: `pdk:${pdkId}` }
   }
 
   async validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
-    const manifest = await this.readManifest()
-    const entry = manifest.installed[`pdk:${pdkId}`]
-    if (!isPdkEntry(entry)) {
-      throw new Error(`PDK '${pdkId}' not found in inventory`)
-    }
-
     let health = 'ok'
-    try {
-      const pathStats = await stat(entry.canonical_path)
-      health = pathStats.isDirectory() ? 'ok' : 'invalid'
-    } catch {
-      health = 'missing'
-    }
-    entry.health = health
-    await this.writeManifest(manifest)
+    await this.mutateManifest(async (manifest) => {
+      const entry = manifest.installed[`pdk:${pdkId}`]
+      if (!isPdkEntry(entry)) {
+        throw new Error(`PDK '${pdkId}' not found in inventory`)
+      }
+      try {
+        const pathStats = await stat(entry.canonical_path)
+        health = pathStats.isDirectory() ? 'ok' : 'invalid'
+      } catch {
+        health = 'missing'
+      }
+      entry.health = health
+    })
     return { resource_id: `pdk:${pdkId}`, health: { status: health } }
   }
 
   async removePdkReference(resourceId: string): Promise<ResourceOperationResult> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
-    const manifest = await this.readManifest()
-    const entry = manifest.installed[`pdk:${pdkId}`]
-    if (!entry) {
-      throw new Error(`PDK '${pdkId}' not found`)
-    }
-    if (isPdkEntry(entry) && entry.managed) {
-      throw new Error(`PDK '${pdkId}' is managed and cannot remove reference; use uninstall`)
-    }
-    delete manifest.installed[`pdk:${pdkId}`]
-    await this.writeManifest(manifest)
+    await this.mutateManifest((manifest) => {
+      const entry = manifest.installed[`pdk:${pdkId}`]
+      if (!entry) {
+        throw new Error(`PDK '${pdkId}' not found`)
+      }
+      if (isPdkEntry(entry) && entry.managed) {
+        throw new Error(`PDK '${pdkId}' is managed and cannot remove reference; use uninstall`)
+      }
+      delete manifest.installed[`pdk:${pdkId}`]
+    })
     return { status: 'removed', resource_id: `pdk:${pdkId}` }
   }
 
   async importPdkPath(path: string): Promise<ResourceInfo> {
     const scanned = await scanPdkDirectory(path)
-    const manifest = await this.readManifest()
-    const activePdk = Object.values(manifest.installed).find((entry) => isPdkEntry(entry) && entry.active)
     const resourceId = `pdk:${scanned.pdkId}`
-    manifest.installed[resourceId] = {
-      type: 'pdk',
-      id: scanned.pdkId,
-      name: scanned.name,
-      pdk_id: scanned.pdkId,
-      version: '',
-      sha256: '',
-      source: 'local',
-      source_url: '',
-      canonical_path: scanned.canonicalPath,
-      path: scanned.canonicalPath,
-      detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
-      detected_file_groups: scanned.detectedFiles,
-      imported_at: utcNowIso(),
-      active: activePdk == null,
-      managed: false,
-      health: 'ok',
-    }
-    await this.writeManifest(manifest)
-    return this.pdkEntryToResource(manifest.installed[resourceId] as PdkInventoryEntry)
+    let importedEntry!: PdkInventoryEntry
+    await this.mutateManifest((manifest) => {
+      const activePdk = Object.values(manifest.installed).find((entry) => isPdkEntry(entry) && entry.active)
+      importedEntry = {
+        type: 'pdk',
+        id: scanned.pdkId,
+        name: scanned.name,
+        pdk_id: scanned.pdkId,
+        version: '',
+        sha256: '',
+        source: 'local',
+        source_url: '',
+        canonical_path: scanned.canonicalPath,
+        path: scanned.canonicalPath,
+        detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+        detected_file_groups: scanned.detectedFiles,
+        imported_at: utcNowIso(),
+        active: activePdk == null,
+        managed: false,
+        health: 'ok',
+      }
+      manifest.installed[resourceId] = importedEntry
+    })
+    return this.pdkEntryToResource(importedEntry)
   }
 
   async refreshRegistry(): Promise<{ status: string; tools_count: number }> {
@@ -846,14 +847,9 @@ export class ResourceManagerService {
         await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
       })
       throwIfAborted(controller.signal)
-      await rm(destination, { force: true, recursive: true })
-      await mkdir(dirname(destination), { recursive: true })
-      await rm(destination, { force: true, recursive: true })
-      await rename(tempExtract, destination)
-      throwIfAborted(controller.signal)
-
-      const detected = await detectExecutables(destination)
+      const detected = await detectExecutables(tempExtract)
       const executable = selectToolExecutable(name, detected)
+      await assertStagedToolHealth(name, tempExtract, detected, executable)
       const manifestEntry: ToolInventoryEntry = {
         type: 'tool',
         name,
@@ -869,8 +865,10 @@ export class ResourceManagerService {
       if (resolvedAsset.size && resolvedAsset.size > 0) {
         manifestEntry.size = resolvedAsset.size
       }
-      await this.mutateManifest((manifest) => {
-        manifest.installed[resourceId] = manifestEntry
+      await replaceDirectoryWithRollback(tempExtract, destination, async () => {
+        await this.mutateManifest((manifest) => {
+          manifest.installed[resourceId] = manifestEntry
+        })
       })
       this.publish(listener, {
         resource_id: resourceId,
@@ -995,50 +993,49 @@ export class ResourceManagerService {
         await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
       })
       throwIfAborted(controller.signal)
-      await rm(destination, { force: true, recursive: true })
-      await mkdir(dirname(destination), { recursive: true })
-      await rename(tempExtract, destination)
-      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, destination, version, resolvedAsset, listener, controller.signal)
+      await this.preDownloadPdkReleaseAssets(resourceId, action, displayName, tempExtract, version, resolvedAsset, listener, controller.signal)
       throwIfAborted(controller.signal)
-      await this.runPostInstallSteps(resourceId, action, displayName, destination, resolvedAsset.post_install, listener)
+      await this.runPostInstallSteps(resourceId, action, displayName, tempExtract, resolvedAsset.post_install, listener)
       throwIfAborted(controller.signal)
 
-      const scanned = await scanPdkDirectory(destination)
-      await this.mutateManifest((manifest) => {
-        const previous = manifest.installed[resourceId]
-        const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
-          return id !== resourceId && isPdkEntry(entry) && entry.active
-        })
-        const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
-        if (active) {
-          for (const [id, entry] of Object.entries(manifest.installed)) {
-            if (id !== resourceId && isPdkEntry(entry)) {
-              entry.active = false
+      const scanned = await scanPdkDirectory(tempExtract)
+      await replaceDirectoryWithRollback(tempExtract, destination, async () => {
+        await this.mutateManifest((manifest) => {
+          const previous = manifest.installed[resourceId]
+          const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
+            return id !== resourceId && isPdkEntry(entry) && entry.active
+          })
+          const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
+          if (active) {
+            for (const [id, entry] of Object.entries(manifest.installed)) {
+              if (id !== resourceId && isPdkEntry(entry)) {
+                entry.active = false
+              }
             }
           }
-        }
-        const manifestEntry: PdkInventoryEntry = {
-          type: 'pdk',
-          id: pdkId,
-          name: scanned.name || displayName,
-          pdk_id: pdkId,
-          version,
-          sha256: resolvedAsset.sha256,
-          source: 'registry',
-          source_url: resolvedAsset.url,
-          canonical_path: destination,
-          path: destination,
-          detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
-          detected_file_groups: scanned.detectedFiles,
-          imported_at: utcNowIso(),
-          active,
-          managed: true,
-          health: 'ok',
-        }
-        if (resolvedAsset.size && resolvedAsset.size > 0) {
-          manifestEntry.size = resolvedAsset.size
-        }
-        manifest.installed[resourceId] = manifestEntry
+          const manifestEntry: PdkInventoryEntry = {
+            type: 'pdk',
+            id: pdkId,
+            name: scanned.name || displayName,
+            pdk_id: pdkId,
+            version,
+            sha256: resolvedAsset.sha256,
+            source: 'registry',
+            source_url: resolvedAsset.url,
+            canonical_path: destination,
+            path: destination,
+            detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+            detected_file_groups: scanned.detectedFiles,
+            imported_at: utcNowIso(),
+            active,
+            managed: true,
+            health: 'ok',
+          }
+          if (resolvedAsset.size && resolvedAsset.size > 0) {
+            manifestEntry.size = resolvedAsset.size
+          }
+          manifest.installed[resourceId] = manifestEntry
+        })
       })
       this.publish(listener, {
         resource_id: resourceId,
@@ -1135,17 +1132,17 @@ export class ResourceManagerService {
   }
 
   private async removeManagedPdk(pdkId: string): Promise<void> {
-    const manifest = await this.readManifest()
-    const entry = manifest.installed[`pdk:${pdkId}`]
-    if (!isPdkEntry(entry)) {
-      throw new Error(`PDK '${pdkId}' is not installed`)
-    }
-    if (!entry.managed) {
-      throw new Error(`PDK '${pdkId}' is unmanaged and cannot be uninstalled`)
-    }
-    await rm(entry.canonical_path, { force: true, recursive: true })
-    delete manifest.installed[`pdk:${pdkId}`]
-    await this.writeManifest(manifest)
+    await this.mutateManifest(async (manifest) => {
+      const entry = manifest.installed[`pdk:${pdkId}`]
+      if (!isPdkEntry(entry)) {
+        throw new Error(`PDK '${pdkId}' is not installed`)
+      }
+      if (!entry.managed) {
+        throw new Error(`PDK '${pdkId}' is unmanaged and cannot be uninstalled`)
+      }
+      await rm(entry.canonical_path, { force: true, recursive: true })
+      delete manifest.installed[`pdk:${pdkId}`]
+    })
   }
 
   private async fetchRegistry(force = false): Promise<RegistryState> {
@@ -1244,8 +1241,12 @@ export class ResourceManagerService {
   private async readManifest(): Promise<ResourceManifest> {
     try {
       return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
-    } catch {
-      return this.emptyManifest()
+    } catch (error) {
+      if (isFileNotFoundError(error)) return this.emptyManifest()
+      throw new Error(
+        `Resource manifest is invalid and was left unchanged at ${this.manifestPath}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
     }
   }
 
@@ -1261,12 +1262,6 @@ export class ResourceManagerService {
       }
       return this.emptyManifest()
     }
-  }
-
-  private async writeManifest(manifest: ResourceManifest): Promise<void> {
-    await this.withManifestLock(async () => {
-      await this.writeManifestFile(manifest)
-    })
   }
 
   private async mutateManifest(mutator: (manifest: ResourceManifest) => void | Promise<void>): Promise<void> {
@@ -1297,8 +1292,12 @@ export class ResourceManagerService {
     manifest.pdks_dir = this.pdksDir
     await mkdir(dirname(this.manifestPath), { recursive: true })
     const tempPath = `${this.manifestPath}.${process.pid}.${randomUUID()}.tmp`
-    await writeFile(tempPath, JSON.stringify(manifest, null, 2), 'utf8')
-    await rename(tempPath, this.manifestPath)
+    try {
+      await writeFile(tempPath, JSON.stringify(manifest, null, 2), 'utf8')
+      await rename(tempPath, this.manifestPath)
+    } finally {
+      await rm(tempPath, { force: true }).catch(() => undefined)
+    }
   }
 
   private emptyManifest(): ResourceManifest {
@@ -2244,6 +2243,31 @@ async function checkInstalledToolHealth(
   return Object.fromEntries(entries)
 }
 
+async function assertStagedToolHealth(
+  name: string,
+  path: string,
+  detectedExecutables: string[],
+  executable: string,
+): Promise<void> {
+  const health = await checkToolEntryHealth({
+    type: 'tool',
+    name,
+    version: '',
+    path,
+    installed_at: '',
+    sha256: '',
+    detected_executables: detectedExecutables,
+    executable,
+    active: true,
+    managed: true,
+  })
+  if (health.status === 'ok') return
+  const missing = health.missing_markers.length > 0
+    ? `: ${health.missing_markers.join(', ')}`
+    : ''
+  throw new Error(`Extracted ${name} archive failed health validation${missing}`)
+}
+
 async function checkToolEntryHealth(entry: ToolInventoryEntry): Promise<ToolHealthStatus> {
   const requiredMarkers = requiredToolMarkers(normalizeToolName(entry.name))
   const rootExists = await isExistingDirectory(entry.path)
@@ -2815,6 +2839,54 @@ async function extractArchive(
     args.push('--strip-components', '1')
   }
   await runCommand('tar', args)
+}
+
+async function replaceDirectoryWithRollback(
+  stagedPath: string,
+  destination: string,
+  commit: () => Promise<void>,
+): Promise<void> {
+  const backupPath = join(dirname(destination), `.backup-${basename(destination)}-${randomUUID()}`)
+  const hadPrevious = await pathExists(destination)
+  await mkdir(dirname(destination), { recursive: true })
+  await rm(backupPath, { force: true, recursive: true })
+
+  if (hadPrevious) {
+    await rename(destination, backupPath)
+  }
+
+  let stagedInstalled = false
+  try {
+    await rename(stagedPath, destination)
+    stagedInstalled = true
+    await commit()
+  } catch (error) {
+    try {
+      if (stagedInstalled) {
+        await rm(destination, { force: true, recursive: true })
+      }
+      if (hadPrevious && await pathExists(backupPath)) {
+        await rename(backupPath, destination)
+      }
+    } catch (rollbackError) {
+      throw new Error(
+        `Resource update failed and rollback could not restore ${destination}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        { cause: error },
+      )
+    }
+    throw error
+  }
+
+  if (hadPrevious) {
+    await rm(backupPath, { force: true, recursive: true }).catch((error) => {
+      electronLogger.warn(
+        '[resources] Installed %s but failed to remove backup %s: %s',
+        destination,
+        backupPath,
+        error instanceof Error ? error.message : String(error),
+      )
+    })
+  }
 }
 
 async function moveStrippedPrefix(sourceRoot: string, destination: string, stripPrefix: string): Promise<void> {

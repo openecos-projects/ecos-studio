@@ -898,6 +898,78 @@ describe('ResourceManagerService', () => {
     }))
   })
 
+  it('keeps the previous tool when a replacement archive fails health validation', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const sourceRoot = join(root, 'incomplete-ecc-fe-source')
+    const sourceDir = join(sourceRoot, 'ecc-fe-runtime')
+    const archivePath = join(root, 'incomplete-ecc-fe.tar')
+    await mkdir(join(sourceDir, 'bin'), { recursive: true })
+    await writeFile(join(sourceDir, 'bin', 'ecc-fe'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(sourceDir, 'bin', 'ecc-fe'), 0o755)
+    await runFixtureCommand('tar', ['-cf', archivePath, '-C', sourceRoot, 'ecc-fe-runtime'])
+
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const destination = join(toolsDir, 'ecc-fe', 'latest')
+    await createInstalledEccFeRoot(destination)
+    await writeFile(join(destination, 'previous-version.txt'), 'keep me\n', 'utf8')
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'tool:ecc-fe': {
+          type: 'tool',
+          name: 'ecc-fe',
+          version: 'latest',
+          path: destination,
+          installed_at: '2026-07-01T00:00:00Z',
+          sha256: 'old-sha',
+          executable: 'bin/ecc-fe',
+          detected_executables: ['bin/ecc-fe'],
+          active: true,
+          managed: true,
+        },
+      },
+    }), 'utf8')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [{
+        name: 'ecc-fe',
+        display_name: 'ECC-FE',
+        versions: [{
+          version: 'latest',
+          platforms: {
+            'all-platform': {
+              url: `file://${archivePath}`,
+              sha256: 'new-sha',
+              size: Buffer.byteLength(await readFile(archivePath)),
+              strip_prefix: 'ecc-fe-runtime',
+            },
+          },
+        }],
+      }],
+      pdks: [],
+    }), 'utf8')
+
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(service.updateResource('tool:ecc-fe')).rejects.toThrow(
+      'Extracted ecc-fe archive failed health validation: fecompiler',
+    )
+    await expect(readFile(join(destination, 'previous-version.txt'), 'utf8')).resolves.toBe('keep me\n')
+    const manifest = JSON.parse(await readFile(join(resourcesDir, 'manifest.json'), 'utf8')) as {
+      installed: Record<string, { sha256: string }>
+    }
+    expect(manifest.installed['tool:ecc-fe'].sha256).toBe('old-sha')
+  })
+
   it('installs a zip-packaged Surfer web asset tool', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createSurferAssetsZip(root)
@@ -2612,5 +2684,94 @@ describe('ResourceManagerService', () => {
         message: expect.not.stringMatching(/x{3000}/),
       }))
     }
+  })
+
+  it('keeps the previous PDK when replacement post-install fails', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const archive = await createPdkArchive(root)
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const pdksDir = join(root, 'data', 'pdks')
+    const destination = join(pdksDir, 'ics55', '1.10.100')
+    await mkdir(destination, { recursive: true })
+    await writeFile(join(destination, 'previous-version.txt'), 'keep me\n', 'utf8')
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(resourcesDir, 'manifest.json'), JSON.stringify({
+      schema_version: 1,
+      installed: {
+        'pdk:ics55': {
+          type: 'pdk',
+          id: 'ics55',
+          name: 'ics55',
+          pdk_id: 'ics55',
+          version: '1.10.100',
+          sha256: 'old-sha',
+          source: 'registry',
+          source_url: 'https://example.com/old.tar.gz',
+          canonical_path: destination,
+          path: destination,
+          detected_files: ['previous-version.txt'],
+          imported_at: '2026-07-01T00:00:00Z',
+          active: true,
+          managed: true,
+          health: 'ok',
+        },
+      },
+    }), 'utf8')
+    await writeFile(registryPath, JSON.stringify({
+      schema_version: 2,
+      tools: [],
+      pdks: [{
+        id: 'ics55',
+        display_name: 'ICsprout 55nm PDK',
+        versions: [{
+          version: '1.10.100',
+          platforms: {
+            'all-platform': {
+              url: `file://${archive.path}`,
+              sha256: archive.sha256,
+              size: archive.size,
+              strip_prefix: 'icsprout55-pdk-1.10.100',
+              post_install: [{ command: ['false'], cwd: '.' }],
+            },
+          },
+        }],
+      }],
+    }), 'utf8')
+
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir,
+      commandRunner: vi.fn(async () => { throw new Error('post-install failed') }),
+      sha256Verifier: vi.fn(async () => true),
+    })
+
+    await expect(service.updateResource('pdk:ics55')).rejects.toThrow('post-install failed')
+    await expect(readFile(join(destination, 'previous-version.txt'), 'utf8')).resolves.toBe('keep me\n')
+    const manifest = JSON.parse(await readFile(join(resourcesDir, 'manifest.json'), 'utf8')) as {
+      installed: Record<string, { sha256: string }>
+    }
+    expect(manifest.installed['pdk:ics55'].sha256).toBe('old-sha')
+  })
+
+  it('fails closed without overwriting an invalid resource manifest', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const manifestPath = join(resourcesDir, 'manifest.json')
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(manifestPath, '{not-json\n', 'utf8')
+    await writeFile(registryPath, JSON.stringify({ schema_version: 2, tools: [], pdks: [] }), 'utf8')
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.listResources()).rejects.toThrow('Resource manifest is invalid and was left unchanged')
+    await expect(readFile(manifestPath, 'utf8')).resolves.toBe('{not-json\n')
   })
 })

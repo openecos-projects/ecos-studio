@@ -12714,3 +12714,41 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - examples 健康检查目前验证关键入口文件存在，不对整套 RTL 逐文件做内容校验；归档完整性仍由静态 SHA 和 release CI 保证。
+
+# 第 209 次 开发
+
+## 开发目标
+
+将 Resource Manager 工具和 PDK 更新改为可回滚的原子流程，并让损坏 manifest 失败关闭，避免更新失败删除可用旧版本或静默覆盖资源清单。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 工具在临时目录完成解压、可执行文件探测和健康检查后才替换正式目录。
+  - PDK 在临时目录完成附加资产下载、post-install 和扫描后才替换正式目录。
+  - 替换过程保留旧目录备份；manifest 提交失败时恢复旧目录，成功后清理备份。
+  - manifest JSON/schema 错误不再返回空清单，而是保留原文件并明确报错。
+  - uninstall、PDK activate/validate/import/remove 的 read-modify-write 纳入同一 manifest 锁，避免并发丢失更新。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 增加损坏工具归档、PDK post-install 失败和损坏 manifest 的回归测试。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次资源事务性改造。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron test -- resourceManagerService.test.ts`；37 个测试文件、264 个测试全部通过。
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 文件系统目录替换和 manifest 文件替换无法组成单一 OS 事务；当前通过同盘 staging、备份和回滚覆盖常见失败路径，极端断电仍需启动时恢复机制进一步处理。
