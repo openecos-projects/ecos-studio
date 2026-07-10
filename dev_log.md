@@ -12648,3 +12648,36 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 真正通用的指令级 difftest 仍需要为用户 CPU 定义独立 retire-state adapter；当前仅 CL3 示例具备该桥接，通用 CPU 使用功能测试与终端检查点验证。
+
+# 第 207 次 开发
+
+## 开发目标
+
+恢复 `tool-registry.json` 作为安装锁源的语义，禁止 Resource Manager 在安装时使用 mutable release metadata 覆盖 registry 中的静态 SHA256 和 size。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.ts`
+  - 安装资源时直接使用 registry platform asset 中的静态 `sha256/size`；metadata 与 sidecar 仅保留给更新检查。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/resourceManagerService.test.ts`
+  - 验证远端 metadata 与 registry 不一致时仍使用 registry SHA 安装，且安装过程不请求 metadata/sidecar。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 registry lock 修复。
+
+## 验证情况
+
+- 已执行 `pnpm --filter @ecos-studio/desktop-electron test -- resourceManagerService.test.ts`；Vitest 实际运行 37 个文件、261 个测试，全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- mutable latest 资产发布后、registry CI 提交新静态锁之前会存在短暂校验失败窗口；后续 release 可靠性改造将进一步缩小该窗口。

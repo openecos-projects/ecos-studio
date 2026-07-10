@@ -1369,17 +1369,14 @@ export class ResourceManagerService {
     }
   }
 
-  private async resolvePlatformAsset(asset: PlatformAsset): Promise<ResolvedPlatformAsset>
-  private async resolvePlatformAsset(asset: null): Promise<null>
-  private async resolvePlatformAsset(asset: PlatformAsset | null): Promise<ResolvedPlatformAsset | null> {
+  private resolvePlatformAsset(asset: PlatformAsset): ResolvedPlatformAsset
+  private resolvePlatformAsset(asset: null): null
+  private resolvePlatformAsset(asset: PlatformAsset | null): ResolvedPlatformAsset | null {
     if (asset === null) return null
-    const metadata = await this.fetchAssetMetadata(asset)
     return {
       ...asset,
-      sha256: metadata?.sha256 || await this.fetchAssetSha256(asset) || asset.sha256,
-      size: metadata?.size && metadata.size > 0 ? metadata.size : asset.size,
-      commit: metadata?.commit || null,
-      built_at: metadata?.built_at || null,
+      commit: null,
+      built_at: null,
     }
   }
 

@@ -1744,7 +1744,7 @@ describe('ResourceManagerService', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it('uses latest release metadata to verify ecc-fe downloads', async () => {
+  it('uses the registry lock to verify downloads even when release metadata changes', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const registryPath = join(root, 'registry.json')
@@ -1753,6 +1753,7 @@ describe('ResourceManagerService', () => {
     const metadataUrl = 'https://example.com/ecc-fe-latest.metadata.json'
     const shaUrl = 'https://example.com/ecc-fe-latest.tar.gz.sha256'
     const latestSha = 'a'.repeat(64)
+    const registrySha = 'b'.repeat(64)
     await mkdir(resourcesDir, { recursive: true })
     await writeFile(registryPath, JSON.stringify({
       schema_version: 2,
@@ -1771,8 +1772,8 @@ describe('ResourceManagerService', () => {
                   url: `file://${archive.path}`,
                   metadata_url: metadataUrl,
                   sha256_url: shaUrl,
-                  sha256: 'b'.repeat(64),
-                  size: 1,
+                  sha256: registrySha,
+                  size: archive.size,
                   strip_prefix: 'ecc-fe-runtime',
                 },
               },
@@ -1817,7 +1818,7 @@ describe('ResourceManagerService', () => {
       }
       throw new Error(`unexpected fetch ${requestUrl}`)
     })
-    const verifySha256 = vi.fn(async (_path: string, expected: string) => expected === latestSha)
+    const verifySha256 = vi.fn(async (_path: string, expected: string) => expected === registrySha)
     const service = new ResourceManagerService({
       registryUrl: `file://${registryPath}`,
       resourcesDir,
@@ -1838,10 +1839,11 @@ describe('ResourceManagerService', () => {
     ) as { installed: Record<string, { sha256?: string; size?: number; version?: string }> }
     expect(manifest.installed['tool:ecc-fe']).toMatchObject({
       version: 'latest',
-      sha256: latestSha,
+      sha256: registrySha,
       size: archive.size,
     })
-    expect(verifySha256).toHaveBeenCalledWith(expect.any(String), latestSha)
+    expect(verifySha256).toHaveBeenCalledWith(expect.any(String), registrySha)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('does not use registry static sha to decide rolling latest updates while listing', async () => {
