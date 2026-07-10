@@ -12604,3 +12604,47 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - SoC 顶层 trap 信号和 difftest 提交接口仍需后续修复；本次先保证报告层不会把无成功证据的普通仿真标记为 PASS。
+
+# 第 206 次 开发
+
+## 开发目标
+
+恢复 CL3 示例的指令提交 DPI 桥接，并纠正通用 `cpu_top` 被错误声明为支持 CL3 私有层级 difftest 的能力标记。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/examples/cl3/cl3_verilog/difftest_wrapper.sv`
+  - 将 CL3 双提交端口寄存后传给 `difftest_step()`，比对失败时明确触发 BAD TRAP。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 通用 `custom-filelist` 默认不再声明支持指令级 difftest。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/compatibility.py`
+  - RT-Thread 兼容性不再与 difftest 能力强绑定，允许使用终端检查点验证。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 不支持 difftest 的 CPU 使用 RT-Thread timeout/终端验证参数，且 fallback 能力判断包含通用 filelist。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - 仅在 CPU 和 SoC 都明确支持时自动启用 RT-Thread difftest。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+  - 覆盖通用 CPU 能力、RT-Thread 非 difftest 路径以及 CL3 DPI 桥接存在性。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 difftest 修复。
+
+## 验证情况
+
+- 已执行 `verilator --lint-only --Wno-fatal --top-module difftest_wrapper examples/cl3/cl3_verilog/difftest_wrapper.sv`，通过且无警告。
+- 已执行 difftest、RT-Thread、catalog 与 examples 聚焦测试，27 个测试全部通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `make`、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 已在 `ecc-fe` 子模块提交 `4e0de81`；未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 真正通用的指令级 difftest 仍需要为用户 CPU 定义独立 retire-state adapter；当前仅 CL3 示例具备该桥接，通用 CPU 使用功能测试与终端检查点验证。
