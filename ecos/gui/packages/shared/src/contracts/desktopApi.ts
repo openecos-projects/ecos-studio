@@ -56,6 +56,12 @@ export interface DesktopFileDialogOptions {
   filters?: DesktopFileDialogFilter[]
 }
 
+export interface DesktopSaveFileDialogOptions {
+  title?: string
+  defaultPath?: string
+  filters?: DesktopFileDialogFilter[]
+}
+
 export interface DesktopRtlSourceDialogOptions {
   title?: string
   multiple?: boolean
@@ -154,6 +160,7 @@ export interface DesktopApi {
   }
   menu: {
     onAction(listener: (eventId: DesktopMenuEventId) => void): DesktopEventUnsubscribe
+    setActionEnabled(action: DesktopMenuEventId, enabled: boolean): Promise<void>
   }
   system: {
     openExternal(url: string): Promise<void>
@@ -169,6 +176,7 @@ export interface DesktopApi {
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
+    saveFile(options?: DesktopSaveFileDialogOptions): Promise<string | null>
     pickRtlSources(
       options?: DesktopRtlSourceDialogOptions,
     ): Promise<PickedRtlSources | null>

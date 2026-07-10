@@ -1,4 +1,8 @@
-import { desktopApiEventChannels, desktopApiIpcChannels } from '@ecos-studio/shared'
+import {
+  desktopApiEventChannels,
+  desktopApiIpcChannels,
+  desktopMenuEventIds,
+} from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { contextBridgeExposeInMainWorld, ipcRenderer } = vi.hoisted(() => ({
@@ -36,6 +40,12 @@ async function loadDesktopBridge() {
       flow: {
         runStep(request: unknown): Promise<unknown>
       }
+    }
+    dialog: {
+      saveFile(options: unknown): Promise<unknown>
+    }
+    menu: {
+      setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
     workspace: {
       readProjectTextFile(path: string): Promise<unknown>
@@ -175,6 +185,34 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
       request,
+    )
+  })
+
+  it('routes Save As and menu enabled-state calls through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/exports/gcd_signoff_package.tar.gz',
+      filters: [{ name: 'Tarball', extensions: ['tar.gz'] }],
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce(options.defaultPath)
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(bridge.dialog.saveFile(options)).resolves.toBe(options.defaultPath)
+    await expect(
+      bridge.menu.setActionEnabled(desktopMenuEventIds.exportSignoffPackage, true),
+    ).resolves.toBeUndefined()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.dialogSaveFile,
+      options,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.menuSetActionEnabled,
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
     )
   })
 

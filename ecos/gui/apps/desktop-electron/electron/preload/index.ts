@@ -106,6 +106,8 @@ const desktopApi: DesktopApi = {
           listener(action as DesktopMenuEventId)
         },
       ),
+    setActionEnabled: (action, enabled) =>
+      invokeDesktop(desktopApiIpcChannels.menuSetActionEnabled, action, enabled),
   },
   system: {
     openExternal: (url) => invokeDesktop(desktopApiIpcChannels.systemOpenExternal, url),
@@ -129,6 +131,7 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),
     pickFiles: (options?: DesktopFileDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickFiles, options),
+    saveFile: (options) => invokeDesktop(desktopApiIpcChannels.dialogSaveFile, options),
     pickRtlSources: (options?: DesktopRtlSourceDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickRtlSources, options),
   },

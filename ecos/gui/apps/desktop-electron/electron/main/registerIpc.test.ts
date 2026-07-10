@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
+  desktopMenuEventIds,
   type EccRuntimeEvent,
 } from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,12 +14,20 @@ interface MockBrowserWindow {
   }
 }
 
-const { fromWebContents, getAllWindows, openExternal, showOpenDialog, statMock } =
+const {
+  fromWebContents,
+  getAllWindows,
+  openExternal,
+  showOpenDialog,
+  showSaveDialog,
+  statMock,
+} =
   vi.hoisted(() => ({
     fromWebContents: vi.fn(),
     getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
     openExternal: vi.fn(),
     showOpenDialog: vi.fn(),
+    showSaveDialog: vi.fn(),
     statMock: vi.fn(),
   }))
 
@@ -37,6 +46,7 @@ vi.mock('electron', () => ({
   },
   dialog: {
     showOpenDialog,
+    showSaveDialog,
   },
   ipcMain: {
     handle: vi.fn(),
@@ -52,6 +62,12 @@ const electronLogger = vi.hoisted(() => ({
 
 vi.mock('../services/logger', () => ({
   electronLogger,
+}))
+
+const setMenuActionEnabled = vi.hoisted(() => vi.fn())
+
+vi.mock('../services/menuService', () => ({
+  setMenuActionEnabled,
 }))
 
 import { registerIpc } from './registerIpc'
@@ -183,6 +199,8 @@ describe('registerIpc', () => {
     electronLogger.warn.mockReset()
     openExternal.mockReset()
     showOpenDialog.mockReset()
+    showSaveDialog.mockReset()
+    setMenuActionEnabled.mockReset()
     statMock.mockReset()
     statMock.mockImplementation(async (path: string) => {
       if (path === '/tmp/project') {
@@ -494,6 +512,57 @@ describe('registerIpc', () => {
     )
 
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
+  })
+
+  it('shows a Save As dialog for the requesting window and returns its path', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/exports/gcd_signoff_package.tar.gz',
+      filters: [{ name: 'Tarball', extensions: ['tar.gz'] }],
+    }
+    fromWebContents.mockReturnValue(windowDouble)
+    showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: options.defaultPath,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, options),
+    ).resolves.toBe(options.defaultPath)
+
+    expect(fromWebContents).toHaveBeenCalledWith(event.sender)
+    expect(showSaveDialog).toHaveBeenCalledWith(windowDouble, options)
+  })
+
+  it('returns null when the Save As dialog is canceled', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble())
+    showSaveDialog.mockResolvedValue({ canceled: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, {
+        title: 'Export Signoff Package',
+      }),
+    ).resolves.toBeNull()
+  })
+
+  it('delegates native menu enabled-state updates to the menu service', async () => {
+    const { handlers } = registerHandlers()
+
+    await handlers.get(desktopApiIpcChannels.menuSetActionEnabled)?.(
+      { sender: { id: 'web-contents' } },
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
+    )
+
+    expect(setMenuActionEnabled).toHaveBeenCalledWith(
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
+    )
   })
 
   it('delegates settings, dialog, and workspace calls to the provided services', async () => {

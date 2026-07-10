@@ -14,6 +14,7 @@ export const desktopMenuEventIds = {
   about: 'about',
   manageDesignFiles: 'manage_design_files',
   reconfigureWorkspace: 'reconfigure_workspace',
+  exportSignoffPackage: 'export_signoff_package',
 } as const
 
 export type DesktopMenuEventId =
@@ -26,6 +27,7 @@ export const appMenuActionIds = {
   openProject: desktopMenuEventIds.openProject,
   manageDesignFiles: desktopMenuEventIds.manageDesignFiles,
   reconfigureWorkspace: desktopMenuEventIds.reconfigureWorkspace,
+  exportSignoffPackage: desktopMenuEventIds.exportSignoffPackage,
 } as const
 
 export type AppMenuAction = (typeof appMenuActionIds)[keyof typeof appMenuActionIds]

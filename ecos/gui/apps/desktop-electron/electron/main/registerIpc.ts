@@ -23,6 +23,7 @@ import {
   type EccWorkspaceOpenRequest,
   type EccWorkspaceSyncConfigRequest,
   type DesktopFileDialogOptions,
+  type DesktopMenuEventId,
   type DesktopRtlSourceDialogOptions,
   type PickedRtlSources,
   type DesktopProjectTextFileTail,
@@ -50,6 +51,7 @@ import {
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
+import type { DesktopSaveFileDialogOptions } from '../../../../packages/shared/src/contracts/desktopApi.ts'
 import {
   closeWindow,
   confirmWindowClose,
@@ -59,6 +61,7 @@ import {
   toggleMaximizeWindow,
 } from '../services/windowService'
 import { electronLogger } from '../services/logger'
+import { setMenuActionEnabled } from '../services/menuService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -341,6 +344,15 @@ async function pickFiles(options?: DesktopFileDialogOptions): Promise<string[] |
   return filePaths.length > 0 ? filePaths : null
 }
 
+async function saveFile(
+  event: IpcMainInvokeEvent,
+  options?: DesktopSaveFileDialogOptions,
+): Promise<string | null> {
+  const result = await dialog.showSaveDialog(getEventWindow(event), options ?? {})
+
+  return result.canceled ? null : (result.filePath ?? null)
+}
+
 async function classifyLocalPaths(paths: string[]): Promise<PickedRtlSources> {
   const files: string[] = []
   const directories: string[] = []
@@ -493,6 +505,10 @@ export function registerIpc(
     return isWindowMaximized(getEventWindow(event))
   })
 
+  handle(desktopApiIpcChannels.menuSetActionEnabled, (_event, action, enabled) => {
+    setMenuActionEnabled(action as DesktopMenuEventId, enabled as boolean)
+  })
+
   handle(desktopApiIpcChannels.settingsGet, async (_event, key) => {
     return await services.settingsStore.get(key as string)
   })
@@ -533,6 +549,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.dialogPickRtlSources, async (_event, options) => {
     return await pickRtlSources(options as DesktopRtlSourceDialogOptions | undefined)
+  })
+
+  handle(desktopApiIpcChannels.dialogSaveFile, async (event, options) => {
+    return await saveFile(event, options as DesktopSaveFileDialogOptions | undefined)
   })
 
   handle(desktopApiIpcChannels.workspaceIsProjectDirectory, async (_event, path) => {
