@@ -9,6 +9,7 @@ use chipgeom_format::{
 };
 pub use chipgeom_reader::GeometryMappedBytes;
 use chipgeom_reader::GeometrySnapshot;
+use rstar::{RTree, RTreeObject, AABB};
 
 pub struct ChipViewDb {
     layer_index: LayerShapeIndex,
@@ -62,6 +63,7 @@ pub struct LayerSummary {
 #[derive(Clone, Debug, Default)]
 pub struct LayerShapeIndex {
     by_layer: BTreeMap<u16, Vec<usize>>,
+    spatial_by_layer: BTreeMap<u16, RTree<LayerSpatialEntry>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -80,20 +82,53 @@ pub struct OwnerNameIndex {
     name_by_owner: BTreeMap<(u8, u64), String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LayerSpatialEntry {
+    index: usize,
+    envelope: AABB<[i32; 2]>,
+}
+
+impl RTreeObject for LayerSpatialEntry {
+    type Envelope = AABB<[i32; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.envelope
+    }
+}
+
 impl LayerShapeIndex {
     pub fn from_shapes(shapes: &[ShapeRecord]) -> Self {
         let mut by_layer = BTreeMap::<u16, Vec<usize>>::new();
+        let mut spatial_entries_by_layer = BTreeMap::<u16, Vec<LayerSpatialEntry>>::new();
         for (index, shape) in shapes.iter().enumerate() {
             if shape.state != ShapeState::Alive as u8 {
                 continue;
             }
             by_layer.entry(shape.layer_id).or_default().push(index);
+            spatial_entries_by_layer
+                .entry(shape.layer_id)
+                .or_default()
+                .push(LayerSpatialEntry {
+                    index,
+                    envelope: rect_envelope(shape.bbox),
+                });
         }
-        Self { by_layer }
+        let spatial_by_layer = spatial_entries_by_layer
+            .into_iter()
+            .map(|(layer_id, entries)| (layer_id, RTree::bulk_load(entries)))
+            .collect();
+        Self {
+            by_layer,
+            spatial_by_layer,
+        }
     }
 
     pub fn candidate_count(&self, layer_id: u16) -> usize {
         self.by_layer.get(&layer_id).map_or(0, std::vec::Vec::len)
+    }
+
+    pub fn query_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
+        self.spatial_candidate_indices(layer_id, bbox).len()
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
@@ -105,6 +140,14 @@ impl LayerShapeIndex {
                     size_of::<u16>()
                         + size_of::<Vec<usize>>()
                         + indices.capacity() * size_of::<usize>()
+                })
+                .sum::<usize>()
+            + self
+                .spatial_by_layer
+                .values()
+                .map(|tree| {
+                    size_of::<RTree<LayerSpatialEntry>>()
+                        + tree.size() * size_of::<LayerSpatialEntry>()
                 })
                 .sum::<usize>()
     }
@@ -127,12 +170,30 @@ impl LayerShapeIndex {
         layer_id: u16,
         bbox: Rect32,
     ) -> Vec<usize> {
-        self.by_layer
-            .get(&layer_id)
+        self.spatial_candidate_indices(layer_id, bbox)
             .into_iter()
-            .flat_map(|indices| indices.iter().copied())
             .filter(|index| shapes[*index].bbox.intersects(bbox))
             .collect()
+    }
+
+    fn spatial_candidate_indices(&self, layer_id: u16, bbox: Rect32) -> Vec<usize> {
+        let mut indices = self
+            .spatial_by_layer
+            .get(&layer_id)
+            .into_iter()
+            .flat_map(|tree| tree.locate_in_envelope_intersecting(rect_envelope(bbox)))
+            .map(|entry| entry.index)
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices
+    }
+
+    #[cfg(test)]
+    fn spatial_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
+        self.spatial_by_layer.get(&layer_id).map_or(0, |tree| {
+            tree.locate_in_envelope_intersecting(rect_envelope(bbox))
+                .count()
+        })
     }
 
     pub fn pick_top_rect(
@@ -143,8 +204,7 @@ impl LayerShapeIndex {
     ) -> Option<ShapeId> {
         layer_ids
             .iter()
-            .filter_map(|layer_id| self.by_layer.get(layer_id))
-            .flat_map(|indices| indices.iter().copied())
+            .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, point_bbox(point)))
             .filter(|index| {
                 let shape = &shapes[*index];
                 shape.state == ShapeState::Alive as u8
@@ -364,6 +424,41 @@ fn rect_contains_point(rect: Rect32, point: Point32) -> bool {
     point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
 }
 
+fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
+    AABB::from_corners(
+        [rect.lx.min(rect.hx), rect.ly.min(rect.hy)],
+        [rect.lx.max(rect.hx), rect.ly.max(rect.hy)],
+    )
+}
+
+fn point_bbox(point: Point32) -> Rect32 {
+    Rect32 {
+        lx: point.x,
+        ly: point.y,
+        hx: point.x,
+        hy: point.y,
+    }
+}
+
+#[cfg(test)]
+fn filter_shape_ids_by_owner_types(
+    shape_ids: Vec<ShapeId>,
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    owner_types: &[u8],
+) -> Vec<ShapeId> {
+    shape_ids
+        .into_iter()
+        .filter(|shape_id| {
+            shapes
+                .iter()
+                .find(|shape| shape.id == *shape_id)
+                .and_then(|shape| owners.get(shape.owner_index as usize))
+                .is_some_and(|owner| owner_types.contains(&owner.owner_type))
+        })
+        .collect()
+}
+
 impl ChipViewDb {
     pub fn open(manifest_path: impl AsRef<Path>) -> Result<Self> {
         let snapshot = GeometrySnapshot::open(manifest_path)?;
@@ -435,6 +530,10 @@ impl ChipViewDb {
         self.layer_index.candidate_count(layer_id)
     }
 
+    pub fn layer_viewport_candidate_count(&self, layer_id: u16, bbox: Rect32) -> usize {
+        self.layer_index.query_candidate_count(layer_id, bbox)
+    }
+
     pub fn view_tile_count(&self) -> usize {
         self.snapshot.view_tile_records().len()
     }
@@ -470,6 +569,25 @@ impl ChipViewDb {
 
     pub fn query_owner_name(&self, name: &str) -> Vec<ShapeId> {
         self.name_index.query(name)
+    }
+
+    pub fn query_owner_name_for_owner_types(
+        &self,
+        name: &str,
+        owner_types: &[OwnerType],
+    ) -> Vec<ShapeId> {
+        let owner_type_values: Vec<u8> = owner_types
+            .iter()
+            .map(|owner_type| *owner_type as u8)
+            .collect();
+        self.query_owner_name(name)
+            .into_iter()
+            .filter(|shape_id| {
+                self.find_shape(*shape_id)
+                    .and_then(|shape| self.owner_for_shape(shape))
+                    .is_some_and(|owner| owner_type_values.contains(&owner.owner_type))
+            })
+            .collect()
     }
 
     pub fn pick_top_rect(&self, layer_ids: &[u16], point: Point32) -> Option<ShapeId> {
@@ -580,6 +698,77 @@ mod tests {
         assert_eq!(index.candidate_count(7), 2);
         assert_eq!(index.candidate_count(8), 1);
         assert_eq!(hits, vec![1]);
+    }
+
+    #[test]
+    fn layer_shape_index_uses_spatial_candidates_for_viewport_queries() {
+        let mut shapes = Vec::new();
+        for id in 1..=200 {
+            shapes.push(ShapeRecord {
+                bbox: Rect32 {
+                    lx: id * 1000,
+                    ly: id * 1000,
+                    hx: id * 1000 + 10,
+                    hy: id * 1000 + 10,
+                },
+                ..shape(id as ShapeId, 4)
+            });
+        }
+        shapes.push(ShapeRecord {
+            bbox: Rect32 {
+                lx: 5,
+                ly: 5,
+                hx: 15,
+                hy: 15,
+            },
+            ..shape(999, 4)
+        });
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        let bbox = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 20,
+            hy: 20,
+        };
+
+        assert_eq!(index.query_layer_intersect(&shapes, 4, bbox), vec![999]);
+        assert!(index.spatial_candidate_count(4, bbox) < index.candidate_count(4));
+    }
+
+    #[test]
+    fn layer_shape_index_reports_viewport_candidate_count_from_spatial_index() {
+        let mut shapes = Vec::new();
+        for id in 1..=40 {
+            shapes.push(ShapeRecord {
+                bbox: Rect32 {
+                    lx: id * 500,
+                    ly: id * 500,
+                    hx: id * 500 + 10,
+                    hy: id * 500 + 10,
+                },
+                ..shape(id as ShapeId, 3)
+            });
+        }
+        shapes.push(ShapeRecord {
+            bbox: Rect32 {
+                lx: 10,
+                ly: 10,
+                hx: 20,
+                hy: 20,
+            },
+            ..shape(99, 3)
+        });
+        let index = LayerShapeIndex::from_shapes(&shapes);
+        let viewport = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 30,
+            hy: 30,
+        };
+
+        assert_eq!(index.query_candidate_count(3, viewport), 1);
+        assert!(index.query_candidate_count(3, viewport) < index.candidate_count(3));
     }
 
     #[test]
@@ -739,6 +928,82 @@ mod tests {
         assert_eq!(
             index.name_for_owner(OwnerType::InstanceBBox as u8, 21),
             None
+        );
+    }
+
+    #[test]
+    fn query_owner_name_filters_by_owner_type_for_net_and_instance_queries() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::Via as u8,
+                owner_id: 11,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceHalo as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                ..shape(3, 0)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                ..shape(4, 0)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "clk".to_string()),
+                (OwnerType::Via as u8, 11, "clk".to_string()),
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstanceHalo as u8, 20, "u0".to_string()),
+            ],
+        );
+
+        assert_eq!(
+            filter_shape_ids_by_owner_types(
+                name_index.query("clk"),
+                &shapes,
+                &owners,
+                &[
+                    OwnerType::NetWireSegment as u8,
+                    OwnerType::SpecialWireSegment as u8,
+                ],
+            ),
+            vec![1]
+        );
+        assert_eq!(
+            filter_shape_ids_by_owner_types(
+                name_index.query("u0"),
+                &shapes,
+                &owners,
+                &[OwnerType::InstanceBBox as u8, OwnerType::InstanceHalo as u8],
+            ),
+            vec![3, 4]
         );
     }
 

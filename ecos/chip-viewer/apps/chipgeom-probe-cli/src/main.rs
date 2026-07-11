@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, SnapshotStats};
-use chipgeom_format::{Rect32, ShapeKind, ShapeState};
+use chipgeom_format::{OwnerRef, OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState};
 use clap::Parser;
 use serde_json::{json, Value};
 
@@ -15,6 +15,10 @@ struct Args {
     json: bool,
     #[arg(long)]
     name: Option<String>,
+    #[arg(long)]
+    net_name: Option<String>,
+    #[arg(long)]
+    instance_name: Option<String>,
     #[arg(long)]
     owner_type: Option<String>,
     #[arg(long)]
@@ -36,6 +40,10 @@ fn main() -> Result<()> {
     let memory_stats = db.memory_stats();
     let delta_stats = db.delta_stats();
     let bbox = args.bbox.as_deref().map(parse_bbox_values).transpose()?;
+    let layer_query_report = match (args.layer, bbox) {
+        (Some(layer_id), Some(viewport)) => Some(query_layer(&db, layer_id, viewport)),
+        _ => None,
+    };
     let bench_report = if args.bench_viewport {
         let layer_id = args
             .layer
@@ -52,7 +60,13 @@ fn main() -> Result<()> {
     };
 
     if args.json {
-        print_json(&args, &db, &stats, bench_report.as_ref())?;
+        print_json(
+            &args,
+            &db,
+            &stats,
+            layer_query_report.as_ref(),
+            bench_report.as_ref(),
+        )?;
         return Ok(());
     }
     let name_report = args
@@ -81,6 +95,37 @@ fn main() -> Result<()> {
     }
     if let Some(name) = args.name {
         println!("name.{}={}", name, db.query_owner_name(&name).len());
+    }
+    if let Some(name) = args.net_name {
+        let shape_ids = query_net_name(&db, &name);
+        println!("net_name.{}={}", name, shape_ids.len());
+        println!(
+            "net_name.{}.shape_ids={}",
+            name,
+            format_shape_ids(&shape_ids)
+        );
+    }
+    if let Some(name) = args.instance_name {
+        let shape_ids = query_instance_name(&db, &name);
+        println!("instance_name.{}={}", name, shape_ids.len());
+        println!(
+            "instance_name.{}.shape_ids={}",
+            name,
+            format_shape_ids(&shape_ids)
+        );
+    }
+    if let Some(report) = &layer_query_report {
+        println!("layer_query.layer={}", report.layer_id);
+        println!(
+            "layer_query.bbox={} {} {} {}",
+            report.bbox.lx, report.bbox.ly, report.bbox.hx, report.bbox.hy
+        );
+        println!("layer_query.hits={}", report.hit_count);
+        println!("layer_query.candidates={}", report.candidate_count);
+        println!(
+            "layer_query.shape_ids={}",
+            format_shape_ids(&report.shape_ids)
+        );
     }
     if let Some(owner_type) = args.owner_type {
         let mut count = 0usize;
@@ -167,12 +212,51 @@ struct BenchReport {
 }
 
 #[derive(Clone, Debug)]
+struct LayerQueryReport {
+    bbox: Rect32,
+    candidate_count: usize,
+    hit_count: usize,
+    layer_id: u16,
+    shape_ids: Vec<ShapeId>,
+}
+
+#[derive(Clone, Debug)]
 struct NameBenchReport {
     hit_count: usize,
     iterations: usize,
     name: String,
     p50_ns: u128,
     p95_ns: u128,
+}
+
+fn query_layer(db: &ChipViewDb, layer_id: u16, bbox: Rect32) -> LayerQueryReport {
+    let shape_ids = db.query_layer_intersect(layer_id, bbox);
+    LayerQueryReport {
+        bbox,
+        candidate_count: db.layer_viewport_candidate_count(layer_id, bbox),
+        hit_count: shape_ids.len(),
+        layer_id,
+        shape_ids,
+    }
+}
+
+fn query_net_name(db: &ChipViewDb, name: &str) -> Vec<ShapeId> {
+    db.query_owner_name_for_owner_types(
+        name,
+        &[OwnerType::NetWireSegment, OwnerType::SpecialWireSegment],
+    )
+}
+
+fn query_instance_name(db: &ChipViewDb, name: &str) -> Vec<ShapeId> {
+    db.query_owner_name_for_owner_types(name, &[OwnerType::InstanceBBox, OwnerType::InstanceHalo])
+}
+
+fn format_shape_ids(shape_ids: &[ShapeId]) -> String {
+    shape_ids
+        .iter()
+        .map(|shape_id| shape_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn bench_viewport(db: &ChipViewDb, layer_id: u16, bbox: Rect32, iterations: usize) -> BenchReport {
@@ -188,7 +272,7 @@ fn bench_viewport(db: &ChipViewDb, layer_id: u16, bbox: Rect32, iterations: usiz
 
     BenchReport {
         bbox,
-        candidate_count: db.layer_query_candidate_count(layer_id),
+        candidate_count: db.layer_viewport_candidate_count(layer_id, bbox),
         hit_count,
         iterations,
         layer_id,
@@ -315,10 +399,70 @@ fn delta_stats_json(stats: &DeltaStats) -> Value {
     })
 }
 
+fn bbox_json(bbox: Rect32) -> Value {
+    json!({
+        "lx": bbox.lx,
+        "ly": bbox.ly,
+        "hx": bbox.hx,
+        "hy": bbox.hy,
+    })
+}
+
+fn owner_json(owner: &OwnerRef) -> Value {
+    json!({
+        "type": ChipViewDb::owner_type_label(owner.owner_type),
+        "owner_id": owner.owner_id,
+        "path": [owner.path0, owner.path1, owner.path2, owner.path3],
+    })
+}
+
+fn shape_query_json(
+    shape_id: ShapeId,
+    shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>)>,
+) -> Value {
+    let Some((shape, owner)) = shape_and_owner else {
+        return json!({
+            "shape_id": shape_id,
+            "missing": true,
+        });
+    };
+
+    json!({
+        "shape_id": shape_id,
+        "missing": false,
+        "version": shape.version,
+        "layer": shape.layer_id,
+        "kind": shape_kind_label(shape.kind),
+        "state": shape_state_label(shape.state),
+        "bbox": bbox_json(shape.bbox),
+        "owner": owner.map(owner_json),
+    })
+}
+
+fn layer_query_json(report: &LayerQueryReport) -> Value {
+    json!({
+        "layer": report.layer_id,
+        "bbox": bbox_json(report.bbox),
+        "hits": report.hit_count,
+        "candidates": report.candidate_count,
+        "shape_ids": report.shape_ids,
+    })
+}
+
+fn typed_name_query_json(kind: &str, name: &str, shape_ids: Vec<ShapeId>) -> Value {
+    json!({
+        "kind": kind,
+        "name": name,
+        "hits": shape_ids.len(),
+        "shape_ids": shape_ids,
+    })
+}
+
 fn print_json(
     args: &Args,
     db: &ChipViewDb,
     stats: &SnapshotStats,
+    layer_query_report: Option<&LayerQueryReport>,
     bench_report: Option<&BenchReport>,
 ) -> Result<()> {
     let name_report = args
@@ -345,10 +489,30 @@ fn print_json(
         "delta": delta_stats_json(&db.delta_stats()),
         "layer_count": db.layer_summaries().len(),
         "view_tile_count": db.view_tile_count(),
-        "name_query": args.name.as_ref().map(|name| json!({
-            "name": name,
-            "hits": db.query_owner_name(name).len(),
-        })),
+        "name_query": args.name.as_ref().map(|name| {
+            let shape_ids = db.query_owner_name(name);
+            json!({
+                "name": name,
+                "hits": shape_ids.len(),
+                "shape_ids": shape_ids,
+            })
+        }),
+        "net_query": args
+            .net_name
+            .as_ref()
+            .map(|name| typed_name_query_json("net", name, query_net_name(db, name))),
+        "instance_query": args
+            .instance_name
+            .as_ref()
+            .map(|name| typed_name_query_json("instance", name, query_instance_name(db, name))),
+        "shape_query": args.shape_id.map(|shape_id| {
+            shape_query_json(
+                shape_id,
+                db.find_shape(shape_id)
+                    .map(|shape| (shape, db.owner_for_shape(shape))),
+            )
+        }),
+        "layer_query": layer_query_report.map(layer_query_json),
         "bench_name": name_report.as_ref().map(|report| json!({
             "name": report.name,
             "iterations": report.iterations,
@@ -356,12 +520,7 @@ fn print_json(
             "p50_ns": report.p50_ns,
             "p95_ns": report.p95_ns,
         })),
-        "bbox": stats.bbox.map(|bbox| json!({
-            "lx": bbox.lx,
-            "ly": bbox.ly,
-            "hx": bbox.hx,
-            "hy": bbox.hy,
-        })),
+        "bbox": stats.bbox.map(bbox_json),
         "owner_type_counts": owner_type_counts,
         "bench_viewport": bench_report.map(|report| json!({
             "layer": report.layer_id,
@@ -472,5 +631,84 @@ mod tests {
         assert_eq!(value["latest"]["shape_id"], 99);
         assert_eq!(value["latest"]["old_version"], 3);
         assert_eq!(value["latest"]["new_version"], 4);
+    }
+
+    #[test]
+    fn shape_query_json_reports_shape_owner_and_missing_shapes() {
+        let shape = chipgeom_format::ShapeRecord {
+            id: 42,
+            version: 3,
+            layer_id: 7,
+            kind: chipgeom_format::ShapeKind::Rect as u8,
+            state: chipgeom_format::ShapeState::Alive as u8,
+            bbox: chipgeom_format::Rect32 {
+                lx: 1,
+                ly: 2,
+                hx: 3,
+                hy: 4,
+            },
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let owner = chipgeom_format::OwnerRef {
+            owner_type: chipgeom_format::OwnerType::InstanceBBox as u8,
+            owner_id: 9001,
+            path0: 5,
+            path1: 6,
+            path2: 7,
+            path3: 8,
+            ..chipgeom_format::OwnerRef::default()
+        };
+
+        let value = shape_query_json(42, Some((&shape, Some(&owner))));
+
+        assert_eq!(value["shape_id"], 42);
+        assert_eq!(value["missing"], false);
+        assert_eq!(value["version"], 3);
+        assert_eq!(value["layer"], 7);
+        assert_eq!(value["kind"], "rect");
+        assert_eq!(value["state"], "alive");
+        assert_eq!(value["bbox"]["lx"], 1);
+        assert_eq!(value["owner"]["type"], "instance_bbox");
+        assert_eq!(value["owner"]["owner_id"], 9001);
+        assert_eq!(value["owner"]["path"], json!([5, 6, 7, 8]));
+
+        let missing = shape_query_json(99, None);
+
+        assert_eq!(missing["shape_id"], 99);
+        assert_eq!(missing["missing"], true);
+    }
+
+    #[test]
+    fn layer_query_json_reports_bbox_hits_and_shape_ids() {
+        let report = LayerQueryReport {
+            bbox: chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 30,
+                hy: 40,
+            },
+            candidate_count: 5,
+            hit_count: 2,
+            layer_id: 9,
+            shape_ids: vec![101, 202],
+        };
+
+        let value = layer_query_json(&report);
+
+        assert_eq!(value["layer"], 9);
+        assert_eq!(value["bbox"]["ly"], 20);
+        assert_eq!(value["hits"], 2);
+        assert_eq!(value["candidates"], 5);
+        assert_eq!(value["shape_ids"], json!([101, 202]));
+    }
+
+    #[test]
+    fn typed_name_query_json_reports_query_kind_name_and_shape_ids() {
+        let value = typed_name_query_json("net", "clk", vec![7, 8, 9]);
+
+        assert_eq!(value["kind"], "net");
+        assert_eq!(value["name"], "clk");
+        assert_eq!(value["hits"], 3);
+        assert_eq!(value["shape_ids"], json!([7, 8, 9]));
     }
 }

@@ -5,7 +5,7 @@ use std::process;
 use std::time::Duration;
 
 use chip_display::LayerStyle;
-use chip_render::RenderPlanCache;
+use chip_render::{RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{ChipViewDb, SnapshotStats};
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId,
@@ -27,6 +27,7 @@ struct LoadedViewer {
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
     search_text: String,
+    search_mode: SearchMode,
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
     edit_tool: EditTool,
@@ -34,6 +35,7 @@ struct LoadedViewer {
     pending_edit: Option<PendingEdit>,
     last_edit_result: Option<String>,
     render_cache: RenderPlanCache,
+    view_tile_cache: ViewTilePlaneCache,
     next_command_counter: u32,
     zoom: f32,
     pan: egui::Vec2,
@@ -72,6 +74,31 @@ struct EditResultAction {
 enum EditTool {
     Move,
     Resize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SearchMode {
+    All,
+    Net,
+    Instance,
+}
+
+impl SearchMode {
+    fn label(self) -> &'static str {
+        match self {
+            SearchMode::All => "All",
+            SearchMode::Net => "Net",
+            SearchMode::Instance => "Instance",
+        }
+    }
+
+    fn owner_types(self) -> Option<&'static [OwnerType]> {
+        match self {
+            SearchMode::All => None,
+            SearchMode::Net => Some(&[OwnerType::NetWireSegment, OwnerType::SpecialWireSegment]),
+            SearchMode::Instance => Some(&[OwnerType::InstanceBBox, OwnerType::InstanceHalo]),
+        }
+    }
 }
 
 impl EditTool {
@@ -164,6 +191,7 @@ impl LoadedViewer {
             edit_command_dir,
             edit_result_dir,
             search_text: String::new(),
+            search_mode: SearchMode::All,
             highlighted: BTreeSet::new(),
             selected: None,
             edit_tool: EditTool::Move,
@@ -171,6 +199,7 @@ impl LoadedViewer {
             pending_edit: None,
             last_edit_result: None,
             render_cache: RenderPlanCache::default(),
+            view_tile_cache: ViewTilePlaneCache::default(),
             next_command_counter: 1,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
@@ -195,6 +224,16 @@ impl LoadedViewer {
             let response = ui.text_edit_singleline(&mut self.search_text);
             if response.changed() {
                 self.refresh_highlight();
+            }
+        });
+        ui.horizontal(|ui| {
+            for mode in [SearchMode::All, SearchMode::Net, SearchMode::Instance] {
+                if ui
+                    .selectable_value(&mut self.search_mode, mode, mode.label())
+                    .changed()
+                {
+                    self.refresh_highlight();
+                }
             }
         });
         if !self.search_text.trim().is_empty() {
@@ -331,7 +370,10 @@ impl LoadedViewer {
 
         for (layer_id, style) in &visible_layers {
             if use_view_tiles {
-                for tile in self.db.query_view_tiles(view_lod, *layer_id, viewport) {
+                for tile in self
+                    .view_tile_cache
+                    .visible_tiles(&self.db, view_lod, *layer_id, viewport)
+                {
                     let screen =
                         world_to_screen_rect(tile.bbox, world, canvas, self.zoom, self.pan);
                     if !screen.is_positive() || !screen.intersects(canvas) {
@@ -598,6 +640,7 @@ impl LoadedViewer {
             .collect();
         self.db = db;
         self.render_cache.clear();
+        self.view_tile_cache.clear();
         self.refresh_highlight();
     }
 
@@ -611,6 +654,11 @@ impl LoadedViewer {
         let name = self.search_text.trim();
         self.highlighted = if name.is_empty() {
             BTreeSet::new()
+        } else if let Some(owner_types) = self.search_mode.owner_types() {
+            self.db
+                .query_owner_name_for_owner_types(name, owner_types)
+                .into_iter()
+                .collect()
         } else {
             self.db.query_owner_name(name).into_iter().collect()
         };
@@ -1064,6 +1112,29 @@ mod tests {
         assert_eq!(
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
+        );
+    }
+
+    #[test]
+    fn search_mode_filters_net_and_instance_owner_types() {
+        assert_eq!(SearchMode::All.owner_types(), None);
+        assert_eq!(
+            SearchMode::Net.owner_types(),
+            Some(
+                &[
+                    chipgeom_format::OwnerType::NetWireSegment,
+                    chipgeom_format::OwnerType::SpecialWireSegment,
+                ][..]
+            )
+        );
+        assert_eq!(
+            SearchMode::Instance.owner_types(),
+            Some(
+                &[
+                    chipgeom_format::OwnerType::InstanceBBox,
+                    chipgeom_format::OwnerType::InstanceHalo,
+                ][..]
+            )
         );
     }
 

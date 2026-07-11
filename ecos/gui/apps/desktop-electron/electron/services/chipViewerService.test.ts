@@ -372,6 +372,55 @@ describe('ChipViewerService', () => {
     })
   })
 
+  it('publishes rejected edit results atomically when apply-edit fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const commandPath = join(EDIT_COMMAND_DIR, 'command-42.json')
+    const resultPath = join(EDIT_RESULT_DIR, 'result-42.json')
+    const temporaryResultPath = `${resultPath}.tmp`
+    const execFile = vi.fn(async (_file: string, args: string[]) => {
+      if (args.includes('apply-edit')) {
+        throw new Error('apply-edit failed')
+      }
+      return {
+        stderr: '',
+        stdout: '',
+      }
+    })
+    const { renameFile, service, watchDirectory, writeTextFile } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [commandPath]: JSON.stringify({
+          command_id: 42,
+          shape_id: 99,
+        }),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+
+    editListener?.('command-42.json')
+
+    await vi.waitFor(() => {
+      expect(writeTextFile).toHaveBeenCalledWith(
+        temporaryResultPath,
+        expect.stringContaining('"status": "rejected"'),
+      )
+      expect(renameFile).toHaveBeenCalledWith(temporaryResultPath, resultPath)
+    })
+  })
+
   it('throws a clear error when the db config has no LEF inputs', async () => {
     const devBinaries = devChipViewerPaths()
     const { service } = createService({

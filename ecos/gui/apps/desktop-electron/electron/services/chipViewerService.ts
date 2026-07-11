@@ -422,7 +422,8 @@ export class ChipViewerService {
       )
       await this.renameFile(temporaryResultPath, resultPath)
     } catch (error) {
-      await this.writeRejectedEditResult(commandPath, resultPath, error)
+      await this.writeRejectedEditResult(commandPath, temporaryResultPath, error)
+      await this.renameFile(temporaryResultPath, resultPath)
     }
   }
 
