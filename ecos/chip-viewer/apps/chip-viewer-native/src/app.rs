@@ -377,14 +377,6 @@ impl LoadedViewer {
         let canvas = response.rect;
         painter.rect_filled(canvas, 0.0, egui::Color32::from_rgb(12, 14, 18));
 
-        if response.hovered() {
-            let zoom_delta = ui.ctx().input(|input| input.zoom_delta());
-            if (zoom_delta - 1.0).abs() > f32::EPSILON {
-                self.zoom = (self.zoom * zoom_delta).clamp(0.05, 200.0);
-                ui.ctx().request_repaint();
-            }
-        }
-
         let Some(world) = self.stats.bbox else {
             painter.text(
                 canvas.center(),
@@ -395,6 +387,26 @@ impl LoadedViewer {
             );
             return;
         };
+
+        if response.hovered() {
+            let raw_scroll_delta_y = ui.ctx().input(|input| input.raw_scroll_delta.y);
+            let zoom_delta = ui.ctx().input(|input| input.zoom_delta());
+            let zoom_factor = if raw_scroll_delta_y.abs() > 0.0 {
+                scroll_zoom_factor(raw_scroll_delta_y)
+            } else {
+                zoom_delta
+            };
+            if (zoom_factor - 1.0).abs() > f32::EPSILON {
+                let cursor = ui
+                    .ctx()
+                    .input(|input| input.pointer.hover_pos())
+                    .unwrap_or(canvas.center());
+                (self.zoom, self.pan) =
+                    zoom_at_screen_pos(world, canvas, self.zoom, self.pan, zoom_factor, cursor);
+                self.pan_drag.reset();
+                ui.ctx().request_repaint();
+            }
+        }
 
         self.focus_pending_shape(world, canvas);
 
@@ -939,6 +951,44 @@ fn screen_to_world_delta(
     )
 }
 
+fn scroll_zoom_factor(scroll: f32) -> f32 {
+    if scroll > 0.0 {
+        1.15
+    } else {
+        1.0 / 1.15
+    }
+}
+
+fn zoom_at_screen_pos(
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    zoom_factor: f32,
+    cursor: egui::Pos2,
+) -> (f32, egui::Vec2) {
+    let world_width = (world.hx - world.lx).max(1) as f32;
+    let world_height = (world.hy - world.ly).max(1) as f32;
+    let base_scale = (canvas.width() / world_width)
+        .min(canvas.height() / world_height)
+        .max(0.001);
+    let old_zoom = zoom.max(0.001);
+    let new_zoom = (zoom * zoom_factor).clamp(0.05, 200.0);
+    let old_scale = base_scale * old_zoom;
+    let new_scale = base_scale * new_zoom;
+    let world_cx = (world.lx + world.hx) as f32 * 0.5;
+    let world_cy = (world.ly + world.hy) as f32 * 0.5;
+    let old_center = canvas.center() + pan;
+    let cursor_world_x = world_cx + (cursor.x - old_center.x) / old_scale;
+    let cursor_world_y = world_cy - (cursor.y - old_center.y) / old_scale;
+    let new_pan = egui::vec2(
+        cursor.x - canvas.center().x - (cursor_world_x - world_cx) * new_scale,
+        cursor.y - canvas.center().y + (cursor_world_y - world_cy) * new_scale,
+    );
+
+    (new_zoom, new_pan)
+}
+
 fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
     Rect32 {
         lx: rect.lx.saturating_add(dx),
@@ -1435,6 +1485,36 @@ mod tests {
             screen_to_world_rect(canvas, world, canvas, 1.0, egui::Vec2::ZERO),
             world
         );
+    }
+
+    #[test]
+    fn scroll_zoom_factor_keeps_directional_zoom() {
+        assert!(scroll_zoom_factor(1.0) > 1.0);
+        assert!(scroll_zoom_factor(-1.0) < 1.0);
+    }
+
+    #[test]
+    fn zoom_at_screen_pos_keeps_cursor_world_position_fixed() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0));
+        let cursor = egui::pos2(150.0, 50.0);
+        let marker = chipgeom_format::Rect32 {
+            lx: 75,
+            ly: 75,
+            hx: 75,
+            hy: 75,
+        };
+        let (zoom, pan) = zoom_at_screen_pos(world, canvas, 1.0, egui::Vec2::ZERO, 2.0, cursor);
+
+        let screen = world_to_screen_rect(marker, world, canvas, zoom, pan);
+
+        assert!((screen.center().x - cursor.x).abs() <= 0.5);
+        assert!((screen.center().y - cursor.y).abs() <= 0.5);
     }
 
     #[test]
