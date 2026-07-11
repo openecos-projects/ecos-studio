@@ -12,6 +12,13 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { useEDA } from '@/composables/useEDA'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { getDesktopApi } from '@/platform/desktop'
+import {
+  buildChipViewerOpenRequest,
+  canOpenChipViewer,
+  chipViewerLoadingMessage,
+  shouldShowChipViewer,
+  type ChipViewerMode,
+} from './drawingAreaChipViewer'
 
 const route = useRoute()
 const { currentProject, resourceVersions, workspaceSession } = useWorkspace()
@@ -28,8 +35,6 @@ const chipViewerBusy = ref(false)
 const chipViewerEditBusy = ref(false)
 
 const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'
-const CHIP_VIEWER_LOADING_MESSAGE = 'Preparing Chip Viewer geometry...'
-const CHIP_VIEWER_EDIT_LOADING_MESSAGE = 'Preparing Chip Viewer edit geometry...'
 
 const currentStepKey = computed(() => {
   const pathParts = route.path.split('/')
@@ -57,11 +62,12 @@ const showNativeLayoutViewer = computed(
 
 const currentStepEnum = computed(() => getStepEnumFromPath(currentStepKey.value))
 
-const showChipViewer = computed(
-  () =>
-    isDesktopRuntime() &&
-    currentProject.value?.path != null &&
-    currentStepEnum.value != null,
+const showChipViewer = computed(() =>
+  shouldShowChipViewer({
+    isDesktopRuntime: isDesktopRuntime(),
+    projectPath: currentProject.value?.path,
+    step: currentStepEnum.value,
+  }),
 )
 
 const stepEnumValues = Object.values(StepEnum)
@@ -186,66 +192,56 @@ async function onOpenNativeLayoutViewer(): Promise<void> {
   }
 }
 
-async function onOpenChipViewer(): Promise<void> {
-  if (chipViewerBusy.value || chipViewerEditBusy.value) return
+async function openChipViewer(mode: ChipViewerMode): Promise<void> {
   const projectPath = currentProject.value?.path
   const stepEnum = currentStepEnum.value
-  if (!projectPath || !stepEnum || !isDesktopRuntime()) return
-
-  chipViewerBusy.value = true
-  loadingState.value = 'loading'
-  loadingMessage.value = CHIP_VIEWER_LOADING_MESSAGE
-  try {
-    const desktopApi = getDesktopApi()
-    await desktopApi.chipViewer.open({
-      mode: 'view',
+  if (
+    !canOpenChipViewer({
+      chipViewerBusy: chipViewerBusy.value,
+      chipViewerEditBusy: chipViewerEditBusy.value,
+      isDesktopRuntime: isDesktopRuntime(),
       projectPath,
       step: stepEnum,
-    })
+    }) ||
+    !projectPath ||
+    !stepEnum
+  ) {
+    return
+  }
+
+  const busyState = mode === 'edit' ? chipViewerEditBusy : chipViewerBusy
+  const preparingMessage = chipViewerLoadingMessage(mode)
+  busyState.value = true
+  loadingState.value = 'loading'
+  loadingMessage.value = preparingMessage
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.chipViewer.open(
+      buildChipViewerOpenRequest(projectPath, stepEnum, mode),
+    )
   } catch (err) {
-    console.error('Failed to open chip viewer:', err)
+    console.error(
+      mode === 'edit'
+        ? 'Failed to open chip viewer edit mode:'
+        : 'Failed to open chip viewer:',
+      err,
+    )
     loadingState.value = 'error'
     loadingMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
-    chipViewerBusy.value = false
-    if (
-      loadingState.value === 'loading' &&
-      loadingMessage.value === CHIP_VIEWER_LOADING_MESSAGE
-    ) {
+    busyState.value = false
+    if (loadingState.value === 'loading' && loadingMessage.value === preparingMessage) {
       resetLoadingState()
     }
   }
 }
 
-async function onOpenChipViewerEdit(): Promise<void> {
-  if (chipViewerBusy.value || chipViewerEditBusy.value) return
-  const projectPath = currentProject.value?.path
-  const stepEnum = currentStepEnum.value
-  if (!projectPath || !stepEnum || !isDesktopRuntime()) return
+async function onOpenChipViewer(): Promise<void> {
+  await openChipViewer('view')
+}
 
-  chipViewerEditBusy.value = true
-  loadingState.value = 'loading'
-  loadingMessage.value = CHIP_VIEWER_EDIT_LOADING_MESSAGE
-  try {
-    const desktopApi = getDesktopApi()
-    await desktopApi.chipViewer.open({
-      mode: 'edit',
-      projectPath,
-      step: stepEnum,
-    })
-  } catch (err) {
-    console.error('Failed to open chip viewer edit mode:', err)
-    loadingState.value = 'error'
-    loadingMessage.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    chipViewerEditBusy.value = false
-    if (
-      loadingState.value === 'loading' &&
-      loadingMessage.value === CHIP_VIEWER_EDIT_LOADING_MESSAGE
-    ) {
-      resetLoadingState()
-    }
-  }
+async function onOpenChipViewerEdit(): Promise<void> {
+  await openChipViewer('edit')
 }
 
 const handleStageChange = async (stage: string) => {
