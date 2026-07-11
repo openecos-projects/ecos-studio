@@ -127,6 +127,30 @@ function createService(options: {
 }
 
 describe('ChipViewerService', () => {
+  it('rejects unsupported viewer modes before spawning the native process', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    await expect(
+      service.open({
+        mode: 'inspect' as 'view',
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('Unsupported chip viewer mode')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('builds a missing geometry snapshot and launches the dev native viewer', async () => {
     const devBinaries = devChipViewerPaths()
     const {

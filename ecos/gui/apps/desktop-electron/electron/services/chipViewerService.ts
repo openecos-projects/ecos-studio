@@ -85,6 +85,8 @@ interface DbGeometryConfig {
   techLefPath: string
 }
 
+type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
+
 function defaultExecFile(file: string, args: string[]): Promise<ExecFileResult> {
   return new Promise((resolve, reject) => {
     execFileCallback(file, args, { encoding: 'utf8' }, (error, stdout, stderr) => {
@@ -199,6 +201,16 @@ function readStringInfo(result: WorkspaceStepInfoResult, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
+  if (mode === undefined || mode === 'view') {
+    return 'view'
+  }
+  if (mode === 'edit') {
+    return 'edit'
+  }
+  throw new Error(`Unsupported chip viewer mode: ${String(mode)}`)
+}
+
 export class ChipViewerService {
   private readonly appPath: string
   private readonly cwd: string
@@ -240,7 +252,7 @@ export class ChipViewerService {
 
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
-    const mode = request.mode ?? 'view'
+    const mode = normalizeChipViewerMode(request.mode)
     const binaries = this.resolveBinaries()
     const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
     const dbConfigPath = join(projectPath, DB_CONFIG_RELATIVE_PATH)
