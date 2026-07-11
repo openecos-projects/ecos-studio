@@ -61,6 +61,7 @@ struct EditDraft {
     shape_id: ShapeId,
     expected_version: u32,
     op: GeometryEditOp,
+    resize_corner: ResizeCorner,
     original_bbox: Rect32,
     requested_bbox: Rect32,
 }
@@ -81,6 +82,14 @@ struct EditResultAction {
 enum EditTool {
     Move,
     Resize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResizeCorner {
+    LowerLeft,
+    LowerRight,
+    UpperLeft,
+    UpperRight,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -583,11 +592,13 @@ impl LoadedViewer {
 
         let expected_version = shape.version;
         let original_bbox = shape.bbox;
+        let resize_corner = resize_corner_from_screen_pos(pos, screen);
         self.draft = Some(EditDraft {
             command_id: self.allocate_command_id(),
             shape_id,
             expected_version,
             op: self.edit_tool.op(),
+            resize_corner,
             original_bbox,
             requested_bbox: original_bbox,
         });
@@ -600,7 +611,9 @@ impl LoadedViewer {
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
         draft.requested_bbox = match draft.op {
             GeometryEditOp::MoveShape => translate_rect(draft.original_bbox, dx, dy),
-            GeometryEditOp::ResizeRect => resize_rect_from_delta(draft.original_bbox, dx, dy),
+            GeometryEditOp::ResizeRect => {
+                resize_rect_from_delta(draft.original_bbox, dx, dy, draft.resize_corner)
+            }
             GeometryEditOp::ReplaceLine => draft.original_bbox,
         };
     }
@@ -917,14 +930,58 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
     }
 }
 
-fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
-    let min_hx = rect.lx.saturating_add(1);
-    let min_hy = rect.ly.saturating_add(1);
-    Rect32 {
-        lx: rect.lx,
-        ly: rect.ly,
-        hx: rect.hx.saturating_add(dx).max(min_hx),
-        hy: rect.hy.saturating_add(dy).max(min_hy),
+fn resize_corner_from_screen_pos(pos: egui::Pos2, rect: egui::Rect) -> ResizeCorner {
+    [
+        (ResizeCorner::LowerLeft, rect.left_bottom()),
+        (ResizeCorner::LowerRight, rect.right_bottom()),
+        (ResizeCorner::UpperLeft, rect.left_top()),
+        (ResizeCorner::UpperRight, rect.right_top()),
+    ]
+    .into_iter()
+    .min_by(|(_, lhs), (_, rhs)| {
+        squared_distance(pos, *lhs).total_cmp(&squared_distance(pos, *rhs))
+    })
+    .map(|(corner, _)| corner)
+    .unwrap_or(ResizeCorner::UpperRight)
+}
+
+fn squared_distance(lhs: egui::Pos2, rhs: egui::Pos2) -> f32 {
+    let dx = lhs.x - rhs.x;
+    let dy = lhs.y - rhs.y;
+    dx * dx + dy * dy
+}
+
+fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32, corner: ResizeCorner) -> Rect32 {
+    let dragged_lx = rect.lx.saturating_add(dx).min(rect.hx.saturating_sub(1));
+    let dragged_ly = rect.ly.saturating_add(dy).min(rect.hy.saturating_sub(1));
+    let dragged_hx = rect.hx.saturating_add(dx).max(rect.lx.saturating_add(1));
+    let dragged_hy = rect.hy.saturating_add(dy).max(rect.ly.saturating_add(1));
+
+    match corner {
+        ResizeCorner::LowerLeft => Rect32 {
+            lx: dragged_lx,
+            ly: dragged_ly,
+            hx: rect.hx,
+            hy: rect.hy,
+        },
+        ResizeCorner::LowerRight => Rect32 {
+            lx: rect.lx,
+            ly: dragged_ly,
+            hx: dragged_hx,
+            hy: rect.hy,
+        },
+        ResizeCorner::UpperLeft => Rect32 {
+            lx: dragged_lx,
+            ly: rect.ly,
+            hx: rect.hx,
+            hy: dragged_hy,
+        },
+        ResizeCorner::UpperRight => Rect32 {
+            lx: rect.lx,
+            ly: rect.ly,
+            hx: dragged_hx,
+            hy: dragged_hy,
+        },
     }
 }
 
@@ -1319,7 +1376,7 @@ mod tests {
         };
 
         assert_eq!(
-            resize_rect_from_delta(rect, 5, -8),
+            resize_rect_from_delta(rect, 5, -8, ResizeCorner::UpperRight),
             chipgeom_format::Rect32 {
                 lx: 10,
                 ly: 20,
@@ -1339,13 +1396,102 @@ mod tests {
         };
 
         assert_eq!(
-            resize_rect_from_delta(rect, -100, -100),
+            resize_rect_from_delta(rect, -100, -100, ResizeCorner::UpperRight),
             chipgeom_format::Rect32 {
                 lx: 10,
                 ly: 20,
                 hx: 11,
                 hy: 21,
             }
+        );
+    }
+
+    #[test]
+    fn resize_rect_drags_the_selected_corner_and_keeps_the_opposite_corner_fixed() {
+        let rect = chipgeom_format::Rect32 {
+            lx: 10,
+            ly: 20,
+            hx: 30,
+            hy: 40,
+        };
+
+        assert_eq!(
+            resize_rect_from_delta(rect, -3, 4, ResizeCorner::LowerLeft),
+            chipgeom_format::Rect32 {
+                lx: 7,
+                ly: 24,
+                hx: 30,
+                hy: 40,
+            }
+        );
+        assert_eq!(
+            resize_rect_from_delta(rect, 5, -6, ResizeCorner::LowerRight),
+            chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 14,
+                hx: 35,
+                hy: 40,
+            }
+        );
+        assert_eq!(
+            resize_rect_from_delta(rect, 8, 3, ResizeCorner::UpperLeft),
+            chipgeom_format::Rect32 {
+                lx: 18,
+                ly: 20,
+                hx: 30,
+                hy: 43,
+            }
+        );
+    }
+
+    #[test]
+    fn resize_rect_clamps_dragged_corner_before_it_crosses_the_opposite_corner() {
+        let rect = chipgeom_format::Rect32 {
+            lx: 10,
+            ly: 20,
+            hx: 30,
+            hy: 40,
+        };
+
+        assert_eq!(
+            resize_rect_from_delta(rect, 100, 100, ResizeCorner::LowerLeft),
+            chipgeom_format::Rect32 {
+                lx: 29,
+                ly: 39,
+                hx: 30,
+                hy: 40,
+            }
+        );
+        assert_eq!(
+            resize_rect_from_delta(rect, -100, -100, ResizeCorner::UpperRight),
+            chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 11,
+                hy: 21,
+            }
+        );
+    }
+
+    #[test]
+    fn resize_corner_from_screen_pos_selects_nearest_corner() {
+        let screen = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(50.0, 80.0));
+
+        assert_eq!(
+            resize_corner_from_screen_pos(egui::pos2(12.0, 78.0), screen),
+            ResizeCorner::LowerLeft
+        );
+        assert_eq!(
+            resize_corner_from_screen_pos(egui::pos2(48.0, 79.0), screen),
+            ResizeCorner::LowerRight
+        );
+        assert_eq!(
+            resize_corner_from_screen_pos(egui::pos2(11.0, 21.0), screen),
+            ResizeCorner::UpperLeft
+        );
+        assert_eq!(
+            resize_corner_from_screen_pos(egui::pos2(49.0, 22.0), screen),
+            ResizeCorner::UpperRight
         );
     }
 
