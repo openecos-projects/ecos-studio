@@ -222,7 +222,6 @@ export function useSignoffPackageExport({
       workspaceSession.value.state === 'active' &&
       workspaceSession.value.workspaceId === workspaceHandle
     let flowReadCompleted = false
-    let rpcExecutionStarted = false
 
     try {
       const api = getDesktopApi()
@@ -257,11 +256,11 @@ export function useSignoffPackageExport({
       })
       if (!outputPath || !isActiveWorkspace()) return
 
-      rpcExecutionStarted = true
       const result = await api.ecc.workspace.exportSignoff({
         outputPath,
         workspaceHandle,
       })
+      if (!isActiveWorkspace()) return
 
       showToast({
         severity: 'success',
@@ -269,7 +268,7 @@ export function useSignoffPackageExport({
         detail: `Saved to ${result.outputPath}`,
       })
     } catch (error) {
-      if (!rpcExecutionStarted && !isActiveWorkspace()) return
+      if (!isActiveWorkspace()) return
       if (!flowReadCompleted) await setMenuEnabled(false)
       showToast({
         severity: 'error',

@@ -715,4 +715,41 @@ describe('useSignoffPackageExport export action', () => {
 
     expect(api.exportSignoff).not.toHaveBeenCalled()
   })
+
+  it('suppresses a successful RPC result after the workspace switches', async () => {
+    const api = createApi()
+    const rpcResult = deferred<{ outputPath: string }>()
+    api.exportSignoff.mockImplementationOnce(() => rpcResult.promise)
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    const exportPromise = mounted.result.exportSignoffPackage()
+    await vi.waitFor(() => expect(api.exportSignoff).toHaveBeenCalledTimes(1))
+    mounted.currentProject.value = { path: '/workspaces/b' }
+    rpcResult.resolve({ outputPath: '/tmp/a.tar.gz' })
+    await exportPromise
+
+    expect(mounted.showToast).not.toHaveBeenCalled()
+  })
+
+  it('suppresses a rejected RPC result after the workspace switches', async () => {
+    const api = createApi()
+    const rpcResult = deferred<{ outputPath: string }>()
+    api.exportSignoff.mockImplementationOnce(() => rpcResult.promise)
+    const mounted = mountComposable(ref({ path: '/workspaces/a' }))
+    scope = mounted.scope
+    await vi.waitFor(() => expect(api.readFlow).toHaveBeenCalledTimes(1))
+
+    const exportPromise = mounted.result.exportSignoffPackage()
+    await vi.waitFor(() => expect(api.exportSignoff).toHaveBeenCalledTimes(1))
+    mounted.workspaceSession.value = {
+      state: 'active',
+      workspaceId: 'workspace-handle-2',
+    }
+    rpcResult.reject(new Error('stale export failed'))
+    await exportPromise
+
+    expect(mounted.showToast).not.toHaveBeenCalled()
+  })
 })
