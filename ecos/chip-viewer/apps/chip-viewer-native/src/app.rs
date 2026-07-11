@@ -8,8 +8,8 @@ use chip_display::LayerStyle;
 use chip_render::{RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{ChipViewDb, SnapshotStats};
 use chipgeom_format::{
-    GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId,
-    OwnerType, Rect32, ShapeId, ShapeKind, ShapeState,
+    GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
+    OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
 };
 use eframe::egui;
 
@@ -262,22 +262,10 @@ impl LoadedViewer {
             ui.separator();
             ui.label("Selection");
             if let Some(shape) = self.db.find_shape(shape_id) {
-                ui.label(format!("shape: {}", shape.id));
-                ui.label(format!("version: {}", shape.version));
-                ui.label(format!("layer: {}", shape.layer_id));
-                if let Some(owner) = self.db.owner_for_shape(shape) {
-                    ui.label(format!(
-                        "owner: {} {}",
-                        ChipViewDb::owner_type_label(owner.owner_type),
-                        owner.owner_id
-                    ));
-                    if let Some(name) = self.db.owner_name(owner) {
-                        ui.label(format!("name: {name}"));
-                    }
-                    ui.label(format!(
-                        "path: {} {} {} {}",
-                        owner.path0, owner.path1, owner.path2, owner.path3
-                    ));
+                let owner = self.db.owner_for_shape(shape);
+                let owner_name = owner.and_then(|owner| self.db.owner_name(owner));
+                for line in selection_detail_lines(shape, owner, owner_name) {
+                    ui.label(line);
                 }
             }
         }
@@ -1075,6 +1063,62 @@ fn overlay_shape_ids(
     overlay
 }
 
+fn selection_detail_lines(
+    shape: &ShapeRecord,
+    owner: Option<&OwnerRef>,
+    owner_name: Option<&str>,
+) -> Vec<String> {
+    let mut lines = vec![
+        format!("shape: {}", shape.id),
+        format!("kind: {}", shape_kind_label(shape.kind)),
+        format!("state: {}", shape_state_label(shape.state)),
+        format!("version: {}", shape.version),
+        format!("layer: {}", shape.layer_id),
+        format!("flags: 0x{:04x}", shape.flags),
+        format!(
+            "bbox: {} {} {} {}",
+            shape.bbox.lx, shape.bbox.ly, shape.bbox.hx, shape.bbox.hy
+        ),
+    ];
+
+    if let Some(owner) = owner {
+        lines.push(format!(
+            "owner: {} {}",
+            ChipViewDb::owner_type_label(owner.owner_type),
+            owner.owner_id
+        ));
+        lines.push(format!("owner flags: 0x{:04x}", owner.flags));
+        if let Some(name) = owner_name {
+            lines.push(format!("name: {name}"));
+        }
+        lines.push(format!(
+            "path: {} {} {} {}",
+            owner.path0, owner.path1, owner.path2, owner.path3
+        ));
+    } else {
+        lines.push("owner: unavailable".to_string());
+    }
+
+    lines
+}
+
+fn shape_kind_label(kind: u8) -> &'static str {
+    match kind {
+        value if value == ShapeKind::Point as u8 => "point",
+        value if value == ShapeKind::Line as u8 => "line",
+        value if value == ShapeKind::Rect as u8 => "rect",
+        _ => "other",
+    }
+}
+
+fn shape_state_label(state: u8) -> &'static str {
+    match state {
+        value if value == ShapeState::Alive as u8 => "alive",
+        value if value == ShapeState::Deleted as u8 => "deleted",
+        _ => "other",
+    }
+}
+
 fn first_existing_shape_id<F>(shape_ids: &BTreeSet<ShapeId>, mut exists: F) -> Option<ShapeId>
 where
     F: FnMut(ShapeId) -> bool,
@@ -1350,6 +1394,57 @@ mod tests {
         assert_eq!(
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
+        );
+    }
+
+    #[test]
+    fn selection_detail_lines_include_shape_bbox_and_owner_context() {
+        let shape = chipgeom_format::ShapeRecord {
+            id: 42,
+            version: 3,
+            layer_id: 7,
+            kind: ShapeKind::Line as u8,
+            state: ShapeState::Alive as u8,
+            flags: 0x0010,
+            reserved_padding0: 0,
+            owner_index: 1,
+            payload_offset: 99,
+            payload_size: 12,
+            style_class: 2,
+            bbox: Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 30,
+                hy: 40,
+            },
+        };
+        let owner = chipgeom_format::OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            flags: 0x0020,
+            owner_id: 123,
+            path0: 1,
+            path1: 2,
+            path2: 3,
+            path3: 4,
+            name_id: 8,
+            ..chipgeom_format::OwnerRef::default()
+        };
+
+        assert_eq!(
+            selection_detail_lines(&shape, Some(&owner), Some("clk")),
+            vec![
+                "shape: 42",
+                "kind: line",
+                "state: alive",
+                "version: 3",
+                "layer: 7",
+                "flags: 0x0010",
+                "bbox: 10 20 30 40",
+                "owner: net_wire_segment 123",
+                "owner flags: 0x0020",
+                "name: clk",
+                "path: 1 2 3 4",
+            ]
         );
     }
 
