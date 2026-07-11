@@ -5,8 +5,8 @@ use std::process;
 use std::time::{Duration, Instant, SystemTime};
 
 use chip_display::LayerStyle;
-use chip_render::{RenderPlanCache, ViewTilePlaneCache};
-use chip_view_db::{ChipViewDb, SnapshotStats};
+use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
+use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, SnapshotStats};
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
     OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
@@ -237,6 +237,17 @@ impl LoadedViewer {
                 bbox.lx, bbox.ly, bbox.hx, bbox.hy
             ));
         }
+        egui::CollapsingHeader::new("Diagnostics").show(ui, |ui| {
+            for line in diagnostics_lines(
+                &self.db.memory_stats(),
+                &self.db.delta_stats(),
+                self.db.view_tile_count(),
+                self.render_cache.stats(),
+                self.view_tile_cache.stats(),
+            ) {
+                ui.label(line);
+            }
+        });
 
         ui.separator();
         ui.horizontal(|ui| {
@@ -1083,6 +1094,46 @@ fn append_edit_diagnostic(mut message: String, result: &GeometryEditResult) -> S
     message
 }
 
+fn diagnostics_lines(
+    memory: &ChipViewMemoryStats,
+    delta: &DeltaStats,
+    view_tile_count: usize,
+    exact_cache: RenderCacheStats,
+    tile_cache: RenderCacheStats,
+) -> Vec<String> {
+    let mut lines = vec![
+        format!("mmap bytes: {}", memory.mapped_bytes.total()),
+        format!("index bytes: {}", memory.index_bytes.total_bytes),
+        format!("total memory: {}", memory.mapped_plus_index_bytes),
+        format!("view tiles: {view_tile_count}"),
+        cache_stats_line("exact cache", exact_cache),
+        cache_stats_line("tile cache", tile_cache),
+        format!("delta records: {}", delta.record_count),
+    ];
+
+    lines.push(match (
+        delta.latest_sequence_id,
+        delta.latest_command_id,
+        delta.latest_shape_id,
+        delta.latest_old_version,
+        delta.latest_new_version,
+    ) {
+        (Some(sequence_id), Some(command_id), Some(shape_id), Some(old_version), Some(new_version)) => {
+            format!("latest delta: seq {sequence_id} cmd {command_id} shape {shape_id} v{old_version}->{new_version}")
+        }
+        _ => "latest delta: none".to_string(),
+    });
+
+    lines
+}
+
+fn cache_stats_line(label: &str, stats: RenderCacheStats) -> String {
+    format!(
+        "{label}: {} entries, {} hits, {} misses",
+        stats.entries, stats.hits, stats.misses
+    )
+}
+
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
     match tool {
         EditTool::Move => matches!(
@@ -1600,6 +1651,89 @@ mod tests {
                 "owner flags: 0x0020",
                 "name: clk",
                 "path: 1 2 3 4",
+            ]
+        );
+    }
+
+    #[test]
+    fn diagnostics_lines_include_memory_cache_tile_and_delta_context() {
+        let memory = chip_view_db::ChipViewMemoryStats {
+            mapped_bytes: chip_view_db::GeometryMappedBytes {
+                meta: 10,
+                shapes: 20,
+                owners: 30,
+                payload: 40,
+                names: 50,
+                name_index: 60,
+                sidmap: 70,
+                delta: 80,
+                view: 90,
+            },
+            index_bytes: chip_view_db::ChipViewIndexMemoryStats {
+                layer_index_bytes: 100,
+                shape_index_bytes: 200,
+                view_index_bytes: 300,
+                name_index_bytes: 400,
+                total_bytes: 1000,
+            },
+            mapped_plus_index_bytes: 1450,
+        };
+        let delta = chip_view_db::DeltaStats {
+            record_count: 3,
+            latest_sequence_id: Some(11),
+            latest_command_id: Some(22),
+            latest_shape_id: Some(33),
+            latest_old_version: Some(4),
+            latest_new_version: Some(5),
+        };
+        let exact_cache = chip_render::RenderCacheStats {
+            entries: 2,
+            hits: 7,
+            misses: 8,
+        };
+        let tile_cache = chip_render::RenderCacheStats {
+            entries: 4,
+            hits: 9,
+            misses: 10,
+        };
+
+        assert_eq!(
+            diagnostics_lines(&memory, &delta, 12, exact_cache, tile_cache),
+            vec![
+                "mmap bytes: 450",
+                "index bytes: 1000",
+                "total memory: 1450",
+                "view tiles: 12",
+                "exact cache: 2 entries, 7 hits, 8 misses",
+                "tile cache: 4 entries, 9 hits, 10 misses",
+                "delta records: 3",
+                "latest delta: seq 11 cmd 22 shape 33 v4->5",
+            ]
+        );
+    }
+
+    #[test]
+    fn diagnostics_lines_report_empty_delta_log_without_latest_record() {
+        let memory = chip_view_db::ChipViewMemoryStats::default();
+        let delta = chip_view_db::DeltaStats::default();
+
+        assert_eq!(
+            diagnostics_lines(
+                &memory,
+                &delta,
+                0,
+                chip_render::RenderCacheStats::default(),
+                chip_render::RenderCacheStats::default(),
+            ),
+            vec![
+                "mmap bytes: 0",
+                "index bytes: 0",
+                "total memory: 0",
+                "view tiles: 0",
+                "exact cache: 0 entries, 0 hits, 0 misses",
+                "tile cache: 0 entries, 0 hits, 0 misses",
+                "delta records: 0",
+                "latest delta: none",
             ]
         );
     }
