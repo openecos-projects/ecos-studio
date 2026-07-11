@@ -39,7 +39,7 @@ struct LoadedViewer {
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     last_edit_result: Option<String>,
-    snapshot_manifest_mtime: Option<SystemTime>,
+    snapshot_signature: SnapshotFileSignature,
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
     view_tile_cache: ViewTilePlaneCache,
@@ -69,6 +69,17 @@ struct EditDraft {
 struct PendingEdit {
     shape_id: ShapeId,
     result_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SnapshotFileStamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SnapshotFileSignature {
+    files: BTreeMap<PathBuf, Option<SnapshotFileStamp>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -189,7 +200,7 @@ impl LoadedViewer {
         edit_result_dir: Option<PathBuf>,
     ) -> Self {
         let stats = db.stats();
-        let snapshot_manifest_mtime = manifest_modified_time(&db.snapshot().manifest().path);
+        let snapshot_signature = snapshot_signature_for_db(&db);
         let layers = db
             .layer_summaries()
             .into_iter()
@@ -216,7 +227,7 @@ impl LoadedViewer {
             draft: None,
             pending_edit: None,
             last_edit_result: None,
-            snapshot_manifest_mtime,
+            snapshot_signature,
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
             view_tile_cache: ViewTilePlaneCache::default(),
@@ -320,7 +331,7 @@ impl LoadedViewer {
                 .add_enabled(can_reload, egui::Button::new("Reload"))
                 .clicked()
             {
-                match self.reload_snapshot(None) {
+                match self.reload_snapshot() {
                     Ok(()) => {
                         self.last_edit_result = Some("geometry snapshot reloaded".to_string());
                     }
@@ -689,7 +700,7 @@ impl LoadedViewer {
         let action = edit_result_action(&result);
         self.selected = action.selected_shape_id;
         if action.reload_snapshot {
-            match self.reload_snapshot(None) {
+            match self.reload_snapshot() {
                 Ok(()) => {}
                 Err(err) => {
                     self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
@@ -714,16 +725,12 @@ impl LoadedViewer {
         }
         self.next_snapshot_refresh_check = now + SNAPSHOT_REFRESH_CHECK_INTERVAL;
 
-        let manifest_path = self.db.snapshot().manifest().path.clone();
-        let current_mtime = manifest_modified_time(&manifest_path);
-        if !snapshot_manifest_mtime_changed(self.snapshot_manifest_mtime, current_mtime) {
-            if self.snapshot_manifest_mtime.is_none() {
-                self.snapshot_manifest_mtime = current_mtime;
-            }
+        let current_signature = snapshot_signature_for_db(&self.db);
+        if !snapshot_file_signature_changed(&self.snapshot_signature, &current_signature) {
             return;
         }
 
-        match self.reload_snapshot(current_mtime) {
+        match self.reload_snapshot() {
             Ok(()) => {
                 self.last_edit_result = Some("geometry snapshot refreshed".to_string());
             }
@@ -733,12 +740,12 @@ impl LoadedViewer {
         }
     }
 
-    fn reload_snapshot(&mut self, current_mtime: Option<SystemTime>) -> Result<(), String> {
+    fn reload_snapshot(&mut self) -> Result<(), String> {
         let manifest_path = self.db.snapshot().manifest().path.clone();
-        let snapshot_mtime = current_mtime.or_else(|| manifest_modified_time(&manifest_path));
         let db = ChipViewDb::open(&manifest_path).map_err(|err| err.to_string())?;
+        let snapshot_signature = snapshot_signature_for_db(&db);
         self.replace_db(db);
-        self.snapshot_manifest_mtime = snapshot_mtime;
+        self.snapshot_signature = snapshot_signature;
         Ok(())
     }
 
@@ -1024,17 +1031,49 @@ fn edit_poll_repaint_interval(has_pending_edit: bool) -> Option<Duration> {
     has_pending_edit.then_some(Duration::from_millis(100))
 }
 
-fn manifest_modified_time(path: &Path) -> Option<SystemTime> {
-    fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
+fn snapshot_signature_for_db(db: &ChipViewDb) -> SnapshotFileSignature {
+    let manifest = db.snapshot().manifest();
+    let mut paths = vec![
+        manifest.path.clone(),
+        manifest.meta.clone(),
+        manifest.shapes.clone(),
+        manifest.owners.clone(),
+        manifest.payload.clone(),
+        manifest.names.clone(),
+        manifest.name_index.clone(),
+        manifest.sidmap.clone(),
+        manifest.view.clone(),
+    ];
+    if let Some(delta) = &manifest.delta {
+        paths.push(delta.clone());
+    }
+    snapshot_file_signature(paths)
 }
 
-fn snapshot_manifest_mtime_changed(
-    previous: Option<SystemTime>,
-    current: Option<SystemTime>,
+fn snapshot_file_signature(paths: impl IntoIterator<Item = PathBuf>) -> SnapshotFileSignature {
+    SnapshotFileSignature {
+        files: paths
+            .into_iter()
+            .map(|path| {
+                let stamp = snapshot_file_stamp(&path);
+                (path, stamp)
+            })
+            .collect(),
+    }
+}
+
+fn snapshot_file_stamp(path: &Path) -> Option<SnapshotFileStamp> {
+    fs::metadata(path).ok().map(|metadata| SnapshotFileStamp {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
+}
+
+fn snapshot_file_signature_changed(
+    previous: &SnapshotFileSignature,
+    current: &SnapshotFileSignature,
 ) -> bool {
-    matches!((previous, current), (Some(previous), Some(current)) if current > previous)
+    previous != current
 }
 
 fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
@@ -1340,6 +1379,7 @@ fn write_edit_command(path: &Path, command: &GeometryEditCommand) -> std::io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn world_to_screen_rect_flips_y_and_fits_canvas() {
@@ -1917,15 +1957,88 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_refresh_detects_newer_manifest_mtime() {
-        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
-        let same = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
-        let newer = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(11);
+    fn snapshot_file_signature_does_not_change_for_identical_file_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "chip-viewer-native-signature-same-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("geometry.manifest");
 
-        assert!(!snapshot_manifest_mtime_changed(Some(old), Some(same)));
-        assert!(snapshot_manifest_mtime_changed(Some(old), Some(newer)));
-        assert!(!snapshot_manifest_mtime_changed(None, Some(newer)));
-        assert!(!snapshot_manifest_mtime_changed(Some(old), None));
+        fs::write(&path, b"manifest").unwrap();
+        let previous = snapshot_file_signature(vec![path.clone()]);
+        let current = snapshot_file_signature(vec![path.clone()]);
+
+        assert!(!snapshot_file_signature_changed(&previous, &current));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_file_signature_detects_binary_file_size_changes() {
+        let dir = std::env::temp_dir().join(format!(
+            "chip-viewer-native-signature-size-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("geometry.shapes.bin");
+
+        fs::write(&path, b"a").unwrap();
+        let previous = snapshot_file_signature(vec![path.clone()]);
+        fs::write(&path, b"abcdef").unwrap();
+        let current = snapshot_file_signature(vec![path.clone()]);
+
+        assert!(snapshot_file_signature_changed(&previous, &current));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_file_signature_detects_missing_file_becoming_available() {
+        let dir = std::env::temp_dir().join(format!(
+            "chip-viewer-native-signature-missing-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("geometry.delta.bin");
+
+        let previous = snapshot_file_signature(vec![path.clone()]);
+        fs::write(&path, b"delta").unwrap();
+        let current = snapshot_file_signature(vec![path.clone()]);
+
+        assert!(snapshot_file_signature_changed(&previous, &current));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_snapshot_refresh_records_reopened_manifest_file_set() {
+        let dir = temp_snapshot_dir("external-refresh-new-delta");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let mut loaded = LoadedViewer::new(db, false, None, None);
+        let delta_path = dir.join("geometry.delta.bin");
+
+        assert!(!loaded.snapshot_signature.files.contains_key(&delta_path));
+
+        write_empty_geometry_file(
+            &delta_path,
+            chipgeom_format::GeometryFileKind::Delta,
+            core::mem::size_of::<chipgeom_format::GeometryDeltaRecord>() as u32,
+            &[],
+        );
+        write_manifest(&dir, true);
+        loaded.next_snapshot_refresh_check = Instant::now() - Duration::from_secs(1);
+
+        loaded.poll_external_snapshot_refresh();
+
+        assert!(loaded.db.snapshot().manifest().delta.is_some());
+        assert!(loaded.snapshot_signature.files.contains_key(&delta_path));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2031,6 +2144,145 @@ mod tests {
             shape_count: 1,
             visible,
             style: LayerStyle::default_for_layer(layer_id),
+        }
+    }
+
+    fn temp_snapshot_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "chip-viewer-native-{test_name}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_empty_snapshot(path: &Path, include_delta: bool) {
+        let meta = chipgeom_format::GeometryMetaRecord {
+            next_shape_id: 1,
+            ..chipgeom_format::GeometryMetaRecord::default()
+        };
+        write_empty_geometry_file(
+            &path.join("geometry.meta.bin"),
+            chipgeom_format::GeometryFileKind::Meta,
+            core::mem::size_of::<chipgeom_format::GeometryMetaRecord>() as u32,
+            any_as_bytes(&meta),
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.shapes.bin"),
+            chipgeom_format::GeometryFileKind::Shapes,
+            core::mem::size_of::<ShapeRecord>() as u32,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.owners.bin"),
+            chipgeom_format::GeometryFileKind::Owners,
+            core::mem::size_of::<OwnerRef>() as u32,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.payload.bin"),
+            chipgeom_format::GeometryFileKind::Payload,
+            1,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.names.bin"),
+            chipgeom_format::GeometryFileKind::Names,
+            1,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.name_index.bin"),
+            chipgeom_format::GeometryFileKind::NameIndex,
+            core::mem::size_of::<chipgeom_format::GeometryNameRecord>() as u32,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.sidmap.bin"),
+            chipgeom_format::GeometryFileKind::SidMap,
+            core::mem::size_of::<chipgeom_format::GeometrySidMapRecord>() as u32,
+            &[],
+        );
+        write_empty_geometry_file(
+            &path.join("geometry.view.bin"),
+            chipgeom_format::GeometryFileKind::View,
+            core::mem::size_of::<chipgeom_format::GeometryViewTileRecord>() as u32,
+            &[],
+        );
+        if include_delta {
+            write_empty_geometry_file(
+                &path.join("geometry.delta.bin"),
+                chipgeom_format::GeometryFileKind::Delta,
+                core::mem::size_of::<chipgeom_format::GeometryDeltaRecord>() as u32,
+                &[],
+            );
+        }
+        write_manifest(path, include_delta);
+    }
+
+    fn write_manifest(path: &Path, include_delta: bool) {
+        let delta = if include_delta {
+            "delta=geometry.delta.bin\n"
+        } else {
+            ""
+        };
+        fs::write(
+            path.join("geometry.manifest"),
+            format!(
+                "schema_version=1\n\
+                 shape_count=0\n\
+                 owner_count=0\n\
+                 payload_size=0\n\
+                 meta=geometry.meta.bin\n\
+                 shapes=geometry.shapes.bin\n\
+                 owners=geometry.owners.bin\n\
+                 payload=geometry.payload.bin\n\
+                 names=geometry.names.bin\n\
+                 name_index=geometry.name_index.bin\n\
+                 sidmap=geometry.sidmap.bin\n\
+                 {delta}\
+                 view=geometry.view.bin\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn write_empty_geometry_file(
+        path: &Path,
+        file_kind: chipgeom_format::GeometryFileKind,
+        record_size: u32,
+        payload: &[u8],
+    ) {
+        let record_count = if record_size == 0 {
+            0
+        } else {
+            payload.len() as u64 / record_size as u64
+        };
+        let header = chipgeom_format::GeometryFileHeader {
+            magic: chipgeom_format::GEOMETRY_FILE_MAGIC,
+            schema_version: chipgeom_format::GEOMETRY_SCHEMA_VERSION,
+            header_size: chipgeom_format::GEOMETRY_FILE_HEADER_SIZE as u32,
+            file_kind: file_kind as u16,
+            record_size,
+            record_count,
+            payload_size: payload.len() as u64,
+            ..chipgeom_format::GeometryFileHeader::default()
+        };
+        let mut file = fs::File::create(path).unwrap();
+        file.write_all(any_as_bytes(&header)).unwrap();
+        file.write_all(payload).unwrap();
+    }
+
+    fn any_as_bytes<T: Sized>(value: &T) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(
+                std::ptr::from_ref(value).cast::<u8>(),
+                core::mem::size_of::<T>(),
+            )
         }
     }
 
