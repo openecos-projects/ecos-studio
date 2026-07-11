@@ -1035,11 +1035,21 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
                     | OwnerType::NetWireSegment
                     | OwnerType::SpecialWireSegment
                     | OwnerType::Blockage
+                    | OwnerType::Fill
+                    | OwnerType::Region
+                    | OwnerType::Slot
             )
         ),
         EditTool::Resize => matches!(
             OwnerType::from_raw(owner_type),
-            Some(OwnerType::NetWireSegment | OwnerType::SpecialWireSegment | OwnerType::Blockage)
+            Some(
+                OwnerType::NetWireSegment
+                    | OwnerType::SpecialWireSegment
+                    | OwnerType::Blockage
+                    | OwnerType::Fill
+                    | OwnerType::Region
+                    | OwnerType::Slot
+            )
         ),
     }
 }
@@ -1660,12 +1670,28 @@ mod tests {
             chipgeom_format::OwnerType::Blockage as u8,
             EditTool::Resize
         ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Fill as u8,
+            EditTool::Move
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Fill as u8,
+            EditTool::Resize
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Region as u8,
+            EditTool::Resize
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::Slot as u8,
+            EditTool::Move
+        ));
         assert!(!edit_tool_is_allowed(
             chipgeom_format::OwnerType::InstanceBBox as u8,
             EditTool::Resize
         ));
         assert!(!edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Fill as u8,
+            chipgeom_format::OwnerType::PinPortShape as u8,
             EditTool::Move
         ));
     }
