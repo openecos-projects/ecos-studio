@@ -538,11 +538,7 @@ impl LoadedViewer {
         painter.text(
             canvas.left_top() + egui::vec2(10.0, 10.0),
             egui::Align2::LEFT_TOP,
-            if use_view_tiles {
-                format!("drawn: {drawn} view tiles")
-            } else {
-                format!("drawn: {drawn}")
-            },
+            canvas_status_line(drawn, use_view_tiles, view_lod, self.zoom, viewport),
             egui::FontId::monospace(12.0),
             egui::Color32::from_gray(190),
         );
@@ -1223,6 +1219,24 @@ fn cache_stats_line(label: &str, stats: RenderCacheStats) -> String {
     )
 }
 
+fn canvas_status_line(
+    drawn: usize,
+    use_view_tiles: bool,
+    view_lod: u8,
+    zoom: f32,
+    viewport: Rect32,
+) -> String {
+    let draw_source = if use_view_tiles {
+        format!("view tiles, lod: {view_lod}")
+    } else {
+        "exact".to_string()
+    };
+    format!(
+        "drawn: {drawn} {draw_source}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
+        viewport.lx, viewport.ly, viewport.hx, viewport.hy
+    )
+}
+
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
     match tool {
         EditTool::Move => matches!(
@@ -1678,6 +1692,44 @@ mod tests {
         assert!(should_use_view_tiles_for_state(
             16, false, false, false, false, 1.0, world, world,
         ));
+    }
+
+    #[test]
+    fn canvas_status_line_reports_exact_draw_count_zoom_and_viewport() {
+        assert_eq!(
+            canvas_status_line(
+                42,
+                false,
+                2,
+                3.25,
+                Rect32 {
+                    lx: 10,
+                    ly: 20,
+                    hx: 30,
+                    hy: 40,
+                },
+            ),
+            "drawn: 42 exact, zoom: 3.25x, viewport: 10 20 30 40"
+        );
+    }
+
+    #[test]
+    fn canvas_status_line_reports_tile_lod_when_using_view_tiles() {
+        assert_eq!(
+            canvas_status_line(
+                7,
+                true,
+                3,
+                0.5,
+                Rect32 {
+                    lx: -10,
+                    ly: -20,
+                    hx: 30,
+                    hy: 40,
+                },
+            ),
+            "drawn: 7 view tiles, lod: 3, zoom: 0.50x, viewport: -10 -20 30 40"
+        );
     }
 
     #[test]
