@@ -93,12 +93,13 @@ describe('development wrappers', () => {
     const chipExecFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
     const chipUnref = vi.fn()
     const chipSpawnProcess = vi.fn(() => ({ unref: chipUnref }))
+    const chipDefPath = '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz'
     const chipService = new ChipViewerService({
       appPath,
       cwd: appPath,
       env: {},
       execFile: chipExecFile,
-      fileExists: existsSync,
+      fileExists: (path) => path === chipDefPath || existsSync(path),
       isPackaged: false,
       platform: 'linux',
       readTextFile: async () =>
@@ -113,7 +114,7 @@ describe('development wrappers', () => {
         resolveStepInfo: async (request) => ({
           id: request.id,
           info: {
-            def: '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+            def: chipDefPath,
           },
           message: [],
           missing: [],
@@ -131,12 +132,7 @@ describe('development wrappers', () => {
 
     expect(chipExecFile).toHaveBeenCalledWith(
       geometrySnapshotWrapperPath,
-      expect.arrayContaining([
-        '--tech-lef',
-        '/pdk/tech.lef',
-        '--def',
-        '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      ]),
+      expect.arrayContaining(['--tech-lef', '/pdk/tech.lef', '--def', chipDefPath]),
     )
     expect(chipSpawnProcess).toHaveBeenCalledWith(
       chipViewerWrapperPath,

@@ -46,12 +46,18 @@ function createService(options: {
   execFile?: (file: string, args: string[]) => Promise<ExecFileResult>
   existingPaths?: string[]
   files?: Record<string, string>
+  includeDefaultDefPath?: boolean
   isPackaged?: boolean
   modifiedTimes?: Record<string, number>
   resourcesPath?: string
+  stepInfoResult?: WorkspaceStepInfoResult
 }) {
   const files = new Map(Object.entries(options.files ?? {}))
-  const existingPaths = new Set([...(options.existingPaths ?? []), ...files.keys()])
+  const existingPaths = new Set([
+    ...(options.includeDefaultDefPath === false ? [] : [DEF_PATH]),
+    ...(options.existingPaths ?? []),
+    ...files.keys(),
+  ])
   const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
   const execFile =
     options.execFile ??
@@ -71,7 +77,7 @@ function createService(options: {
   const writeTextFile = vi.fn(async () => undefined)
   const workspaceResourceService = {
     resolveStepInfo: vi.fn(async (request: { id: 'layout'; step: string }) => {
-      const result: WorkspaceStepInfoResult = {
+      const result: WorkspaceStepInfoResult = options.stepInfoResult ?? {
         id: request.id,
         info: {
           def: DEF_PATH,
@@ -465,5 +471,108 @@ describe('ChipViewerService', () => {
         step: STEP_NAME,
       }),
     ).rejects.toThrow('Geometry snapshot requires tech LEF and LEF paths')
+  })
+
+  it('rejects unavailable workspace step resources before launching the viewer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      stepInfoResult: {
+        id: 'layout',
+        info: {
+          def: DEF_PATH,
+        },
+        message: ['Layout step output is incomplete'],
+        missing: [DEF_PATH],
+        response: 'missing',
+        step: STEP_NAME,
+      },
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('Workspace step Floorplan layout resources are missing')
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing workspace DEF before generating geometry', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      includeDefaultDefPath: false,
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        rebuildGeometry: true,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(`Workspace step DEF does not exist: ${DEF_PATH}`)
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('launches packaged chip viewer binaries from electron resources', async () => {
+    const resourcesPath = '/opt/ECOS Studio/resources'
+    const binaryDir = join(resourcesPath, 'binaries')
+    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
+    const viewer = join(binaryDir, 'chip-viewer-native')
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [snapshot, viewer],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      isPackaged: true,
+      resourcesPath,
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      rebuildGeometry: true,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
+    expect(spawnProcess).toHaveBeenCalledWith(
+      viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
+      expect.objectContaining({
+        detached: true,
+        stdio: 'ignore',
+      }),
+    )
   })
 })

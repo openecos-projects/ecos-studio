@@ -201,6 +201,14 @@ function readStringInfo(result: WorkspaceStepInfoResult, key: string): string | 
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+function workspaceStepDetails(result: WorkspaceStepInfoResult): string {
+  const details = [
+    ...result.message,
+    ...(result.missing.length > 0 ? [`Missing: ${result.missing.join(', ')}`] : []),
+  ]
+  return details.length > 0 ? ` ${details.join(' ')}` : ''
+}
+
 function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
   if (mode === undefined || mode === 'view') {
     return 'view'
@@ -324,12 +332,30 @@ export class ChipViewerService {
       step,
     })
     const defPath = readStringInfo(layoutInfo, 'def')
+    const stepLabel = layoutInfo.step || step
+
+    if (layoutInfo.response === 'error') {
+      throw new Error(
+        `Workspace step ${stepLabel} layout resources are unavailable.${workspaceStepDetails(layoutInfo)}`,
+      )
+    }
+    if (
+      layoutInfo.response === 'missing' &&
+      (!defPath || layoutInfo.missing.includes(defPath))
+    ) {
+      throw new Error(
+        `Workspace step ${stepLabel} layout resources are missing.${workspaceStepDetails(layoutInfo)}`,
+      )
+    }
 
     if (!defPath) {
       throw new Error(`Workspace step ${step} does not expose an output DEF.`)
     }
     if (!isPathInside(projectPath, defPath)) {
       throw new Error(`Workspace step DEF is outside the project path: ${defPath}`)
+    }
+    if (!this.fileExists(defPath)) {
+      throw new Error(`Workspace step DEF does not exist: ${defPath}`)
     }
 
     const outputDirectory = dirname(defPath)
