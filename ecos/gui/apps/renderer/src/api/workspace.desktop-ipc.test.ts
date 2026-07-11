@@ -63,6 +63,11 @@ describe('workspace desktop bridge', () => {
       pdk: 'ics55',
       pdk_root: '/pdks/ics55',
       rtl_list: ['/rtl/top.v'],
+      flow_config: {
+        start_step: 'Synthesis',
+        end_step: 'Harden',
+        steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+      },
     })
 
     await expect(createWorkspaceApi(options)).resolves.toMatchObject({
@@ -77,6 +82,11 @@ describe('workspace desktop bridge', () => {
           design: 'demo',
         }),
         rtlList: ['/rtl/top.v'],
+        flowConfig: {
+          start_step: 'Synthesis',
+          end_step: 'Harden',
+          steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+        },
       }),
     )
   })

@@ -6,6 +6,7 @@
       <TopBar
         :project-name="isWelcome ? null : currentProject?.name"
         :has-workspace="Boolean(currentProject?.path)"
+        :signoff-package-export-enabled="signoffPackageExportEnabled"
         @menu-action="handleMenuAction"
       />
       <!-- 页面内容 -->
@@ -181,7 +182,7 @@ const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
-const { exportSignoffPackage } = useSignoffPackageExport({
+const { exportSignoffPackage, signoffPackageExportEnabled } = useSignoffPackageExport({
   currentProject,
   resourceVersions,
   showToast,

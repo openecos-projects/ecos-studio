@@ -17,6 +17,7 @@ export interface EccRpcShutdownResult {
 export interface EccWorkspaceCreateRequest {
   directory: string
   filelist?: string
+  flowConfig?: Record<string, unknown>
   originDef?: string
   originVerilog?: string
   parameters?: Record<string, unknown>

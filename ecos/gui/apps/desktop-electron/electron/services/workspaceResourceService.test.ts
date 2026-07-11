@@ -338,6 +338,42 @@ describe('WorkspaceResourceService', () => {
     )
   })
 
+  it('resolves Harden preview and subflow resources from the ECC step directory', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'Harden', tool: 'ecc' }])
+    await mkdir(join(root, 'Harden_ecc', 'output'), { recursive: true })
+    await writeFile(
+      join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'),
+      'png',
+      'utf8',
+    )
+    await writeJson(join(root, 'Harden_ecc', 'subflow.json'), {
+      path: join(root, 'Harden_ecc', 'subflow.json'),
+      steps: [{ name: 'run harden', state: 'Success' }],
+    })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    await expect(
+      service.resolveStepInfo({ step: 'harden', id: 'layout' }),
+    ).resolves.toMatchObject({
+      step: 'Harden',
+      response: 'missing',
+      info: {
+        image: join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'),
+      },
+    })
+    await expect(
+      service.resolveStepInfo({ step: 'Harden', id: 'subflow' }),
+    ).resolves.toMatchObject({
+      step: 'Harden',
+      response: 'available',
+      info: {
+        path: join(root, 'Harden_ecc', 'subflow.json'),
+      },
+    })
+  })
+
   it('maps yosys config to flow_config.json', async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, 'home'), { recursive: true })

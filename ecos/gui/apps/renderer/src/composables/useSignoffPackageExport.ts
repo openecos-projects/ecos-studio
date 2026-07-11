@@ -1,4 +1,4 @@
-import { onUnmounted, watch, type Ref } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { appMenuActionIds } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
 import { resolveProjectFilePath, watchProjectFile } from '@/utils/projectFiles'
@@ -66,12 +66,14 @@ export function useSignoffPackageExport({
   showToast,
   workspaceSession,
 }: SignoffPackageExportDependencies) {
+  const signoffPackageExportEnabled = ref(false)
   let syncGeneration = 0
   let watcherGeneration = 0
   let unwatchFlowFile: (() => void) | null = null
   let unmounted = false
 
   async function setMenuEnabled(enabled: boolean): Promise<void> {
+    signoffPackageExportEnabled.value = enabled
     try {
       await getDesktopApi().menu.setActionEnabled(
         appMenuActionIds.exportSignoffPackage,
@@ -278,5 +280,5 @@ export function useSignoffPackageExport({
     }
   }
 
-  return { exportSignoffPackage }
+  return { exportSignoffPackage, signoffPackageExportEnabled }
 }

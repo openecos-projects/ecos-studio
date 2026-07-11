@@ -92,6 +92,26 @@ function createService() {
 }
 
 describe('EccRpcRuntimeService', () => {
+  it('forwards the wizard flow range when creating a workspace', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const flowConfig = {
+      start_step: 'Synthesis',
+      end_step: 'Harden',
+      steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+    }
+
+    await service.createWorkspace({ directory: '/work/demo', flowConfig })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      params: expect.objectContaining({ flowConfig }),
+    })
+  })
+
   it('lazy-starts the sidecar, performs rpc.hello, and opens workspaces', async () => {
     const { client, events, service, sidecar } = createService()
     client.responses.push(

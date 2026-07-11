@@ -180,6 +180,7 @@ describe('useSignoffPackageExport menu eligibility', () => {
         true,
       )
     })
+    expect(mounted.result.signoffPackageExportEnabled.value).toBe(true)
   })
 
   it('tracks flow eligibility as home/flow.json changes on disk', async () => {
@@ -336,6 +337,7 @@ describe('useSignoffPackageExport menu eligibility', () => {
       )
     })
     expect(api.readFlow).not.toHaveBeenCalled()
+    expect(mounted.result.signoffPackageExportEnabled.value).toBe(false)
   })
 
   it('resynchronizes when flow and all resource versions change', async () => {

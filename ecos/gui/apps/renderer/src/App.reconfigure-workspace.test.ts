@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import appSource from './App.vue?raw'
 
 describe('App workspace reconfiguration wizard wiring', () => {
+  it('passes signoff eligibility to the visible top bar menu', () => {
+    expect(appSource).toContain(
+      ':signoff-package-export-enabled="signoffPackageExportEnabled"',
+    )
+    expect(appSource).toContain(
+      'const { exportSignoffPackage, signoffPackageExportEnabled }',
+    )
+  })
+
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {
     expect(appSource).toContain(':initial-config="workspaceWizardInitialConfig"')
     expect(appSource).toContain(':title="workspaceWizardTitle"')

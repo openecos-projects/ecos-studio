@@ -213,6 +213,7 @@ const workspaceProjectName = computed(() => queryString(route.query.projectName)
 const props = defineProps<{
   projectName?: string | null
   hasWorkspace?: boolean
+  signoffPackageExportEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -254,6 +255,12 @@ const menus = computed<Menu[]>(() => [
         icon: 'ri-settings-3-line',
         event: appMenuActionIds.reconfigureWorkspace,
         disabled: !props.hasWorkspace,
+      },
+      {
+        label: 'Export Signoff Package',
+        icon: 'ri-archive-line',
+        event: appMenuActionIds.exportSignoffPackage,
+        disabled: !props.signoffPackageExportEnabled,
       },
     ],
   },

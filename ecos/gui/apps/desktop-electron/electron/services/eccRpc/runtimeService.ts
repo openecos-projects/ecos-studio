@@ -121,6 +121,7 @@ export class EccRpcRuntimeService {
       const response = await client.call<EccWorkspaceSessionResult>('workspace.create', {
         directory: request.directory,
         filelist: request.filelist ?? '',
+        flowConfig: request.flowConfig ?? {},
         originDef: request.originDef ?? '',
         originVerilog: request.originVerilog ?? '',
         parameters: request.parameters ?? {},

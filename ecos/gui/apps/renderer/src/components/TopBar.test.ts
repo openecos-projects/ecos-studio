@@ -73,6 +73,15 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toContain('disabled: !props.hasWorkspace')
   })
 
+  it('shows signoff export below workspace update and binds its eligibility', () => {
+    const updateIndex = topBarSource.indexOf("label: 'Update Workspace'")
+    const exportIndex = topBarSource.indexOf("label: 'Export Signoff Package'")
+
+    expect(exportIndex).toBeGreaterThan(updateIndex)
+    expect(topBarSource).toContain('appMenuActionIds.exportSignoffPackage')
+    expect(topBarSource).toContain('disabled: !props.signoffPackageExportEnabled')
+  })
+
   it('does not render the workspace Design menu', () => {
     expect(topBarSource).not.toContain("label: 'Design'")
     expect(topBarSource).not.toContain("action: 'design'")

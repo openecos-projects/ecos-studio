@@ -23,6 +23,7 @@ const testState = vi.hoisted(() => ({
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
+import { InfoEnum, StepEnum } from '@/api/type'
 
 vi.mock('vue-router', () => ({
   useRoute: () => testState.route,
@@ -111,6 +112,48 @@ describe('useSubflow runtime refresh', () => {
         ],
       }),
     )
+  })
+
+  it('loads the Harden subflow for the canonical Harden route', async () => {
+    testState.route.path = '/workspace/Harden'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        path: '/workspace/demo/Harden_ecc/subflow.json',
+      },
+      missing: [],
+      message: [],
+      id: 'subflow',
+      step: 'Harden',
+    })
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        path: '/workspace/demo/Harden_ecc/subflow.json',
+        steps: [
+          {
+            name: 'run harden',
+            state: 'Success',
+            runtime: '9.0s',
+            'peak memory (mb)': 830,
+            info: {},
+          },
+        ],
+      }),
+    )
+
+    const subflow = useSubflow()
+
+    await vi.waitFor(() => {
+      expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
+        step: StepEnum.HARDEN,
+        id: InfoEnum.subflow,
+      })
+    })
+    await vi.waitFor(() => {
+      expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual([
+        'run harden',
+      ])
+    })
   })
 
   it('reloads the current subflow when the workspace step resource version changes', async () => {
