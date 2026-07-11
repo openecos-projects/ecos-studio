@@ -286,6 +286,9 @@ impl LoadedViewer {
                         self.db.find_shape(shape_id).is_some()
                     });
                 }
+                if ui.button("Clear").clicked() {
+                    clear_search_state(&mut self.search_text, &mut self.highlighted);
+                }
             });
         }
 
@@ -1284,6 +1287,11 @@ fn overlay_shape_ids(
     overlay
 }
 
+fn clear_search_state(search_text: &mut String, highlighted: &mut BTreeSet<ShapeId>) {
+    search_text.clear();
+    highlighted.clear();
+}
+
 fn selection_detail_lines(
     shape: &ShapeRecord,
     owner: Option<&OwnerRef>,
@@ -1774,6 +1782,17 @@ mod tests {
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
         );
+    }
+
+    #[test]
+    fn clear_search_state_resets_search_text_and_highlights() {
+        let mut search_text = "clk".to_string();
+        let mut highlighted = BTreeSet::from([10, 20]);
+
+        clear_search_state(&mut search_text, &mut highlighted);
+
+        assert!(search_text.is_empty());
+        assert!(highlighted.is_empty());
     }
 
     #[test]
