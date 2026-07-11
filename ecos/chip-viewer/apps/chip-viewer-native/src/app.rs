@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use chip_display::LayerStyle;
 use chip_render::{RenderPlanCache, ViewTilePlaneCache};
@@ -12,6 +12,8 @@ use chipgeom_format::{
     OwnerType, Rect32, ShapeId, ShapeKind, ShapeState,
 };
 use eframe::egui;
+
+const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct ChipViewerApp {
     manifest: PathBuf,
@@ -34,6 +36,8 @@ struct LoadedViewer {
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
     last_edit_result: Option<String>,
+    snapshot_manifest_mtime: Option<SystemTime>,
+    next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
     view_tile_cache: ViewTilePlaneCache,
     next_command_counter: u32,
@@ -173,6 +177,7 @@ impl LoadedViewer {
         edit_result_dir: Option<PathBuf>,
     ) -> Self {
         let stats = db.stats();
+        let snapshot_manifest_mtime = manifest_modified_time(&db.snapshot().manifest().path);
         let layers = db
             .layer_summaries()
             .into_iter()
@@ -198,6 +203,8 @@ impl LoadedViewer {
             draft: None,
             pending_edit: None,
             last_edit_result: None,
+            snapshot_manifest_mtime,
+            next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
             view_tile_cache: ViewTilePlaneCache::default(),
             next_command_counter: 1,
@@ -607,8 +614,12 @@ impl LoadedViewer {
         let action = edit_result_action(&result);
         self.selected = action.selected_shape_id;
         if action.reload_snapshot {
-            match ChipViewDb::open(&self.db.snapshot().manifest().path) {
-                Ok(db) => self.replace_db(db),
+            let manifest_path = self.db.snapshot().manifest().path.clone();
+            match ChipViewDb::open(&manifest_path) {
+                Ok(db) => {
+                    self.replace_db(db);
+                    self.snapshot_manifest_mtime = manifest_modified_time(&manifest_path);
+                }
                 Err(err) => {
                     self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
                     self.pending_edit = None;
@@ -619,6 +630,38 @@ impl LoadedViewer {
 
         self.last_edit_result = Some(action.message);
         self.pending_edit = None;
+    }
+
+    fn poll_external_snapshot_refresh(&mut self) {
+        if self.pending_edit.is_some() || self.draft.is_some() {
+            return;
+        }
+
+        let now = Instant::now();
+        if now < self.next_snapshot_refresh_check {
+            return;
+        }
+        self.next_snapshot_refresh_check = now + SNAPSHOT_REFRESH_CHECK_INTERVAL;
+
+        let manifest_path = self.db.snapshot().manifest().path.clone();
+        let current_mtime = manifest_modified_time(&manifest_path);
+        if !snapshot_manifest_mtime_changed(self.snapshot_manifest_mtime, current_mtime) {
+            if self.snapshot_manifest_mtime.is_none() {
+                self.snapshot_manifest_mtime = current_mtime;
+            }
+            return;
+        }
+
+        match ChipViewDb::open(&manifest_path) {
+            Ok(db) => {
+                self.replace_db(db);
+                self.snapshot_manifest_mtime = current_mtime;
+                self.last_edit_result = Some("geometry snapshot refreshed".to_string());
+            }
+            Err(err) => {
+                self.last_edit_result = Some(format!("failed to refresh geometry: {err}"));
+            }
+        }
     }
 
     fn replace_db(&mut self, db: ChipViewDb) {
@@ -693,8 +736,11 @@ impl eframe::App for ChipViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.poll_edit_result();
+            loaded.poll_external_snapshot_refresh();
             if let Some(interval) = edit_poll_repaint_interval(loaded.pending_edit.is_some()) {
                 ctx.request_repaint_after(interval);
+            } else {
+                ctx.request_repaint_after(SNAPSHOT_REFRESH_CHECK_INTERVAL);
             }
         }
         egui::SidePanel::left("chip_viewer_layers")
@@ -829,6 +875,19 @@ fn edit_poll_repaint_interval(has_pending_edit: bool) -> Option<Duration> {
     has_pending_edit.then_some(Duration::from_millis(100))
 }
 
+fn manifest_modified_time(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+fn snapshot_manifest_mtime_changed(
+    previous: Option<SystemTime>,
+    current: Option<SystemTime>,
+) -> bool {
+    matches!((previous, current), (Some(previous), Some(current)) if current > previous)
+}
+
 fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
     let (reload_snapshot, message) = match result.status {
         GeometryEditStatus::Accepted => (
@@ -869,8 +928,21 @@ fn edit_result_action(result: &GeometryEditResult) -> EditResultAction {
     EditResultAction {
         reload_snapshot,
         selected_shape_id: Some(result.shape_id),
-        message,
+        message: append_edit_diagnostic(message, result),
     }
+}
+
+fn append_edit_diagnostic(mut message: String, result: &GeometryEditResult) -> String {
+    let Some(diagnostic) = result.message.as_deref().map(str::trim) else {
+        return message;
+    };
+    if diagnostic.is_empty() {
+        return message;
+    }
+
+    message.push_str(": ");
+    message.push_str(diagnostic);
+    message
 }
 
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
@@ -1172,6 +1244,18 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_refresh_detects_newer_manifest_mtime() {
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
+        let same = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10);
+        let newer = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(11);
+
+        assert!(!snapshot_manifest_mtime_changed(Some(old), Some(same)));
+        assert!(snapshot_manifest_mtime_changed(Some(old), Some(newer)));
+        assert!(!snapshot_manifest_mtime_changed(None, Some(newer)));
+        assert!(!snapshot_manifest_mtime_changed(Some(old), None));
+    }
+
+    #[test]
     fn edit_tool_allows_only_supported_owner_operations() {
         assert!(edit_tool_is_allowed(
             chipgeom_format::OwnerType::InstanceBBox as u8,
@@ -1226,6 +1310,16 @@ mod tests {
         assert_eq!(rejected.selected_shape_id, Some(7));
     }
 
+    #[test]
+    fn edit_result_action_includes_diagnostic_message() {
+        let mut result = edit_result(GeometryEditStatus::Rejected);
+        result.message = Some("apply-edit failed".to_string());
+
+        let rejected = edit_result_action(&result);
+
+        assert!(rejected.message.contains("apply-edit failed"));
+    }
+
     fn edit_result(status: GeometryEditStatus) -> GeometryEditResult {
         GeometryEditResult {
             command_id: 1,
@@ -1238,6 +1332,7 @@ mod tests {
                 hx: 10,
                 hy: 10,
             },
+            message: None,
         }
     }
 }

@@ -114,6 +114,8 @@ pub struct GeometryEditResult {
     pub new_version: ShapeVersion,
     pub status: GeometryEditStatus,
     pub committed_bbox: Rect32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 impl OwnerType {
@@ -292,5 +294,22 @@ mod tests {
             serde_json::from_str::<GeometryEditOp>("\"resize_rect\"").unwrap(),
             GeometryEditOp::ResizeRect
         );
+    }
+
+    #[test]
+    fn edit_result_deserializes_optional_message() {
+        let result = serde_json::from_str::<GeometryEditResult>(
+            r#"{
+              "command_id": 42,
+              "shape_id": 99,
+              "new_version": 0,
+              "status": "rejected",
+              "committed_bbox": { "lx": 0, "ly": 0, "hx": 0, "hy": 0 },
+              "message": "apply-edit failed"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(result.message.as_deref(), Some("apply-edit failed"));
     }
 }
