@@ -14,6 +14,7 @@ use chipgeom_format::{
 use eframe::egui;
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+const FOCUS_VIEWPORT_FILL: f32 = 0.45;
 
 pub struct ChipViewerApp {
     manifest: PathBuf,
@@ -32,6 +33,7 @@ struct LoadedViewer {
     search_mode: SearchMode,
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
+    pending_focus: Option<ShapeId>,
     edit_tool: EditTool,
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
@@ -199,6 +201,7 @@ impl LoadedViewer {
             search_mode: SearchMode::All,
             highlighted: BTreeSet::new(),
             selected: None,
+            pending_focus: None,
             edit_tool: EditTool::Move,
             draft: None,
             pending_edit: None,
@@ -244,7 +247,14 @@ impl LoadedViewer {
             }
         });
         if !self.search_text.trim().is_empty() {
-            ui.label(format!("matches: {}", self.highlighted.len()));
+            ui.horizontal(|ui| {
+                ui.label(format!("matches: {}", self.highlighted.len()));
+                if !self.highlighted.is_empty() && ui.button("Locate").clicked() {
+                    self.pending_focus = first_existing_shape_id(&self.highlighted, |shape_id| {
+                        self.db.find_shape(shape_id).is_some()
+                    });
+                }
+            });
         }
 
         if let Some(shape_id) = self.selected {
@@ -365,6 +375,8 @@ impl LoadedViewer {
             );
             return;
         };
+
+        self.focus_pending_shape(world, canvas);
 
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
@@ -525,6 +537,24 @@ impl LoadedViewer {
         } else {
             1
         }
+    }
+
+    fn focus_pending_shape(&mut self, world: Rect32, canvas: egui::Rect) {
+        let Some(shape_id) = self.pending_focus.take() else {
+            return;
+        };
+        let Some(shape) = self.db.find_shape(shape_id) else {
+            return;
+        };
+        if shape.state != ShapeState::Alive as u8 || shape.kind != ShapeKind::Rect as u8 {
+            return;
+        }
+
+        let (zoom, pan) = focus_view_on_bbox(world, shape.bbox, canvas);
+        self.zoom = zoom;
+        self.pan = pan;
+        self.pan_drag.reset();
+        self.selected = Some(shape_id);
     }
 
     fn begin_edit_drag(
@@ -1016,6 +1046,41 @@ fn overlay_shape_ids(
     overlay
 }
 
+fn first_existing_shape_id<F>(shape_ids: &BTreeSet<ShapeId>, mut exists: F) -> Option<ShapeId>
+where
+    F: FnMut(ShapeId) -> bool,
+{
+    shape_ids.iter().copied().find(|shape_id| exists(*shape_id))
+}
+
+fn focus_view_on_bbox(world: Rect32, target: Rect32, canvas: egui::Rect) -> (f32, egui::Vec2) {
+    let world_width = (world.hx - world.lx).max(1) as f32;
+    let world_height = (world.hy - world.ly).max(1) as f32;
+    let canvas_width = canvas.width().max(1.0);
+    let canvas_height = canvas.height().max(1.0);
+    let base_scale = (canvas_width / world_width)
+        .min(canvas_height / world_height)
+        .max(0.001);
+    let target_width = (target.hx - target.lx).max(1) as f32;
+    let target_height = (target.hy - target.ly).max(1) as f32;
+    let target_scale =
+        (canvas_width / target_width).min(canvas_height / target_height) * FOCUS_VIEWPORT_FILL;
+    let zoom = (target_scale / base_scale).clamp(1.0, 200.0);
+    let scale = base_scale * zoom;
+    let world_cx = (world.lx + world.hx) as f32 * 0.5;
+    let world_cy = (world.ly + world.hy) as f32 * 0.5;
+    let target_cx = (target.lx + target.hx) as f32 * 0.5;
+    let target_cy = (target.ly + target.hy) as f32 * 0.5;
+
+    (
+        zoom,
+        egui::vec2(
+            (world_cx - target_cx) * scale,
+            (target_cy - world_cy) * scale,
+        ),
+    )
+}
+
 fn retain_existing_shape_id<F>(shape_id: Option<ShapeId>, mut exists: F) -> Option<ShapeId>
 where
     F: FnMut(ShapeId) -> bool,
@@ -1257,6 +1322,41 @@ mod tests {
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
         );
+    }
+
+    #[test]
+    fn first_existing_shape_id_returns_lowest_live_highlight() {
+        let highlighted = BTreeSet::from([30, 10, 20]);
+
+        assert_eq!(
+            first_existing_shape_id(&highlighted, |shape_id| shape_id != 10),
+            Some(20)
+        );
+        assert_eq!(first_existing_shape_id(&highlighted, |_| false), None);
+    }
+
+    #[test]
+    fn focus_view_on_bbox_centers_target_bbox() {
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let target = Rect32 {
+            lx: 70,
+            ly: 10,
+            hx: 80,
+            hy: 20,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 100.0));
+
+        let (zoom, pan) = focus_view_on_bbox(world, target, canvas);
+        let screen = world_to_screen_rect(target, world, canvas, zoom, pan);
+
+        assert!((screen.center().x - canvas.center().x).abs() <= 0.5);
+        assert!((screen.center().y - canvas.center().y).abs() <= 0.5);
+        assert!(zoom >= 1.0);
     }
 
     #[test]
