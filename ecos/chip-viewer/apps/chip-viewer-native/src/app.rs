@@ -1093,15 +1093,15 @@ fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32, corner: ResizeCorner) 
 
 fn should_use_view_tiles_for_state(
     view_tile_count: usize,
-    has_highlight: bool,
-    has_selection: bool,
-    has_draft: bool,
+    _has_highlight: bool,
+    _has_selection: bool,
+    _has_draft: bool,
     _edit_enabled: bool,
     zoom: f32,
     viewport: Rect32,
     world: Rect32,
 ) -> bool {
-    if view_tile_count == 0 || has_highlight || has_selection || has_draft {
+    if view_tile_count == 0 {
         return false;
     }
 
@@ -1846,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn edit_mode_overview_still_uses_view_tiles_until_an_exact_overlay_is_active() {
+    fn edit_mode_overview_keeps_view_tiles_with_exact_overlays() {
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
@@ -1857,16 +1857,16 @@ mod tests {
         assert!(should_use_view_tiles_for_state(
             16, false, false, false, true, 1.0, world, world,
         ));
-        assert!(!should_use_view_tiles_for_state(
+        assert!(should_use_view_tiles_for_state(
             16, false, true, false, true, 1.0, world, world,
         ));
-        assert!(!should_use_view_tiles_for_state(
+        assert!(should_use_view_tiles_for_state(
             16, false, false, true, true, 1.0, world, world,
         ));
     }
 
     #[test]
-    fn highlight_disables_view_tiles_so_exact_shapes_can_be_stroked() {
+    fn highlight_keeps_view_tiles_for_base_plane_at_overview() {
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
@@ -1874,7 +1874,7 @@ mod tests {
             hy: 1000,
         };
 
-        assert!(!should_use_view_tiles_for_state(
+        assert!(should_use_view_tiles_for_state(
             16, true, false, false, false, 0.25, world, world,
         ));
     }
