@@ -15,6 +15,7 @@ use eframe::egui;
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
+const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 
 pub struct ChipViewerApp {
     manifest: PathBuf,
@@ -450,11 +451,11 @@ impl LoadedViewer {
                 let Some(shape) = self.db.find_shape(shape_id) else {
                     continue;
                 };
-                if shape.kind != ShapeKind::Rect as u8 {
+                if !is_renderable_shape(shape) {
                     continue;
                 }
-                let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
-                if !screen.is_positive() || !screen.intersects(canvas) {
+                let screen = shape_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
+                if !screen.intersects(canvas) {
                     continue;
                 }
                 let color = color32(style.rgba);
@@ -467,11 +468,11 @@ impl LoadedViewer {
             let Some(shape) = self.db.find_shape(shape_id) else {
                 continue;
             };
-            if shape.state != ShapeState::Alive as u8 || shape.kind != ShapeKind::Rect as u8 {
+            if !is_renderable_shape(shape) {
                 continue;
             }
-            let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
-            if !screen.is_positive() || !screen.intersects(canvas) {
+            let screen = shape_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
+            if !screen.intersects(canvas) {
                 continue;
             }
             if self.highlighted.contains(&shape_id) {
@@ -546,7 +547,7 @@ impl LoadedViewer {
         let Some(shape) = self.db.find_shape(shape_id) else {
             return;
         };
-        if shape.state != ShapeState::Alive as u8 || shape.kind != ShapeKind::Rect as u8 {
+        if !is_renderable_shape(shape) {
             return;
         }
 
@@ -794,7 +795,7 @@ impl LoadedViewer {
             self.pan,
         );
         let layer_ids: Vec<LayerId> = visible_layers.keys().copied().collect();
-        self.db.pick_top_rect(
+        self.db.pick_top_shape(
             &layer_ids,
             chipgeom_format::Point32 {
                 x: hit.lx,
@@ -851,6 +852,26 @@ fn world_to_screen_rect(
     };
 
     egui::Rect::from_min_max(to_screen(rect.lx, rect.hy), to_screen(rect.hx, rect.ly))
+}
+
+fn shape_screen_rect(
+    rect: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> egui::Rect {
+    expand_screen_rect_to_min_size(
+        world_to_screen_rect(rect, world, canvas, zoom, pan),
+        MIN_SHAPE_SCREEN_SIZE,
+    )
+}
+
+fn expand_screen_rect_to_min_size(rect: egui::Rect, min_size: f32) -> egui::Rect {
+    let center = rect.center();
+    let width = rect.width().max(min_size);
+    let height = rect.height().max(min_size);
+    egui::Rect::from_center_size(center, egui::vec2(width, height))
 }
 
 fn screen_to_world_rect(
@@ -1033,6 +1054,14 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
             Some(OwnerType::NetWireSegment | OwnerType::SpecialWireSegment | OwnerType::Blockage)
         ),
     }
+}
+
+fn is_renderable_shape(shape: &chipgeom_format::ShapeRecord) -> bool {
+    shape.state == ShapeState::Alive as u8 && is_renderable_shape_kind(shape.kind)
+}
+
+fn is_renderable_shape_kind(kind: u8) -> bool {
+    kind == ShapeKind::Rect as u8 || kind == ShapeKind::Line as u8 || kind == ShapeKind::Point as u8
 }
 
 fn overlay_shape_ids(
@@ -1322,6 +1351,39 @@ mod tests {
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
         );
+    }
+
+    #[test]
+    fn shape_kind_rendering_includes_bbox_safe_line_and_point_shapes() {
+        assert!(is_renderable_shape_kind(ShapeKind::Rect as u8));
+        assert!(is_renderable_shape_kind(ShapeKind::Line as u8));
+        assert!(is_renderable_shape_kind(ShapeKind::Point as u8));
+        assert!(!is_renderable_shape_kind(0));
+    }
+
+    #[test]
+    fn shape_screen_rect_expands_zero_extent_bbox() {
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let point_bbox = Rect32 {
+            lx: 50,
+            ly: 50,
+            hx: 50,
+            hy: 50,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+
+        let screen = shape_screen_rect(point_bbox, world, canvas, 1.0, egui::Vec2::ZERO);
+
+        assert!(screen.is_positive());
+        assert!(screen.width() >= MIN_SHAPE_SCREEN_SIZE);
+        assert!(screen.height() >= MIN_SHAPE_SCREEN_SIZE);
+        assert!((screen.center().x - canvas.center().x).abs() <= 0.5);
+        assert!((screen.center().y - canvas.center().y).abs() <= 0.5);
     }
 
     #[test]

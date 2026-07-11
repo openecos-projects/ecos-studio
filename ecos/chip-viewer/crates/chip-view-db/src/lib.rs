@@ -214,6 +214,25 @@ impl LayerShapeIndex {
             .max()
             .map(|index| shapes[index].id)
     }
+
+    pub fn pick_top_shape(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_ids: &[u16],
+        point: Point32,
+    ) -> Option<ShapeId> {
+        layer_ids
+            .iter()
+            .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, point_bbox(point)))
+            .filter(|index| {
+                let shape = &shapes[*index];
+                shape.state == ShapeState::Alive as u8
+                    && is_pickable_shape_kind(shape.kind)
+                    && rect_contains_point(shape.bbox, point)
+            })
+            .max()
+            .map(|index| shapes[index].id)
+    }
 }
 
 impl ShapeIdIndex {
@@ -424,6 +443,10 @@ fn rect_contains_point(rect: Rect32, point: Point32) -> bool {
     point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
 }
 
+fn is_pickable_shape_kind(kind: u8) -> bool {
+    kind == ShapeKind::Rect as u8 || kind == ShapeKind::Line as u8 || kind == ShapeKind::Point as u8
+}
+
 fn rect_envelope(rect: Rect32) -> AABB<[i32; 2]> {
     AABB::from_corners(
         [rect.lx.min(rect.hx), rect.ly.min(rect.hy)],
@@ -593,6 +616,11 @@ impl ChipViewDb {
     pub fn pick_top_rect(&self, layer_ids: &[u16], point: Point32) -> Option<ShapeId> {
         self.layer_index
             .pick_top_rect(self.snapshot.shapes(), layer_ids, point)
+    }
+
+    pub fn pick_top_shape(&self, layer_ids: &[u16], point: Point32) -> Option<ShapeId> {
+        self.layer_index
+            .pick_top_shape(self.snapshot.shapes(), layer_ids, point)
     }
 
     pub fn owner_name(&self, owner: &OwnerRef) -> Option<&str> {
@@ -769,6 +797,60 @@ mod tests {
 
         assert_eq!(index.query_candidate_count(3, viewport), 1);
         assert!(index.query_candidate_count(3, viewport) < index.candidate_count(3));
+    }
+
+    #[test]
+    fn layer_shape_index_picks_top_non_rect_shape_by_bbox() {
+        let shapes = [
+            ShapeRecord {
+                kind: ShapeKind::Line as u8,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 5,
+                    hx: 20,
+                    hy: 5,
+                },
+                ..shape(10, 3)
+            },
+            ShapeRecord {
+                kind: ShapeKind::Point as u8,
+                bbox: Rect32 {
+                    lx: 25,
+                    ly: 5,
+                    hx: 25,
+                    hy: 5,
+                },
+                ..shape(20, 3)
+            },
+            ShapeRecord {
+                kind: ShapeKind::Rect as u8,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(30, 3)
+            },
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        assert_eq!(
+            index.pick_top_shape(&shapes, &[3], Point32 { x: 5, y: 5 }),
+            Some(30)
+        );
+        assert_eq!(
+            index.pick_top_shape(&shapes, &[3], Point32 { x: 15, y: 5 }),
+            Some(10)
+        );
+        assert_eq!(
+            index.pick_top_shape(&shapes, &[3], Point32 { x: 25, y: 5 }),
+            Some(20)
+        );
+        assert_eq!(
+            index.pick_top_rect(&shapes, &[3], Point32 { x: 25, y: 5 }),
+            None
+        );
     }
 
     #[test]
