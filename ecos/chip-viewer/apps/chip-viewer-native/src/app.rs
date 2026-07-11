@@ -34,7 +34,7 @@ struct LoadedViewer {
     search_mode: SearchMode,
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
-    pending_focus: Option<ShapeId>,
+    pending_focus: Option<PendingFocus>,
     edit_tool: EditTool,
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
@@ -69,6 +69,12 @@ struct EditDraft {
 struct PendingEdit {
     shape_id: ShapeId,
     result_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingFocus {
+    bbox: Rect32,
+    select_shape_id: Option<ShapeId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,9 +288,13 @@ impl LoadedViewer {
             ui.horizontal(|ui| {
                 ui.label(format!("matches: {}", self.highlighted.len()));
                 if !self.highlighted.is_empty() && ui.button("Locate").clicked() {
-                    self.pending_focus = first_existing_shape_id(&self.highlighted, |shape_id| {
-                        self.db.find_shape(shape_id).is_some()
-                    });
+                    self.pending_focus =
+                        focus_target_for_shape_ids(&self.highlighted, |shape_id| {
+                            self.db
+                                .find_shape(shape_id)
+                                .filter(|shape| is_renderable_shape(shape))
+                                .map(|shape| shape.bbox)
+                        });
                 }
                 if ui.button("Clear").clicked() {
                     clear_search_state(&mut self.search_text, &mut self.highlighted);
@@ -571,21 +581,15 @@ impl LoadedViewer {
     }
 
     fn focus_pending_shape(&mut self, world: Rect32, canvas: egui::Rect) {
-        let Some(shape_id) = self.pending_focus.take() else {
+        let Some(focus) = self.pending_focus.take() else {
             return;
         };
-        let Some(shape) = self.db.find_shape(shape_id) else {
-            return;
-        };
-        if !is_renderable_shape(shape) {
-            return;
-        }
 
-        let (zoom, pan) = focus_view_on_bbox(world, shape.bbox, canvas);
+        let (zoom, pan) = focus_view_on_bbox(world, focus.bbox, canvas);
         self.zoom = zoom;
         self.pan = pan;
         self.pan_drag.reset();
-        self.selected = Some(shape_id);
+        self.selected = focus.select_shape_id;
     }
 
     fn begin_edit_drag(
@@ -1355,6 +1359,39 @@ where
     shape_ids.iter().copied().find(|shape_id| exists(*shape_id))
 }
 
+fn focus_target_for_shape_ids<F>(
+    shape_ids: &BTreeSet<ShapeId>,
+    mut bbox_for_shape: F,
+) -> Option<PendingFocus>
+where
+    F: FnMut(ShapeId) -> Option<Rect32>,
+{
+    let mut shape_bboxes = BTreeMap::new();
+    for shape_id in shape_ids.iter().copied() {
+        let Some(shape_bbox) = bbox_for_shape(shape_id) else {
+            continue;
+        };
+        shape_bboxes.insert(shape_id, shape_bbox);
+    }
+
+    let bbox = shape_bboxes.values().copied().reduce(union_rect)?;
+    let select_shape_id =
+        first_existing_shape_id(shape_ids, |shape_id| shape_bboxes.contains_key(&shape_id));
+    Some(PendingFocus {
+        bbox,
+        select_shape_id,
+    })
+}
+
+fn union_rect(lhs: Rect32, rhs: Rect32) -> Rect32 {
+    Rect32 {
+        lx: lhs.lx.min(rhs.lx),
+        ly: lhs.ly.min(rhs.ly),
+        hx: lhs.hx.max(rhs.hx),
+        hy: lhs.hy.max(rhs.hy),
+    }
+}
+
 fn focus_view_on_bbox(world: Rect32, target: Rect32, canvas: egui::Rect) -> (f32, egui::Vec2) {
     let world_width = (world.hx - world.lx).max(1) as f32;
     let world_height = (world.hy - world.ly).max(1) as f32;
@@ -1971,6 +2008,39 @@ mod tests {
             Some(20)
         );
         assert_eq!(first_existing_shape_id(&highlighted, |_| false), None);
+    }
+
+    #[test]
+    fn focus_target_for_shape_ids_uses_union_bbox_and_lowest_live_shape() {
+        let highlighted = BTreeSet::from([30, 10, 20]);
+
+        let focus = focus_target_for_shape_ids(&highlighted, |shape_id| match shape_id {
+            20 => Some(Rect32 {
+                lx: 100,
+                ly: 100,
+                hx: 120,
+                hy: 130,
+            }),
+            30 => Some(Rect32 {
+                lx: -10,
+                ly: 5,
+                hx: 15,
+                hy: 25,
+            }),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(focus.select_shape_id, Some(20));
+        assert_eq!(
+            focus.bbox,
+            Rect32 {
+                lx: -10,
+                ly: 5,
+                hx: 120,
+                hy: 130,
+            }
+        );
     }
 
     #[test]
