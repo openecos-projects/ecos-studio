@@ -32,6 +32,8 @@ struct LoadedViewer {
     edit_result_dir: Option<PathBuf>,
     search_text: String,
     search_mode: SearchMode,
+    shape_id_text: String,
+    last_query_status: Option<String>,
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
     pending_focus: Option<PendingFocus>,
@@ -75,6 +77,12 @@ struct PendingEdit {
 struct PendingFocus {
     bbox: Rect32,
     select_shape_id: Option<ShapeId>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ShapeIdLookupAction {
+    pending_focus: Option<PendingFocus>,
+    message: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +234,8 @@ impl LoadedViewer {
             edit_result_dir,
             search_text: String::new(),
             search_mode: SearchMode::All,
+            shape_id_text: String::new(),
+            last_query_status: None,
             highlighted: BTreeSet::new(),
             selected: None,
             pending_focus: None,
@@ -300,6 +310,20 @@ impl LoadedViewer {
                     clear_search_state(&mut self.search_text, &mut self.highlighted);
                 }
             });
+        }
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("ShapeId");
+            let response = ui.text_edit_singleline(&mut self.shape_id_text);
+            let submit =
+                response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if ui.button("Select").clicked() || submit {
+                self.select_shape_id_from_input();
+            }
+        });
+        if let Some(status) = &self.last_query_status {
+            ui.label(status);
         }
 
         if let Some(shape_id) = self.selected {
@@ -812,6 +836,17 @@ impl LoadedViewer {
         } else {
             self.db.query_owner_name(name).into_iter().collect()
         };
+    }
+
+    fn select_shape_id_from_input(&mut self) {
+        let action = shape_id_lookup_action(&self.shape_id_text, |shape_id| {
+            self.db
+                .find_shape(shape_id)
+                .filter(|shape| is_renderable_shape(shape))
+                .map(|shape| shape.bbox)
+        });
+        self.pending_focus = action.pending_focus;
+        self.last_query_status = Some(action.message);
     }
 
     fn pick_shape_at(
@@ -1381,6 +1416,39 @@ where
         bbox,
         select_shape_id,
     })
+}
+
+fn shape_id_lookup_action<F>(input: &str, mut bbox_for_shape: F) -> ShapeIdLookupAction
+where
+    F: FnMut(ShapeId) -> Option<Rect32>,
+{
+    let value = input.trim();
+    if value.is_empty() {
+        return ShapeIdLookupAction {
+            pending_focus: None,
+            message: "enter a ShapeId".to_string(),
+        };
+    }
+    let Ok(shape_id) = value.parse::<ShapeId>() else {
+        return ShapeIdLookupAction {
+            pending_focus: None,
+            message: format!("invalid ShapeId: {value}"),
+        };
+    };
+    let Some(bbox) = bbox_for_shape(shape_id) else {
+        return ShapeIdLookupAction {
+            pending_focus: None,
+            message: format!("shape {shape_id} not found"),
+        };
+    };
+
+    ShapeIdLookupAction {
+        pending_focus: Some(PendingFocus {
+            bbox,
+            select_shape_id: Some(shape_id),
+        }),
+        message: format!("shape {shape_id} selected"),
+    }
 }
 
 fn union_rect(lhs: Rect32, rhs: Rect32) -> Rect32 {
@@ -2041,6 +2109,43 @@ mod tests {
                 hy: 130,
             }
         );
+    }
+
+    #[test]
+    fn shape_id_lookup_action_focuses_existing_shape() {
+        let action = shape_id_lookup_action(" 42 ", |shape_id| {
+            (shape_id == 42).then_some(Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 30,
+                hy: 40,
+            })
+        });
+
+        assert_eq!(
+            action.pending_focus,
+            Some(PendingFocus {
+                bbox: Rect32 {
+                    lx: 10,
+                    ly: 20,
+                    hx: 30,
+                    hy: 40,
+                },
+                select_shape_id: Some(42),
+            })
+        );
+        assert_eq!(action.message, "shape 42 selected");
+    }
+
+    #[test]
+    fn shape_id_lookup_action_reports_invalid_or_missing_shape() {
+        let invalid = shape_id_lookup_action("shape-42", |_| None);
+        assert_eq!(invalid.pending_focus, None);
+        assert_eq!(invalid.message, "invalid ShapeId: shape-42");
+
+        let missing = shape_id_lookup_action("99", |_| None);
+        assert_eq!(missing.pending_focus, None);
+        assert_eq!(missing.message, "shape 99 not found");
     }
 
     #[test]
