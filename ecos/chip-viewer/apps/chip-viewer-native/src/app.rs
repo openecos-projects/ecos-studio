@@ -290,13 +290,45 @@ impl LoadedViewer {
         }
 
         ui.separator();
-        if ui.button("Fit").clicked() {
-            self.zoom = 1.0;
-            self.pan = egui::Vec2::ZERO;
-            self.pan_drag.reset();
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Fit").clicked() {
+                self.zoom = 1.0;
+                self.pan = egui::Vec2::ZERO;
+                self.pan_drag.reset();
+            }
+            let can_reload = self.pending_edit.is_none() && self.draft.is_none();
+            if ui
+                .add_enabled(can_reload, egui::Button::new("Reload"))
+                .clicked()
+            {
+                match self.reload_snapshot(None) {
+                    Ok(()) => {
+                        self.last_edit_result = Some("geometry snapshot reloaded".to_string());
+                    }
+                    Err(err) => {
+                        self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
+                    }
+                }
+            }
+        });
         ui.separator();
         ui.label("Layers");
+        ui.horizontal(|ui| {
+            if ui.small_button("All").clicked() {
+                set_layer_visibility(&mut self.layers, true);
+            }
+            if ui.small_button("None").clicked() {
+                set_layer_visibility(&mut self.layers, false);
+            }
+            if ui.small_button("Invert").clicked() {
+                invert_layer_visibility(&mut self.layers);
+            }
+        });
+        ui.label(format!(
+            "visible: {}/{}",
+            visible_layer_count(&self.layers),
+            self.layers.len()
+        ));
         egui::ScrollArea::vertical().show(ui, |ui| {
             for layer in &mut self.layers {
                 ui.horizontal(|ui| {
@@ -614,12 +646,8 @@ impl LoadedViewer {
         let action = edit_result_action(&result);
         self.selected = action.selected_shape_id;
         if action.reload_snapshot {
-            let manifest_path = self.db.snapshot().manifest().path.clone();
-            match ChipViewDb::open(&manifest_path) {
-                Ok(db) => {
-                    self.replace_db(db);
-                    self.snapshot_manifest_mtime = manifest_modified_time(&manifest_path);
-                }
+            match self.reload_snapshot(None) {
+                Ok(()) => {}
                 Err(err) => {
                     self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
                     self.pending_edit = None;
@@ -652,16 +680,23 @@ impl LoadedViewer {
             return;
         }
 
-        match ChipViewDb::open(&manifest_path) {
-            Ok(db) => {
-                self.replace_db(db);
-                self.snapshot_manifest_mtime = current_mtime;
+        match self.reload_snapshot(current_mtime) {
+            Ok(()) => {
                 self.last_edit_result = Some("geometry snapshot refreshed".to_string());
             }
             Err(err) => {
                 self.last_edit_result = Some(format!("failed to refresh geometry: {err}"));
             }
         }
+    }
+
+    fn reload_snapshot(&mut self, current_mtime: Option<SystemTime>) -> Result<(), String> {
+        let manifest_path = self.db.snapshot().manifest().path.clone();
+        let snapshot_mtime = current_mtime.or_else(|| manifest_modified_time(&manifest_path));
+        let db = ChipViewDb::open(&manifest_path).map_err(|err| err.to_string())?;
+        self.replace_db(db);
+        self.snapshot_manifest_mtime = snapshot_mtime;
+        Ok(())
     }
 
     fn replace_db(&mut self, db: ChipViewDb) {
@@ -685,6 +720,13 @@ impl LoadedViewer {
         self.render_cache.clear();
         self.view_tile_cache.clear();
         self.refresh_highlight();
+        let db = &self.db;
+        self.selected =
+            retain_existing_shape_id(self.selected, |shape_id| db.find_shape(shape_id).is_some());
+        let db = &self.db;
+        retain_existing_shape_ids(&mut self.highlighted, |shape_id| {
+            db.find_shape(shape_id).is_some()
+        });
     }
 
     fn allocate_command_id(&mut self) -> u64 {
@@ -974,6 +1016,36 @@ fn overlay_shape_ids(
     overlay
 }
 
+fn retain_existing_shape_id<F>(shape_id: Option<ShapeId>, mut exists: F) -> Option<ShapeId>
+where
+    F: FnMut(ShapeId) -> bool,
+{
+    shape_id.filter(|shape_id| exists(*shape_id))
+}
+
+fn retain_existing_shape_ids<F>(shape_ids: &mut BTreeSet<ShapeId>, mut exists: F)
+where
+    F: FnMut(ShapeId) -> bool,
+{
+    shape_ids.retain(|shape_id| exists(*shape_id));
+}
+
+fn set_layer_visibility(layers: &mut [LayerUiState], visible: bool) {
+    for layer in layers {
+        layer.visible = visible;
+    }
+}
+
+fn invert_layer_visibility(layers: &mut [LayerUiState]) {
+    for layer in layers {
+        layer.visible = !layer.visible;
+    }
+}
+
+fn visible_layer_count(layers: &[LayerUiState]) -> usize {
+    layers.iter().filter(|layer| layer.visible).count()
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PanDragState {
     previous_drag_delta: egui::Vec2,
@@ -1188,6 +1260,31 @@ mod tests {
     }
 
     #[test]
+    fn retain_existing_shape_id_clears_stale_selection() {
+        assert_eq!(
+            retain_existing_shape_id(Some(10), |shape_id| shape_id == 10),
+            Some(10)
+        );
+        assert_eq!(
+            retain_existing_shape_id(Some(20), |shape_id| shape_id == 10),
+            None
+        );
+        assert_eq!(
+            retain_existing_shape_id(None, |shape_id| shape_id == 10),
+            None
+        );
+    }
+
+    #[test]
+    fn retain_existing_shape_ids_filters_stale_highlights() {
+        let mut shape_ids = BTreeSet::from([10, 20, 30]);
+
+        retain_existing_shape_ids(&mut shape_ids, |shape_id| shape_id != 20);
+
+        assert_eq!(shape_ids, BTreeSet::from([10, 30]));
+    }
+
+    #[test]
     fn search_mode_filters_net_and_instance_owner_types() {
         assert_eq!(SearchMode::All.owner_types(), None);
         assert_eq!(
@@ -1208,6 +1305,35 @@ mod tests {
                 ][..]
             )
         );
+    }
+
+    #[test]
+    fn layer_visibility_helpers_show_hide_and_invert_layers() {
+        let mut layers = vec![
+            layer_state(1, true),
+            layer_state(2, false),
+            layer_state(3, true),
+        ];
+
+        set_layer_visibility(&mut layers, false);
+        assert_eq!(layer_visibility(&layers), vec![false, false, false]);
+
+        set_layer_visibility(&mut layers, true);
+        assert_eq!(layer_visibility(&layers), vec![true, true, true]);
+
+        invert_layer_visibility(&mut layers);
+        assert_eq!(layer_visibility(&layers), vec![false, false, false]);
+    }
+
+    #[test]
+    fn visible_layer_count_counts_only_enabled_layers() {
+        let layers = vec![
+            layer_state(1, true),
+            layer_state(2, false),
+            layer_state(3, true),
+        ];
+
+        assert_eq!(visible_layer_count(&layers), 2);
     }
 
     #[test]
@@ -1334,5 +1460,18 @@ mod tests {
             },
             message: None,
         }
+    }
+
+    fn layer_state(layer_id: LayerId, visible: bool) -> LayerUiState {
+        LayerUiState {
+            layer_id,
+            shape_count: 1,
+            visible,
+            style: LayerStyle::default_for_layer(layer_id),
+        }
+    }
+
+    fn layer_visibility(layers: &[LayerUiState]) -> Vec<bool> {
+        layers.iter().map(|layer| layer.visible).collect()
     }
 }
