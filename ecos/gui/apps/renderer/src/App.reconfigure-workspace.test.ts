@@ -6,9 +6,8 @@ describe('App workspace reconfiguration wizard wiring', () => {
     expect(appSource).toContain(
       ':signoff-package-export-enabled="signoffPackageExportEnabled"',
     )
-    expect(appSource).toContain(
-      'const { exportSignoffPackage, signoffPackageExportEnabled }',
-    )
+    expect(appSource).toContain('exportSignoffPackage,')
+    expect(appSource).toContain('signoffPackageExportEnabled,')
   })
 
   it('opens the shared workspace wizard with current workspace data from the File menu', () => {

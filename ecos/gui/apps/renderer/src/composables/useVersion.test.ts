@@ -184,6 +184,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
           workspaceHandle: 'workspace-handle-1',
         }),
         exportSignoff: async (request) => ({ outputPath: request.outputPath }),
+        inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
         home: async () => ({ path: '' }),
         info: async (request) => ({ id: request.id, info: {}, step: request.step }),
         open: async (request) => ({

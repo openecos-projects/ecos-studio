@@ -48,6 +48,33 @@ export interface EccWorkspaceExportSignoffRequest extends EccWorkspaceHandleRequ
   outputPath: string
 }
 
+export type EccSignoffReviewStatus = 'ready' | 'attention' | 'blocked'
+
+export interface EccSignoffReviewGroup {
+  id: 'initial' | 'config' | 'harden' | 'final_design' | 'sta' | 'spef' | 'reports'
+  label: string
+  status: EccSignoffReviewStatus
+  available: number
+  expected: number
+  summary: string
+}
+
+export type EccSignoffReviewDetailKind = 'resource' | 'flow' | 'checklist'
+
+export interface EccSignoffReviewDetail {
+  kind: EccSignoffReviewDetailKind
+  label: string
+  location: string
+  reason: string
+}
+
+export interface EccSignoffReviewRisk {
+  details: EccSignoffReviewDetail[]
+  severity: 'blocked' | 'warning'
+  title: string
+  summary: string
+}
+
 export interface EccWorkspaceOpenResult {
   directory: string
   workspaceHandle: string
@@ -87,6 +114,12 @@ export interface EccWorkspaceResetFlowResult {
 
 export interface EccWorkspaceExportSignoffResult {
   outputPath: string
+}
+
+export interface EccWorkspaceInspectSignoffResult {
+  status: EccSignoffReviewStatus
+  groups: EccSignoffReviewGroup[]
+  risks: EccSignoffReviewRisk[]
 }
 
 export interface EccFlowRunRequest extends EccWorkspaceHandleRequest {
@@ -180,6 +213,9 @@ export interface EccRuntimeApi {
     exportSignoff(
       request: EccWorkspaceExportSignoffRequest,
     ): Promise<EccWorkspaceExportSignoffResult>
+    inspectSignoff(
+      request: EccWorkspaceHandleRequest,
+    ): Promise<EccWorkspaceInspectSignoffResult>
     home(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult>
     info(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult>
     open(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult>

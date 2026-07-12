@@ -77,6 +77,7 @@ export const desktopApiIpcChannels = {
   eccWorkspaceSyncConfig: 'ecc:workspace-sync-config',
   eccWorkspaceResetFlow: 'ecc:workspace-reset-flow',
   eccWorkspaceExportSignoff: 'ecc:workspace-export-signoff',
+  eccWorkspaceInspectSignoff: 'ecc:workspace-inspect-signoff',
   eccFlowRun: 'ecc:flow-run',
   eccFlowRunStep: 'ecc:flow-run-step',
   shellCreateSession: 'shell:create-session',

@@ -141,6 +141,7 @@ function registerHandlers() {
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
       exportSignoff: vi.fn(),
+      inspectSignoff: vi.fn(),
       onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
       openWorkspace: vi.fn(),
       refreshConfig: vi.fn(),
@@ -1022,6 +1023,20 @@ describe('registerIpc', () => {
     ).resolves.toEqual(result)
 
     expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
+  })
+
+  it('inspects ECC signoff through the runtime service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { workspaceHandle: 'workspace-handle-1' }
+    const result = { groups: [], risks: [], status: 'ready' }
+    services.eccRuntimeService.inspectSignoff.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccWorkspaceInspectSignoff)?.(event, request),
+    ).resolves.toEqual(result)
+
+    expect(services.eccRuntimeService.inspectSignoff).toHaveBeenCalledWith(request)
   })
 
   it('broadcasts ECC runtime events to live renderer windows', () => {

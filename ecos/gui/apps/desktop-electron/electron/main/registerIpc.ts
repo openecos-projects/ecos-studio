@@ -183,6 +183,7 @@ export interface DesktopBridgeServices {
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
+    inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
     openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
@@ -951,6 +952,12 @@ export function registerIpc(
   handle(desktopApiIpcChannels.eccWorkspaceExportSignoff, async (_event, request) => {
     return await services.eccRuntimeService.exportSignoff(
       request as EccWorkspaceExportSignoffRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceInspectSignoff, async (_event, request) => {
+    return await services.eccRuntimeService.inspectSignoff(
+      request as EccWorkspaceHandleRequest,
     )
   })
 

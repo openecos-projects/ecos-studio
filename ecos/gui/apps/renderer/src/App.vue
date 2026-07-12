@@ -100,6 +100,16 @@
 
     <AboutDialog v-model="showAboutDialog" />
 
+    <SignoffPackageReviewDialog
+      :error="signoffPackageReview.error"
+      :loading="signoffPackageReview.loading"
+      :result="signoffPackageReview.result"
+      :visible="signoffPackageReview.visible"
+      @close="closeSignoffPackageReview"
+      @export="confirmSignoffPackageExport"
+      @refresh="refreshSignoffPackageReview"
+    />
+
     <DesignFilesManageDialog v-model="showManageDialog" />
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
@@ -144,6 +154,7 @@ import TopBar from '@/components/TopBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
+import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import Toast from 'primevue/toast'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
 import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
@@ -182,7 +193,14 @@ const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
 const { showManageDialog, openManageDialog } = useDesignFiles()
-const { exportSignoffPackage, signoffPackageExportEnabled } = useSignoffPackageExport({
+const {
+  closeSignoffPackageReview,
+  confirmSignoffPackageExport,
+  exportSignoffPackage,
+  refreshSignoffPackageReview,
+  signoffPackageExportEnabled,
+  signoffPackageReview,
+} = useSignoffPackageExport({
   currentProject,
   resourceVersions,
   showToast,
