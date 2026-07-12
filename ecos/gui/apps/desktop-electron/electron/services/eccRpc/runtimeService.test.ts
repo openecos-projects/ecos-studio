@@ -182,6 +182,63 @@ describe('EccRpcRuntimeService', () => {
     })
   })
 
+  it('retries workspace creation without flowConfig and sdc for older runtimes', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0a4', version: 1 },
+      new EccJsonRpcError(-32602, 'invalid_request', {
+        message: 'unknown field: flowConfig',
+      }),
+      new EccJsonRpcError(-32602, 'invalid_request', {
+        message: 'unknown field: sdc',
+      }),
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const flowConfig = {
+      start_step: 'Synthesis',
+      end_step: 'Harden',
+      steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+    }
+
+    await expect(
+      service.createWorkspace({
+        directory: '/work/demo',
+        flowConfig,
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
+      }),
+    ).resolves.toEqual({
+      directory: '/work/demo',
+      workspaceHandle: expect.stringMatching(/^workspace-/),
+    })
+
+    expect(client.calls.at(-3)).toEqual({
+      method: 'workspace.create',
+      params: expect.objectContaining({
+        flowConfig,
+        sdc: '/constraints/top.sdc',
+      }),
+    })
+    expect(client.calls.at(-2)).toEqual({
+      method: 'workspace.create',
+      params: expect.not.objectContaining({
+        flowConfig: expect.anything(),
+      }),
+    })
+    expect(client.calls.at(-2)?.params).toEqual(
+      expect.objectContaining({
+        sdc: '/constraints/top.sdc',
+      }),
+    )
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      params: expect.not.objectContaining({
+        flowConfig: expect.anything(),
+        sdc: expect.anything(),
+      }),
+    })
+  })
+
   it('retries workspace creation without the default sdc field for older runtimes', async () => {
     const { client, service } = createService()
     client.responses.push(

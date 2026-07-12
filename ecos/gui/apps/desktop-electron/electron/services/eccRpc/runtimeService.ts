@@ -77,12 +77,17 @@ function hasEntries(value: Record<string, unknown> | undefined): value is Record
 
 function workspaceCreatePayload(
   request: EccWorkspaceCreateRequest,
-  options: { includeSdc: boolean } = { includeSdc: true },
+  options: { includeFlowConfig: boolean; includeSdc: boolean } = {
+    includeFlowConfig: true,
+    includeSdc: true,
+  },
 ): Record<string, unknown> {
   return {
     directory: request.directory,
     filelist: request.filelist ?? '',
-    ...(hasEntries(request.flowConfig) ? { flowConfig: request.flowConfig } : {}),
+    ...(options.includeFlowConfig && hasEntries(request.flowConfig)
+      ? { flowConfig: request.flowConfig }
+      : {}),
     originDef: request.originDef ?? '',
     originVerilog: request.originVerilog ?? '',
     parameters: request.parameters ?? {},
@@ -159,20 +164,31 @@ export class EccRpcRuntimeService {
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
     return this.enqueue('workspace.create', undefined, async () => {
       const client = await this.ensureStarted()
-      let response: EccWorkspaceSessionResult
-      try {
-        response = await client.call<EccWorkspaceSessionResult>(
-          'workspace.create',
-          workspaceCreatePayload(request),
-        )
-      } catch (error) {
-        if (!isUnknownJsonRpcFieldError(error, 'sdc')) {
+      const payloadOptions = {
+        includeFlowConfig: true,
+        includeSdc: true,
+      }
+      let response: EccWorkspaceSessionResult | null = null
+      while (!response) {
+        try {
+          response = await client.call<EccWorkspaceSessionResult>(
+            'workspace.create',
+            workspaceCreatePayload(request, payloadOptions),
+          )
+        } catch (error) {
+          if (
+            payloadOptions.includeFlowConfig &&
+            isUnknownJsonRpcFieldError(error, 'flowConfig')
+          ) {
+            payloadOptions.includeFlowConfig = false
+            continue
+          }
+          if (payloadOptions.includeSdc && isUnknownJsonRpcFieldError(error, 'sdc')) {
+            payloadOptions.includeSdc = false
+            continue
+          }
           throw error
         }
-        response = await client.call<EccWorkspaceSessionResult>(
-          'workspace.create',
-          workspaceCreatePayload(request, { includeSdc: false }),
-        )
       }
       const session = this.sessions.activate(response.directory, response.workspaceId)
       return {
