@@ -71,6 +71,10 @@ function isUnknownJsonRpcFieldError(error: unknown, field: string): boolean {
   )
 }
 
+function hasEntries(value: Record<string, unknown> | undefined): value is Record<string, unknown> {
+  return value !== undefined && Object.keys(value).length > 0
+}
+
 function workspaceCreatePayload(
   request: EccWorkspaceCreateRequest,
   options: { includeSdc: boolean } = { includeSdc: true },
@@ -78,7 +82,7 @@ function workspaceCreatePayload(
   return {
     directory: request.directory,
     filelist: request.filelist ?? '',
-    flowConfig: request.flowConfig ?? {},
+    ...(hasEntries(request.flowConfig) ? { flowConfig: request.flowConfig } : {}),
     originDef: request.originDef ?? '',
     originVerilog: request.originVerilog ?? '',
     parameters: request.parameters ?? {},

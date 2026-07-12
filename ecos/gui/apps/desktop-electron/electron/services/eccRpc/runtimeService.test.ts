@@ -125,6 +125,27 @@ describe('EccRpcRuntimeService', () => {
     })
   })
 
+  it('omits empty flowConfig when creating a workspace', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+
+    await service.createWorkspace({
+      directory: '/work/demo',
+      flowConfig: {},
+      pdkJson: '/pdks/ics55/pdk.json',
+    })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      params: expect.not.objectContaining({
+        flowConfig: expect.anything(),
+      }),
+    })
+  })
+
   it('retries workspace creation without sdc when an older runtime rejects the field', async () => {
     const { client, service } = createService()
     client.responses.push(
