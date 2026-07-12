@@ -1,30 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import source from './DrawingArea.vue?raw'
 
-describe('DrawingArea native layout viewer bridge', () => {
-  it('wires the current view JSON package root to the desktop native viewer API only', () => {
-    expect(source).toContain('showNativeLayoutViewer')
-    expect(source).toContain('onOpenNativeLayoutViewer')
-    expect(source).toContain('desktopApi.layoutViewer.open')
-    expect(source).toContain(':show-native-layout-viewer="showNativeLayoutViewer"')
-    expect(source).toContain('@openNativeLayoutViewer="onOpenNativeLayoutViewer"')
+describe('DrawingArea legacy layout viewer bridge', () => {
+  it('does not expose the legacy layout viewer launch path from the renderer', () => {
+    expect(source).not.toContain('showNativeLayoutViewer')
+    expect(source).not.toContain('onOpenNativeLayoutViewer')
+    expect(source).not.toContain('desktopApi.layoutViewer.open')
+    expect(source).not.toContain(':show-native-layout-viewer')
+    expect(source).not.toContain('@openNativeLayoutViewer')
     expect(source).not.toContain('loadStepViewJsonOverview')
     expect(source).not.toContain('ViewJsonOverviewRenderer')
     expect(source).not.toContain('@previewModeChange')
   })
 
-  it('shows a canvas transition while the native viewer package is prepared', () => {
-    expect(source).toContain('isPreparingNativeLayoutViewer')
-    expect(source).toContain(
-      "const NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE = 'Preparing Native Layout Viewer...'",
-    )
-    expect(source).toContain(
-      'loadingMessage.value = NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE',
-    )
-    expect(source).toContain('data-testid="native-layout-viewer-loading"')
-    expect(source).toContain('Preparing Native Layout Viewer')
-    expect(source).toMatch(
-      /finally \{[\s\S]*?nativeLayoutViewerBusy\.value = false[\s\S]*?resetLoadingState\(\)/,
-    )
+  it('does not show legacy layout viewer preparation state in the canvas', () => {
+    expect(source).not.toContain('isPreparingNativeLayoutViewer')
+    expect(source).not.toContain('NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE')
+    expect(source).not.toContain('native-layout-viewer-loading')
+    expect(source).not.toContain('Preparing Native Layout Viewer')
+    expect(source).not.toContain('nativeLayoutViewerBusy')
   })
 })

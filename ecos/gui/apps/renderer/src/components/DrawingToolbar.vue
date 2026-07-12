@@ -4,10 +4,6 @@ import type { ImagePreviewController } from '@/applications/image-preview'
 
 interface Props {
   preview?: ImagePreviewController | null
-  /** 是否显示「打开 Native Layout Viewer」工具 */
-  showNativeLayoutViewer?: boolean
-  /** Native viewer 拉起中 */
-  nativeLayoutViewerBusy?: boolean
   /** 是否显示「打开 Chip Viewer」工具 */
   showChipViewer?: boolean
   /** Chip Viewer 拉起中 */
@@ -18,15 +14,12 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   preview: null,
-  showNativeLayoutViewer: false,
-  nativeLayoutViewerBusy: false,
   showChipViewer: false,
   chipViewerBusy: false,
   chipViewerEditBusy: false,
 })
 
 const emit = defineEmits<{
-  openNativeLayoutViewer: []
   openChipViewer: []
   openChipViewerEdit: []
 }>()
@@ -91,25 +84,6 @@ onUnmounted(() => {
     class="flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) bg-(--bg-secondary) px-4"
   >
     <div class="flex items-center gap-1">
-      <button
-        v-if="showNativeLayoutViewer"
-        type="button"
-        :disabled="nativeLayoutViewerBusy"
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
-        :class="
-          nativeLayoutViewerBusy
-            ? 'text-(--text-secondary)'
-            : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
-        "
-        title="打开 Native Layout Viewer"
-        aria-label="打开 Native Layout Viewer"
-        @click="emit('openNativeLayoutViewer')"
-      >
-        <i
-          class="ri-window-line text-base"
-          :class="{ 'animate-pulse': nativeLayoutViewerBusy }"
-        ></i>
-      </button>
       <button
         v-if="showChipViewer"
         type="button"

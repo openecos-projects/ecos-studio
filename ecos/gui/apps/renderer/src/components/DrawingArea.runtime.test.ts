@@ -16,10 +16,10 @@ describe('DrawingArea runtime wiring', () => {
     expect(source).not.toContain('useLayoutState')
   })
 
-  it('uses view-json resources only to open Native Layout Viewer', () => {
-    expect(source).toContain('currentViewJsonPackageRoot')
-    expect(source).toContain('desktopApi.layoutViewer.open')
-    expect(source).toContain('viewJsonPackageRoot')
+  it('does not use view-json resources to launch the legacy layout viewer', () => {
+    expect(source).not.toContain('currentViewJsonPackageRoot')
+    expect(source).not.toContain('desktopApi.layoutViewer.open')
+    expect(source).not.toContain('viewJsonPackageRoot')
 
     expect(source).not.toContain('loadViewJsonOverview')
     expect(source).not.toContain('ViewJsonOverviewRenderer')
