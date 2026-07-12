@@ -9,6 +9,14 @@ impl RenderPlanner {
     pub fn visible_shape_ids(db: &ChipViewDb, layer_id: u16, viewport: Rect32) -> Vec<ShapeId> {
         db.query_layer_intersect(layer_id, viewport)
     }
+
+    pub fn visible_shape_ids_for_layers(
+        db: &ChipViewDb,
+        layer_ids: &[u16],
+        viewport: Rect32,
+    ) -> Vec<ShapeId> {
+        db.query_layers_intersect(layer_ids, viewport)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

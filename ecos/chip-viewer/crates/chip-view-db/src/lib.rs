@@ -3,9 +3,10 @@ use std::mem::size_of;
 use std::path::Path;
 
 use anyhow::Result;
+use bytemuck::Pod;
 use chipgeom_format::{
-    GeometryDeltaRecord, GeometryViewTileRecord, OwnerRef, OwnerType, Point32, Rect32, ShapeId,
-    ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
+    GeometryDeltaRecord, GeometryViewTileRecord, LinePayload, OwnerRef, OwnerType, Point32,
+    PointPayload, Rect32, RectPayload, ShapeId, ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
 pub use chipgeom_reader::{GeometryManifest, GeometryMappedBytes};
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
@@ -67,6 +68,20 @@ pub struct LayerSummary {
     pub pitch_y: i32,
 }
 
+#[derive(Clone, Debug)]
+pub struct ShapeDetail {
+    pub shape: ShapeRecord,
+    pub owner: OwnerRef,
+    pub owner_name: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeGeometry {
+    Rect(Rect32),
+    Line(LinePayload),
+    Point(PointPayload),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct LayerShapeIndex {
     by_layer: BTreeMap<u16, Vec<usize>>,
@@ -87,6 +102,7 @@ pub struct ViewTileIndex {
 pub struct OwnerNameIndex {
     by_name: BTreeMap<String, Vec<ShapeId>>,
     name_by_owner: BTreeMap<(u8, u64), String>,
+    shapes_by_owner: BTreeMap<(u8, u64), Vec<ShapeId>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +185,21 @@ impl LayerShapeIndex {
             .into_iter()
             .map(|index| shapes[index].id)
             .collect()
+    }
+
+    pub fn query_layers_intersect(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_ids: &[u16],
+        bbox: Rect32,
+    ) -> Vec<ShapeId> {
+        let mut hits = Vec::new();
+        for layer_id in layer_ids {
+            let mut layer_hits = self.query_layer_intersect(shapes, *layer_id, bbox);
+            layer_hits.sort_unstable();
+            hits.extend(layer_hits);
+        }
+        hits
     }
 
     pub fn query_layer_intersect_indices(
@@ -341,6 +372,10 @@ impl OwnerNameIndex {
                 .or_default()
                 .push(shape.id);
         }
+        for shape_ids in shapes_by_owner.values_mut() {
+            shape_ids.sort_unstable();
+            shape_ids.dedup();
+        }
 
         let mut by_name = BTreeMap::<String, Vec<ShapeId>>::new();
         let mut name_by_owner = BTreeMap::<(u8, u64), String>::new();
@@ -360,11 +395,19 @@ impl OwnerNameIndex {
         Self {
             by_name,
             name_by_owner,
+            shapes_by_owner,
         }
     }
 
     pub fn query(&self, name: &str) -> Vec<ShapeId> {
         self.by_name.get(name).cloned().unwrap_or_default()
+    }
+
+    pub fn query_owner(&self, owner_type: u8, owner_id: u64) -> Vec<ShapeId> {
+        self.shapes_by_owner
+            .get(&(owner_type, owner_id))
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {
@@ -383,7 +426,16 @@ impl OwnerNameIndex {
             .values()
             .map(|name| size_of::<(u8, u64)>() + size_of::<String>() + name.capacity())
             .sum::<usize>();
-        size_of::<Self>() + by_name_bytes + name_by_owner_bytes
+        let shapes_by_owner_bytes = self
+            .shapes_by_owner
+            .values()
+            .map(|shape_ids| {
+                size_of::<(u8, u64)>()
+                    + size_of::<Vec<ShapeId>>()
+                    + shape_ids.capacity() * size_of::<ShapeId>()
+            })
+            .sum::<usize>();
+        size_of::<Self>() + by_name_bytes + name_by_owner_bytes + shapes_by_owner_bytes
     }
 
     pub fn name_for_owner(&self, owner_type: u8, owner_id: u64) -> Option<&str> {
@@ -509,6 +561,53 @@ fn point_bbox(point: Point32) -> Rect32 {
     }
 }
 
+fn shape_detail_from_parts(
+    shape_index: &ShapeIdIndex,
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    name_index: &OwnerNameIndex,
+    shape_id: ShapeId,
+) -> Option<ShapeDetail> {
+    let shape = *shape_index.find(shapes, shape_id)?;
+    let owner = *owners.get(shape.owner_index as usize)?;
+    let owner_name = name_index
+        .name_for_owner(owner.owner_type, owner.owner_id)
+        .map(str::to_string);
+    Some(ShapeDetail {
+        shape,
+        owner,
+        owner_name,
+    })
+}
+
+fn shape_geometry_from_payload(shape: &ShapeRecord, payload_bytes: &[u8]) -> ShapeGeometry {
+    if shape.kind == ShapeKind::Line as u8 {
+        decode_shape_payload::<LinePayload>(shape, payload_bytes)
+            .map(ShapeGeometry::Line)
+            .unwrap_or(ShapeGeometry::Rect(shape.bbox))
+    } else if shape.kind == ShapeKind::Point as u8 {
+        decode_shape_payload::<PointPayload>(shape, payload_bytes)
+            .map(ShapeGeometry::Point)
+            .unwrap_or(ShapeGeometry::Rect(shape.bbox))
+    } else if shape.kind == ShapeKind::Rect as u8 {
+        decode_shape_payload::<RectPayload>(shape, payload_bytes)
+            .map(|payload| ShapeGeometry::Rect(payload.rect))
+            .unwrap_or(ShapeGeometry::Rect(shape.bbox))
+    } else {
+        ShapeGeometry::Rect(shape.bbox)
+    }
+}
+
+fn decode_shape_payload<T: Pod>(shape: &ShapeRecord, payload_bytes: &[u8]) -> Option<T> {
+    let begin = shape.payload_offset as usize;
+    let size = shape.payload_size as usize;
+    let end = begin.checked_add(size)?;
+    if size != size_of::<T>() || end > payload_bytes.len() {
+        return None;
+    }
+    Some(bytemuck::pod_read_unaligned(payload_bytes.get(begin..end)?))
+}
+
 #[cfg(test)]
 fn filter_shape_ids_by_owner_types(
     shape_ids: Vec<ShapeId>,
@@ -578,6 +677,20 @@ impl ChipViewDb {
         self.snapshot.owners().get(shape.owner_index as usize)
     }
 
+    pub fn shape_geometry(&self, shape: &ShapeRecord) -> ShapeGeometry {
+        shape_geometry_from_payload(shape, self.snapshot.payload_bytes())
+    }
+
+    pub fn shape_detail(&self, shape_id: ShapeId) -> Option<ShapeDetail> {
+        shape_detail_from_parts(
+            &self.shape_index,
+            self.snapshot.shapes(),
+            self.snapshot.owners(),
+            &self.name_index,
+            shape_id,
+        )
+    }
+
     pub fn layer_summaries(&self) -> Vec<LayerSummary> {
         layer_summaries_from_shapes_and_metadata(
             self.snapshot.shapes(),
@@ -588,6 +701,11 @@ impl ChipViewDb {
     pub fn query_layer_intersect(&self, layer_id: u16, bbox: Rect32) -> Vec<ShapeId> {
         self.layer_index
             .query_layer_intersect(self.snapshot.shapes(), layer_id, bbox)
+    }
+
+    pub fn query_layers_intersect(&self, layer_ids: &[u16], bbox: Rect32) -> Vec<ShapeId> {
+        self.layer_index
+            .query_layers_intersect(self.snapshot.shapes(), layer_ids, bbox)
     }
 
     pub fn query_layer_intersect_records(&self, layer_id: u16, bbox: Rect32) -> Vec<&ShapeRecord> {
@@ -641,6 +759,10 @@ impl ChipViewDb {
 
     pub fn query_owner_name(&self, name: &str) -> Vec<ShapeId> {
         self.name_index.query(name)
+    }
+
+    pub fn query_owner_shapes(&self, owner_type: OwnerType, owner_id: u64) -> Vec<ShapeId> {
+        self.name_index.query_owner(owner_type as u8, owner_id)
     }
 
     pub fn query_owner_name_for_owner_types(
@@ -891,6 +1013,75 @@ mod tests {
     }
 
     #[test]
+    fn query_layers_intersect_returns_only_requested_layers() {
+        let shapes = [
+            shape(1, 1),
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 100,
+                    ly: 100,
+                    hx: 120,
+                    hy: 120,
+                },
+                ..shape(2, 1)
+            },
+            shape(3, 2),
+            shape(4, 3),
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        let hits = index.query_layers_intersect(
+            &shapes,
+            &[3, 1],
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 20,
+                hy: 20,
+            },
+        );
+
+        assert_eq!(hits, vec![4, 1]);
+    }
+
+    #[test]
+    fn query_layers_intersect_keeps_layer_then_shape_id_stable_order() {
+        let shapes = [
+            ShapeRecord {
+                layer_id: 2,
+                ..shape(30, 2)
+            },
+            ShapeRecord {
+                layer_id: 1,
+                ..shape(20, 1)
+            },
+            ShapeRecord {
+                layer_id: 2,
+                ..shape(10, 2)
+            },
+            ShapeRecord {
+                layer_id: 1,
+                ..shape(40, 1)
+            },
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        assert_eq!(
+            index.query_layers_intersect(
+                &shapes,
+                &[2, 1],
+                Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 20,
+                    hy: 20,
+                },
+            ),
+            vec![10, 30, 20, 40]
+        );
+    }
+
+    #[test]
     fn layer_shape_index_picks_top_non_rect_shape_by_bbox() {
         let shapes = [
             ShapeRecord {
@@ -952,6 +1143,90 @@ mod tests {
         assert_eq!(index.find(&shapes, 10).map(|shape| shape.id), Some(10));
         assert_eq!(index.find(&shapes, 25).map(|shape| shape.layer_id), Some(8));
         assert!(index.find(&shapes, 999).is_none());
+    }
+
+    #[test]
+    fn shape_geometry_decodes_line_payload_when_size_matches() {
+        let payload = LinePayload {
+            begin: Point32 { x: 1, y: 2 },
+            end: Point32 { x: 30, y: 40 },
+            width: 5,
+            flags: 7,
+        };
+        let mut payload_bytes = vec![0xaa, 0xbb, 0xcc, 0xdd];
+        payload_bytes.extend_from_slice(bytemuck::bytes_of(&payload));
+        let shape = ShapeRecord {
+            kind: ShapeKind::Line as u8,
+            payload_offset: 4,
+            payload_size: size_of::<LinePayload>() as u32,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1,
+                hy: 1,
+            },
+            ..shape(1, 1)
+        };
+
+        assert_eq!(
+            shape_geometry_from_payload(&shape, &payload_bytes),
+            ShapeGeometry::Line(payload)
+        );
+    }
+
+    #[test]
+    fn shape_geometry_decodes_point_payload_when_size_matches() {
+        let payload = PointPayload {
+            point: Point32 { x: 11, y: 22 },
+            symbol_id: 3,
+            flags: 4,
+        };
+        let mut payload_bytes = vec![0xaa, 0xbb];
+        payload_bytes.extend_from_slice(bytemuck::bytes_of(&payload));
+        let shape = ShapeRecord {
+            kind: ShapeKind::Point as u8,
+            payload_offset: 2,
+            payload_size: size_of::<PointPayload>() as u32,
+            ..shape(2, 1)
+        };
+
+        assert_eq!(
+            shape_geometry_from_payload(&shape, &payload_bytes),
+            ShapeGeometry::Point(payload)
+        );
+    }
+
+    #[test]
+    fn shape_geometry_falls_back_to_bbox_for_missing_or_bad_payload() {
+        let bbox = Rect32 {
+            lx: 10,
+            ly: 20,
+            hx: 30,
+            hy: 40,
+        };
+        let bad_size = ShapeRecord {
+            kind: ShapeKind::Line as u8,
+            payload_offset: 0,
+            payload_size: 3,
+            bbox,
+            ..shape(3, 1)
+        };
+        let bad_offset = ShapeRecord {
+            kind: ShapeKind::Point as u8,
+            payload_offset: 100,
+            payload_size: size_of::<PointPayload>() as u32,
+            bbox,
+            ..shape(4, 1)
+        };
+
+        assert_eq!(
+            shape_geometry_from_payload(&bad_size, &[1, 2, 3]),
+            ShapeGeometry::Rect(bbox)
+        );
+        assert_eq!(
+            shape_geometry_from_payload(&bad_offset, &[1, 2, 3]),
+            ShapeGeometry::Rect(bbox)
+        );
     }
 
     #[test]
@@ -1087,6 +1362,88 @@ mod tests {
     }
 
     #[test]
+    fn owner_shape_index_returns_alive_shape_ids_for_owner_type_and_id() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(9, 1)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(3, 1)
+            },
+        ];
+        let index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "clk".to_string()),
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+            ],
+        );
+
+        assert_eq!(
+            index.query_owner(OwnerType::NetWireSegment as u8, 10),
+            vec![2, 9]
+        );
+        assert_eq!(
+            index.query_owner(OwnerType::InstanceBBox as u8, 20),
+            vec![3]
+        );
+        assert!(index
+            .query_owner(OwnerType::NetWireSegment as u8, 99)
+            .is_empty());
+    }
+
+    #[test]
+    fn owner_shape_index_ignores_deleted_shapes_and_bad_owner_index() {
+        let owners = [OwnerRef {
+            owner_type: OwnerType::Region as u8,
+            owner_id: 7,
+            ..OwnerRef::default()
+        }];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 0)
+            },
+            ShapeRecord {
+                owner_index: 0,
+                state: ShapeState::Deleted as u8,
+                ..shape(2, 0)
+            },
+            ShapeRecord {
+                owner_index: 99,
+                ..shape(3, 0)
+            },
+        ];
+        let index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [(OwnerType::Region as u8, 7, "region0".to_string())],
+        );
+
+        assert_eq!(index.query_owner(OwnerType::Region as u8, 7), vec![1]);
+        assert_eq!(index.query("region0"), vec![1]);
+    }
+
+    #[test]
     fn owner_name_index_returns_name_for_owner() {
         let index = OwnerNameIndex::from_shapes_and_names(
             &[],
@@ -1102,6 +1459,38 @@ mod tests {
             index.name_for_owner(OwnerType::InstanceBBox as u8, 21),
             None
         );
+    }
+
+    #[test]
+    fn shape_detail_includes_shape_owner_owner_name_and_owner_path() {
+        let owners = [OwnerRef {
+            owner_type: OwnerType::Region as u8,
+            owner_id: 7,
+            path0: 3,
+            path1: 4,
+            ..OwnerRef::default()
+        }];
+        let shapes = [ShapeRecord {
+            owner_index: 0,
+            ..shape(42, 0)
+        }];
+        let shape_index = ShapeIdIndex::from_shapes(&shapes);
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [(OwnerType::Region as u8, 7, "region0".to_string())],
+        );
+
+        let detail = shape_detail_from_parts(&shape_index, &shapes, &owners, &name_index, 42)
+            .expect("shape detail");
+
+        assert_eq!(detail.shape.id, 42);
+        assert_eq!(detail.owner.owner_type, OwnerType::Region as u8);
+        assert_eq!(detail.owner.owner_id, 7);
+        assert_eq!(detail.owner.path0, 3);
+        assert_eq!(detail.owner.path1, 4);
+        assert_eq!(detail.owner_name.as_deref(), Some("region0"));
+        assert!(shape_detail_from_parts(&shape_index, &shapes, &owners, &name_index, 99).is_none());
     }
 
     #[test]

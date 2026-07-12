@@ -209,6 +209,29 @@ pub struct OwnerRef {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Pod, Zeroable)]
+pub struct PointPayload {
+    pub point: Point32,
+    pub symbol_id: u32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Pod, Zeroable)]
+pub struct LinePayload {
+    pub begin: Point32,
+    pub end: Point32,
+    pub width: i32,
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Pod, Zeroable)]
+pub struct RectPayload {
+    pub rect: Rect32,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct GeometryNameRecord {
     pub owner_type: u8,

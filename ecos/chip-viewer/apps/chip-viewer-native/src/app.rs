@@ -6,10 +6,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chip_display::LayerStyle;
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
-use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, SnapshotStats};
+use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, ShapeGeometry, SnapshotStats};
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
-    OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
+    OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
 };
 use eframe::egui;
 
@@ -540,13 +540,18 @@ impl LoadedViewer {
                 if !is_renderable_shape(shape) {
                     continue;
                 }
-                let screen = shape_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
-                if !screen.intersects(canvas) {
-                    continue;
-                }
                 let color = color32(style.rgba);
-                painter.rect_filled(screen, 0.0, color);
-                drawn += 1;
+                if paint_shape_geometry(
+                    &painter,
+                    self.db.shape_geometry(shape),
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
+                    color,
+                ) {
+                    drawn += 1;
+                }
             }
         }
 
@@ -924,6 +929,110 @@ fn color32(rgba: [u8; 4]) -> egui::Color32 {
     egui::Color32::from_rgba_premultiplied(rgba[0], rgba[1], rgba[2], rgba[3])
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ScreenShapePrimitive {
+    Rect(egui::Rect),
+    Line {
+        begin: egui::Pos2,
+        end: egui::Pos2,
+        width: f32,
+    },
+    Point {
+        center: egui::Pos2,
+        radius: f32,
+    },
+}
+
+fn paint_shape_geometry(
+    painter: &egui::Painter,
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    color: egui::Color32,
+) -> bool {
+    let primitive = shape_screen_primitive(geometry, world, canvas, zoom, pan);
+    if !screen_primitive_bounds(primitive).intersects(canvas) {
+        return false;
+    }
+
+    match primitive {
+        ScreenShapePrimitive::Rect(rect) => {
+            painter.rect_filled(rect, 0.0, color);
+        }
+        ScreenShapePrimitive::Line { begin, end, width } => {
+            painter.line_segment([begin, end], egui::Stroke::new(width, color));
+        }
+        ScreenShapePrimitive::Point { center, radius } => {
+            painter.circle_filled(center, radius, color);
+        }
+    }
+    true
+}
+
+fn shape_screen_primitive(
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> ScreenShapePrimitive {
+    match geometry {
+        ShapeGeometry::Rect(rect) => {
+            ScreenShapePrimitive::Rect(shape_screen_rect(rect, world, canvas, zoom, pan))
+        }
+        ShapeGeometry::Line(line) => {
+            let scale = world_to_screen_scale(world, canvas, zoom);
+            ScreenShapePrimitive::Line {
+                begin: world_to_screen_point(line.begin, world, canvas, zoom, pan),
+                end: world_to_screen_point(line.end, world, canvas, zoom, pan),
+                width: ((line.width.abs().max(1)) as f32 * scale).max(MIN_SHAPE_SCREEN_SIZE),
+            }
+        }
+        ShapeGeometry::Point(point) => ScreenShapePrimitive::Point {
+            center: world_to_screen_point(point.point, world, canvas, zoom, pan),
+            radius: MIN_SHAPE_SCREEN_SIZE,
+        },
+    }
+}
+
+fn screen_primitive_bounds(primitive: ScreenShapePrimitive) -> egui::Rect {
+    match primitive {
+        ScreenShapePrimitive::Rect(rect) => rect,
+        ScreenShapePrimitive::Line { begin, end, width } => {
+            egui::Rect::from_two_pos(begin, end).expand(width * 0.5)
+        }
+        ScreenShapePrimitive::Point { center, radius } => {
+            egui::Rect::from_center_size(center, egui::vec2(radius * 2.0, radius * 2.0))
+        }
+    }
+}
+
+fn world_to_screen_scale(world: Rect32, canvas: egui::Rect, zoom: f32) -> f32 {
+    let world_width = (world.hx - world.lx).max(1) as f32;
+    let world_height = (world.hy - world.ly).max(1) as f32;
+    let base_scale = (canvas.width() / world_width).min(canvas.height() / world_height);
+    base_scale * zoom.max(0.001)
+}
+
+fn world_to_screen_point(
+    point: Point32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> egui::Pos2 {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    let world_cx = (world.lx + world.hx) as f32 * 0.5;
+    let world_cy = (world.ly + world.hy) as f32 * 0.5;
+    let center = canvas.center() + pan;
+    egui::pos2(
+        center.x + (point.x as f32 - world_cx) * scale,
+        center.y - (point.y as f32 - world_cy) * scale,
+    )
+}
+
 fn world_to_screen_rect(
     rect: Rect32,
     world: Rect32,
@@ -931,21 +1040,28 @@ fn world_to_screen_rect(
     zoom: f32,
     pan: egui::Vec2,
 ) -> egui::Rect {
-    let world_width = (world.hx - world.lx).max(1) as f32;
-    let world_height = (world.hy - world.ly).max(1) as f32;
-    let base_scale = (canvas.width() / world_width).min(canvas.height() / world_height);
-    let scale = base_scale * zoom.max(0.001);
-    let world_cx = (world.lx + world.hx) as f32 * 0.5;
-    let world_cy = (world.ly + world.hy) as f32 * 0.5;
-    let center = canvas.center() + pan;
-    let to_screen = |x: i32, y: i32| -> egui::Pos2 {
-        egui::pos2(
-            center.x + (x as f32 - world_cx) * scale,
-            center.y - (y as f32 - world_cy) * scale,
-        )
-    };
-
-    egui::Rect::from_min_max(to_screen(rect.lx, rect.hy), to_screen(rect.hx, rect.ly))
+    egui::Rect::from_min_max(
+        world_to_screen_point(
+            Point32 {
+                x: rect.lx,
+                y: rect.hy,
+            },
+            world,
+            canvas,
+            zoom,
+            pan,
+        ),
+        world_to_screen_point(
+            Point32 {
+                x: rect.hx,
+                y: rect.ly,
+            },
+            world,
+            canvas,
+            zoom,
+            pan,
+        ),
+    )
 }
 
 fn shape_screen_rect(
@@ -1638,6 +1754,77 @@ mod tests {
         assert_eq!(screen.right(), 60.0);
         assert_eq!(screen.top(), 60.0);
         assert_eq!(screen.bottom(), 80.0);
+    }
+
+    #[test]
+    fn shape_screen_primitive_for_line_uses_payload_endpoints_not_bbox() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0));
+        let line = chipgeom_format::LinePayload {
+            begin: Point32 { x: 10, y: 20 },
+            end: Point32 { x: 80, y: 90 },
+            width: 3,
+            flags: 0,
+        };
+
+        let primitive = shape_screen_primitive(
+            ShapeGeometry::Line(line),
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        );
+
+        let ScreenShapePrimitive::Line { begin, end, width } = primitive else {
+            panic!("expected line primitive");
+        };
+        assert_eq!(
+            begin,
+            world_to_screen_point(line.begin, world, canvas, 1.0, egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            end,
+            world_to_screen_point(line.end, world, canvas, 1.0, egui::Vec2::ZERO)
+        );
+        assert_eq!(width, 6.0);
+    }
+
+    #[test]
+    fn shape_screen_primitive_for_point_uses_payload_point() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0));
+        let point = chipgeom_format::PointPayload {
+            point: Point32 { x: 25, y: 75 },
+            symbol_id: 0,
+            flags: 0,
+        };
+
+        let primitive = shape_screen_primitive(
+            ShapeGeometry::Point(point),
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        );
+
+        let ScreenShapePrimitive::Point { center, radius } = primitive else {
+            panic!("expected point primitive");
+        };
+        assert_eq!(
+            center,
+            world_to_screen_point(point.point, world, canvas, 1.0, egui::Vec2::ZERO)
+        );
+        assert_eq!(radius, MIN_SHAPE_SCREEN_SIZE);
     }
 
     #[test]

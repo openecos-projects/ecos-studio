@@ -686,6 +686,7 @@ name = "chip-view-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "chipgeom-format",
  "chipgeom-reader",
  "rstar",
