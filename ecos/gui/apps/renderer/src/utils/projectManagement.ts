@@ -2053,7 +2053,7 @@ function workspaceArtifactDesignName(
 ): string {
   return (
     normalizeArtifactDesignName(
-      parameterPatchValues(workspace.parameter_patch.design).to,
+      parameterPatchValues((workspace.parameter_patch ?? {}).design).to,
     ) ||
     (workspace.branch_from || workspace.source_workspace_id
       ? normalizeArtifactDesignName(workspace.name)

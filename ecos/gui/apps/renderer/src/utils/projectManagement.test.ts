@@ -12,6 +12,7 @@ import {
   nextWorkspaceId,
   registerWorkspaceInManifest,
   serializeProjectManifest,
+  type ProjectWorkspaceManifest,
 } from './projectManagement'
 import type { Project } from '@/types'
 
@@ -1105,6 +1106,46 @@ describe('project management model', () => {
       '/projects/gcd/ws_0005/place_dreamplace/output/project_gcd_ws_0004_place.v.gz',
     )
     expect(draft.originSdc).toBe('/projects/gcd/ws_0005/origin/project_gcd_ws_0004.sdc')
+  })
+
+  it('renders imported workspace manifests without parameter patches', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'project_gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.base_design = {
+      pdk: 'ics55',
+      top_module: 'gcd',
+      parameters: {
+        design: 'gcd',
+      },
+    }
+    manifest.workspaces.push({
+      workspace_id: 'ws_0006',
+      name: 'legacy_branch',
+      workspace_path: '/projects/gcd/ws_0006',
+      source_workspace_id: 'ws_0004',
+      branch_from: {
+        source_workspace_id: 'ws_0004',
+        source_step: 'Floor',
+        source_output_type: 'def',
+      },
+      start_step: 'Fanout',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:30:00.000Z',
+      metrics_summary: {},
+      step_metrics: {},
+    } as ProjectWorkspaceManifest)
+
+    const project = buildProjectManagementProject(recentProject, manifest)
+
+    expect(project.workspaces[0]?.artifactDesignName).toBe('legacy_branch')
+    expect(createWorkspaceBranchDraft(project, 'ws_0006', 'Place').sourceOutputPath).toBe(
+      '/projects/gcd/ws_0006/place_dreamplace/output/legacy_branch_place.def.gz',
+    )
   })
 
   it('registers imported project-root workspaces by workspace folder name', () => {
