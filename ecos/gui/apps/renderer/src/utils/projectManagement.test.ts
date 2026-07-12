@@ -1008,6 +1008,105 @@ describe('project management model', () => {
     expect(serializeProjectManifest(updated)).not.toContain('"iterations"')
   })
 
+  it('uses the source workspace design name when creating a branch draft', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'project_gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.base_design = {
+      pdk: 'ics55',
+      top_module: 'gcd',
+      parameters: {
+        design: 'gcd',
+      },
+    }
+    manifest.workspaces.push({
+      workspace_id: 'ws_0004',
+      name: 'project_gcd_ws_0004',
+      workspace_path: '/projects/gcd/ws_0004',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:30:00.000Z',
+      parameter_patch: {
+        design: {
+          from: 'gcd',
+          to: 'project_gcd_ws_0004',
+        },
+      },
+      metrics_summary: {},
+      step_metrics: {},
+    })
+    const project = buildProjectManagementProject(recentProject, manifest)
+
+    const draft = createWorkspaceBranchDraft(project, 'ws_0004', 'Floor')
+
+    expect(draft.sourceOutputPath).toBe(
+      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.def.gz',
+    )
+    expect(draft.originDef).toBe(
+      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.def.gz',
+    )
+    expect(draft.originVerilog).toBe(
+      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.v.gz',
+    )
+    expect(draft.originSdc).toBe('/projects/gcd/ws_0004/origin/project_gcd_ws_0004.sdc')
+  })
+
+  it('falls back to the source workspace name for branch drafts without a design patch', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'project_gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.base_design = {
+      pdk: 'ics55',
+      top_module: 'gcd',
+      parameters: {
+        design: 'gcd',
+      },
+    }
+    manifest.workspaces.push({
+      workspace_id: 'ws_0005',
+      name: 'project_gcd_ws_0004',
+      workspace_path: '/projects/gcd/ws_0005',
+      source_workspace_id: 'ws_0004',
+      branch_from: {
+        source_workspace_id: 'ws_0004',
+        source_step: 'Floor',
+        source_output_type: 'def',
+      },
+      start_step: 'Fanout',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:30:00.000Z',
+      parameter_patch: {
+        start_step: {
+          from: '',
+          to: 'Fanout',
+        },
+      },
+      metrics_summary: {},
+      step_metrics: {},
+    })
+    const project = buildProjectManagementProject(recentProject, manifest)
+
+    const draft = createWorkspaceBranchDraft(project, 'ws_0005', 'Place')
+
+    expect(draft.sourceOutputPath).toBe(
+      '/projects/gcd/ws_0005/place_dreamplace/output/project_gcd_ws_0004_place.def.gz',
+    )
+    expect(draft.originVerilog).toBe(
+      '/projects/gcd/ws_0005/place_dreamplace/output/project_gcd_ws_0004_place.v.gz',
+    )
+    expect(draft.originSdc).toBe('/projects/gcd/ws_0005/origin/project_gcd_ws_0004.sdc')
+  })
+
   it('registers imported project-root workspaces by workspace folder name', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
