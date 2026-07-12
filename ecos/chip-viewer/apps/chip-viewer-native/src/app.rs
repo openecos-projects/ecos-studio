@@ -279,6 +279,9 @@ impl LoadedViewer {
             ));
         }
         egui::CollapsingHeader::new("Diagnostics").show(ui, |ui| {
+            for line in design_metadata_lines(self.db.snapshot().manifest()) {
+                ui.label(line);
+            }
             for line in diagnostics_lines(
                 &self.db.memory_stats(),
                 &self.db.delta_stats(),
@@ -1279,6 +1282,23 @@ fn diagnostics_lines(
     lines
 }
 
+fn design_metadata_lines(manifest: &chip_view_db::GeometryManifest) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(name) = manifest.design_name.as_deref() {
+        lines.push(format!("design: {name}"));
+    }
+    if let Some(version) = manifest.design_version.as_deref() {
+        lines.push(format!("design version: {version}"));
+    }
+    if let Some(dbu_per_micron) = manifest.dbu_per_micron {
+        lines.push(format!("dbu per micron: {dbu_per_micron}"));
+    }
+    if let Some(manufacture_grid) = manifest.manufacture_grid {
+        lines.push(format!("manufacture grid: {manufacture_grid}"));
+    }
+    lines
+}
+
 fn cache_stats_line(label: &str, stats: RenderCacheStats) -> String {
     format!(
         "{label}: {} entries, {} hits, {} misses",
@@ -2070,6 +2090,28 @@ mod tests {
                 "latest delta: none",
             ]
         );
+    }
+
+    #[test]
+    fn design_metadata_lines_report_manifest_context_when_available() {
+        let manifest = chip_view_db::GeometryManifest {
+            design_name: Some("uart_top".to_string()),
+            design_version: Some("5.8".to_string()),
+            dbu_per_micron: Some(2000),
+            manufacture_grid: Some(5),
+            ..chip_view_db::GeometryManifest::default()
+        };
+
+        assert_eq!(
+            design_metadata_lines(&manifest),
+            vec![
+                "design: uart_top",
+                "design version: 5.8",
+                "dbu per micron: 2000",
+                "manufacture grid: 5",
+            ]
+        );
+        assert!(design_metadata_lines(&chip_view_db::GeometryManifest::default()).is_empty());
     }
 
     #[test]

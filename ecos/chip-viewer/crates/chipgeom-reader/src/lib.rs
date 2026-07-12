@@ -23,6 +23,10 @@ pub enum GeometryReadError {
 pub struct GeometryManifest {
     pub path: PathBuf,
     pub schema_version: u32,
+    pub design_name: Option<String>,
+    pub design_version: Option<String>,
+    pub dbu_per_micron: Option<u32>,
+    pub manufacture_grid: Option<i32>,
     pub shape_count: u64,
     pub owner_count: u64,
     pub payload_size: u64,
@@ -293,10 +297,33 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
             .ok_or_else(|| GeometryReadError::MissingManifestKey(key).into())
     };
     let parse_u64 = |key: &'static str| -> Result<u64> { Ok(required(key)?.parse()?) };
+    let optional_string = |key: &'static str| -> Option<String> {
+        values
+            .get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    let optional_u32 = |key: &'static str| -> Result<Option<u32>> {
+        values
+            .get(key)
+            .map(|value| value.parse().with_context(|| format!("invalid {key}")))
+            .transpose()
+    };
+    let optional_i32 = |key: &'static str| -> Result<Option<i32>> {
+        values
+            .get(key)
+            .map(|value| value.parse().with_context(|| format!("invalid {key}")))
+            .transpose()
+    };
 
     Ok(GeometryManifest {
         path: path.to_path_buf(),
         schema_version: required("schema_version")?.parse()?,
+        design_name: optional_string("design_name"),
+        design_version: optional_string("design_version"),
+        dbu_per_micron: optional_u32("dbu_per_micron")?,
+        manufacture_grid: optional_i32("manufacture_grid")?,
         shape_count: parse_u64("shape_count")?,
         owner_count: parse_u64("owner_count")?,
         payload_size: parse_u64("payload_size")?,
@@ -642,6 +669,91 @@ mod tests {
         assert_eq!(snapshot.layer_metadata()[0].width, 100);
         assert_eq!(snapshot.layer_metadata()[0].pitch_x, 200);
         assert_eq!(snapshot.layer_metadata()[0].pitch_y, 300);
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn opens_manifest_with_design_metadata_fields() {
+        let snapshot_dir = temp_snapshot_dir("design-metadata");
+        write_geometry_file(
+            &snapshot_dir.join("geometry.meta.bin"),
+            GeometryFileKind::Meta,
+            core::mem::size_of::<GeometryMetaRecord>() as u32,
+            bytemuck::bytes_of(&GeometryMetaRecord {
+                next_shape_id: 1,
+                ..GeometryMetaRecord::default()
+            }),
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.shapes.bin"),
+            GeometryFileKind::Shapes,
+            core::mem::size_of::<ShapeRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.owners.bin"),
+            GeometryFileKind::Owners,
+            core::mem::size_of::<OwnerRef>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.payload.bin"),
+            GeometryFileKind::Payload,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.names.bin"),
+            GeometryFileKind::Names,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.name_index.bin"),
+            GeometryFileKind::NameIndex,
+            core::mem::size_of::<GeometryNameRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.sidmap.bin"),
+            GeometryFileKind::SidMap,
+            core::mem::size_of::<GeometrySidMapRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.view.bin"),
+            GeometryFileKind::View,
+            core::mem::size_of::<GeometryViewTileRecord>() as u32,
+            &[],
+        );
+        std::fs::write(
+            snapshot_dir.join("geometry.manifest"),
+            "schema_version=1\n\
+             design_name=uart_top\n\
+             design_version=5.8\n\
+             dbu_per_micron=2000\n\
+             manufacture_grid=5\n\
+             shape_count=0\n\
+             owner_count=0\n\
+             payload_size=0\n\
+             meta=geometry.meta.bin\n\
+             shapes=geometry.shapes.bin\n\
+             owners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\n\
+             names=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\n\
+             sidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n",
+        )
+        .unwrap();
+
+        let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
+
+        assert_eq!(snapshot.manifest().design_name.as_deref(), Some("uart_top"));
+        assert_eq!(snapshot.manifest().design_version.as_deref(), Some("5.8"));
+        assert_eq!(snapshot.manifest().dbu_per_micron, Some(2000));
+        assert_eq!(snapshot.manifest().manufacture_grid, Some(5));
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }

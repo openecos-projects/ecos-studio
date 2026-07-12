@@ -76,6 +76,18 @@ fn main() -> Result<()> {
 
     println!("manifest={}", args.manifest.display());
     println!("schema_version={}", db.snapshot().manifest().schema_version);
+    if let Some(name) = db.snapshot().manifest().design_name.as_deref() {
+        println!("design.name={name}");
+    }
+    if let Some(version) = db.snapshot().manifest().design_version.as_deref() {
+        println!("design.version={version}");
+    }
+    if let Some(dbu_per_micron) = db.snapshot().manifest().dbu_per_micron {
+        println!("design.dbu_per_micron={dbu_per_micron}");
+    }
+    if let Some(manufacture_grid) = db.snapshot().manifest().manufacture_grid {
+        println!("design.manufacture_grid={manufacture_grid}");
+    }
     println!("shape_count={}", stats.shape_count);
     println!("owner_count={}", stats.owner_count);
     println!("name_count={}", stats.name_count);
@@ -406,6 +418,15 @@ fn delta_stats_json(stats: &DeltaStats) -> Value {
     })
 }
 
+fn design_metadata_json(manifest: &chip_view_db::GeometryManifest) -> Value {
+    json!({
+        "name": manifest.design_name.as_deref(),
+        "version": manifest.design_version.as_deref(),
+        "dbu_per_micron": manifest.dbu_per_micron,
+        "manufacture_grid": manifest.manufacture_grid,
+    })
+}
+
 fn bbox_json(bbox: Rect32) -> Value {
     json!({
         "lx": bbox.lx,
@@ -489,6 +510,7 @@ fn print_json(
     let value = json!({
         "manifest": args.manifest,
         "schema_version": db.snapshot().manifest().schema_version,
+        "design": design_metadata_json(db.snapshot().manifest()),
         "shape_count": stats.shape_count,
         "owner_count": stats.owner_count,
         "name_count": stats.name_count,
@@ -649,6 +671,24 @@ mod tests {
         assert_eq!(value["latest"]["shape_id"], 99);
         assert_eq!(value["latest"]["old_version"], 3);
         assert_eq!(value["latest"]["new_version"], 4);
+    }
+
+    #[test]
+    fn design_metadata_json_reports_optional_manifest_fields() {
+        let manifest = chip_view_db::GeometryManifest {
+            design_name: Some("uart_top".to_string()),
+            design_version: Some("5.8".to_string()),
+            dbu_per_micron: Some(2000),
+            manufacture_grid: Some(5),
+            ..chip_view_db::GeometryManifest::default()
+        };
+
+        let value = design_metadata_json(&manifest);
+
+        assert_eq!(value["name"], "uart_top");
+        assert_eq!(value["version"], "5.8");
+        assert_eq!(value["dbu_per_micron"], 2000);
+        assert_eq!(value["manufacture_grid"], 5);
     }
 
     #[test]

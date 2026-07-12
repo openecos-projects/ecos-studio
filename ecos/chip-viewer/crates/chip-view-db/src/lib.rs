@@ -7,7 +7,7 @@ use chipgeom_format::{
     GeometryDeltaRecord, GeometryViewTileRecord, OwnerRef, OwnerType, Point32, Rect32, ShapeId,
     ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
-pub use chipgeom_reader::GeometryMappedBytes;
+pub use chipgeom_reader::{GeometryManifest, GeometryMappedBytes};
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use rstar::{RTree, RTreeObject, AABB};
 
