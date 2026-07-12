@@ -61,8 +61,10 @@ describe('workspace desktop bridge', () => {
         top_module: 'top',
       },
       pdk: 'ics55',
+      pdk_json: '/pdks/ics55/pdk.json',
       pdk_root: '/pdks/ics55',
       rtl_list: ['/rtl/top.v'],
+      sdc: '/constraints/top.sdc',
       flow_config: {
         start_step: 'Synthesis',
         end_step: 'Harden',
@@ -87,6 +89,8 @@ describe('workspace desktop bridge', () => {
           end_step: 'Harden',
           steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
         },
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
       }),
     )
   })

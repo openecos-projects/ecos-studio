@@ -9,6 +9,7 @@ import {
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
 } from './runtimeService'
+import { EccJsonRpcError } from './jsonRpcClient'
 
 interface RpcCall {
   method: string
@@ -107,11 +108,86 @@ describe('EccRpcRuntimeService', () => {
       steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
     }
 
-    await service.createWorkspace({ directory: '/work/demo', flowConfig })
+    await service.createWorkspace({
+      directory: '/work/demo',
+      flowConfig,
+      pdkJson: '/pdks/ics55/pdk.json',
+      sdc: '/constraints/top.sdc',
+    })
 
     expect(client.calls.at(-1)).toEqual({
       method: 'workspace.create',
-      params: expect.objectContaining({ flowConfig }),
+      params: expect.objectContaining({
+        flowConfig,
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
+      }),
+    })
+  })
+
+  it('retries workspace creation without sdc when an older runtime rejects the field', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0a5', version: 1 },
+      new EccJsonRpcError(-32602, 'invalid_request', {
+        message: 'unknown field: sdc',
+      }),
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+
+    await expect(
+      service.createWorkspace({
+        directory: '/work/demo',
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
+      }),
+    ).resolves.toEqual({
+      directory: '/work/demo',
+      workspaceHandle: expect.stringMatching(/^workspace-/),
+    })
+
+    expect(client.calls.at(-2)).toEqual({
+      method: 'workspace.create',
+      params: expect.objectContaining({
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
+      }),
+    })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      params: expect.not.objectContaining({
+        sdc: expect.anything(),
+      }),
+    })
+  })
+
+  it('retries workspace creation without the default sdc field for older runtimes', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0a5', version: 1 },
+      new EccJsonRpcError(-32602, 'invalid_request', {
+        message: 'unknown field: sdc',
+      }),
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+
+    await service.createWorkspace({
+      directory: '/work/demo',
+      pdkJson: '/pdks/ics55/pdk.json',
+    })
+
+    expect(client.calls.at(-2)).toEqual({
+      method: 'workspace.create',
+      params: expect.objectContaining({
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '',
+      }),
+    })
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      params: expect.not.objectContaining({
+        sdc: expect.anything(),
+      }),
     })
   })
 
@@ -247,9 +323,34 @@ describe('EccRpcRuntimeService', () => {
         method: 'flow.run',
         rerun: true,
         type: 'operation.started',
+        workspaceDirectory: '/work/demo',
         workspaceHandle: workspace.workspaceHandle,
       }),
     )
+  })
+
+  it('cleans runtime activity tracking when an operation-started listener throws', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    service.onEvent((event) => {
+      if (event.type === 'operation.started' && event.method === 'flow.run') {
+        throw new Error('listener failed')
+      }
+    })
+
+    await expect(
+      service.runFlow({
+        rerun: false,
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).rejects.toThrow('listener failed')
+
+    expect(service.isWorkspaceRuntimeActive('/work/demo')).toBe(false)
   })
 
   it('serializes all RPC operations through a global queue', async () => {
@@ -331,6 +432,7 @@ describe('EccRpcRuntimeService', () => {
         interruptedOperationId: started?.operationId,
         reason: 'unexpected',
         type: 'runtime.exited',
+        workspaceDirectory: '/work/demo',
         workspaceHandle: workspace.workspaceHandle,
       }),
     )

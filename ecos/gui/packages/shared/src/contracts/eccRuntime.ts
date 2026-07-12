@@ -25,6 +25,7 @@ export interface EccWorkspaceCreateRequest {
   pdkJson?: unknown
   pdkRoot?: string
   rtlList?: string[]
+  sdc?: string
 }
 
 export interface EccWorkspaceOpenRequest {
@@ -166,6 +167,7 @@ export type EccRuntimeEvent =
       reason: 'unexpected' | 'shutdown'
       signal: string | null
       type: 'runtime.exited'
+      workspaceDirectory?: string
       workspaceHandle?: string
     }
   | {
@@ -174,6 +176,7 @@ export type EccRuntimeEvent =
       operationId: string
       rerun?: boolean
       type: 'operation.started'
+      workspaceDirectory?: string
       workspaceHandle?: string
     }
   | {
@@ -182,6 +185,7 @@ export type EccRuntimeEvent =
       operationId: string
       rerun?: boolean
       type: 'operation.completed'
+      workspaceDirectory?: string
       workspaceHandle?: string
     }
   | {
@@ -191,6 +195,7 @@ export type EccRuntimeEvent =
       operationId: string
       rerun?: boolean
       type: 'operation.failed'
+      workspaceDirectory?: string
       workspaceHandle?: string
     }
 

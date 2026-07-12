@@ -436,6 +436,14 @@ export function registerIpc(
       onDestroyed: () => void
     }
   >()
+  const workspaceHandleSubscriptions = new Map<
+    string,
+    {
+      sender: IpcMainInvokeEvent['sender']
+      onDestroyed: () => void
+    }
+  >()
+  const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
 
   services.eccRuntimeService.onEvent((payload) => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -484,6 +492,70 @@ export function registerIpc(
       session.sender.off('destroyed', session.onDestroyed)
     }
     await services.shellService.kill(sessionId)
+  }
+
+  const closeTrackedWorkspaceHandle = async (
+    workspaceHandle: string,
+  ): Promise<unknown> => {
+    const existingClose = workspaceHandleClosePromises.get(workspaceHandle)
+    if (existingClose) {
+      return await existingClose
+    }
+
+    const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
+    if (subscription) {
+      workspaceHandleSubscriptions.delete(workspaceHandle)
+      if (typeof subscription.sender.off === 'function') {
+        subscription.sender.off('destroyed', subscription.onDestroyed)
+      }
+    }
+
+    const closePromise = Promise.resolve().then(() =>
+      services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
+    )
+    const trackedClosePromise = closePromise.catch((error) => {
+      workspaceHandleClosePromises.delete(workspaceHandle)
+      throw error
+    })
+    workspaceHandleClosePromises.set(workspaceHandle, trackedClosePromise)
+    return await trackedClosePromise
+  }
+
+  const trackWorkspaceHandle = (
+    sender: IpcMainInvokeEvent['sender'],
+    workspaceHandle: string,
+  ): void => {
+    if (!workspaceHandle || workspaceHandleClosePromises.has(workspaceHandle)) {
+      return
+    }
+
+    const previous = workspaceHandleSubscriptions.get(workspaceHandle)
+    if (previous && typeof previous.sender.off === 'function') {
+      previous.sender.off('destroyed', previous.onDestroyed)
+    }
+
+    const onDestroyed = (): void => {
+      void closeTrackedWorkspaceHandle(workspaceHandle)
+    }
+    workspaceHandleSubscriptions.set(workspaceHandle, {
+      sender,
+      onDestroyed,
+    })
+    if (typeof sender.once === 'function') {
+      sender.once('destroyed', onDestroyed)
+    }
+
+    const isDestroyed =
+      typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
+    if (isDestroyed) {
+      onDestroyed()
+    }
+  }
+
+  const workspaceHandleFromResult = (result: unknown): string | null => {
+    if (typeof result !== 'object' || result === null) return null
+    if (!('workspaceHandle' in result)) return null
+    return typeof result.workspaceHandle === 'string' ? result.workspaceHandle : null
   }
 
   handle(desktopApiIpcChannels.appGetVersions, async () => {
@@ -907,22 +979,31 @@ export function registerIpc(
     return await services.eccRuntimeService.rpcShutdown()
   })
 
-  handle(desktopApiIpcChannels.eccWorkspaceCreate, async (_event, request) => {
-    return await services.eccRuntimeService.createWorkspace(
+  handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
+    const result = await services.eccRuntimeService.createWorkspace(
       request as EccWorkspaceCreateRequest,
     )
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(event.sender, workspaceHandle)
+    }
+    return result
   })
 
-  handle(desktopApiIpcChannels.eccWorkspaceOpen, async (_event, request) => {
-    return await services.eccRuntimeService.openWorkspace(
+  handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
+    const result = await services.eccRuntimeService.openWorkspace(
       request as EccWorkspaceOpenRequest,
     )
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(event.sender, workspaceHandle)
+    }
+    return result
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
-    return await services.eccRuntimeService.closeWorkspace(
-      request as EccWorkspaceHandleRequest,
-    )
+    const closeRequest = request as EccWorkspaceHandleRequest
+    return await closeTrackedWorkspaceHandle(closeRequest.workspaceHandle)
   })
 
   handle(desktopApiIpcChannels.eccWorkspaceHome, async (_event, request) => {

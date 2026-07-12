@@ -90,6 +90,7 @@ function responseFromEccEvent(event: EccRuntimeEvent): RuntimeEventResponse | nu
     'message' in event && typeof event.message === 'string' ? [event.message] : []
   const data: RuntimeEventResponse['data'] = {
     cmd: command,
+    directory: 'workspaceDirectory' in event ? event.workspaceDirectory : undefined,
     jobId: 'operationId' in event ? event.operationId : undefined,
     logFile: 'logFile' in event ? event.logFile : undefined,
     method,

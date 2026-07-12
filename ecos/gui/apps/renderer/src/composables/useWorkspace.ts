@@ -831,6 +831,8 @@ export function useWorkspace() {
     let sessionId: string | null = null
     let replacement: WorkspaceDirectoryReplacement | null = null
     let committedReplacement = false
+    let candidateWorkspaceCommitted = false
+    let candidateWorkspaceHandle = ''
     const restoreReplacement = async () => {
       if (!replacement || committedReplacement) return
       const desktopApi = await waitForDesktopApi()
@@ -979,6 +981,9 @@ export function useWorkspace() {
         pdk_json: creationConfig?.pdk_json,
         project_context: creationConfig?.project_context,
       })
+      if (response.response === 'success') {
+        candidateWorkspaceHandle = workspaceHandleFromResponseData(response.data)
+      }
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
         await restoreReplacement()
         return false
@@ -1023,6 +1028,7 @@ export function useWorkspace() {
           workspaceId,
           projectRoot: canonicalProjectRoot,
         })
+        candidateWorkspaceCommitted = true
         workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
           sessionId: session.sessionId,
           reason: 'workspace-created',
@@ -1072,6 +1078,9 @@ export function useWorkspace() {
       })
       return false
     } finally {
+      if (!candidateWorkspaceCommitted && candidateWorkspaceHandle) {
+        await releaseWorkspaceHandle(candidateWorkspaceHandle)
+      }
       runtimeBackendConnecting.value = false
     }
   }

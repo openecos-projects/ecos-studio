@@ -2212,6 +2212,37 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
   })
 
+  it('closes a freshly created workspace handle when local activation fails', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.registerProjectRoot).mockResolvedValueOnce('')
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/new-project',
+        workspace_handle: 'workspace-new-project',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/new-project',
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'new_project',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project')
+  })
+
   it('replaces an existing workspace by creating from a temporary backup directory', async () => {
     const workspace = useWorkspace()
     const replacement = {

@@ -108,6 +108,7 @@ describe('createRuntimeEventClient desktop ECC events', () => {
       operationId: 'operation-rerun',
       rerun: true,
       type: 'operation.started',
+      workspaceDirectory: '/work/demo',
       workspaceHandle: 'workspace-handle-1',
     })
 
@@ -116,6 +117,7 @@ describe('createRuntimeEventClient desktop ECC events', () => {
         data: expect.objectContaining({
           cmd: 'rtl2gds',
           jobId: 'operation-rerun',
+          directory: '/work/demo',
           rerun: true,
           type: 'message',
           workspaceId: 'workspace-handle-1',

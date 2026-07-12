@@ -1206,6 +1206,7 @@ describe('useHomeData live project file watchers', () => {
           directory: '/workspace/a',
           rerun: true,
           type: 'message',
+          workspaceId: 'workspace-handle-a',
         },
         message: ['Started rtl2gds'],
         response: 'success',

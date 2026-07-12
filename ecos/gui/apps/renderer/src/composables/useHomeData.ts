@@ -701,8 +701,8 @@ function isCurrentWorkspaceRerunStartEvent(event: unknown, projectPath: string):
   if (eventData.rerun !== true) return false
 
   const eventWorkspace =
-    normalizeWorkspaceEventPath(eventData.workspaceId) ||
-    normalizeWorkspaceEventPath(eventData.directory)
+    normalizeWorkspaceEventPath(eventData.directory) ||
+    normalizeWorkspaceEventPath(eventData.workspaceId)
   return eventWorkspace === normalizeWorkspaceEventPath(projectPath)
 }
 
@@ -726,8 +726,8 @@ function isCurrentWorkspaceRerunTerminalEvent(
   }
 
   const eventWorkspace =
-    normalizeWorkspaceEventPath(eventData.workspaceId) ||
-    normalizeWorkspaceEventPath(eventData.directory)
+    normalizeWorkspaceEventPath(eventData.directory) ||
+    normalizeWorkspaceEventPath(eventData.workspaceId)
   return eventWorkspace === normalizeWorkspaceEventPath(projectPath)
 }
 

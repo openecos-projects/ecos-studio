@@ -1111,6 +1111,43 @@ describe('registerIpc', () => {
     expect(webContents.send).not.toHaveBeenCalled()
   })
 
+  it('closes ECC workspace handles when the requesting renderer is destroyed', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: vi.fn(() => false),
+    })
+    const event = { sender }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+        directory: '/work/demo',
+      }),
+    ).resolves.toEqual({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(sender.listenerCount('destroyed')).toBe(1)
+    sender.emit('destroyed')
+
+    await vi.waitFor(() => {
+      expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledWith({
+        workspaceHandle: 'workspace-handle-1',
+      })
+    })
+
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledTimes(1)
+    expect(sender.listenerCount('destroyed')).toBe(0)
+  })
+
   it('creates shell sessions and forwards shell output to the requesting renderer', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {

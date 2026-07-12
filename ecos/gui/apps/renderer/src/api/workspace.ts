@@ -120,8 +120,10 @@ export function createWorkspaceApi(options: {
       originVerilog: String(data.origin_verilog ?? ''),
       parameters: (data.parameters as Record<string, unknown>) ?? {},
       pdk: String(data.pdk ?? ''),
+      pdkJson: String(data.pdk_json ?? ''),
       pdkRoot: String(data.pdk_root ?? ''),
       rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
+      sdc: String(data.sdc ?? ''),
     })
     .then((result) => ({
       cmd: CMDEnum.create_workspace,
