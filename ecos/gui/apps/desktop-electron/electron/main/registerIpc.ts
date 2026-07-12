@@ -513,9 +513,8 @@ export function registerIpc(
     const closePromise = Promise.resolve().then(() =>
       services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
     )
-    const trackedClosePromise = closePromise.catch((error) => {
+    const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(workspaceHandle)
-      throw error
     })
     workspaceHandleClosePromises.set(workspaceHandle, trackedClosePromise)
     return await trackedClosePromise

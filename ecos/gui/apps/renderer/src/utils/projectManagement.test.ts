@@ -1058,6 +1058,56 @@ describe('project management model', () => {
     expect(draft.originSdc).toBe('/projects/gcd/ws_0004/origin/project_gcd_ws_0004.sdc')
   })
 
+  it('keeps root workspace artifact names after registering a branch design', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.workspaces.push({
+      workspace_id: 'ws_0001',
+      name: 'baseline',
+      workspace_path: '/projects/gcd/workspaces/ws_0001',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:30:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+
+    const updated = registerWorkspaceInManifest(manifest, {
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd',
+      workspacePath: '/projects/gcd/workspaces/ws_0002',
+      sourceWorkspaceId: 'ws_0001',
+      sourceStep: 'Floor',
+      sourceOutputPath:
+        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+      sourceOutputType: 'def',
+      now: '2026-07-02T09:00:00.000Z',
+      config: {
+        parameters: {
+          design: 'gcd_floor_branch',
+          top_module: 'gcd',
+        },
+      },
+    })
+
+    const project = buildProjectManagementProject(recentProject, updated)
+
+    expect(updated.base_design.parameters?.design).toBeUndefined()
+    expect(project.workspaces.find((workspace) => workspace.id === 'ws_0001'))
+      .toHaveProperty('artifactDesignName', 'gcd')
+    expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor').sourceOutputPath).toBe(
+      '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
+    )
+  })
+
   it('falls back to the source workspace name for branch drafts without a design patch', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',

@@ -1133,19 +1133,47 @@ describe('registerIpc', () => {
 
     expect(sender.listenerCount('destroyed')).toBe(1)
     sender.emit('destroyed')
+    const explicitClose = handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+      workspaceHandle: 'workspace-handle-1',
+    })
 
     await vi.waitFor(() => {
       expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledWith({
         workspaceHandle: 'workspace-handle-1',
       })
     })
+    await explicitClose
+
+    expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledTimes(1)
+    expect(sender.listenerCount('destroyed')).toBe(0)
+  })
+
+  it('tracks a workspace handle again after a successful explicit close', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: vi.fn(() => false),
+    })
+    const event = { sender }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
+    expect(sender.listenerCount('destroyed')).toBe(1)
 
     await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
       workspaceHandle: 'workspace-handle-1',
     })
-
-    expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledTimes(1)
     expect(sender.listenerCount('destroyed')).toBe(0)
+
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
+
+    expect(sender.listenerCount('destroyed')).toBe(1)
   })
 
   it('creates shell sessions and forwards shell output to the requesting renderer', async () => {

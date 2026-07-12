@@ -770,7 +770,9 @@ export function registerWorkspaceInManifest(
     name: input.projectName || manifest.name,
     root_path: normalizePath(input.projectRoot || manifest.root_path),
     updated_at: now,
-    base_design: mergeBaseDesignConfig(manifest.base_design, input.config),
+    base_design: mergeBaseDesignConfig(manifest.base_design, input.config, {
+      includeDesignParameter: !sourceWorkspaceId && !branchFrom,
+    }),
     workspaces,
   }
 }
@@ -2114,15 +2116,21 @@ function nextManifestWorkspaceId(manifest: ProjectManifest): string {
 function mergeBaseDesignConfig(
   baseDesign: ProjectManifestBaseDesign,
   config: ProjectWorkspaceRegistrationInput['config'],
+  options: { includeDesignParameter?: boolean } = {},
 ): ProjectManifestBaseDesign {
   if (!config) return baseDesign
 
   const parameters = config.parameters ?? {}
+  const baseDesignParameters = Object.fromEntries(
+    Object.entries(parameters).filter(
+      ([key]) => options.includeDesignParameter !== false || key !== 'design',
+    ),
+  )
   const next: ProjectManifestBaseDesign = {
     ...baseDesign,
     parameters: {
       ...baseDesign.parameters,
-      ...parameters,
+      ...baseDesignParameters,
     },
   }
   const pdk = optionalString(config.pdk)
