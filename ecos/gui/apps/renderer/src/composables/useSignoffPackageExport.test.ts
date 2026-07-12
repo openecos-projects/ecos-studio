@@ -665,7 +665,7 @@ describe('useSignoffPackageExport export action', () => {
     expect(mounted.showToast).not.toHaveBeenCalled()
   })
 
-  it('uses Design for the default name and sends the exact selected path to ECC RPC', async () => {
+  it('opens Save As in the workspace project signoff directory using Design for the filename', async () => {
     const api = createApi()
     api.readParameters.mockResolvedValueOnce({ Design: 'rocket_core' })
     api.saveFile.mockResolvedValueOnce('/tmp/rocket package.tar.gz')
@@ -677,7 +677,8 @@ describe('useSignoffPackageExport export action', () => {
 
     expect(api.saveFile).toHaveBeenCalledWith({
       title: 'Export Signoff Package',
-      defaultPath: 'rocket_core_signoff_package.tar.gz',
+      defaultPath: '/workspaces/signoff/rocket_core_signoff_package.tar.gz',
+      ensureDirectory: true,
       filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
     })
     expect(api.exportSignoff).toHaveBeenCalledWith({
@@ -702,7 +703,10 @@ describe('useSignoffPackageExport export action', () => {
     await openReviewAndConfirm(mounted)
 
     expect(api.saveFile).toHaveBeenCalledWith(
-      expect.objectContaining({ defaultPath: 'fallback_chip_signoff_package.tar.gz' }),
+      expect.objectContaining({
+        defaultPath: 'C:\\projects\\signoff\\fallback_chip_signoff_package.tar.gz',
+        ensureDirectory: true,
+      }),
     )
   })
 

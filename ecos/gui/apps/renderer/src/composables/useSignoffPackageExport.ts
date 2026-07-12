@@ -1,6 +1,7 @@
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import {
   appMenuActionIds,
+  joinLocalPath,
   type EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
 import { getDesktopApi } from '@/platform/desktop'
@@ -64,6 +65,24 @@ function workspaceLeaf(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '')
   const parts = normalized.split('/').filter(Boolean)
   return parts[parts.length - 1] || normalized
+}
+
+function projectPathForWorkspace(workspacePath: string): string {
+  const normalized = workspacePath.replace(/[\\/]+$/g, '')
+  const separatorIndex = Math.max(
+    normalized.lastIndexOf('/'),
+    normalized.lastIndexOf('\\'),
+  )
+
+  if (separatorIndex <= 0) return normalized
+  return normalized.slice(0, separatorIndex)
+}
+
+function signoffPackageDefaultPath(workspacePath: string, design: string): string {
+  return joinLocalPath(
+    joinLocalPath(projectPathForWorkspace(workspacePath), 'signoff'),
+    `${design}_signoff_package.tar.gz`,
+  )
 }
 
 function errorDetail(error: unknown): string {
@@ -392,7 +411,8 @@ export function useSignoffPackageExport({
           : workspaceLeaf(workspace.workspacePath)
       const outputPath = await api.dialog.saveFile({
         title: 'Export Signoff Package',
-        defaultPath: `${design}_signoff_package.tar.gz`,
+        defaultPath: signoffPackageDefaultPath(workspace.workspacePath, design),
+        ensureDirectory: true,
         filters: [{ name: 'Signoff Package', extensions: ['tar.gz'] }],
       })
       if (

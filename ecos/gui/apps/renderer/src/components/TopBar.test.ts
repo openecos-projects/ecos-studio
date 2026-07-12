@@ -13,9 +13,20 @@ function getCssDeclaration(selector: string, property: string): string | null {
 }
 
 describe('TopBar drag region layout', () => {
-  it('offers a home button that routes back to ECOSView', () => {
-    expect(topBarSource).toContain('class="home-btn"')
+  it('moves workspace home navigation into the quick menu above Project Management', () => {
+    const quickMenuIndex = topBarSource.indexOf('class="quick-dropdown-menu"')
+    const homeMenuIndex = topBarSource.indexOf('title="Back to Home"', quickMenuIndex)
+    const projectManagementIndex = topBarSource.indexOf(
+      'Back to Project Management',
+      quickMenuIndex,
+    )
+
+    expect(topBarSource).not.toContain('class="home-btn"')
+    expect(topBarSource).not.toContain('.home-btn')
     expect(topBarSource).toContain("router.push({ name: 'ECOS' })")
+    expect(quickMenuIndex).toBeGreaterThan(-1)
+    expect(homeMenuIndex).toBeGreaterThan(quickMenuIndex)
+    expect(homeMenuIndex).toBeLessThan(projectManagementIndex)
   })
 
   it('uses a dedicated drag spacer instead of making the centered overlay draggable', () => {

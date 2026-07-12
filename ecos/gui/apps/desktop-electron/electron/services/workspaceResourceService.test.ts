@@ -342,11 +342,7 @@ describe('WorkspaceResourceService', () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'Harden', tool: 'ecc' }])
     await mkdir(join(root, 'Harden_ecc', 'output'), { recursive: true })
-    await writeFile(
-      join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'),
-      'png',
-      'utf8',
-    )
+    await writeFile(join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'), 'png', 'utf8')
     await writeJson(join(root, 'Harden_ecc', 'subflow.json'), {
       path: join(root, 'Harden_ecc', 'subflow.json'),
       steps: [{ name: 'run harden', state: 'Success' }],

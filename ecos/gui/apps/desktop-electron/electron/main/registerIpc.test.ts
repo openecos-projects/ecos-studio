@@ -20,10 +20,12 @@ const {
   openExternal,
   showOpenDialog,
   showSaveDialog,
+  mkdirMock,
   statMock,
 } = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
   getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
+  mkdirMock: vi.fn(),
   openExternal: vi.fn(),
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
@@ -34,6 +36,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
+    mkdir: mkdirMock,
     stat: statMock,
   }
 })
@@ -201,6 +204,7 @@ describe('registerIpc', () => {
     openExternal.mockReset()
     showOpenDialog.mockReset()
     showSaveDialog.mockReset()
+    mkdirMock.mockReset()
     setMenuActionEnabled.mockReset()
     statMock.mockReset()
     statMock.mockImplementation(async (path: string) => {
@@ -536,6 +540,38 @@ describe('registerIpc', () => {
 
     expect(fromWebContents).toHaveBeenCalledWith(event.sender)
     expect(showSaveDialog).toHaveBeenCalledWith(windowDouble, options)
+  })
+
+  it('creates the requested default directory before showing Save As', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/projects/gcd/signoff/gcd_signoff_package.tar.gz',
+      ensureDirectory: true,
+    }
+    fromWebContents.mockReturnValue(windowDouble)
+    mkdirMock.mockResolvedValue(undefined)
+    showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: options.defaultPath,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, options),
+    ).resolves.toBe(options.defaultPath)
+
+    expect(mkdirMock).toHaveBeenCalledWith('/projects/gcd/signoff', {
+      recursive: true,
+    })
+    expect(showSaveDialog).toHaveBeenCalledWith(windowDouble, {
+      title: options.title,
+      defaultPath: options.defaultPath,
+    })
+    expect(mkdirMock.mock.invocationCallOrder[0]).toBeLessThan(
+      showSaveDialog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
   })
 
   it('returns null when the Save As dialog is canceled', async () => {

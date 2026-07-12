@@ -7,17 +7,6 @@
         <i class="ri-cpu-line"></i>
       </div>
 
-      <button
-        v-if="!isEcosHome"
-        @click="handleGoHome"
-        class="home-btn"
-        type="button"
-        title="Back to Home"
-        aria-label="Back to Home"
-      >
-        <i class="ri-home-4-line"></i>
-      </button>
-
       <!-- 菜单项（带下拉菜单） -->
       <div class="menu-items" ref="menuBarRef">
         <div v-for="menu in menus" :key="menu.label" class="menu-wrapper">
@@ -168,6 +157,16 @@
         <button
           type="button"
           class="quick-dropdown-item"
+          title="Back to Home"
+          aria-label="Back to Home"
+          @click="handleGoHome"
+        >
+          <i class="ri-home-4-line item-icon"></i>
+          <span class="item-label">Back to Home</span>
+        </button>
+        <button
+          type="button"
+          class="quick-dropdown-item"
           title="Return to Project Management"
           @click="goToProjectManagement"
         >
@@ -205,7 +204,6 @@ interface Menu {
 
 const route = useRoute()
 const router = useRouter()
-const isEcosHome = computed(() => route.name === 'ECOS')
 const isWorkspaceRoute = computed(() => route.path.startsWith('/workspace'))
 const workspaceProjectRoot = computed(() => queryString(route.query.projectRoot))
 const workspaceProjectName = computed(() => queryString(route.query.projectName))
@@ -229,6 +227,7 @@ const toggleTheme = () => {
 
 const handleGoHome = () => {
   activeMenu.value = null
+  quickMenuOpen.value = false
   router.push({ name: 'ECOS' })
 }
 
@@ -465,28 +464,6 @@ const handleClose = async () => {
   height: 28px;
   color: var(--accent-color);
   font-size: 18px;
-}
-
-.home-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  transition:
-    color 0.15s,
-    background-color 0.15s;
-}
-
-.home-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
 }
 
 .app-icon-img {

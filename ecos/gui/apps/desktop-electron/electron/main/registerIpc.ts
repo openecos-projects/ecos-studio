@@ -6,7 +6,8 @@ import {
   type IpcMain,
   type IpcMainInvokeEvent,
 } from 'electron'
-import { stat } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -351,7 +352,12 @@ async function saveFile(
   event: IpcMainInvokeEvent,
   options?: DesktopSaveFileDialogOptions,
 ): Promise<string | null> {
-  const result = await dialog.showSaveDialog(getEventWindow(event), options ?? {})
+  const { ensureDirectory, ...dialogOptions } = options ?? {}
+  if (ensureDirectory && dialogOptions.defaultPath) {
+    await mkdir(dirname(dialogOptions.defaultPath), { recursive: true })
+  }
+
+  const result = await dialog.showSaveDialog(getEventWindow(event), dialogOptions)
 
   return result.canceled ? null : (result.filePath ?? null)
 }

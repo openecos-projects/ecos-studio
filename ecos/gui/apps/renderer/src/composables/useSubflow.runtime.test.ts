@@ -150,9 +150,7 @@ describe('useSubflow runtime refresh', () => {
       })
     })
     await vi.waitFor(() => {
-      expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual([
-        'run harden',
-      ])
+      expect(subflow.subflowSteps.value.map((step) => step.name)).toEqual(['run harden'])
     })
   })
 
