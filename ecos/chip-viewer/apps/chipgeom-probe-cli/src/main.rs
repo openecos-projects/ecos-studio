@@ -79,7 +79,8 @@ fn main() -> Result<()> {
     println!("shape_count={}", stats.shape_count);
     println!("owner_count={}", stats.owner_count);
     println!("name_count={}", stats.name_count);
-    println!("layer_count={}", db.layer_summaries().len());
+    let layer_summaries = db.layer_summaries();
+    println!("layer_count={}", layer_summaries.len());
     println!("view_tile_count={}", db.view_tile_count());
     print_memory_stats(&memory_stats);
     print_delta_stats(&delta_stats);
@@ -92,6 +93,12 @@ fn main() -> Result<()> {
             ChipViewDb::owner_type_label(owner_type),
             count
         );
+    }
+    for layer in layer_summaries {
+        println!("layer.{}.name={}", layer.layer_id, layer.name);
+        println!("layer.{}.type={}", layer.layer_id, layer.layer_type);
+        println!("layer.{}.direction={}", layer.layer_id, layer.direction);
+        println!("layer.{}.shape_count={}", layer.layer_id, layer.shape_count);
     }
     if let Some(name) = args.name {
         println!("name.{}={}", name, db.query_owner_name(&name).len());
@@ -488,6 +495,17 @@ fn print_json(
         "memory": memory_stats_json(&db.memory_stats()),
         "delta": delta_stats_json(&db.delta_stats()),
         "layer_count": db.layer_summaries().len(),
+        "layers": db.layer_summaries().into_iter().map(|layer| json!({
+            "layer_id": layer.layer_id,
+            "name": layer.name,
+            "type": layer.layer_type,
+            "direction": layer.direction,
+            "order": layer.order,
+            "width": layer.width,
+            "pitch_x": layer.pitch_x,
+            "pitch_y": layer.pitch_y,
+            "shape_count": layer.shape_count,
+        })).collect::<Vec<_>>(),
         "view_tile_count": db.view_tile_count(),
         "name_query": args.name.as_ref().map(|name| {
             let shape_ids = db.query_owner_name(name);

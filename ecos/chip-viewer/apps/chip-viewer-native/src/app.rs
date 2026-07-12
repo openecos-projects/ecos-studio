@@ -54,6 +54,13 @@ struct LoadedViewer {
 struct LayerUiState {
     layer_id: LayerId,
     shape_count: usize,
+    order: u32,
+    name: String,
+    layer_type: String,
+    direction: String,
+    width: i32,
+    pitch_x: i32,
+    pitch_y: i32,
     visible: bool,
     style: LayerStyle,
 }
@@ -221,6 +228,13 @@ impl LoadedViewer {
             .map(|summary| LayerUiState {
                 layer_id: summary.layer_id,
                 shape_count: summary.shape_count,
+                order: summary.order,
+                name: summary.name,
+                layer_type: summary.layer_type,
+                direction: summary.direction,
+                width: summary.width,
+                pitch_x: summary.pitch_x,
+                pitch_y: summary.pitch_y,
                 visible: true,
                 style: LayerStyle::default_for_layer(summary.layer_id),
             })
@@ -401,7 +415,8 @@ impl LoadedViewer {
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut layer.visible, "");
                     let color = color32(layer.style.rgba);
-                    ui.colored_label(color, format!("L{}", layer.layer_id));
+                    ui.colored_label(color, &layer.name)
+                        .on_hover_text(layer_hover_text(layer));
                     ui.label(layer.shape_count.to_string());
                 });
             }
@@ -801,6 +816,13 @@ impl LoadedViewer {
             .map(|summary| LayerUiState {
                 layer_id: summary.layer_id,
                 shape_count: summary.shape_count,
+                order: summary.order,
+                name: summary.name,
+                layer_type: summary.layer_type,
+                direction: summary.direction,
+                width: summary.width,
+                pitch_x: summary.pitch_x,
+                pitch_y: summary.pitch_y,
                 visible: visibility.get(&summary.layer_id).copied().unwrap_or(true),
                 style: LayerStyle::default_for_layer(summary.layer_id),
             })
@@ -1132,6 +1154,9 @@ fn snapshot_signature_for_db(db: &ChipViewDb) -> SnapshotFileSignature {
         manifest.sidmap.clone(),
         manifest.view.clone(),
     ];
+    if let Some(layers) = &manifest.layers {
+        paths.push(layers.clone());
+    }
     if let Some(delta) = &manifest.delta {
         paths.push(delta.clone());
     }
@@ -1516,6 +1541,19 @@ fn invert_layer_visibility(layers: &mut [LayerUiState]) {
 
 fn visible_layer_count(layers: &[LayerUiState]) -> usize {
     layers.iter().filter(|layer| layer.visible).count()
+}
+
+fn layer_hover_text(layer: &LayerUiState) -> String {
+    format!(
+        "id: {}\norder: {}\ntype: {}\ndirection: {}\nwidth: {}\npitch: {} {}",
+        layer.layer_id,
+        layer.order,
+        layer.layer_type,
+        layer.direction,
+        layer.width,
+        layer.pitch_x,
+        layer.pitch_y
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2468,6 +2506,13 @@ mod tests {
         LayerUiState {
             layer_id,
             shape_count: 1,
+            order: u32::from(layer_id),
+            name: format!("L{layer_id}"),
+            layer_type: "unknown".to_string(),
+            direction: "unknown".to_string(),
+            width: 0,
+            pitch_x: 0,
+            pitch_y: 0,
             visible,
             style: LayerStyle::default_for_layer(layer_id),
         }

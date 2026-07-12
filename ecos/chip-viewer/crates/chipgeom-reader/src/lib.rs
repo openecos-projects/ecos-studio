@@ -35,6 +35,19 @@ pub struct GeometryManifest {
     pub sidmap: PathBuf,
     pub delta: Option<PathBuf>,
     pub view: PathBuf,
+    pub layers: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LayerMetadata {
+    pub layer_id: u16,
+    pub order: u32,
+    pub name: String,
+    pub layer_type: String,
+    pub direction: String,
+    pub width: i32,
+    pub pitch_x: i32,
+    pub pitch_y: i32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,6 +88,7 @@ pub struct GeometrySnapshot {
     sidmap: Mmap,
     delta: GeometryDeltaStorage,
     view: Mmap,
+    layer_metadata: Vec<LayerMetadata>,
 }
 
 enum GeometryDeltaStorage {
@@ -144,6 +158,7 @@ impl GeometrySnapshot {
             GeometryFileKind::View,
             core::mem::size_of::<GeometryViewTileRecord>() as u32,
         )?;
+        let layer_metadata = read_layer_metadata(manifest.layers.as_deref())?;
 
         let snapshot = Self {
             manifest,
@@ -156,6 +171,7 @@ impl GeometrySnapshot {
             sidmap,
             delta,
             view,
+            layer_metadata,
         };
         snapshot.validate_manifest_counts()?;
         Ok(snapshot)
@@ -199,6 +215,10 @@ impl GeometrySnapshot {
 
     pub fn delta_records(&self) -> &[GeometryDeltaRecord] {
         cast_records(self.delta.as_bytes())
+    }
+
+    pub fn layer_metadata(&self) -> &[LayerMetadata] {
+        &self.layer_metadata
     }
 
     pub fn mapped_bytes(&self) -> GeometryMappedBytes {
@@ -289,7 +309,72 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         sidmap: base.join(required("sidmap")?),
         delta: values.get("delta").map(|value| base.join(value)),
         view: base.join(required("view")?),
+        layers: values.get("layers").map(|value| base.join(value)),
     })
+}
+
+fn read_layer_metadata(path: Option<&Path>) -> Result<Vec<LayerMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut layers = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"layer_id") {
+            continue;
+        }
+        if fields.len() < 8 {
+            anyhow::bail!(
+                "invalid layer metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+
+        let layer_id: u16 = fields[0]
+            .parse()
+            .with_context(|| format!("invalid layer_id on line {}", line_index + 1))?;
+        let order: u32 = fields[1]
+            .parse()
+            .with_context(|| format!("invalid order on line {}", line_index + 1))?;
+        let width: i32 = fields[4]
+            .parse()
+            .with_context(|| format!("invalid width on line {}", line_index + 1))?;
+        let pitch_x: i32 = fields[5]
+            .parse()
+            .with_context(|| format!("invalid pitch_x on line {}", line_index + 1))?;
+        let pitch_y: i32 = fields[6]
+            .parse()
+            .with_context(|| format!("invalid pitch_y on line {}", line_index + 1))?;
+        let name = non_empty_layer_field(fields[7], &format!("L{layer_id}"));
+        layers.push(LayerMetadata {
+            layer_id,
+            order,
+            name,
+            layer_type: non_empty_layer_field(fields[2], "unknown"),
+            direction: non_empty_layer_field(fields[3], "unknown"),
+            width,
+            pitch_x,
+            pitch_y,
+        });
+    }
+    Ok(layers)
+}
+
+fn non_empty_layer_field(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn empty_geometry_file_bytes(file_kind: GeometryFileKind, record_size: u32) -> Vec<u8> {
@@ -461,6 +546,102 @@ mod tests {
 
         assert!(snapshot.delta_records().is_empty());
         assert_eq!(snapshot.mapped_bytes().delta, 0);
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn opens_manifest_with_layer_metadata_file() {
+        let snapshot_dir = temp_snapshot_dir("layer-metadata");
+        write_geometry_file(
+            &snapshot_dir.join("geometry.meta.bin"),
+            GeometryFileKind::Meta,
+            core::mem::size_of::<GeometryMetaRecord>() as u32,
+            bytemuck::bytes_of(&GeometryMetaRecord {
+                next_shape_id: 1,
+                ..GeometryMetaRecord::default()
+            }),
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.shapes.bin"),
+            GeometryFileKind::Shapes,
+            core::mem::size_of::<ShapeRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.owners.bin"),
+            GeometryFileKind::Owners,
+            core::mem::size_of::<OwnerRef>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.payload.bin"),
+            GeometryFileKind::Payload,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.names.bin"),
+            GeometryFileKind::Names,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.name_index.bin"),
+            GeometryFileKind::NameIndex,
+            core::mem::size_of::<GeometryNameRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.sidmap.bin"),
+            GeometryFileKind::SidMap,
+            core::mem::size_of::<GeometrySidMapRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.view.bin"),
+            GeometryFileKind::View,
+            core::mem::size_of::<GeometryViewTileRecord>() as u32,
+            &[],
+        );
+        let layers_path = snapshot_dir.join("geometry.layers.txt");
+        std::fs::write(
+            &layers_path,
+            "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\n\
+             1\t7\trouting\thorizontal\t100\t200\t300\tM1\n\
+             2\t8\tcut\tunknown\t50\t0\t0\tVIA1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            snapshot_dir.join("geometry.manifest"),
+            "schema_version=1\n\
+             shape_count=0\n\
+             owner_count=0\n\
+             payload_size=0\n\
+             meta=geometry.meta.bin\n\
+             shapes=geometry.shapes.bin\n\
+             owners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\n\
+             names=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\n\
+             sidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n\
+             layers=geometry.layers.txt\n",
+        )
+        .unwrap();
+
+        let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
+
+        assert_eq!(snapshot.manifest().layers.as_ref(), Some(&layers_path));
+        assert_eq!(snapshot.layer_metadata().len(), 2);
+        assert_eq!(snapshot.layer_metadata()[0].layer_id, 1);
+        assert_eq!(snapshot.layer_metadata()[0].order, 7);
+        assert_eq!(snapshot.layer_metadata()[0].name, "M1");
+        assert_eq!(snapshot.layer_metadata()[0].layer_type, "routing");
+        assert_eq!(snapshot.layer_metadata()[0].direction, "horizontal");
+        assert_eq!(snapshot.layer_metadata()[0].width, 100);
+        assert_eq!(snapshot.layer_metadata()[0].pitch_x, 200);
+        assert_eq!(snapshot.layer_metadata()[0].pitch_y, 300);
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }

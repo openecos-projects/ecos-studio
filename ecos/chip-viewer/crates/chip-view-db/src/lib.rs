@@ -8,7 +8,7 @@ use chipgeom_format::{
     ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
 pub use chipgeom_reader::GeometryMappedBytes;
-use chipgeom_reader::GeometrySnapshot;
+use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use rstar::{RTree, RTreeObject, AABB};
 
 pub struct ChipViewDb {
@@ -58,6 +58,13 @@ pub struct DeltaStats {
 pub struct LayerSummary {
     pub layer_id: u16,
     pub shape_count: usize,
+    pub order: u32,
+    pub name: String,
+    pub layer_type: String,
+    pub direction: String,
+    pub width: i32,
+    pub pitch_x: i32,
+    pub pitch_y: i32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -411,6 +418,13 @@ impl ChipViewIndexMemoryStats {
 }
 
 pub fn layer_summaries_from_shapes(shapes: &[ShapeRecord]) -> Vec<LayerSummary> {
+    layer_summaries_from_shapes_and_metadata(shapes, &[])
+}
+
+pub fn layer_summaries_from_shapes_and_metadata(
+    shapes: &[ShapeRecord],
+    metadata: &[LayerMetadata],
+) -> Vec<LayerSummary> {
     let mut counts = BTreeMap::<u16, usize>::new();
     for shape in shapes {
         if shape.state != ShapeState::Alive as u8 {
@@ -418,13 +432,45 @@ pub fn layer_summaries_from_shapes(shapes: &[ShapeRecord]) -> Vec<LayerSummary> 
         }
         *counts.entry(shape.layer_id).or_insert(0) += 1;
     }
-    counts
+    let metadata_by_layer = metadata
+        .iter()
+        .map(|metadata| (metadata.layer_id, metadata))
+        .collect::<BTreeMap<_, _>>();
+    let mut summaries = counts
         .into_iter()
         .map(|(layer_id, shape_count)| LayerSummary {
             layer_id,
             shape_count,
+            ..layer_summary_defaults(layer_id)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    for summary in &mut summaries {
+        if let Some(metadata) = metadata_by_layer.get(&summary.layer_id) {
+            summary.order = metadata.order;
+            summary.name = metadata.name.clone();
+            summary.layer_type = metadata.layer_type.clone();
+            summary.direction = metadata.direction.clone();
+            summary.width = metadata.width;
+            summary.pitch_x = metadata.pitch_x;
+            summary.pitch_y = metadata.pitch_y;
+        }
+    }
+    summaries.sort_by_key(|summary| (summary.order, summary.layer_id));
+    summaries
+}
+
+fn layer_summary_defaults(layer_id: u16) -> LayerSummary {
+    LayerSummary {
+        layer_id,
+        shape_count: 0,
+        order: u32::from(layer_id),
+        name: format!("L{layer_id}"),
+        layer_type: "unknown".to_string(),
+        direction: "unknown".to_string(),
+        width: 0,
+        pitch_x: 0,
+        pitch_y: 0,
+    }
 }
 
 pub fn delta_stats_from_records(records: &[GeometryDeltaRecord]) -> DeltaStats {
@@ -533,7 +579,10 @@ impl ChipViewDb {
     }
 
     pub fn layer_summaries(&self) -> Vec<LayerSummary> {
-        layer_summaries_from_shapes(self.snapshot.shapes())
+        layer_summaries_from_shapes_and_metadata(
+            self.snapshot.shapes(),
+            self.snapshot.layer_metadata(),
+        )
     }
 
     pub fn query_layer_intersect(&self, layer_id: u16, bbox: Rect32) -> Vec<ShapeId> {
@@ -689,6 +738,48 @@ mod tests {
         assert_eq!(summaries[0].shape_count, 1);
         assert_eq!(summaries[1].layer_id, 3);
         assert_eq!(summaries[1].shape_count, 2);
+    }
+
+    #[test]
+    fn layer_summaries_merge_metadata_when_available() {
+        let summaries = layer_summaries_from_shapes_and_metadata(
+            &[shape(1, 3), shape(2, 1), shape(3, 3)],
+            &[
+                chipgeom_reader::LayerMetadata {
+                    layer_id: 3,
+                    order: 9,
+                    name: "M3".to_string(),
+                    layer_type: "routing".to_string(),
+                    direction: "vertical".to_string(),
+                    width: 120,
+                    pitch_x: 240,
+                    pitch_y: 480,
+                },
+                chipgeom_reader::LayerMetadata {
+                    layer_id: 7,
+                    order: 11,
+                    name: "M7".to_string(),
+                    layer_type: "routing".to_string(),
+                    direction: "horizontal".to_string(),
+                    width: 220,
+                    pitch_x: 440,
+                    pitch_y: 880,
+                },
+            ],
+        );
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].layer_id, 1);
+        assert_eq!(summaries[0].name, "L1");
+        assert_eq!(summaries[0].layer_type, "unknown");
+        assert_eq!(summaries[1].layer_id, 3);
+        assert_eq!(summaries[1].name, "M3");
+        assert_eq!(summaries[1].layer_type, "routing");
+        assert_eq!(summaries[1].direction, "vertical");
+        assert_eq!(summaries[1].order, 9);
+        assert_eq!(summaries[1].width, 120);
+        assert_eq!(summaries[1].pitch_x, 240);
+        assert_eq!(summaries[1].pitch_y, 480);
     }
 
     #[test]
