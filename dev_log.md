@@ -13653,3 +13653,44 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `scr1` Verilator lint 仍有第三方 RTL 自身宽度和 incomplete case 警告；本次只验证新的 `cpu_top` 直连结构没有引入 lint fatal。
 - 其它大型第三方 adapter 未逐个跑完整 Verilator lint/sim；catalog/prepare 层已覆盖 9 个可创建组合的唯一 `cpu_top` 合同。
+
+# 第 229 次 开发
+
+## 开发目标
+
+修复 `test0713b` 在 sim 阶段失败的问题：旧 workspace 元数据仍把 `custom-filelist` 标记为 difftest-enabled，导致 Verilator 编译 CL3 私有层级绑定的 `difftest.cpp`；当前架构已直接使用 `cpu_top`，不再存在旧的 `cl3_top` 层级。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - 对 `custom-filelist`、`standard-cpu-filelist` 以及内置开源 CPU adapter 强制视为不支持 CL3 私有 difftest。
+  - 当 workspace 中残留 `difftest.cpp` 时，在仿真 C++ 源列表中自动替换为 `difftest_stub.cpp`。
+  - 当 CPU 不支持 difftest 时，从运行参数中移除旧的 `--diff`、`--ref`、`--diff-image-offset` 和 `--diff-reset-vector`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 让 core id 判定优先于旧的 `cpu_supports_difftest` 原始布尔字段，避免旧工程把自定义 CPU 误判为可用 difftest。
+  - prepare contracts 中的 `Difftest` 状态改为使用统一 `_supports_difftest()` 判定，GUI/CLI 展示和实际仿真行为保持一致。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加旧 `custom-filelist` workspace 回归测试，覆盖 `difftest.cpp` 到 `difftest_stub.cpp` 的替换、运行参数清理，以及 prepare contracts 显示 `Difftest: Stub`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 sim failure 根因和修复。
+
+## 验证情况
+
+- 已检查 `/home/luyoung/test0713b/sim_verilator/log/log.txt`，失败点为 `difftest.cpp` 编译访问不存在的 `...u_core__DOT__cl3_top...` Verilator 层级。
+- 已用 `/home/luyoung/test0713b/home/parameters.json` 直接验证新 runner 输出：C++ 源列表改为 `difftest_stub.cpp`，运行参数保留 `["--max-cycles", "50000000"]`。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_engine_flow.py::test_legacy_custom_cpu_workspace_forces_difftest_stub test/test_engine_flow.py::test_rtthread_program_omits_difftest_for_generic_cpu test/test_engine_flow.py::test_rtthread_program_uses_external_difftest_ref_when_soc_ref_is_split`，3 项通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_contract.py test/test_catalog_compatibility.py test/test_examples.py`，30 项通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行实际 sim、make、pnpm build/dev、GUI 启动、Electron 打包或 release 打包。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 用户当前 GUI/dev 会话若仍使用旧的已安装 ecc-fe runner，需要刷新到包含本次修改的代码或重新走资源发布/安装后，`test0713b` 才会在 GUI 中应用同一修复。
