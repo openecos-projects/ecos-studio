@@ -376,7 +376,7 @@ export class WorkspaceResourceService {
   }
 
   private async buildFrontendDetailInfo(step: WorkspaceStepResource): Promise<StepInfoBuildResult> {
-    const cases = await this.readFrontendCases(step.resources.report.cases?.path)
+    const cases = await this.readFrontendCases(nestedResource(step.resources.report, 'cases')?.path)
     return stepInfo({
       step: step.name,
       tool: step.tool,

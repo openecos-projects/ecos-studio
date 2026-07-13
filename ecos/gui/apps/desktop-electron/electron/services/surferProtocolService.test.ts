@@ -21,11 +21,15 @@ async function createSurferAssets(): Promise<string> {
   const root = await createTempDir('ecos-surfer-assets-')
   await writeFile(join(root, 'index.html'), [
     '<!doctype html>',
-    '<html><body>',
+    '<html><head>',
     '<script type="module">',
-    '/*SURFER_SETUP_HOOKS*/',
+    'import init from "./surfer.js";',
+    'init(`./surfer_bg.wasm`);',
+    'import { inject_message as injectMessage } from "./surfer.js";',
+    'window.inject_message = injectMessage;',
     '</script>',
-    '<script>navigator.serviceWorker.register(\'sw.js\');</script>',
+    '</head><body>',
+    '<script>navigator.serviceWorker.register(`sw.js`);</script>',
     '</body></html>',
   ].join('\n'))
   await writeFile(join(root, 'integration.js'), [
@@ -82,10 +86,22 @@ describe('SurferProtocolService', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('Content-Type')).toContain('text/html')
-    expect(text).toContain('register_message_listener();')
+    expect(text).toContain('await init(`./surfer_bg.wasm`);')
+    expect(text).toContain("case 'Ping':")
+    expect(text).toContain("case 'LoadUrl':")
+    expect(text).toContain('keep_unavailable: false')
+    expect(text).toContain('keep_variables: false')
+    expect(text).not.toContain("url,\n                'Clear'")
+    expect(text).not.toContain("case 'LoadBlob':")
+    expect(text).not.toContain('URL.createObjectURL')
+    expect(text).toContain('surferModule.waves_loaded()')
+    expect(text).toContain("JSON.stringify({ AddScope: scope })")
+    expect(text).toContain("postHostMessage('SurferWaveformLoaded'")
+    expect(text).toContain('injectWhenReady')
     expect(text).toContain('SurferReady')
     expect(text).toContain('Surfer service worker disabled inside ECOS Studio')
-    expect(text).not.toContain('<script src="integration.js"></script>')
+    expect(text).not.toContain('navigator.serviceWorker.register(`sw.js`)')
+    expect(text).not.toContain('register_message_listener();')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

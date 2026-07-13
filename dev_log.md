@@ -13777,3 +13777,320 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 当前已打开的 Electron dev 主进程需要重启后才能加载本次 `workspaceResourceService.ts` 修改。
 - 如果 Wave 页面仍显示 Surfer ready/loading 相关错误，下一步应检查 `ecos-surfer://viewer/waveform/...` 的 HEAD 请求和 Surfer iframe 初始化时序。
+
+# 第 232 次 开发
+
+## 开发目标
+
+继续修复 GUI Wave 页面无法查看 `test0713b` 波形的问题：上一轮已让 renderer 拿到 `cases[].wave`，但 Surfer iframe 仍可能在 WASM/module 尚未完成初始化时过早发送 `SurferReady`，导致 renderer 立即发送 `LoadUrl` 后 iframe 内部调用未准备好的 `inject_message`。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - Surfer viewer 注入脚本改为等待 `window.inject_message` 可用后再向 renderer 发送 `SurferReady`。
+  - 将 Surfer 原始 `index.html` 中的 WASM 初始化调用改写为 `await`，避免 named export 暴露早于 WASM 初始化完成。
+  - 自定义 host message listener 捕获 `LoadUrl`/`ToggleMenu`/`InjectMessage` 异常，并向 renderer 发送 `SurferError`。
+  - 更稳健地禁用 Surfer service worker，覆盖 release HTML 中使用反引号注册 `sw.js` 的写法。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 测试 fixture 改为接近真实 Surfer release HTML：无 `SURFER_SETUP_HOOKS` 占位符、使用 module script 初始化 WASM、使用反引号注册 service worker。
+  - 增加断言：生成的 viewer HTML 会等待 WASM 初始化、包含 host `LoadUrl` listener、禁用 service worker，并且不再调用旧的 `register_message_listener()`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/workspaceResourceService.ts`
+  - 修复 `cases` 路径读取的 TypeScript 类型问题，统一通过 `nestedResource(step.resources.report, "cases")?.path` 取文件路径。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer iframe 初始化时序修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前已打开的 Electron dev 主进程需要重启后才能加载本次 `surferProtocolService.ts` 修改。
+- 如果重启后仍无法查看，需要结合 renderer 控制台/主进程日志确认 `ecos-surfer://viewer/waveform/...` 的 HEAD/GET 是否返回 200，以及 Surfer WASM 是否返回内部解析错误。
+
+# 第 233 次 开发
+
+## 开发目标
+
+继续修复 GUI Wave 侧边栏无法查看 `test0713b` 波形的问题：确认 CLI 已返回 `cases[].wave`，本地也已安装 Surfer 资源后，重点修复 renderer 与 Surfer iframe 之间 ready 消息可能丢失、旧 iframe ready 状态被误复用的问题。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 将 `FrontendWaveWorkspace` 的 iframe 引用更新改为显式 `handleSurferFrameChange()`。
+  - iframe 对象变化时重置 `surferReady`、`loadedWaveformKey`、loading/error 状态，并取消旧加载 token。
+  - 在 Surfer 未 ready 时，每 500ms 主动向 iframe 发送 `Ping`，直到收到 `SurferReady` 或 12 秒超时，避免 ready 消息早于 renderer 监听器而丢失后永久卡住。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - Surfer host bridge 增加 `Ping` 命令，API 可用后会强制回发 `SurferReady`。
+  - `LoadUrl`/`ToggleMenu`/`InjectMessage` 改为通过 `injectWhenReady()` 等待 `window.inject_message` 可用后再注入，避免初始化竞态导致命令丢失。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 增加断言：生成的 Surfer HTML 包含 `Ping` ready 握手和 `injectWhenReady` 注入保护。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Wave iframe ready 握手修复。
+
+## 验证情况
+
+- 已确认 `/home/luyoung/test0713b` 的 `workspace get-info --step sim --id frontend_detail --json` 返回 8 个 simulation case，且每个 case 都带有 `wave.vcd` 绝对路径。
+- 已确认本机存在 Resource Manager 安装的 Surfer web 资源：`/home/luyoung/.local/share/ecos-studio/tools/surfer/latest/index.html`、`surfer.js`、`surfer_bg.wasm`。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前正在运行的 Electron dev 主进程需要重新加载 main/renderer 代码后才能验证本次 iframe 握手修复。
+- 如果修复后仍打不开，应继续读取 renderer DevTools console 中的 Surfer WASM/Fetch 错误，因为主进程日志目前没有记录 iframe 内部控制台错误。
+
+# 第 234 次 开发
+
+## 开发目标
+
+继续修复 GUI Wave 侧边栏无法显示波形列表的问题：最新 Electron 日志确认 `workspace get-info --step sim --id frontend_detail` 已成功返回，因此进一步增强 renderer 的 Wave 列表数据来源，避免只依赖单一路径。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - Wave 列表从 `cases[].wave` 扩展为同时扫描 `detail.artifacts` 中的 `.vcd/.fst/.ghw` 文件。
+  - 新增 waveform artifact case 名推导：优先使用 `add.soc wave` 这类 label，其次从 `/cases/<case>/wave.vcd` 路径中提取。
+  - Wave 页面如果 CLI detail 没拿到 wave，会再调用 `workspaceResources.resolveStepInfo({ step: "sim", id: "frontend_detail" })`，直接从本地 `sim_verilator/report/cases.json` 读取 `cases[].wave` 作为兜底。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Wave 列表多数据源兜底修复。
+
+## 验证情况
+
+- 已确认最新 GUI session 日志中 `get-info --step sim --id frontend_detail` completed success。
+- 已确认本地 `/home/luyoung/test0713b` 的 CLI detail 返回 8 个带 `wave.vcd` 的 case。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 如果 Wave 列表出现但 viewer 仍为空，后续应继续查 Surfer iframe 内部控制台或 `ecos-surfer://viewer/waveform/...` 请求状态。
+
+# 第 235 次 开发
+
+## 开发目标
+
+修复 GUI 左侧 `WAVE` 能打开页面、也能选中波形文件，但右侧 Surfer viewer 不显示任何信号或波形的问题。判断原因是 Surfer WASM 直接 fetch Electron 自定义协议 `ecos-surfer://...` 时不稳定，renderer 发送 `LoadUrl` 后 GUI 无报错但 viewer 为空。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - Surfer iframe host bridge 新增 `LoadBlob` 命令。
+  - iframe 内部接收 waveform 二进制后创建 `blob:` URL，再调用 Surfer 的 `LoadWaveformFileFromUrl`。
+  - 切换 waveform 时释放上一份 `blob:` URL，避免重复打开波形造成内存泄漏。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 增加断言：生成的 Surfer viewer HTML 包含 `LoadBlob` 处理逻辑和 `URL.createObjectURL`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - Wave 加载逻辑从 `HEAD + LoadUrl` 改为 `GET + arrayBuffer + LoadBlob`。
+  - renderer 先通过受控的 `ecos-surfer://viewer/waveform/...` 协议读取 VCD，再把二进制 transfer 给 Surfer iframe，避免 Surfer 自己读取自定义协议导致空白 viewer。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Wave viewer blob 加载修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 这次修改包含 Electron main process 的 `surferProtocolService.ts`，当前已经打开的 `pnpm run dev` 窗口需要重启后才能加载新协议桥。
+- 如果重启后仍为空，需要看 renderer DevTools console 中 Surfer iframe 的具体 WASM/Blob 加载错误。
+
+# 第 236 次 开发
+
+## 开发目标
+
+修复点击 GUI 左侧 `WAVE` 后，右侧 Surfer 区域没有任何信号或波形的问题。进一步确认 Wave 组件此前使用 `v-show` 常驻，Surfer iframe 会在隐藏的零尺寸容器中提前初始化，进入 WAVE 页面后只是显示已经以零尺寸创建的 canvas。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 将 Wave 工作区从 `v-show` 改为 `v-if`，只在用户进入 WAVE 页面时挂载 Surfer iframe。
+  - 确保 Surfer WASM 和 canvas 在右侧面板具有真实宽高后初始化，避免零尺寸初始化造成空白 viewer。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer 可见时挂载修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前用户运行中的 `pnpm run dev` 可通过 renderer HMR 接收本次模板修改；如果 Electron 没有正确热更新，需重启该 dev 会话后验证。
+- 若 viewer 在可见尺寸初始化后仍为空，应继续把 Surfer iframe 内部的异步波形加载结果回传给 renderer，区分 canvas 初始化失败与 VCD 解析失败。
+
+# 第 237 次 开发
+
+## 开发目标
+
+修复 Surfer 已收到 VCD、但 GUI 右侧仍没有任何信号或波形的问题。源码确认 Surfer 加载波形后默认 `displayed_items` 为空，必须再执行 `AddScope` 或 `AddVariable`；此前 renderer 还在发送加载消息后立即误判为成功，没有等待 Surfer 的实际解析结果。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - `LoadBlob` 后轮询 Surfer 导出的 `waves_loaded()`，确认 VCD 已被实际解析。
+  - 波形加载成功后自动选中并加入固定 SoC 顶层 `ecos_sim_top` 的直接信号，使右侧立即出现信号名和波形。
+  - 向 renderer 回传 `SurferWaveformLoaded`；解析超时或异常则回传带 `loadId` 的 `SurferError`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 增加实际加载确认、自动 `AddScope` 和成功消息的 HTML 桥接断言。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/frontend/FrontendWaveWorkspace.vue`
+  - 使用 waveform path 作为 iframe key，切换 case 时创建干净的 Surfer 实例，避免前一个波形的加载状态干扰确认逻辑。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 发送 `ecos_sim_top` 初始 scope 和稳定的 `loadId`。
+  - 只在收到 `SurferWaveformLoaded` 后标记加载成功并结束 Loading，不再把“消息已发送”等同于“波形已加载”。
+  - 忽略来自旧 waveform 的延迟成功或错误消息。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer 实际加载确认和默认信号展示修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- Surfer 协议桥属于 Electron main process，当前 dev 会话需要重启后才能加载本次修改。
+- 自动展示的是固定 SoC 顶层 `ecos_sim_top` 的直接信号；用户仍可在 Surfer 层次树中继续选择 CPU 和外设内部信号。
+
+# 第 238 次 开发
+
+## 开发目标
+
+修复 Wave viewer 一直显示 `Loading Surfer waveform viewer...`，随后报告 `Surfer did not finish loading the waveform` 的问题。已确认加载命令使用了旧版 Surfer 的字符串参数 `"Clear"`，而当前已安装 WASM 的 `LoadWaveformFileFromUrl` 要求结构化 `LoadOptions`，导致命令在 serde 反序列化阶段被拒绝，VCD 解析实际从未启动。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - 将 `LoadWaveformFileFromUrl` 的第二个参数从旧字符串 `"Clear"` 改为当前 WASM 接受的 `{ keep_variables: false, keep_unavailable: false }`。
+  - 保留 Blob URL 传输、实际加载确认和 `ecos_sim_top` 默认信号加入逻辑。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 增加结构化 `LoadOptions` 断言，并禁止生成旧的 `"Clear"` 参数。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer 消息协议版本不匹配修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项测试通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 修改位于 Electron main process，当前 dev 会话需要重启后才能加载新的 Surfer 消息格式。
+- `/home/luyoung/surfer/ecos/integration.js` 本身仍包含旧的 `"Clear"` 参数；ECOS Studio 当前使用注入桥覆盖该路径，但后续应在 Surfer 资源仓同步修正，避免其他嵌入方继续失败。
+
+# 第 239 次 开发
+
+## 开发目标
+
+修复 Wave viewer 接受正确的加载命令后，长期停在 `Downloading blob:ecos-surfer...` 并最终超时的问题。确认当前 Surfer 的 WASM/reqwest 下载路径无法完成 `blob:` URL 请求，因此取消 Blob 中转，改为直接读取 Electron 已注册 Fetch/stream 权限的同源 `ecos-surfer://viewer/waveform/...` URL。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.ts`
+  - 删除 `LoadBlob`、`Blob` 和 `URL.createObjectURL` 逻辑。
+  - `LoadUrl` 现在使用结构化 `LoadOptions` 直接加载同源 `ecos-surfer://` waveform URL，并启动实际解析完成轮询。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/surferProtocolService.test.ts`
+  - 调整协议桥测试，要求保留 `LoadUrl`，并禁止重新引入 `LoadBlob` 和 Object URL。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 加载前使用 `HEAD` 校验 waveform 文件可访问。
+  - 校验成功后直接向 Surfer 发送受控的 `ecos-surfer://viewer/waveform/...` URL，不再读取和跨 iframe 传输整份 VCD 二进制。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 Surfer Blob 下载卡死修复。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/surferProtocolService.test.ts electron/services/workspaceResourceService.test.ts`，24 项测试通过。
+- 已执行 `git diff --check`，通过。
+- 已扫描 Surfer service 与 renderer，确认运行时代码中不再包含 `LoadBlob`、`URL.createObjectURL`、`waveformBytes` 或 `arrayBuffer` 波形中转逻辑。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 修改位于 Electron main process，当前 dev 会话需要重启后才能加载新的 URL 桥接逻辑。
+- 如果当前 Chromium 对 `ecos-surfer://` 的 WASM 内 Fetch 仍有限制，下一步需要在 Surfer 资源本身增加接受 `Uint8Array` 的公开 WASM API；不应退回会卡死的 Blob URL，也不应把大型 VCD 转成膨胀数倍的 JSON 数组。

@@ -14,7 +14,7 @@
   />
 
   <FrontendWaveWorkspace
-    v-show="isGlobalWaveView"
+    v-if="isGlobalWaveView"
     :active-waveform="activeWaveform"
     :file-name="fileName"
     :short-path="shortPath"
@@ -22,7 +22,7 @@
     :wave-items="waveItems"
     :wave-status-message="waveStatusMessage"
     :waveform-error="waveformError"
-    @frame-change="surferFrame = $event"
+    @frame-change="handleSurferFrameChange"
     @frame-load="handleSurferFrameLoad"
     @open-wave-external="openWaveExternal"
     @select-waveform="selectWaveform"
@@ -1388,7 +1388,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
-import { getWorkspaceResourceIndexApi } from '@/api/workspaceResources'
+import { getWorkspaceResourceIndexApi, resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -1855,17 +1855,44 @@ const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
 const detailWaveItems = computed<WaveSelection[]>(() =>
   uniqueWaveItems(
-    cases.value
-      .filter((testCase) => Boolean(testCase.wave))
-      .map((testCase) => ({
-        path: String(testCase.wave || ''),
-        caseName: testCase.name,
-      })),
+    [
+      ...cases.value
+        .filter((testCase) => Boolean(testCase.wave))
+        .map((testCase) => ({
+          path: String(testCase.wave || ''),
+          caseName: testCase.name,
+        })),
+      ...(detail.value?.artifacts || [])
+        .filter((artifact) => isWaveformPath(artifact.path))
+        .map((artifact) => ({
+          path: artifact.path,
+          caseName: caseNameForWaveArtifact(artifact),
+        })),
+    ],
+  ),
+)
+const fallbackWaveItems = computed<WaveSelection[]>(() =>
+  uniqueWaveItems(
+    [
+      ...cachedWaveItems.value,
+      ...(detail.value?.artifacts || [])
+        .filter((artifact) => isWaveformPath(artifact.path))
+        .map((artifact) => ({
+          path: artifact.path,
+          caseName: caseNameForWaveArtifact(artifact),
+        })),
+      ...cases.value
+        .filter((testCase) => Boolean(testCase.wave))
+        .map((testCase) => ({
+          path: String(testCase.wave || ''),
+          caseName: testCase.name,
+        })),
+    ],
   ),
 )
 const detailIsSimStep = computed(() => String(detail.value?.step || '').toLowerCase() === 'sim')
 const waveItems = computed<WaveSelection[]>(() =>
-  detailIsSimStep.value ? detailWaveItems.value : cachedWaveItems.value,
+  detailIsSimStep.value ? detailWaveItems.value : fallbackWaveItems.value,
 )
 const selectedCpuRunCases = computed(() => cpuRunCasesForSelection())
 const cpuCaseSelectionLabel = computed(() => {
@@ -2702,6 +2729,7 @@ async function loadDetail(): Promise<void> {
       throw new Error(response.message?.join(', ') || 'Failed to load frontend detail')
     }
     detail.value = response.data.info as FrontendStepDetail
+    await hydrateWaveCasesFromWorkspaceResources()
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
     syncWaveSelectionFromRoute()
@@ -2749,6 +2777,28 @@ async function loadSelectedLog(): Promise<void> {
     logContent.value = err instanceof Error ? err.message : String(err)
   } finally {
     logLoading.value = false
+  }
+}
+
+async function hydrateWaveCasesFromWorkspaceResources(): Promise<void> {
+  if (!isGlobalWaveView.value || detailWaveItems.value.length > 0) return
+
+  try {
+    const response = await resolveWorkspaceStepInfoApi({
+      step: 'sim',
+      id: InfoEnum.frontend_detail,
+    })
+    if (response.response !== 'available') return
+    const fallbackCases = Array.isArray(response.info?.cases)
+      ? response.info.cases as SimCase[]
+      : []
+    if (!fallbackCases.some((testCase) => Boolean(testCase.wave)) || !detail.value) return
+    detail.value = {
+      ...detail.value,
+      cases: fallbackCases,
+    }
+  } catch (err) {
+    console.warn('Failed to load waveform cases from workspace resources:', err)
   }
 }
 
@@ -3012,6 +3062,21 @@ function uniqueWaveItems(items: WaveSelection[]): WaveSelection[] {
   return result
 }
 
+function isWaveformPath(path: string): boolean {
+  return /\.(vcd|fst|ghw)$/i.test(String(path || '').trim())
+}
+
+function caseNameForWaveArtifact(item: PathItem): string {
+  const rawLabel = String(item.label || '').trim()
+  const waveLabel = rawLabel.replace(/\s+wave(form)?$/i, '')
+  if (waveLabel && waveLabel !== rawLabel) return waveLabel
+
+  const normalized = normalizeWorkspacePath(item.path)
+  const caseMatch = normalized.match(/\/cases\/([^/]+)\/[^/]+$/)
+  if (caseMatch?.[1]) return caseMatch[1]
+  return rawLabel || fileName(item.path)
+}
+
 function toggleCpuCase(name: string): void {
   if (runBusy.value) return
   selectedCpuCases.value = selectedCpuCases.value.includes(name)
@@ -3154,15 +3219,35 @@ function pathToFileUrl(path: string): string {
   return `file://${normalized.split('/').map(encodeURIComponent).join('/')}`
 }
 
+function handleSurferFrameChange(frame: HTMLIFrameElement | null): void {
+  if (surferFrame.value === frame) return
+  surferFrame.value = frame
+  surferReady.value = false
+  waveformLoading.value = false
+  waveformError.value = ''
+  loadedWaveformKey = ''
+  waveformLoadToken += 1
+  if (frame) {
+    requestSurferReady(frame)
+    void loadCurrentWaveform()
+  }
+}
+
 function handleSurferFrameLoad(): void {
   loadedWaveformKey = ''
   waveformError.value = ''
+  requestSurferReady(surferFrame.value)
   void loadCurrentWaveform()
 }
 
 function handleSurferMessage(event: MessageEvent): void {
   if (event.source !== surferFrame.value?.contentWindow) return
-  const data = event.data as { source?: string; command?: string; message?: string }
+  const data = event.data as {
+    source?: string
+    command?: string
+    loadId?: string
+    message?: string
+  }
   if (data?.source !== 'ecos-surfer') return
 
   if (data.command === 'SurferReady') {
@@ -3171,7 +3256,18 @@ function handleSurferMessage(event: MessageEvent): void {
     return
   }
 
+  if (data.command === 'SurferWaveformLoaded') {
+    const activeWaveKey = normalizeWorkspacePath(activeWaveform.value?.path || '')
+    if (!data.loadId || data.loadId !== activeWaveKey) return
+    loadedWaveformKey = activeWaveKey
+    waveformLoading.value = false
+    waveformError.value = ''
+    return
+  }
+
   if (data.command === 'SurferError') {
+    const activeWaveKey = normalizeWorkspacePath(activeWaveform.value?.path || '')
+    if (data.loadId && data.loadId !== activeWaveKey) return
     waveformLoading.value = false
     loadedWaveformKey = ''
     waveformError.value = data.message || 'Surfer viewer failed to initialize.'
@@ -3190,6 +3286,12 @@ async function loadCurrentWaveform(): Promise<void> {
   waveformError.value = ''
 
   if (!surferReady.value) {
+    const pingSurferUntilReady = () => {
+      if (token !== waveformLoadToken || surferReady.value) return
+      requestSurferReady(frame)
+      window.setTimeout(pingSurferUntilReady, 500)
+    }
+    pingSurferUntilReady()
     window.setTimeout(() => {
       if (token === waveformLoadToken && !surferReady.value) {
         waveformLoading.value = false
@@ -3206,16 +3308,18 @@ async function loadCurrentWaveform(): Promise<void> {
     if (!response.ok) {
       throw new Error(`Cannot load waveform: ${response.status} ${response.statusText}`)
     }
-    frame.contentWindow.postMessage({ command: 'LoadUrl', url: waveformUrl }, '*')
-    loadedWaveformKey = waveKey
+    frame.contentWindow.postMessage({
+      command: 'LoadUrl',
+      initialScope: 'ecos_sim_top',
+      loadId: waveKey,
+      name: fileName(wave.path),
+      url: waveformUrl,
+    }, '*')
   } catch (err) {
     if (token === waveformLoadToken) {
       loadedWaveformKey = ''
-      waveformError.value = err instanceof Error ? err.message : String(err)
-    }
-  } finally {
-    if (token === waveformLoadToken) {
       waveformLoading.value = false
+      waveformError.value = err instanceof Error ? err.message : String(err)
     }
   }
 }
@@ -3223,6 +3327,10 @@ async function loadCurrentWaveform(): Promise<void> {
 function surferWaveformUrl(path: string): string {
   const name = encodeURIComponent(fileName(path))
   return `ecos-surfer://viewer/waveform/${name}?path=${encodeURIComponent(path)}`
+}
+
+function requestSurferReady(frame: HTMLIFrameElement | null): void {
+  frame?.contentWindow?.postMessage({ command: 'Ping' }, '*')
 }
 
 function labelForStep(step: string): string {

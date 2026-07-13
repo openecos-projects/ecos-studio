@@ -119,30 +119,134 @@ export class SurferProtocolService {
     let text = (await this.readSurferAssetFrom(assetsPath, 'index.html')).toString('utf8')
     const integrationScript = (await this.readSurferAssetFrom(assetsPath, 'integration.js')).toString('utf8')
     const setupHooks = `
-      try {
-        ${integrationScript}
-        register_message_listener();
-        window.__surfer_host_api = {
-          postMessage: (message) => window.parent.postMessage({
+      (() => {
+        const postHostMessage = (command, fields = {}) => {
+          window.parent.postMessage({
             source: 'ecos-surfer',
-            command: 'SurferHostMessage',
-            message,
-          }, '*'),
+            command,
+            ...fields,
+          }, '*');
         };
-        window.setTimeout(() => {
-          window.parent.postMessage({ source: 'ecos-surfer', command: 'SurferReady' }, '*');
-        }, 0);
-      } catch (err) {
-        window.parent.postMessage({
-          source: 'ecos-surfer',
-          command: 'SurferError',
-          message: err && err.message ? err.message : String(err),
-        }, '*');
-        throw err;
-      }
+        const postError = (err) => {
+          postHostMessage('SurferError', {
+            message: err && err.message ? err.message : String(err),
+          });
+        };
+
+        window.__surfer_host_api = {
+          postMessage: (message) => postHostMessage('SurferHostMessage', { message }),
+        };
+
+        try {
+          ${integrationScript}
+
+          let readySent = false;
+          const postReadyIfAvailable = (force = false) => {
+            if (typeof window.inject_message === 'function') {
+              if (force || !readySent) {
+                readySent = true;
+                postHostMessage('SurferReady');
+              }
+              return true;
+            }
+            return false;
+          };
+          const waitForSurferApi = (attempt = 0, forceNotify = false) => {
+            if (postReadyIfAvailable(forceNotify)) return;
+            if (attempt >= 400) {
+              postError(new Error('Surfer waveform viewer API did not become ready.'));
+              return;
+            }
+            window.setTimeout(() => waitForSurferApi(attempt + 1, forceNotify), 25);
+          };
+          const injectWhenReady = (message, attempt = 0) => {
+            if (typeof window.inject_message === 'function') {
+              window.inject_message(message);
+              return;
+            }
+            if (attempt >= 400) {
+              postError(new Error('Surfer waveform viewer API did not become ready for host command.'));
+              return;
+            }
+            window.setTimeout(() => injectWhenReady(message, attempt + 1), 25);
+          };
+          const surferModulePromise = import('./surfer.js');
+          const loadWaveformUrl = (url) => {
+            injectWhenReady(JSON.stringify({
+              LoadWaveformFileFromUrl: [
+                url,
+                {
+                  keep_unavailable: false,
+                  keep_variables: false,
+                },
+              ],
+            }));
+          };
+          const waitForWaveformLoaded = async (decoded, attempt = 0) => {
+            try {
+              const surferModule = await surferModulePromise;
+              if (await surferModule.waves_loaded()) {
+                const initialScope = String(decoded.initialScope || '').trim();
+                if (initialScope) {
+                  const scope = { strs: [initialScope] };
+                  injectWhenReady(JSON.stringify({ SetActiveScope: scope }));
+                  injectWhenReady(JSON.stringify({ AddScope: scope }));
+                }
+                postHostMessage('SurferWaveformLoaded', {
+                  loadId: decoded.loadId || '',
+                  name: decoded.name || '',
+                });
+                return;
+              }
+              if (attempt >= 600) {
+                throw new Error('Surfer did not finish loading the waveform.');
+              }
+              window.setTimeout(() => {
+                void waitForWaveformLoaded(decoded, attempt + 1);
+              }, 25);
+            } catch (err) {
+              postHostMessage('SurferError', {
+                loadId: decoded.loadId || '',
+                message: err && err.message ? err.message : String(err),
+              });
+            }
+          };
+          window.addEventListener('message', (event) => {
+            try {
+              const decoded = event.data || {};
+              switch (decoded.command) {
+                case 'Ping':
+                  waitForSurferApi(0, true);
+                  break;
+                case 'LoadUrl':
+                  loadWaveformUrl(decoded.url);
+                  void waitForWaveformLoaded(decoded);
+                  break;
+                case 'ToggleMenu':
+                  injectWhenReady(JSON.stringify('ToggleMenu'));
+                  break;
+                case 'InjectMessage':
+                  injectWhenReady(decoded.message);
+                  break;
+                default:
+                  console.debug('Unknown Surfer host command', decoded.command);
+                  break;
+              }
+            } catch (err) {
+              postError(err);
+            }
+          });
+
+          waitForSurferApi();
+        } catch (err) {
+          postError(err);
+          throw err;
+        }
+      })();
     `
 
     text = this.removeDefaultMessageListenerSetup(text)
+    text = this.awaitSurferWasmInit(text)
     text = this.disableSurferServiceWorker(text)
 
     if (text.includes('/*SURFER_SETUP_HOOKS*/')) {
@@ -163,9 +267,16 @@ export class SurferProtocolService {
     )
   }
 
+  private awaitSurferWasmInit(text: string): string {
+    return text.replace(
+      /(^|[;\s])([A-Za-z_$][\w$]*\(\s*(['"`])\.\/surfer_bg\.wasm\3\s*\);)/,
+      (_match, prefix: string, initCall: string) => `${prefix}await ${initCall}`,
+    )
+  }
+
   private disableSurferServiceWorker(text: string): string {
     return text.replace(
-      "navigator.serviceWorker.register('sw.js');",
+      /navigator\.serviceWorker\.register\((['"`])sw\.js\1\);?/g,
       "console.debug('Surfer service worker disabled inside ECOS Studio');",
     )
   }

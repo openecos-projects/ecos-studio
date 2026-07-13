@@ -43,6 +43,7 @@
         </div>
         <div v-if="activeWaveform" class="surfer-shell wave-surfer-shell">
           <iframe
+            :key="activeWaveform.path"
             ref="frameRef"
             class="surfer-frame"
             title="Surfer waveform viewer"
