@@ -13584,3 +13584,72 @@ fatal error: driver/difftest.h: No such file or directory
 
 - `ysyx-axi-cpu-socket-v1` 仍作为协议/contract 名称存在，这是 CPU socket 协议名，不再是 SoC 或用户需要提供的 RTL 顶层模块。
 - 内置 adapter 仍通过 `cpu_top_bridge.v` 接入公共 `cpu_top`，后续若要进一步精简，可把各 adapter 直接改写成 `cpu_top`，再移除 bridge 文件。
+
+# 第 228 次 开发
+
+## 开发目标
+
+完成上一轮留下的最终收敛：内置 CPU adapter 不再通过公共 `cpu_top_bridge.v` 间接暴露 `cpu_top`，而是在各自 adapter wrapper 文件中直接提供 SoC-facing `cpu_top` 模块。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/ecos_cv32e40p_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/ecos_cva6_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/darkriscv/ecos_darkriscv_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/femtorv32/ecos_femtorv32_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/ecos_ibex_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/picorv32/ecos_picorv32_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/scr1/ecos_scr1_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/ecos_serv_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/ecos_vexriscv_cpu_wrapper.v`
+  - 将底部 SoC-facing 模块直接改为 `cpu_top`，由该模块实例化本文件内的 `ecos_*_cpu_wrapper`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/darkriscv/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/femtorv32/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/picorv32/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/scr1/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/filelist.cpu.f`
+  - 移除 `../cpu_top_bridge.v` 条目，每个内置 adapter filelist 现在自己提供唯一 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/README.md`
+  - 文档改为 adapter-owned `cpu_top`，不再提 bridge。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+  - 增加回归：所有内置 sim-ready CPU filelist 不再依赖已删除 bridge，且解析后恰好一个文件定义 `cpu_top`。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 bridge 删除和 adapter 直接暴露 `cpu_top`。
+
+## 删除文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cpu_top_bridge.v`
+  - 删除独立 bridge 层。
+
+## 验证情况
+
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_contract.py test/test_catalog_compatibility.py test/test_examples.py`，30 项通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_engine_flow.py::test_prepare_keeps_soc_entries_without_compatibility_filtering test/test_engine_flow.py::test_prepare_does_not_generate_cpu_alias_for_cpu_top_filelist test/test_engine_flow.py::test_prepare_fails_when_frontend_workspace_has_duplicate_cpu_top test/test_rtl_review.py::test_yosys_precheck_inferrs_cpu_top_when_wrapper_is_outside_cpu_filelist`，4 项通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m fecompiler.cli.workspace catalog-check --json`，通过。
+- 已执行 `verilator --lint-only -Wno-fatal -f filelist.cpu.f --top-module cpu_top` 于 `picorv32` adapter，干净通过。
+- 已执行 `verilator --lint-only -Wno-fatal -f filelist.cpu.f --top-module cpu_top` 于 `scr1` adapter，返回码为 0；输出仅为第三方 SCR1 RTL 的既有宽度/CASE/COMBDLY 警告。
+- 已执行 `rg -n "cpu_top_bridge|ecos_internal_cpu_socket|ysyx_00000000" README.md fecompiler test examples -g '*.*'`，无残留。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、Bazel build、make 或 release 打包。
+- 本步骤执行前已按用户要求提交上一批修改；本步骤完成后准备继续提交。
+
+## 已知后续风险
+
+- `scr1` Verilator lint 仍有第三方 RTL 自身宽度和 incomplete case 警告；本次只验证新的 `cpu_top` 直连结构没有引入 lint fatal。
+- 其它大型第三方 adapter 未逐个跑完整 Verilator lint/sim；catalog/prepare 层已覆盖 9 个可创建组合的唯一 `cpu_top` 合同。
