@@ -22,6 +22,8 @@ struct Args {
     #[arg(long)]
     owner_type: Option<String>,
     #[arg(long)]
+    owner_id: Option<u64>,
+    #[arg(long)]
     shape_id: Option<u64>,
     #[arg(long)]
     bench_viewport: bool,
@@ -147,23 +149,41 @@ fn main() -> Result<()> {
         );
     }
     if let Some(owner_type) = args.owner_type {
-        let mut count = 0usize;
-        let mut first_shape = None;
-        for shape in db.snapshot().shapes() {
-            let Some(owner) = db.owner_for_shape(shape) else {
-                continue;
-            };
-            if ChipViewDb::owner_type_label(owner.owner_type) == owner_type {
-                count += 1;
-                first_shape.get_or_insert(shape.id);
-            }
-        }
-        println!("owner_type_query.{}={}", owner_type, count);
-        if let Some(shape_id) = first_shape {
+        if let Some(owner_id) = args.owner_id {
+            let shape_ids = owner_type_from_label(&owner_type)
+                .map(|owner_type| db.query_owner_shapes(owner_type, owner_id))
+                .unwrap_or_default();
             println!(
-                "owner_type_query.{}.first_shape_id={}",
-                owner_type, shape_id
+                "owner_query.{}.{}.shape_ids={}",
+                owner_type,
+                owner_id,
+                format_shape_ids(&shape_ids)
             );
+            println!(
+                "owner_query.{}.{}={}",
+                owner_type,
+                owner_id,
+                shape_ids.len()
+            );
+        } else {
+            let mut count = 0usize;
+            let mut first_shape = None;
+            for shape in db.snapshot().shapes() {
+                let Some(owner) = db.owner_for_shape(shape) else {
+                    continue;
+                };
+                if ChipViewDb::owner_type_label(owner.owner_type) == owner_type {
+                    count += 1;
+                    first_shape.get_or_insert(shape.id);
+                }
+            }
+            println!("owner_type_query.{}={}", owner_type, count);
+            if let Some(shape_id) = first_shape {
+                println!(
+                    "owner_type_query.{}.first_shape_id={}",
+                    owner_type, shape_id
+                );
+            }
         }
     }
     if let Some(shape_id) = args.shape_id {
@@ -534,6 +554,22 @@ fn typed_name_query_json(kind: &str, name: &str, shape_ids: Vec<ShapeId>) -> Val
     })
 }
 
+fn owner_type_from_label(label: &str) -> Option<OwnerType> {
+    (0..=u8::MAX).find_map(|raw| {
+        let owner_type = OwnerType::from_raw(raw)?;
+        (ChipViewDb::owner_type_label(raw) == label).then_some(owner_type)
+    })
+}
+
+fn owner_query_json(owner_type: &str, owner_id: u64, shape_ids: Vec<ShapeId>) -> Value {
+    json!({
+        "owner_type": owner_type,
+        "owner_id": owner_id,
+        "hits": shape_ids.len(),
+        "shape_ids": shape_ids,
+    })
+}
+
 fn print_json(
     args: &Args,
     db: &ChipViewDb,
@@ -593,6 +629,14 @@ fn print_json(
             .instance_name
             .as_ref()
             .map(|name| typed_name_query_json("instance", name, query_instance_name(db, name))),
+        "owner_query": args.owner_type.as_ref().and_then(|owner_type| {
+            args.owner_id.map(|owner_id| {
+                let shape_ids = owner_type_from_label(owner_type)
+                    .map(|owner_type| db.query_owner_shapes(owner_type, owner_id))
+                    .unwrap_or_default();
+                owner_query_json(owner_type, owner_id, shape_ids)
+            })
+        }),
         "shape_query": args.shape_id.map(|shape_id| {
             shape_query_json(
                 shape_id,
@@ -877,5 +921,28 @@ mod tests {
         assert_eq!(value["name"], "clk");
         assert_eq!(value["hits"], 3);
         assert_eq!(value["shape_ids"], json!([7, 8, 9]));
+    }
+
+    #[test]
+    fn owner_type_from_label_accepts_known_owner_labels() {
+        assert_eq!(
+            owner_type_from_label("net_wire_segment"),
+            Some(OwnerType::NetWireSegment)
+        );
+        assert_eq!(
+            owner_type_from_label("instance_bbox"),
+            Some(OwnerType::InstanceBBox)
+        );
+        assert_eq!(owner_type_from_label("missing"), None);
+    }
+
+    #[test]
+    fn owner_query_json_reports_owner_type_id_and_shape_ids() {
+        let value = owner_query_json("region", 7, vec![10, 20]);
+
+        assert_eq!(value["owner_type"], "region");
+        assert_eq!(value["owner_id"], 7);
+        assert_eq!(value["hits"], 2);
+        assert_eq!(value["shape_ids"], json!([10, 20]));
     }
 }
