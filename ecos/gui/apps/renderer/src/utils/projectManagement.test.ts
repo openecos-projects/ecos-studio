@@ -9,7 +9,9 @@ import {
   parseWorkspaceFlowStateMap,
   archiveWorkspaceInManifest,
   deleteWorkspaceFromManifest,
+  setQorBaselineInManifest,
   nextWorkspaceId,
+  parseProjectManifest,
   registerWorkspaceInManifest,
   serializeProjectManifest,
   type ProjectWorkspaceManifest,
@@ -613,6 +615,83 @@ describe('project management model', () => {
     expect(legalCompare?.missingCount).toBe(2)
   })
 
+  it('uses standard qor_metrics records as Step Analysis metric source when available', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.workspaces.push({
+      workspace_id: 'baseline',
+      name: 'baseline',
+      workspace_path: '/projects/gcd/baseline',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:30:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      {
+        baseline: {
+          stepMetricTexts: {
+            Route: JSON.stringify({
+              schema_version: 1,
+              tool: 'ecc',
+              step: 'Route',
+              metrics: [
+                {
+                  name: 'route_wirelength',
+                  display_name: 'Route Wirelength',
+                  value: 5198.943,
+                  unit: 'um',
+                  dimension: 'routability_physical',
+                  polarity: 'lower_is_better',
+                },
+                {
+                  name: 'route_via_count',
+                  display_name: 'Route Via Count',
+                  value: 1470,
+                  unit: 'count',
+                  dimension: 'routability_physical',
+                  polarity: 'lower_is_better',
+                },
+              ],
+            }),
+          },
+        },
+      },
+    )
+
+    const routeCompare = model.stepCompareSummaries.find(
+      (summary) => summary.step === 'Route',
+    )
+    expect(routeCompare?.metrics.map((metric) => metric.id)).toEqual([
+      'route_wirelength',
+      'route_via_count',
+    ])
+    expect(routeCompare?.metrics.map((metric) => metric.label)).toEqual([
+      'Route Wirelength',
+      'Route Via Count',
+    ])
+    expect(routeCompare?.metrics[0]?.points).toEqual([
+      expect.objectContaining({
+        workspaceId: 'baseline',
+        value: 5198.943,
+        label: '5198.943',
+      }),
+    ])
+  })
+
   it('exposes QoR trend summary from step analysis metrics only', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
@@ -665,6 +744,30 @@ describe('project management model', () => {
             Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
             DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
           },
+          stepSummaryTexts: {
+            Route: JSON.stringify({
+              schema_version: 1,
+              status: 'green',
+              metric_count: 2,
+              blocking_issues: [],
+            }),
+          },
+          stepHotspotTexts: {
+            Route: JSON.stringify({
+              schema_version: 1,
+              hotspots: [
+                {
+                  kind: 'routing_overflow',
+                  severity: 'critical',
+                  metric: 'route_la_total_overflow',
+                  display_name: 'Route LA Overflow',
+                  value: 1,
+                  source_file: 'route_ecc/analysis/qor_metrics.json',
+                  description: 'Route overflow is present.',
+                },
+              ],
+            }),
+          },
         },
         ws_0002: {
           files: {
@@ -688,6 +791,102 @@ describe('project management model', () => {
     })
     expect(model.qorTrendSummary.regressions).toContainEqual(
       expect.objectContaining({ metricName: 'drc_count', priority: 'P0' }),
+    )
+    expect(
+      model.qorTrendSummary.unsupportedModules.map((module) => module.id),
+    ).not.toContain('qor_summary_standard_output')
+    expect(
+      model.qorTrendSummary.unsupportedModules.map((module) => module.id),
+    ).not.toContain('qor_hotspots')
+    expect(model.qorTrendSummary.workspaces[0]?.hotspots).toHaveLength(1)
+  })
+
+  it('uses project QoR baseline metadata for trend deltas', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    const baseWorkspace = {
+      workspace_path: '',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth' as const,
+      end_step: 'Harden' as const,
+      status: 'success' as const,
+      updated_at: '2026-07-02T08:30:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    }
+    manifest.workspaces.push(
+      {
+        ...baseWorkspace,
+        workspace_id: 'baseline',
+        name: 'baseline',
+        workspace_path: '/projects/gcd/baseline',
+        created_at: '2026-07-02T08:00:00.000Z',
+      },
+      {
+        ...baseWorkspace,
+        workspace_id: 'ws_0002',
+        name: 'trial_a',
+        workspace_path: '/projects/gcd/ws_0002',
+        source_workspace_id: 'baseline',
+        branch_from: { source_workspace_id: 'baseline', source_step: 'Floor' },
+        start_step: 'Fanout',
+        created_at: '2026-07-02T09:00:00.000Z',
+      },
+      {
+        ...baseWorkspace,
+        workspace_id: 'ws_0003',
+        name: 'trial_b',
+        workspace_path: '/projects/gcd/ws_0003',
+        source_workspace_id: 'ws_0002',
+        branch_from: { source_workspace_id: 'ws_0002', source_step: 'Place' },
+        start_step: 'CTS',
+        created_at: '2026-07-02T10:00:00.000Z',
+      },
+    )
+    manifest.qor_baseline = {
+      workspace_id: 'baseline',
+      reason: 'Golden QoR reference',
+    }
+
+    const parsed = parseProjectManifest(serializeProjectManifest(manifest))
+    const model = buildProjectManagementProject(recentProject, parsed, {}, {
+      baseline: {
+        stepMetricTexts: {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
+        },
+      },
+      ws_0002: {
+        stepMetricTexts: {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5400, num_via: 1600 }),
+        },
+      },
+      ws_0003: {
+        stepMetricTexts: {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5250, num_via: 1520 }),
+        },
+      },
+    })
+
+    expect(parsed.qor_baseline).toEqual({
+      workspace_id: 'baseline',
+      reason: 'Golden QoR reference',
+    })
+    expect(model.qorTrendSummary.baselineWorkspaceId).toBe('baseline')
+    expect(
+      model.qorTrendSummary.unsupportedModules.map((module) => module.id),
+    ).not.toContain('golden_baseline')
+    expect(model.qorTrendSummary.regressions).toContainEqual(
+      expect.objectContaining({
+        workspaceId: 'ws_0003',
+        baselineWorkspaceId: 'baseline',
+        metricName: 'route_wirelength',
+        absoluteDelta: 50,
+      }),
     )
   })
 
@@ -1351,6 +1550,7 @@ describe('project management model', () => {
       },
     )
     manifest.best_workspace = { workspace_id: 'ws_0002', reason: 'experimental' }
+    manifest.qor_baseline = { workspace_id: 'ws_0002', reason: 'qor reference' }
 
     const archived = archiveWorkspaceInManifest(
       manifest,
@@ -1362,6 +1562,7 @@ describe('project management model', () => {
         ?.status,
     ).toBe('archived')
     expect(archived.best_workspace).toBeNull()
+    expect(archived.qor_baseline).toBeNull()
 
     const deleted = deleteWorkspaceFromManifest(
       archived,
@@ -1372,5 +1573,41 @@ describe('project management model', () => {
       'ws_0001',
     ])
     expect(deleted.workspaces[0].branch_from).toBeNull()
+  })
+
+  it('sets the project QoR baseline to an existing workspace', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    manifest.workspaces.push({
+      workspace_id: 'ws_0001',
+      name: 'baseline',
+      workspace_path: '/projects/gcd/ws_0001',
+      source_workspace_id: null,
+      branch_from: null,
+      start_step: 'Synth',
+      end_step: 'Harden',
+      status: 'success',
+      created_at: '2026-07-02T08:00:00.000Z',
+      updated_at: '2026-07-02T08:00:00.000Z',
+      parameter_patch: {},
+      metrics_summary: {},
+      step_metrics: {},
+    })
+
+    const updated = setQorBaselineInManifest(
+      manifest,
+      'ws_0001',
+      'selected in QoR trend',
+      '2026-07-02T10:00:00.000Z',
+    )
+
+    expect(updated.qor_baseline).toEqual({
+      workspace_id: 'ws_0001',
+      reason: 'selected in QoR trend',
+    })
+    expect(updated.updated_at).toBe('2026-07-02T10:00:00.000Z')
   })
 })
