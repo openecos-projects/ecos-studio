@@ -20,6 +20,8 @@ describe('FrontendProjectWizard catalog ownership', () => {
 
   it('keeps the custom cpu_top contract discoverable from the CPU choice', () => {
     expect(wizardSource).toContain("selectedCoreId === 'custom-filelist'")
+    expect(wizardSource).toContain("core.id === 'custom-filelist'")
+    expect(wizardSource).toContain("? 'custom-filelist'")
     expect(wizardSource).toContain('scrollToCpuTopContract()')
     expect(wizardSource).toContain('fixed ECOS SoC instantiates it directly')
   })

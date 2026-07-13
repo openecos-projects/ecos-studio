@@ -13414,3 +13414,38 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 内置 adapter 的 bridge 均使用相同历史 socket；catalog/prepare 已验证其 filelist 都提供唯一 `cpu_top`，但每个 CPU 的完整工具链和软件仿真仍应在后续 CI 中分项验证。
 - 已存在的旧 workspace 仍可能保存 `cpu_wrapper_generation` 等历史字段；新 workspace 不再写入，prepare 也不再解释这些字段。
+
+# 第 224 次 开发
+
+## 开发目标
+
+让 GUI 的 CPU 选择与单一 `cpu_top` 用户流程一致：无论 catalog 中还保留多少内置 CPU 元数据，创建项目时用户只看到并只能选择 `My CPU Top`。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - `visibleCores` 只保留 `custom-filelist`，不再把内置 CPU catalog 条目渲染为用户可选卡片。
+  - catalog 加载后总是将 CPU 选择归一化为 `custom-filelist`，避免旧 workspace 或旧 runtime 的 `standard-cpu-filelist` 保留为不可见选择。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 增加对单一 `custom-filelist` 可见性和加载时归一化逻辑的源码回归断言。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录 GUI CPU 选项收敛和本地 runtime 状态。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 项通过。
+- 已检查本机已安装 runtime：`/home/luyoung/.local/share/ecos-studio/tools/ecc-fe/latest/fecompiler/catalog/builtin/cores.json` 仍包含旧的 `standard-cpu-filelist`，确认其尚未更新到本次 ECC-FE release。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包或资源发布打包。
+- 本机没有 `gh` CLI，未通过命令行读取 GitHub Actions workflow 状态。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 源码修改在新的 GUI bundle 生效后会只展示一个 CPU 选项；已安装桌面应用若仍加载旧 bundle 或旧 ECC-FE runtime，需完成相应更新后才会在运行中的 GUI 中可见。

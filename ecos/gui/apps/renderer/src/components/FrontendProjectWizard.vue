@@ -604,7 +604,7 @@ const visibleSocHarnesses = computed(() =>
   sortedCatalogEntries(catalog.value.soc_harnesses),
 )
 const visibleCores = computed(() =>
-  sortedCatalogEntries(catalog.value.cores),
+  sortedCatalogEntries(catalog.value.cores.filter((core) => core.id === 'custom-filelist')),
 )
 const visibleToolchains = computed(() =>
   sortedCatalogEntries(catalog.value.toolchains),
@@ -770,7 +770,9 @@ async function refreshValidation(): Promise<void> {
 }
 
 function applyCatalogDefaults(nextCatalog: FrontendCatalogPayload): void {
-  selectedCoreId.value = selectedCoreId.value || nextCatalog.defaults.core_id || nextCatalog.cores[0]?.id || ''
+  selectedCoreId.value = nextCatalog.cores.some((core) => core.id === 'custom-filelist')
+    ? 'custom-filelist'
+    : ''
   selectedSocHarnessId.value = selectedSocHarnessId.value || nextCatalog.defaults.soc_harness_id || nextCatalog.soc_harnesses[0]?.id || ''
   selectedToolchainId.value = selectedToolchainId.value || nextCatalog.defaults.toolchain_id || nextCatalog.toolchains[0]?.id || ''
   selectedTestSuiteId.value = selectedTestSuiteId.value || nextCatalog.defaults.test_suite_id || nextCatalog.test_suites[0]?.id || ''
