@@ -13739,3 +13739,41 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 当前已打开的 Electron dev 主进程不会自动加载本次 main/runtime 代码修改；需要用户重启自己的 `pnpm run dev` 会话后再测 GUI。
 - packaged 版本仍应使用 Resource Manager 安装的 `tool:ecc-fe`；本次自动发现只在 Electron main 传入非 packaged search roots 时启用。
+
+# 第 231 次 开发
+
+## 开发目标
+
+修复 `test0713b` 已生成 `wave.vcd` 但 GUI Wave 页面无法打开的问题：Electron workspace detail 没有把 `sim_verilator/report/cases.json` 中的 `cases[].wave` 返回给 renderer，导致前端 Wave 列表拿不到波形路径。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/workspaceResourceService.ts`
+  - `frontend_detail` 改为读取 frontend step 的 `report/cases.json`。
+  - 将解析到的 `cases` 数组返回给 renderer，使 `FrontendWorkspaceView` 能从 `cases[].wave` 构造 Wave 列表。
+  - `cases.json` 缺失时返回空数组，不把未运行 sim 的工程误判为 detail 不可用。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/workspaceResourceService.test.ts`
+  - 增加回归测试：`frontend_detail` 能返回 simulation case 的 `wave.vcd` 路径。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GUI 波形加载数据链路修复。
+
+## 验证情况
+
+- 已确认 `/home/luyoung/test0713b/sim_verilator/output/cases/add.soc/wave.vcd` 存在且为有效 Verilator VCD。
+- 已确认 `/home/luyoung/test0713b/sim_verilator/report/cases.json` 中包含 `cases[0].wave` 指向该波形文件。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/workspaceResourceService.test.ts`，19 项通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际 sim。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前已打开的 Electron dev 主进程需要重启后才能加载本次 `workspaceResourceService.ts` 修改。
+- 如果 Wave 页面仍显示 Surfer ready/loading 相关错误，下一步应检查 `ecos-surfer://viewer/waveform/...` 的 HEAD 请求和 Surfer iframe 初始化时序。

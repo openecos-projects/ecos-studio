@@ -371,17 +371,30 @@ export class WorkspaceResourceService {
       case 'sta':
         return stepInfo({ sta: nestedResourcePaths(step.resources.report.sta) })
       case 'frontend_detail':
-        return stepInfo({
-          step: step.name,
-          tool: step.tool,
-          state: step.state,
-          runtime: step.runtime,
-          directory: step.directory,
-          log: step.resources.log.file?.path,
-          report: step.resources.report.step?.path,
-          subflow: step.resources.subflow.path?.path,
-        })
+        return await this.buildFrontendDetailInfo(step)
     }
+  }
+
+  private async buildFrontendDetailInfo(step: WorkspaceStepResource): Promise<StepInfoBuildResult> {
+    const cases = await this.readFrontendCases(step.resources.report.cases?.path)
+    return stepInfo({
+      step: step.name,
+      tool: step.tool,
+      state: step.state,
+      runtime: step.runtime,
+      directory: step.directory,
+      log: step.resources.log.file?.path,
+      report: step.resources.report.step?.path,
+      subflow: step.resources.subflow.path?.path,
+      cases,
+    })
+  }
+
+  private async readFrontendCases(path: string | undefined): Promise<unknown[]> {
+    if (!path) return []
+    const report = await this.readJsonOrNull(path)
+    const cases = report?.cases
+    return Array.isArray(cases) ? cases : []
   }
 
   private async buildDensityMapInfo(step: WorkspaceStepResource): Promise<StepInfoBuildResult> {
