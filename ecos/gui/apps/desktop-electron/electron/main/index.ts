@@ -118,6 +118,7 @@ function getDesktopServices() {
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
       },
+      frontendRootSearchRoots: app.isPackaged ? [] : [process.cwd(), app.getAppPath()],
     }),
   })
   const workspaceService = new WorkspaceService({

@@ -383,15 +383,18 @@ describe('FrontendCliAdapter', () => {
     await expect(listPromise).resolves.toMatchObject({ response: 'success' })
   })
 
-  it('only overrides the installed frontend root when a development root is explicit', async () => {
+  it('uses the development root CLI ahead of the installed Resource Manager CLI', async () => {
     const tempDir = createTempDir()
     const installedRoot = join(tempDir, 'installed-ecc-fe')
     const developmentRoot = join(tempDir, 'development-ecc-fe')
     const installedCli = join(installedRoot, 'bin', 'ecc-fe')
+    const developmentCli = join(developmentRoot, 'bin', 'ecc-fe')
     mkdirSync(join(installedRoot, 'fecompiler'), { recursive: true })
     mkdirSync(join(installedRoot, 'bin'), { recursive: true })
     mkdirSync(join(developmentRoot, 'fecompiler'), { recursive: true })
+    mkdirSync(join(developmentRoot, 'bin'), { recursive: true })
     writeFileSync(installedCli, '')
+    writeFileSync(developmentCli, '')
     const harness = createSpawnHarness()
     const adapter = new FrontendCliAdapter({
       envProvider: async () => ({
@@ -406,6 +409,7 @@ describe('FrontendCliAdapter', () => {
     const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
 
     await vi.waitFor(() => expect(harness.calls).toHaveLength(1))
+    expect(harness.calls[0].command).toBe(developmentCli)
     expect(harness.options[0].cwd).toBe(developmentRoot)
     expect(harness.options[0].env?.ECOS_FE_COMPILER_ROOT).toBe(developmentRoot)
 

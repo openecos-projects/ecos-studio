@@ -272,6 +272,19 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
   return '(not found)'
 }
 
+function resolveFrontendRootCli(frontendRoot: string): string {
+  const binDir = join(frontendRoot, 'bin')
+  const candidates = process.platform === 'win32'
+    ? ['ecc-fe.cmd', 'ecc-fe.exe', 'ecc-fe']
+    : ['ecc-fe']
+
+  for (const candidate of candidates) {
+    const fullPath = join(binDir, candidate)
+    if (existsSync(fullPath)) return fullPath
+  }
+  return ''
+}
+
 function normalizeCreateData(data: Record<string, unknown>): Record<string, unknown> {
   const parameters = readRecord(data.parameters)
   const variant = readString(data.soc_variant)
@@ -540,21 +553,26 @@ export class FrontendCliAdapter {
     const baseEnv = this.envProvider ? await this.resolveProvidedEnv() : this.env
     const frontendRoot = this.frontendRoot
       ?? readString(baseEnv.ECOS_FE_COMPILER_ROOT).trim()
+    const hasFrontendRoot = Boolean(frontendRoot && existsSync(join(frontendRoot, 'fecompiler')))
+    const frontendRootCommand = !this.hasExplicitCommand && this.frontendRoot && hasFrontendRoot
+      ? resolveFrontendRootCli(frontendRoot)
+      : ''
     const runtimeCommandOverride = readString(baseEnv.ECOS_FE_CLI).trim()
-    const command = !this.hasExplicitCommand && runtimeCommandOverride
+    const command = frontendRootCommand
+      || (!this.hasExplicitCommand && runtimeCommandOverride
       ? runtimeCommandOverride
-      : this.command
-    const moduleArgs = !this.hasExplicitCommand && runtimeCommandOverride
+      : this.command)
+    const moduleArgs = !this.hasExplicitCommand && runtimeCommandOverride && !frontendRootCommand
       ? defaultModuleArgsForCommand(command)
       : this.moduleArgs
     const lookupEnv = frontendRuntimeEnv(baseEnv, frontendRoot, { includePythonPath: false })
     const resolvedCommand = resolveCommandFromPath(command, lookupEnv)
-    const hasFrontendRoot = Boolean(frontendRoot && existsSync(join(frontendRoot, 'fecompiler')))
     const shouldUsePythonFallback = !this.hasExplicitCommand
-      && !runtimeCommandOverride
-      && command === DEFAULT_FRONTEND_CLI_COMMAND
-      && resolvedCommand === '(not found)'
       && hasFrontendRoot
+      && (
+        (!runtimeCommandOverride && command === DEFAULT_FRONTEND_CLI_COMMAND && resolvedCommand === '(not found)')
+        || (Boolean(this.frontendRoot) && !frontendRootCommand)
+      )
     const env = frontendRuntimeEnv(baseEnv, frontendRoot, {
       includePythonPath: shouldUsePythonFallback || isPythonCommand(command),
     })

@@ -13694,3 +13694,48 @@ fatal error: driver/difftest.h: No such file or directory
 ## 已知后续风险
 
 - 用户当前 GUI/dev 会话若仍使用旧的已安装 ecc-fe runner，需要刷新到包含本次修改的代码或重新走资源发布/安装后，`test0713b` 才会在 GUI 中应用同一修复。
+
+# 第 230 次 开发
+
+## 开发目标
+
+继续排查 `test0713b` sim 仍失败的问题，修复 GUI dev runtime 没有使用本地 `ecc-fe` 源码、而是继续使用 Resource Manager 旧安装包的问题。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendAwareRuntimeAdapter.ts`
+  - 增加 `ecc-fe` 开发源码根自动发现逻辑，可从 `pnpm run dev` 的 `cwd` / `appPath` 向上找到 `/home/luyoung/ecos-studio/ecc-fe`。
+  - 保留 `ECOS_FE_DEV_ROOT` 显式覆盖能力，显式环境变量优先于自动发现。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/main/index.ts`
+  - 非 packaged 开发模式下，把 `process.cwd()` 和 `app.getAppPath()` 作为 frontend source search roots 传给 runtime adapter。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.ts`
+  - 当存在 frontend source root 时，优先执行 source root 下的 `bin/ecc-fe`，避免 Resource Manager 旧安装包的 `bin/ecc-fe` 把旧目录放到 `PYTHONPATH` 最前。
+  - 若 source root 没有 `bin/ecc-fe`，仍可回退到 Python module 模式并注入源码 `PYTHONPATH`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendAwareRuntimeAdapter.test.ts`
+  - 增加自动发现 repo 内 `ecc-fe` 的测试，以及 `ECOS_FE_DEV_ROOT` 优先级测试。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.test.ts`
+  - 增加开发源码 CLI 优先于 Resource Manager 安装 CLI 的行为断言。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GUI dev runtime 根因和修复。
+
+## 验证情况
+
+- 已检查 `/home/luyoung/test0713b/sim_verilator/log/log.txt` 最新日志，仍在编译 `/home/luyoung/.local/share/ecos-studio/tools/ecc-fe-soc-ysyx-am/latest/driver/difftest.cpp` 并访问不存在的 `...cl3_top...` 层级。
+- 已检查 `/home/luyoung/.local/share/ecos-studio/tools/ecc-fe/latest/fecompiler/tools/verilator/runner.py`，确认本地安装的 `tool:ecc-fe` 仍是旧版，不包含 `_DIFFTEST_UNSUPPORTED_CPU_IDS` / `difftest_stub` 替换逻辑。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron exec vitest run electron/services/frontendCliAdapter.test.ts electron/services/frontendAwareRuntimeAdapter.test.ts`，12 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/desktop-electron run typecheck`，通过。
+- 已用源码 runner 直接解析 `/home/luyoung/test0713b/home/parameters.json`，确认新逻辑会使用 `difftest_stub.cpp` 且运行参数只保留 `["--max-cycles", "50000000"]`。
+
+## 未执行项
+
+- 按项目约束，未执行实际 sim、make、pnpm build/dev、GUI 启动、Electron 打包或 release 打包。
+- 本次未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前已打开的 Electron dev 主进程不会自动加载本次 main/runtime 代码修改；需要用户重启自己的 `pnpm run dev` 会话后再测 GUI。
+- packaged 版本仍应使用 Resource Manager 安装的 `tool:ecc-fe`；本次自动发现只在 Electron main 传入非 packaged search roots 时启用。
