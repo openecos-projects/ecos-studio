@@ -166,7 +166,7 @@
                 <div v-else class="space-y-8">
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
-                      <label class="text-sm font-semibold text-(--text-primary)">CPU Source <span class="text-red-500">*</span></label>
+                      <label class="text-sm font-semibold text-(--text-primary)">CPU <span class="text-red-500">*</span></label>
                       <span class="text-xs text-(--text-secondary)">{{ visibleCores.length }} options</span>
                     </div>
                     <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -184,12 +184,18 @@
 
                   <PathPicker
                     v-if="selectedCore?.requires_filelist !== false"
-                    label="CPU RTL Filelist"
+                    label="CPU Source Filelist"
                     required
                     icon="ri-file-list-3-line"
                     :model-value="config.parameters.cpu_filelist"
                     @browse="selectCpuFilelist"
                   />
+                  <p
+                    v-if="selectedCoreId === 'custom-filelist'"
+                    class="-mt-5 text-xs leading-relaxed text-(--text-secondary)"
+                  >
+                    Include all CPU RTL sources in this filelist. They must define exactly one <code>cpu_top</code> module; the fixed ECOS SoC instantiates it directly, and the source filename is unrestricted.
+                  </p>
 
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
@@ -554,7 +560,8 @@ const requiredCpuTopPortContract = computed(() => normalizeCpuPortContract(
   || selectedCore.value?.required_cpu_top_port_contract,
 ))
 const showCpuTopContract = computed(() =>
-  Boolean(requiredCpuTopModule.value && requiredCpuTopPortContract.value.length),
+  selectedCoreId.value === 'custom-filelist'
+  && Boolean(requiredCpuTopModule.value && requiredCpuTopPortContract.value.length),
 )
 const cpuTopExample = computed(() =>
   formatCpuTopModule(requiredCpuTopModule.value, requiredCpuTopPortContract.value),

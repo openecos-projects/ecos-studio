@@ -17,4 +17,10 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).toContain('required_cpu_reset_vector')
     expect(wizardSource).toContain('soc_bootloader_payload_link_base')
   })
+
+  it('keeps the custom cpu_top contract discoverable from the CPU choice', () => {
+    expect(wizardSource).toContain("selectedCoreId === 'custom-filelist'")
+    expect(wizardSource).toContain('scrollToCpuTopContract()')
+    expect(wizardSource).toContain('fixed ECOS SoC instantiates it directly')
+  })
 })

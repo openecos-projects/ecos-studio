@@ -13268,4 +13268,149 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 确定性 tar/gzip 格式会让首次新 workflow 生成的 latest 归档 SHA 与旧包不同；release 成功后 registry lock CI 必须提交新的静态 SHA/size，客户端才能安装新包。
 - GitHub Releases 不支持跨多个 tag 的原子事务；本次通过 workflow concurrency、并行发布和 metadata-last 将窗口缩短并保持 fail-closed，但不能从平台层面完全消除窗口。
+
+# 第 222 次 开发
+
+## 开发目标
+
+恢复并固化用户自定义 CPU 的单一入口：用户只提供符合固定接口的 `cpu_top` 顶层，ECOS 自动生成 `ysyx_00000000` SoC 兼容模块；向导必须在选择该入口后展示并定位到完整接口模板。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - 将 `custom-filelist` 的用户可见名称改为 `My CPU Top`，明确 filelist 仅用于列出 CPU RTL 依赖，且必须恰好定义一个 `cpu_top`。
+  - 明确 SoC-facing adapter 由 ECOS 自动生成，不向用户暴露 `ysyx_00000000` 作为输入选择。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/registry.py`
+  - 将 fallback CPU wrapper 显示名称同步为 `My CPU Top`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 明确用户不应提供 `ysyx_00000000`；该模块由 prepare 自动生成并连接至 SoC。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 增加 catalog 回归测试，确认仅暴露 `My CPU Top` 与 `cpu_top` 契约，不出现 `standard-cpu-filelist`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 将用户 CPU 入口的 filelist 说明改为 CPU source filelist，并明确该 filelist 可包含依赖 RTL，但必须有且只有一个 `cpu_top` 顶层。
+  - 将接口模板限制为 `custom-filelist` 选择时展示；现有点击后滚动到模板的行为继续保留。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 增加向导回归测试，确认自定义 CPU 选择仍会定位并展示 `cpu_top` 契约。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次用户 CPU 入口与接口展示修复。
+
+## 验证情况
+
+- 已执行 `/home/luyoung/ecos-studio/ecc-fe` 中的 `python3 -m pytest test/test_catalog_compatibility.py`，17 个测试全部通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 个测试全部通过。
+- 已执行 JSON 解析和 `git diff --check`，通过。
+- 已确认当前安装 runtime `/home/luyoung/.local/share/ecos-studio/tools/ecc-fe/latest` 仍是包含 `standard-cpu-filelist` 的旧 release；源码修复须经 ECC-FE release 与 Resource Manager 更新后才会进入实际 GUI。
+
+## 未执行项
+
+- 按项目约束，未执行 make、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包命令。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 已存在的旧 workspace 若持有 `standard-cpu-filelist` ID，内部兼容分支仍可读取其历史配置；该 ID 不再由新的 catalog 或 GUI 暴露。
+- 在新的 ECC-FE release 发布并安装前，桌面端将继续使用旧 runtime，因此用户界面会暂时保留旧的双 filelist 选项。
 - 本地按约束未实际生成大体积 CPU RTL release；归档内容契约仍会在远端 package job 中由 `check-release-archives.sh` 验证。
+
+# 第 223 次 开发
+
+## 开发目标
+
+统一 ECOS 前端 CPU/SoC 架构：固定 SoC 只实例化 `cpu_top`；用户 CPU 直接提供该模块，内置 CPU 则在资源内部转换为该模块。删除 prepare 阶段生成、筛选和校验 `ysyx_00000000` 的旧兼容层，保留 GUI 中可发现的固定 CPU 接口。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cpu_top_bridge.v`
+  - 为随 ECC-FE 发布的旧内置 adapter 提供私有 bridge：将其历史 `ysyx_00000000` socket 映射为唯一公开的 `cpu_top` 接口。
+  - 桥接 timer/external IRQ 与 AXI master 通道，未使用的 legacy slave 通道固定为无效输入；用户 CPU filelist 不引用此文件。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 删除动态生成 `ysyx_00000000`、筛选 SoC placeholder 和 adapter filelist 过滤逻辑。
+  - 将 prepare 收敛为按顺序合并 CPU 与 SoC filelist；ECOS SoC workspace 仅验证合并结果中恰有一个 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/filelist.soc.f`
+  - 移除已废弃的 `ysyx_00000000.sv`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/perip/easy_box/easy_box_core_wrapper.v`
+  - 固定 SoC CPU socket 改为直接实例化 `cpu_top`，保留 UART/GOOD-BAD TRAP 行为。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/scripts/gen_filelists.sh`
+  - 生成 SoC filelist 时不再写入旧 compatibility 模块。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/ysyx_00000000.sv`
+  - 删除不再由 SoC 使用的旧 CPU adapter。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/builtin/cores.json`
+  - `custom-filelist` 的公开 top 从旧 alias 统一为 `cpu_top`，删除 `standard_alias_v1` 生成元数据；内置 CPU 的公开 top 同步为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - 移除旧 alias/generation/adapter-filelist 的 normalized 字段和 fallback，用户 CPU top 只解析为 `cpu_top`。
+  - 拒绝内置 CPU 的 user filelist override，避免将两套 CPU RTL 静默混合；用户提供 RTL 时必须选择 `My CPU Top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/contract.py`
+  - 静态 catalog 检查要求 sim-ready 内置 CPU filelist 直接提供 `cpu_top`，由 bridge 满足该约束。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace_typer.py`
+  - 新 workspace 与 CLI 不再接收或写入已废弃的 `cpu_adapter_filelist`、`cpu_standard_top` 与 `cpu_wrapper_generation` 参数。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/data/workspace.py`
+  - 从新 workspace 的持久化和参数 override schema 中删除旧 adapter/generation 字段；历史 JSON 中这些字段将被忽略。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/registry.py`
+  - CPU wrapper metadata 的默认 top 统一为 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/rtl_inputs.py`
+  - source fingerprint 跟踪实际的 `required_cpu_top_module`，不再跟踪废弃 generation 或 adapter filelist 参数。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/darkriscv/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/femtorv32/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/picorv32/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/scr1/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/catalog.json`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/catalog.json`
+  - 内置 CPU 对外声明统一为 `cpu_top`，原 adapter top 保持为其内部实现细节。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/darkriscv/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/femtorv32/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/picorv32/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/scr1/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/filelist.cpu.f`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/filelist.cpu.f`
+  - 将 private bridge 加入内置 CPU filelist，确保每个可创建组合恰有一个 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cpu/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/SoC/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/README.md`
+  - 文档统一说明 `cpu_top` 为 SoC-facing contract，旧 alias 只在内置 adapter 私有实现中存在。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_contract.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_data_workspace.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 用 `cpu_top` 直接合并和重复 top 拒绝用例替换旧 alias 生成/过滤用例，并覆盖所有可创建 catalog 组合和内置 CPU filelist override 拒绝路径。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 自定义 CPU 选择继续自动滚动到固定接口模板，并明确固定 SoC 直接实例化 `cpu_top`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 同步验证向导中的直接实例化说明。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CPU/SoC 单一入口重构。
+
+## 验证情况
+
+- 已执行 46 项定向回归：data workspace、catalog contract、catalog compatibility，以及 prepare 的 stale manifest、普通合并、无过滤合并、无生成 wrapper、重复 `cpu_top` 拒绝和内置 CPU filelist override 拒绝路径，全部通过。
+- 已执行 `verilator --lint-only -Wno-fatal` 检查 PicoRV32 RTL、adapter 与 `cpu_top_bridge.v`；无错误。上游 `picorv32.v` 报告多个顶层模块提示，属于其 source 文件固有结构。
+- 已执行 Python bytecode syntax check、catalog JSON 解析、GUI `FrontendProjectWizard.catalog.test.ts`（3 项通过）与两处 `git diff --check`，全部通过。
+
+## 未执行项
+
+- 按项目约束，未执行 make、Bazel build、pnpm build/dev、GUI 启动、Electron 打包或 release 打包。
+- 未执行所有内置 CPU adapter 的完整 elab/lint/sim；本次只对 PicoRV32 bridge 做真实 Verilator 端口检查。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 内置 adapter 的 bridge 均使用相同历史 socket；catalog/prepare 已验证其 filelist 都提供唯一 `cpu_top`，但每个 CPU 的完整工具链和软件仿真仍应在后续 CI 中分项验证。
+- 已存在的旧 workspace 仍可能保存 `cpu_wrapper_generation` 等历史字段；新 workspace 不再写入，prepare 也不再解释这些字段。
