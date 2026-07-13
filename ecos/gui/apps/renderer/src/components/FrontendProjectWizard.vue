@@ -68,7 +68,7 @@
           </div>
         </aside>
 
-        <main class="relative flex min-w-0 flex-1 flex-col bg-transparent">
+        <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
           <div ref="wizardScrollRef" class="custom-scrollbar flex-1 overflow-y-auto p-8 md:p-12">
             <Transition name="fade-slide" mode="out-in">
               <section v-if="currentStep === 1" key="step1" class="mx-auto w-full max-w-2xl">
@@ -191,7 +191,7 @@
                     @browse="selectCpuFilelist"
                   />
                   <p
-                    v-if="selectedCoreId === 'custom-filelist'"
+                    v-if="selectedCoreId === CUSTOM_FILELIST_ID"
                     class="-mt-5 text-xs leading-relaxed text-(--text-secondary)"
                   >
                     Include all CPU RTL sources in this filelist. They must define exactly one <code>cpu_top</code> module; the fixed ECOS SoC instantiates it directly, and the source filename is unrestricted.
@@ -261,7 +261,9 @@
 
                   <section
                     v-if="showCpuTopContract"
+                    id="cpu-top-io-contract"
                     ref="cpuTopContractRef"
+                    tabindex="-1"
                     class="cpu-top-contract"
                   >
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -435,12 +437,57 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, nextTick, onMounted, ref, watch } from 'vue'
-import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendCompatibilityEntry, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
+import { listFrontendCatalogApi, validateFrontendConfigApi, type FrontendCatalogEntry, type FrontendCatalogPayload, type FrontendCompatibilityEntry, type FrontendCpuPortContract, type FrontendValidationIssue, type FrontendValidationResult } from '@/api/frontendCatalog'
 import { waitForDesktopApi } from '@/platform/desktop'
 import type { WorkspaceConfig } from '../types'
 import { formatCpuTopModule, normalizeCpuPortContract } from './frontendCpuContract'
 
 const FINAL_STEP = 3
+const CUSTOM_FILELIST_ID = 'custom-filelist'
+const LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'
+const CUSTOM_CPU_TOP_MODULE = 'cpu_top'
+const CUSTOM_CPU_RESET_VECTOR = '0x20000000'
+const CUSTOM_CPU_TOP_PORT_CONTRACT: FrontendCpuPortContract[] = [
+  { name: 'clock', direction: 'input', width: 1 },
+  { name: 'reset', direction: 'input', width: 1 },
+  { name: 'io_extIrq', direction: 'input', width: 1 },
+  { name: 'io_timerIrq', direction: 'input', width: 1 },
+  { name: 'io_master_aw_ready', direction: 'input', width: 1 },
+  { name: 'io_master_aw_valid', direction: 'output', width: 1 },
+  { name: 'io_master_aw_bits_awaddr', direction: 'output', width: 32 },
+  { name: 'io_master_aw_bits_awid', direction: 'output', width: 4 },
+  { name: 'io_master_aw_bits_awlen', direction: 'output', width: 8 },
+  { name: 'io_master_aw_bits_awsize', direction: 'output', width: 3 },
+  { name: 'io_master_aw_bits_awburst', direction: 'output', width: 2 },
+  { name: 'io_master_aw_bits_awlock', direction: 'output', width: 1 },
+  { name: 'io_master_aw_bits_awcache', direction: 'output', width: 4 },
+  { name: 'io_master_aw_bits_awprot', direction: 'output', width: 3 },
+  { name: 'io_master_w_ready', direction: 'input', width: 1 },
+  { name: 'io_master_w_valid', direction: 'output', width: 1 },
+  { name: 'io_master_w_bits_wdata', direction: 'output', width: 32 },
+  { name: 'io_master_w_bits_wstrb', direction: 'output', width: 4 },
+  { name: 'io_master_w_bits_wlast', direction: 'output', width: 1 },
+  { name: 'io_master_b_ready', direction: 'output', width: 1 },
+  { name: 'io_master_b_valid', direction: 'input', width: 1 },
+  { name: 'io_master_b_bits_bresp', direction: 'input', width: 2 },
+  { name: 'io_master_b_bits_bid', direction: 'input', width: 4 },
+  { name: 'io_master_ar_ready', direction: 'input', width: 1 },
+  { name: 'io_master_ar_valid', direction: 'output', width: 1 },
+  { name: 'io_master_ar_bits_araddr', direction: 'output', width: 32 },
+  { name: 'io_master_ar_bits_arid', direction: 'output', width: 4 },
+  { name: 'io_master_ar_bits_arlen', direction: 'output', width: 8 },
+  { name: 'io_master_ar_bits_arsize', direction: 'output', width: 3 },
+  { name: 'io_master_ar_bits_arburst', direction: 'output', width: 2 },
+  { name: 'io_master_ar_bits_arlock', direction: 'output', width: 1 },
+  { name: 'io_master_ar_bits_arcache', direction: 'output', width: 4 },
+  { name: 'io_master_ar_bits_arprot', direction: 'output', width: 3 },
+  { name: 'io_master_r_ready', direction: 'output', width: 1 },
+  { name: 'io_master_r_valid', direction: 'input', width: 1 },
+  { name: 'io_master_r_bits_rresp', direction: 'input', width: 2 },
+  { name: 'io_master_r_bits_rdata', direction: 'input', width: 32 },
+  { name: 'io_master_r_bits_rlast', direction: 'input', width: 1 },
+  { name: 'io_master_r_bits_rid', direction: 'input', width: 4 },
+]
 
 interface FrontendParameters extends Record<string, unknown> {
   design: string
@@ -507,6 +554,7 @@ const selectedSocHarnessId = ref('')
 const selectedToolchainId = ref('')
 const selectedTestSuiteId = ref('')
 let validationToken = 0
+let cpuTopContractScrollPending = false
 
 const steps = [
   { id: 1, title: 'Basic Info' },
@@ -539,7 +587,7 @@ const config = ref<FrontendWorkspaceConfig>({
   rtl_list: [],
 })
 
-const selectedCore = computed(() => entryById(catalog.value.cores, selectedCoreId.value))
+const selectedCore = computed(() => normalizeCoreEntry(entryById(catalog.value.cores, selectedCoreId.value)))
 const selectedSocHarness = computed(() => entryById(catalog.value.soc_harnesses, selectedSocHarnessId.value))
 const selectedToolchain = computed(() => entryById(catalog.value.toolchains, selectedToolchainId.value))
 const selectedTestSuite = computed(() => entryById(catalog.value.test_suites, selectedTestSuiteId.value))
@@ -560,7 +608,7 @@ const requiredCpuTopPortContract = computed(() => normalizeCpuPortContract(
   || selectedCore.value?.required_cpu_top_port_contract,
 ))
 const showCpuTopContract = computed(() =>
-  selectedCoreId.value === 'custom-filelist'
+  selectedCoreId.value === CUSTOM_FILELIST_ID
   && Boolean(requiredCpuTopModule.value && requiredCpuTopPortContract.value.length),
 )
 const cpuTopExample = computed(() =>
@@ -604,7 +652,10 @@ const visibleSocHarnesses = computed(() =>
   sortedCatalogEntries(catalog.value.soc_harnesses),
 )
 const visibleCores = computed(() =>
-  sortedCatalogEntries(catalog.value.cores.filter((core) => core.id === 'custom-filelist')),
+  sortedCatalogEntries(catalog.value.cores
+    .filter((core) => core.id !== LEGACY_STANDARD_CPU_FILELIST_ID)
+    .map(normalizeCoreEntry)
+    .filter((core): core is FrontendCatalogEntry => Boolean(core))),
 )
 const visibleToolchains = computed(() =>
   sortedCatalogEntries(catalog.value.toolchains),
@@ -705,6 +756,12 @@ watch(
   },
 )
 
+watch(showCpuTopContract, (visible) => {
+  if (visible && cpuTopContractScrollPending) {
+    void scrollToCpuTopContract()
+  }
+})
+
 async function loadCatalog(): Promise<void> {
   catalogLoading.value = true
   catalogError.value = ''
@@ -770,9 +827,14 @@ async function refreshValidation(): Promise<void> {
 }
 
 function applyCatalogDefaults(nextCatalog: FrontendCatalogPayload): void {
-  selectedCoreId.value = nextCatalog.cores.some((core) => core.id === 'custom-filelist')
-    ? 'custom-filelist'
-    : ''
+  const selectableCores = nextCatalog.cores.filter((core) => core.id !== LEGACY_STANDARD_CPU_FILELIST_ID)
+  const configuredDefault = nextCatalog.defaults.core_id
+  const defaultCore = selectableCores.some((core) => core.id === configuredDefault)
+    ? configuredDefault
+    : selectableCores[0]?.id || ''
+  selectedCoreId.value = selectableCores.some((core) => core.id === selectedCoreId.value)
+    ? selectedCoreId.value
+    : defaultCore
   selectedSocHarnessId.value = selectedSocHarnessId.value || nextCatalog.defaults.soc_harness_id || nextCatalog.soc_harnesses[0]?.id || ''
   selectedToolchainId.value = selectedToolchainId.value || nextCatalog.defaults.toolchain_id || nextCatalog.toolchains[0]?.id || ''
   selectedTestSuiteId.value = selectedTestSuiteId.value || nextCatalog.defaults.test_suite_id || nextCatalog.test_suites[0]?.id || ''
@@ -817,6 +879,25 @@ function localValidationIssues(): FrontendValidationIssue[] {
     })
   }
   return issues
+}
+
+function normalizeCoreEntry(entry: FrontendCatalogEntry | null): FrontendCatalogEntry | null {
+  if (!entry || entry.id !== CUSTOM_FILELIST_ID) return entry
+  return {
+    ...entry,
+    name: 'My CPU Top',
+    description: 'Use a CPU RTL filelist that provides exactly one cpu_top module matching the fixed ECOS CPU interface. The ECOS SoC instantiates cpu_top directly.',
+    top_module: CUSTOM_CPU_TOP_MODULE,
+    cpu_wrapper_top: CUSTOM_CPU_TOP_MODULE,
+    required_cpu_top_module: CUSTOM_CPU_TOP_MODULE,
+    required_cpu_top_port_contract: normalizeCpuPortContract(entry.required_cpu_top_port_contract).length
+      ? entry.required_cpu_top_port_contract
+      : CUSTOM_CPU_TOP_PORT_CONTRACT,
+    cpu_reset_vector: stringField(entry, 'cpu_reset_vector') || CUSTOM_CPU_RESET_VECTOR,
+    sim_program_link_base: stringField(entry, 'sim_program_link_base') || CUSTOM_CPU_RESET_VECTOR,
+    supports_difftest: false,
+    tags: Array.isArray(entry.tags) ? ['custom', 'cpu-top', 'recommended'] : ['custom', 'cpu-top', 'recommended'],
+  }
 }
 
 function entryById(entries: FrontendCatalogEntry[], id: string): FrontendCatalogEntry | null {
@@ -883,8 +964,11 @@ const selectCpuFilelist = async () => {
 
 function selectCore(id: string) {
   selectedCoreId.value = id
-  if (id === 'custom-filelist') {
+  if (id === CUSTOM_FILELIST_ID) {
+    cpuTopContractScrollPending = true
     void scrollToCpuTopContract()
+  } else {
+    cpuTopContractScrollPending = false
   }
 }
 
@@ -902,19 +986,25 @@ function selectTestSuite(id: string) {
 
 async function scrollToCpuTopContract(): Promise<void> {
   await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+
   const target = cpuTopContractRef.value
   if (!target) return
 
+  cpuTopContractScrollPending = false
+  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
   const container = wizardScrollRef.value
-  if (!container) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' })
+  if (container) {
+    const containerRect = container.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    container.scrollTo({
+      top: Math.max(0, container.scrollTop + targetRect.top - containerRect.top - 12),
+      behavior: 'smooth',
+    })
     return
   }
 
-  const containerRect = container.getBoundingClientRect()
-  const targetRect = target.getBoundingClientRect()
-  const nextTop = container.scrollTop + targetRect.top - containerRect.top - 12
-  container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+  target.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' })
 }
 
 const nextStep = () => {

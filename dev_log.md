@@ -13419,7 +13419,7 @@ fatal error: driver/difftest.h: No such file or directory
 
 ## 开发目标
 
-让 GUI 的 CPU 选择与单一 `cpu_top` 用户流程一致：无论 catalog 中还保留多少内置 CPU 元数据，创建项目时用户只看到并只能选择 `My CPU Top`。
+让 GUI 的 CPU 选择与单一 `cpu_top` 接口一致：内置 CPU 继续作为可选实现，移除已废弃的 `standard-cpu-filelist`；用户上传 RTL 时选择 `My CPU Top`，点击该卡片必须可靠滚动到固定接口模板。
 
 ## 新增文件
 
@@ -13428,17 +13428,19 @@ fatal error: driver/difftest.h: No such file or directory
 ## 修改文件
 
 - `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
-  - `visibleCores` 只保留 `custom-filelist`，不再把内置 CPU catalog 条目渲染为用户可选卡片。
-  - catalog 加载后总是将 CPU 选择归一化为 `custom-filelist`，避免旧 workspace 或旧 runtime 的 `standard-cpu-filelist` 保留为不可见选择。
+  - 保留 catalog 中已适配的内置 CPU 卡片，但过滤已废弃的 `standard-cpu-filelist`；`My CPU Top` 是唯一用户提供 RTL 的入口。
+  - 若旧 workspace 仍保存该废弃 ID，catalog 加载时回退到默认可选 CPU，而不是保留不可见选择。
+  - 为主滚动容器补充 `min-h-0`，并在两帧布局稳定后把 `CPU Top IO Contract` 面板顶部对齐到可视区域，确保点击 `My CPU Top` 后直接展示固定标准接口；容器 ref 缺失时使用浏览器级 `scrollIntoView` fallback。
 - `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
-  - 增加对单一 `custom-filelist` 可见性和加载时归一化逻辑的源码回归断言。
+  - 增加对 `My CPU Top` 点击后的稳定布局等待和标准接口面板对齐滚动的源码回归断言。
 - `/home/luyoung/ecos-studio/dev_log.md`
   - 记录 GUI CPU 选项收敛和本地 runtime 状态。
 
 ## 验证情况
 
 - 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 项通过。
-- 已检查本机已安装 runtime：`/home/luyoung/.local/share/ecos-studio/tools/ecc-fe/latest/fecompiler/catalog/builtin/cores.json` 仍包含旧的 `standard-cpu-filelist`，确认其尚未更新到本次 ECC-FE release。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vue-tsc --noEmit`，通过。
+- 已检查本机已安装 runtime：`/home/luyoung/.local/share/ecos-studio/tools/ecc-fe/latest/fecompiler/catalog/builtin/cores.json` 仍包含旧的 `standard-cpu-filelist`。当前运行的是 `/tmp/ecos-studio-bundle/appimage/ECOS-Studio_0.1.0-alpha.5_amd64.AppImage`，该已构建旧包不读取本仓库源码；新 renderer 生效后会过滤此旧 ID，同时保留可用内置 CPU。
 
 ## 未执行项
 
@@ -13448,4 +13450,137 @@ fatal error: driver/difftest.h: No such file or directory
 
 ## 已知后续风险
 
-- 源码修改在新的 GUI bundle 生效后会只展示一个 CPU 选项；已安装桌面应用若仍加载旧 bundle 或旧 ECC-FE runtime，需完成相应更新后才会在运行中的 GUI 中可见。
+- 已安装桌面应用若仍加载旧 GUI bundle，需完成相应更新后才会获得废弃 ID 过滤和稳定的点击自动滚动行为。
+
+# 第 225 次 开发
+
+## 开发目标
+
+修正 Frontend Project Wizard 中 `My CPU Top` 的点击行为：点击用户上传 CPU 入口时，目的不是滚到页面底部，而是稳定展示 `CPU Top IO Contract` 标准接口面板。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 增加 `cpuTopContractScrollPending` 待滚动状态；点击 `My CPU Top` 后先标记必须展示标准接口。
+  - 如果 `CPU Top IO Contract` 面板在点击瞬间还没有渲染出来，会在 `showCpuTopContract` 变为可见后再次执行滚动，避免异步 catalog/validation 时序导致点击无效。
+  - 切换到内置 CPU 时清除待滚动状态，保留所有内置 CPU 可选，只隐藏废弃的 `standard-cpu-filelist`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 增加对待滚动状态和标准接口面板可见后补滚动逻辑的源码断言。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 GUI 点击行为修正。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vue-tsc --noEmit`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包或资源发布打包。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 真实滚动效果仍需用户在 `pnpm run dev` 的 GUI 中验证；本次修复重点是消除 `CPU Top IO Contract` 面板延迟渲染导致点击后不滚动的问题。
+
+# 第 226 次 开发
+
+## 开发目标
+
+修复用户在 `pnpm run dev` 中仍看不到 `CPU Top IO Contract` 的问题：本机已安装 ecc-fe runtime catalog 仍是旧版 `My CPU Filelist / ysyx_00000000` 元数据，缺少新的 `cpu_top` 接口字段，导致 GUI 没有标准接口面板可滚动。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - 为 `custom-filelist` 增加 GUI 层兜底归一化：无论远端/本地 catalog 是否更新，前端都显示为 `My CPU Top`，并使用固定 `cpu_top` 模块名、复位地址和完整 IO contract。
+  - `selectedCore` 和 `visibleCores` 都走同一归一化逻辑，保留所有内置 CPU，只隐藏废弃的 `standard-cpu-filelist`。
+  - 为 `CPU Top IO Contract` 面板增加稳定 DOM id，并在点击 `My CPU Top` 后优先对该面板执行 `scrollIntoView`，再对内部滚动容器做精确对齐。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 更新断言，覆盖旧 catalog 下的 `cpu_top` 标准接口兜底、`My CPU Top` 显示和接口面板锚点滚动。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次旧 catalog 兼容和滚动目标修正。
+
+## 验证情况
+
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vue-tsc --noEmit`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包或资源发布打包。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 如果用户当前 dev 窗口没有热更新到最新 renderer，需要刷新或重开用户自己的 `pnpm run dev` 会话；本次不由 Codex 启动 GUI。
+
+# 第 227 次 开发
+
+## 开发目标
+
+继续收敛 ecc-fe CPU/SoC 入口：SoC 和用户接口只保留 `cpu_top`，移除源码路径中残留的 `ysyx_00000000` 公共兼容模块概念，让 SoC 结构更简单。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cpu_top_bridge.v`
+  - 将 bridge 说明从历史兼容模块改为私有 adapter socket。
+  - `cpu_top` bridge 内部实例化 `ecos_internal_cpu_socket`，不再引用 `ysyx_00000000`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/ecos_cv32e40p_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/ecos_cva6_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/darkriscv/ecos_darkriscv_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/femtorv32/ecos_femtorv32_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/ibex/ecos_ibex_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/picorv32/ecos_picorv32_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/scr1/ecos_scr1_cpu_wrapper.sv`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/ecos_serv_cpu_wrapper.v`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/ecos_vexriscv_cpu_wrapper.v`
+  - 将内置 adapter 的内部 socket module 统一重命名为 `ecos_internal_cpu_socket`。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 删除 fallback 逻辑中把 `ysyx_00000000` 当作 core id 的旧兼容分支。
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/thirdparty/README`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cv32e40p/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/cva6/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/serv/README.md`
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/adapters/vexriscv/README.md`
+  - 文档改为说明用户和 SoC 只面对 `cpu_top`，内置 adapter 通过私有 bridge 接入。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_examples.py`
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_rtl_review.py`
+  - 测试负例改为通用非 `cpu_top` 模块或普通 SoC helper，不再使用旧模块名。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CPU/SoC 入口继续收敛。
+
+## 验证情况
+
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_compatibility.py test/test_examples.py test/test_engine_flow.py::test_prepare_keeps_soc_entries_without_compatibility_filtering test/test_rtl_review.py::test_yosys_precheck_inferrs_cpu_top_when_wrapper_is_outside_cpu_filelist`，26 项通过。
+- 已执行 `PYTHONPATH=/home/luyoung/ecos-studio/ecc-fe python3 -m pytest -q test/test_catalog_contract.py::test_all_creatable_catalog_pairs_prepare_with_one_cpu_top`，1 项通过。
+- 已执行 `rg -n "ysyx_00000000" ecc-fe --glob '!dev_log.md' --glob '!**/.git/**'`，源码、测试和文档中已无该字符串。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vitest run src/components/FrontendProjectWizard.catalog.test.ts`，3 项通过。
+- 已执行 `pnpm --dir /home/luyoung/ecos-studio/ecos/gui --filter @ecos-studio/renderer exec vue-tsc --noEmit`，通过。
+- 已执行 `git diff --check`，通过。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、Bazel build、make 或 release 打包。
+- 未执行 commit、push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- `ysyx-axi-cpu-socket-v1` 仍作为协议/contract 名称存在，这是 CPU socket 协议名，不再是 SoC 或用户需要提供的 RTL 顶层模块。
+- 内置 adapter 仍通过 `cpu_top_bridge.v` 接入公共 `cpu_top`，后续若要进一步精简，可把各 adapter 直接改写成 `cpu_top`，再移除 bridge 文件。
