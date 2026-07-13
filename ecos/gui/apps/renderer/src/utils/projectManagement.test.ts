@@ -1101,8 +1101,9 @@ describe('project management model', () => {
     const project = buildProjectManagementProject(recentProject, updated)
 
     expect(updated.base_design.parameters?.design).toBeUndefined()
-    expect(project.workspaces.find((workspace) => workspace.id === 'ws_0001'))
-      .toHaveProperty('artifactDesignName', 'gcd')
+    expect(
+      project.workspaces.find((workspace) => workspace.id === 'ws_0001'),
+    ).toHaveProperty('artifactDesignName', 'gcd')
     expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor').sourceOutputPath).toBe(
       '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
     )

@@ -71,7 +71,9 @@ function isUnknownJsonRpcFieldError(error: unknown, field: string): boolean {
   )
 }
 
-function hasEntries(value: Record<string, unknown> | undefined): value is Record<string, unknown> {
+function hasEntries(
+  value: Record<string, unknown> | undefined,
+): value is Record<string, unknown> {
   return value !== undefined && Object.keys(value).length > 0
 }
 
