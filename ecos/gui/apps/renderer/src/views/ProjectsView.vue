@@ -99,7 +99,11 @@
               />
             </div>
 
-            <div class="project-list" aria-label="Project list">
+            <div
+              class="project-list"
+              :class="{ 'project-list--popover-open': Boolean(popoverWorkspaceId) }"
+              aria-label="Project list"
+            >
               <article
                 v-for="project in projectCards"
                 :key="project.source.id"
@@ -1113,6 +1117,7 @@ const STA_CORNER_PATHS = [
 ]
 
 let activeProjectKey: string | null = null
+let projectManifestRefreshQueue = Promise.resolve()
 
 watch(
   selectedProject,
@@ -1269,36 +1274,53 @@ async function openWorkspace(workspace: ProjectWorkspace) {
   }
 }
 
-async function refreshProjectManifests() {
-  const entries = await Promise.all(
-    projectSources.value.map(async (project) => {
-      try {
-        const projectRoot = await registerProjectRootForProjectManagement(project.path)
-        if (!projectRoot) return null
-        const manifestText = await readOptionalProjectTextFile('project.json', {
-          projectPath: projectRoot,
-        })
-        if (!manifestText) return null
-        const manifest = parseProjectManifest(manifestText)
-        const flowStates = await readWorkspaceFlowStates(manifest)
-        const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
-        return [project.path, manifest, flowStates, analysisInputs] as const
-      } catch (error) {
-        console.warn(`Failed to load project manifest: ${project.path}`, error)
-        return null
-      }
-    }),
+function refreshProjectManifests(): Promise<void> {
+  const refresh = projectManifestRefreshQueue.then(
+    refreshProjectManifestsNow,
+    refreshProjectManifestsNow,
   )
+  projectManifestRefreshQueue = refresh.then(
+    () => undefined,
+    () => undefined,
+  )
+  return refresh
+}
 
-  const validEntries = entries.filter((entry) => entry !== null)
+async function refreshProjectManifestsNow() {
+  const entries: Array<
+    [
+      string,
+      ProjectManifest,
+      ProjectWorkspaceFlowStatesById,
+      ProjectWorkspaceAnalysisInputsById,
+    ]
+  > = []
+
+  for (const project of projectSources.value) {
+    try {
+      const projectRoot = await registerProjectRootForProjectManagement(project.path)
+      if (!projectRoot) continue
+      const manifestText = await readOptionalProjectTextFile('project.json', {
+        projectPath: projectRoot,
+      })
+      if (!manifestText) continue
+      const manifest = parseProjectManifest(manifestText)
+      const flowStates = await readWorkspaceFlowStates(manifest)
+      const analysisInputs = await readWorkspaceAnalysisInputs(manifest)
+      entries.push([project.path, manifest, flowStates, analysisInputs])
+    } catch (error) {
+      console.warn(`Failed to load project manifest: ${project.path}`, error)
+    }
+  }
+
   projectManifests.value = Object.fromEntries(
-    validEntries.map(([path, manifest]) => [path, manifest]),
+    entries.map(([path, manifest]) => [path, manifest]),
   )
   workspaceFlowStates.value = Object.fromEntries(
-    validEntries.map(([path, _manifest, flowStates]) => [path, flowStates]),
+    entries.map(([path, _manifest, flowStates]) => [path, flowStates]),
   )
   workspaceAnalysisInputs.value = Object.fromEntries(
-    validEntries.map(([path, _manifest, _flowStates, analysisInputs]) => [
+    entries.map(([path, _manifest, _flowStates, analysisInputs]) => [
       path,
       analysisInputs,
     ]),
@@ -2274,6 +2296,13 @@ function normalizeArtifactDesignName(value: string): string {
   gap: 10px;
   min-height: 0;
   flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.project-list--popover-open {
   overflow: visible;
 }
 

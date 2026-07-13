@@ -67,6 +67,21 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('--mockup-bg: #f9fafb')
   })
 
+  it('keeps the Projects toolbar fixed while the workspace tree scrolls vertically', () => {
+    const projectListStart = source.indexOf('.project-list {')
+    const projectListEnd = source.indexOf('.project-workspace-tree {', projectListStart)
+    const projectListStyles = source.slice(projectListStart, projectListEnd)
+
+    expect(projectListStyles).toContain('overflow-y: auto;')
+    expect(projectListStyles).toContain('overflow-x: hidden;')
+    expect(projectListStyles).toContain('scrollbar-gutter: stable;')
+    expect(source).toContain(
+      ':class="{ \'project-list--popover-open\': Boolean(popoverWorkspaceId) }"',
+    )
+    expect(source).toContain('.project-list--popover-open {')
+    expect(source).toContain('overflow: visible;')
+  })
+
   it('provides a maximize toggle for the project management dialog', () => {
     expect(source).toContain(':class="{ maximized: isDialogMaximized }"')
     expect(source).toContain('toggleDialogMaximized')
@@ -392,6 +407,18 @@ describe('ProjectsView project management surface', () => {
     )
     expect(refreshRegister).toBeGreaterThan(refreshStart)
     expect(refreshRead).toBeGreaterThan(refreshRegister)
+  })
+
+  it('serializes project manifest refreshes because the desktop file scope has one active root', () => {
+    expect(source).toContain('let projectManifestRefreshQueue = Promise.resolve()')
+
+    const refreshStart = source.indexOf('async function refreshProjectManifestsNow')
+    const refreshEnd = source.indexOf('async function importProject', refreshStart)
+    const refreshSource = source.slice(refreshStart, refreshEnd)
+
+    expect(source).toContain('function refreshProjectManifests(): Promise<void>')
+    expect(refreshSource).toContain('for (const project of projectSources.value)')
+    expect(refreshSource).not.toContain('projectSources.value.map(async (project) =>')
   })
 
   it('persists project history when project.json is updated', () => {
