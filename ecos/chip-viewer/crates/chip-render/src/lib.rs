@@ -41,6 +41,37 @@ impl RenderPlanKey {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RenderLayersPlanKey {
+    layer_ids: Vec<u16>,
+    lx: i32,
+    ly: i32,
+    hx: i32,
+    hy: i32,
+}
+
+impl RenderLayersPlanKey {
+    pub fn new(layer_ids: &[u16], viewport: Rect32) -> Self {
+        let viewport = normalize_rect(viewport);
+        let mut layer_ids = layer_ids.to_vec();
+        layer_ids.sort_unstable();
+        layer_ids.dedup();
+        Self {
+            layer_ids,
+            lx: viewport.lx,
+            ly: viewport.ly,
+            hx: viewport.hx,
+            hy: viewport.hy,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum RenderPlanCacheKey {
+    Layer(RenderPlanKey),
+    Layers(RenderLayersPlanKey),
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RenderCacheStats {
     pub entries: usize,
@@ -49,11 +80,11 @@ pub struct RenderCacheStats {
 }
 
 pub struct RenderPlanCache {
-    entries: BTreeMap<RenderPlanKey, Vec<ShapeId>>,
+    entries: BTreeMap<RenderPlanCacheKey, Vec<ShapeId>>,
     hits: usize,
     max_entries: usize,
     misses: usize,
-    order: VecDeque<RenderPlanKey>,
+    order: VecDeque<RenderPlanCacheKey>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -118,9 +149,37 @@ impl RenderPlanCache {
         })
     }
 
+    pub fn visible_shape_ids_for_layers(
+        &mut self,
+        db: &ChipViewDb,
+        layer_ids: &[u16],
+        viewport: Rect32,
+    ) -> Vec<ShapeId> {
+        let key = RenderLayersPlanKey::new(layer_ids, viewport);
+        self.get_or_insert_layers_with(key, || {
+            RenderPlanner::visible_shape_ids_for_layers(db, layer_ids, viewport)
+        })
+    }
+
     pub fn get_or_insert_with(
         &mut self,
         key: RenderPlanKey,
+        build: impl FnOnce() -> Vec<ShapeId>,
+    ) -> Vec<ShapeId> {
+        self.get_or_insert_cache_key_with(RenderPlanCacheKey::Layer(key), build)
+    }
+
+    pub fn get_or_insert_layers_with(
+        &mut self,
+        key: RenderLayersPlanKey,
+        build: impl FnOnce() -> Vec<ShapeId>,
+    ) -> Vec<ShapeId> {
+        self.get_or_insert_cache_key_with(RenderPlanCacheKey::Layers(key), build)
+    }
+
+    fn get_or_insert_cache_key_with(
+        &mut self,
+        key: RenderPlanCacheKey,
         build: impl FnOnce() -> Vec<ShapeId>,
     ) -> Vec<ShapeId> {
         if let Some(shape_ids) = self.entries.get(&key) {
@@ -130,7 +189,7 @@ impl RenderPlanCache {
 
         self.misses += 1;
         let shape_ids = build();
-        self.insert(key, shape_ids.clone());
+        self.insert_cache_key(key, shape_ids.clone());
         shape_ids
     }
 
@@ -142,9 +201,9 @@ impl RenderPlanCache {
         }
     }
 
-    fn insert(&mut self, key: RenderPlanKey, shape_ids: Vec<ShapeId>) {
+    fn insert_cache_key(&mut self, key: RenderPlanCacheKey, shape_ids: Vec<ShapeId>) {
         if !self.entries.contains_key(&key) {
-            self.order.push_back(key);
+            self.order.push_back(key.clone());
         }
         self.entries.insert(key, shape_ids);
 
@@ -314,6 +373,83 @@ mod tests {
         assert_eq!(cache.get_or_insert_with(first, || vec![1]), vec![1]);
         assert_eq!(cache.get_or_insert_with(second, || vec![2]), vec![2]);
         assert_eq!(cache.get_or_insert_with(first, || vec![3]), vec![3]);
+
+        assert_eq!(cache.stats().entries, 1);
+        assert_eq!(cache.stats().misses, 3);
+    }
+
+    #[test]
+    fn render_plan_cache_reuses_identical_layer_set_viewport_queries() {
+        let mut cache = RenderPlanCache::new(8);
+        let key = RenderLayersPlanKey::new(
+            &[3, 1, 3],
+            Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 0,
+                hy: 5,
+            },
+        );
+        let same_key = RenderLayersPlanKey::new(
+            &[1, 3],
+            Rect32 {
+                lx: 0,
+                ly: 5,
+                hx: 10,
+                hy: 20,
+            },
+        );
+        let mut calls = 0;
+
+        assert_eq!(
+            cache.get_or_insert_layers_with(key, || {
+                calls += 1;
+                vec![10, 20, 30]
+            }),
+            vec![10, 20, 30]
+        );
+        assert_eq!(
+            cache.get_or_insert_layers_with(same_key, || {
+                calls += 1;
+                vec![40]
+            }),
+            vec![10, 20, 30]
+        );
+
+        assert_eq!(calls, 1);
+        assert_eq!(cache.stats().entries, 1);
+        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats().misses, 1);
+    }
+
+    #[test]
+    fn render_plan_cache_eviction_counts_single_and_layer_set_keys_together() {
+        let mut cache = RenderPlanCache::new(1);
+        let single_key = RenderPlanKey::new(
+            1,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1,
+                hy: 1,
+            },
+        );
+        let layer_set_key = RenderLayersPlanKey::new(
+            &[1, 2],
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 1,
+                hy: 1,
+            },
+        );
+
+        assert_eq!(cache.get_or_insert_with(single_key, || vec![1]), vec![1]);
+        assert_eq!(
+            cache.get_or_insert_layers_with(layer_set_key, || vec![2]),
+            vec![2]
+        );
+        assert_eq!(cache.get_or_insert_with(single_key, || vec![3]), vec![3]);
 
         assert_eq!(cache.stats().entries, 1);
         assert_eq!(cache.stats().misses, 3);

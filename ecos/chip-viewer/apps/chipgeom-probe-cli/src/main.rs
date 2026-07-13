@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Result;
-use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, SnapshotStats};
+use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, ShapeGeometry, SnapshotStats};
 use chipgeom_format::{OwnerRef, OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState};
 use clap::Parser;
 use serde_json::{json, Value};
@@ -192,6 +192,7 @@ fn main() -> Result<()> {
                     owner.path3
                 );
             }
+            print_shape_geometry_text(shape_id, db.shape_geometry(shape));
         } else {
             println!("shape.{}.missing=true", shape_id);
         }
@@ -436,6 +437,52 @@ fn bbox_json(bbox: Rect32) -> Value {
     })
 }
 
+fn point_json(point: chipgeom_format::Point32) -> Value {
+    json!({
+        "x": point.x,
+        "y": point.y,
+    })
+}
+
+fn shape_geometry_json(geometry: ShapeGeometry) -> Value {
+    match geometry {
+        ShapeGeometry::Rect(rect) => json!({
+            "kind": "rect",
+            "rect": bbox_json(rect),
+        }),
+        ShapeGeometry::Line(line) => json!({
+            "kind": "line",
+            "begin": point_json(line.begin),
+            "end": point_json(line.end),
+            "width": line.width,
+            "flags": line.flags,
+        }),
+        ShapeGeometry::Point(point) => json!({
+            "kind": "point",
+            "point": point_json(point.point),
+            "symbol_id": point.symbol_id,
+            "flags": point.flags,
+        }),
+    }
+}
+
+fn print_shape_geometry_text(shape_id: ShapeId, geometry: ShapeGeometry) {
+    match geometry {
+        ShapeGeometry::Rect(rect) => println!(
+            "shape.{}.geometry=rect {} {} {} {}",
+            shape_id, rect.lx, rect.ly, rect.hx, rect.hy
+        ),
+        ShapeGeometry::Line(line) => println!(
+            "shape.{}.geometry=line {} {} {} {} {} {}",
+            shape_id, line.begin.x, line.begin.y, line.end.x, line.end.y, line.width, line.flags
+        ),
+        ShapeGeometry::Point(point) => println!(
+            "shape.{}.geometry=point {} {} {} {}",
+            shape_id, point.point.x, point.point.y, point.symbol_id, point.flags
+        ),
+    }
+}
+
 fn owner_json(owner: &OwnerRef) -> Value {
     json!({
         "type": ChipViewDb::owner_type_label(owner.owner_type),
@@ -446,9 +493,9 @@ fn owner_json(owner: &OwnerRef) -> Value {
 
 fn shape_query_json(
     shape_id: ShapeId,
-    shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>)>,
+    shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>, ShapeGeometry)>,
 ) -> Value {
-    let Some((shape, owner)) = shape_and_owner else {
+    let Some((shape, owner, geometry)) = shape_and_owner else {
         return json!({
             "shape_id": shape_id,
             "missing": true,
@@ -463,6 +510,7 @@ fn shape_query_json(
         "kind": shape_kind_label(shape.kind),
         "state": shape_state_label(shape.state),
         "bbox": bbox_json(shape.bbox),
+        "geometry": shape_geometry_json(geometry),
         "owner": owner.map(owner_json),
     })
 }
@@ -549,7 +597,7 @@ fn print_json(
             shape_query_json(
                 shape_id,
                 db.find_shape(shape_id)
-                    .map(|shape| (shape, db.owner_for_shape(shape))),
+                    .map(|shape| (shape, db.owner_for_shape(shape), db.shape_geometry(shape))),
             )
         }),
         "layer_query": layer_query_report.map(layer_query_json),
@@ -717,7 +765,10 @@ mod tests {
             ..chipgeom_format::OwnerRef::default()
         };
 
-        let value = shape_query_json(42, Some((&shape, Some(&owner))));
+        let value = shape_query_json(
+            42,
+            Some((&shape, Some(&owner), ShapeGeometry::Rect(shape.bbox))),
+        );
 
         assert_eq!(value["shape_id"], 42);
         assert_eq!(value["missing"], false);
@@ -726,6 +777,8 @@ mod tests {
         assert_eq!(value["kind"], "rect");
         assert_eq!(value["state"], "alive");
         assert_eq!(value["bbox"]["lx"], 1);
+        assert_eq!(value["geometry"]["kind"], "rect");
+        assert_eq!(value["geometry"]["rect"]["hx"], 3);
         assert_eq!(value["owner"]["type"], "instance_bbox");
         assert_eq!(value["owner"]["owner_id"], 9001);
         assert_eq!(value["owner"]["path"], json!([5, 6, 7, 8]));
@@ -734,6 +787,62 @@ mod tests {
 
         assert_eq!(missing["shape_id"], 99);
         assert_eq!(missing["missing"], true);
+    }
+
+    #[test]
+    fn shape_query_json_reports_line_geometry_payload() {
+        let shape = chipgeom_format::ShapeRecord {
+            id: 42,
+            version: 3,
+            layer_id: 7,
+            kind: chipgeom_format::ShapeKind::Line as u8,
+            state: chipgeom_format::ShapeState::Alive as u8,
+            bbox: chipgeom_format::Rect32 {
+                lx: 1,
+                ly: 2,
+                hx: 30,
+                hy: 40,
+            },
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let geometry = chip_view_db::ShapeGeometry::Line(chipgeom_format::LinePayload {
+            begin: chipgeom_format::Point32 { x: 10, y: 20 },
+            end: chipgeom_format::Point32 { x: 30, y: 40 },
+            width: 5,
+            flags: 7,
+        });
+
+        let value = shape_query_json(42, Some((&shape, None, geometry)));
+
+        assert_eq!(value["geometry"]["kind"], "line");
+        assert_eq!(value["geometry"]["begin"], json!({"x": 10, "y": 20}));
+        assert_eq!(value["geometry"]["end"], json!({"x": 30, "y": 40}));
+        assert_eq!(value["geometry"]["width"], 5);
+        assert_eq!(value["geometry"]["flags"], 7);
+    }
+
+    #[test]
+    fn shape_query_json_reports_point_geometry_payload() {
+        let shape = chipgeom_format::ShapeRecord {
+            id: 43,
+            version: 1,
+            layer_id: 8,
+            kind: chipgeom_format::ShapeKind::Point as u8,
+            state: chipgeom_format::ShapeState::Alive as u8,
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let geometry = chip_view_db::ShapeGeometry::Point(chipgeom_format::PointPayload {
+            point: chipgeom_format::Point32 { x: 11, y: 22 },
+            symbol_id: 3,
+            flags: 4,
+        });
+
+        let value = shape_query_json(43, Some((&shape, None, geometry)));
+
+        assert_eq!(value["geometry"]["kind"], "point");
+        assert_eq!(value["geometry"]["point"], json!({"x": 11, "y": 22}));
+        assert_eq!(value["geometry"]["symbol_id"], 3);
+        assert_eq!(value["geometry"]["flags"], 4);
     }
 
     #[test]

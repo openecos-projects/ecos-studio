@@ -506,8 +506,8 @@ impl LoadedViewer {
         let use_view_tiles = self.should_use_view_tiles(viewport, world);
         let view_lod = self.view_lod_level();
 
-        for (layer_id, style) in &visible_layers {
-            if use_view_tiles {
+        if use_view_tiles {
+            for (layer_id, style) in &visible_layers {
                 for tile in self
                     .view_tile_cache
                     .visible_tiles(&self.db, view_lod, *layer_id, viewport)
@@ -527,12 +527,12 @@ impl LoadedViewer {
                     painter.rect_filled(screen, 0.0, color);
                     drawn += 1;
                 }
-                continue;
             }
-
+        } else {
+            let layer_ids = visible_layer_ids(&visible_layers);
             for shape_id in self
                 .render_cache
-                .visible_shape_ids(&self.db, *layer_id, viewport)
+                .visible_shape_ids_for_layers(&self.db, &layer_ids, viewport)
             {
                 let Some(shape) = self.db.find_shape(shape_id) else {
                     continue;
@@ -540,6 +540,9 @@ impl LoadedViewer {
                 if !is_renderable_shape(shape) {
                     continue;
                 }
+                let Some(style) = visible_style_for_shape(shape, &visible_layers) else {
+                    continue;
+                };
                 let color = color32(style.rgba);
                 if paint_shape_geometry(
                     &painter,
@@ -562,24 +565,27 @@ impl LoadedViewer {
             if !is_renderable_shape(shape) {
                 continue;
             }
-            let screen = shape_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
-            if !screen.intersects(canvas) {
-                continue;
-            }
+            let geometry = self.db.shape_geometry(shape);
             if self.highlighted.contains(&shape_id) {
-                painter.rect_stroke(
-                    screen.expand(1.5),
-                    0.0,
+                paint_shape_overlay(
+                    &painter,
+                    geometry,
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
                     egui::Stroke::new(2.0, egui::Color32::YELLOW),
-                    egui::StrokeKind::Inside,
                 );
             }
             if self.selected == Some(shape_id) {
-                painter.rect_stroke(
-                    screen.expand(2.0),
-                    0.0,
+                paint_shape_overlay(
+                    &painter,
+                    geometry,
+                    world,
+                    canvas,
+                    self.zoom,
+                    self.pan,
                     egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 220, 255)),
-                    egui::StrokeKind::Inside,
                 );
             }
         }
@@ -995,6 +1001,44 @@ fn shape_screen_primitive(
             radius: MIN_SHAPE_SCREEN_SIZE,
         },
     }
+}
+
+fn shape_overlay_primitive(
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> ScreenShapePrimitive {
+    shape_screen_primitive(geometry, world, canvas, zoom, pan)
+}
+
+fn paint_shape_overlay(
+    painter: &egui::Painter,
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+    stroke: egui::Stroke,
+) -> bool {
+    let primitive = shape_overlay_primitive(geometry, world, canvas, zoom, pan);
+    if !screen_primitive_bounds(primitive).intersects(canvas) {
+        return false;
+    }
+
+    match primitive {
+        ScreenShapePrimitive::Rect(rect) => {
+            painter.rect_stroke(rect.expand(1.5), 0.0, stroke, egui::StrokeKind::Inside);
+        }
+        ScreenShapePrimitive::Line { begin, end, .. } => {
+            painter.line_segment([begin, end], stroke);
+        }
+        ScreenShapePrimitive::Point { center, radius } => {
+            painter.circle_stroke(center, radius + 1.5, stroke);
+        }
+    }
+    true
 }
 
 fn screen_primitive_bounds(primitive: ScreenShapePrimitive) -> egui::Rect {
@@ -1679,6 +1723,17 @@ fn visible_layer_count(layers: &[LayerUiState]) -> usize {
     layers.iter().filter(|layer| layer.visible).count()
 }
 
+fn visible_layer_ids(visible_layers: &BTreeMap<LayerId, LayerStyle>) -> Vec<LayerId> {
+    visible_layers.keys().copied().collect()
+}
+
+fn visible_style_for_shape<'a>(
+    shape: &ShapeRecord,
+    visible_layers: &'a BTreeMap<LayerId, LayerStyle>,
+) -> Option<&'a LayerStyle> {
+    visible_layers.get(&shape.layer_id)
+}
+
 fn layer_hover_text(layer: &LayerUiState) -> String {
     format!(
         "id: {}\norder: {}\ntype: {}\ndirection: {}\nwidth: {}\npitch: {} {}",
@@ -1825,6 +1880,33 @@ mod tests {
             world_to_screen_point(point.point, world, canvas, 1.0, egui::Vec2::ZERO)
         );
         assert_eq!(radius, MIN_SHAPE_SCREEN_SIZE);
+    }
+
+    #[test]
+    fn shape_overlay_primitive_uses_line_payload_geometry() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 200.0));
+        let line = chipgeom_format::LinePayload {
+            begin: Point32 { x: 10, y: 20 },
+            end: Point32 { x: 80, y: 90 },
+            width: 1,
+            flags: 0,
+        };
+
+        let primitive = shape_overlay_primitive(
+            ShapeGeometry::Line(line),
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        );
+
+        assert!(matches!(primitive, ScreenShapePrimitive::Line { .. }));
     }
 
     #[test]
@@ -2514,6 +2596,32 @@ mod tests {
         ];
 
         assert_eq!(visible_layer_count(&layers), 2);
+    }
+
+    #[test]
+    fn visible_layer_ids_for_render_query_are_sorted_from_visible_layer_map() {
+        let visible_layers = BTreeMap::from([
+            (7, LayerStyle::default_for_layer(7)),
+            (3, LayerStyle::default_for_layer(3)),
+        ]);
+
+        assert_eq!(visible_layer_ids(&visible_layers), vec![3, 7]);
+    }
+
+    #[test]
+    fn visible_style_for_shape_skips_shapes_from_invisible_layers() {
+        let visible_layers = BTreeMap::from([(3, LayerStyle::default_for_layer(3))]);
+        let visible_shape = chipgeom_format::ShapeRecord {
+            layer_id: 3,
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let hidden_shape = chipgeom_format::ShapeRecord {
+            layer_id: 4,
+            ..chipgeom_format::ShapeRecord::default()
+        };
+
+        assert!(visible_style_for_shape(&visible_shape, &visible_layers).is_some());
+        assert!(visible_style_for_shape(&hidden_shape, &visible_layers).is_none());
     }
 
     #[test]
