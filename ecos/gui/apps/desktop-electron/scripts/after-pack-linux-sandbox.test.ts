@@ -1,10 +1,18 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import afterPackLinuxSandbox from './after-pack-linux-sandbox.mjs'
 
 const tempDirs: string[] = []
+
+async function writeRpcCapableEcc(appOutDir: string): Promise<void> {
+  const binariesDir = join(appOutDir, 'resources', 'binaries')
+  const eccPath = join(binariesDir, 'ecc')
+  await mkdir(binariesDir, { recursive: true })
+  await writeFile(eccPath, '#!/bin/sh\nexit 0\n')
+  await chmod(eccPath, 0o755)
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -23,6 +31,7 @@ describe('afterPackLinuxSandbox', () => {
     tempDirs.push(appOutDir)
     const executablePath = join(appOutDir, 'ecos-studio')
     await writeFile(executablePath, 'binary-placeholder')
+    await writeRpcCapableEcc(appOutDir)
 
     await afterPackLinuxSandbox({
       appOutDir,
@@ -41,6 +50,25 @@ describe('afterPackLinuxSandbox', () => {
     expect(renamedBinary).toBe('binary-placeholder')
     expect(wrapperScript).toContain('exec "$BINARY" --no-sandbox "$@"')
     expect(wrapperScript).toContain('helper_mode')
+  })
+
+  it('rejects Linux packaging when the ECC RPC sidecar is absent', async () => {
+    const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
+    tempDirs.push(appOutDir)
+    await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
+
+    await expect(
+      afterPackLinuxSandbox({
+        appOutDir,
+        electronPlatformName: 'linux',
+        packager: {
+          appInfo: {
+            productFilename: 'ecos-studio',
+          },
+          executableName: 'ecos-studio',
+        },
+      }),
+    ).rejects.toThrow('Packaged ECC RPC sidecar validation failed')
   })
 
   it('skips non-Linux targets', async () => {

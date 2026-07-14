@@ -105,6 +105,7 @@ export interface ProjectQorTrendSummary {
   baselineLabel: string
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
+  risks: ProjectQorRisk[]
   unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
@@ -128,7 +129,9 @@ export interface ProjectQorTrendPoint {
 
 export interface ProjectQorDelta {
   workspaceId: string
+  workspaceName: string
   baselineWorkspaceId: string
+  baselineWorkspaceName: string
   metricName: string
   displayName: string
   currentValue: number
@@ -140,6 +143,18 @@ export interface ProjectQorDelta {
 
 export interface ProjectQorRegression extends ProjectQorDelta {
   priority: 'P0' | 'P1' | 'P2' | 'P3'
+  message: string
+}
+
+export interface ProjectQorRisk {
+  workspaceId: string
+  workspaceName: string
+  step: FlowStep
+  kind: 'blocking_issue' | 'hotspot'
+  severity: 'critical' | 'warning' | 'info'
+  metric: string
+  displayName: string
+  value: number | string | null
   message: string
 }
 
@@ -636,6 +651,30 @@ const LEGACY_METRIC_MAP: Record<string, LegacyMetricMapping> = {
     dimension: 'timing',
     polarity: 'trend_only',
   },
+  sta_expected_corner_count: {
+    metricName: 'sta_expected_corner_count',
+    displayName: 'STA Expected Corner Count',
+    dimension: 'timing',
+    polarity: 'trend_only',
+  },
+  sta_missing_corner_count: {
+    metricName: 'sta_missing_corner_count',
+    displayName: 'STA Missing Corner Count',
+    dimension: 'timing',
+    polarity: 'lower_is_better',
+  },
+  setup_violation_count: {
+    metricName: 'sta_setup_violation_count',
+    displayName: 'STA Setup Violation Count',
+    dimension: 'timing',
+    polarity: 'lower_is_better',
+  },
+  hold_violation_count: {
+    metricName: 'sta_hold_violation_count',
+    displayName: 'STA Hold Violation Count',
+    dimension: 'timing',
+    polarity: 'lower_is_better',
+  },
   harden_artifact_missing_count: {
     metricName: 'harden_artifact_missing_count',
     displayName: 'Harden Missing Artifact Count',
@@ -645,11 +684,11 @@ const LEGACY_METRIC_MAP: Record<string, LegacyMetricMapping> = {
 }
 
 const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
-  timing: 0,
-  power_integrity: 0,
-  routability_physical: 0.45,
-  area_cost: 0.25,
-  clock_robustness_dfm: 0.3,
+  timing: 0.35,
+  power_integrity: 0.25,
+  routability_physical: 0.2,
+  area_cost: 0.1,
+  clock_robustness_dfm: 0.1,
 }
 
 const METRIC_FAIL_VALUES: Record<string, number> = {
@@ -680,6 +719,14 @@ const METRIC_FAIL_VALUES: Record<string, number> = {
   route_dr_total_via_count: 2000,
   route_la_total_overflow: 100,
   rcx_missing_corner_count: 9,
+  sta_setup_wns: -0.2,
+  sta_setup_tns: -1,
+  sta_hold_wns: -0.2,
+  sta_hold_tns: -1,
+  sta_frequency_mhz: 100,
+  sta_setup_violation_count: 1,
+  sta_hold_violation_count: 1,
+  sta_missing_corner_count: 1,
   harden_artifact_missing_count: 6,
 }
 
@@ -816,6 +863,7 @@ export function buildProjectQorTrendSummary(
     workspaceSummaries,
     baselineWorkspace?.workspaceId ?? null,
   )
+  const risks = buildProjectQorRisks(workspaceSummaries)
 
   return {
     workspaces: workspaceSummaries,
@@ -831,6 +879,7 @@ export function buildProjectQorTrendSummary(
       : 'Sequential workspace baseline',
     regressions,
     improvements,
+    risks,
     unsupportedModules: buildUnsupportedModules(sortedInputs, workspaceSummaries),
   }
 }
@@ -897,7 +946,9 @@ export function buildProjectQorTrendReport(
     })),
     regressions: summary.regressions.map((regression) => ({
       workspace_id: regression.workspaceId,
+      workspace_name: regression.workspaceName,
       baseline_workspace_id: regression.baselineWorkspaceId,
+      baseline_workspace_name: regression.baselineWorkspaceName,
       metric_name: regression.metricName,
       display_name: regression.displayName,
       current_value: regression.currentValue,
@@ -910,7 +961,9 @@ export function buildProjectQorTrendReport(
     })),
     improvements: summary.improvements.map((improvement) => ({
       workspace_id: improvement.workspaceId,
+      workspace_name: improvement.workspaceName,
       baseline_workspace_id: improvement.baselineWorkspaceId,
+      baseline_workspace_name: improvement.baselineWorkspaceName,
       metric_name: improvement.metricName,
       display_name: improvement.displayName,
       current_value: improvement.currentValue,
@@ -918,6 +971,17 @@ export function buildProjectQorTrendReport(
       absolute_delta: improvement.absoluteDelta,
       relative_delta_pct: improvement.relativeDeltaPct,
       state: improvement.state,
+    })),
+    risks: summary.risks.map((risk) => ({
+      workspace_id: risk.workspaceId,
+      workspace_name: risk.workspaceName,
+      step: risk.step,
+      kind: risk.kind,
+      severity: risk.severity,
+      metric: risk.metric,
+      display_name: risk.displayName,
+      value: risk.value,
+      message: risk.message,
     })),
     unsupported_modules: summary.unsupportedModules.map((module) => ({
       id: module.id,
@@ -1029,6 +1093,37 @@ function buildWorkspaceSummary(
   }
 }
 
+function buildProjectQorRisks(
+  workspaces: ProjectQorTrendWorkspaceSummary[],
+): ProjectQorRisk[] {
+  return workspaces
+    .flatMap((workspace) => [
+      ...workspace.blockingIssues.map((issue) => ({
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step: issue.step,
+        kind: 'blocking_issue' as const,
+        severity: 'critical' as const,
+        metric: issue.metric,
+        displayName: issue.displayName,
+        value: issue.value,
+        message: issue.reason,
+      })),
+      ...workspace.hotspots.map((hotspot) => ({
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step: hotspot.step,
+        kind: 'hotspot' as const,
+        severity: hotspot.severity,
+        metric: hotspot.metric,
+        displayName: hotspot.displayName,
+        value: hotspot.value,
+        message: hotspot.description,
+      })),
+    ])
+    .sort(compareProjectQorRisk)
+}
+
 function buildDimensionScores(
   records: ProjectQorMetricRecord[],
 ): Partial<Record<QorDimension, number>> {
@@ -1072,6 +1167,18 @@ function weightedOverallScore(
 
 function scoreRecord(record: ProjectQorMetricRecord): number | null {
   if (record.value === null || record.polarity === 'trend_only') return null
+
+  if (
+    record.metricName === 'sta_setup_wns' ||
+    record.metricName === 'sta_setup_tns' ||
+    record.metricName === 'sta_hold_wns' ||
+    record.metricName === 'sta_hold_tns'
+  ) {
+    const failValue = METRIC_FAIL_VALUES[record.metricName]
+    if (failValue === undefined || failValue >= 0) return null
+    if (record.value >= 0) return 100
+    return clampScore((100 * (record.value - failValue)) / -failValue)
+  }
 
   if (record.polarity === 'target_range') {
     if (record.metricName === 'core_utilization') {
@@ -1128,6 +1235,12 @@ function buildWorkspaceDeltas(
   const regressions: ProjectQorRegression[] = []
   const improvements: ProjectQorDelta[] = []
   const previousRecordsByMetric = new Map<string, ProjectQorMetricRecord>()
+  const workspaceNamesById = new Map(
+    workspaces.map((workspace) => [
+      workspace.workspaceId,
+      workspace.workspaceName || workspace.workspaceId,
+    ]),
+  )
 
   for (const workspace of workspaces) {
     const currentRecordsByMetric = new Map<string, ProjectQorMetricRecord>()
@@ -1139,7 +1252,12 @@ function buildWorkspaceDeltas(
     for (const record of currentRecordsByMetric.values()) {
       const baseline = previousRecordsByMetric.get(record.metricName)
       if (baseline?.value !== null && baseline?.value !== undefined) {
-        const delta = buildDelta(record, baseline)
+        const delta = buildDelta(
+          record,
+          baseline,
+          workspace.workspaceName || workspace.workspaceId,
+          workspaceNamesById.get(baseline.workspaceId) ?? baseline.workspaceId,
+        )
         if (delta.state === 'improvement') {
           improvements.push(delta)
         } else if (delta.state === 'regression') {
@@ -1181,7 +1299,12 @@ function buildExplicitBaselineDeltas(
       const baseline = baselineRecordsByMetric.get(record.metricName)
       if (baseline?.value === null || baseline?.value === undefined) continue
 
-      const delta = buildDelta(record, baseline)
+      const delta = buildDelta(
+        record,
+        baseline,
+        workspace.workspaceName || workspace.workspaceId,
+        baselineWorkspace.workspaceName || baselineWorkspace.workspaceId,
+      )
       if (delta.state === 'improvement') {
         improvements.push(delta)
       } else if (delta.state === 'regression') {
@@ -1214,6 +1337,8 @@ function recordsByMetric(
 function buildDelta(
   record: ProjectQorMetricRecord,
   baseline: ProjectQorMetricRecord,
+  workspaceName: string,
+  baselineWorkspaceName: string,
 ): ProjectQorDelta {
   const absoluteDelta = roundMetric((record.value ?? 0) - (baseline.value ?? 0))
   const baselineValue = baseline.value ?? 0
@@ -1224,7 +1349,9 @@ function buildDelta(
 
   return {
     workspaceId: record.workspaceId,
+    workspaceName,
     baselineWorkspaceId: baseline.workspaceId,
+    baselineWorkspaceName,
     metricName: record.metricName,
     displayName: record.displayName,
     currentValue: record.value ?? 0,
@@ -1516,6 +1643,17 @@ function compareRegressionPriority(
   const priorityDelta = priorityOrder[left.priority] - priorityOrder[right.priority]
   if (priorityDelta !== 0) return priorityDelta
   return compareDeltaMagnitude(left, right)
+}
+
+function compareProjectQorRisk(left: ProjectQorRisk, right: ProjectQorRisk): number {
+  const severityOrder = { critical: 0, warning: 1, info: 2 }
+  const severityDelta = severityOrder[left.severity] - severityOrder[right.severity]
+  if (severityDelta !== 0) return severityDelta
+
+  const workspaceDelta = left.workspaceName.localeCompare(right.workspaceName)
+  if (workspaceDelta !== 0) return workspaceDelta
+
+  return left.step.localeCompare(right.step) || left.metric.localeCompare(right.metric)
 }
 
 function compareDeltaMagnitude(left: ProjectQorDelta, right: ProjectQorDelta): number {

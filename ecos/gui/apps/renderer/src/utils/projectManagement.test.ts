@@ -267,7 +267,7 @@ describe('project management model', () => {
     })
     expect(model.workspaces[1]).toMatchObject({
       id: 'ws_0002',
-      name: 'fanout_from_floor',
+      name: 'ws_0002',
       workspacePath: '/projects/gcd/workspaces/ws_0002',
       description: 'from ws_0001/Floor',
       flowStatusHint: {
@@ -295,10 +295,15 @@ describe('project management model', () => {
     ])
     expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
       workspaceId: 'ws_0002',
+      workspaceName: 'ws_0002',
       label: '9',
       value: 9,
       state: 'bad',
     })
+    expect(model.metricsRows.find((row) => row.id === 'wns')?.points).toEqual([
+      expect.objectContaining({ workspaceId: 'ws_0001', value: null, state: 'pending' }),
+      expect.objectContaining({ workspaceId: 'ws_0002', value: null, state: 'pending' }),
+    ])
     expect(model.dashboardSummary).toMatchObject({
       workspaceCount: 2,
       configuredStepCount: 19,
@@ -309,7 +314,7 @@ describe('project management model', () => {
     })
   })
 
-  it('builds project-level workspace and step summaries from feature and STA snapshots', () => {
+  it('builds project-level workspace and step summaries from feature and STA analysis', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',
       name: 'gcd',
@@ -400,20 +405,45 @@ describe('project management model', () => {
           }),
           drcStep: JSON.stringify({ drc: { number: 2 } }),
         },
-        staReports: [
-          {
-            corner: 'MAX_125/Cworst',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'max', WNS: '8.100', TNS: '0.000' }],
-            }),
-          },
-          {
-            corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'min', WNS: '0.080', TNS: '0.000' }],
-            }),
-          },
-        ],
+        stepMetricTexts: {
+          STA: JSON.stringify({
+            schema_version: 1,
+            tool: 'ecc',
+            step: 'sta',
+            metrics: [
+              {
+                name: 'sta_setup_wns',
+                display_name: 'STA Setup WNS',
+                value: 8.1,
+                corner: 'MAX_125/Cworst',
+              },
+              {
+                name: 'sta_setup_tns',
+                display_name: 'STA Setup TNS',
+                value: 0,
+                corner: 'MAX_125/Cworst',
+              },
+              {
+                name: 'sta_hold_wns',
+                display_name: 'STA Hold WNS',
+                value: 0.08,
+                corner: 'MIN_m40/Cbest',
+              },
+              {
+                name: 'sta_hold_tns',
+                display_name: 'STA Hold TNS',
+                value: 0,
+                corner: 'MIN_m40/Cbest',
+              },
+              {
+                name: 'sta_frequency_mhz',
+                display_name: 'STA Frequency',
+                value: 860,
+                corner: 'MAX_125/Cworst',
+              },
+            ],
+          }),
+        },
       },
       ws_0007: {
         files: {
@@ -458,20 +488,15 @@ describe('project management model', () => {
           }),
           drcStep: JSON.stringify({ drc: { number: 0 } }),
         },
-        staReports: [
-          {
-            corner: 'MAX_125/Cworst',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'max', WNS: '8.500', TNS: '0.000' }],
-            }),
-          },
-          {
-            corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'min', WNS: '0.095', TNS: '0.000' }],
-            }),
-          },
-        ],
+        stepMetricTexts: {
+          STA: JSON.stringify({
+            max_WNS: 8.5,
+            max_TNS: 0,
+            min_WNS: 0.095,
+            min_TNS: 0,
+            'Frequency [MHz]': 870,
+          }),
+        },
       },
     }
 
@@ -487,13 +512,17 @@ describe('project management model', () => {
 
     expect(workspaceSummary?.finalMetrics.drcCount?.value).toBe(0)
     expect(workspaceSummary?.finalMetrics.setupWns?.value).toBe(8.5)
+    expect(workspaceSummary?.finalMetrics.setupTns?.value).toBe(0)
     expect(workspaceSummary?.finalMetrics.holdWns?.value).toBe(0.095)
+    expect(workspaceSummary?.finalMetrics.holdTns?.value).toBe(0)
+    expect(workspaceSummary?.finalMetrics.frequency?.value).toBe(870)
     expect(workspaceSummary?.finalMetrics.area?.value).toBe(758.24)
     expect(
       workspaceSummary?.steps.find((step) => step.step === 'Route')?.metrics,
     ).toEqual([])
     expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
       workspaceId: 'ws_0007',
+      workspaceName: 'ws_0007',
       label: '0',
       value: 0,
       state: 'good',
@@ -502,7 +531,21 @@ describe('project management model', () => {
     const staCompare = model.stepCompareSummaries.find(
       (summary) => summary.step === 'STA',
     )
-    expect(staCompare?.metrics).toEqual([])
+    expect(staCompare?.metrics.map((metric) => metric.id)).toEqual([
+      'sta_setup_wns',
+      'sta_setup_tns',
+      'sta_hold_wns',
+      'sta_hold_tns',
+      'sta_frequency_mhz',
+    ])
+    expect(
+      staCompare?.metrics
+        .find((metric) => metric.id === 'sta_hold_wns')
+        ?.points.map((point) => [point.workspaceId, point.value]),
+    ).toEqual([
+      ['baseline', 0.08],
+      ['ws_0007', 0.095],
+    ])
 
     const drcCompare = model.stepCompareSummaries.find(
       (summary) => summary.step === 'DRC',
@@ -1013,26 +1056,9 @@ describe('project management model', () => {
             Die: { Area: 2300 },
             Core: { Utilization: 0.71 },
           }),
-          staReports: [
-            {
-              corner: 'MAX_125/Cworst',
-              content: JSON.stringify({
-                summary: [
-                  { delay_type: 'max', freq: '870' },
-                  { delay_type: 'min', freq: 'NA' },
-                ],
-              }),
-            },
-            {
-              corner: 'MIN_m40/Cbest',
-              content: JSON.stringify({
-                summary: [
-                  { delay_type: 'max', freq: '830' },
-                  { delay_type: 'max', freq: '820' },
-                ],
-              }),
-            },
-          ],
+          stepMetricTexts: {
+            STA: JSON.stringify({ 'Frequency [MHz]': 820 }),
+          },
           checklistText: JSON.stringify({
             checklist: [{ state: 'Passed' }, { state: 'Passed' }, { state: 'Warn' }],
           }),
@@ -1258,7 +1284,7 @@ describe('project management model', () => {
     expect(updated.workspaces).toHaveLength(2)
     expect(updated.workspaces[1]).toMatchObject({
       workspace_id: 'ws_0002',
-      name: 'gcd_floor_branch',
+      name: 'ws_0002',
       workspace_path: '/projects/gcd/workspaces/ws_0002',
       source_workspace_id: 'ws_0001',
       start_step: 'Fanout',
@@ -1491,7 +1517,7 @@ describe('project management model', () => {
       now: '2026-07-02T09:00:00.000Z',
       config: {
         parameters: {
-          design: 'backend_a',
+          design: 'gcd',
         },
       },
     })
@@ -1506,6 +1532,43 @@ describe('project management model', () => {
       start_step: 'Synth',
       end_step: 'Harden',
     })
+  })
+
+  it('uses workspace folder names instead of design names in QoR comparisons', () => {
+    const manifest = createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-02T08:00:00.000Z',
+    })
+    const first = registerWorkspaceInManifest(manifest, {
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd',
+      workspacePath: '/projects/gcd/ws_0001',
+      now: '2026-07-02T08:00:00.000Z',
+      config: { parameters: { design: 'gcd' } },
+    })
+    const updated = registerWorkspaceInManifest(first, {
+      projectRoot: '/projects/gcd',
+      projectName: 'gcd',
+      workspacePath: '/projects/gcd/ws_0002',
+      now: '2026-07-02T09:00:00.000Z',
+      config: { parameters: { design: 'gcd_floor_branch' } },
+    })
+
+    const project = buildProjectManagementProject(recentProject, updated)
+
+    expect(updated.workspaces.map((workspace) => workspace.name)).toEqual([
+      'ws_0001',
+      'ws_0002',
+    ])
+    expect(project.workspaces.map((workspace) => workspace.name)).toEqual([
+      'ws_0001',
+      'ws_0002',
+    ])
+    expect(project.qorTrendSummary.trendPoints.map((point) => point.label)).toEqual([
+      'ws_0001',
+      'ws_0002',
+    ])
   })
 
   it('archives and deletes workspaces in project.json without removing other workspaces', () => {

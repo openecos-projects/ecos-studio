@@ -229,6 +229,39 @@ describe('project QoR trend model', () => {
     )
   })
 
+  it('scores the current STA metrics analysis and removes the STA future-work label', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput('ws_0001', {
+        STA: JSON.stringify({
+          max_WNS: 0.08,
+          max_TNS: 0,
+          min_WNS: 0.04,
+          min_TNS: 0,
+          'Frequency [MHz]': 750,
+          setup_violation_count: 0,
+          hold_violation_count: 0,
+          sta_corner_count: 2,
+          sta_expected_corner_count: 2,
+          sta_missing_corner_count: 0,
+        }),
+      }),
+    ])
+
+    expect(summary.workspaces[0]?.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ metricName: 'sta_setup_wns', value: 0.08 }),
+        expect.objectContaining({ metricName: 'sta_hold_wns', value: 0.04 }),
+        expect.objectContaining({ metricName: 'sta_setup_violation_count', value: 0 }),
+        expect.objectContaining({ metricName: 'sta_missing_corner_count', value: 0 }),
+      ]),
+    )
+    expect(summary.workspaces[0]?.dimensionScores.timing).toBe(100)
+    expect(summary.workspaces[0]?.hardGateCap).toBe(100)
+    expect(summary.unsupportedModules.map((module) => module.id)).not.toContain(
+      'sta_analysis',
+    )
+  })
+
   it('scores available first-version dimensions and applies DRC hard gate cap', () => {
     const summary = buildProjectQorTrendSummary([
       workspaceInput('baseline', {
@@ -329,6 +362,52 @@ describe('project QoR trend model', () => {
         workspaceId: 'ws_0003',
         baselineWorkspaceId: 'ws_0002',
         metricName: 'route_wirelength',
+      }),
+    )
+  })
+
+  it('uses workspace names for trend, delta, and exported report labels', () => {
+    const summary = buildProjectQorTrendSummary(
+      [
+        workspaceInput(
+          'ws_0001',
+          { Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200 }) },
+          {},
+          {},
+          'Golden Route',
+        ),
+        workspaceInput(
+          'ws_0002',
+          { Route: JSON.stringify({ Tool: 'ecc', wire_len: 5400 }) },
+          {},
+          {},
+          'Route ECO A',
+        ),
+      ],
+      { baselineWorkspaceId: 'ws_0001' },
+    )
+
+    expect(summary.trendPoints.map((point) => point.label)).toEqual([
+      'Golden Route',
+      'Route ECO A',
+    ])
+    expect(summary.baselineLabel).toBe('Golden Route')
+    expect(summary.regressions).toContainEqual(
+      expect.objectContaining({
+        workspaceId: 'ws_0002',
+        workspaceName: 'Route ECO A',
+        baselineWorkspaceId: 'ws_0001',
+        baselineWorkspaceName: 'Golden Route',
+      }),
+    )
+
+    const report = JSON.parse(serializeProjectQorTrendReport(summary))
+    expect(report.regressions).toContainEqual(
+      expect.objectContaining({
+        workspace_id: 'ws_0002',
+        workspace_name: 'Route ECO A',
+        baseline_workspace_id: 'ws_0001',
+        baseline_workspace_name: 'Golden Route',
       }),
     )
   })
@@ -570,6 +649,78 @@ describe('project QoR trend model', () => {
     )
   })
 
+  it('prioritizes structured blocking issues and hotspots as QoR analysis risks', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0002',
+        {},
+        {
+          STA: JSON.stringify({
+            schema_version: 1,
+            blocking_issues: [
+              {
+                metric: 'sta_setup_wns',
+                display_name: 'STA Setup WNS',
+                value: -0.018,
+                reason: 'STA setup WNS is negative.',
+              },
+            ],
+          }),
+        },
+        {
+          Place: JSON.stringify({
+            schema_version: 1,
+            hotspots: [
+              {
+                kind: 'congestion',
+                severity: 'warning',
+                metric: 'place_congestion_egr_overflow_total',
+                display_name: 'Place EGR Overflow Total',
+                value: 11,
+                description: 'Placement EGR overflow is present.',
+              },
+            ],
+          }),
+        },
+        'route_eco_a',
+      ),
+    ])
+
+    expect(summary.risks).toEqual([
+      {
+        workspaceId: 'ws_0002',
+        workspaceName: 'route_eco_a',
+        step: 'STA',
+        kind: 'blocking_issue',
+        severity: 'critical',
+        metric: 'sta_setup_wns',
+        displayName: 'STA Setup WNS',
+        value: -0.018,
+        message: 'STA setup WNS is negative.',
+      },
+      {
+        workspaceId: 'ws_0002',
+        workspaceName: 'route_eco_a',
+        step: 'Place',
+        kind: 'hotspot',
+        severity: 'warning',
+        metric: 'place_congestion_egr_overflow_total',
+        displayName: 'Place EGR Overflow Total',
+        value: 11,
+        message: 'Placement EGR overflow is present.',
+      },
+    ])
+
+    const report = JSON.parse(serializeProjectQorTrendReport(summary))
+    expect(report.risks).toContainEqual(
+      expect.objectContaining({
+        workspace_name: 'route_eco_a',
+        step: 'STA',
+        severity: 'critical',
+      }),
+    )
+  })
+
   it('serializes a project-level QoR trend report payload for explicit export', () => {
     const summary = buildProjectQorTrendSummary(
       [
@@ -646,10 +797,11 @@ function workspaceInput(
   stepMetricTexts: ProjectQorWorkspaceInput['stepMetricTexts'],
   stepSummaryTexts: Partial<Record<string, string | null>> = {},
   stepHotspotTexts: Partial<Record<string, string | null>> = {},
+  workspaceName = workspaceId,
 ): ProjectQorWorkspaceInput {
   return {
     workspaceId,
-    workspaceName: workspaceId,
+    workspaceName,
     workspacePath: `/projects/gcd/${workspaceId}`,
     createdAt:
       workspaceId === 'baseline' || workspaceId === 'ws_0001'

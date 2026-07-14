@@ -28,7 +28,6 @@
           <span>Export</span>
         </button>
         <span class="qor-baseline-tag">Baseline: {{ baselineLabel }}</span>
-        <span class="qor-selected-step">{{ selectedStep }}</span>
       </div>
     </header>
 
@@ -46,200 +45,151 @@
       <section class="qor-summary-card">
         <span>Largest Regression</span>
         <strong>{{ largestRegressionLabel }}</strong>
-        <small>{{ largestRegression?.message ?? 'No regressions detected' }}</small>
-      </section>
-      <section class="qor-summary-card">
-        <span>Missing Analysis</span>
-        <strong>{{ selectedWorkspace?.missingAnalysisSteps.length ?? 0 }}</strong>
-        <small>{{ missingAnalysisLabel }}</small>
+        <small>
+          {{ largestRegression ? formatDeltaDetail(largestRegression) : 'No regressions detected' }}
+        </small>
       </section>
     </div>
 
-    <section class="qor-trend-card">
-      <div class="qor-section-title">
-        <span>Overall Score</span>
-        <small>{{ qorTrendSummary.trendPoints.length }} workspaces</small>
-      </div>
-      <div class="qor-chart-row">
-        <svg
-          class="qor-trend-svg"
-          viewBox="0 0 100 40"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <polyline
-            v-if="scorePolyline"
-            :points="scorePolyline"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-        <div class="qor-trend-points qor-scroll-list">
-          <button
-            v-for="point in qorTrendSummary.trendPoints"
-            :key="point.workspaceId"
-            type="button"
-            class="qor-trend-point"
-            :class="{
-              selected: point.workspaceId === selectedWorkspaceId,
-              baseline: point.workspaceId === qorTrendSummary.baselineWorkspaceId,
-            }"
-            @click="selectTrendPoint(point.workspaceId)"
-          >
-            <strong>{{ formatScore(point.score) }}</strong>
-            <span>{{ point.label }}</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <div class="qor-detail-grid">
-      <section class="qor-trend-card">
+    <div class="qor-main-grid">
+      <section class="qor-trend-card qor-chart-card">
         <div class="qor-section-title">
-          <span>Selected Workspace</span>
-          <small>{{ selectedWorkspace?.workspaceName ?? selectedWorkspaceId }}</small>
+          <span>Overall Score</span>
+          <small>{{ qorTrendSummary.trendPoints.length }} workspaces</small>
         </div>
-        <div v-if="selectedWorkspace" class="qor-dimension-list qor-scroll-list">
-          <div
-            v-for="dimension in dimensionRows"
-            :key="dimension.id"
-            class="qor-dimension-row"
+        <div
+          ref="chartViewport"
+          class="qor-chart-viewport"
+          aria-label="Overall QoR score by workspace"
+        >
+          <svg
+            class="qor-score-chart"
+            :viewBox="chartViewBox"
+            role="img"
+            aria-label="Overall QoR score trend from 0 to 100"
           >
-            <span>{{ dimension.label }}</span>
-            <strong>{{ formatScore(dimension.score) }}</strong>
-          </div>
-          <div
-            v-if="selectedWorkspace.blockingIssues.length > 0"
-            class="qor-blocking-block"
-          >
-            <span>Blocking Issues</span>
-            <ul class="qor-blocking-list qor-scroll-list">
-              <li
-                v-for="issue in selectedWorkspace.blockingIssues"
-                :key="`${issue.step}-${issue.metric}`"
+            <g v-for="score in scoreTicks" :key="score">
+              <line
+                class="qor-chart-gridline"
+                :class="{ threshold: score === 60 }"
+                :x1="chartLeft"
+                :x2="chartPlotRight"
+                :y1="scoreToChartY(score)"
+                :y2="scoreToChartY(score)"
+              />
+              <text
+                class="qor-chart-score-label"
+                :class="{ threshold: score === 60 }"
+                :x="chartLeft - 3"
+                :y="scoreToChartY(score)"
+                text-anchor="end"
+                dominant-baseline="middle"
               >
-                <strong>{{ issue.displayName }}</strong>
-                <small>
-                  {{ issue.step }} · {{ issue.reason }} ·
-                  {{ formatBlockingValue(issue.value) }}
-                </small>
-              </li>
-            </ul>
-          </div>
-          <div v-if="selectedWorkspace.hotspots.length > 0" class="qor-hotspot-block">
-            <span>Hotspots</span>
-            <ul class="qor-hotspot-list qor-scroll-list">
-              <li
-                v-for="hotspot in selectedWorkspace.hotspots"
-                :key="`${hotspot.step}-${hotspot.metric}-${hotspot.kind}`"
+                {{ score }}
+              </text>
+            </g>
+            <line
+              class="qor-chart-axis qor-chart-y-axis"
+              :x1="chartLeft"
+              :x2="chartLeft"
+              :y1="chartTop"
+              :y2="chartBottom"
+            />
+            <line
+              class="qor-chart-axis qor-chart-x-axis"
+              :x1="chartLeft"
+              :x2="chartPlotRight"
+              :y1="chartBottom"
+              :y2="chartBottom"
+            />
+            <polyline
+              v-if="scorePolyline"
+              class="qor-score-polyline"
+              :points="scorePolyline"
+              fill="none"
+            />
+            <g v-for="(point, index) in scoreChartPoints" :key="point.workspaceId">
+              <circle
+                v-if="point.isBest"
+                class="qor-chart-best-ring"
+                :cx="point.x"
+                :cy="point.y"
+                r="3.7"
+              />
+              <circle
+                class="qor-chart-point"
+                :class="{ best: point.isBest }"
+                :cx="point.x"
+                :cy="point.y"
+                r="2.1"
               >
-                <strong>{{ hotspot.displayName }}</strong>
-                <small>
-                  {{ hotspot.step }} · {{ hotspot.severity }} ·
-                  {{ hotspot.description }} · {{ formatBlockingValue(hotspot.value) }}
-                </small>
-              </li>
-            </ul>
-          </div>
+                <title>{{ `${point.label}: ${formatScore(point.score)}` }}</title>
+              </circle>
+              <text
+                class="qor-chart-workspace-label"
+                :x="point.x"
+                :y="chartWorkspaceLabelY"
+                :text-anchor="workspaceLabelAnchor(index, scoreChartPoints.length)"
+              >
+                <title>{{ point.label }}</title>
+                {{ shortenWorkspaceLabel(point.label) }}
+              </text>
+            </g>
+          </svg>
         </div>
-        <p v-else class="qor-empty-note">No selected workspace QoR data.</p>
       </section>
 
-      <section class="qor-trend-card">
-        <div class="qor-section-title">
-          <span>Top Regressions</span>
-          <small>Compared with {{ baselineLabel }}</small>
-        </div>
-        <ul
-          v-if="qorTrendSummary.regressions.length > 0"
-          class="qor-delta-list qor-scroll-list"
-        >
-          <li
-            v-for="regression in qorTrendSummary.regressions"
-            :key="`${regression.workspaceId}-${regression.metricName}`"
-          >
-            <span>{{ regression.displayName }}</span>
-            <strong>{{ regression.priority }}</strong>
-            <small>{{ regression.message }}</small>
-          </li>
-        </ul>
-        <p v-else class="qor-empty-note">No top regressions detected.</p>
-      </section>
-
-      <section class="qor-trend-card">
-        <div class="qor-section-title">
-          <span>Top Improvements</span>
-          <small>Compared with {{ baselineLabel }}</small>
-        </div>
-        <ul
-          v-if="qorTrendSummary.improvements.length > 0"
-          class="qor-delta-list qor-scroll-list"
-        >
-          <li
-            v-for="improvement in qorTrendSummary.improvements"
-            :key="`${improvement.workspaceId}-${improvement.metricName}`"
-          >
-            <span>{{ improvement.displayName }}</span>
-            <strong>{{ formatDelta(improvement.relativeDeltaPct) }}</strong>
-            <small>{{ improvement.workspaceId }}</small>
-          </li>
-        </ul>
-        <p v-else class="qor-empty-note">No top improvements detected.</p>
-      </section>
-
-      <section class="qor-trend-card">
-        <div class="qor-section-title">
-          <span>Missing Analysis</span>
-          <small>Unsupported module status</small>
-        </div>
-        <div v-if="selectedWorkspace" class="qor-missing-grid">
-          <div class="qor-missing-block">
-            <span>Missing Step Analysis</span>
-            <div
-              v-if="selectedWorkspace.missingAnalysisSteps.length > 0"
-              class="qor-chip-row qor-scroll-list"
+      <section class="qor-trend-card qor-delta-card">
+        <div class="qor-section-title qor-delta-section-title">
+          <div class="qor-delta-tabs" role="tablist" aria-label="QoR delta list">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="activeDeltaTab === 'improvements'"
+              :class="{ selected: activeDeltaTab === 'improvements' }"
+              @click="activeDeltaTab = 'improvements'"
             >
-              <span
-                v-for="step in selectedWorkspace.missingAnalysisSteps"
-                :key="step"
-                class="qor-chip"
-              >
-                {{ step }}
-              </span>
-            </div>
-            <small v-else>Complete for supported steps</small>
-          </div>
-          <div class="qor-missing-block">
-            <span>Missing Supported Metrics</span>
-            <div
-              v-if="selectedWorkspace.missingMetrics.length > 0"
-              class="qor-chip-row qor-scroll-list"
+              Top Improvements
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="activeDeltaTab === 'regressions'"
+              :class="{ selected: activeDeltaTab === 'regressions' }"
+              @click="activeDeltaTab = 'regressions'"
             >
-              <span
-                v-for="metric in selectedWorkspace.missingMetrics"
-                :key="metric"
-                class="qor-chip"
-              >
-                {{ metric }}
-              </span>
-            </div>
-            <small v-else>All supported metrics found</small>
+              Top Regressions
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="activeDeltaTab === 'risks'"
+              :class="{ selected: activeDeltaTab === 'risks' }"
+              @click="activeDeltaTab = 'risks'"
+            >
+              Analysis Risks
+            </button>
           </div>
+          <small>{{ activeListContext }}</small>
         </div>
-        <ul class="qor-module-list qor-scroll-list">
-          <li v-for="module in qorTrendSummary.unsupportedModules" :key="module.id">
-            <div>
-              <span>{{ module.label }}</span>
-              <small>{{ module.reason }}</small>
-            </div>
-            <strong>{{ module.status }}</strong>
+        <ul v-if="activeListItems.length > 0" class="qor-delta-list qor-scroll-list">
+          <li
+            v-for="item in activeListItems"
+            :key="qorListItemKey(item)"
+          >
+            <span>{{ item.displayName }}</span>
+            <strong :class="qorListItemClass(item)">{{ formatQorListItemBadge(item) }}</strong>
+            <small>{{ formatQorListItemDetail(item) }}</small>
           </li>
         </ul>
-        <p v-if="qorTrendSummary.unsupportedModules.length === 0" class="qor-empty-note">
-          No unsupported modules marked 待后续开发.
+        <p v-else class="qor-empty-note">
+          {{
+            activeDeltaTab === 'improvements'
+              ? 'No top improvements detected.'
+              : activeDeltaTab === 'regressions'
+                ? 'No top regressions detected.'
+                : 'No structured analysis risks detected.'
+          }}
         </p>
       </section>
     </div>
@@ -247,31 +197,45 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { ProjectQorTrendSummary, QorDimension } from '@/utils/projectQorTrend'
-import type { FlowStep } from '@/utils/projectManagement'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
 
 const props = defineProps<{
   qorTrendSummary: ProjectQorTrendSummary
   selectedWorkspaceId: string
-  selectedStep: FlowStep
 }>()
 
 const emit = defineEmits<{
-  'select-point': [{ workspaceId: string; step: FlowStep }]
   'export-report': []
   'set-baseline': [{ workspaceId: string }]
 }>()
 
-const trendPointStep: FlowStep = 'DRC'
+const scoreTicks = [0, 20, 40, 60, 80, 100] as const
+const chartLeft = 10
+const chartRight = 3
+const chartTop = 6
+const chartBottom = 80
+const chartWorkspaceLabelY = 91
+const activeDeltaTab = ref<'improvements' | 'regressions' | 'risks'>('improvements')
+const chartViewport = ref<HTMLElement | null>(null)
+const chartViewportSize = ref({ width: 0, height: 0 })
+let chartResizeObserver: ResizeObserver | null = null
 
-const dimensionLabels: Record<QorDimension, string> = {
-  timing: 'Timing',
-  power_integrity: 'Power / Integrity',
-  routability_physical: 'Routability / Physical',
-  area_cost: 'Area / Cost',
-  clock_robustness_dfm: 'Clock / DFM',
-}
+onMounted(() => {
+  if (!chartViewport.value) return
+
+  chartResizeObserver = new ResizeObserver(([entry]) => {
+    chartViewportSize.value = {
+      width: entry.contentRect.width,
+      height: entry.contentRect.height,
+    }
+  })
+  chartResizeObserver.observe(chartViewport.value)
+})
+
+onBeforeUnmount(() => {
+  chartResizeObserver?.disconnect()
+})
 
 const latestTrendPoint = computed(() => {
   const points = props.qorTrendSummary.trendPoints
@@ -287,6 +251,8 @@ const bestTrendPoint = computed(() => {
     return best
   }, null)
 })
+
+const highestTrendScore = computed(() => bestTrendPoint.value?.score ?? null)
 
 const largestRegression = computed(() => props.qorTrendSummary.regressions[0] ?? null)
 
@@ -313,47 +279,71 @@ const selectedWorkspace = computed(() => {
 
 const canSetSelectedWorkspaceAsBaseline = computed(() => {
   const workspaceId = selectedWorkspace.value?.workspaceId
-  return Boolean(
-    workspaceId && workspaceId !== props.qorTrendSummary.baselineWorkspaceId,
-  )
+  return Boolean(workspaceId && workspaceId !== props.qorTrendSummary.baselineWorkspaceId)
 })
 
-const missingAnalysisLabel = computed(() => {
-  const steps = selectedWorkspace.value?.missingAnalysisSteps ?? []
-  return steps.length > 0 ? steps.join(', ') : 'Complete for supported steps'
+const chartCoordinateWidth = computed(() => {
+  const { width, height } = chartViewportSize.value
+  if (width <= 0 || height <= 0) return 180
+  return Math.max(120, (width / height) * 100)
 })
 
-const dimensionRows = computed(() => {
-  const scores = selectedWorkspace.value?.dimensionScores ?? {}
-  return Object.entries(dimensionLabels).map(([id, label]) => ({
-    id,
-    label,
-    score: scores[id as QorDimension] ?? null,
+const chartPlotRight = computed(() => chartCoordinateWidth.value - chartRight)
+
+const chartViewBox = computed(() => `0 0 ${chartCoordinateWidth.value.toFixed(2)} 100`)
+
+const scoreChartPoints = computed(() => {
+  const points = props.qorTrendSummary.trendPoints
+  const pointCount = points.length
+  const plotWidth = chartPlotRight.value - chartLeft
+  return points.map((point, index) => ({
+    ...point,
+    isBest:
+      point.score !== null &&
+      highestTrendScore.value !== null &&
+      point.score === highestTrendScore.value,
+    x:
+      pointCount <= 1
+        ? chartLeft
+        : chartLeft + (index / (pointCount - 1)) * plotWidth,
+    y: scoreToChartY(point.score),
   }))
 })
 
 const scorePolyline = computed(() => {
-  const points = props.qorTrendSummary.trendPoints
-  if (points.length === 0) return ''
-  if (points.length === 1) {
-    const y = scoreToSvgY(points[0].score)
-    return `50,${y}`
-  }
-  return points
-    .map((point, index) => {
-      const x = (index / (points.length - 1)) * 100
-      return `${Number(x.toFixed(2))},${scoreToSvgY(point.score)}`
-    })
+  return scoreChartPoints.value
+    .map((point) => `${Number(point.x.toFixed(2))},${Number(point.y.toFixed(2))}`)
     .join(' ')
 })
 
-function scoreToSvgY(score: number | null): number {
-  if (score === null) return 36
-  return Number((36 - (Math.max(0, Math.min(100, score)) / 100) * 32).toFixed(2))
+const activeListItems = computed(() => {
+  if (activeDeltaTab.value === 'improvements') return props.qorTrendSummary.improvements
+  if (activeDeltaTab.value === 'regressions') return props.qorTrendSummary.regressions
+  return props.qorTrendSummary.risks
+})
+
+const activeListContext = computed(() => {
+  return activeDeltaTab.value === 'risks'
+    ? 'Structured step analysis'
+    : `Compared with ${baselineLabel.value}`
+})
+
+function scoreToChartY(score: number | null): number {
+  const normalizedScore = score === null ? 50 : Math.max(0, Math.min(100, score))
+  return Number(
+    (chartBottom - (normalizedScore / 100) * (chartBottom - chartTop)).toFixed(2),
+  )
 }
 
-function selectTrendPoint(workspaceId: string) {
-  emit('select-point', { workspaceId, step: trendPointStep })
+function shortenWorkspaceLabel(label: string): string {
+  const maxLength = 8
+  return label.length > maxLength ? `${label.slice(0, maxLength)}...` : label
+}
+
+function workspaceLabelAnchor(index: number, pointCount: number): 'start' | 'middle' | 'end' {
+  if (index === 0) return 'start'
+  if (index === pointCount - 1) return 'end'
+  return 'middle'
 }
 
 function exportReport() {
@@ -376,15 +366,78 @@ function formatDelta(delta: number | null): string {
   return `${sign}${delta.toFixed(1)}%`
 }
 
-function formatBlockingValue(value: number | string | null): string {
-  return value === null ? 'N/A' : String(value)
+function formatDeltaBadge(
+  delta:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number],
+): string {
+  return 'priority' in delta ? delta.priority : formatDelta(delta.relativeDeltaPct)
+}
+
+function formatDeltaDetail(
+  delta:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number],
+): string {
+  const workspaces = `${delta.workspaceName} vs ${delta.baselineWorkspaceName}`
+  return 'message' in delta ? `${workspaces}: ${delta.message}` : workspaces
+}
+
+function isProjectQorRisk(
+  item: ProjectQorTrendSummary['improvements'][number] | ProjectQorTrendSummary['risks'][number],
+): item is ProjectQorTrendSummary['risks'][number] {
+  return 'severity' in item
+}
+
+function formatQorListItemBadge(
+  item:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number]
+    | ProjectQorTrendSummary['risks'][number],
+): string {
+  if (isProjectQorRisk(item)) return item.severity.toUpperCase()
+  return formatDeltaBadge(item)
+}
+
+function formatQorListItemDetail(
+  item:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number]
+    | ProjectQorTrendSummary['risks'][number],
+): string {
+  if (isProjectQorRisk(item)) {
+    const value = item.value === null ? '' : `: ${item.value}`
+    return `${item.workspaceName} · ${item.step} · ${item.message}${value}`
+  }
+  return formatDeltaDetail(item)
+}
+
+function qorListItemKey(
+  item:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number]
+    | ProjectQorTrendSummary['risks'][number],
+): string {
+  return isProjectQorRisk(item)
+    ? `${item.workspaceId}-${item.step}-${item.kind}-${item.metric}`
+    : `${item.workspaceId}-${item.metricName}`
+}
+
+function qorListItemClass(
+  item:
+    | ProjectQorTrendSummary['improvements'][number]
+    | ProjectQorTrendSummary['regressions'][number]
+    | ProjectQorTrendSummary['risks'][number],
+): string {
+  if (!isProjectQorRisk(item)) return ''
+  return `qor-risk-${item.severity}`
 }
 </script>
 
 <style scoped>
 .qor-trend-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(190px, 0.85fr) minmax(0, 1.15fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
   height: 100%;
   min-height: 0;
@@ -419,11 +472,7 @@ function formatBlockingValue(value: number | string | null): string {
 .qor-section-title small,
 .qor-summary-card small,
 .qor-empty-note,
-.qor-missing-block small,
-.qor-blocking-list small,
-.qor-hotspot-list small,
-.qor-delta-list small,
-.qor-module-list small {
+.qor-delta-list small {
   color: var(--text-secondary);
 }
 
@@ -440,7 +489,6 @@ function formatBlockingValue(value: number | string | null): string {
 }
 
 .qor-baseline-tag,
-.qor-selected-step,
 .qor-baseline-button,
 .qor-export-button {
   min-width: 54px;
@@ -478,34 +526,17 @@ function formatBlockingValue(value: number | string | null): string {
   color: var(--warning-color, #d97706);
 }
 
-.qor-summary-grid,
-.qor-detail-grid {
+.qor-summary-grid {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   min-height: 0;
-}
-
-.qor-summary-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.qor-detail-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(0, 1fr);
-  overflow: hidden;
 }
 
 .qor-summary-card,
 .qor-trend-card {
   border-radius: 8px;
   padding: 14px;
-}
-
-.qor-trend-card {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .qor-summary-card {
@@ -517,10 +548,7 @@ function formatBlockingValue(value: number | string | null): string {
 
 .qor-summary-card span,
 .qor-section-title span,
-.qor-dimension-row span,
-.qor-missing-block > span,
-.qor-delta-list span,
-.qor-module-list span {
+.qor-delta-list span {
   font-size: 12px;
   font-weight: 700;
 }
@@ -528,6 +556,21 @@ function formatBlockingValue(value: number | string | null): string {
 .qor-summary-card strong {
   overflow-wrap: anywhere;
   font-size: 22px;
+}
+
+.qor-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.42fr);
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.qor-trend-card {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .qor-section-title {
@@ -542,224 +585,168 @@ function formatBlockingValue(value: number | string | null): string {
   background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
 }
 
-.qor-chart-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr);
-  gap: 14px;
-  align-items: stretch;
+.qor-chart-viewport {
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-}
-
-.qor-trend-svg {
-  width: 100%;
-  height: 100%;
-  min-height: 140px;
-  color: var(--accent-color);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background:
-    linear-gradient(
-        color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
-        transparent 1px
-      )
-      0 0 / 100% 25%,
-    var(--bg-primary);
-}
-
-.qor-trend-points,
-.qor-dimension-list,
-.qor-missing-grid,
-.qor-blocking-list,
-.qor-hotspot-list,
-.qor-delta-list,
-.qor-module-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-.qor-scroll-list {
-  min-height: 0;
-  overflow: auto;
+  overflow-y: hidden;
   overscroll-behavior: contain;
-  padding-right: 2px;
 }
 
-.qor-trend-points,
-.qor-dimension-list,
-.qor-delta-list,
-.qor-module-list {
-  flex: 1 1 auto;
-}
-
-.qor-trend-point,
-.qor-dimension-row,
-.qor-missing-block,
-.qor-blocking-block,
-.qor-blocking-list li,
-.qor-hotspot-block,
-.qor-hotspot-list li,
-.qor-delta-list li,
-.qor-module-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 42px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-primary);
-}
-
-.qor-trend-point {
+.qor-score-chart {
+  display: block;
   width: 100%;
-  padding: 8px 10px;
-  color: inherit;
+  min-width: 0;
+  height: 100%;
+  min-height: 250px;
+  color: var(--accent-color);
+}
+
+.qor-chart-gridline {
+  stroke: color-mix(in srgb, var(--border-color) 72%, transparent);
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+
+.qor-chart-gridline.threshold {
+  stroke: #7f1d1d;
+  stroke-width: 1.1;
+}
+
+.qor-chart-axis {
+  stroke: color-mix(in srgb, var(--text-secondary) 70%, var(--border-color));
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.qor-chart-score-label,
+.qor-chart-workspace-label {
+  fill: var(--text-secondary);
+  font-size: 4.2px;
+  font-weight: 600;
+}
+
+.qor-chart-score-label.threshold {
+  fill: #7f1d1d;
+}
+
+.qor-chart-workspace-label {
+  font-size: 3.9px;
+  font-weight: 500;
+}
+
+.qor-score-polyline {
+  stroke: color-mix(in srgb, var(--text-secondary) 82%, #7c93ad);
+  stroke-width: 1.25;
+  stroke-dasharray: 3.5 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.qor-chart-point {
+  fill: var(--bg-primary);
+  stroke: var(--accent-color);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.qor-chart-best-ring {
+  fill: var(--bg-primary);
+  stroke: #189968;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.qor-chart-point.best {
+  fill: #189968;
+  stroke: #0b6b48;
+  stroke-width: 1.1;
+}
+
+.qor-delta-section-title {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qor-delta-section-title small {
+  padding-top: 0;
+  text-align: left;
+}
+
+.qor-delta-tabs {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qor-delta-tabs button {
+  border: 0;
+  border-radius: 5px;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.qor-trend-point.selected {
-  border-color: var(--accent-color);
-  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary));
+.qor-delta-tabs button.selected {
+  background: color-mix(in srgb, var(--accent-color) 14%, var(--bg-primary));
+  color: var(--accent-color);
 }
 
-.qor-trend-point.baseline {
-  box-shadow: inset 3px 0 0 var(--warning-color, #d97706);
-}
-
-.qor-trend-point span,
-.qor-delta-list small,
-.qor-module-list small {
-  overflow-wrap: anywhere;
-  text-align: right;
-}
-
-.qor-dimension-row,
-.qor-missing-block,
-.qor-blocking-block,
-.qor-hotspot-block,
-.qor-delta-list li,
-.qor-module-list li {
-  padding: 9px 10px;
-}
-
-.qor-missing-grid {
-  margin-bottom: 10px;
-}
-
-.qor-missing-block {
-  align-items: flex-start;
-  flex-direction: column;
-  justify-content: flex-start;
-}
-
-.qor-blocking-block {
-  align-items: stretch;
-  flex-direction: column;
-}
-
-.qor-hotspot-block {
-  align-items: stretch;
-  flex-direction: column;
-}
-
-.qor-blocking-list,
-.qor-hotspot-list {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.qor-blocking-list li,
-.qor-hotspot-list li {
-  align-items: flex-start;
-  flex-direction: column;
-  min-height: 0;
-  padding: 8px 9px;
-}
-
-.qor-blocking-list li {
-  border-color: color-mix(in srgb, var(--danger-color) 36%, var(--border-color));
-  background: color-mix(in srgb, var(--danger-color) 7%, var(--bg-primary));
-}
-
-.qor-hotspot-list li {
-  border-color: color-mix(in srgb, var(--warn-color) 36%, var(--border-color));
-  background: color-mix(in srgb, var(--warn-color) 8%, var(--bg-primary));
-}
-
-.qor-blocking-list strong {
-  color: var(--danger-color);
-  font-size: 12px;
-}
-
-.qor-hotspot-list strong {
-  color: var(--warn-color);
-  font-size: 12px;
-}
-
-.qor-chip-row {
+.qor-delta-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.qor-chip-row.qor-scroll-list {
-  max-height: 78px;
-}
-
-.qor-chip {
-  max-width: 100%;
-  padding: 3px 7px;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary));
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.qor-delta-list,
-.qor-module-list {
-  padding: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
+  padding: 0 2px 0 0;
+  overflow: auto;
+  overscroll-behavior: contain;
   list-style: none;
-}
-
-.qor-blocking-list.qor-scroll-list,
-.qor-hotspot-list.qor-scroll-list,
-.qor-delta-list.qor-scroll-list,
-.qor-module-list.qor-scroll-list {
-  padding-right: 2px;
-}
-
-.qor-delta-list li,
-.qor-module-list li {
-  align-items: flex-start;
 }
 
 .qor-delta-list li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.qor-delta-list strong {
+  color: var(--accent-color);
+  font-size: 12px;
+}
+
+.qor-delta-list strong.qor-risk-critical {
+  color: var(--error-color, #b91c1c);
+}
+
+.qor-delta-list strong.qor-risk-warning {
+  color: var(--warning-color, #b45309);
+}
+
+.qor-delta-list strong.qor-risk-info {
+  color: var(--text-secondary);
 }
 
 .qor-delta-list small {
   grid-column: 1 / -1;
+  overflow-wrap: anywhere;
   text-align: left;
 }
 
-.qor-module-list li div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.qor-module-list strong {
-  white-space: nowrap;
-  color: var(--accent-color);
+.qor-scroll-list {
+  min-height: 0;
+  overflow: auto;
 }
 
 .qor-empty-note {
@@ -769,9 +756,17 @@ function formatBlockingValue(value: number | string | null): string {
 
 @media (max-width: 980px) {
   .qor-summary-grid,
-  .qor-detail-grid,
-  .qor-chart-row {
+  .qor-main-grid {
     grid-template-columns: 1fr;
+  }
+
+  .qor-main-grid {
+    overflow: auto;
+  }
+
+  .qor-chart-card,
+  .qor-delta-card {
+    min-height: 260px;
   }
 }
 </style>
