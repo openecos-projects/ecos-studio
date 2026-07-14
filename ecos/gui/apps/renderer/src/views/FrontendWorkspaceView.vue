@@ -340,6 +340,11 @@
             </button>
           </div>
 
+          <div v-if="stepStaleReason" class="sim-stale-banner step-stale-banner">
+            <i class="ri-time-line"></i>
+            <span>{{ stepStaleReason }}</span>
+          </div>
+
           <main class="tab-content">
             <section v-if="activeTab === 'summary'" class="summary-panel">
               <template v-if="isPrepareStep && prepareReport">
@@ -383,6 +388,11 @@
                       <span>Includes <strong>{{ numberLabel(prepareInputs.incdirs) }}</strong></span>
                       <span>Defines <strong>{{ numberLabel(prepareInputs.defines) }}</strong></span>
                     </div>
+                    <div v-if="prepareOwnershipRows.length" class="ownership-strip">
+                      <span v-for="item in prepareOwnershipRows" :key="item.ownership">
+                        {{ titleCase(item.ownership) }} <strong>{{ item.count }}</strong>
+                      </span>
+                    </div>
                     <div class="prepare-source-list">
                       <div
                         v-for="source in prepareInputSources"
@@ -403,6 +413,18 @@
                       <strong>{{ prepareContractSummary }}</strong>
                     </header>
                     <div class="prepare-contract-list">
+                      <div
+                        v-if="prepareCpuTopContract.module"
+                        class="prepare-contract-row"
+                        :class="prepareStatusTone(String(prepareCpuTopContract.status || 'pending'))"
+                      >
+                        <i :class="prepareStatusIcon(String(prepareCpuTopContract.status || 'pending'))"></i>
+                        <span>
+                          <strong>{{ prepareCpuTopContract.module }}</strong>
+                          <small>{{ prepareCpuTopContractDetail }}</small>
+                        </span>
+                        <em>{{ titleCase(String(prepareCpuTopContract.status || 'pending')) }}</em>
+                      </div>
                       <div
                         v-for="contract in prepareContracts"
                         :key="contract.label"
@@ -453,6 +475,21 @@
                 <section class="summary-grid">
                   <div class="summary-card">
                     <header>
+                      <span>Review Delta</span>
+                      <strong>{{ reviewDelta.baseline === 'previous_run' ? 'Previous Run' : 'No Baseline' }}</strong>
+                    </header>
+                    <div class="summary-metrics">
+                      <span>New <strong>{{ numberLabel(reviewDelta.new) }}</strong></span>
+                      <span>Existing <strong>{{ numberLabel(reviewDelta.existing) }}</strong></span>
+                      <span>Resolved <strong>{{ numberLabel(reviewResolvedIssues.length) }}</strong></span>
+                      <span>Waived <strong>{{ numberLabel(reviewWaivers.applied) }}</strong></span>
+                    </div>
+                    <p v-if="numberValue(reviewWaivers.invalid?.length)">
+                      {{ numberLabel(reviewWaivers.invalid?.length) }} invalid waiver record(s)
+                    </p>
+                  </div>
+                  <div class="summary-card">
+                    <header>
                       <span>Yosys Precheck</span>
                       <strong>{{ reviewStructuralStatus }}</strong>
                     </header>
@@ -487,7 +524,7 @@
                       :key="reviewIssueKey(issue)"
                       type="button"
                       class="review-issue"
-                      :class="issue.severity"
+                      :class="[issue.severity, { waived: issue.waived }]"
                       @click="openReviewIssue(issue)"
                     >
                       <div class="review-issue-icon">
@@ -496,7 +533,7 @@
                       <div class="review-issue-body">
                         <div class="review-issue-title">
                           <strong>{{ issue.title }}</strong>
-                          <span>{{ titleCase(issue.category) }}</span>
+                          <span>{{ reviewIssueMeta(issue) }}</span>
                         </div>
                         <p>{{ issue.detail }}</p>
                         <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
@@ -558,20 +595,20 @@
                   </div>
                   <div class="summary-card">
                     <header>
-                      <span>Diagnostics</span>
+                      <span>Compiler Result</span>
                       <strong>{{ numberLabel(elabDiagnostics.length + elabUnresolvedModules.length) }}</strong>
                     </header>
                     <p v-if="elabDiagnostics.length || elabUnresolvedModules.length">
-                      Open Elab to jump to Slang diagnostics or inspect unresolved module references.
+                      {{ elabAuthorityLabel }} reported diagnostics or unresolved module references.
                     </p>
                     <p v-else>
-                      No Slang diagnostics or unresolved module candidates were reported.
+                      {{ elabAuthorityLabel }} reported no blocking diagnostics.
                     </p>
                     <div class="summary-metrics">
                       <span>Slang <strong>{{ numberLabel(elabDiagnostics.length) }}</strong></span>
-                      <span>Unresolved <strong>{{ numberLabel(elabUnresolvedModules.length) }}</strong></span>
+                      <span>Compiler Missing <strong>{{ numberLabel(elabUnresolvedModules.length) }}</strong></span>
+                      <span>Heuristic <strong>{{ numberLabel(elabHeuristicCandidates.length) }}</strong></span>
                       <span>Refs <strong>{{ numberLabel(elabReadiness.referenced_modules || elabSummary.referenced_modules) }}</strong></span>
-                      <span>Files <strong>{{ numberLabel(elabReadiness.rtl_files || elabSummary.rtl_files) }}</strong></span>
                     </div>
                   </div>
                   <div class="summary-card">
@@ -740,7 +777,7 @@
                           :key="reviewIssueKey(issue)"
                           type="button"
                           class="review-issue"
-                          :class="issue.severity"
+                          :class="[issue.severity, { waived: issue.waived }]"
                           @click="openReviewIssue(issue)"
                         >
                           <div class="review-issue-icon">
@@ -749,7 +786,7 @@
                           <div class="review-issue-body">
                             <div class="review-issue-title">
                               <strong>{{ issue.title }}</strong>
-                              <span>{{ titleCase(issue.category) }}</span>
+                              <span>{{ reviewIssueMeta(issue) }}</span>
                             </div>
                             <p>{{ issue.detail }}</p>
                             <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
@@ -783,7 +820,7 @@
                               :key="reviewIssueKey(issue)"
                               type="button"
                               class="review-issue"
-                              :class="issue.severity"
+                              :class="[issue.severity, { waived: issue.waived }]"
                               @click="openReviewIssue(issue)"
                             >
                               <div class="review-issue-icon">
@@ -792,7 +829,7 @@
                               <div class="review-issue-body">
                                 <div class="review-issue-title">
                                   <strong>{{ issue.title }}</strong>
-                                  <span>{{ titleCase(issue.category) }}</span>
+                                  <span>{{ reviewIssueMeta(issue) }}</span>
                                 </div>
                                 <p>{{ issue.detail }}</p>
                                 <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
@@ -921,8 +958,8 @@
                   <div class="elab-column">
                     <header class="review-layer-head">
                       <div>
-                        <span>Diagnostics</span>
-                        <strong>Slang parse and hierarchy messages</strong>
+                        <span>Authoritative</span>
+                        <strong>Slang elaboration diagnostics</strong>
                       </div>
                       <em>{{ elabDiagnostics.length + elabUnresolvedModules.length }}</em>
                     </header>
@@ -955,12 +992,23 @@
                         <i class="ri-question-line"></i>
                         <span>
                           <strong>{{ moduleName }}</strong>
-                          <small>Referenced by RTL but not found in the current file universe.</small>
+                          <small>Reported unresolved by Slang elaboration.</small>
                         </span>
                       </div>
-                      <div v-if="elabDiagnostics.length === 0 && elabUnresolvedModules.length === 0" class="empty-panel compact">
+                      <div
+                        v-for="moduleName in elabHeuristicCandidates"
+                        :key="`heuristic:${moduleName}`"
+                        class="elab-unresolved informational"
+                      >
+                        <i class="ri-information-line"></i>
+                        <span>
+                          <strong>{{ moduleName }}</strong>
+                          <small>Source-scan candidate; excluded from readiness.</small>
+                        </span>
+                      </div>
+                      <div v-if="elabDiagnostics.length === 0 && elabUnresolvedModules.length === 0 && elabHeuristicCandidates.length === 0" class="empty-panel compact">
                         <i class="ri-checkbox-circle-line"></i>
-                        <span>No ELAB diagnostics or unresolved module candidates.</span>
+                        <span>No elaboration diagnostics or source-scan candidates.</span>
                       </div>
                     </div>
                   </div>
@@ -969,7 +1017,7 @@
                     <header class="review-layer-head">
                       <div>
                         <span>Module Inventory</span>
-                        <strong>Definitions and instance references</strong>
+                        <strong>Informational source inventory</strong>
                       </div>
                       <em>{{ elabModules.length }}</em>
                     </header>
@@ -1021,19 +1069,32 @@
                     <strong>{{ tile.value }}</strong>
                   </div>
                 </section>
+                <div v-if="lintOwnershipRows.length" class="ownership-strip lint-ownership-strip">
+                  <span v-for="item in lintOwnershipRows" :key="String(item.ownership)">
+                    {{ titleCase(String(item.ownership || 'unknown')) }}
+                    <strong>{{ numberLabel(item.total) }}</strong>
+                  </span>
+                </div>
 
                 <section class="lint-main">
                   <div class="lint-column lint-diagnostics">
                     <header class="review-layer-head">
                       <div>
                         <span>Diagnostics</span>
-                        <strong>Verilator source-level lint messages</strong>
+                        <strong>{{ lintScope === 'actionable' ? 'CPU and tool diagnostics' : 'All Verilator diagnostics' }}</strong>
                       </div>
-                      <em>{{ lintDiagnostics.length }}</em>
+                      <div class="lint-scope-control">
+                        <button type="button" :class="{ active: lintScope === 'actionable' }" @click="lintScope = 'actionable'">
+                          CPU {{ lintActionableDiagnostics.length }}
+                        </button>
+                        <button type="button" :class="{ active: lintScope === 'all' }" @click="lintScope = 'all'">
+                          All {{ lintDiagnostics.length }}
+                        </button>
+                      </div>
                     </header>
                     <div class="lint-list">
                       <button
-                        v-for="diagnostic in lintDiagnostics"
+                        v-for="diagnostic in lintVisibleDiagnostics"
                         :key="lintDiagnosticKey(diagnostic)"
                         type="button"
                         class="review-issue"
@@ -1046,15 +1107,15 @@
                         <div class="review-issue-body">
                           <div class="review-issue-title">
                             <strong>{{ diagnostic.code || titleCase(diagnostic.category || 'lint') }}</strong>
-                            <span>{{ titleCase(diagnostic.category || 'lint') }}</span>
+                            <span>{{ titleCase(diagnostic.ownership || 'unknown') }} · {{ titleCase(diagnostic.category || 'lint') }}</span>
                           </div>
                           <p>{{ diagnostic.message || 'Verilator lint diagnostic' }}</p>
                           <em v-if="diagnostic.source">{{ lintDiagnosticLocationLabel(diagnostic) }}</em>
                         </div>
                       </button>
-                      <div v-if="lintDiagnostics.length === 0" class="empty-panel compact">
+                      <div v-if="lintVisibleDiagnostics.length === 0" class="empty-panel compact">
                         <i class="ri-checkbox-circle-line"></i>
-                        <span>No Verilator lint diagnostics.</span>
+                        <span>{{ lintScope === 'actionable' ? 'No CPU or tool lint diagnostics.' : 'No Verilator lint diagnostics.' }}</span>
                       </div>
                     </div>
                   </div>
@@ -1105,7 +1166,7 @@
                       >
                         <span>
                           <strong>{{ file.label || fileName(String(file.path || '')) }}</strong>
-                          <small>{{ shortPath(String(file.path || '')) }}</small>
+                          <small>{{ titleCase(String(file.ownership || 'unknown')) }} · {{ shortPath(String(file.path || '')) }}</small>
                         </span>
                         <em>{{ numberLabel(file.errors) }}E / {{ numberLabel(file.warnings) }}W</em>
                       </button>
@@ -1120,6 +1181,47 @@
             </section>
 
             <section v-else-if="activeTab === 'cases'" class="cases-panel">
+              <section v-if="cases.length" class="sim-insight-grid">
+                <div class="sim-insight-card">
+                  <header>
+                    <span>Run Regression</span>
+                    <strong>{{ simRegression.baseline_run_id || 'No baseline' }}</strong>
+                  </header>
+                  <div class="sim-regression-grid">
+                    <div v-for="tile in simRegressionTiles" :key="tile.label" :class="tile.tone">
+                      <span>{{ tile.label }}</span>
+                      <strong>{{ tile.value }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="simCycleChanges.length" class="sim-cycle-changes">
+                    <span v-for="change in simCycleChanges" :key="String(change.name)">
+                      <strong>{{ change.name }}</strong>
+                      <em :class="numberValue(change.delta) > 0 ? 'slower' : 'faster'">
+                        {{ signedNumber(change.delta) }} cycles
+                      </em>
+                    </span>
+                  </div>
+                </div>
+                <div class="sim-insight-card">
+                  <header>
+                    <span>Run History</span>
+                    <strong>{{ simHistory.length }} recent</strong>
+                  </header>
+                  <div class="sim-history-list">
+                    <div v-for="run in simHistory.slice(0, 5)" :key="String(run.run_id)">
+                      <i :class="run.ok ? 'ri-checkbox-circle-line ok' : 'ri-close-circle-line failed'"></i>
+                      <span>
+                        <strong>{{ run.run_id }}</strong>
+                        <small>{{ titleCase(String(run.suite || 'simulation')) }} · {{ numberLabel(run.cases) }} cases</small>
+                      </span>
+                      <em>{{ run.ok ? 'PASS' : `${run.failed_cases?.length || 0} FAIL` }}</em>
+                    </div>
+                    <div v-if="!simHistory.length" class="empty-panel compact">
+                      <span>No prior run.</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
               <Splitter v-if="shouldShowSimTerminal" layout="vertical" class="sim-cases-splitter frontend-resizable-splitter">
                 <SplitterPanel :size="58" :minSize="18" class="sim-cases-pane">
                   <div v-if="simResultIsStale" class="sim-stale-banner">
@@ -1136,6 +1238,9 @@
                         <tr>
                           <th>Case</th>
                           <th>Status</th>
+                          <th>Cycles</th>
+                          <th>Outcome</th>
+                          <th>Difftest</th>
                           <th>RC</th>
                           <th>Wave</th>
                           <th>Image</th>
@@ -1164,6 +1269,9 @@
                               {{ testCase.ok ? 'PASS' : 'FAIL' }}
                             </span>
                           </td>
+                          <td>{{ caseCycles(testCase) }}</td>
+                          <td><span class="path-pill">{{ caseTermination(testCase) }}</span></td>
+                          <td><span class="path-pill">{{ caseDifftestStatus(testCase) }}</span></td>
                           <td>{{ testCase.returncode ?? '-' }}</td>
                           <td>
                             <button
@@ -1216,6 +1324,10 @@
                         </button>
                       </div>
                     </header>
+                    <div v-if="selectedCase?.failure" class="sim-failure-summary">
+                      <strong>{{ selectedCase.failure.message || titleCase(selectedCase.failure.kind || 'simulation failure') }}</strong>
+                      <span v-if="selectedCase.failure.first_error">{{ selectedCase.failure.first_error }}</span>
+                    </div>
                     <pre class="sim-terminal-output">{{ simTerminalContent }}</pre>
                   </section>
                 </SplitterPanel>
@@ -1235,6 +1347,9 @@
                       <tr>
                         <th>Case</th>
                         <th>Status</th>
+                        <th>Cycles</th>
+                        <th>Outcome</th>
+                        <th>Difftest</th>
                         <th>RC</th>
                         <th>Wave</th>
                         <th>Image</th>
@@ -1263,6 +1378,9 @@
                             {{ testCase.ok ? 'PASS' : 'FAIL' }}
                           </span>
                         </td>
+                        <td>{{ caseCycles(testCase) }}</td>
+                        <td><span class="path-pill">{{ caseTermination(testCase) }}</span></td>
+                        <td><span class="path-pill">{{ caseDifftestStatus(testCase) }}</span></td>
                         <td>{{ testCase.returncode ?? '-' }}</td>
                         <td>
                           <button
@@ -1428,6 +1546,66 @@ interface SimCase {
     required_markers?: string[]
     missing_markers?: string[]
   }
+  metrics?: SimCaseMetrics
+  failure?: SimFailure
+}
+
+interface SimCaseMetrics {
+  cycles?: number | null
+  max_cycles?: number | null
+  termination?: string
+  trap_code?: number | null
+  timeout_accepted?: boolean
+  difftest?: {
+    enabled?: boolean
+    status?: string
+    last_pc?: string | null
+    last_npc?: string | null
+    first_mismatch?: { message?: string; pc?: string | null } | null
+  }
+  [key: string]: unknown
+}
+
+interface SimFailure {
+  kind?: string
+  message?: string
+  first_error?: string
+  log_tail?: string
+  wave?: string
+}
+
+interface SimRegression {
+  has_baseline?: boolean
+  baseline_run_id?: string
+  new_failures?: string[]
+  persistent_failures?: string[]
+  fixed?: string[]
+  added?: string[]
+  removed?: string[]
+  cycle_changes?: Array<{
+    name?: string
+    previous?: number
+    current?: number
+    delta?: number
+    delta_percent?: number | null
+  }>
+}
+
+interface SimHistoryRun {
+  run_id?: string
+  suite?: string
+  ok?: boolean
+  cases?: number
+  failed_cases?: string[]
+  regression?: SimRegression
+}
+
+interface SimReport {
+  run_id?: string
+  suite?: string
+  regression?: SimRegression
+  history?: SimHistoryRun[]
+  history_path?: string
 }
 
 interface FrontendStepDetail {
@@ -1439,12 +1617,15 @@ interface FrontendStepDetail {
   summary: Record<string, unknown>
   prepare?: PrepareReport
   cases?: SimCase[]
+  sim?: SimReport
   review?: RtlReviewReport
   elab?: ElabReport
   lint?: LintReport
   logs: PathItem[]
   reports: PathItem[]
   artifacts: PathItem[]
+  info?: Record<string, unknown>
+  provenance?: Record<string, unknown>
 }
 
 interface WaveSelection {
@@ -1502,6 +1683,16 @@ interface PrepareReport {
     sources?: PrepareInputSource[]
     manifest?: string
     merged_filelist?: string
+    rtl_sources?: Array<{ path?: string; ownership?: string; source?: string }>
+  }
+  ownership?: Record<string, number>
+  cpu_top_contract?: {
+    status?: string
+    module?: string
+    source?: string
+    ports?: Array<{ name?: string; direction?: string; width?: number }>
+    expected_ports?: number
+    differences?: Record<string, unknown>
   }
   contracts?: PrepareContract[]
   runtime?: PrepareInfoItem[]
@@ -1545,6 +1736,13 @@ interface RtlReviewIssue {
   column?: number
   evidence?: Record<string, unknown>
   recommendation?: string
+  fingerprint?: string
+  confidence?: string
+  origin?: string
+  ownership?: string
+  status?: string
+  waived?: boolean
+  waiver?: { reason?: string }
 }
 
 interface RtlReviewReport {
@@ -1557,6 +1755,18 @@ interface RtlReviewReport {
   structural_probe?: Record<string, unknown>
   yosys_precheck?: Record<string, unknown>
   next_analyzers?: string[]
+  delta?: {
+    baseline?: string
+    new?: number
+    existing?: number
+    resolved?: number
+  }
+  resolved_issues?: RtlReviewIssue[]
+  waivers?: {
+    configured?: number
+    applied?: number
+    invalid?: unknown[]
+  }
 }
 
 interface ElabDiagnostic {
@@ -1565,6 +1775,7 @@ interface ElabDiagnostic {
   source?: string
   line?: number
   column?: number
+  ownership?: string
 }
 
 interface ElabModule {
@@ -1575,6 +1786,7 @@ interface ElabModule {
   parameters?: number
   instances?: number
   instantiates?: string[]
+  ownership?: string
 }
 
 interface ElabReadiness {
@@ -1598,6 +1810,9 @@ interface ElabHierarchy {
   referenced_count?: number
   unresolved?: string[]
   largest_modules?: ElabModule[]
+  heuristic_unresolved_candidates?: string[]
+  inventory_source?: string
+  inventory_authoritative?: boolean
 }
 
 interface ElabNextAction {
@@ -1616,6 +1831,7 @@ interface ElabReport {
   diagnostics?: ElabDiagnostic[]
   modules?: ElabModule[]
   unresolved_modules?: string[]
+  heuristic_unresolved_candidates?: string[]
   referenced_modules?: string[]
   readiness?: ElabReadiness
   hierarchy?: ElabHierarchy
@@ -1627,6 +1843,8 @@ interface ElabReport {
     defines?: string[]
   }
   reports?: Record<string, unknown>
+  compiler?: { source?: string; authoritative?: boolean; elaboration_mode?: string }
+  inventory?: { source?: string; authoritative?: boolean; note?: string }
 }
 
 interface LintDiagnostic {
@@ -1638,6 +1856,8 @@ interface LintDiagnostic {
   line?: number
   column?: number
   raw?: string
+  ownership?: string
+  actionable?: boolean
 }
 
 interface LintRule {
@@ -1656,6 +1876,16 @@ interface LintFile {
   warnings?: number
   total?: number
   rules?: string[]
+  ownership?: string
+  actionable?: boolean
+}
+
+interface LintOwnership {
+  ownership?: string
+  errors?: number
+  warnings?: number
+  total?: number
+  actionable?: boolean
 }
 
 interface LintReport {
@@ -1668,6 +1898,7 @@ interface LintReport {
   diagnostics?: LintDiagnostic[]
   rules?: LintRule[]
   files?: LintFile[]
+  ownership?: LintOwnership[]
   inputs?: {
     rtl_files?: string[]
     rtl_file_count?: number
@@ -1748,6 +1979,7 @@ const consoleHeight = ref(CONSOLE_DEFAULT_HEIGHT)
 const consoleResizing = ref(false)
 const consoleTab = ref<ConsoleTabId>('problems')
 const reviewMode = ref<ReviewMode>('source')
+const lintScope = ref<'actionable' | 'all'>('actionable')
 const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
 let sourceFocusToken = 0
 const simSuites: Array<{ id: SimSuite; label: string; icon: string }> = [
@@ -1853,6 +2085,39 @@ const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.val
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
+const simReport = computed<SimReport>(() => detail.value?.sim || {})
+const simRegression = computed<SimRegression>(() => simReport.value.regression || {})
+const simHistory = computed<SimHistoryRun[]>(() =>
+  Array.isArray(simReport.value.history) ? simReport.value.history.slice(0, 8) : [],
+)
+const simCycleChanges = computed(() =>
+  Array.isArray(simRegression.value.cycle_changes) ? simRegression.value.cycle_changes.slice(0, 4) : [],
+)
+const simRegressionTiles = computed(() => [
+  {
+    label: 'Baseline',
+    value: simRegression.value.has_baseline ? 'Compared' : 'First Run',
+    tone: simRegression.value.has_baseline ? 'neutral' : 'ok',
+  },
+  {
+    label: 'New Failures',
+    value: numberLabel(simRegression.value.new_failures?.length),
+    tone: simRegression.value.new_failures?.length ? 'error' : 'ok',
+  },
+  {
+    label: 'Persistent',
+    value: numberLabel(simRegression.value.persistent_failures?.length),
+    tone: simRegression.value.persistent_failures?.length ? 'warning' : 'ok',
+  },
+  {
+    label: 'Fixed',
+    value: numberLabel(simRegression.value.fixed?.length),
+    tone: simRegression.value.fixed?.length ? 'ok' : 'neutral',
+  },
+])
+const stepStaleReason = computed(() =>
+  detail.value?.info?.stale === true ? String(detail.value.info.stale_reason || 'Step inputs changed.') : '',
+)
 const detailWaveItems = computed<WaveSelection[]>(() =>
   uniqueWaveItems(
     [
@@ -2021,23 +2286,40 @@ const prepareReadiness = computed(() => prepareReport.value?.readiness || {})
 const prepareConfiguration = computed(() => prepareReport.value?.configuration || [])
 const prepareInputs = computed(() => prepareReport.value?.inputs || {})
 const prepareInputSources = computed(() => prepareInputs.value.sources || [])
+const prepareOwnershipRows = computed(() =>
+  Object.entries(prepareReport.value?.ownership || {})
+    .map(([ownership, count]) => ({ ownership, count: numberValue(count) }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => b.count - a.count),
+)
+const prepareCpuTopContract = computed(() => prepareReport.value?.cpu_top_contract || {})
+const prepareCpuTopContractDetail = computed(() => {
+  const detected = prepareCpuTopContract.value.ports?.length || 0
+  const expected = numberValue(prepareCpuTopContract.value.expected_ports)
+  if (expected > 0) return `${detected} detected / ${expected} expected ports`
+  return `${detected} detected ports · module presence validated`
+})
 const prepareContracts = computed(() => prepareReport.value?.contracts || [])
+const prepareContractStatuses = computed(() => [
+  ...prepareContracts.value.map((item) => item.status),
+  ...(prepareCpuTopContract.value.module ? [String(prepareCpuTopContract.value.status || 'pending')] : []),
+])
 const prepareRuntimePlan = computed(() => prepareReport.value?.runtime || [])
 const prepareSummaryTone = computed(() => prepareStatusTone(String(prepareReadiness.value.status || currentStepDisplayState.value)))
 const prepareSummaryTiles = computed(() => [
   { label: 'Readiness', value: String(prepareReadiness.value.status || currentStepDisplayState.value || 'Pending'), tone: prepareSummaryTone.value },
   { label: 'CPU RTL', value: numberLabel(prepareInputs.value.cpu_rtl_files), tone: 'neutral' },
   { label: 'Total RTL', value: numberLabel(prepareInputs.value.total_rtl_files), tone: 'neutral' },
-  { label: 'Contracts', value: prepareContractSummary.value, tone: prepareContracts.value.some((item) => prepareStatusTone(item.status) === 'error') ? 'error' : 'ok' },
+  { label: 'Contracts', value: prepareContractSummary.value, tone: prepareContractStatuses.value.some((status) => prepareStatusTone(status) === 'error') ? 'error' : 'ok' },
   { label: 'Includes', value: numberLabel(prepareInputs.value.incdirs), tone: 'neutral' },
   { label: 'Defines', value: numberLabel(prepareInputs.value.defines), tone: 'neutral' },
 ])
 const prepareContractSummary = computed(() => {
-  const failed = prepareContracts.value.filter((item) => prepareStatusTone(item.status) === 'error').length
-  const warnings = prepareContracts.value.filter((item) => prepareStatusTone(item.status) === 'warning').length
+  const failed = prepareContractStatuses.value.filter((status) => prepareStatusTone(status) === 'error').length
+  const warnings = prepareContractStatuses.value.filter((status) => prepareStatusTone(status) === 'warning').length
   if (failed) return `${failed} failed`
   if (warnings) return `${warnings} warning`
-  return `${prepareContracts.value.length} OK`
+  return `${prepareContractStatuses.value.length} OK`
 })
 const allArtifacts = computed(() => {
   const fromCases = cases.value.flatMap((testCase) => [
@@ -2201,12 +2483,14 @@ const humanSummaryText = computed(() => {
   if (isSimStep.value) return simRunSubtitle.value
   if (isElabStep.value && elabReport.value) {
     if (elabDiagnostics.value.length) return 'ELAB reported diagnostics. Open Elab or Problems to jump to the source line.'
-    if (elabUnresolvedModules.value.length) return 'ELAB found module references that are not present in the current RTL file universe.'
+    if (elabUnresolvedModules.value.length) return 'Slang elaboration reported unresolved module references.'
+    if (elabHeuristicCandidates.value.length) return 'Elaboration passed; source scan also reported informational module-name candidates.'
     return 'ELAB completed the configured design universe check and generated a module inventory.'
   }
   if (isLintStep.value && lintReport.value) {
-    if (lintDiagnostics.value.length) return 'Lint found Verilator diagnostics. Open Lint to inspect rules, files, and source locations.'
-    return 'Lint completed without Verilator diagnostics in the current CPU RTL file universe.'
+    if (lintActionableDiagnostics.value.length) return 'Lint found CPU or tool diagnostics. Open Lint to inspect source locations.'
+    if (lintHiddenDiagnostics.value) return 'CPU lint is clean; infrastructure diagnostics remain available in the All view.'
+    return 'Lint completed without Verilator diagnostics.'
   }
   if (isPrepareStep.value && prepareReport.value) {
     return String(prepareReadiness.value.message || 'Prepare normalized the project inputs and generated the runtime plan.')
@@ -2238,10 +2522,10 @@ const humanNextAction = computed<{ title: string; detail: string; label: string;
   }
   if (isLintStep.value && lintReport.value) {
     return {
-      title: lintDiagnostics.value.length ? 'Inspect Lint' : 'Lint Clean',
-      detail: lintDiagnostics.value.length
-        ? 'Open Verilator diagnostics, rule breakdown, and file hotspots before running simulation.'
-        : 'No lint diagnostics are reported. Continue to simulation or inspect source if needed.',
+      title: lintActionableDiagnostics.value.length ? 'Inspect Lint' : 'CPU Lint Clean',
+      detail: lintActionableDiagnostics.value.length
+        ? 'Open CPU and tool diagnostics before running simulation.'
+        : 'No actionable CPU lint diagnostics are reported.',
       label: 'Lint',
       tab: 'lint',
     }
@@ -2274,6 +2558,12 @@ const reviewReport = computed<RtlReviewReport | null>(() => {
   return null
 })
 const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.issues || []))
+const reviewActionableIssues = computed(() =>
+  reviewIssues.value.filter((issue) => !issue.waived && (issue.ownership === 'cpu' || !issue.ownership)),
+)
+const reviewDelta = computed(() => reviewReport.value?.delta || {})
+const reviewWaivers = computed(() => reviewReport.value?.waivers || {})
+const reviewResolvedIssues = computed(() => normalizeReviewIssues(reviewReport.value?.resolved_issues || []))
 const sourceScanIssues = computed(() => reviewIssues.value.filter((issue) => !isYosysIssue(issue)))
 const reviewYosysIssues = computed(() => reviewIssues.value.filter((issue) => isYosysIssue(issue)))
 const reviewStructuralProbe = computed(() => {
@@ -2373,9 +2663,13 @@ const reviewModeItems = computed(() => [
     count: reviewRiskyModules.value.length,
   },
 ])
-const reviewTopIssues = computed(() => reviewIssues.value.slice(0, 6))
+const reviewTopIssues = computed(() =>
+  [...reviewIssues.value]
+    .sort((a, b) => Number(Boolean(a.waived)) - Number(Boolean(b.waived)) || Number(b.status === 'new') - Number(a.status === 'new'))
+    .slice(0, 6),
+)
 const reviewNextAction = computed<{ title: string; detail: string; label: string; mode: ReviewMode }>(() => {
-  if (reviewYosysIssues.value.length || reviewYosysDiagnostics.value.length || reviewStructuralHotspots.value.length) {
+  if (reviewYosysIssues.value.some((issue) => !issue.waived) || reviewYosysDiagnostics.value.length || reviewStructuralHotspots.value.length) {
     return {
       title: 'Inspect Yosys',
       detail: 'Open Yosys diagnostics and hotspots first. These issues usually block or distort structural quality analysis.',
@@ -2383,7 +2677,7 @@ const reviewNextAction = computed<{ title: string; detail: string; label: string
       mode: 'yosys',
     }
   }
-  if (sourceScanIssues.value.length) {
+  if (sourceScanIssues.value.some((issue) => !issue.waived)) {
     return {
       title: 'Fix Source',
       detail: 'Open source scan issues and clean the RTL coding/style risks before running simulation again.',
@@ -2422,12 +2716,12 @@ const reviewStructuralTone = computed(() => {
 const reviewSummaryTiles = computed(() => {
   const summary = reviewReport.value?.summary || {}
   return [
-    { label: 'Scope', value: reviewScopeLabel(reviewReport.value?.scope), tone: 'neutral' },
-    { label: 'Errors', value: numberLabel(summary.errors), tone: numberValue(summary.errors) > 0 ? 'error' : 'ok' },
-    { label: 'Warnings', value: numberLabel(summary.warnings), tone: numberValue(summary.warnings) > 0 ? 'warning' : 'ok' },
-    { label: 'Review Issues', value: numberLabel(reviewIssues.value.length), tone: reviewIssues.value.length ? 'warning' : 'ok' },
-    { label: 'Sources', value: numberLabel(summary.source_files), tone: 'neutral' },
-    { label: 'Modules', value: numberLabel(summary.modules), tone: 'neutral' },
+    { label: 'Status', value: titleCase(String(summary.status || 'pending')), tone: reviewActionableIssues.value.length ? 'warning' : 'ok' },
+    { label: 'Actionable', value: numberLabel(summary.actionable_issues ?? reviewActionableIssues.value.length), tone: reviewActionableIssues.value.length ? 'warning' : 'ok' },
+    { label: 'New', value: numberLabel(reviewDelta.value.new), tone: numberValue(reviewDelta.value.new) ? 'warning' : 'ok' },
+    { label: 'Existing', value: numberLabel(reviewDelta.value.existing), tone: 'neutral' },
+    { label: 'Resolved', value: numberLabel(reviewDelta.value.resolved), tone: numberValue(reviewDelta.value.resolved) ? 'ok' : 'neutral' },
+    { label: 'Waived', value: numberLabel(reviewWaivers.value.applied), tone: numberValue(reviewWaivers.value.applied) ? 'neutral' : 'ok' },
   ]
 })
 const elabSummary = computed(() => elabReport.value?.summary || {})
@@ -2445,6 +2739,7 @@ const elabDiagnostics = computed<ElabDiagnostic[]>(() => {
       source: String(item.source || ''),
       line: numberValue(item.line),
       column: numberValue(item.column) || 1,
+      ownership: String(item.ownership || 'unknown'),
     }))
 })
 const elabModules = computed<ElabModule[]>(() => {
@@ -2461,6 +2756,7 @@ const elabModules = computed<ElabModule[]>(() => {
       parameters: numberValue(item.parameters),
       instances: numberValue(item.instances),
       instantiates: Array.isArray(item.instantiates) ? item.instantiates.map(String).filter(Boolean) : [],
+      ownership: String(item.ownership || 'unknown'),
     }))
     .sort((a, b) => {
       if (a.module === top) return -1
@@ -2474,6 +2770,15 @@ const elabUnresolvedModules = computed(() =>
     : Array.isArray(elabReport.value?.unresolved_modules)
       ? elabReport.value.unresolved_modules.map(String).filter(Boolean)
       : [],
+)
+const elabHeuristicCandidates = computed(() => {
+  const hierarchyCandidates = elabHierarchy.value.heuristic_unresolved_candidates
+  const reportCandidates = elabReport.value?.heuristic_unresolved_candidates
+  const candidates = Array.isArray(hierarchyCandidates) ? hierarchyCandidates : reportCandidates
+  return Array.isArray(candidates) ? candidates.map(String).filter(Boolean) : []
+})
+const elabAuthorityLabel = computed(() =>
+  elabReport.value?.compiler?.authoritative === false ? 'Non-authoritative' : 'Slang authoritative',
 )
 const elabTopChildren = computed(() =>
   Array.isArray(elabHierarchy.value.top_children)
@@ -2508,7 +2813,7 @@ const elabSummaryTiles = computed(() => [
   { label: 'RTL Files', value: numberLabel(elabReadiness.value.rtl_files || elabSummary.value.rtl_files || elabReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
   { label: 'Modules', value: numberLabel(elabReadiness.value.modules || elabSummary.value.modules), tone: 'neutral' },
   { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length), tone: elabDiagnostics.value.length ? 'warning' : 'ok' },
-  { label: 'Unresolved', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
+  { label: 'Compiler Missing', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
 ])
 const lintSummary = computed(() => lintReport.value?.summary || {})
 const lintDiagnostics = computed<LintDiagnostic[]>(() => {
@@ -2525,8 +2830,22 @@ const lintDiagnostics = computed<LintDiagnostic[]>(() => {
       line: numberValue(item.line) || 1,
       column: numberValue(item.column) || 1,
       raw: String(item.raw || ''),
+      ownership: String(item.ownership || 'unknown'),
+      actionable: item.actionable === true,
     }))
 })
+const lintActionableDiagnostics = computed(() =>
+  lintDiagnostics.value.filter((item) => item.ownership === 'cpu' || item.ownership === 'tool' || item.actionable),
+)
+const lintVisibleDiagnostics = computed(() =>
+  lintScope.value === 'all' ? lintDiagnostics.value : lintActionableDiagnostics.value,
+)
+const lintHiddenDiagnostics = computed(() => Math.max(0, lintDiagnostics.value.length - lintActionableDiagnostics.value.length))
+const lintOwnershipRows = computed<LintOwnership[]>(() =>
+  Array.isArray(lintReport.value?.ownership)
+    ? lintReport.value.ownership.filter((item) => numberValue(item.total) > 0)
+    : [],
+)
 const lintRules = computed<LintRule[]>(() => {
   const rules = lintReport.value?.rules
   if (!Array.isArray(rules)) return []
@@ -2554,6 +2873,8 @@ const lintFiles = computed<LintFile[]>(() => {
       warnings: numberValue(item.warnings),
       total: numberValue(item.total),
       rules: Array.isArray(item.rules) ? item.rules.map(String).filter(Boolean) : [],
+      ownership: String(item.ownership || 'unknown'),
+      actionable: item.actionable === true,
     }))
     .filter((item) => item.path)
 })
@@ -2566,10 +2887,10 @@ const lintSummaryTiles = computed(() => [
     value: lintStatusLabel.value,
     tone: String(lintStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
   },
-  { label: 'Errors', value: numberLabel(lintSummary.value.errors), tone: numberValue(lintSummary.value.errors) ? 'error' : 'ok' },
-  { label: 'Warnings', value: numberLabel(lintSummary.value.warnings), tone: numberValue(lintSummary.value.warnings) ? 'warning' : 'ok' },
-  { label: 'Rules', value: numberLabel(lintSummary.value.rules || lintRules.value.length), tone: lintRules.value.length ? 'warning' : 'ok' },
-  { label: 'Files', value: numberLabel(lintSummary.value.files || lintFiles.value.length), tone: lintFiles.value.length ? 'warning' : 'ok' },
+  { label: 'CPU Errors', value: numberLabel(lintSummary.value.cpu_errors), tone: numberValue(lintSummary.value.cpu_errors) ? 'error' : 'ok' },
+  { label: 'CPU Warnings', value: numberLabel(lintSummary.value.cpu_warnings), tone: numberValue(lintSummary.value.cpu_warnings) ? 'warning' : 'ok' },
+  { label: 'Actionable', value: numberLabel(lintSummary.value.actionable_diagnostics), tone: lintActionableDiagnostics.value.length ? 'warning' : 'ok' },
+  { label: 'Infrastructure', value: numberLabel(lintHiddenDiagnostics.value), tone: lintHiddenDiagnostics.value ? 'neutral' : 'ok' },
   { label: 'RTL Files', value: numberLabel(lintSummary.value.rtl_files || lintReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
 ])
 const reviewMetricRows = computed(() => {
@@ -2626,7 +2947,7 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
       detail: `${simContextLabel(resultSimRunContext.value || currentSimRunContext.value)} is displayed, but ${simContextLabel(currentSimRunContext.value)} is selected.`,
     })
   }
-  for (const issue of reviewIssues.value.slice(0, 30)) {
+  for (const issue of reviewIssues.value.filter((item) => !item.waived).slice(0, 30)) {
     problems.push(reviewIssueToProblem(issue))
   }
   for (const diagnostic of reviewYosysDiagnostics.value.slice(0, 30)) {
@@ -2635,7 +2956,7 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
   for (const diagnostic of elabDiagnostics.value.slice(0, 30)) {
     problems.push(elabDiagnosticToProblem(diagnostic))
   }
-  for (const diagnostic of lintDiagnostics.value.slice(0, 30)) {
+  for (const diagnostic of lintActionableDiagnostics.value.slice(0, 30)) {
     problems.push(lintDiagnosticToProblem(diagnostic))
   }
   for (const moduleName of elabUnresolvedModules.value.slice(0, 10)) {
@@ -3115,6 +3436,8 @@ function runFailureDetail(messages: string[] | undefined, step: string): string 
 }
 
 function caseIssue(testCase: SimCase): string {
+  if (testCase.failure?.first_error) return testCase.failure.first_error
+  if (testCase.failure?.message) return testCase.failure.message
   const missing = testCase.validation?.missing_markers || []
   if (missing.length) {
     return `Missing markers: ${missing.join(', ')}`
@@ -3123,6 +3446,24 @@ function caseIssue(testCase: SimCase): string {
     return `Return code ${testCase.returncode}`
   }
   return ''
+}
+
+function caseCycles(testCase: SimCase): string {
+  const cycles = testCase.metrics?.cycles
+  return typeof cycles === 'number' ? cycles.toLocaleString() : '-'
+}
+
+function caseTermination(testCase: SimCase): string {
+  return titleCase(String(testCase.metrics?.termination || 'unknown').replace(/_/g, ' '))
+}
+
+function caseDifftestStatus(testCase: SimCase): string {
+  return titleCase(String(testCase.metrics?.difftest?.status || 'disabled').replace(/_/g, ' '))
+}
+
+function signedNumber(value: unknown): string {
+  const numeric = numberValue(value)
+  return numeric > 0 ? `+${numeric}` : String(numeric)
 }
 
 function selectCase(testCase: SimCase): void {
@@ -3481,7 +3822,23 @@ function normalizeReviewIssues(items: RtlReviewIssue[]): RtlReviewIssue[] {
       column: reviewIssueColumn(item),
       evidence: item.evidence || {},
       recommendation: String(item.recommendation || ''),
+      fingerprint: String(item.fingerprint || ''),
+      confidence: String(item.confidence || ''),
+      origin: String(item.origin || ''),
+      ownership: String(item.ownership || ''),
+      status: String(item.status || ''),
+      waived: item.waived === true,
+      waiver: item.waiver || {},
     }))
+}
+
+function reviewIssueMeta(issue: RtlReviewIssue): string {
+  return [
+    titleCase(issue.category),
+    issue.confidence ? `${titleCase(issue.confidence)} confidence` : '',
+    issue.status ? titleCase(issue.status) : '',
+    issue.waived ? 'Waived' : '',
+  ].filter(Boolean).join(' · ')
 }
 
 function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
@@ -3605,10 +3962,6 @@ function reviewIssueKey(issue: RtlReviewIssue): string {
     reviewIssueSource(issue),
     reviewIssueLine(issue),
   ].join(':')
-}
-
-function reviewScopeLabel(scope: unknown): string {
-  return String(scope || '').toLowerCase() === 'cpu' ? 'CPU RTL' : '--'
 }
 
 function moduleRiskReason(module: ModuleRisk): string {
@@ -3803,7 +4156,7 @@ function numberLabel(value: unknown): string {
 
 function prepareStatusTone(status: unknown): 'ok' | 'warning' | 'error' | 'neutral' {
   const value = String(status || '').toLowerCase()
-  if (['ready', 'success', 'ok', 'enabled'].includes(value)) return 'ok'
+  if (['ready', 'success', 'ok', 'enabled', 'pass', 'module_only'].includes(value)) return 'ok'
   if (['failed', 'error', 'missing', 'invalid'].includes(value)) return 'error'
   if (['warning', 'stub', 'disabled', 'pending'].includes(value)) return 'warning'
   return 'neutral'
@@ -5204,6 +5557,29 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.ownership-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ownership-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.ownership-strip strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+}
+
 .summary-issue-list {
   display: flex;
   flex: 1;
@@ -5653,6 +6029,11 @@ button:disabled {
   border-left: 3px solid var(--accent-color);
 }
 
+.review-issue.waived {
+  opacity: 0.62;
+  border-left-color: var(--text-secondary);
+}
+
 .review-issue-icon {
   flex-shrink: 0;
   display: grid;
@@ -5888,6 +6269,34 @@ button:disabled {
   overflow: hidden;
 }
 
+.lint-ownership-strip {
+  flex-shrink: 0;
+}
+
+.lint-scope-control {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.lint-scope-control button {
+  min-width: 64px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.lint-scope-control button.active {
+  background: var(--bg-primary);
+  color: var(--accent-color);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 59, 130, 246), 0.2);
+}
+
 .lint-main {
   display: grid;
   grid-template-columns: minmax(420px, 1.25fr) minmax(320px, 0.85fr);
@@ -6059,6 +6468,14 @@ button:disabled {
 .elab-unresolved i {
   flex-shrink: 0;
   color: #f59e0b;
+}
+
+.elab-unresolved.informational {
+  border-left-color: var(--accent-color);
+}
+
+.elab-unresolved.informational i {
+  color: var(--accent-color);
 }
 
 .elab-unresolved span,
@@ -6370,6 +6787,158 @@ button:disabled {
   gap: 8px;
 }
 
+.sim-insight-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 8px;
+  flex: 0 0 auto;
+  max-height: 156px;
+}
+
+.sim-insight-card {
+  min-width: 0;
+  overflow: auto;
+  padding: 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.sim-insight-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.sim-insight-card > header span,
+.sim-insight-card > header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-insight-card > header span {
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.sim-insight-card > header strong {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.sim-regression-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.sim-regression-grid > div {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.sim-regression-grid span,
+.sim-regression-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-regression-grid span {
+  margin-bottom: 2px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.sim-regression-grid strong {
+  font-size: 12px;
+}
+
+.sim-regression-grid .error strong,
+.sim-cycle-changes em.slower {
+  color: #ef4444;
+}
+
+.sim-regression-grid .warning strong {
+  color: #f59e0b;
+}
+
+.sim-regression-grid .ok strong,
+.sim-cycle-changes em.faster,
+.sim-history-list i.ok {
+  color: #10b981;
+}
+
+.sim-cycle-changes {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  overflow: auto;
+}
+
+.sim-cycle-changes span {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.sim-cycle-changes em {
+  font-style: normal;
+}
+
+.sim-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sim-history-list > div:not(.empty-panel) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.sim-history-list i.failed {
+  color: #ef4444;
+}
+
+.sim-history-list span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.sim-history-list strong,
+.sim-history-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-history-list strong {
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+
+.sim-history-list small,
+.sim-history-list em {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-style: normal;
+}
+
 .sim-stale-banner {
   display: flex;
   align-items: center;
@@ -6388,6 +6957,10 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.step-stale-banner {
+  margin: 8px 10px 0;
 }
 
 .sim-terminal-card {
@@ -6477,6 +7050,28 @@ button:disabled {
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.sim-failure-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(127, 29, 29, 0.28);
+  color: #fecaca;
+}
+
+.sim-failure-summary strong {
+  font-size: 11px;
+}
+
+.sim-failure-summary span {
+  overflow: hidden;
+  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cases-table {
@@ -6930,8 +7525,14 @@ button:disabled {
   .review-main,
   .review-yosys-grid,
   .review-module-grid,
-  .elab-main {
+  .elab-main,
+  .lint-main,
+  .sim-insight-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sim-insight-grid {
+    max-height: 280px;
   }
 
   .frontend-config-grid,
@@ -6981,6 +7582,10 @@ button:disabled {
   }
 
   .review-module-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sim-regression-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
