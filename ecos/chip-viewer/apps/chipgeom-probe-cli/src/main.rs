@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use anyhow::Result;
 use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, ShapeGeometry, SnapshotStats};
-use chipgeom_format::{OwnerRef, OwnerType, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState};
+use chipgeom_format::{
+    OwnerRef, OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
+};
 use clap::Parser;
 use serde_json::{json, Value};
 
@@ -31,6 +33,10 @@ struct Args {
     layer: Option<u16>,
     #[arg(long, num_args = 4, value_names = ["LX", "LY", "HX", "HY"])]
     bbox: Option<Vec<i32>>,
+    #[arg(long, num_args = 2, value_names = ["X", "Y"])]
+    point: Option<Vec<i32>>,
+    #[arg(long, default_value_t = 0)]
+    radius: i32,
     #[arg(long, default_value_t = 100)]
     iterations: usize,
 }
@@ -42,10 +48,12 @@ fn main() -> Result<()> {
     let memory_stats = db.memory_stats();
     let delta_stats = db.delta_stats();
     let bbox = args.bbox.as_deref().map(parse_bbox_values).transpose()?;
+    let point = args.point.as_deref().map(parse_point_values).transpose()?;
     let layer_query_report = match (args.layer, bbox) {
         (Some(layer_id), Some(viewport)) => Some(query_layer(&db, layer_id, viewport)),
         _ => None,
     };
+    let point_query_report = point.map(|point| query_point(&db, args.layer, point, args.radius));
     let bench_report = if args.bench_viewport {
         let layer_id = args
             .layer
@@ -67,6 +75,7 @@ fn main() -> Result<()> {
             &db,
             &stats,
             layer_query_report.as_ref(),
+            point_query_report.as_ref(),
             bench_report.as_ref(),
         )?;
         return Ok(());
@@ -93,6 +102,11 @@ fn main() -> Result<()> {
     println!("shape_count={}", stats.shape_count);
     println!("owner_count={}", stats.owner_count);
     println!("name_count={}", stats.name_count);
+    println!("site_count={}", stats.site_count);
+    println!("master_count={}", stats.master_count);
+    println!("connectivity_count={}", stats.connectivity_count);
+    println!("bus_count={}", stats.bus_count);
+    println!("group_count={}", stats.group_count);
     let layer_summaries = db.layer_summaries();
     println!("layer_count={}", layer_summaries.len());
     println!("view_tile_count={}", db.view_tile_count());
@@ -112,19 +126,92 @@ fn main() -> Result<()> {
         println!("layer.{}.name={}", layer.layer_id, layer.name);
         println!("layer.{}.type={}", layer.layer_id, layer.layer_type);
         println!("layer.{}.direction={}", layer.layer_id, layer.direction);
+        println!("layer.{}.width={}", layer.layer_id, layer.width);
+        println!("layer.{}.pitch_x={}", layer.layer_id, layer.pitch_x);
+        println!("layer.{}.pitch_y={}", layer.layer_id, layer.pitch_y);
+        println!("layer.{}.min_spacing={}", layer.layer_id, layer.min_spacing);
+        println!("layer.{}.min_area={}", layer.layer_id, layer.min_area);
+        println!("layer.{}.min_step={}", layer.layer_id, layer.min_step);
+        println!("layer.{}.cut_spacing={}", layer.layer_id, layer.cut_spacing);
+        println!(
+            "layer.{}.enclosure_below={}",
+            layer.layer_id, layer.enclosure_below
+        );
+        println!(
+            "layer.{}.enclosure_above={}",
+            layer.layer_id, layer.enclosure_above
+        );
+        println!(
+            "layer.{}.lef58_rule_count={}",
+            layer.layer_id, layer.lef58_rule_count
+        );
         println!("layer.{}.shape_count={}", layer.layer_id, layer.shape_count);
+    }
+    for site in db.site_metadata() {
+        println!("site.{}.class={}", site.name, site.site_class);
+        println!("site.{}.symmetry={}", site.name, site.symmetry);
+        println!("site.{}.orient={}", site.name, site.orient);
+        println!("site.{}.width={}", site.name, site.width);
+        println!("site.{}.height={}", site.name, site.height);
+        println!("site.{}.is_overlap={}", site.name, site.is_overlap);
+    }
+    for master in db.master_metadata() {
+        println!("master.{}.type={}", master.name, master.master_type);
+        println!("master.{}.site={}", master.name, master.site);
+        println!("master.{}.symmetry={}", master.name, master.symmetry);
+        println!("master.{}.origin_x={}", master.name, master.origin_x);
+        println!("master.{}.origin_y={}", master.name, master.origin_y);
+        println!("master.{}.width={}", master.name, master.width);
+        println!("master.{}.height={}", master.name, master.height);
+        println!("master.{}.term_count={}", master.name, master.term_count);
+        println!("master.{}.obs_count={}", master.name, master.obs_count);
+    }
+    for endpoint in db.connectivity_metadata() {
+        println!(
+            "connectivity.{}.{}.{}.instance={}",
+            endpoint.net_name, endpoint.endpoint_type, endpoint.pin_name, endpoint.instance_name
+        );
+        println!(
+            "connectivity.{}.{}.{}.master={}",
+            endpoint.net_name, endpoint.endpoint_type, endpoint.pin_name, endpoint.master_name
+        );
+    }
+    for bus in db.bus_metadata() {
+        println!("bus.{}.type={}", bus.name, bus.bus_type);
+        println!("bus.{}.range={} {}", bus.name, bus.left, bus.right);
+        println!("bus.{}.net_count={}", bus.name, bus.net_count);
+        println!("bus.{}.pin_count={}", bus.name, bus.pin_count);
+    }
+    for group in db.group_metadata() {
+        println!("group.{}.region={}", group.name, group.region_name);
+        println!(
+            "group.{}.instance_count={}",
+            group.name, group.instance_count
+        );
     }
     if let Some(name) = args.name {
         println!("name.{}={}", name, db.query_owner_name(&name).len());
     }
     if let Some(name) = args.net_name {
         let shape_ids = query_net_name(&db, &name);
+        let endpoints = db.connectivity_for_net(&name);
         println!("net_name.{}={}", name, shape_ids.len());
         println!(
             "net_name.{}.shape_ids={}",
             name,
             format_shape_ids(&shape_ids)
         );
+        println!("net_name.{}.endpoints={}", name, endpoints.len());
+        for endpoint in endpoints {
+            println!(
+                "net_name.{}.endpoint={}:{}:{}:{}",
+                name,
+                endpoint.endpoint_type,
+                endpoint.instance_name,
+                endpoint.pin_name,
+                endpoint.master_name
+            );
+        }
     }
     if let Some(name) = args.instance_name {
         let shape_ids = query_instance_name(&db, &name);
@@ -145,6 +232,16 @@ fn main() -> Result<()> {
         println!("layer_query.candidates={}", report.candidate_count);
         println!(
             "layer_query.shape_ids={}",
+            format_shape_ids(&report.shape_ids)
+        );
+    }
+    if let Some(report) = &point_query_report {
+        println!("point_query.x={}", report.point.x);
+        println!("point_query.y={}", report.point.y);
+        println!("point_query.radius={}", report.radius);
+        println!("point_query.hits={}", report.hit_count);
+        println!(
+            "point_query.shape_ids={}",
             format_shape_ids(&report.shape_ids)
         );
     }
@@ -211,6 +308,9 @@ fn main() -> Result<()> {
                     owner.path2,
                     owner.path3
                 );
+                if let Some(local_name) = db.owner_local_name(owner) {
+                    println!("shape.{}.owner_local_name={}", shape_id, local_name);
+                }
             }
             print_shape_geometry_text(shape_id, db.shape_geometry(shape));
         } else {
@@ -261,6 +361,15 @@ struct LayerQueryReport {
 }
 
 #[derive(Clone, Debug)]
+struct PointQueryReport {
+    hit_count: usize,
+    layer_ids: Vec<u16>,
+    point: Point32,
+    radius: i32,
+    shape_ids: Vec<ShapeId>,
+}
+
+#[derive(Clone, Debug)]
 struct NameBenchReport {
     hit_count: usize,
     iterations: usize,
@@ -276,6 +385,32 @@ fn query_layer(db: &ChipViewDb, layer_id: u16, bbox: Rect32) -> LayerQueryReport
         candidate_count: db.layer_viewport_candidate_count(layer_id, bbox),
         hit_count: shape_ids.len(),
         layer_id,
+        shape_ids,
+    }
+}
+
+fn query_point(
+    db: &ChipViewDb,
+    layer_id: Option<u16>,
+    point: Point32,
+    radius: i32,
+) -> PointQueryReport {
+    let layer_ids = layer_id.map(|layer_id| vec![layer_id]).unwrap_or_else(|| {
+        db.layer_summaries()
+            .into_iter()
+            .map(|layer| layer.layer_id)
+            .collect()
+    });
+    let shape_ids = if radius > 0 {
+        db.query_layers_near_point(&layer_ids, point, radius)
+    } else {
+        db.query_layers_at_point(&layer_ids, point)
+    };
+    PointQueryReport {
+        hit_count: shape_ids.len(),
+        layer_ids,
+        point,
+        radius: radius.max(0),
         shape_ids,
     }
 }
@@ -350,6 +485,16 @@ fn parse_bbox_values(values: &[i32]) -> Result<Rect32> {
         ly: values[1],
         hx: values[2],
         hy: values[3],
+    })
+}
+
+fn parse_point_values(values: &[i32]) -> Result<Point32> {
+    if values.len() != 2 {
+        anyhow::bail!("--point requires exactly two coordinates");
+    }
+    Ok(Point32 {
+        x: values[0],
+        y: values[1],
     })
 }
 
@@ -508,14 +653,15 @@ fn owner_json(owner: &OwnerRef) -> Value {
         "type": ChipViewDb::owner_type_label(owner.owner_type),
         "owner_id": owner.owner_id,
         "path": [owner.path0, owner.path1, owner.path2, owner.path3],
+        "name_id": owner.name_id,
     })
 }
 
 fn shape_query_json(
     shape_id: ShapeId,
-    shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>, ShapeGeometry)>,
+    shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>, Option<&str>, ShapeGeometry)>,
 ) -> Value {
-    let Some((shape, owner, geometry)) = shape_and_owner else {
+    let Some((shape, owner, owner_local_name, geometry)) = shape_and_owner else {
         return json!({
             "shape_id": shape_id,
             "missing": true,
@@ -532,6 +678,7 @@ fn shape_query_json(
         "bbox": bbox_json(shape.bbox),
         "geometry": shape_geometry_json(geometry),
         "owner": owner.map(owner_json),
+        "owner_local_name": owner_local_name,
     })
 }
 
@@ -541,6 +688,16 @@ fn layer_query_json(report: &LayerQueryReport) -> Value {
         "bbox": bbox_json(report.bbox),
         "hits": report.hit_count,
         "candidates": report.candidate_count,
+        "shape_ids": report.shape_ids,
+    })
+}
+
+fn point_query_json(report: &PointQueryReport) -> Value {
+    json!({
+        "point": point_json(report.point),
+        "radius": report.radius,
+        "layers": report.layer_ids,
+        "hits": report.hit_count,
         "shape_ids": report.shape_ids,
     })
 }
@@ -575,6 +732,7 @@ fn print_json(
     db: &ChipViewDb,
     stats: &SnapshotStats,
     layer_query_report: Option<&LayerQueryReport>,
+    point_query_report: Option<&PointQueryReport>,
     bench_report: Option<&BenchReport>,
 ) -> Result<()> {
     let name_report = args
@@ -598,6 +756,11 @@ fn print_json(
         "shape_count": stats.shape_count,
         "owner_count": stats.owner_count,
         "name_count": stats.name_count,
+        "site_count": stats.site_count,
+        "master_count": stats.master_count,
+        "connectivity_count": stats.connectivity_count,
+        "bus_count": stats.bus_count,
+        "group_count": stats.group_count,
         "memory": memory_stats_json(&db.memory_stats()),
         "delta": delta_stats_json(&db.delta_stats()),
         "layer_count": db.layer_summaries().len(),
@@ -610,7 +773,56 @@ fn print_json(
             "width": layer.width,
             "pitch_x": layer.pitch_x,
             "pitch_y": layer.pitch_y,
+            "min_spacing": layer.min_spacing,
+            "min_area": layer.min_area,
+            "min_step": layer.min_step,
+            "cut_spacing": layer.cut_spacing,
+            "enclosure_below": layer.enclosure_below,
+            "enclosure_above": layer.enclosure_above,
+            "lef58_rule_count": layer.lef58_rule_count,
             "shape_count": layer.shape_count,
+        })).collect::<Vec<_>>(),
+        "sites": db.site_metadata().iter().map(|site| json!({
+            "name": site.name.as_str(),
+            "class": site.site_class.as_str(),
+            "symmetry": site.symmetry.as_str(),
+            "orient": site.orient.as_str(),
+            "width": site.width,
+            "height": site.height,
+            "is_overlap": site.is_overlap,
+        })).collect::<Vec<_>>(),
+        "masters": db.master_metadata().iter().map(|master| json!({
+            "name": master.name.as_str(),
+            "type": master.master_type.as_str(),
+            "site": master.site.as_str(),
+            "symmetry": master.symmetry.as_str(),
+            "origin_x": master.origin_x,
+            "origin_y": master.origin_y,
+            "width": master.width,
+            "height": master.height,
+            "term_count": master.term_count,
+            "obs_count": master.obs_count,
+        })).collect::<Vec<_>>(),
+        "connectivity": db.connectivity_metadata().iter().map(|endpoint| json!({
+            "net": endpoint.net_name.as_str(),
+            "kind": endpoint.net_kind.as_str(),
+            "endpoint_type": endpoint.endpoint_type.as_str(),
+            "instance": endpoint.instance_name.as_str(),
+            "pin": endpoint.pin_name.as_str(),
+            "master": endpoint.master_name.as_str(),
+        })).collect::<Vec<_>>(),
+        "buses": db.bus_metadata().iter().map(|bus| json!({
+            "name": bus.name.as_str(),
+            "type": bus.bus_type.as_str(),
+            "left": bus.left,
+            "right": bus.right,
+            "net_count": bus.net_count,
+            "pin_count": bus.pin_count,
+        })).collect::<Vec<_>>(),
+        "groups": db.group_metadata().iter().map(|group| json!({
+            "name": group.name.as_str(),
+            "region": group.region_name.as_str(),
+            "instance_count": group.instance_count,
         })).collect::<Vec<_>>(),
         "view_tile_count": db.view_tile_count(),
         "name_query": args.name.as_ref().map(|name| {
@@ -624,7 +836,25 @@ fn print_json(
         "net_query": args
             .net_name
             .as_ref()
-            .map(|name| typed_name_query_json("net", name, query_net_name(db, name))),
+            .map(|name| {
+                let endpoints = db.connectivity_for_net(name);
+                let mut value = typed_name_query_json("net", name, query_net_name(db, name));
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "endpoints".to_string(),
+                        json!(endpoints
+                            .into_iter()
+                            .map(|endpoint| json!({
+                                "type": endpoint.endpoint_type.as_str(),
+                                "instance": endpoint.instance_name.as_str(),
+                                "pin": endpoint.pin_name.as_str(),
+                                "master": endpoint.master_name.as_str(),
+                            }))
+                            .collect::<Vec<_>>()),
+                    );
+                }
+                value
+            }),
         "instance_query": args
             .instance_name
             .as_ref()
@@ -640,11 +870,15 @@ fn print_json(
         "shape_query": args.shape_id.map(|shape_id| {
             shape_query_json(
                 shape_id,
-                db.find_shape(shape_id)
-                    .map(|shape| (shape, db.owner_for_shape(shape), db.shape_geometry(shape))),
+                db.find_shape(shape_id).map(|shape| {
+                    let owner = db.owner_for_shape(shape);
+                    let owner_local_name = owner.and_then(|owner| db.owner_local_name(owner));
+                    (shape, owner, owner_local_name, db.shape_geometry(shape))
+                }),
             )
         }),
         "layer_query": layer_query_report.map(layer_query_json),
+        "point_query": point_query_report.map(point_query_json),
         "bench_name": name_report.as_ref().map(|report| json!({
             "name": report.name,
             "iterations": report.iterations,
@@ -706,6 +940,15 @@ mod tests {
             }
         );
         assert!(parse_bbox_values(&[1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn parse_point_values_requires_exactly_two_coordinates() {
+        assert_eq!(
+            parse_point_values(&[10, 20]).unwrap(),
+            chipgeom_format::Point32 { x: 10, y: 20 }
+        );
+        assert!(parse_point_values(&[1]).is_err());
     }
 
     #[test]
@@ -806,12 +1049,18 @@ mod tests {
             path1: 6,
             path2: 7,
             path3: 8,
+            name_id: 11,
             ..chipgeom_format::OwnerRef::default()
         };
 
         let value = shape_query_json(
             42,
-            Some((&shape, Some(&owner), ShapeGeometry::Rect(shape.bbox))),
+            Some((
+                &shape,
+                Some(&owner),
+                Some("via:VIA1"),
+                ShapeGeometry::Rect(shape.bbox),
+            )),
         );
 
         assert_eq!(value["shape_id"], 42);
@@ -826,6 +1075,8 @@ mod tests {
         assert_eq!(value["owner"]["type"], "instance_bbox");
         assert_eq!(value["owner"]["owner_id"], 9001);
         assert_eq!(value["owner"]["path"], json!([5, 6, 7, 8]));
+        assert_eq!(value["owner"]["name_id"], 11);
+        assert_eq!(value["owner_local_name"], "via:VIA1");
 
         let missing = shape_query_json(99, None);
 
@@ -856,7 +1107,7 @@ mod tests {
             flags: 7,
         });
 
-        let value = shape_query_json(42, Some((&shape, None, geometry)));
+        let value = shape_query_json(42, Some((&shape, None, None, geometry)));
 
         assert_eq!(value["geometry"]["kind"], "line");
         assert_eq!(value["geometry"]["begin"], json!({"x": 10, "y": 20}));
@@ -881,7 +1132,7 @@ mod tests {
             flags: 4,
         });
 
-        let value = shape_query_json(43, Some((&shape, None, geometry)));
+        let value = shape_query_json(43, Some((&shape, None, None, geometry)));
 
         assert_eq!(value["geometry"]["kind"], "point");
         assert_eq!(value["geometry"]["point"], json!({"x": 11, "y": 22}));
@@ -911,6 +1162,23 @@ mod tests {
         assert_eq!(value["hits"], 2);
         assert_eq!(value["candidates"], 5);
         assert_eq!(value["shape_ids"], json!([101, 202]));
+    }
+
+    #[test]
+    fn point_query_json_reports_point_radius_layers_and_shape_ids() {
+        let value = point_query_json(&PointQueryReport {
+            hit_count: 2,
+            layer_ids: vec![1, 3],
+            point: chipgeom_format::Point32 { x: 10, y: 20 },
+            radius: 5,
+            shape_ids: vec![7, 9],
+        });
+
+        assert_eq!(value["point"]["x"], 10);
+        assert_eq!(value["radius"], 5);
+        assert_eq!(value["layers"], json!([1, 3]));
+        assert_eq!(value["hits"], 2);
+        assert_eq!(value["shape_ids"], json!([7, 9]));
     }
 
     #[test]

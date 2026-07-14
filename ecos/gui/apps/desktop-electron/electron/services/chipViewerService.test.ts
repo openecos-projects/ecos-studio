@@ -47,6 +47,7 @@ function createService(options: {
   existingPaths?: string[]
   files?: Record<string, string>
   includeDefaultDefPath?: boolean
+  includeDefaultGeometryInputPaths?: boolean
   isPackaged?: boolean
   modifiedTimes?: Record<string, number>
   resourcesPath?: string
@@ -55,6 +56,9 @@ function createService(options: {
   const files = new Map(Object.entries(options.files ?? {}))
   const existingPaths = new Set([
     ...(options.includeDefaultDefPath === false ? [] : [DEF_PATH]),
+    ...(options.includeDefaultGeometryInputPaths === false
+      ? []
+      : [TECH_LEF, LEF_A, LEF_B]),
     ...(options.existingPaths ?? []),
     ...files.keys(),
   ])
@@ -473,6 +477,54 @@ describe('ChipViewerService', () => {
     ).rejects.toThrow('Geometry snapshot requires tech LEF and LEF paths')
   })
 
+  it('throws a clear error when the geometry DB config file is missing', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+      ],
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        rebuildGeometry: true,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(`Geometry DB config does not exist: ${DB_CONFIG_PATH}`)
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('throws a clear error when a configured LEF input is missing', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        TECH_LEF,
+        LEF_B,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      includeDefaultGeometryInputPaths: false,
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        rebuildGeometry: true,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(`Geometry snapshot LEF does not exist: ${LEF_A}`)
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('rejects unavailable workspace step resources before launching the viewer', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
@@ -573,6 +625,34 @@ describe('ChipViewerService', () => {
         detached: true,
         stdio: 'ignore',
       }),
+    )
+  })
+
+  it('reports missing packaged chip viewer binaries before PATH fallback details', async () => {
+    const resourcesPath = '/opt/ECOS Studio/resources'
+    const binaryDir = join(resourcesPath, 'binaries')
+    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
+    const viewer = join(binaryDir, 'chip-viewer-native')
+    const { service } = createService({
+      env: {
+        PATH: '',
+      },
+      existingPaths: [],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      isPackaged: true,
+      resourcesPath,
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        rebuildGeometry: true,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `Packaged chip viewer binaries are incomplete. Missing: ${snapshot}, ${viewer}`,
     )
   })
 })

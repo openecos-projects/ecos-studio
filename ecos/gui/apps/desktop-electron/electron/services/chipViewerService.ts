@@ -47,6 +47,11 @@ interface ChipViewerBinaries {
   viewerPath: string
 }
 
+interface PackagedBinaryResolution {
+  binaries: ChipViewerBinaries | null
+  missingPaths: string[]
+}
+
 export interface ChipViewerServiceOptions {
   appPath: string
   cwd: string
@@ -189,6 +194,13 @@ function parseDbGeometryConfig(raw: string, path: string): DbGeometryConfig {
   }
 }
 
+function snapshotInputPaths(dbConfig: DbGeometryConfig): { label: string; path: string }[] {
+  return [
+    { label: 'tech LEF', path: dbConfig.techLefPath },
+    ...dbConfig.lefPaths.map((path) => ({ label: 'LEF', path })),
+  ]
+}
+
 function isPathInside(rootPath: string, targetPath: string): boolean {
   const normalizedRoot = normalizeLocalPath(rootPath).replace(/[\\/]+$/, '')
   const normalizedTarget = normalizeLocalPath(targetPath)
@@ -266,7 +278,16 @@ export class ChipViewerService {
     const dbConfigPath = join(projectPath, DB_CONFIG_RELATIVE_PATH)
     let dbConfig: DbGeometryConfig | null = null
     const readDbConfig = async () => {
-      return parseDbGeometryConfig(await this.readTextFile(dbConfigPath), dbConfigPath)
+      if (!this.fileExists(dbConfigPath)) {
+        throw new Error(`Geometry DB config does not exist: ${dbConfigPath}`)
+      }
+
+      const config = parseDbGeometryConfig(
+        await this.readTextFile(dbConfigPath),
+        dbConfigPath,
+      )
+      this.validateSnapshotInputs(config)
+      return config
     }
 
     let shouldBuildSnapshot =
@@ -503,13 +524,28 @@ export class ChipViewerService {
 
   private resolveBinaries(): ChipViewerBinaries {
     if (this.isPackaged) {
-      return this.resolvePackagedBinaries() ?? this.resolvePathBinaries()
+      const packaged = this.resolvePackagedBinaries()
+      if (packaged.binaries) {
+        return packaged.binaries
+      }
+
+      try {
+        return this.resolvePathBinaries()
+      } catch (error) {
+        throw new Error(
+          `Packaged chip viewer binaries are incomplete. Missing: ${packaged.missingPaths.join(
+            ', ',
+          )}. PATH fallback failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+      }
     }
 
     return this.resolveDevBinaries()
   }
 
-  private resolvePackagedBinaries(): ChipViewerBinaries | null {
+  private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const snapshotPath = join(
       binaryDir,
@@ -521,10 +557,16 @@ export class ChipViewerService {
     )
 
     if (this.fileExists(snapshotPath) && this.fileExists(viewerPath)) {
-      return { snapshotPath, viewerPath }
+      return {
+        binaries: { snapshotPath, viewerPath },
+        missingPaths: [],
+      }
     }
 
-    return null
+    return {
+      binaries: null,
+      missingPaths: [snapshotPath, viewerPath].filter((path) => !this.fileExists(path)),
+    }
   }
 
   private resolvePathBinaries(): ChipViewerBinaries {
@@ -608,5 +650,13 @@ export class ChipViewerService {
     }
 
     return false
+  }
+
+  private validateSnapshotInputs(dbConfig: DbGeometryConfig): void {
+    for (const input of snapshotInputPaths(dbConfig)) {
+      if (!this.fileExists(input.path)) {
+        throw new Error(`Geometry snapshot ${input.label} does not exist: ${input.path}`)
+      }
+    }
   }
 }

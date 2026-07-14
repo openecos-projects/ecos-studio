@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chipgeom_format::{
     GeometryDeltaRecord, GeometryFileHeader, GeometryFileKind, GeometryMetaRecord,
-    GeometryNameRecord, GeometrySidMapRecord, GeometryViewTileRecord, OwnerRef, ShapeRecord,
-    GEOMETRY_FILE_HEADER_SIZE, GEOMETRY_FILE_MAGIC, GEOMETRY_SCHEMA_VERSION,
+    GeometryNameRecord, GeometrySidMapRecord, GeometryViewTileRecord, NameId, OwnerRef,
+    ShapeRecord, GEOMETRY_FILE_HEADER_SIZE, GEOMETRY_FILE_MAGIC, GEOMETRY_SCHEMA_VERSION,
 };
 use memmap2::{Mmap, MmapOptions};
 use thiserror::Error;
@@ -40,6 +40,11 @@ pub struct GeometryManifest {
     pub delta: Option<PathBuf>,
     pub view: PathBuf,
     pub layers: Option<PathBuf>,
+    pub sites: Option<PathBuf>,
+    pub masters: Option<PathBuf>,
+    pub connectivity: Option<PathBuf>,
+    pub buses: Option<PathBuf>,
+    pub groups: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -52,6 +57,65 @@ pub struct LayerMetadata {
     pub width: i32,
     pub pitch_x: i32,
     pub pitch_y: i32,
+    pub min_spacing: i32,
+    pub min_area: i32,
+    pub min_step: i32,
+    pub cut_spacing: i32,
+    pub enclosure_below: String,
+    pub enclosure_above: String,
+    pub lef58_rule_count: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SiteMetadata {
+    pub name: String,
+    pub site_class: String,
+    pub symmetry: String,
+    pub orient: String,
+    pub width: i32,
+    pub height: i32,
+    pub is_overlap: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MasterMetadata {
+    pub name: String,
+    pub master_type: String,
+    pub site: String,
+    pub symmetry: String,
+    pub origin_x: i64,
+    pub origin_y: i64,
+    pub width: u32,
+    pub height: u32,
+    pub term_count: u32,
+    pub obs_count: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConnectivityMetadata {
+    pub net_name: String,
+    pub net_kind: String,
+    pub endpoint_type: String,
+    pub instance_name: String,
+    pub pin_name: String,
+    pub master_name: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BusMetadata {
+    pub name: String,
+    pub bus_type: String,
+    pub left: u32,
+    pub right: u32,
+    pub net_count: u32,
+    pub pin_count: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroupMetadata {
+    pub name: String,
+    pub region_name: String,
+    pub instance_count: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,6 +157,11 @@ pub struct GeometrySnapshot {
     delta: GeometryDeltaStorage,
     view: Mmap,
     layer_metadata: Vec<LayerMetadata>,
+    site_metadata: Vec<SiteMetadata>,
+    master_metadata: Vec<MasterMetadata>,
+    connectivity_metadata: Vec<ConnectivityMetadata>,
+    bus_metadata: Vec<BusMetadata>,
+    group_metadata: Vec<GroupMetadata>,
 }
 
 enum GeometryDeltaStorage {
@@ -163,6 +232,11 @@ impl GeometrySnapshot {
             core::mem::size_of::<GeometryViewTileRecord>() as u32,
         )?;
         let layer_metadata = read_layer_metadata(manifest.layers.as_deref())?;
+        let site_metadata = read_site_metadata(manifest.sites.as_deref())?;
+        let master_metadata = read_master_metadata(manifest.masters.as_deref())?;
+        let connectivity_metadata = read_connectivity_metadata(manifest.connectivity.as_deref())?;
+        let bus_metadata = read_bus_metadata(manifest.buses.as_deref())?;
+        let group_metadata = read_group_metadata(manifest.groups.as_deref())?;
 
         let snapshot = Self {
             manifest,
@@ -176,6 +250,11 @@ impl GeometrySnapshot {
             delta,
             view,
             layer_metadata,
+            site_metadata,
+            master_metadata,
+            connectivity_metadata,
+            bus_metadata,
+            group_metadata,
         };
         snapshot.validate_manifest_counts()?;
         Ok(snapshot)
@@ -225,6 +304,26 @@ impl GeometrySnapshot {
         &self.layer_metadata
     }
 
+    pub fn site_metadata(&self) -> &[SiteMetadata] {
+        &self.site_metadata
+    }
+
+    pub fn master_metadata(&self) -> &[MasterMetadata] {
+        &self.master_metadata
+    }
+
+    pub fn connectivity_metadata(&self) -> &[ConnectivityMetadata] {
+        &self.connectivity_metadata
+    }
+
+    pub fn bus_metadata(&self) -> &[BusMetadata] {
+        &self.bus_metadata
+    }
+
+    pub fn group_metadata(&self) -> &[GroupMetadata] {
+        &self.group_metadata
+    }
+
     pub fn mapped_bytes(&self) -> GeometryMappedBytes {
         GeometryMappedBytes {
             meta: self.meta.len(),
@@ -243,6 +342,15 @@ impl GeometrySnapshot {
         let begin = record.name_offset as usize;
         let end = begin.checked_add(record.name_size as usize)?;
         std::str::from_utf8(self.name_bytes().get(begin..end)?).ok()
+    }
+
+    pub fn name_by_id(&self, name_id: NameId) -> Option<&str> {
+        if name_id == 0 {
+            return None;
+        }
+        self.name_records()
+            .get(name_id.saturating_sub(1) as usize)
+            .and_then(|record| self.owner_name(record))
     }
 
     fn validate_manifest_counts(&self) -> Result<()> {
@@ -337,6 +445,11 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         delta: values.get("delta").map(|value| base.join(value)),
         view: base.join(required("view")?),
         layers: values.get("layers").map(|value| base.join(value)),
+        sites: values.get("sites").map(|value| base.join(value)),
+        masters: values.get("masters").map(|value| base.join(value)),
+        connectivity: values.get("connectivity").map(|value| base.join(value)),
+        buses: values.get("buses").map(|value| base.join(value)),
+        groups: values.get("groups").map(|value| base.join(value)),
     })
 }
 
@@ -380,6 +493,13 @@ fn read_layer_metadata(path: Option<&Path>) -> Result<Vec<LayerMetadata>> {
         let pitch_y: i32 = fields[6]
             .parse()
             .with_context(|| format!("invalid pitch_y on line {}", line_index + 1))?;
+        let min_spacing = optional_layer_i32(fields.get(8), "min_spacing", line_index)?;
+        let min_area = optional_layer_i32(fields.get(9), "min_area", line_index)?;
+        let min_step = optional_layer_i32(fields.get(10), "min_step", line_index)?;
+        let cut_spacing = optional_layer_i32(fields.get(11), "cut_spacing", line_index)?;
+        let enclosure_below = optional_layer_string(fields.get(12));
+        let enclosure_above = optional_layer_string(fields.get(13));
+        let lef58_rule_count = optional_layer_u32(fields.get(14), "lef58_rule_count", line_index)?;
         let name = non_empty_layer_field(fields[7], &format!("L{layer_id}"));
         layers.push(LayerMetadata {
             layer_id,
@@ -390,9 +510,40 @@ fn read_layer_metadata(path: Option<&Path>) -> Result<Vec<LayerMetadata>> {
             width,
             pitch_x,
             pitch_y,
+            min_spacing,
+            min_area,
+            min_step,
+            cut_spacing,
+            enclosure_below,
+            enclosure_above,
+            lef58_rule_count,
         });
     }
     Ok(layers)
+}
+
+fn optional_layer_i32(value: Option<&&str>, field: &str, line_index: usize) -> Result<i32> {
+    value
+        .map(|value| {
+            value
+                .parse()
+                .with_context(|| format!("invalid {field} on line {}", line_index + 1))
+        })
+        .unwrap_or(Ok(0))
+}
+
+fn optional_layer_u32(value: Option<&&str>, field: &str, line_index: usize) -> Result<u32> {
+    value
+        .map(|value| {
+            value
+                .parse()
+                .with_context(|| format!("invalid {field} on line {}", line_index + 1))
+        })
+        .unwrap_or(Ok(0))
+}
+
+fn optional_layer_string(value: Option<&&str>) -> String {
+    value.map_or_else(String::new, |value| value.trim().to_string())
 }
 
 fn non_empty_layer_field(value: &str, fallback: &str) -> String {
@@ -401,6 +552,227 @@ fn non_empty_layer_field(value: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+fn read_site_metadata(path: Option<&Path>) -> Result<Vec<SiteMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut sites = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"name") {
+            continue;
+        }
+        if fields.len() < 7 {
+            anyhow::bail!(
+                "invalid site metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        sites.push(SiteMetadata {
+            name: metadata_string(fields[0]),
+            site_class: metadata_string_with_fallback(fields[1], "unknown"),
+            symmetry: metadata_string(fields[2]),
+            orient: metadata_string(fields[3]),
+            width: parse_metadata_i32(fields[4], "width", line_index)?,
+            height: parse_metadata_i32(fields[5], "height", line_index)?,
+            is_overlap: parse_metadata_bool(fields[6], "is_overlap", line_index)?,
+        });
+    }
+    Ok(sites)
+}
+
+fn read_master_metadata(path: Option<&Path>) -> Result<Vec<MasterMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut masters = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"name") {
+            continue;
+        }
+        if fields.len() < 10 {
+            anyhow::bail!(
+                "invalid master metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        masters.push(MasterMetadata {
+            name: metadata_string(fields[0]),
+            master_type: metadata_string_with_fallback(fields[1], "unknown"),
+            site: metadata_string(fields[2]),
+            symmetry: metadata_string(fields[3]),
+            origin_x: parse_metadata_i64(fields[4], "origin_x", line_index)?,
+            origin_y: parse_metadata_i64(fields[5], "origin_y", line_index)?,
+            width: parse_metadata_u32(fields[6], "width", line_index)?,
+            height: parse_metadata_u32(fields[7], "height", line_index)?,
+            term_count: parse_metadata_u32(fields[8], "term_count", line_index)?,
+            obs_count: parse_metadata_u32(fields[9], "obs_count", line_index)?,
+        });
+    }
+    Ok(masters)
+}
+
+fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut connectivity = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"net") {
+            continue;
+        }
+        if fields.len() < 6 {
+            anyhow::bail!(
+                "invalid connectivity metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        connectivity.push(ConnectivityMetadata {
+            net_name: metadata_string(fields[0]),
+            net_kind: metadata_string_with_fallback(fields[1], "regular"),
+            endpoint_type: metadata_string_with_fallback(fields[2], "unknown"),
+            instance_name: metadata_string(fields[3]),
+            pin_name: metadata_string(fields[4]),
+            master_name: metadata_string(fields[5]),
+        });
+    }
+    Ok(connectivity)
+}
+
+fn read_bus_metadata(path: Option<&Path>) -> Result<Vec<BusMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut buses = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"name") {
+            continue;
+        }
+        if fields.len() < 6 {
+            anyhow::bail!(
+                "invalid bus metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        buses.push(BusMetadata {
+            name: metadata_string(fields[0]),
+            bus_type: metadata_string_with_fallback(fields[1], "unknown"),
+            left: parse_metadata_u32(fields[2], "left", line_index)?,
+            right: parse_metadata_u32(fields[3], "right", line_index)?,
+            net_count: parse_metadata_u32(fields[4], "net_count", line_index)?,
+            pin_count: parse_metadata_u32(fields[5], "pin_count", line_index)?,
+        });
+    }
+    Ok(buses)
+}
+
+fn read_group_metadata(path: Option<&Path>) -> Result<Vec<GroupMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut groups = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"name") {
+            continue;
+        }
+        if fields.len() < 3 {
+            anyhow::bail!(
+                "invalid group metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        groups.push(GroupMetadata {
+            name: metadata_string(fields[0]),
+            region_name: metadata_string(fields[1]),
+            instance_count: parse_metadata_u32(fields[2], "instance_count", line_index)?,
+        });
+    }
+    Ok(groups)
+}
+
+fn metadata_string(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn metadata_string_with_fallback(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn parse_metadata_i32(value: &str, field: &str, line_index: usize) -> Result<i32> {
+    value
+        .parse()
+        .with_context(|| format!("invalid {field} on line {}", line_index + 1))
+}
+
+fn parse_metadata_i64(value: &str, field: &str, line_index: usize) -> Result<i64> {
+    value
+        .parse()
+        .with_context(|| format!("invalid {field} on line {}", line_index + 1))
+}
+
+fn parse_metadata_u32(value: &str, field: &str, line_index: usize) -> Result<u32> {
+    value
+        .parse()
+        .with_context(|| format!("invalid {field} on line {}", line_index + 1))
+}
+
+fn parse_metadata_bool(value: &str, field: &str, line_index: usize) -> Result<bool> {
+    match value.trim() {
+        "1" | "true" | "TRUE" => Ok(true),
+        "0" | "false" | "FALSE" => Ok(false),
+        _ => anyhow::bail!("invalid {field} on line {}", line_index + 1),
     }
 }
 
@@ -572,6 +944,11 @@ mod tests {
         let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
 
         assert!(snapshot.delta_records().is_empty());
+        assert!(snapshot.site_metadata().is_empty());
+        assert!(snapshot.master_metadata().is_empty());
+        assert!(snapshot.connectivity_metadata().is_empty());
+        assert!(snapshot.bus_metadata().is_empty());
+        assert!(snapshot.group_metadata().is_empty());
         assert_eq!(snapshot.mapped_bytes().delta, 0);
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
@@ -634,9 +1011,45 @@ mod tests {
         let layers_path = snapshot_dir.join("geometry.layers.txt");
         std::fs::write(
             &layers_path,
-            "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\n\
-             1\t7\trouting\thorizontal\t100\t200\t300\tM1\n\
-             2\t8\tcut\tunknown\t50\t0\t0\tVIA1\n",
+            "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\tmin_spacing\tmin_area\tmin_step\tcut_spacing\tenclosure_below\tenclosure_above\tlef58_rule_count\n\
+             1\t7\trouting\thorizontal\t100\t200\t300\tM1\t70\t400\t50\t0\t\t\t5\n\
+             2\t8\tcut\tunknown\t50\t0\t0\tVIA1\t0\t0\t0\t80\t1,2\t3,4\t2\n",
+        )
+        .unwrap();
+        let sites_path = snapshot_dir.join("geometry.sites.txt");
+        std::fs::write(
+            &sites_path,
+            "name\tclass\tsymmetry\torient\twidth\theight\tis_overlap\n\
+             core_site\tCORE\tX\tN\t10\t20\t1\n",
+        )
+        .unwrap();
+        let masters_path = snapshot_dir.join("geometry.masters.txt");
+        std::fs::write(
+            &masters_path,
+            "name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n\
+             INVX1\tCORE\tcore_site\tX,Y\t-1\t2\t30\t40\t3\t2\n",
+        )
+        .unwrap();
+        let connectivity_path = snapshot_dir.join("geometry.connectivity.txt");
+        std::fs::write(
+            &connectivity_path,
+            "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n\
+             clk\tregular\tinstance\tu0\tA\tINVX1\n\
+             clk\tregular\tio\t\tclk_in\t\n",
+        )
+        .unwrap();
+        let buses_path = snapshot_dir.join("geometry.buses.txt");
+        std::fs::write(
+            &buses_path,
+            "name\ttype\tleft\tright\tnet_count\tpin_count\n\
+             data\tnet\t7\t0\t8\t0\n",
+        )
+        .unwrap();
+        let groups_path = snapshot_dir.join("geometry.groups.txt");
+        std::fs::write(
+            &groups_path,
+            "name\tregion\tinstance_count\n\
+             cluster0\tregion0\t4\n",
         )
         .unwrap();
         std::fs::write(
@@ -653,13 +1066,26 @@ mod tests {
              name_index=geometry.name_index.bin\n\
              sidmap=geometry.sidmap.bin\n\
              view=geometry.view.bin\n\
-             layers=geometry.layers.txt\n",
+             layers=geometry.layers.txt\n\
+             sites=geometry.sites.txt\n\
+             masters=geometry.masters.txt\n\
+             connectivity=geometry.connectivity.txt\n\
+             buses=geometry.buses.txt\n\
+             groups=geometry.groups.txt\n",
         )
         .unwrap();
 
         let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
 
         assert_eq!(snapshot.manifest().layers.as_ref(), Some(&layers_path));
+        assert_eq!(snapshot.manifest().sites.as_ref(), Some(&sites_path));
+        assert_eq!(snapshot.manifest().masters.as_ref(), Some(&masters_path));
+        assert_eq!(
+            snapshot.manifest().connectivity.as_ref(),
+            Some(&connectivity_path)
+        );
+        assert_eq!(snapshot.manifest().buses.as_ref(), Some(&buses_path));
+        assert_eq!(snapshot.manifest().groups.as_ref(), Some(&groups_path));
         assert_eq!(snapshot.layer_metadata().len(), 2);
         assert_eq!(snapshot.layer_metadata()[0].layer_id, 1);
         assert_eq!(snapshot.layer_metadata()[0].order, 7);
@@ -669,6 +1095,98 @@ mod tests {
         assert_eq!(snapshot.layer_metadata()[0].width, 100);
         assert_eq!(snapshot.layer_metadata()[0].pitch_x, 200);
         assert_eq!(snapshot.layer_metadata()[0].pitch_y, 300);
+        assert_eq!(snapshot.layer_metadata()[0].min_spacing, 70);
+        assert_eq!(snapshot.layer_metadata()[0].min_area, 400);
+        assert_eq!(snapshot.layer_metadata()[0].min_step, 50);
+        assert_eq!(snapshot.layer_metadata()[0].cut_spacing, 0);
+        assert_eq!(snapshot.layer_metadata()[0].enclosure_below, "");
+        assert_eq!(snapshot.layer_metadata()[0].enclosure_above, "");
+        assert_eq!(snapshot.layer_metadata()[0].lef58_rule_count, 5);
+        assert_eq!(snapshot.layer_metadata()[1].cut_spacing, 80);
+        assert_eq!(snapshot.layer_metadata()[1].enclosure_below, "1,2");
+        assert_eq!(snapshot.layer_metadata()[1].enclosure_above, "3,4");
+        assert_eq!(snapshot.layer_metadata()[1].lef58_rule_count, 2);
+        assert_eq!(
+            snapshot.site_metadata(),
+            &[SiteMetadata {
+                name: "core_site".to_string(),
+                site_class: "CORE".to_string(),
+                symmetry: "X".to_string(),
+                orient: "N".to_string(),
+                width: 10,
+                height: 20,
+                is_overlap: true,
+            }]
+        );
+        assert_eq!(
+            snapshot.master_metadata(),
+            &[MasterMetadata {
+                name: "INVX1".to_string(),
+                master_type: "CORE".to_string(),
+                site: "core_site".to_string(),
+                symmetry: "X,Y".to_string(),
+                origin_x: -1,
+                origin_y: 2,
+                width: 30,
+                height: 40,
+                term_count: 3,
+                obs_count: 2,
+            }]
+        );
+        assert_eq!(snapshot.connectivity_metadata().len(), 2);
+        assert_eq!(snapshot.connectivity_metadata()[0].net_name, "clk");
+        assert_eq!(
+            snapshot.connectivity_metadata()[0].endpoint_type,
+            "instance"
+        );
+        assert_eq!(snapshot.connectivity_metadata()[0].instance_name, "u0");
+        assert_eq!(snapshot.connectivity_metadata()[0].pin_name, "A");
+        assert_eq!(snapshot.connectivity_metadata()[0].master_name, "INVX1");
+        assert_eq!(
+            snapshot.bus_metadata(),
+            &[BusMetadata {
+                name: "data".to_string(),
+                bus_type: "net".to_string(),
+                left: 7,
+                right: 0,
+                net_count: 8,
+                pin_count: 0,
+            }]
+        );
+        assert_eq!(
+            snapshot.group_metadata(),
+            &[GroupMetadata {
+                name: "cluster0".to_string(),
+                region_name: "region0".to_string(),
+                instance_count: 4,
+            }]
+        );
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn reads_legacy_layer_metadata_without_rule_columns() {
+        let snapshot_dir = temp_snapshot_dir("legacy-layer-metadata");
+        let layers_path = snapshot_dir.join("geometry.layers.txt");
+        std::fs::write(
+            &layers_path,
+            "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\n\
+             1\t7\trouting\thorizontal\t100\t200\t300\tM1\n",
+        )
+        .unwrap();
+
+        let layers = read_layer_metadata(Some(&layers_path)).unwrap();
+
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].name, "M1");
+        assert_eq!(layers[0].min_spacing, 0);
+        assert_eq!(layers[0].min_area, 0);
+        assert_eq!(layers[0].min_step, 0);
+        assert_eq!(layers[0].cut_spacing, 0);
+        assert_eq!(layers[0].enclosure_below, "");
+        assert_eq!(layers[0].enclosure_above, "");
+        assert_eq!(layers[0].lef58_rule_count, 0);
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }
@@ -754,6 +1272,94 @@ mod tests {
         assert_eq!(snapshot.manifest().design_version.as_deref(), Some("5.8"));
         assert_eq!(snapshot.manifest().dbu_per_micron, Some(2000));
         assert_eq!(snapshot.manifest().manufacture_grid, Some(5));
+
+        std::fs::remove_dir_all(snapshot_dir).unwrap();
+    }
+
+    #[test]
+    fn resolves_one_based_local_name_ids() {
+        let snapshot_dir = temp_snapshot_dir("local-name-id");
+        let local_name = b"via:VIA12";
+        let name_record = GeometryNameRecord {
+            name_offset: 0,
+            name_size: local_name.len() as u32,
+            ..GeometryNameRecord::default()
+        };
+        write_geometry_file(
+            &snapshot_dir.join("geometry.meta.bin"),
+            GeometryFileKind::Meta,
+            core::mem::size_of::<GeometryMetaRecord>() as u32,
+            bytemuck::bytes_of(&GeometryMetaRecord {
+                next_shape_id: 1,
+                name_record_count: 1,
+                name_payload_size: local_name.len() as u64,
+                ..GeometryMetaRecord::default()
+            }),
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.shapes.bin"),
+            GeometryFileKind::Shapes,
+            core::mem::size_of::<ShapeRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.owners.bin"),
+            GeometryFileKind::Owners,
+            core::mem::size_of::<OwnerRef>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.payload.bin"),
+            GeometryFileKind::Payload,
+            1,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.names.bin"),
+            GeometryFileKind::Names,
+            1,
+            local_name,
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.name_index.bin"),
+            GeometryFileKind::NameIndex,
+            core::mem::size_of::<GeometryNameRecord>() as u32,
+            bytemuck::bytes_of(&name_record),
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.sidmap.bin"),
+            GeometryFileKind::SidMap,
+            core::mem::size_of::<GeometrySidMapRecord>() as u32,
+            &[],
+        );
+        write_geometry_file(
+            &snapshot_dir.join("geometry.view.bin"),
+            GeometryFileKind::View,
+            core::mem::size_of::<GeometryViewTileRecord>() as u32,
+            &[],
+        );
+        std::fs::write(
+            snapshot_dir.join("geometry.manifest"),
+            "schema_version=1\n\
+             shape_count=0\n\
+             owner_count=0\n\
+             payload_size=0\n\
+             meta=geometry.meta.bin\n\
+             shapes=geometry.shapes.bin\n\
+             owners=geometry.owners.bin\n\
+             payload=geometry.payload.bin\n\
+             names=geometry.names.bin\n\
+             name_index=geometry.name_index.bin\n\
+             sidmap=geometry.sidmap.bin\n\
+             view=geometry.view.bin\n",
+        )
+        .unwrap();
+
+        let snapshot = GeometrySnapshot::open(snapshot_dir.join("geometry.manifest")).unwrap();
+
+        assert_eq!(snapshot.name_by_id(1), Some("via:VIA12"));
+        assert_eq!(snapshot.name_by_id(0), None);
+        assert_eq!(snapshot.name_by_id(2), None);
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }

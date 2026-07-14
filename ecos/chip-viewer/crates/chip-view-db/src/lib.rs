@@ -8,7 +8,10 @@ use chipgeom_format::{
     GeometryDeltaRecord, GeometryViewTileRecord, LinePayload, OwnerRef, OwnerType, Point32,
     PointPayload, Rect32, RectPayload, ShapeId, ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
-pub use chipgeom_reader::{GeometryManifest, GeometryMappedBytes};
+pub use chipgeom_reader::{
+    BusMetadata, ConnectivityMetadata, GeometryManifest, GeometryMappedBytes, GroupMetadata,
+    MasterMetadata, SiteMetadata,
+};
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use rstar::{RTree, RTreeObject, AABB};
 
@@ -25,6 +28,11 @@ pub struct SnapshotStats {
     pub shape_count: usize,
     pub owner_count: usize,
     pub name_count: usize,
+    pub site_count: usize,
+    pub master_count: usize,
+    pub connectivity_count: usize,
+    pub bus_count: usize,
+    pub group_count: usize,
     pub bbox: Option<Rect32>,
     pub owner_type_counts: BTreeMap<u8, usize>,
 }
@@ -66,6 +74,13 @@ pub struct LayerSummary {
     pub width: i32,
     pub pitch_x: i32,
     pub pitch_y: i32,
+    pub min_spacing: i32,
+    pub min_area: i32,
+    pub min_step: i32,
+    pub cut_spacing: i32,
+    pub enclosure_below: String,
+    pub enclosure_above: String,
+    pub lef58_rule_count: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +88,7 @@ pub struct ShapeDetail {
     pub shape: ShapeRecord,
     pub owner: OwnerRef,
     pub owner_name: Option<String>,
+    pub owner_local_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -505,6 +521,13 @@ pub fn layer_summaries_from_shapes_and_metadata(
             summary.width = metadata.width;
             summary.pitch_x = metadata.pitch_x;
             summary.pitch_y = metadata.pitch_y;
+            summary.min_spacing = metadata.min_spacing;
+            summary.min_area = metadata.min_area;
+            summary.min_step = metadata.min_step;
+            summary.cut_spacing = metadata.cut_spacing;
+            summary.enclosure_below = metadata.enclosure_below.clone();
+            summary.enclosure_above = metadata.enclosure_above.clone();
+            summary.lef58_rule_count = metadata.lef58_rule_count;
         }
     }
     summaries.sort_by_key(|summary| (summary.order, summary.layer_id));
@@ -522,6 +545,13 @@ fn layer_summary_defaults(layer_id: u16) -> LayerSummary {
         width: 0,
         pitch_x: 0,
         pitch_y: 0,
+        min_spacing: 0,
+        min_area: 0,
+        min_step: 0,
+        cut_spacing: 0,
+        enclosure_below: String::new(),
+        enclosure_above: String::new(),
+        lef58_rule_count: 0,
     }
 }
 
@@ -577,6 +607,7 @@ fn shape_detail_from_parts(
         shape,
         owner,
         owner_name,
+        owner_local_name: None,
     })
 }
 
@@ -652,6 +683,11 @@ impl ChipViewDb {
             shape_count: self.snapshot.shapes().len(),
             owner_count: self.snapshot.owners().len(),
             name_count: self.snapshot.name_records().len(),
+            site_count: self.snapshot.site_metadata().len(),
+            master_count: self.snapshot.master_metadata().len(),
+            connectivity_count: self.snapshot.connectivity_metadata().len(),
+            bus_count: self.snapshot.bus_metadata().len(),
+            group_count: self.snapshot.group_metadata().len(),
             ..SnapshotStats::default()
         };
 
@@ -682,13 +718,18 @@ impl ChipViewDb {
     }
 
     pub fn shape_detail(&self, shape_id: ShapeId) -> Option<ShapeDetail> {
-        shape_detail_from_parts(
+        let mut detail = shape_detail_from_parts(
             &self.shape_index,
             self.snapshot.shapes(),
             self.snapshot.owners(),
             &self.name_index,
             shape_id,
-        )
+        )?;
+        detail.owner_local_name = self
+            .snapshot
+            .name_by_id(detail.owner.name_id)
+            .map(str::to_string);
+        Some(detail)
     }
 
     pub fn layer_summaries(&self) -> Vec<LayerSummary> {
@@ -696,6 +737,48 @@ impl ChipViewDb {
             self.snapshot.shapes(),
             self.snapshot.layer_metadata(),
         )
+    }
+
+    pub fn site_metadata(&self) -> &[SiteMetadata] {
+        self.snapshot.site_metadata()
+    }
+
+    pub fn master_metadata(&self) -> &[MasterMetadata] {
+        self.snapshot.master_metadata()
+    }
+
+    pub fn connectivity_metadata(&self) -> &[ConnectivityMetadata] {
+        self.snapshot.connectivity_metadata()
+    }
+
+    pub fn bus_metadata(&self) -> &[BusMetadata] {
+        self.snapshot.bus_metadata()
+    }
+
+    pub fn group_metadata(&self) -> &[GroupMetadata] {
+        self.snapshot.group_metadata()
+    }
+
+    pub fn connectivity_for_net(&self, net_name: &str) -> Vec<&ConnectivityMetadata> {
+        self.snapshot
+            .connectivity_metadata()
+            .iter()
+            .filter(|endpoint| endpoint.net_name == net_name)
+            .collect()
+    }
+
+    pub fn site_by_name(&self, name: &str) -> Option<&SiteMetadata> {
+        self.snapshot
+            .site_metadata()
+            .iter()
+            .find(|site| site.name == name)
+    }
+
+    pub fn master_by_name(&self, name: &str) -> Option<&MasterMetadata> {
+        self.snapshot
+            .master_metadata()
+            .iter()
+            .find(|master| master.name == name)
     }
 
     pub fn query_layer_intersect(&self, layer_id: u16, bbox: Rect32) -> Vec<ShapeId> {
@@ -706,6 +789,28 @@ impl ChipViewDb {
     pub fn query_layers_intersect(&self, layer_ids: &[u16], bbox: Rect32) -> Vec<ShapeId> {
         self.layer_index
             .query_layers_intersect(self.snapshot.shapes(), layer_ids, bbox)
+    }
+
+    pub fn query_layers_at_point(&self, layer_ids: &[u16], point: Point32) -> Vec<ShapeId> {
+        self.query_layers_intersect(layer_ids, point_bbox(point))
+    }
+
+    pub fn query_layers_near_point(
+        &self,
+        layer_ids: &[u16],
+        point: Point32,
+        radius: i32,
+    ) -> Vec<ShapeId> {
+        let radius = radius.max(0);
+        self.query_layers_intersect(
+            layer_ids,
+            Rect32 {
+                lx: point.x.saturating_sub(radius),
+                ly: point.y.saturating_sub(radius),
+                hx: point.x.saturating_add(radius),
+                hy: point.y.saturating_add(radius),
+            },
+        )
     }
 
     pub fn query_layer_intersect_records(&self, layer_id: u16, bbox: Rect32) -> Vec<&ShapeRecord> {
@@ -799,6 +904,10 @@ impl ChipViewDb {
             .name_for_owner(owner.owner_type, owner.owner_id)
     }
 
+    pub fn owner_local_name(&self, owner: &OwnerRef) -> Option<&str> {
+        self.snapshot.name_by_id(owner.name_id)
+    }
+
     pub fn owner_type_label(owner_type: u8) -> &'static str {
         match OwnerType::from_raw(owner_type) {
             Some(OwnerType::Die) => "die",
@@ -876,6 +985,11 @@ mod tests {
                     width: 120,
                     pitch_x: 240,
                     pitch_y: 480,
+                    min_spacing: 70,
+                    min_area: 400,
+                    min_step: 50,
+                    lef58_rule_count: 5,
+                    ..chipgeom_reader::LayerMetadata::default()
                 },
                 chipgeom_reader::LayerMetadata {
                     layer_id: 7,
@@ -886,6 +1000,11 @@ mod tests {
                     width: 220,
                     pitch_x: 440,
                     pitch_y: 880,
+                    min_spacing: 80,
+                    min_area: 500,
+                    min_step: 60,
+                    lef58_rule_count: 6,
+                    ..chipgeom_reader::LayerMetadata::default()
                 },
             ],
         );
@@ -902,6 +1021,10 @@ mod tests {
         assert_eq!(summaries[1].width, 120);
         assert_eq!(summaries[1].pitch_x, 240);
         assert_eq!(summaries[1].pitch_y, 480);
+        assert_eq!(summaries[1].min_spacing, 70);
+        assert_eq!(summaries[1].min_area, 400);
+        assert_eq!(summaries[1].min_step, 50);
+        assert_eq!(summaries[1].lef58_rule_count, 5);
     }
 
     #[test]
