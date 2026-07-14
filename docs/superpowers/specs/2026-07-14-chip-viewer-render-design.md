@@ -70,6 +70,20 @@ frames and retain selected/search-highlight overlays above detail and overview
 content. Existing Chip Viewer behaviors remain available; this is a visual and
 visibility-control evolution, not a replacement of its workflow.
 
+### ECOS Studio Theme Alignment
+
+The native panel will use the same dark-theme vocabulary as the ECOS Studio
+Home and Workspace Step interfaces: `#18181c` for the main canvas surface,
+`#222226` for the operation rail, `#36363a` for separators, `#e3e3e8` and
+`#a1a1aa` for primary and secondary text, and `#00bfa5` for focus, selection,
+and active controls. The panel will be a flat, resizable right rail with compact
+section headers, small swatches, subtle hover fills, and one-pixel separators.
+It will not use nested cards, gradients, or the default eframe widget palette.
+
+This preserves the Layout Viewer-style spatial arrangement while making the
+separate native process feel like a coherent extension of the Home and
+Workspace Step experience.
+
 ### Object Visibility
 
 Map snapshot owner types to the four Layout Viewer-style controls:
