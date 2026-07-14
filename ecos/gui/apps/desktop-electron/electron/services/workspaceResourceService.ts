@@ -391,6 +391,7 @@ export class WorkspaceResourceService {
           image: step.resources.output.image?.path,
           json: step.resources.output.json?.path,
           viewJson: step.resources.output.viewJson?.path,
+          geometryManifest: step.resources.output.geometryManifest?.path,
         })
       case 'views':
         return stepInfo({
@@ -562,6 +563,11 @@ function addEccLikeResources(
   resources.output.viewJson = createFile(
     join(directory, 'output', `${design}_${stepName}_view`),
     'view-json',
+  )
+  resources.output.geometry = createFile(join(directory, 'output', 'geometry'), 'output')
+  resources.output.geometryManifest = createFile(
+    join(directory, 'output', 'geometry', 'geometry.manifest'),
+    'output',
   )
   resources.output.lef = createFile(
     join(directory, 'output', `${design}_${stepName}.lef`),

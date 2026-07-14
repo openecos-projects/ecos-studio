@@ -4,6 +4,17 @@ set -euo pipefail
 SCRIPT_FILE="$(dirname "${BASH_SOURCE[0]}")"
 REPO_ROOT="$(cd "$SCRIPT_FILE/../.." && pwd)"
 
+ensure_ecc_tools_python_extension() {
+  local import_check='from ecc_tools_bin import ecc_py; print(ecc_py.__file__)'
+
+  if uv run python -c "$import_check"; then
+    return
+  fi
+
+  uv sync --reinstall-package ecc-tools-bin --no-build-isolation-package ecc-tools-bin
+  uv run python -c "$import_check"
+}
+
 build_ecc() {
   cd "$REPO_ROOT/ecc"
 
@@ -21,10 +32,17 @@ build_ecc() {
   fi
 
   if [ "${ECOS_USE_NIX:-}" = "1" ]; then
-    nix develop "$REPO_ROOT" --command uv run pyinstaller ecc.spec --clean --noconfirm
+    nix develop "$REPO_ROOT" --command bash -lc \
+      '
+        import_check="from ecc_tools_bin import ecc_py; print(ecc_py.__file__)"
+        uv run python -c "$import_check" || uv sync --reinstall-package ecc-tools-bin --no-build-isolation-package ecc-tools-bin
+        uv run python -c "$import_check"
+        uv run pyinstaller ecc.spec --clean --noconfirm
+      '
     return
   fi
 
+  ensure_ecc_tools_python_extension
   uv run pyinstaller ecc.spec --clean --noconfirm
 }
 

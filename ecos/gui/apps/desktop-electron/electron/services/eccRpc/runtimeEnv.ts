@@ -61,6 +61,22 @@ function resolvePackagedResourcesPath(options: EccRuntimeEnvOptions): string {
   return options.env.ECOS_ELECTRON_RESOURCES_PATH ?? join(options.appPath, 'resources')
 }
 
+function packagedEccLibraryEnv(
+  env: NodeJS.ProcessEnv,
+  binariesPath: string,
+  platform: RuntimePlatform,
+): NodeJS.ProcessEnv {
+  if (platform !== 'linux') return {}
+
+  const libraryPath = join(binariesPath, '_internal', 'ecc_tools_bin', 'lib')
+  if (!existsSync(libraryPath)) return {}
+
+  const currentPath = env.LD_LIBRARY_PATH ?? ''
+  return {
+    LD_LIBRARY_PATH: currentPath ? `${libraryPath}:${currentPath}` : libraryPath,
+  }
+}
+
 function ensureRepoEccDevShim(
   userDataPath: string,
   wrapperScript: string,
@@ -110,6 +126,7 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
 
       return {
         ...baseEnv,
+        ...packagedEccLibraryEnv(baseEnv, packagedRuntimeBin, options.platform),
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         [nextPath.key]: nextPath.value,
       }

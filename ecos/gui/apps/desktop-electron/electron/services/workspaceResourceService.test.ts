@@ -324,6 +324,13 @@ describe('WorkspaceResourceService', () => {
       response: 'missing',
       info: {
         viewJson: join(root, 'place_dreamplace', 'output', 'gcd_place_view'),
+        geometryManifest: join(
+          root,
+          'place_dreamplace',
+          'output',
+          'geometry',
+          'geometry.manifest',
+        ),
       },
     })
     expect(result.missing).toContain(

@@ -163,6 +163,31 @@ describe('createEccRuntimeEnv', () => {
     expect(env.PATH).toBe(`${join(resourcesPath, 'binaries')}:/usr/bin`)
   })
 
+  it('adds packaged ECC libraries for geometry snapshot subprocesses on Linux', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const binariesPath = join(resourcesPath, 'binaries')
+    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), { recursive: true })
+    writeFileSync(join(binariesPath, 'ecc'), '#!/usr/bin/env bash\n')
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        LD_LIBRARY_PATH: '/usr/local/lib',
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.LD_LIBRARY_PATH).toBe(
+      `${join(binariesPath, '_internal', 'ecc_tools_bin', 'lib')}:/usr/local/lib`,
+    )
+  })
+
   it('does not inject bundled OSS CAD env when packaged resources include yosys', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')

@@ -12,6 +12,25 @@ describe('ECCView project management handoff', () => {
     expect(source).not.toContain('sourceIteration')
   })
 
+  it('keeps optional source workspace defaults from blocking the wizard', () => {
+    const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
+    const prefillEnd = source.indexOf(
+      'async function loadSourceWorkspaceInitialConfig',
+      prefillStart,
+    )
+    const prefillSource = source.slice(prefillStart, prefillEnd)
+    const catchIndex = prefillSource.indexOf('catch (error)')
+    const showWizardIndex = prefillSource.lastIndexOf('showWizard.value = true')
+
+    expect(prefillSource).toContain('let sourceWorkspaceConfig')
+    expect(prefillSource).toMatch(
+      /sourceWorkspaceConfig\s*=\s*await loadSourceWorkspaceInitialConfig/,
+    )
+    expect(catchIndex).toBeGreaterThan(-1)
+    expect(prefillSource).toContain('Failed to load source workspace defaults')
+    expect(showWizardIndex).toBeGreaterThan(catchIndex)
+  })
+
   it('prefills branch artifact origins from project management query parameters', () => {
     expect(source).toContain('originDef')
     expect(source).toContain('originVerilog')

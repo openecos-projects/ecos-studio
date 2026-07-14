@@ -208,6 +208,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import NewProjectWizard from '../components/NewProjectWizard.vue'
 import { useWorkspace } from '../composables/useWorkspace'
+import { waitForDesktopApi } from '@/platform/desktop'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   projectContextFromWorkspaceConfig,
@@ -301,6 +302,7 @@ const prefillWorkspaceDirectory = async () => {
   const workspacePath = queryString(route.query.workspacePath)
   if (!workspacePath) return
 
+  const projectRoot = queryString(route.query.projectRoot)
   const projectName = queryString(route.query.projectName)
   const sourceWorkspace = queryString(route.query.sourceWorkspace)
   const sourceWorkspacePath = queryString(route.query.sourceWorkspacePath)
@@ -313,8 +315,14 @@ const prefillWorkspaceDirectory = async () => {
   const startStep = queryString(route.query.startStep)
   const endStep = queryString(route.query.endStep)
   const workspaceName = workspacePath.split('/').filter(Boolean).pop() || 'workspace'
-  const sourceWorkspaceConfig =
-    await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
+  let sourceWorkspaceConfig: ProjectWorkspaceInitialConfig | undefined
+
+  await registerProjectRootForProjectManagement(projectRoot)
+  try {
+    sourceWorkspaceConfig = await loadSourceWorkspaceInitialConfig(sourceWorkspacePath)
+  } catch (error) {
+    console.warn('Failed to load source workspace defaults.', error)
+  }
 
   initialWizardConfig.value = mergeBranchInitialConfig(
     {
@@ -330,7 +338,7 @@ const prefillWorkspaceDirectory = async () => {
       source_config: sourceWorkspaceConfig,
       source_context: {
         projectName,
-        projectRoot: queryString(route.query.projectRoot),
+        projectRoot,
         workspaceId: sourceWorkspace,
         workspaceName: sourceWorkspace,
         workspacePath: sourceWorkspacePath,
@@ -355,6 +363,19 @@ const prefillWorkspaceDirectory = async () => {
     sourceWorkspaceConfig,
   )
   showWizard.value = true
+}
+
+async function registerProjectRootForProjectManagement(
+  projectRoot: string,
+): Promise<void> {
+  if (!projectRoot) return
+
+  try {
+    const desktopApi = await waitForDesktopApi({ timeoutMs: 500 })
+    await desktopApi.workspace.registerProjectRoot(projectRoot)
+  } catch (error) {
+    console.warn('Failed to register project root for workspace defaults.', error)
+  }
 }
 
 async function loadSourceWorkspaceInitialConfig(
