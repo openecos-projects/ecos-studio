@@ -14094,3 +14094,77 @@ fatal error: driver/difftest.h: No such file or directory
 
 - 修改位于 Electron main process，当前 dev 会话需要重启后才能加载新的 URL 桥接逻辑。
 - 如果当前 Chromium 对 `ecos-surfer://` 的 WASM 内 Fetch 仍有限制，下一步需要在 Surfer 资源本身增加接受 `Uint8Array` 的公开 WASM API；不应退回会卡死的 Blob URL，也不应把大型 VCD 转成膨胀数倍的 JSON 数组。
+
+# 第 240 次 开发
+
+## 开发目标
+
+增强 ecc-fe 的 Prepare、Review、Elab、Lint、Sim 五步业务能力，并让 ECOS Studio GUI 直接展示可行动的结构化结果。每项后端能力独立提交，覆盖结果 provenance/过期判定、`cpu_top` 合同、Review 基线与 waiver、Slang 权威 elaboration、RTL ownership、Sim 指标与历史回归，以及 CLI 报告透传。
+
+## 新增文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/engine/provenance.py`
+  - 生成步骤输入、配置、工具、资源和输出指纹，支持结果可复现性与 stale 判定。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/rtl_ownership.py`
+  - 统一分类 CPU、adapter、SoC、generated、third-party、tool 和 unknown RTL 所有权。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/sv_module.py`
+  - 解析 SystemVerilog 模块定义和端口合同，并比较端口名称、方向与位宽。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/README.md`
+  - 补充步骤结果与输入变化后的重新运行语义。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/catalog/registry.py`
+  - 持久化完整 `cpu_top` 端口合同。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - 向 GUI 透传 stale/provenance、Prepare ownership/合同、Review delta/waiver、Elab 权威性、Lint ownership 和 Sim metrics/failure/regression/history。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/data/workspace.py`
+  - 保存新增合同与步骤配置字段。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/engine/flow.py`
+  - 记录步骤 provenance，并在输入、配置、工具或上游变化后将已有下游结果标记为 stale。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - Prepare 重新验证唯一 `cpu_top` 及固定端口合同，并记录 RTL ownership。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/review/analyzer.py`
+  - 为 Review 问题增加 fingerprint、confidence、origin、ownership、run delta、resolved 和精确 waiver。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/review/runner.py`
+  - 自动使用前一次 Review 作为 baseline，并区分工具不可用与真实结构错误。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/slang/runner.py`
+  - 使用完整 Slang elaboration 作为 readiness 权威来源，将正则 unresolved 扫描降级为 informational candidate。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/verilator/runner.py`
+  - Lint 标记 CPU 可行动诊断及 ownership；Sim 记录周期、终止原因、trap、difftest 首个失配、失败摘要、相邻运行回归和最近 100 次历史。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_catalog_compatibility.py`
+  - 更新 catalog 合同兼容性测试。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 增加 provenance、Prepare 合同、ownership、Elab 权威性、Lint 分类、Sim 指标/历史和 CLI payload 测试。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_rtl_review.py`
+  - 增加 Review delta、confidence、ownership、resolved 和 waiver 回归测试。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/views/FrontendWorkspaceView.vue`
+  - 所有步骤显示 stale 原因。
+  - Prepare 显示 RTL ownership 与实际 `cpu_top` 合同。
+  - Review 显示 new/existing/resolved/waived、confidence 和问题状态，waived 问题不再进入 Problems/Next Action。
+  - Elab 分开展示 Slang 权威错误和 informational heuristic candidate。
+  - Lint 默认显示 CPU/工具诊断，SoC、adapter 和 third-party 诊断保留在 All 视图。
+  - Sim 显示周期、termination、difftest、结构化失败、baseline 回归和运行历史。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次五步业务增强、提交和验证情况。
+
+## 验证情况
+
+- ecc-fe provenance、Prepare、Review、Elab、ownership 和 Lint 定向测试已分批通过；Sim 相关筛选测试 32 项通过。
+- ecc-fe CLI 增强 payload、Prepare detail 和 Sim 指标/历史 5 项定向测试通过。
+- 已执行 Python `py_compile` 和 `git diff --check`，通过。
+- 已执行 `pnpm --filter @ecos-studio/renderer run typecheck`，通过。
+- 已执行 renderer Vitest：400 项中 399 项通过。唯一失败是未修改的 `useWorkspace.test.ts` 仍断言 `loadWorkspaceApi('/work/demo')`，而现有实现调用参数为 `('/work/demo', undefined)`。
+- ecc-fe 已按能力生成 7 个独立提交：`d1d6df3`、`ca883e2`、`e504fcb`、`a2344d3`、`47148d8`、`bc2468c`、`99ada07`。
+- GUI 已生成独立提交 `f3bbb36`。
+
+## 未执行项
+
+- 按项目约束，未执行 pnpm build/dev、GUI 启动、Electron 打包、make、Bazel build 或实际硬件仿真。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 当前 shell 的 `PATH` 不包含 Slang/Yosys，因此完整 `test_engine_flow.py` 会在真实工具步骤提前停止；定向测试已隔离验证本轮逻辑。
+- 两个旧测试夹具仍使用空 CPU filelist，不符合当前固定 `cpu_top` 合同，需要后续单独更新夹具。
+- 受禁止启动 GUI 的项目约束，本轮只完成类型与自动化测试，没有进行实际窗口尺寸和交互截图验证；需要用户在现有 `pnpm run dev` 环境中检查五步页面的最终视觉布局。
