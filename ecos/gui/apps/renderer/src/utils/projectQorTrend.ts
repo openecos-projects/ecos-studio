@@ -109,6 +109,32 @@ export interface ProjectQorTrendSummary {
   unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
+export interface ProjectQorScoreMetricDetail {
+  step: FlowStep
+  metricName: string
+  displayName: string
+  value: number
+  unit?: string
+  score: number
+}
+
+export interface ProjectQorScoreDimensionDetail {
+  dimension: QorDimension
+  label: string
+  score: number
+  configuredWeight: number
+  effectiveWeight: number
+  contribution: number
+  metrics: ProjectQorScoreMetricDetail[]
+}
+
+export interface ProjectQorScoreDetail {
+  overallScore: number | null
+  hardGateCap: number
+  hasHardGateCap: boolean
+  dimensions: ProjectQorScoreDimensionDetail[]
+}
+
 export interface ProjectQorTrendOptions {
   baselineWorkspaceId?: string | null
 }
@@ -691,6 +717,14 @@ const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
   clock_robustness_dfm: 0.1,
 }
 
+const DIMENSION_LABELS: Record<QorDimension, string> = {
+  timing: 'Timing',
+  power_integrity: 'Power / IR / EM',
+  routability_physical: 'Routability / Physical',
+  area_cost: 'Area',
+  clock_robustness_dfm: 'Clock / DFM',
+}
+
 const METRIC_FAIL_VALUES: Record<string, number> = {
   drc_count: 10,
   route_wirelength: 6000,
@@ -881,6 +915,57 @@ export function buildProjectQorTrendSummary(
     improvements,
     risks,
     unsupportedModules: buildUnsupportedModules(sortedInputs, workspaceSummaries),
+  }
+}
+
+export function buildProjectQorScoreDetail(
+  workspace: ProjectQorTrendWorkspaceSummary,
+): ProjectQorScoreDetail {
+  const dimensions = QOR_DIMENSIONS.flatMap((dimension) => {
+    const score = workspace.dimensionScores[dimension]
+    const configuredWeight = DIMENSION_WEIGHTS[dimension]
+    if (score === undefined || configuredWeight <= 0) return []
+
+    const metrics = workspace.records.flatMap((record) => {
+      if (record.dimension !== dimension) return []
+      const metricScore = scoreRecord(record)
+      if (metricScore === null || record.value === null) return []
+      return [
+        {
+          step: record.step,
+          metricName: record.metricName,
+          displayName: record.displayName,
+          value: record.value,
+          unit: record.unit,
+          score: roundScore(metricScore),
+        },
+      ]
+    })
+
+    return [
+      {
+        dimension,
+        label: DIMENSION_LABELS[dimension],
+        score,
+        configuredWeight,
+        metrics,
+      },
+    ]
+  })
+  const usedWeight = dimensions.reduce((total, dimension) => total + dimension.configuredWeight, 0)
+
+  return {
+    overallScore: workspace.overallScore,
+    hardGateCap: workspace.hardGateCap,
+    hasHardGateCap: workspace.hardGateCap < 100,
+    dimensions: dimensions.map((dimension) => {
+      const effectiveWeight = usedWeight === 0 ? 0 : dimension.configuredWeight / usedWeight
+      return {
+        ...dimension,
+        effectiveWeight: roundScore(effectiveWeight * 100),
+        contribution: roundScore(dimension.score * effectiveWeight),
+      }
+    }),
   }
 }
 

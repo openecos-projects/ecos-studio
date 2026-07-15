@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildProjectQorScoreDetail,
   buildProjectQorTrendSummary,
   serializeProjectQorTrendReport,
   normalizeLegacyStepMetrics,
@@ -7,6 +8,42 @@ import {
 } from './projectQorTrend'
 
 describe('project QoR trend model', () => {
+  it('explains the best workspace score with normalized weights and raw metrics', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput('ws_0001', {
+        Route: JSON.stringify({ Tool: 'ecc', wire_len: 3000, num_via: 900 }),
+        STA: JSON.stringify({ Tool: 'ecc', sta_setup_wns: -0.1 }),
+      }),
+    ])
+    const detail = buildProjectQorScoreDetail(summary.workspaces[0]!)
+
+    expect(detail).toMatchObject({
+      hardGateCap: 100,
+      hasHardGateCap: false,
+      dimensions: expect.arrayContaining([
+        expect.objectContaining({
+          dimension: 'timing',
+          configuredWeight: 0.35,
+          effectiveWeight: expect.any(Number),
+          metrics: expect.arrayContaining([
+            expect.objectContaining({ metricName: 'sta_setup_wns', value: -0.1 }),
+          ]),
+        }),
+        expect.objectContaining({
+          dimension: 'routability_physical',
+          configuredWeight: 0.2,
+          metrics: expect.arrayContaining([
+            expect.objectContaining({ metricName: 'route_wirelength', value: 3000 }),
+            expect.objectContaining({ metricName: 'route_via_count', value: 900 }),
+          ]),
+        }),
+      ]),
+    })
+    expect(
+      detail.dimensions.reduce((total, dimension) => total + dimension.effectiveWeight, 0),
+    ).toBeCloseTo(100)
+  })
+
   it('normalizes current step analysis metrics into standard QoR metric records', () => {
     const records = normalizeLegacyStepMetrics({
       workspaceId: 'ws_0001',

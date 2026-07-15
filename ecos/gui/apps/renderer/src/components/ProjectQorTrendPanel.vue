@@ -1,9 +1,9 @@
 <template>
-  <div class="qor-trend-panel" aria-label="QoR Trend">
-    <header class="qor-trend-header">
+  <div class="qor-overview-panel" aria-label="QoR Overview">
+    <header class="qor-overview-header">
       <div>
-        <h4>QoR Trend</h4>
-        <p>Prepared workspace score trend and QoR deltas.</p>
+        <h4>QoR Overview</h4>
+        <p>Overall workspace score and QoR deltas.</p>
       </div>
       <div class="qor-header-tags">
         <button
@@ -30,26 +30,6 @@
         <span class="qor-baseline-tag">Baseline: {{ baselineLabel }}</span>
       </div>
     </header>
-
-    <div class="qor-summary-grid">
-      <section class="qor-summary-card">
-        <span>Overall Score</span>
-        <strong>{{ formatScore(latestTrendPoint?.score ?? null) }}</strong>
-        <small>{{ latestTrendPoint?.label ?? 'No workspace data' }}</small>
-      </section>
-      <section class="qor-summary-card">
-        <span>Best Score</span>
-        <strong>{{ formatScore(bestTrendPoint?.score ?? null) }}</strong>
-        <small>Baseline: {{ baselineLabel }}</small>
-      </section>
-      <section class="qor-summary-card">
-        <span>Largest Regression</span>
-        <strong>{{ largestRegressionLabel }}</strong>
-        <small>
-          {{ largestRegression ? formatDeltaDetail(largestRegression) : 'No regressions detected' }}
-        </small>
-      </section>
-    </div>
 
     <div class="qor-main-grid">
       <section class="qor-trend-card qor-chart-card">
@@ -237,11 +217,6 @@ onBeforeUnmount(() => {
   chartResizeObserver?.disconnect()
 })
 
-const latestTrendPoint = computed(() => {
-  const points = props.qorTrendSummary.trendPoints
-  return points.length > 0 ? points[points.length - 1] : null
-})
-
 const bestTrendPoint = computed(() => {
   return props.qorTrendSummary.trendPoints.reduce<
     ProjectQorTrendSummary['trendPoints'][number] | null
@@ -254,17 +229,10 @@ const bestTrendPoint = computed(() => {
 
 const highestTrendScore = computed(() => bestTrendPoint.value?.score ?? null)
 
-const largestRegression = computed(() => props.qorTrendSummary.regressions[0] ?? null)
-
 const baselineLabel = computed(() => {
   return props.qorTrendSummary.baselineWorkspaceId
     ? props.qorTrendSummary.baselineLabel
     : 'sequential baseline'
-})
-
-const largestRegressionLabel = computed(() => {
-  if (!largestRegression.value) return 'None'
-  return largestRegression.value.displayName
 })
 
 const selectedWorkspace = computed(() => {
@@ -435,25 +403,24 @@ function qorListItemClass(
 </script>
 
 <style scoped>
-.qor-trend-panel {
+.qor-overview-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   color: var(--text-primary);
 }
 
-.qor-trend-header,
+.qor-overview-header,
 .qor-section-title,
-.qor-summary-card,
 .qor-trend-card {
   border: 1px solid var(--border-color);
   background: var(--bg-primary);
 }
 
-.qor-trend-header {
+.qor-overview-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -462,21 +429,20 @@ function qorListItemClass(
   border-radius: 8px;
 }
 
-.qor-trend-header h4 {
+.qor-overview-header h4 {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
 }
 
-.qor-trend-header p,
+.qor-overview-header p,
 .qor-section-title small,
-.qor-summary-card small,
 .qor-empty-note,
 .qor-delta-list small {
   color: var(--text-secondary);
 }
 
-.qor-trend-header p {
+.qor-overview-header p {
   margin: 4px 0 0;
   font-size: 12px;
 }
@@ -526,36 +492,15 @@ function qorListItemClass(
   color: var(--warning-color, #d97706);
 }
 
-.qor-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  min-height: 0;
-}
-
-.qor-summary-card,
 .qor-trend-card {
   border-radius: 8px;
   padding: 14px;
 }
 
-.qor-summary-card {
-  display: flex;
-  min-height: 92px;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.qor-summary-card span,
 .qor-section-title span,
 .qor-delta-list span {
   font-size: 12px;
   font-weight: 700;
-}
-
-.qor-summary-card strong {
-  overflow-wrap: anywhere;
-  font-size: 22px;
 }
 
 .qor-main-grid {
@@ -755,7 +700,6 @@ function qorListItemClass(
 }
 
 @media (max-width: 980px) {
-  .qor-summary-grid,
   .qor-main-grid {
     grid-template-columns: 1fr;
   }

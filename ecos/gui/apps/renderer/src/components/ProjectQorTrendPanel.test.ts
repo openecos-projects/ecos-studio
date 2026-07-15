@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import source from './ProjectQorTrendPanel.vue?raw'
 
 describe('ProjectQorTrendPanel', () => {
-  it('renders the simplified score chart and delta card', () => {
-    expect(source).toContain('QoR Trend')
+  it('renders the embedded QoR overview score chart and delta card', () => {
+    expect(source).toContain('QoR Overview')
+    expect(source).not.toContain('QoR Trend')
     expect(source).toContain('Overall Score')
     expect(source).toContain('Top Regressions')
     expect(source).toContain('Baseline:')
@@ -88,7 +89,6 @@ describe('ProjectQorTrendPanel', () => {
   it('uses workspace names instead of internal IDs in QoR delta details', () => {
     expect(source).toContain('delta.workspaceName')
     expect(source).toContain('delta.baselineWorkspaceName')
-    expect(source).toContain('formatDeltaDetail(largestRegression)')
     expect(source).not.toContain("'message' in delta ? delta.message : delta.workspaceId")
   })
 
@@ -99,5 +99,12 @@ describe('ProjectQorTrendPanel', () => {
     expect(source).toContain('Structured step analysis')
     expect(source).toContain('qor-risk-critical')
     expect(source).toContain('qor-risk-warning')
+  })
+
+  it('keeps baseline and export actions in the embedded overview header', () => {
+    expect(source).toContain('qor-overview-header')
+    expect(source).toContain('qor-baseline-button')
+    expect(source).toContain('qor-export-button')
+    expect(source).not.toContain('qor-summary-grid')
   })
 })
