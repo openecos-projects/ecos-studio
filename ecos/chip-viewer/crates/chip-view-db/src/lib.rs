@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 use std::path::Path;
 
@@ -9,13 +9,14 @@ use chipgeom_format::{
     PointPayload, Rect32, RectPayload, ShapeId, ShapeKind, ShapeRecord, ShapeState, ShapeVersion,
 };
 pub use chipgeom_reader::{
-    BusMetadata, ConnectivityMetadata, GeometryManifest, GeometryMappedBytes, GroupMetadata,
-    MasterMetadata, SiteMetadata,
+    BusMetadata, ConnectivityMetadata, GeometryManifest, GeometryMappedBytes, GridMetadata,
+    GroupMetadata, MasterMetadata, SiteMetadata, ViaMetadata,
 };
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use rstar::{RTree, RTreeObject, AABB};
 
 pub struct ChipViewDb {
+    connectivity_index: ConnectivityIndex,
     layer_index: LayerShapeIndex,
     name_index: OwnerNameIndex,
     shape_index: ShapeIdIndex,
@@ -30,6 +31,8 @@ pub struct SnapshotStats {
     pub name_count: usize,
     pub site_count: usize,
     pub master_count: usize,
+    pub via_count: usize,
+    pub grid_count: usize,
     pub connectivity_count: usize,
     pub bus_count: usize,
     pub group_count: usize,
@@ -43,6 +46,7 @@ pub struct ChipViewIndexMemoryStats {
     pub shape_index_bytes: usize,
     pub view_index_bytes: usize,
     pub name_index_bytes: usize,
+    pub connectivity_index_bytes: usize,
     pub total_bytes: usize,
 }
 
@@ -61,6 +65,12 @@ pub struct DeltaStats {
     pub latest_shape_id: Option<ShapeId>,
     pub latest_old_version: Option<ShapeVersion>,
     pub latest_new_version: Option<ShapeVersion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NearestShape {
+    pub shape_id: ShapeId,
+    pub distance_squared: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,6 +101,42 @@ pub struct ShapeDetail {
     pub owner_local_name: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerLocalInfo {
+    pub kind: String,
+    pub fields: BTreeMap<String, String>,
+}
+
+impl OwnerLocalInfo {
+    pub fn parse(local_name: &str) -> Option<Self> {
+        let mut kind = String::new();
+        let mut fields = BTreeMap::new();
+
+        for token in local_name.split_whitespace() {
+            let Some((key, value)) = token.split_once(':') else {
+                continue;
+            };
+            if key.is_empty() || value.is_empty() {
+                continue;
+            }
+            if kind.is_empty() {
+                kind = key.to_string();
+            }
+            fields.insert(key.to_string(), value.to_string());
+        }
+
+        if fields.is_empty() {
+            return None;
+        }
+
+        Some(Self { kind, fields })
+    }
+
+    pub fn field(&self, key: &str) -> Option<&str> {
+        self.fields.get(key).map(String::as_str)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShapeGeometry {
     Rect(Rect32),
@@ -119,6 +165,14 @@ pub struct OwnerNameIndex {
     by_name: BTreeMap<String, Vec<ShapeId>>,
     name_by_owner: BTreeMap<(u8, u64), String>,
     shapes_by_owner: BTreeMap<(u8, u64), Vec<ShapeId>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ConnectivityIndex {
+    by_instance_name: BTreeMap<String, Vec<usize>>,
+    by_net_name: BTreeMap<String, Vec<usize>>,
+    by_pin_name: BTreeMap<String, Vec<usize>>,
+    by_qualified_pin_name: BTreeMap<String, Vec<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -286,6 +340,54 @@ impl LayerShapeIndex {
             })
             .max()
             .map(|index| shapes[index].id)
+    }
+
+    pub fn nearest_shape(
+        &self,
+        shapes: &[ShapeRecord],
+        layer_ids: &[u16],
+        point: Point32,
+        max_distance: Option<i32>,
+    ) -> Option<NearestShape> {
+        let max_distance_squared =
+            max_distance.map(|distance| saturating_square_u64(distance.max(0) as i64));
+        let candidates = if let Some(distance) = max_distance {
+            let radius = distance.max(0);
+            let bbox = Rect32 {
+                lx: point.x.saturating_sub(radius),
+                ly: point.y.saturating_sub(radius),
+                hx: point.x.saturating_add(radius),
+                hy: point.y.saturating_add(radius),
+            };
+            layer_ids
+                .iter()
+                .flat_map(|layer_id| self.spatial_candidate_indices(*layer_id, bbox))
+                .collect::<Vec<_>>()
+        } else {
+            layer_ids
+                .iter()
+                .flat_map(|layer_id| self.by_layer.get(layer_id).into_iter().flatten().copied())
+                .collect::<Vec<_>>()
+        };
+
+        candidates
+            .into_iter()
+            .filter_map(|index| {
+                let shape = shapes.get(index)?;
+                if shape.state != ShapeState::Alive as u8 || !is_pickable_shape_kind(shape.kind) {
+                    return None;
+                }
+                let distance_squared = rect_distance_squared(shape.bbox, point);
+                if max_distance_squared.is_some_and(|limit| distance_squared > limit) {
+                    return None;
+                }
+                Some((distance_squared, shape.layer_id, shape.id))
+            })
+            .min()
+            .map(|(distance_squared, _, shape_id)| NearestShape {
+                shape_id,
+                distance_squared,
+            })
     }
 }
 
@@ -461,26 +563,126 @@ impl OwnerNameIndex {
     }
 }
 
+impl ConnectivityIndex {
+    fn from_endpoints(endpoints: &[ConnectivityMetadata]) -> Self {
+        let mut index = Self::default();
+        for (endpoint_index, endpoint) in endpoints.iter().enumerate() {
+            push_connectivity_index(
+                &mut index.by_instance_name,
+                &endpoint.instance_name,
+                endpoint_index,
+            );
+            push_connectivity_index(&mut index.by_net_name, &endpoint.net_name, endpoint_index);
+            push_connectivity_index(&mut index.by_pin_name, &endpoint.pin_name, endpoint_index);
+            if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
+                push_connectivity_index(
+                    &mut index.by_qualified_pin_name,
+                    &format!("{}/{}", endpoint.instance_name, endpoint.pin_name),
+                    endpoint_index,
+                );
+            }
+        }
+        index
+    }
+
+    fn endpoints_for_instance<'a>(
+        &self,
+        endpoints: &'a [ConnectivityMetadata],
+        instance_name: &str,
+    ) -> Vec<&'a ConnectivityMetadata> {
+        self.endpoint_refs(endpoints, self.by_instance_name.get(instance_name))
+    }
+
+    fn endpoints_for_net<'a>(
+        &self,
+        endpoints: &'a [ConnectivityMetadata],
+        net_name: &str,
+    ) -> Vec<&'a ConnectivityMetadata> {
+        self.endpoint_refs(endpoints, self.by_net_name.get(net_name))
+    }
+
+    fn endpoints_for_pin<'a>(
+        &self,
+        endpoints: &'a [ConnectivityMetadata],
+        pin_name: &str,
+    ) -> Vec<&'a ConnectivityMetadata> {
+        let indices = if pin_name.contains('/') {
+            self.by_qualified_pin_name.get(pin_name)
+        } else {
+            self.by_pin_name.get(pin_name)
+        };
+        self.endpoint_refs(endpoints, indices)
+    }
+
+    fn endpoint_refs<'a>(
+        &self,
+        endpoints: &'a [ConnectivityMetadata],
+        indices: Option<&Vec<usize>>,
+    ) -> Vec<&'a ConnectivityMetadata> {
+        indices
+            .into_iter()
+            .flat_map(|indices| indices.iter().copied())
+            .filter_map(|index| endpoints.get(index))
+            .collect()
+    }
+
+    fn estimated_heap_bytes(&self) -> usize {
+        size_of::<Self>()
+            + connectivity_index_map_bytes(&self.by_instance_name)
+            + connectivity_index_map_bytes(&self.by_net_name)
+            + connectivity_index_map_bytes(&self.by_pin_name)
+            + connectivity_index_map_bytes(&self.by_qualified_pin_name)
+    }
+}
+
+fn push_connectivity_index(
+    map: &mut BTreeMap<String, Vec<usize>>,
+    name: &str,
+    endpoint_index: usize,
+) {
+    if name.is_empty() {
+        return;
+    }
+    map.entry(name.to_string())
+        .or_default()
+        .push(endpoint_index);
+}
+
+fn connectivity_index_map_bytes(map: &BTreeMap<String, Vec<usize>>) -> usize {
+    map.iter()
+        .map(|(name, indices)| {
+            size_of::<String>()
+                + name.capacity()
+                + size_of::<Vec<usize>>()
+                + indices.capacity() * size_of::<usize>()
+        })
+        .sum()
+}
+
 impl ChipViewIndexMemoryStats {
-    pub fn from_indexes(
+    fn from_indexes(
         layer_index: &LayerShapeIndex,
         shape_index: &ShapeIdIndex,
         view_index: &ViewTileIndex,
         name_index: &OwnerNameIndex,
+        connectivity_index: &ConnectivityIndex,
     ) -> Self {
         let layer_index_bytes = layer_index.estimated_heap_bytes();
         let shape_index_bytes = shape_index.estimated_heap_bytes();
         let view_index_bytes = view_index.estimated_heap_bytes();
         let name_index_bytes = name_index.estimated_heap_bytes();
+        let connectivity_index_bytes = connectivity_index.estimated_heap_bytes();
         Self {
             layer_index_bytes,
             shape_index_bytes,
             view_index_bytes,
             name_index_bytes,
+            connectivity_index_bytes,
             total_bytes: layer_index_bytes
                 + shape_index_bytes
                 + view_index_bytes
-                + name_index_bytes,
+                + name_index_bytes
+                + connectivity_index_bytes,
         }
     }
 }
@@ -571,6 +773,34 @@ fn rect_contains_point(rect: Rect32, point: Point32) -> bool {
     point.x >= rect.lx && point.x <= rect.hx && point.y >= rect.ly && point.y <= rect.hy
 }
 
+fn rect_distance_squared(rect: Rect32, point: Point32) -> u64 {
+    let lx = rect.lx.min(rect.hx);
+    let hx = rect.lx.max(rect.hx);
+    let ly = rect.ly.min(rect.hy);
+    let hy = rect.ly.max(rect.hy);
+    let dx = if point.x < lx {
+        (lx as i64) - (point.x as i64)
+    } else if point.x > hx {
+        (point.x as i64) - (hx as i64)
+    } else {
+        0
+    };
+    let dy = if point.y < ly {
+        (ly as i64) - (point.y as i64)
+    } else if point.y > hy {
+        (point.y as i64) - (hy as i64)
+    } else {
+        0
+    };
+
+    saturating_square_u64(dx).saturating_add(saturating_square_u64(dy))
+}
+
+fn saturating_square_u64(value: i64) -> u64 {
+    let value = value.unsigned_abs();
+    value.saturating_mul(value)
+}
+
 fn is_pickable_shape_kind(kind: u8) -> bool {
     kind == ShapeKind::Rect as u8 || kind == ShapeKind::Line as u8 || kind == ShapeKind::Point as u8
 }
@@ -639,6 +869,91 @@ fn decode_shape_payload<T: Pod>(shape: &ShapeRecord, payload_bytes: &[u8]) -> Op
     Some(bytemuck::pod_read_unaligned(payload_bytes.get(begin..end)?))
 }
 
+fn query_bus_shape_ids_from_parts(name_index: &OwnerNameIndex, bus: &BusMetadata) -> Vec<ShapeId> {
+    let mut shape_ids = BTreeSet::new();
+    for name in bus.net_names.iter().chain(bus.pin_names.iter()) {
+        collect_named_shape_ids(name_index, name, &mut shape_ids);
+        if let Some((_, pin_name)) = name.rsplit_once('/') {
+            collect_named_shape_ids(name_index, pin_name, &mut shape_ids);
+        }
+    }
+    if shape_ids.is_empty() {
+        collect_named_shape_ids(name_index, &bus.name, &mut shape_ids);
+    }
+    shape_ids.into_iter().collect()
+}
+
+fn query_group_shape_ids_from_parts(
+    name_index: &OwnerNameIndex,
+    group: &GroupMetadata,
+) -> Vec<ShapeId> {
+    let mut shape_ids = BTreeSet::new();
+    for instance_name in &group.instance_names {
+        collect_named_shape_ids(name_index, instance_name, &mut shape_ids);
+    }
+    collect_named_shape_ids(name_index, &group.region_name, &mut shape_ids);
+    shape_ids.into_iter().collect()
+}
+
+#[cfg(test)]
+fn query_pin_shape_ids_from_parts(
+    name_index: &OwnerNameIndex,
+    endpoints: &[ConnectivityMetadata],
+    pin_name: &str,
+) -> Vec<ShapeId> {
+    let matching_endpoints = endpoints
+        .iter()
+        .filter(|endpoint| endpoint_matches_pin(endpoint, pin_name))
+        .collect::<Vec<_>>();
+    query_pin_shape_ids_from_endpoint_refs(name_index, &matching_endpoints, pin_name)
+}
+
+fn query_pin_shape_ids_from_endpoint_refs(
+    name_index: &OwnerNameIndex,
+    endpoints: &[&ConnectivityMetadata],
+    pin_name: &str,
+) -> Vec<ShapeId> {
+    let mut shape_ids = BTreeSet::new();
+    for endpoint in endpoints {
+        collect_named_shape_ids(name_index, &endpoint.pin_name, &mut shape_ids);
+        collect_named_shape_ids(name_index, &endpoint.net_name, &mut shape_ids);
+        if !endpoint.instance_name.is_empty() && !endpoint.pin_name.is_empty() {
+            collect_named_shape_ids(
+                name_index,
+                &format!("{}/{}", endpoint.instance_name, endpoint.pin_name),
+                &mut shape_ids,
+            );
+        }
+    }
+    if shape_ids.is_empty() {
+        collect_named_shape_ids(name_index, pin_name, &mut shape_ids);
+        if let Some((_, local_pin_name)) = pin_name.rsplit_once('/') {
+            collect_named_shape_ids(name_index, local_pin_name, &mut shape_ids);
+        }
+    }
+    shape_ids.into_iter().collect()
+}
+
+#[cfg(test)]
+fn endpoint_matches_pin(endpoint: &ConnectivityMetadata, pin_name: &str) -> bool {
+    if let Some((instance_name, local_pin_name)) = pin_name.rsplit_once('/') {
+        endpoint.instance_name == instance_name && endpoint.pin_name == local_pin_name
+    } else {
+        endpoint.pin_name == pin_name
+    }
+}
+
+fn collect_named_shape_ids(
+    name_index: &OwnerNameIndex,
+    name: &str,
+    shape_ids: &mut BTreeSet<ShapeId>,
+) {
+    if name.is_empty() {
+        return;
+    }
+    shape_ids.extend(name_index.query(name));
+}
+
 #[cfg(test)]
 fn filter_shape_ids_by_owner_types(
     shape_ids: Vec<ShapeId>,
@@ -661,11 +976,14 @@ fn filter_shape_ids_by_owner_types(
 impl ChipViewDb {
     pub fn open(manifest_path: impl AsRef<Path>) -> Result<Self> {
         let snapshot = GeometrySnapshot::open(manifest_path)?;
+        let connectivity_index =
+            ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata());
         let layer_index = LayerShapeIndex::from_shapes(snapshot.shapes());
         let name_index = OwnerNameIndex::from_snapshot(&snapshot);
         let shape_index = ShapeIdIndex::from_shapes(snapshot.shapes());
         let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
         Ok(Self {
+            connectivity_index,
             layer_index,
             name_index,
             shape_index,
@@ -685,6 +1003,8 @@ impl ChipViewDb {
             name_count: self.snapshot.name_records().len(),
             site_count: self.snapshot.site_metadata().len(),
             master_count: self.snapshot.master_metadata().len(),
+            via_count: self.snapshot.via_metadata().len(),
+            grid_count: self.snapshot.grid_metadata().len(),
             connectivity_count: self.snapshot.connectivity_metadata().len(),
             bus_count: self.snapshot.bus_metadata().len(),
             group_count: self.snapshot.group_metadata().len(),
@@ -747,6 +1067,14 @@ impl ChipViewDb {
         self.snapshot.master_metadata()
     }
 
+    pub fn via_metadata(&self) -> &[ViaMetadata] {
+        self.snapshot.via_metadata()
+    }
+
+    pub fn grid_metadata(&self) -> &[GridMetadata] {
+        self.snapshot.grid_metadata()
+    }
+
     pub fn connectivity_metadata(&self) -> &[ConnectivityMetadata] {
         self.snapshot.connectivity_metadata()
     }
@@ -759,12 +1087,50 @@ impl ChipViewDb {
         self.snapshot.group_metadata()
     }
 
-    pub fn connectivity_for_net(&self, net_name: &str) -> Vec<&ConnectivityMetadata> {
+    pub fn bus_by_name(&self, name: &str) -> Option<&BusMetadata> {
         self.snapshot
-            .connectivity_metadata()
+            .bus_metadata()
             .iter()
-            .filter(|endpoint| endpoint.net_name == net_name)
-            .collect()
+            .find(|bus| bus.name == name)
+    }
+
+    pub fn group_by_name(&self, name: &str) -> Option<&GroupMetadata> {
+        self.snapshot
+            .group_metadata()
+            .iter()
+            .find(|group| group.name == name)
+    }
+
+    pub fn query_bus_name(&self, name: &str) -> Vec<ShapeId> {
+        self.bus_by_name(name)
+            .map(|bus| query_bus_shape_ids_from_parts(&self.name_index, bus))
+            .unwrap_or_default()
+    }
+
+    pub fn query_group_name(&self, name: &str) -> Vec<ShapeId> {
+        self.group_by_name(name)
+            .map(|group| query_group_shape_ids_from_parts(&self.name_index, group))
+            .unwrap_or_default()
+    }
+
+    pub fn query_pin_name(&self, pin_name: &str) -> Vec<ShapeId> {
+        let endpoints = self.connectivity_for_pin(pin_name);
+        query_pin_shape_ids_from_endpoint_refs(&self.name_index, &endpoints, pin_name)
+    }
+
+    pub fn connectivity_for_net(&self, net_name: &str) -> Vec<&ConnectivityMetadata> {
+        self.connectivity_index
+            .endpoints_for_net(self.snapshot.connectivity_metadata(), net_name)
+    }
+
+    pub fn connectivity_for_pin(&self, pin_name: &str) -> Vec<&ConnectivityMetadata> {
+        self.connectivity_index
+            .endpoints_for_pin(self.snapshot.connectivity_metadata(), pin_name)
+    }
+
+    pub fn connectivity_for_instance(&self, instance_name: &str) -> Vec<&ConnectivityMetadata> {
+        self.connectivity_index
+            .endpoints_for_instance(self.snapshot.connectivity_metadata(), instance_name)
     }
 
     pub fn site_by_name(&self, name: &str) -> Option<&SiteMetadata> {
@@ -813,6 +1179,16 @@ impl ChipViewDb {
         )
     }
 
+    pub fn nearest_shape(
+        &self,
+        layer_ids: &[u16],
+        point: Point32,
+        max_distance: Option<i32>,
+    ) -> Option<NearestShape> {
+        self.layer_index
+            .nearest_shape(self.snapshot.shapes(), layer_ids, point, max_distance)
+    }
+
     pub fn query_layer_intersect_records(&self, layer_id: u16, bbox: Rect32) -> Vec<&ShapeRecord> {
         self.layer_index
             .query_layer_intersect_indices(self.snapshot.shapes(), layer_id, bbox)
@@ -840,6 +1216,7 @@ impl ChipViewDb {
             &self.shape_index,
             &self.view_index,
             &self.name_index,
+            &self.connectivity_index,
         );
         ChipViewMemoryStats {
             mapped_plus_index_bytes: mapped_bytes.total() + index_bytes.total_bytes,
@@ -1028,6 +1405,30 @@ mod tests {
     }
 
     #[test]
+    fn owner_local_info_parses_key_value_tokens() {
+        let info = OwnerLocalInfo::parse(
+            "via:VIA12 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2 rowcol:1x2",
+        )
+        .unwrap();
+
+        assert_eq!(info.kind, "via");
+        assert_eq!(info.field("via"), Some("VIA12"));
+        assert_eq!(info.field("master"), Some("VIA12"));
+        assert_eq!(info.field("type"), Some("fixed"));
+        assert_eq!(info.field("bottom"), Some("M1"));
+        assert_eq!(info.field("cut"), Some("VIA12"));
+        assert_eq!(info.field("top"), Some("M2"));
+        assert_eq!(info.field("rowcol"), Some("1x2"));
+        assert_eq!(info.field("missing"), None);
+    }
+
+    #[test]
+    fn owner_local_info_ignores_unstructured_local_name() {
+        assert!(OwnerLocalInfo::parse("").is_none());
+        assert!(OwnerLocalInfo::parse("plain_name_without_fields").is_none());
+    }
+
+    #[test]
     fn layer_shape_index_queries_only_requested_layer() {
         let shapes = [
             shape(1, 7),
@@ -1201,6 +1602,60 @@ mod tests {
                 },
             ),
             vec![10, 30, 20, 40]
+        );
+    }
+
+    #[test]
+    fn layer_shape_index_finds_nearest_shape_by_bbox_distance() {
+        let shapes = [
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 100,
+                    ly: 100,
+                    hx: 120,
+                    hy: 120,
+                },
+                ..shape(10, 1)
+            },
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 20,
+                    ly: 20,
+                    hx: 30,
+                    hy: 30,
+                },
+                ..shape(20, 1)
+            },
+            ShapeRecord {
+                bbox: Rect32 {
+                    lx: 12,
+                    ly: 12,
+                    hx: 14,
+                    hy: 14,
+                },
+                state: ShapeState::Deleted as u8,
+                ..shape(30, 1)
+            },
+        ];
+        let index = LayerShapeIndex::from_shapes(&shapes);
+
+        assert_eq!(
+            index.nearest_shape(&shapes, &[1], Point32 { x: 0, y: 0 }, None),
+            Some(NearestShape {
+                shape_id: 20,
+                distance_squared: 800,
+            })
+        );
+        assert_eq!(
+            index.nearest_shape(&shapes, &[1], Point32 { x: 0, y: 0 }, Some(15)),
+            None
+        );
+        assert_eq!(
+            index.nearest_shape(&shapes, &[1], Point32 { x: 21, y: 22 }, Some(1)),
+            Some(NearestShape {
+                shape_id: 20,
+                distance_squared: 0,
+            })
         );
     }
 
@@ -1693,6 +2148,221 @@ mod tests {
     }
 
     #[test]
+    fn bus_and_group_queries_expand_member_metadata_to_shape_ids() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::PinPortShape as u8,
+                owner_id: 11,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::Region as u8,
+                owner_id: 30,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(4, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                ..shape(8, 0)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                ..shape(6, 0)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "data[0]".to_string()),
+                (OwnerType::PinPortShape as u8, 11, "A".to_string()),
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::Region as u8, 30, "region0".to_string()),
+            ],
+        );
+        let bus = BusMetadata {
+            name: "data".to_string(),
+            net_names: vec!["data[0]".to_string()],
+            pin_names: vec!["u0/A".to_string()],
+            ..BusMetadata::default()
+        };
+        let group = GroupMetadata {
+            name: "cluster0".to_string(),
+            region_name: "region0".to_string(),
+            instance_names: vec!["u0".to_string()],
+            ..GroupMetadata::default()
+        };
+
+        assert_eq!(
+            query_bus_shape_ids_from_parts(&name_index, &bus),
+            vec![2, 4]
+        );
+        assert_eq!(
+            query_group_shape_ids_from_parts(&name_index, &group),
+            vec![6, 8]
+        );
+    }
+
+    #[test]
+    fn pin_query_uses_connectivity_endpoints_and_owner_names() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::PinPortShape as u8,
+                owner_id: 11,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::PinPortShape as u8,
+                owner_id: 12,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(4, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                ..shape(6, 1)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                ..shape(8, 0)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "clk".to_string()),
+                (OwnerType::PinPortShape as u8, 11, "A".to_string()),
+                (OwnerType::PinPortShape as u8, 12, "u0/A".to_string()),
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+            ],
+        );
+        let endpoint = ConnectivityMetadata {
+            net_name: "clk".to_string(),
+            endpoint_type: "instance".to_string(),
+            instance_name: "u0".to_string(),
+            pin_name: "A".to_string(),
+            master_name: "NAND2_X1".to_string(),
+            ..ConnectivityMetadata::default()
+        };
+
+        assert!(endpoint_matches_pin(&endpoint, "A"));
+        assert!(endpoint_matches_pin(&endpoint, "u0/A"));
+        assert!(!endpoint_matches_pin(&endpoint, "u1/A"));
+        assert_eq!(
+            query_pin_shape_ids_from_parts(&name_index, std::slice::from_ref(&endpoint), "A"),
+            vec![2, 4, 6]
+        );
+        assert_eq!(
+            query_pin_shape_ids_from_parts(&name_index, &[endpoint], "u0/A"),
+            vec![2, 4, 6]
+        );
+        assert_eq!(
+            query_pin_shape_ids_from_parts(&name_index, &[], "u0/A"),
+            vec![2, 6]
+        );
+    }
+
+    #[test]
+    fn connectivity_index_queries_endpoints_by_net_instance_and_pin() {
+        let endpoints = [
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: "u0".to_string(),
+                pin_name: "A".to_string(),
+                master_name: "NAND2_X1".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+            ConnectivityMetadata {
+                net_name: "data".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: "u1".to_string(),
+                pin_name: "A".to_string(),
+                master_name: "INV_X1".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+        ];
+        let index = ConnectivityIndex::from_endpoints(&endpoints);
+
+        assert_eq!(
+            index
+                .endpoints_for_net(&endpoints, "clk")
+                .into_iter()
+                .map(|endpoint| endpoint.pin_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["A", "CLK"]
+        );
+        assert_eq!(
+            index
+                .endpoints_for_instance(&endpoints, "u1")
+                .into_iter()
+                .map(|endpoint| endpoint.net_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["data"]
+        );
+        assert_eq!(
+            index
+                .endpoints_for_pin(&endpoints, "A")
+                .into_iter()
+                .map(|endpoint| endpoint.instance_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u0", "u1"]
+        );
+        assert_eq!(
+            index
+                .endpoints_for_pin(&endpoints, "u0/A")
+                .into_iter()
+                .map(|endpoint| endpoint.net_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["clk"]
+        );
+    }
+
+    #[test]
     fn index_memory_estimates_include_heap_backing_storage() {
         let shapes = [
             shape(40, 7),
@@ -1749,23 +2419,34 @@ mod tests {
                 "synthetic_clk".to_string(),
             )],
         );
+        let connectivity_index = ConnectivityIndex::from_endpoints(&[ConnectivityMetadata {
+            net_name: "synthetic_clk".to_string(),
+            endpoint_type: "instance".to_string(),
+            instance_name: "u0".to_string(),
+            pin_name: "A".to_string(),
+            master_name: "NAND2_X1".to_string(),
+            ..ConnectivityMetadata::default()
+        }]);
         let stats = ChipViewIndexMemoryStats::from_indexes(
             &layer_index,
             &shape_index,
             &view_index,
             &name_index,
+            &connectivity_index,
         );
 
         assert!(stats.layer_index_bytes >= 3 * core::mem::size_of::<usize>());
         assert!(stats.shape_index_bytes >= 3 * core::mem::size_of::<(ShapeId, usize)>());
         assert!(stats.view_index_bytes >= 2 * core::mem::size_of::<usize>());
         assert!(stats.name_index_bytes >= "synthetic_clk".len());
+        assert!(stats.connectivity_index_bytes >= "synthetic_clk".len());
         assert_eq!(
             stats.total_bytes,
             stats.layer_index_bytes
                 + stats.shape_index_bytes
                 + stats.view_index_bytes
                 + stats.name_index_bytes
+                + stats.connectivity_index_bytes
         );
     }
 

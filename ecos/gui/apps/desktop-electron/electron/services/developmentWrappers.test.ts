@@ -90,10 +90,15 @@ describe('development wrappers', () => {
     )
     expect(unref).toHaveBeenCalledTimes(1)
 
-    const chipExecFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
+    let chipManifestWritten = false
+    const chipExecFile = vi.fn(async () => {
+      chipManifestWritten = true
+      return { stderr: '', stdout: '' }
+    })
     const chipUnref = vi.fn()
     const chipSpawnProcess = vi.fn(() => ({ unref: chipUnref }))
     const chipDefPath = '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz'
+    const chipManifestPath = '/project/Floorplan_ecc/output/geometry/geometry.manifest'
     const chipDbConfigPath = '/project/config/db_default_config.json'
     const chipTechLefPath = '/pdk/tech.lef'
     const chipLefPath = '/pdk/std.lef'
@@ -104,6 +109,7 @@ describe('development wrappers', () => {
       execFile: chipExecFile,
       fileExists: (path) =>
         [chipDefPath, chipDbConfigPath, chipTechLefPath, chipLefPath].includes(path) ||
+        (chipManifestWritten && path === chipManifestPath) ||
         existsSync(path),
       isPackaged: false,
       platform: 'linux',
@@ -143,7 +149,7 @@ describe('development wrappers', () => {
       chipViewerWrapperPath,
       [
         '--manifest',
-        '/project/Floorplan_ecc/output/geometry/geometry.manifest',
+        chipManifestPath,
         '--mode',
         'view',
       ],

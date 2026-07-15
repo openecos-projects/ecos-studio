@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chip-display = { path = "../../crates/chip-display" }
 chip-view-db = { path = "../../crates/chip-view-db" }
 chipgeom-format = { path = "../../crates/chipgeom-format" }
 clap.workspace = true

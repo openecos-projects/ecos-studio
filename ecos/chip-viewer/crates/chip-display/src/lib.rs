@@ -8,6 +8,9 @@ pub enum FillPattern {
     DenseDots,
     DiagonalHatch,
     CrossHatch,
+    HorizontalHatch,
+    VerticalHatch,
+    Grid,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +33,26 @@ pub enum LayerRole {
 }
 
 impl LayerRole {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overlap => "overlap",
+            Self::Metal { .. } => "metal",
+            Self::Routing => "routing",
+            Self::Via { .. } => "via",
+            Self::Cut => "cut",
+            Self::TopMetal { .. } => "top-metal",
+            Self::TopVia { .. } => "top-via",
+            Self::RedistributionVia => "redistribution-via",
+            Self::Rdl => "rdl",
+            Self::Fill => "fill",
+            Self::Row => "row",
+            Self::Blockage => "blockage",
+            Self::Implant => "implant",
+            Self::MasterSlice => "master-slice",
+            Self::Unknown => "unknown",
+        }
+    }
+
     pub fn from_metadata(name: &str, layer_type: &str) -> Self {
         let named_role = Self::from_layer_name(name);
         if named_role != Self::Unknown {
@@ -383,6 +406,14 @@ mod tests {
 
         assert_eq!(routing.fill_pattern, FillPattern::CrossHatch);
         assert_eq!(cut.fill_pattern, FillPattern::SparseDots);
+    }
+
+    #[test]
+    fn layer_roles_have_stable_display_labels() {
+        assert_eq!(LayerRole::Metal { level: 4 }.label(), "metal");
+        assert_eq!(LayerRole::Cut.label(), "cut");
+        assert_eq!(LayerRole::Blockage.label(), "blockage");
+        assert_eq!(LayerRole::Unknown.label(), "unknown");
     }
 
     #[test]

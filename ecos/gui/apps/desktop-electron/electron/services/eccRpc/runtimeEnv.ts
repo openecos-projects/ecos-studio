@@ -35,13 +35,15 @@ function prependPath(
 }
 
 function resolvePackagedRuntimeBin(options: EccRuntimeEnvOptions): string | null {
-  const resourcesPath =
-    options.env.ECOS_ELECTRON_RESOURCES_PATH ?? join(options.appPath, 'resources')
-  const binariesPath =
-    options.env.ECOS_ELECTRON_BINARIES_DIR ?? join(resourcesPath, 'binaries')
+  const binariesPath = resolvePackagedBinariesPath(options)
   const executableName = options.platform === 'win32' ? 'ecc.cmd' : 'ecc'
 
   return existsSync(join(binariesPath, executableName)) ? binariesPath : null
+}
+
+function resolvePackagedBinariesPath(options: EccRuntimeEnvOptions): string {
+  const resourcesPath = resolvePackagedResourcesPath(options)
+  return options.env.ECOS_ELECTRON_BINARIES_DIR ?? join(resourcesPath, 'binaries')
 }
 
 function findRepoRootFromAppPath(appPath: string): string | null {
@@ -115,20 +117,30 @@ export function createEccRuntimeEnv(options: EccRuntimeEnvOptions): NodeJS.Proce
   if (options.isPackaged) {
     const packagedRuntimeBin = resolvePackagedRuntimeBin(options)
     const resourcesPath = resolvePackagedResourcesPath(options)
+    const binariesPath = resolvePackagedBinariesPath(options)
     const {
       CHIPCOMPILER_OSS_CAD_DIR: _inheritedOssCadDir,
       ECOS_ELECTRON_OSS_CAD_DIR: _inheritedElectronOssCadDir,
       ...baseEnv
     } = options.env
+    const libraryEnv = packagedEccLibraryEnv(baseEnv, binariesPath, options.platform)
 
     if (packagedRuntimeBin) {
       const nextPath = prependPath(baseEnv, packagedRuntimeBin, options.platform)
 
       return {
         ...baseEnv,
-        ...packagedEccLibraryEnv(baseEnv, packagedRuntimeBin, options.platform),
+        ...libraryEnv,
         ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
         [nextPath.key]: nextPath.value,
+      }
+    }
+
+    if (Object.keys(libraryEnv).length > 0) {
+      return {
+        ...baseEnv,
+        ...libraryEnv,
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
       }
     }
 

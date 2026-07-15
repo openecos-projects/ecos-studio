@@ -92,11 +92,21 @@ interface DbGeometryConfig {
 
 type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 
+interface SnapshotSourcePath {
+  label: string
+  path: string
+}
+
+type SnapshotBuildReason =
+  | { kind: 'forced' }
+  | { kind: 'missing-manifest' }
+  | { kind: 'stale'; source: SnapshotSourcePath }
+
 function defaultExecFile(file: string, args: string[]): Promise<ExecFileResult> {
   return new Promise((resolve, reject) => {
     execFileCallback(file, args, { encoding: 'utf8' }, (error, stdout, stderr) => {
       if (error) {
-        reject(error)
+        reject(Object.assign(error, { stderr, stdout }))
         return
       }
       resolve({
@@ -140,6 +150,17 @@ function defaultWatchDirectory(
 
 function executableName(baseName: string, platform: NodeJS.Platform): string {
   return platform === 'win32' ? `${baseName}.exe` : baseName
+}
+
+function packagedRuntimePayloadPaths(
+  binaryDir: string,
+  platform: NodeJS.Platform,
+): string[] {
+  if (platform !== 'linux') {
+    return []
+  }
+  const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
+  return [eccToolsPackageDir, join(eccToolsPackageDir, 'lib')]
 }
 
 function ancestorPaths(startPath: string, maxDepth = 12): string[] {
@@ -199,6 +220,62 @@ function snapshotInputPaths(dbConfig: DbGeometryConfig): { label: string; path: 
     { label: 'tech LEF', path: dbConfig.techLefPath },
     ...dbConfig.lefPaths.map((path) => ({ label: 'LEF', path })),
   ]
+}
+
+function snapshotSourcePaths(
+  dbConfig: DbGeometryConfig,
+  dbConfigPath: string,
+  snapshotInputs: SnapshotInputs,
+): SnapshotSourcePath[] {
+  return [
+    { label: 'DEF', path: snapshotInputs.defPath },
+    { label: 'geometry DB config', path: dbConfigPath },
+    ...snapshotInputPaths(dbConfig),
+  ]
+}
+
+function snapshotBuildReasonText(reason: SnapshotBuildReason): string {
+  if (reason.kind === 'forced') {
+    return 'forced rebuild'
+  }
+  if (reason.kind === 'missing-manifest') {
+    return 'creating missing snapshot'
+  }
+  return `rebuilding stale snapshot; stale source: ${reason.source.label} ${reason.source.path}`
+}
+
+function stringDetail(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function processFailureDetails(error: unknown): string[] {
+  const details: string[] = []
+  if (error instanceof Error && error.message.trim()) {
+    details.push(error.message.trim())
+  } else if (error !== undefined && error !== null) {
+    details.push(String(error))
+  }
+
+  if (isRecord(error)) {
+    const stderr = stringDetail(error.stderr)
+    const stdout = stringDetail(error.stdout)
+    const code = error.code
+    const signal = error.signal
+    if (stderr) {
+      details.push(`stderr: ${stderr}`)
+    }
+    if (stdout) {
+      details.push(`stdout: ${stdout}`)
+    }
+    if (code !== undefined) {
+      details.push(`exit code: ${String(code)}`)
+    }
+    if (signal !== undefined) {
+      details.push(`signal: ${String(signal)}`)
+    }
+  }
+
+  return details
 }
 
 function isPathInside(rootPath: string, targetPath: string): boolean {
@@ -290,23 +367,31 @@ export class ChipViewerService {
       return config
     }
 
-    let shouldBuildSnapshot =
-      request.rebuildGeometry || !this.fileExists(snapshotInputs.manifestPath)
-    if (!shouldBuildSnapshot) {
+    let buildReason: SnapshotBuildReason | null = request.rebuildGeometry
+      ? { kind: 'forced' }
+      : null
+    if (!buildReason && !this.fileExists(snapshotInputs.manifestPath)) {
+      buildReason = { kind: 'missing-manifest' }
+    }
+    if (!buildReason) {
       dbConfig = await readDbConfig()
-      shouldBuildSnapshot = await this.isSnapshotStale(snapshotInputs.manifestPath, [
-        snapshotInputs.defPath,
-        dbConfigPath,
-        dbConfig.techLefPath,
-        ...dbConfig.lefPaths,
-      ])
+      const staleSource = await this.findStaleSnapshotSource(
+        snapshotInputs.manifestPath,
+        snapshotSourcePaths(dbConfig, dbConfigPath, snapshotInputs),
+      )
+      if (staleSource) {
+        buildReason = { kind: 'stale', source: staleSource }
+      }
     }
 
-    if (shouldBuildSnapshot) {
+    if (buildReason) {
       dbConfig ??= await readDbConfig()
-      await this.execFile(
+      await this.generateSnapshot(
         binaries.snapshotPath,
         this.snapshotArgs(dbConfig, snapshotInputs, 'snapshot'),
+        snapshotInputs,
+        request.step,
+        buildReason,
       )
     }
 
@@ -555,8 +640,16 @@ export class ChipViewerService {
       binaryDir,
       executableName('chip-viewer-native', this.platform),
     )
+    const runtimePayloadPaths = packagedRuntimePayloadPaths(
+      binaryDir,
+      this.platform,
+    )
 
-    if (this.fileExists(snapshotPath) && this.fileExists(viewerPath)) {
+    const missingPaths = [snapshotPath, viewerPath, ...runtimePayloadPaths].filter(
+      (path) => !this.fileExists(path),
+    )
+
+    if (missingPaths.length === 0) {
       return {
         binaries: { snapshotPath, viewerPath },
         missingPaths: [],
@@ -565,7 +658,7 @@ export class ChipViewerService {
 
     return {
       binaries: null,
-      missingPaths: [snapshotPath, viewerPath].filter((path) => !this.fileExists(path)),
+      missingPaths,
     }
   }
 
@@ -633,23 +726,55 @@ export class ChipViewerService {
     )
   }
 
-  private async isSnapshotStale(
+  private async findStaleSnapshotSource(
     manifestPath: string,
-    sourcePaths: string[],
-  ): Promise<boolean> {
+    sourcePaths: SnapshotSourcePath[],
+  ): Promise<SnapshotSourcePath | null> {
     const manifestModifiedTime = await this.getFileModifiedTime(manifestPath)
     if (manifestModifiedTime === null) {
-      return true
+      return { label: 'manifest', path: manifestPath }
     }
 
     for (const sourcePath of sourcePaths) {
-      const sourceModifiedTime = await this.getFileModifiedTime(sourcePath)
+      const sourceModifiedTime = await this.getFileModifiedTime(sourcePath.path)
       if (sourceModifiedTime !== null && sourceModifiedTime > manifestModifiedTime) {
-        return true
+        return sourcePath
       }
     }
 
-    return false
+    return null
+  }
+
+  private async generateSnapshot(
+    snapshotPath: string,
+    args: string[],
+    snapshotInputs: SnapshotInputs,
+    step: string,
+    reason: SnapshotBuildReason,
+  ): Promise<void> {
+    try {
+      const result = await this.execFile(snapshotPath, args)
+      if (!this.fileExists(snapshotInputs.manifestPath)) {
+        throw Object.assign(
+          new Error(
+            `Snapshot command completed but did not create manifest: ${snapshotInputs.manifestPath}`,
+          ),
+          result,
+        )
+      }
+    } catch (error) {
+      const details = [
+        `Geometry snapshot generation failed while ${snapshotBuildReasonText(
+          reason,
+        )} for step ${step}.`,
+        `Snapshot binary: ${snapshotPath}`,
+        `DEF: ${snapshotInputs.defPath}`,
+        `Output: ${snapshotInputs.geometryDir}`,
+        `Manifest: ${snapshotInputs.manifestPath}`,
+        ...processFailureDetails(error),
+      ]
+      throw new Error(details.join('\n'))
+    }
   }
 
   private validateSnapshotInputs(dbConfig: DbGeometryConfig): void {

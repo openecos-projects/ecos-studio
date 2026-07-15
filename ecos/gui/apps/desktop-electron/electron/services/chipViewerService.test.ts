@@ -65,10 +65,15 @@ function createService(options: {
   const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
   const execFile =
     options.execFile ??
-    vi.fn(async () => ({
-      stderr: '',
-      stdout: '',
-    }))
+    vi.fn(async (_file: string, args: string[]) => {
+      if (args.includes('--mode') && args.includes('snapshot')) {
+        existingPaths.add(GEOMETRY_MANIFEST)
+      }
+      return {
+        stderr: '',
+        stdout: '',
+      }
+    })
   const unref = vi.fn()
   const spawnProcess = vi.fn(() => ({ unref }))
   const ensureDirectory = vi.fn(async () => undefined)
@@ -584,13 +589,137 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
+  it('reports snapshot subprocess stderr when generating a missing snapshot fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('snapshot exited with status 1'), {
+        code: 1,
+        stderr: 'failed to read LEF /pdk/std/a.lef',
+        stdout: 'loading technology',
+      })
+    })
+    const { service, spawnProcess } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected snapshot generation to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      `Geometry snapshot generation failed while creating missing snapshot for step ${STEP_NAME}.`,
+    )
+    expect(message).toContain(`Snapshot binary: ${devBinaries.snapshot}`)
+    expect(message).toContain(`DEF: ${DEF_PATH}`)
+    expect(message).toContain(`Output: ${GEOMETRY_DIR}`)
+    expect(message).toContain('stderr: failed to read LEF /pdk/std/a.lef')
+    expect(message).toContain('stdout: loading technology')
+    expect(message).toContain('exit code: 1')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('reports a missing manifest when snapshot generation exits successfully without output', async () => {
+    const devBinaries = devChipViewerPaths()
+    const execFile = vi.fn(async () => ({
+      stderr: '',
+      stdout: 'completed without writing files',
+    }))
+    const { service, spawnProcess } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected missing manifest to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      `Snapshot command completed but did not create manifest: ${GEOMETRY_MANIFEST}`,
+    )
+    expect(message).toContain('stdout: completed without writing files')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('reports the stale source when snapshot regeneration fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('snapshot rebuild failed'), {
+        stderr: 'DEF/LEF mismatch',
+      })
+    })
+    const { service, spawnProcess } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      modifiedTimes: {
+        [GEOMETRY_MANIFEST]: 250,
+        [LEF_A]: 400,
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected stale snapshot regeneration to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      `Geometry snapshot generation failed while rebuilding stale snapshot; stale source: LEF ${LEF_A} for step ${STEP_NAME}.`,
+    )
+    expect(message).toContain('stderr: DEF/LEF mismatch')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
   it('launches packaged chip viewer binaries from electron resources', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
     const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
+    const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
+    const eccToolsLibDir = join(eccToolsPackageDir, 'lib')
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [snapshot, viewer],
+      existingPaths: [snapshot, viewer, eccToolsPackageDir, eccToolsLibDir],
       files: {
         [DB_CONFIG_PATH]: dbConfig(),
       },
@@ -626,6 +755,37 @@ describe('ChipViewerService', () => {
         stdio: 'ignore',
       }),
     )
+  })
+
+  it('reports missing packaged ecc-tools runtime payload before launching the viewer', async () => {
+    const resourcesPath = '/opt/ECOS Studio/resources'
+    const binaryDir = join(resourcesPath, 'binaries')
+    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
+    const viewer = join(binaryDir, 'chip-viewer-native')
+    const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
+    const eccToolsLibDir = join(eccToolsPackageDir, 'lib')
+    const { service, spawnProcess } = createService({
+      env: {
+        PATH: '',
+      },
+      existingPaths: [snapshot, viewer, eccToolsPackageDir],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      isPackaged: true,
+      resourcesPath,
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        rebuildGeometry: true,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `Packaged chip viewer binaries are incomplete. Missing: ${eccToolsLibDir}`,
+    )
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('reports missing packaged chip viewer binaries before PATH fallback details', async () => {

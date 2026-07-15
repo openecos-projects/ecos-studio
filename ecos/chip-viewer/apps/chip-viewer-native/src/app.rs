@@ -4,9 +4,12 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, Instant, SystemTime};
 
-use chip_display::{FillPattern, LayerStyle};
+use chip_display::{FillPattern, LayerRole, LayerStyle};
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
-use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, ShapeGeometry, SnapshotStats};
+use chip_view_db::{
+    ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, NearestShape,
+    OwnerLocalInfo, ShapeGeometry, SnapshotStats,
+};
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
     OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
@@ -18,6 +21,9 @@ const FOCUS_VIEWPORT_FILL: f32 = 0.45;
 const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
+const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
+const HOVER_NEAREST_RADIUS_PX: f32 = 8.0;
+const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
 
 pub struct ChipViewerApp {
     state: ViewerState,
@@ -60,6 +66,7 @@ struct LayerUiState {
     order: u32,
     name: String,
     layer_type: String,
+    display_role: String,
     direction: String,
     width: i32,
     pitch_x: i32,
@@ -94,6 +101,12 @@ struct PendingEdit {
 struct PendingFocus {
     bbox: Rect32,
     select_shape_id: Option<ShapeId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EndpointFocusTarget {
+    mode: SearchMode,
+    name: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -139,6 +152,9 @@ enum SearchMode {
     All,
     Net,
     Instance,
+    Pin,
+    Bus,
+    Group,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -320,6 +336,9 @@ impl SearchMode {
             SearchMode::All => "All",
             SearchMode::Net => "Net",
             SearchMode::Instance => "Instance",
+            SearchMode::Pin => "Pin",
+            SearchMode::Bus => "Bus",
+            SearchMode::Group => "Group",
         }
     }
 
@@ -328,6 +347,20 @@ impl SearchMode {
             SearchMode::All => None,
             SearchMode::Net => Some(&[OwnerType::NetWireSegment, OwnerType::SpecialWireSegment]),
             SearchMode::Instance => Some(&[OwnerType::InstanceBBox, OwnerType::InstanceHalo]),
+            SearchMode::Pin | SearchMode::Bus | SearchMode::Group => None,
+        }
+    }
+
+    fn query_shape_ids(self, db: &ChipViewDb, name: &str) -> Vec<ShapeId> {
+        match self {
+            SearchMode::All => db.query_owner_name(name),
+            SearchMode::Net | SearchMode::Instance => self
+                .owner_types()
+                .map(|owner_types| db.query_owner_name_for_owner_types(name, owner_types))
+                .unwrap_or_default(),
+            SearchMode::Pin => db.query_pin_name(name),
+            SearchMode::Bus => db.query_bus_name(name),
+            SearchMode::Group => db.query_group_name(name),
         }
     }
 }
@@ -346,6 +379,13 @@ impl CoordinateUnit {
 }
 
 impl EditTool {
+    fn label(self) -> &'static str {
+        match self {
+            EditTool::Move => "move",
+            EditTool::Resize => "resize",
+        }
+    }
+
     fn op(self) -> GeometryEditOp {
         match self {
             EditTool::Move => GeometryEditOp::MoveShape,
@@ -504,7 +544,14 @@ impl LoadedViewer {
             }
         });
         ui.horizontal(|ui| {
-            for mode in [SearchMode::All, SearchMode::Net, SearchMode::Instance] {
+            for mode in [
+                SearchMode::All,
+                SearchMode::Net,
+                SearchMode::Instance,
+                SearchMode::Pin,
+                SearchMode::Bus,
+                SearchMode::Group,
+            ] {
                 if ui
                     .selectable_value(&mut self.search_mode, mode, mode.label())
                     .changed()
@@ -707,6 +754,58 @@ impl LoadedViewer {
                             .color(ecos_text_secondary()),
                     );
                 }
+                for line in edit_capability_lines(shape, owner, self.edit_enabled) {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .small()
+                            .color(ecos_text_secondary()),
+                    );
+                }
+                let endpoints = selection_connectivity_endpoints(&self.db, owner, owner_name);
+                let endpoint_header_lines = selection_connectivity_header_lines(&endpoints);
+                let endpoint_rows = endpoints
+                    .iter()
+                    .take(MAX_SELECTION_ENDPOINT_LINES)
+                    .map(|endpoint| {
+                        (
+                            selection_connectivity_endpoint_line(endpoint),
+                            endpoint_focus_targets(endpoint),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let endpoint_omitted_line = selection_connectivity_omitted_line(&endpoints);
+                for line in endpoint_header_lines {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .small()
+                            .color(ecos_text_secondary()),
+                    );
+                }
+                for (line, targets) in endpoint_rows {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            egui::RichText::new(line)
+                                .small()
+                                .color(ecos_text_secondary()),
+                        );
+                        for target in targets {
+                            if ui
+                                .small_button(target.mode.label())
+                                .on_hover_text(target.name.as_str())
+                                .clicked()
+                            {
+                                self.focus_endpoint_target(target);
+                            }
+                        }
+                    });
+                }
+                if let Some(line) = endpoint_omitted_line {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .small()
+                            .color(ecos_text_secondary()),
+                    );
+                }
             }
         }
 
@@ -748,6 +847,8 @@ impl LoadedViewer {
             for line in semantic_metadata_lines(
                 self.db.site_metadata().len(),
                 self.db.master_metadata().len(),
+                self.db.via_metadata().len(),
+                self.db.grid_metadata().len(),
                 self.db.connectivity_metadata().len(),
                 self.db.bus_metadata().len(),
                 self.db.group_metadata().len(),
@@ -776,7 +877,7 @@ impl LoadedViewer {
 
     fn canvas(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
-        let (response, painter) = ui.allocate_painter(available, egui::Sense::drag());
+        let (response, painter) = ui.allocate_painter(available, egui::Sense::click_and_drag());
         let canvas = response.rect;
         painter.rect_filled(canvas, 0.0, ecos_canvas());
 
@@ -813,12 +914,18 @@ impl LoadedViewer {
 
         self.focus_pending_shape(world, canvas);
 
+        let all_layers: BTreeMap<LayerId, LayerStyle> = self
+            .layers
+            .iter()
+            .map(|layer| (layer.layer_id, layer.style))
+            .collect();
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
             .iter()
             .filter(|layer| layer.visible)
             .map(|layer| (layer.layer_id, layer.style))
             .collect();
+        let query_layer_ids = render_query_layer_ids(&self.layers, self.object_visibility);
         let viewport = screen_to_world_rect(canvas, world, canvas, self.zoom, self.pan);
         let hover_world_point = ui
             .ctx()
@@ -828,36 +935,80 @@ impl LoadedViewer {
 
         if response.drag_started() {
             self.pan_drag.reset();
-            if self.edit_enabled {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    self.begin_edit_drag(pos, world, canvas, &visible_layers);
-                }
+            let mode = if response.drag_started_by(egui::PointerButton::Middle)
+                || response.drag_started_by(egui::PointerButton::Secondary)
+            {
+                Some(CanvasDragMode::Pan)
+            } else if response.drag_started_by(egui::PointerButton::Primary) {
+                let edit_started = self.edit_enabled
+                    && response
+                        .interact_pointer_pos()
+                        .is_some_and(|pos| self.begin_edit_drag(pos, world, canvas));
+                Some(if edit_started {
+                    CanvasDragMode::Edit
+                } else {
+                    CanvasDragMode::Pan
+                })
+            } else {
+                None
+            };
+            if let Some(mode) = mode {
+                self.pan_drag.start(mode);
             }
         }
         if response.dragged() {
-            if self.draft.is_some() {
-                self.update_edit_drag(response.drag_delta(), world, canvas);
-                ui.ctx().request_repaint();
-            } else {
-                self.pan = self.pan_drag.apply(self.pan, response.drag_delta());
-                ui.ctx().request_repaint();
+            let frame_delta = response.drag_delta();
+            match self.pan_drag.mode() {
+                Some(CanvasDragMode::Edit) if self.draft.is_some() => {
+                    let total_delta = self.pan_drag.accumulate(frame_delta);
+                    self.update_edit_drag(total_delta, world, canvas);
+                    ui.ctx().request_repaint();
+                }
+                _ => {
+                    if self.pan_drag.mode().is_none() {
+                        self.pan_drag.start(CanvasDragMode::Pan);
+                    }
+                    self.pan = self.pan_drag.apply_pan_frame(self.pan, frame_delta);
+                    ui.ctx().request_repaint();
+                }
             }
         }
         if response.drag_stopped() {
-            if self.draft.is_some() {
+            if self.pan_drag.mode() == Some(CanvasDragMode::Edit) && self.draft.is_some() {
                 self.commit_draft();
             }
             self.pan_drag.reset();
         }
 
-        if response.clicked() {
+        if response.clicked_by(egui::PointerButton::Primary) {
             self.selected = response
                 .interact_pointer_pos()
-                .and_then(|pos| self.pick_shape_at(pos, world, canvas, &visible_layers));
+                .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
+        }
+        if self.pan_drag.mode() == Some(CanvasDragMode::Pan) && response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         let mut drawn = 0usize;
         let use_view_tiles = self.should_use_view_tiles(viewport, world);
         let view_lod = self.view_lod_level();
+        let hover_nearest = if use_view_tiles {
+            None
+        } else {
+            hover_world_point.and_then(|point| {
+                let radius = hover_nearest_radius_dbu(world, canvas, self.zoom);
+                self.db
+                    .nearest_shape(&query_layer_ids, point, Some(radius))
+                    .filter(|nearest| {
+                        self.db.find_shape(nearest.shape_id).is_some_and(|shape| {
+                            self.shape_is_visible(shape)
+                                && self.shape_is_drawn_at_current_zoom(shape)
+                        })
+                    })
+            })
+        };
+        let overlay_shape_ids = overlay_shape_ids(self.selected, &self.highlighted);
 
         if use_view_tiles {
             for (layer_id, style) in &visible_layers {
@@ -876,10 +1027,9 @@ impl LoadedViewer {
                 }
             }
         } else {
-            let layer_ids = visible_layer_ids(&visible_layers);
-            for shape_id in self
-                .render_cache
-                .visible_shape_ids_for_layers(&self.db, &layer_ids, viewport)
+            for shape_id in
+                self.render_cache
+                    .visible_shape_ids_for_layers(&self.db, &query_layer_ids, viewport)
             {
                 let Some(shape) = self.db.find_shape(shape_id) else {
                     continue;
@@ -893,10 +1043,13 @@ impl LoadedViewer {
                 if !self.shape_is_drawn_at_current_zoom(shape) {
                     continue;
                 }
-                let Some(style) = visible_style_for_shape(shape, &visible_layers) else {
+                let owner = self.db.owner_for_shape(shape);
+                let Some(style) =
+                    visible_style_for_shape(shape, owner, &visible_layers, &all_layers)
+                else {
                     continue;
                 };
-                let style = style_for_shape(*style, self.db.owner_for_shape(shape));
+                let style = style_for_shape(*style, owner);
                 if paint_styled_shape_geometry(
                     &painter,
                     self.db.shape_geometry(shape),
@@ -910,9 +1063,20 @@ impl LoadedViewer {
                 }
             }
         }
+        drawn += paint_parameterized_grid_overlay(
+            &painter,
+            self.db.grid_metadata(),
+            &self.layers,
+            self.object_visibility,
+            viewport,
+            world,
+            canvas,
+            self.zoom,
+            self.pan,
+        );
 
-        for shape_id in overlay_shape_ids(self.selected, &self.highlighted) {
-            let Some(shape) = self.db.find_shape(shape_id) else {
+        for shape_id in &overlay_shape_ids {
+            let Some(shape) = self.db.find_shape(*shape_id) else {
                 continue;
             };
             if !is_renderable_shape(shape) {
@@ -925,7 +1089,7 @@ impl LoadedViewer {
                 continue;
             }
             let geometry = self.db.shape_geometry(shape);
-            if self.highlighted.contains(&shape_id) {
+            if self.highlighted.contains(shape_id) {
                 paint_shape_overlay(
                     &painter,
                     geometry,
@@ -936,7 +1100,7 @@ impl LoadedViewer {
                     egui::Stroke::new(2.0, ecos_warning()),
                 );
             }
-            if self.selected == Some(shape_id) {
+            if self.selected == Some(*shape_id) {
                 paint_shape_overlay(
                     &painter,
                     geometry,
@@ -972,7 +1136,14 @@ impl LoadedViewer {
         painter.text(
             canvas.left_top() + egui::vec2(10.0, 10.0),
             egui::Align2::LEFT_TOP,
-            canvas_status_line(drawn, use_view_tiles, view_lod, self.zoom, viewport),
+            canvas_status_line(
+                drawn,
+                overlay_shape_ids.len(),
+                use_view_tiles,
+                view_lod,
+                self.zoom,
+                viewport,
+            ),
             egui::FontId::monospace(12.0),
             ecos_text_secondary(),
         );
@@ -980,10 +1151,11 @@ impl LoadedViewer {
             painter.text(
                 canvas.left_top() + egui::vec2(10.0, 28.0),
                 egui::Align2::LEFT_TOP,
-                cursor_status_line(
+                hover_status_line(
                     point,
                     self.coordinate_unit,
                     self.db.snapshot().manifest().dbu_per_micron,
+                    hover_nearest,
                 ),
                 egui::FontId::monospace(12.0),
                 ecos_text_secondary(),
@@ -1026,40 +1198,33 @@ impl LoadedViewer {
         self.selected = focus.select_shape_id;
     }
 
-    fn begin_edit_drag(
-        &mut self,
-        pos: egui::Pos2,
-        world: Rect32,
-        canvas: egui::Rect,
-        visible_layers: &BTreeMap<LayerId, LayerStyle>,
-    ) {
+    fn begin_edit_drag(&mut self, pos: egui::Pos2, world: Rect32, canvas: egui::Rect) -> bool {
         let Some(shape_id) = self.selected else {
-            return;
+            return false;
         };
         let Some(shape) = self.db.find_shape(shape_id) else {
-            return;
+            return false;
         };
         if shape.state != ShapeState::Alive as u8
             || shape.kind != ShapeKind::Rect as u8
-            || !visible_layers.contains_key(&shape.layer_id)
             || !self.shape_is_visible(shape)
         {
-            return;
+            return false;
         }
         let Some(owner) = self.db.owner_for_shape(shape) else {
-            return;
+            return false;
         };
         if !edit_tool_is_allowed(owner.owner_type, self.edit_tool) {
             self.last_edit_result = Some(format!(
-                "{:?} is not supported for {}",
-                self.edit_tool,
+                "{} is not supported for {}",
+                self.edit_tool.label(),
                 ChipViewDb::owner_type_label(owner.owner_type)
             ));
-            return;
+            return false;
         }
         let screen = world_to_screen_rect(shape.bbox, world, canvas, self.zoom, self.pan);
         if !screen.contains(pos) {
-            return;
+            return false;
         }
 
         let expected_version = shape.version;
@@ -1074,6 +1239,7 @@ impl LoadedViewer {
             original_bbox,
             requested_bbox: original_bbox,
         });
+        true
     }
 
     fn update_edit_drag(&mut self, screen_delta: egui::Vec2, world: Rect32, canvas: egui::Rect) {
@@ -1230,19 +1396,9 @@ impl LoadedViewer {
         let name = self.search_text.trim();
         self.highlighted = if name.is_empty() {
             BTreeSet::new()
-        } else if let Some(owner_types) = self.search_mode.owner_types() {
-            self.db
-                .query_owner_name_for_owner_types(name, owner_types)
-                .into_iter()
-                .filter(|shape_id| {
-                    self.db
-                        .find_shape(*shape_id)
-                        .is_some_and(|shape| self.shape_is_visible(shape))
-                })
-                .collect()
         } else {
-            self.db
-                .query_owner_name(name)
+            self.search_mode
+                .query_shape_ids(&self.db, name)
                 .into_iter()
                 .filter(|shape_id| {
                     self.db
@@ -1251,6 +1407,15 @@ impl LoadedViewer {
                 })
                 .collect()
         };
+    }
+
+    fn focus_endpoint_target(&mut self, target: EndpointFocusTarget) {
+        self.search_mode = target.mode;
+        self.search_text = target.name;
+        self.refresh_highlight();
+        self.pending_focus = focus_target_for_shape_ids(&self.highlighted, |shape_id| {
+            self.db.find_shape(shape_id).map(|shape| shape.bbox)
+        });
     }
 
     fn select_shape_id_from_input(&mut self) {
@@ -1292,22 +1457,47 @@ impl LoadedViewer {
     }
 
     fn shape_is_visible(&self, shape: &ShapeRecord) -> bool {
-        self.layers
-            .iter()
-            .find(|layer| layer.layer_id == shape.layer_id)
-            .is_some_and(|layer| layer.visible)
-            && self
-                .db
-                .owner_for_shape(shape)
-                .is_none_or(|owner| self.object_visibility.includes_owner_type(owner.owner_type))
+        let owner_type = self
+            .db
+            .owner_for_shape(shape)
+            .and_then(|owner| OwnerType::from_raw(owner.owner_type));
+        let layer_visible = if owner_uses_layer_visibility(owner_type) {
+            self.layers
+                .iter()
+                .find(|layer| layer.layer_id == shape.layer_id)
+                .is_some_and(|layer| layer.visible)
+        } else {
+            true
+        };
+        let owner_visible = self
+            .db
+            .owner_for_shape(shape)
+            .is_none_or(|owner| self.object_visibility.includes_owner_type(owner.owner_type));
+        layer_visible && owner_visible
     }
 
     fn shape_is_drawn_at_current_zoom(&self, shape: &ShapeRecord) -> bool {
+        let owner_type = self.db.owner_for_shape(shape).and_then(|owner| {
+            let owner_type = OwnerType::from_raw(owner.owner_type)?;
+            Some(owner_type)
+        });
+        if owner_type.is_some_and(|owner_type| {
+            matches!(owner_type, OwnerType::TrackGrid | OwnerType::GCellGrid)
+                && self.has_parameterized_grid_metadata(owner_type)
+        }) {
+            return false;
+        }
         self.zoom > 1.25
-            || self
-                .db
-                .owner_for_shape(shape)
-                .is_none_or(|owner| !is_context_owner_type(owner.owner_type))
+            || owner_type
+                .map(|owner_type| !is_context_owner_type(owner_type as u8))
+                .unwrap_or(true)
+    }
+
+    fn has_parameterized_grid_metadata(&self, owner_type: OwnerType) -> bool {
+        self.db
+            .grid_metadata()
+            .iter()
+            .any(|grid| grid_owner_type(grid) == Some(owner_type))
     }
 
     fn apply_object_visibility(&mut self) {
@@ -1324,7 +1514,7 @@ impl LoadedViewer {
         pos: egui::Pos2,
         world: Rect32,
         canvas: egui::Rect,
-        visible_layers: &BTreeMap<LayerId, LayerStyle>,
+        query_layer_ids: &[LayerId],
     ) -> Option<ShapeId> {
         let hit = screen_to_world_rect(
             egui::Rect::from_min_max(pos, pos),
@@ -1333,10 +1523,9 @@ impl LoadedViewer {
             self.zoom,
             self.pan,
         );
-        let layer_ids: Vec<LayerId> = visible_layers.keys().copied().collect();
         self.db
             .pick_top_shape(
-                &layer_ids,
+                query_layer_ids,
                 chipgeom_format::Point32 {
                     x: hit.lx,
                     y: hit.ly,
@@ -1460,21 +1649,92 @@ fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
 fn style_for_shape(mut style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
     match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
         Some(OwnerType::Die | OwnerType::Core) => context_style(style, 170, 2),
-        Some(OwnerType::Row | OwnerType::TrackGrid | OwnerType::GCellGrid) => {
-            context_style(style, 46, 1)
+        Some(OwnerType::Row) => context_style_with_frame(style, [104, 120, 132], 46, 1),
+        Some(OwnerType::TrackGrid) => context_style_with_frame(style, [64, 196, 184], 82, 1),
+        Some(OwnerType::GCellGrid) => context_style_with_frame(style, [228, 176, 72], 104, 2),
+        Some(OwnerType::Obs) => {
+            owner_style(style, [184, 92, 112], 52, 190, FillPattern::CrossHatch, 1)
         }
-        Some(OwnerType::Obs) => context_style(style, 72, 1),
-        Some(OwnerType::Via | OwnerType::PinPortShape) => context_style(style, 88, 1),
-        Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo) => {
-            style.rgba = [176, 155, 255, 34];
-            style.frame_rgba = [208, 196, 255, 176];
-            style.fill_alpha = 34;
-            style.frame_alpha = 176;
-            style.fill_pattern = FillPattern::DenseDots;
+        Some(OwnerType::Via) => {
+            owner_style(style, [255, 232, 128], 58, 194, FillPattern::DenseDots, 1)
+        }
+        Some(OwnerType::PinPortShape) => {
+            owner_style(style, [92, 232, 190], 64, 215, FillPattern::Grid, 2)
+        }
+        Some(OwnerType::NetWireSegment) => {
+            style.fill_alpha = style.fill_alpha.max(56);
+            style.rgba[3] = style.rgba[3].max(style.fill_alpha);
+            style.frame_alpha = style.frame_alpha.max(210);
+            style.frame_rgba[3] = style.frame_rgba[3].max(style.frame_alpha);
+            style.fill_pattern = FillPattern::DiagonalHatch;
             style
         }
+        Some(OwnerType::SpecialWireSegment) => {
+            owner_style(style, [255, 196, 84], 76, 235, FillPattern::CrossHatch, 2)
+        }
+        Some(OwnerType::InstanceBBox) => {
+            owner_style(style, [150, 132, 255], 72, 225, FillPattern::Grid, 2)
+        }
+        Some(OwnerType::InstanceHalo) => owner_style(
+            style,
+            [176, 155, 255],
+            38,
+            156,
+            FillPattern::HorizontalHatch,
+            1,
+        ),
+        Some(OwnerType::Blockage) => {
+            owner_style(style, [224, 88, 120], 66, 220, FillPattern::CrossHatch, 1)
+        }
+        Some(OwnerType::Fill) => {
+            owner_style(style, [126, 208, 142], 42, 150, FillPattern::SparseDots, 1)
+        }
+        Some(OwnerType::Region) => owner_style(
+            style,
+            [104, 156, 255],
+            36,
+            180,
+            FillPattern::VerticalHatch,
+            1,
+        ),
+        Some(OwnerType::Slot) => owner_style(
+            style,
+            [255, 148, 92],
+            48,
+            190,
+            FillPattern::HorizontalHatch,
+            1,
+        ),
         _ => style,
     }
+}
+
+fn owner_style(
+    mut style: LayerStyle,
+    rgb: [u8; 3],
+    fill_alpha: u8,
+    frame_alpha: u8,
+    fill_pattern: FillPattern,
+    line_width_px: u8,
+) -> LayerStyle {
+    style.rgba = [rgb[0], rgb[1], rgb[2], fill_alpha];
+    style.frame_rgba = [
+        brighten_channel(rgb[0], 0.38),
+        brighten_channel(rgb[1], 0.38),
+        brighten_channel(rgb[2], 0.38),
+        frame_alpha,
+    ];
+    style.fill_alpha = fill_alpha;
+    style.frame_alpha = frame_alpha;
+    style.fill_pattern = fill_pattern;
+    style.line_width_px = line_width_px;
+    style
+}
+
+fn brighten_channel(channel: u8, amount: f32) -> u8 {
+    (channel as f32 + (255.0 - channel as f32) * amount)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> LayerStyle {
@@ -1485,6 +1745,16 @@ fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> L
     style.frame_alpha = frame_alpha;
     style.line_width_px = line_width_px;
     style
+}
+
+fn context_style_with_frame(
+    mut style: LayerStyle,
+    frame_rgb: [u8; 3],
+    frame_alpha: u8,
+    line_width_px: u8,
+) -> LayerStyle {
+    style.frame_rgba = [frame_rgb[0], frame_rgb[1], frame_rgb[2], frame_alpha];
+    context_style(style, frame_alpha, line_width_px)
 }
 
 fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec<LayerUiState> {
@@ -1498,12 +1768,16 @@ fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec
                 &summary.layer_type,
                 index,
             );
+            let display_role = LayerRole::from_metadata(&summary.name, &summary.layer_type)
+                .label()
+                .to_string();
             LayerUiState {
                 layer_id: summary.layer_id,
                 shape_count: summary.shape_count,
                 order: summary.order,
                 name: summary.name,
                 layer_type: summary.layer_type,
+                display_role,
                 direction: summary.direction,
                 width: summary.width,
                 pitch_x: summary.pitch_x,
@@ -1551,7 +1825,7 @@ fn paint_styled_shape_geometry(
     }
 
     match primitive {
-        ScreenShapePrimitive::Rect(rect) => paint_styled_rect(painter, rect, *style),
+        ScreenShapePrimitive::Rect(rect) => paint_styled_rect(painter, rect, canvas, *style),
         ScreenShapePrimitive::Line { begin, end, width } => {
             painter.line_segment(
                 [begin, end],
@@ -1568,25 +1842,45 @@ fn paint_styled_shape_geometry(
     true
 }
 
-fn paint_styled_rect(painter: &egui::Painter, rect: egui::Rect, style: LayerStyle) {
-    let can_pattern = rect.width() >= PATTERN_MIN_SIZE_PX && rect.height() >= PATTERN_MIN_SIZE_PX;
+fn paint_styled_rect(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    canvas: egui::Rect,
+    style: LayerStyle,
+) {
+    let visible_rect = rect.intersect(canvas);
+    if !visible_rect.is_positive() {
+        return;
+    }
+    let can_pattern =
+        visible_rect.width() >= PATTERN_MIN_SIZE_PX && visible_rect.height() >= PATTERN_MIN_SIZE_PX;
     let fill_color = color32(style.rgba);
     match style.fill_pattern {
         FillPattern::Hollow => {}
         FillPattern::Solid => {
-            painter.rect_filled(rect, 0.0, fill_color);
+            painter.rect_filled(visible_rect, 0.0, fill_color);
         }
         FillPattern::SparseDots if can_pattern => {
-            draw_pattern_dots(painter, rect, fill_color, 9.0);
+            draw_pattern_dots(painter, visible_rect, fill_color, 9.0);
         }
         FillPattern::DenseDots if can_pattern => {
-            draw_pattern_dots(painter, rect, fill_color, 5.0);
+            draw_pattern_dots(painter, visible_rect, fill_color, 5.0);
         }
         FillPattern::DiagonalHatch if can_pattern => {
-            draw_hatch(painter, rect, fill_color, false);
+            draw_hatch(painter, visible_rect, fill_color, false);
         }
         FillPattern::CrossHatch if can_pattern => {
-            draw_hatch(painter, rect, fill_color, true);
+            draw_hatch(painter, visible_rect, fill_color, true);
+        }
+        FillPattern::HorizontalHatch if can_pattern => {
+            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
+        }
+        FillPattern::VerticalHatch if can_pattern => {
+            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+        }
+        FillPattern::Grid if can_pattern => {
+            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
+            draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
         }
         _ => {}
     }
@@ -1630,6 +1924,48 @@ fn draw_hatch(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, c
         count += draw_hatch_direction(painter, rect, color, true);
     }
     let _ = count;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HatchAxis {
+    Horizontal,
+    Vertical,
+}
+
+fn draw_axis_hatch(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    color: egui::Color32,
+    axis: HatchAxis,
+) -> usize {
+    let mut count = 0usize;
+    let mut offset = 4.0;
+    while offset <= rect.width().max(rect.height()) && count < MAX_PATTERN_OPS_PER_SHAPE {
+        match axis {
+            HatchAxis::Horizontal => {
+                let y = rect.top() + offset;
+                if y <= rect.bottom() {
+                    painter.line_segment(
+                        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                        egui::Stroke::new(1.0, color),
+                    );
+                    count += 1;
+                }
+            }
+            HatchAxis::Vertical => {
+                let x = rect.left() + offset;
+                if x <= rect.right() {
+                    painter.line_segment(
+                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                        egui::Stroke::new(1.0, color),
+                    );
+                    count += 1;
+                }
+            }
+        }
+        offset += 10.0;
+    }
+    count
 }
 
 fn draw_hatch_direction(
@@ -1726,6 +2062,161 @@ fn paint_shape_overlay(
         }
     }
     true
+}
+
+fn paint_parameterized_grid_overlay(
+    painter: &egui::Painter,
+    grids: &[GridMetadata],
+    layers: &[LayerUiState],
+    visibility: ObjectVisibility,
+    viewport: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> usize {
+    let mut drawn = 0usize;
+    for grid in grids {
+        if !parameterized_grid_is_visible(grid, layers, visibility, zoom) {
+            continue;
+        }
+        let Some(owner_type) = grid_owner_type(grid) else {
+            continue;
+        };
+        let stroke = parameterized_grid_stroke(owner_type);
+        for index in grid_visible_indices(grid, viewport) {
+            let coordinate = saturating_i64_to_i32(grid_coordinate_at_index(grid, index));
+            let (begin, end) = match grid.direction.trim().to_ascii_lowercase().as_str() {
+                "x" => (
+                    Point32 {
+                        x: coordinate,
+                        y: viewport.ly,
+                    },
+                    Point32 {
+                        x: coordinate,
+                        y: viewport.hy,
+                    },
+                ),
+                "y" => (
+                    Point32 {
+                        x: viewport.lx,
+                        y: coordinate,
+                    },
+                    Point32 {
+                        x: viewport.hx,
+                        y: coordinate,
+                    },
+                ),
+                _ => continue,
+            };
+            painter.line_segment(
+                [
+                    world_to_screen_point(begin, world, canvas, zoom, pan),
+                    world_to_screen_point(end, world, canvas, zoom, pan),
+                ],
+                stroke,
+            );
+            drawn += 1;
+        }
+    }
+    drawn
+}
+
+fn parameterized_grid_is_visible(
+    grid: &GridMetadata,
+    layers: &[LayerUiState],
+    visibility: ObjectVisibility,
+    zoom: f32,
+) -> bool {
+    let Some(owner_type) = grid_owner_type(grid) else {
+        return false;
+    };
+    zoom > 1.25
+        && visibility.includes_owner_type(owner_type as u8)
+        && grid_layer_filter_is_visible(grid, layers)
+        && grid.step > 0
+        && grid.count > 0
+}
+
+fn grid_owner_type(grid: &GridMetadata) -> Option<OwnerType> {
+    match grid.grid_type.trim().to_ascii_lowercase().as_str() {
+        "track" => Some(OwnerType::TrackGrid),
+        "gcell" => Some(OwnerType::GCellGrid),
+        _ => None,
+    }
+}
+
+fn grid_layer_filter_is_visible(grid: &GridMetadata, layers: &[LayerUiState]) -> bool {
+    if grid.layer_names.is_empty() {
+        return true;
+    }
+    grid.layer_names.iter().any(|name| {
+        layers
+            .iter()
+            .any(|layer| layer.visible && layer.name.as_str() == name.as_str())
+    })
+}
+
+fn parameterized_grid_stroke(owner_type: OwnerType) -> egui::Stroke {
+    match owner_type {
+        OwnerType::TrackGrid => {
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 196, 184, 82))
+        }
+        OwnerType::GCellGrid => egui::Stroke::new(
+            2.0,
+            egui::Color32::from_rgba_unmultiplied(228, 176, 72, 104),
+        ),
+        _ => egui::Stroke::new(1.0, ecos_text_secondary()),
+    }
+}
+
+fn grid_visible_indices(grid: &GridMetadata, viewport: Rect32) -> Vec<u32> {
+    let Some((first, last)) = grid_visible_index_range(grid, viewport) else {
+        return Vec::new();
+    };
+    let total = (last - first + 1) as usize;
+    let stride = total.div_ceil(MAX_PARAMETERIZED_GRID_LINES_PER_GRID).max(1);
+    (first..=last).step_by(stride).collect()
+}
+
+fn grid_visible_index_range(grid: &GridMetadata, viewport: Rect32) -> Option<(u32, u32)> {
+    if grid.step <= 0 || grid.count == 0 {
+        return None;
+    }
+    let (min, max) = match grid.direction.trim().to_ascii_lowercase().as_str() {
+        "x" => (viewport.lx as i64, viewport.hx as i64),
+        "y" => (viewport.ly as i64, viewport.hy as i64),
+        _ => return None,
+    };
+    let first = ceil_div_i64(min.saturating_sub(grid.start), grid.step).max(0);
+    let last = floor_div_i64(max.saturating_sub(grid.start), grid.step)
+        .min(grid.count.saturating_sub(1) as i64);
+    if first > last {
+        return None;
+    }
+    Some((first as u32, last as u32))
+}
+
+fn grid_coordinate_at_index(grid: &GridMetadata, index: u32) -> i64 {
+    grid.start
+        .saturating_add(grid.step.saturating_mul(index as i64))
+}
+
+fn floor_div_i64(numerator: i64, denominator: i64) -> i64 {
+    numerator.div_euclid(denominator)
+}
+
+fn ceil_div_i64(numerator: i64, denominator: i64) -> i64 {
+    let quotient = numerator.div_euclid(denominator);
+    if numerator.rem_euclid(denominator) == 0 {
+        quotient
+    } else {
+        quotient + 1
+    }
+}
+
+fn saturating_i64_to_i32(value: i64) -> i32 {
+    value.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
 fn paint_scale_ruler(
@@ -1940,6 +2431,30 @@ fn cursor_status_line(point: Point32, unit: CoordinateUnit, dbu_per_micron: Opti
     }
 }
 
+fn hover_status_line(
+    point: Point32,
+    unit: CoordinateUnit,
+    dbu_per_micron: Option<u32>,
+    nearest: Option<NearestShape>,
+) -> String {
+    let cursor = cursor_status_line(point, unit, dbu_per_micron);
+    match nearest {
+        Some(nearest) => format!(
+            "{cursor}, nearest: shape {} d2 {}",
+            nearest.shape_id, nearest.distance_squared
+        ),
+        None => cursor,
+    }
+}
+
+fn hover_nearest_radius_dbu(world: Rect32, canvas: egui::Rect, zoom: f32) -> i32 {
+    let scale = world_to_screen_scale(world, canvas, zoom);
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0;
+    }
+    (HOVER_NEAREST_RADIUS_PX / scale).ceil().max(1.0) as i32
+}
+
 fn format_distance(distance_dbu: i32, unit: CoordinateUnit, dbu_per_micron: Option<u32>) -> String {
     match effective_coordinate_unit(unit, dbu_per_micron) {
         CoordinateUnit::Dbu => format!("{distance_dbu} DBU"),
@@ -2076,8 +2591,8 @@ fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32, corner: ResizeCorner) 
 
 fn should_use_view_tiles_for_state(
     view_tile_count: usize,
-    has_highlight: bool,
-    has_selection: bool,
+    _has_highlight: bool,
+    _has_selection: bool,
     has_draft: bool,
     edit_enabled: bool,
     zoom: f32,
@@ -2087,7 +2602,7 @@ fn should_use_view_tiles_for_state(
     if view_tile_count == 0 {
         return false;
     }
-    if has_highlight || has_selection || has_draft || edit_enabled {
+    if has_draft || edit_enabled {
         return false;
     }
 
@@ -2098,9 +2613,8 @@ fn should_use_view_tiles_for_state(
     let viewport_area = viewport_width.saturating_mul(viewport_height);
     let world_area = world_width.saturating_mul(world_height).max(1);
 
-    // The fitted view must show actual layout geometry. Tile summaries are only
-    // useful once the user has zoomed out far enough that the viewport covers
-    // substantially more than the complete design.
+    // Highlights and selection are rendered as exact overlays on top of the
+    // tile summary. Draft/edit mode still needs the exact base geometry.
     zoom <= 0.35 && viewport_area >= world_area.saturating_mul(6)
 }
 
@@ -2129,6 +2643,12 @@ fn snapshot_signature_for_db(db: &ChipViewDb) -> SnapshotFileSignature {
     }
     if let Some(masters) = &manifest.masters {
         paths.push(masters.clone());
+    }
+    if let Some(vias) = &manifest.vias {
+        paths.push(vias.clone());
+    }
+    if let Some(grids) = &manifest.grids {
+        paths.push(grids.clone());
     }
     if let Some(connectivity) = &manifest.connectivity {
         paths.push(connectivity.clone());
@@ -2281,6 +2801,8 @@ fn design_metadata_lines(manifest: &chip_view_db::GeometryManifest) -> Vec<Strin
 fn semantic_metadata_lines(
     site_count: usize,
     master_count: usize,
+    via_count: usize,
+    grid_count: usize,
     connectivity_count: usize,
     bus_count: usize,
     group_count: usize,
@@ -2288,6 +2810,8 @@ fn semantic_metadata_lines(
     vec![
         format!("sites: {site_count}"),
         format!("masters: {master_count}"),
+        format!("via definitions: {via_count}"),
+        format!("grid definitions: {grid_count}"),
         format!("connectivity endpoints: {connectivity_count}"),
         format!("buses: {bus_count}"),
         format!("groups: {group_count}"),
@@ -2303,6 +2827,7 @@ fn cache_stats_line(label: &str, stats: RenderCacheStats) -> String {
 
 fn canvas_status_line(
     drawn: usize,
+    overlay_count: usize,
     use_view_tiles: bool,
     view_lod: u8,
     zoom: f32,
@@ -2313,10 +2838,14 @@ fn canvas_status_line(
     } else {
         "exact".to_string()
     };
-    format!(
+    let mut line = format!(
         "drawn: {drawn} {draw_source}, zoom: {zoom:.2}x, viewport: {} {} {} {}",
         viewport.lx, viewport.ly, viewport.hx, viewport.hy
-    )
+    );
+    if overlay_count > 0 {
+        line.push_str(&format!(", overlays: {overlay_count}"));
+    }
+    line
 }
 
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
@@ -2327,6 +2856,7 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
                 OwnerType::InstanceBBox
                     | OwnerType::NetWireSegment
                     | OwnerType::SpecialWireSegment
+                    | OwnerType::PinPortShape
                     | OwnerType::Blockage
                     | OwnerType::Fill
                     | OwnerType::Region
@@ -2338,6 +2868,7 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
             Some(
                 OwnerType::NetWireSegment
                     | OwnerType::SpecialWireSegment
+                    | OwnerType::PinPortShape
                     | OwnerType::Blockage
                     | OwnerType::Fill
                     | OwnerType::Region
@@ -2347,11 +2878,71 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
     }
 }
 
+fn edit_capability_lines(
+    shape: &ShapeRecord,
+    owner: Option<&OwnerRef>,
+    edit_enabled: bool,
+) -> Vec<String> {
+    if !edit_enabled {
+        return vec!["edit: view-only session".to_string()];
+    }
+    if shape.state != ShapeState::Alive as u8 {
+        return vec!["edit: read-only, shape is not alive".to_string()];
+    }
+    if shape.kind != ShapeKind::Rect as u8 {
+        return vec!["edit: read-only, only rect shapes are editable".to_string()];
+    }
+
+    let Some(owner) = owner else {
+        return vec!["edit: read-only, owner unavailable".to_string()];
+    };
+
+    let mut allowed = Vec::new();
+    for tool in [EditTool::Move, EditTool::Resize] {
+        if edit_tool_is_allowed(owner.owner_type, tool) {
+            allowed.push(tool.label());
+        }
+    }
+    if allowed.is_empty() {
+        return vec![format!(
+            "edit: read-only, {} is not editable",
+            ChipViewDb::owner_type_label(owner.owner_type)
+        )];
+    }
+
+    let mut lines = vec![format!("edit: {}", allowed.join(", "))];
+    if OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox)
+        && !allowed.contains(&"resize")
+    {
+        lines
+            .push("edit note: instance resize is rejected; move preserves master size".to_string());
+    }
+    lines
+}
+
 fn is_context_owner_type(owner_type: u8) -> bool {
     matches!(
         OwnerType::from_raw(owner_type),
         Some(OwnerType::Row | OwnerType::TrackGrid | OwnerType::GCellGrid | OwnerType::Obs)
     )
+}
+
+fn owner_uses_layer_visibility(owner_type: Option<OwnerType>) -> bool {
+    !matches!(
+        owner_type,
+        Some(
+            OwnerType::Die
+                | OwnerType::Core
+                | OwnerType::Row
+                | OwnerType::InstanceBBox
+                | OwnerType::InstanceHalo
+                | OwnerType::Region
+        )
+    )
+}
+
+fn object_visibility_needs_layout_layer(visibility: ObjectVisibility) -> bool {
+    visibility.instances || visibility.boundaries || visibility.placement || visibility.regions
 }
 
 fn is_renderable_shape(shape: &chipgeom_format::ShapeRecord) -> bool {
@@ -2409,6 +3000,9 @@ fn selection_detail_lines(
         }
         if let Some(local_name) = owner_local_name {
             lines.push(format!("local name: {local_name}"));
+            if let Some(local_info) = OwnerLocalInfo::parse(local_name) {
+                lines.extend(owner_local_info_lines(&local_info));
+            }
         }
         lines.push(format!(
             "path: {} {} {} {}",
@@ -2419,6 +3013,171 @@ fn selection_detail_lines(
     }
 
     lines
+}
+
+fn owner_local_info_lines(local_info: &OwnerLocalInfo) -> Vec<String> {
+    if local_info.kind == "via" {
+        return via_local_info_lines(local_info);
+    }
+
+    let mut lines = Vec::new();
+    if let Some(master) = local_info.field("master") {
+        lines.push(format!("master: {master}"));
+    }
+    if let Some(site) = local_info.field("site") {
+        lines.push(format!("site: {site}"));
+    }
+    lines
+}
+
+fn via_local_info_lines(local_info: &OwnerLocalInfo) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(via) = local_info.field("via") {
+        lines.push(format!("via: {via}"));
+    }
+    if let Some(master) = local_info.field("master") {
+        lines.push(format!("via master: {master}"));
+    }
+    if let Some(via_type) = local_info.field("type") {
+        lines.push(format!("via type: {via_type}"));
+    }
+    if let Some(rule) = local_info.field("rule") {
+        lines.push(format!("via rule: {rule}"));
+    }
+
+    let bottom = local_info.field("bottom");
+    let cut = local_info.field("cut");
+    let top = local_info.field("top");
+    if bottom.is_some() || cut.is_some() || top.is_some() {
+        lines.push(format!(
+            "via layers: {} / {} / {}",
+            bottom.unwrap_or("?"),
+            cut.unwrap_or("?"),
+            top.unwrap_or("?")
+        ));
+    }
+
+    let cut_size = local_info.field("cut_size");
+    let cut_spacing = local_info.field("cut_spacing");
+    if cut_size.is_some() || cut_spacing.is_some() {
+        lines.push(format!(
+            "via cut: size {} spacing {}",
+            cut_size.unwrap_or("?"),
+            cut_spacing.unwrap_or("?")
+        ));
+    }
+
+    let enclosure_bottom = local_info.field("enclosure_bottom");
+    let enclosure_top = local_info.field("enclosure_top");
+    if enclosure_bottom.is_some() || enclosure_top.is_some() {
+        lines.push(format!(
+            "via enclosure: bottom {} top {}",
+            enclosure_bottom.unwrap_or("?"),
+            enclosure_top.unwrap_or("?")
+        ));
+    }
+
+    if let Some(rowcol) = local_info.field("rowcol") {
+        lines.push(format!("via row/col: {rowcol}"));
+    }
+    if local_info.field("default") == Some("true") {
+        lines.push("via default: true".to_string());
+    }
+    lines
+}
+
+fn selection_connectivity_lines(endpoints: &[&ConnectivityMetadata]) -> Vec<String> {
+    let mut lines = selection_connectivity_header_lines(endpoints);
+    for endpoint in endpoints.iter().take(MAX_SELECTION_ENDPOINT_LINES) {
+        lines.push(selection_connectivity_endpoint_line(endpoint));
+    }
+    if let Some(line) = selection_connectivity_omitted_line(endpoints) {
+        lines.push(line);
+    }
+    lines
+}
+
+fn selection_connectivity_header_lines(endpoints: &[&ConnectivityMetadata]) -> Vec<String> {
+    if endpoints.is_empty() {
+        return Vec::new();
+    }
+
+    vec![format!("connectivity endpoints: {}", endpoints.len())]
+}
+
+fn selection_connectivity_endpoint_line(endpoint: &ConnectivityMetadata) -> String {
+    format!(
+        "endpoint: {} {} {} master:{}",
+        empty_label(&endpoint.endpoint_type),
+        empty_label(&endpoint.instance_name),
+        empty_label(&endpoint.pin_name),
+        empty_label(&endpoint.master_name)
+    )
+}
+
+fn selection_connectivity_omitted_line(endpoints: &[&ConnectivityMetadata]) -> Option<String> {
+    (endpoints.len() > MAX_SELECTION_ENDPOINT_LINES).then(|| {
+        format!(
+            "endpoints omitted: {}",
+            endpoints.len() - MAX_SELECTION_ENDPOINT_LINES
+        )
+    })
+}
+
+fn endpoint_focus_targets(endpoint: &ConnectivityMetadata) -> Vec<EndpointFocusTarget> {
+    let mut targets = Vec::new();
+    if !endpoint.net_name.is_empty() {
+        targets.push(EndpointFocusTarget {
+            mode: SearchMode::Net,
+            name: endpoint.net_name.clone(),
+        });
+    }
+    if !endpoint.instance_name.is_empty() {
+        targets.push(EndpointFocusTarget {
+            mode: SearchMode::Instance,
+            name: endpoint.instance_name.clone(),
+        });
+    }
+    if !endpoint.pin_name.is_empty() {
+        targets.push(EndpointFocusTarget {
+            mode: SearchMode::Pin,
+            name: endpoint_pin_query_name(endpoint),
+        });
+    }
+    targets
+}
+
+fn endpoint_pin_query_name(endpoint: &ConnectivityMetadata) -> String {
+    if endpoint.instance_name.is_empty() {
+        endpoint.pin_name.clone()
+    } else {
+        format!("{}/{}", endpoint.instance_name, endpoint.pin_name)
+    }
+}
+
+fn selection_connectivity_endpoints<'a>(
+    db: &'a ChipViewDb,
+    owner: Option<&OwnerRef>,
+    owner_name: Option<&str>,
+) -> Vec<&'a ConnectivityMetadata> {
+    let Some(owner_name) = owner_name else {
+        return Vec::new();
+    };
+    match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
+        Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo) => {
+            db.connectivity_for_instance(owner_name)
+        }
+        Some(OwnerType::PinPortShape) => db.connectivity_for_pin(owner_name),
+        _ => db.connectivity_for_net(owner_name),
+    }
+}
+
+fn empty_label(value: &str) -> &str {
+    if value.is_empty() {
+        "-"
+    } else {
+        value
+    }
 }
 
 fn shape_kind_label(kind: u8) -> &'static str {
@@ -2573,19 +3332,46 @@ fn visible_layer_ids(visible_layers: &BTreeMap<LayerId, LayerStyle>) -> Vec<Laye
     visible_layers.keys().copied().collect()
 }
 
+fn render_query_layer_ids(layers: &[LayerUiState], visibility: ObjectVisibility) -> Vec<LayerId> {
+    let mut ids: BTreeSet<LayerId> = layers
+        .iter()
+        .filter(|layer| layer.visible)
+        .map(|layer| layer.layer_id)
+        .collect();
+    if object_visibility_needs_layout_layer(visibility) {
+        ids.extend(
+            layers
+                .iter()
+                .filter(|layer| layer.layer_id == 0)
+                .map(|layer| layer.layer_id),
+        );
+    }
+    ids.into_iter().collect()
+}
+
 fn visible_style_for_shape<'a>(
     shape: &ShapeRecord,
+    owner: Option<&OwnerRef>,
     visible_layers: &'a BTreeMap<LayerId, LayerStyle>,
+    all_layers: &'a BTreeMap<LayerId, LayerStyle>,
 ) -> Option<&'a LayerStyle> {
-    visible_layers.get(&shape.layer_id)
+    let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
+    if owner_uses_layer_visibility(owner_type) {
+        visible_layers.get(&shape.layer_id)
+    } else {
+        all_layers
+            .get(&shape.layer_id)
+            .or_else(|| visible_layers.get(&shape.layer_id))
+    }
 }
 
 fn layer_hover_text(layer: &LayerUiState) -> String {
     let mut text = format!(
-        "id: {}\norder: {}\ntype: {}\ndirection: {}\nwidth: {}\npitch: {} {}",
+        "id: {}\norder: {}\ntype: {}\nstyle role: {}\ndirection: {}\nwidth: {}\npitch: {} {}",
         layer.layer_id,
         layer.order,
         layer.layer_type,
+        layer.display_role,
         layer.direction,
         layer.width,
         layer.pitch_x,
@@ -2615,28 +3401,49 @@ fn append_positive_layer_rule(text: &mut String, label: &str, value: i32) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CanvasDragMode {
+    Pan,
+    Edit,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PanDragState {
-    previous_drag_delta: egui::Vec2,
+    mode: Option<CanvasDragMode>,
+    accumulated_delta: egui::Vec2,
 }
 
 impl Default for PanDragState {
     fn default() -> Self {
         Self {
-            previous_drag_delta: egui::Vec2::ZERO,
+            mode: None,
+            accumulated_delta: egui::Vec2::ZERO,
         }
     }
 }
 
 impl PanDragState {
-    fn apply(&mut self, pan: egui::Vec2, current_drag_delta: egui::Vec2) -> egui::Vec2 {
-        let incremental_delta = current_drag_delta - self.previous_drag_delta;
-        self.previous_drag_delta = current_drag_delta;
-        pan + incremental_delta
+    fn start(&mut self, mode: CanvasDragMode) {
+        self.mode = Some(mode);
+        self.accumulated_delta = egui::Vec2::ZERO;
+    }
+
+    fn mode(&self) -> Option<CanvasDragMode> {
+        self.mode
+    }
+
+    fn apply_pan_frame(&self, pan: egui::Vec2, frame_delta: egui::Vec2) -> egui::Vec2 {
+        pan + frame_delta
+    }
+
+    fn accumulate(&mut self, frame_delta: egui::Vec2) -> egui::Vec2 {
+        self.accumulated_delta += frame_delta;
+        self.accumulated_delta
     }
 
     fn reset(&mut self) {
-        self.previous_drag_delta = egui::Vec2::ZERO;
+        self.mode = None;
+        self.accumulated_delta = egui::Vec2::ZERO;
     }
 }
 
@@ -2843,6 +3650,42 @@ mod tests {
             cursor_status_line(point, CoordinateUnit::Micron, Some(2000)),
             "cursor: 1.500 -0.250 um"
         );
+    }
+
+    #[test]
+    fn hover_status_line_appends_nearest_shape_when_available() {
+        let point = Point32 { x: 3000, y: -500 };
+
+        assert_eq!(
+            hover_status_line(
+                point,
+                CoordinateUnit::Dbu,
+                Some(2000),
+                Some(NearestShape {
+                    shape_id: 42,
+                    distance_squared: 25,
+                }),
+            ),
+            "cursor: 3000 -500 DBU, nearest: shape 42 d2 25"
+        );
+        assert_eq!(
+            hover_status_line(point, CoordinateUnit::Micron, Some(2000), None),
+            "cursor: 1.500 -0.250 um"
+        );
+    }
+
+    #[test]
+    fn hover_nearest_radius_uses_screen_pixel_distance() {
+        let world = chipgeom_format::Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1000,
+            hy: 1000,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+
+        assert_eq!(hover_nearest_radius_dbu(world, canvas, 1.0), 80);
+        assert_eq!(hover_nearest_radius_dbu(world, canvas, 2.0), 40);
     }
 
     #[test]
@@ -3064,6 +3907,7 @@ mod tests {
         assert_eq!(
             canvas_status_line(
                 42,
+                0,
                 false,
                 2,
                 3.25,
@@ -3083,6 +3927,7 @@ mod tests {
         assert_eq!(
             canvas_status_line(
                 7,
+                0,
                 true,
                 3,
                 0.5,
@@ -3094,6 +3939,26 @@ mod tests {
                 },
             ),
             "drawn: 7 view tiles, lod: 3, zoom: 0.50x, viewport: -10 -20 30 40"
+        );
+    }
+
+    #[test]
+    fn canvas_status_line_reports_exact_overlay_count() {
+        assert_eq!(
+            canvas_status_line(
+                7,
+                3,
+                true,
+                3,
+                0.5,
+                Rect32 {
+                    lx: -10,
+                    ly: -20,
+                    hx: 30,
+                    hy: 40,
+                },
+            ),
+            "drawn: 7 view tiles, lod: 3, zoom: 0.50x, viewport: -10 -20 30 40, overlays: 3"
         );
     }
 
@@ -3125,16 +3990,6 @@ mod tests {
         assert!(!should_use_view_tiles_for_state(
             16,
             false,
-            true,
-            false,
-            false,
-            0.25,
-            overview_viewport,
-            world,
-        ));
-        assert!(!should_use_view_tiles_for_state(
-            16,
-            false,
             false,
             true,
             false,
@@ -3145,7 +4000,7 @@ mod tests {
     }
 
     #[test]
-    fn overview_uses_view_tiles_only_when_far_and_unfiltered() {
+    fn overview_uses_view_tiles_when_far_even_with_exact_overlay() {
         let world = chipgeom_format::Rect32 {
             lx: 0,
             ly: 0,
@@ -3169,10 +4024,20 @@ mod tests {
             overview_viewport,
             world,
         ));
-        assert!(!should_use_view_tiles_for_state(
+        assert!(should_use_view_tiles_for_state(
             16,
             true,
             false,
+            false,
+            false,
+            0.25,
+            overview_viewport,
+            world,
+        ));
+        assert!(should_use_view_tiles_for_state(
+            16,
+            false,
+            true,
             false,
             false,
             0.25,
@@ -3249,9 +4114,59 @@ mod tests {
                 "owner flags: 0x0020",
                 "name: clk",
                 "local name: via:VIA1",
+                "via: VIA1",
                 "path: 1 2 3 4",
             ]
         );
+    }
+
+    #[test]
+    fn selection_detail_lines_expand_rich_via_local_info() {
+        let shape = chipgeom_format::ShapeRecord {
+            id: 42,
+            version: 3,
+            layer_id: 7,
+            kind: chipgeom_format::ShapeKind::Rect as u8,
+            state: chipgeom_format::ShapeState::Alive as u8,
+            flags: 0x0010,
+            bbox: chipgeom_format::Rect32 {
+                lx: 10,
+                ly: 20,
+                hx: 30,
+                hy: 40,
+            },
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let owner = chipgeom_format::OwnerRef {
+            owner_type: OwnerType::Via as u8,
+            flags: 0x0020,
+            owner_id: 123,
+            path0: 1,
+            path1: 2,
+            path2: 3,
+            path3: 4,
+            name_id: 8,
+            ..chipgeom_format::OwnerRef::default()
+        };
+        let lines = selection_detail_lines(
+            &shape,
+            Some(&owner),
+            Some("clk"),
+            Some(
+                "via:VIA12 master:VIA12 type:generated rule:VIA12RULE bottom:M1 cut:VIA12 top:M2 cut_size:4x4 \
+                 cut_spacing:8,8 enclosure_bottom:1,2 enclosure_top:3,4 rowcol:1x2 default:true",
+            ),
+        );
+
+        assert!(lines.contains(&"via: VIA12".to_string()));
+        assert!(lines.contains(&"via master: VIA12".to_string()));
+        assert!(lines.contains(&"via type: generated".to_string()));
+        assert!(lines.contains(&"via rule: VIA12RULE".to_string()));
+        assert!(lines.contains(&"via layers: M1 / VIA12 / M2".to_string()));
+        assert!(lines.contains(&"via cut: size 4x4 spacing 8,8".to_string()));
+        assert!(lines.contains(&"via enclosure: bottom 1,2 top 3,4".to_string()));
+        assert!(lines.contains(&"via row/col: 1x2".to_string()));
+        assert!(lines.contains(&"via default: true".to_string()));
     }
 
     #[test]
@@ -3273,6 +4188,7 @@ mod tests {
                 shape_index_bytes: 200,
                 view_index_bytes: 300,
                 name_index_bytes: 400,
+                connectivity_index_bytes: 0,
                 total_bytes: 1000,
             },
             mapped_plus_index_bytes: 1450,
@@ -3362,13 +4278,117 @@ mod tests {
     #[test]
     fn semantic_metadata_lines_report_site_and_master_counts() {
         assert_eq!(
-            semantic_metadata_lines(2, 3, 4, 5, 6),
+            semantic_metadata_lines(2, 3, 4, 5, 6, 7, 8),
             vec![
                 "sites: 2".to_string(),
                 "masters: 3".to_string(),
-                "connectivity endpoints: 4".to_string(),
-                "buses: 5".to_string(),
-                "groups: 6".to_string(),
+                "via definitions: 4".to_string(),
+                "grid definitions: 5".to_string(),
+                "connectivity endpoints: 6".to_string(),
+                "buses: 7".to_string(),
+                "groups: 8".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn selection_connectivity_lines_report_endpoint_context() {
+        let endpoints = [
+            chip_view_db::ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                net_kind: "regular".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: "u0".to_string(),
+                pin_name: "A".to_string(),
+                master_name: "INVX1".to_string(),
+            },
+            chip_view_db::ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                net_kind: "regular".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK".to_string(),
+                ..chip_view_db::ConnectivityMetadata::default()
+            },
+        ];
+        let endpoint_refs = endpoints.iter().collect::<Vec<_>>();
+
+        assert_eq!(
+            selection_connectivity_lines(&endpoint_refs),
+            vec![
+                "connectivity endpoints: 2".to_string(),
+                "endpoint: instance u0 A master:INVX1".to_string(),
+                "endpoint: io - CLK master:-".to_string(),
+            ]
+        );
+        assert!(selection_connectivity_lines(&[]).is_empty());
+    }
+
+    #[test]
+    fn selection_connectivity_lines_limit_verbose_endpoint_lists() {
+        let endpoints = (0..8)
+            .map(|index| chip_view_db::ConnectivityMetadata {
+                net_name: "data".to_string(),
+                net_kind: "regular".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: format!("u{index}"),
+                pin_name: "A".to_string(),
+                master_name: "INVX1".to_string(),
+            })
+            .collect::<Vec<_>>();
+        let endpoint_refs = endpoints.iter().collect::<Vec<_>>();
+        let lines = selection_connectivity_lines(&endpoint_refs);
+
+        assert_eq!(lines.len(), 8);
+        assert_eq!(lines[0], "connectivity endpoints: 8");
+        assert_eq!(lines[7], "endpoints omitted: 2");
+    }
+
+    #[test]
+    fn endpoint_focus_targets_include_search_mode_and_query_name() {
+        let instance_endpoint = chip_view_db::ConnectivityMetadata {
+            net_name: "clk".to_string(),
+            endpoint_type: "instance".to_string(),
+            instance_name: "u0".to_string(),
+            pin_name: "A".to_string(),
+            ..chip_view_db::ConnectivityMetadata::default()
+        };
+
+        assert_eq!(
+            endpoint_focus_targets(&instance_endpoint),
+            vec![
+                EndpointFocusTarget {
+                    mode: SearchMode::Net,
+                    name: "clk".to_string(),
+                },
+                EndpointFocusTarget {
+                    mode: SearchMode::Instance,
+                    name: "u0".to_string(),
+                },
+                EndpointFocusTarget {
+                    mode: SearchMode::Pin,
+                    name: "u0/A".to_string(),
+                },
+            ]
+        );
+
+        let io_endpoint = chip_view_db::ConnectivityMetadata {
+            net_name: "clk".to_string(),
+            endpoint_type: "io".to_string(),
+            pin_name: "CLK".to_string(),
+            ..chip_view_db::ConnectivityMetadata::default()
+        };
+
+        assert_eq!(
+            endpoint_focus_targets(&io_endpoint),
+            vec![
+                EndpointFocusTarget {
+                    mode: SearchMode::Net,
+                    name: "clk".to_string(),
+                },
+                EndpointFocusTarget {
+                    mode: SearchMode::Pin,
+                    name: "CLK".to_string(),
+                },
             ]
         );
     }
@@ -3557,6 +4577,12 @@ mod tests {
                 ][..]
             )
         );
+        assert_eq!(SearchMode::Bus.owner_types(), None);
+        assert_eq!(SearchMode::Group.owner_types(), None);
+        assert_eq!(SearchMode::Pin.owner_types(), None);
+        assert_eq!(SearchMode::Pin.label(), "Pin");
+        assert_eq!(SearchMode::Bus.label(), "Bus");
+        assert_eq!(SearchMode::Group.label(), "Group");
     }
 
     #[test]
@@ -3620,25 +4646,60 @@ mod tests {
     }
 
     #[test]
-    fn context_owners_do_not_use_the_metal_fill_style() {
+    fn owner_styles_use_distinct_textures_for_layout_and_route_categories() {
         let base = LayerStyle::default_for_metadata(7, "MET1", 0);
         let track = OwnerRef {
             owner_type: OwnerType::TrackGrid as u8,
+            ..OwnerRef::default()
+        };
+        let gcell = OwnerRef {
+            owner_type: OwnerType::GCellGrid as u8,
             ..OwnerRef::default()
         };
         let instance = OwnerRef {
             owner_type: OwnerType::InstanceBBox as u8,
             ..OwnerRef::default()
         };
+        let net = OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            ..OwnerRef::default()
+        };
+        let pdn = OwnerRef {
+            owner_type: OwnerType::SpecialWireSegment as u8,
+            ..OwnerRef::default()
+        };
+        let pin = OwnerRef {
+            owner_type: OwnerType::PinPortShape as u8,
+            ..OwnerRef::default()
+        };
 
         let track_style = style_for_shape(base, Some(&track));
         assert_eq!(track_style.fill_pattern, FillPattern::Hollow);
         assert_eq!(track_style.fill_alpha, 0);
-        assert_eq!(track_style.frame_alpha, 46);
+        assert_eq!(track_style.frame_rgba, [64, 196, 184, 82]);
+        assert_eq!(track_style.frame_alpha, 82);
+        assert_eq!(track_style.line_width_px, 1);
+
+        let gcell_style = style_for_shape(base, Some(&gcell));
+        assert_eq!(gcell_style.fill_pattern, FillPattern::Hollow);
+        assert_eq!(gcell_style.frame_rgba, [228, 176, 72, 104]);
+        assert_eq!(gcell_style.line_width_px, 2);
 
         let instance_style = style_for_shape(base, Some(&instance));
-        assert_eq!(instance_style.fill_pattern, FillPattern::DenseDots);
-        assert_eq!(instance_style.fill_alpha, 34);
+        assert_eq!(instance_style.fill_pattern, FillPattern::Grid);
+        assert_eq!(instance_style.fill_alpha, 72);
+
+        let net_style = style_for_shape(base, Some(&net));
+        assert_eq!(net_style.fill_pattern, FillPattern::DiagonalHatch);
+        assert!(net_style.fill_alpha >= 56);
+
+        let pdn_style = style_for_shape(base, Some(&pdn));
+        assert_eq!(pdn_style.fill_pattern, FillPattern::CrossHatch);
+        assert_eq!(pdn_style.line_width_px, 2);
+
+        let pin_style = style_for_shape(base, Some(&pin));
+        assert_eq!(pin_style.fill_pattern, FillPattern::Grid);
+        assert_eq!(pin_style.line_width_px, 2);
     }
 
     #[test]
@@ -3649,6 +4710,147 @@ mod tests {
         assert!(is_context_owner_type(OwnerType::Obs as u8));
         assert!(!is_context_owner_type(OwnerType::NetWireSegment as u8));
         assert!(!is_context_owner_type(OwnerType::InstanceBBox as u8));
+    }
+
+    #[test]
+    fn layout_level_owner_styles_do_not_require_layer_visibility() {
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::InstanceBBox)));
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::InstanceHalo)));
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::Die)));
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::Core)));
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::Row)));
+        assert!(!owner_uses_layer_visibility(Some(OwnerType::Region)));
+
+        assert!(owner_uses_layer_visibility(Some(OwnerType::NetWireSegment)));
+        assert!(owner_uses_layer_visibility(Some(
+            OwnerType::SpecialWireSegment
+        )));
+        assert!(owner_uses_layer_visibility(Some(OwnerType::PinPortShape)));
+        assert!(owner_uses_layer_visibility(Some(OwnerType::Via)));
+        assert!(owner_uses_layer_visibility(None));
+    }
+
+    #[test]
+    fn parameterized_grid_visible_indices_clip_to_viewport_by_direction() {
+        let grid = GridMetadata {
+            grid_type: "track".to_string(),
+            direction: "x".to_string(),
+            start: 100,
+            step: 200,
+            count: 4,
+            ..GridMetadata::default()
+        };
+        assert_eq!(
+            grid_visible_indices(
+                &grid,
+                Rect32 {
+                    lx: 50,
+                    ly: -1000,
+                    hx: 550,
+                    hy: 1000,
+                },
+            ),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            grid_visible_indices(
+                &grid,
+                Rect32 {
+                    lx: 101,
+                    ly: -1000,
+                    hx: 499,
+                    hy: 1000,
+                },
+            ),
+            vec![1]
+        );
+
+        let y_grid = GridMetadata {
+            direction: "y".to_string(),
+            ..grid
+        };
+        assert_eq!(
+            grid_visible_indices(
+                &y_grid,
+                Rect32 {
+                    lx: -1000,
+                    ly: 50,
+                    hx: 1000,
+                    hy: 550,
+                },
+            ),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn parameterized_grid_indices_are_sampled_when_viewport_contains_many_lines() {
+        let grid = GridMetadata {
+            grid_type: "gcell".to_string(),
+            direction: "x".to_string(),
+            start: 0,
+            step: 1,
+            count: 10000,
+            ..GridMetadata::default()
+        };
+        let indices = grid_visible_indices(
+            &grid,
+            Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 9999,
+                hy: 10,
+            },
+        );
+
+        assert!(indices.len() <= MAX_PARAMETERIZED_GRID_LINES_PER_GRID);
+        assert_eq!(indices.first(), Some(&0));
+        assert!(indices.last().is_some_and(|index| *index <= 9999));
+    }
+
+    #[test]
+    fn parameterized_grid_visibility_respects_zoom_category_and_layers() {
+        let mut layers = vec![layer_state(1, false), layer_state(2, true)];
+        layers[0].name = "M1".to_string();
+        layers[1].name = "M2".to_string();
+        let grid = GridMetadata {
+            grid_type: "track".to_string(),
+            direction: "x".to_string(),
+            start: 0,
+            step: 100,
+            count: 4,
+            layer_names: vec!["M1".to_string()],
+            ..GridMetadata::default()
+        };
+
+        assert!(!parameterized_grid_is_visible(
+            &grid,
+            &layers,
+            ObjectVisibility::default(),
+            2.0
+        ));
+        layers[0].visible = true;
+        assert!(parameterized_grid_is_visible(
+            &grid,
+            &layers,
+            ObjectVisibility::default(),
+            2.0
+        ));
+        assert!(!parameterized_grid_is_visible(
+            &grid,
+            &layers,
+            ObjectVisibility::default(),
+            1.0
+        ));
+
+        let mut hidden_guides = ObjectVisibility::default();
+        hidden_guides.set_category_visible(DrawingCategory::RoutingGuides, false);
+        assert!(!parameterized_grid_is_visible(
+            &grid,
+            &layers,
+            hidden_guides,
+            2.0
+        ));
     }
 
     #[test]
@@ -3685,6 +4887,7 @@ mod tests {
         let mut layer = layer_state(4, true);
         layer.name = "M4".to_string();
         layer.layer_type = "routing".to_string();
+        layer.display_role = "metal".to_string();
         layer.direction = "vertical".to_string();
         layer.width = 100;
         layer.pitch_x = 200;
@@ -3699,7 +4902,7 @@ mod tests {
 
         assert_eq!(
             layer_hover_text(&layer),
-            "id: 4\norder: 4\ntype: routing\ndirection: vertical\nwidth: 100\npitch: 200 300\nmin spacing: 70\nmin area: 400\nmin step: 50\ncut spacing: 80\nenclosure below: 1,2\nenclosure above: 3,4\nLEF58 rules: 5"
+            "id: 4\norder: 4\ntype: routing\nstyle role: metal\ndirection: vertical\nwidth: 100\npitch: 200 300\nmin spacing: 70\nmin area: 400\nmin step: 50\ncut spacing: 80\nenclosure below: 1,2\nenclosure above: 3,4\nLEF58 rules: 5"
         );
     }
 
@@ -3716,6 +4919,10 @@ mod tests {
     #[test]
     fn visible_style_for_shape_skips_shapes_from_invisible_layers() {
         let visible_layers = BTreeMap::from([(3, LayerStyle::default_for_layer(3))]);
+        let all_layers = BTreeMap::from([
+            (3, LayerStyle::default_for_layer(3)),
+            (4, LayerStyle::default_for_layer(4)),
+        ]);
         let visible_shape = chipgeom_format::ShapeRecord {
             layer_id: 3,
             ..chipgeom_format::ShapeRecord::default()
@@ -3724,33 +4931,90 @@ mod tests {
             layer_id: 4,
             ..chipgeom_format::ShapeRecord::default()
         };
+        let hidden_instance = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
 
-        assert!(visible_style_for_shape(&visible_shape, &visible_layers).is_some());
-        assert!(visible_style_for_shape(&hidden_shape, &visible_layers).is_none());
+        assert!(
+            visible_style_for_shape(&visible_shape, None, &visible_layers, &all_layers).is_some()
+        );
+        assert!(
+            visible_style_for_shape(&hidden_shape, None, &visible_layers, &all_layers).is_none()
+        );
+        assert!(visible_style_for_shape(
+            &hidden_shape,
+            Some(&hidden_instance),
+            &visible_layers,
+            &all_layers
+        )
+        .is_some());
     }
 
     #[test]
-    fn pan_drag_uses_incremental_delta() {
+    fn render_query_layers_keep_layout_layer_for_layout_level_owner_categories() {
+        let mut layers = vec![
+            layer_state(0, false),
+            layer_state(7, true),
+            layer_state(8, false),
+        ];
+
+        assert_eq!(
+            render_query_layer_ids(&layers, ObjectVisibility::default()),
+            vec![0, 7]
+        );
+
+        let mut visibility = ObjectVisibility::default();
+        visibility.set_category_visible(DrawingCategory::Instances, false);
+        visibility.set_category_visible(DrawingCategory::Boundaries, false);
+        visibility.set_category_visible(DrawingCategory::Placement, false);
+        visibility.set_category_visible(DrawingCategory::Regions, false);
+        assert_eq!(render_query_layer_ids(&layers, visibility), vec![7]);
+
+        layers[0].visible = true;
+        assert_eq!(render_query_layer_ids(&layers, visibility), vec![0, 7]);
+    }
+
+    #[test]
+    fn pan_drag_applies_frame_delta() {
         let mut drag = PanDragState::default();
-        let pan = drag.apply(egui::Vec2::ZERO, egui::vec2(10.0, 2.0));
+        drag.start(CanvasDragMode::Pan);
+        let pan = drag.apply_pan_frame(egui::Vec2::ZERO, egui::vec2(10.0, 2.0));
         assert_eq!(pan, egui::vec2(10.0, 2.0));
 
-        let pan = drag.apply(pan, egui::vec2(18.0, -1.0));
+        let pan = drag.apply_pan_frame(pan, egui::vec2(8.0, -3.0));
 
         assert_eq!(pan, egui::vec2(18.0, -1.0));
     }
 
     #[test]
+    fn edit_drag_accumulates_frame_deltas() {
+        let mut drag = PanDragState::default();
+        drag.start(CanvasDragMode::Edit);
+
+        assert_eq!(
+            drag.accumulate(egui::vec2(10.0, 2.0)),
+            egui::vec2(10.0, 2.0)
+        );
+        assert_eq!(
+            drag.accumulate(egui::vec2(8.0, -3.0)),
+            egui::vec2(18.0, -1.0)
+        );
+    }
+
+    #[test]
     fn pan_drag_state_resets_between_gestures() {
         let mut drag = PanDragState::default();
-        let pan = drag.apply(egui::Vec2::ZERO, egui::vec2(10.0, 0.0));
-        let pan = drag.apply(pan, egui::vec2(20.0, 0.0));
-        assert_eq!(pan, egui::vec2(20.0, 0.0));
-
+        drag.start(CanvasDragMode::Edit);
+        assert_eq!(
+            drag.accumulate(egui::vec2(10.0, 0.0)),
+            egui::vec2(10.0, 0.0)
+        );
         drag.reset();
-        let pan = drag.apply(pan, egui::vec2(4.0, 0.0));
 
-        assert_eq!(pan, egui::vec2(24.0, 0.0));
+        assert_eq!(drag.mode(), None);
+        drag.start(CanvasDragMode::Edit);
+        assert_eq!(drag.accumulate(egui::vec2(4.0, 0.0)), egui::vec2(4.0, 0.0));
     }
 
     #[test]
@@ -3885,14 +5149,59 @@ mod tests {
             chipgeom_format::OwnerType::Slot as u8,
             EditTool::Move
         ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::PinPortShape as u8,
+            EditTool::Move
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::PinPortShape as u8,
+            EditTool::Resize
+        ));
         assert!(!edit_tool_is_allowed(
             chipgeom_format::OwnerType::InstanceBBox as u8,
             EditTool::Resize
         ));
-        assert!(!edit_tool_is_allowed(
-            chipgeom_format::OwnerType::PinPortShape as u8,
-            EditTool::Move
-        ));
+    }
+
+    #[test]
+    fn edit_capability_lines_report_supported_tools_and_read_only_reasons() {
+        let shape = chipgeom_format::ShapeRecord {
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            ..chipgeom_format::ShapeRecord::default()
+        };
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        let net_owner = OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            ..OwnerRef::default()
+        };
+        let pin_owner = OwnerRef {
+            owner_type: OwnerType::PinPortShape as u8,
+            ..OwnerRef::default()
+        };
+
+        assert_eq!(
+            edit_capability_lines(&shape, Some(&instance_owner), false),
+            vec!["edit: view-only session".to_string()]
+        );
+        assert_eq!(
+            edit_capability_lines(&shape, Some(&instance_owner), true),
+            vec![
+                "edit: move".to_string(),
+                "edit note: instance resize is rejected; move preserves master size".to_string(),
+            ]
+        );
+        assert_eq!(
+            edit_capability_lines(&shape, Some(&net_owner), true),
+            vec!["edit: move, resize".to_string()]
+        );
+        assert_eq!(
+            edit_capability_lines(&shape, Some(&pin_owner), true),
+            vec!["edit: move, resize".to_string()]
+        );
     }
 
     #[test]
@@ -3951,6 +5260,7 @@ mod tests {
             order: u32::from(layer_id),
             name: format!("L{layer_id}"),
             layer_type: "unknown".to_string(),
+            display_role: "unknown".to_string(),
             direction: "unknown".to_string(),
             width: 0,
             pitch_x: 0,
@@ -4044,6 +5354,16 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            path.join("geometry.vias.txt"),
+            "name\tmaster\ttype\trule\tbottom\tcut\ttop\tcut_width\tcut_height\tcut_spacing_x\tcut_spacing_y\tenclosure_bottom_x\tenclosure_bottom_y\tenclosure_top_x\tenclosure_top_y\trows\tcols\tdefault\n",
+        )
+        .unwrap();
+        fs::write(
+            path.join("geometry.grids.txt"),
+            "type\tindex\tdirection\tstart\tstep\tcount\twidth\tlayers\n",
+        )
+        .unwrap();
+        fs::write(
             path.join("geometry.connectivity.txt"),
             "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n",
         )
@@ -4093,6 +5413,8 @@ mod tests {
                  view=geometry.view.bin\n\
                  sites=geometry.sites.txt\n\
                  masters=geometry.masters.txt\n\
+                 vias=geometry.vias.txt\n\
+                 grids=geometry.grids.txt\n\
                  connectivity=geometry.connectivity.txt\n\
                  buses=geometry.buses.txt\n\
                  groups=geometry.groups.txt\n"

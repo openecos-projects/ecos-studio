@@ -1,8 +1,14 @@
+#![recursion_limit = "256"]
+
 use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Result;
-use chip_view_db::{ChipViewDb, ChipViewMemoryStats, DeltaStats, ShapeGeometry, SnapshotStats};
+use chip_display::LayerRole;
+use chip_view_db::{
+    ChipViewDb, ChipViewMemoryStats, DeltaStats, NearestShape, OwnerLocalInfo, ShapeGeometry,
+    SnapshotStats,
+};
 use chipgeom_format::{
     OwnerRef, OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
 };
@@ -22,6 +28,12 @@ struct Args {
     #[arg(long)]
     instance_name: Option<String>,
     #[arg(long)]
+    pin_name: Option<String>,
+    #[arg(long)]
+    bus_name: Option<String>,
+    #[arg(long)]
+    group_name: Option<String>,
+    #[arg(long)]
     owner_type: Option<String>,
     #[arg(long)]
     owner_id: Option<u64>,
@@ -30,6 +42,8 @@ struct Args {
     #[arg(long)]
     bench_viewport: bool,
     #[arg(long)]
+    bench_point: bool,
+    #[arg(long)]
     layer: Option<u16>,
     #[arg(long, num_args = 4, value_names = ["LX", "LY", "HX", "HY"])]
     bbox: Option<Vec<i32>>,
@@ -37,6 +51,8 @@ struct Args {
     point: Option<Vec<i32>>,
     #[arg(long, default_value_t = 0)]
     radius: i32,
+    #[arg(long)]
+    nearest: bool,
     #[arg(long, default_value_t = 100)]
     iterations: usize,
 }
@@ -53,7 +69,21 @@ fn main() -> Result<()> {
         (Some(layer_id), Some(viewport)) => Some(query_layer(&db, layer_id, viewport)),
         _ => None,
     };
-    let point_query_report = point.map(|point| query_point(&db, args.layer, point, args.radius));
+    let point_query_report =
+        point.map(|point| query_point(&db, args.layer, point, args.radius, args.nearest));
+    let point_bench_report = if args.bench_point {
+        let point = point.ok_or_else(|| anyhow::anyhow!("--bench-point requires --point"))?;
+        Some(bench_point_query(
+            &db,
+            args.layer,
+            point,
+            args.radius,
+            args.nearest,
+            args.iterations.max(1),
+        ))
+    } else {
+        None
+    };
     let bench_report = if args.bench_viewport {
         let layer_id = args
             .layer
@@ -76,14 +106,12 @@ fn main() -> Result<()> {
             &stats,
             layer_query_report.as_ref(),
             point_query_report.as_ref(),
+            point_bench_report.as_ref(),
             bench_report.as_ref(),
         )?;
         return Ok(());
     }
-    let name_report = args
-        .name
-        .as_deref()
-        .map(|name| bench_name_query(&db, name, args.iterations.max(1)));
+    let name_reports = bench_name_reports(&args, &db);
 
     println!("manifest={}", args.manifest.display());
     println!("schema_version={}", db.snapshot().manifest().schema_version);
@@ -104,6 +132,8 @@ fn main() -> Result<()> {
     println!("name_count={}", stats.name_count);
     println!("site_count={}", stats.site_count);
     println!("master_count={}", stats.master_count);
+    println!("via_count={}", stats.via_count);
+    println!("grid_count={}", stats.grid_count);
     println!("connectivity_count={}", stats.connectivity_count);
     println!("bus_count={}", stats.bus_count);
     println!("group_count={}", stats.group_count);
@@ -125,6 +155,11 @@ fn main() -> Result<()> {
     for layer in layer_summaries {
         println!("layer.{}.name={}", layer.layer_id, layer.name);
         println!("layer.{}.type={}", layer.layer_id, layer.layer_type);
+        println!(
+            "layer.{}.display_role={}",
+            layer.layer_id,
+            layer_display_role(&layer.name, &layer.layer_type)
+        );
         println!("layer.{}.direction={}", layer.layer_id, layer.direction);
         println!("layer.{}.width={}", layer.layer_id, layer.width);
         println!("layer.{}.pitch_x={}", layer.layer_id, layer.pitch_x);
@@ -166,6 +201,31 @@ fn main() -> Result<()> {
         println!("master.{}.term_count={}", master.name, master.term_count);
         println!("master.{}.obs_count={}", master.name, master.obs_count);
     }
+    for grid in db.grid_metadata() {
+        println!(
+            "grid.{}.{}.direction={}",
+            grid.grid_type, grid.index, grid.direction
+        );
+        println!(
+            "grid.{}.{}.start={}",
+            grid.grid_type, grid.index, grid.start
+        );
+        println!("grid.{}.{}.step={}", grid.grid_type, grid.index, grid.step);
+        println!(
+            "grid.{}.{}.count={}",
+            grid.grid_type, grid.index, grid.count
+        );
+        println!(
+            "grid.{}.{}.width={}",
+            grid.grid_type, grid.index, grid.width
+        );
+        println!(
+            "grid.{}.{}.layers={}",
+            grid.grid_type,
+            grid.index,
+            format_names(&grid.layer_names)
+        );
+    }
     for endpoint in db.connectivity_metadata() {
         println!(
             "connectivity.{}.{}.{}.instance={}",
@@ -181,12 +241,19 @@ fn main() -> Result<()> {
         println!("bus.{}.range={} {}", bus.name, bus.left, bus.right);
         println!("bus.{}.net_count={}", bus.name, bus.net_count);
         println!("bus.{}.pin_count={}", bus.name, bus.pin_count);
+        println!("bus.{}.nets={}", bus.name, format_names(&bus.net_names));
+        println!("bus.{}.pins={}", bus.name, format_names(&bus.pin_names));
     }
     for group in db.group_metadata() {
         println!("group.{}.region={}", group.name, group.region_name);
         println!(
             "group.{}.instance_count={}",
             group.name, group.instance_count
+        );
+        println!(
+            "group.{}.instances={}",
+            group.name,
+            format_names(&group.instance_names)
         );
     }
     if let Some(name) = args.name {
@@ -215,9 +282,60 @@ fn main() -> Result<()> {
     }
     if let Some(name) = args.instance_name {
         let shape_ids = query_instance_name(&db, &name);
+        let endpoints = db.connectivity_for_instance(&name);
         println!("instance_name.{}={}", name, shape_ids.len());
         println!(
             "instance_name.{}.shape_ids={}",
+            name,
+            format_shape_ids(&shape_ids)
+        );
+        println!("instance_name.{}.endpoints={}", name, endpoints.len());
+        for endpoint in endpoints {
+            println!(
+                "instance_name.{}.endpoint={}:{}:{}:{}",
+                name,
+                endpoint.net_name,
+                endpoint.endpoint_type,
+                endpoint.pin_name,
+                endpoint.master_name
+            );
+        }
+    }
+    if let Some(name) = args.pin_name {
+        let shape_ids = db.query_pin_name(&name);
+        let endpoints = db.connectivity_for_pin(&name);
+        println!("pin_name.{}={}", name, shape_ids.len());
+        println!(
+            "pin_name.{}.shape_ids={}",
+            name,
+            format_shape_ids(&shape_ids)
+        );
+        println!("pin_name.{}.endpoints={}", name, endpoints.len());
+        for endpoint in endpoints {
+            println!(
+                "pin_name.{}.endpoint={}:{}:{}:{}",
+                name,
+                endpoint.endpoint_type,
+                endpoint.instance_name,
+                endpoint.pin_name,
+                endpoint.master_name
+            );
+        }
+    }
+    if let Some(name) = args.bus_name {
+        let shape_ids = db.query_bus_name(&name);
+        println!("bus_name.{}={}", name, shape_ids.len());
+        println!(
+            "bus_name.{}.shape_ids={}",
+            name,
+            format_shape_ids(&shape_ids)
+        );
+    }
+    if let Some(name) = args.group_name {
+        let shape_ids = db.query_group_name(&name);
+        println!("group_name.{}={}", name, shape_ids.len());
+        println!(
+            "group_name.{}.shape_ids={}",
             name,
             format_shape_ids(&shape_ids)
         );
@@ -244,6 +362,13 @@ fn main() -> Result<()> {
             "point_query.shape_ids={}",
             format_shape_ids(&report.shape_ids)
         );
+        if let Some(nearest) = report.nearest {
+            println!("point_query.nearest_shape_id={}", nearest.shape_id);
+            println!(
+                "point_query.nearest_distance_squared={}",
+                nearest.distance_squared
+            );
+        }
     }
     if let Some(owner_type) = args.owner_type {
         if let Some(owner_id) = args.owner_id {
@@ -310,6 +435,7 @@ fn main() -> Result<()> {
                 );
                 if let Some(local_name) = db.owner_local_name(owner) {
                     println!("shape.{}.owner_local_name={}", shape_id, local_name);
+                    print_owner_local_info_text(shape_id, local_name);
                 }
             }
             print_shape_geometry_text(shape_id, db.shape_geometry(shape));
@@ -329,12 +455,26 @@ fn main() -> Result<()> {
         println!("bench_viewport.p50_ns={}", report.p50_ns);
         println!("bench_viewport.p95_ns={}", report.p95_ns);
     }
-    if let Some(report) = name_report {
-        println!("bench_name.name={}", report.name);
-        println!("bench_name.iterations={}", report.iterations);
-        println!("bench_name.hits={}", report.hit_count);
-        println!("bench_name.p50_ns={}", report.p50_ns);
-        println!("bench_name.p95_ns={}", report.p95_ns);
+    if let Some(report) = point_bench_report {
+        println!("bench_point.mode={}", report.mode);
+        println!("bench_point.x={}", report.point.x);
+        println!("bench_point.y={}", report.point.y);
+        println!("bench_point.radius={}", report.radius);
+        println!("bench_point.layers={}", format_layer_ids(&report.layer_ids));
+        println!("bench_point.iterations={}", report.iterations);
+        println!("bench_point.hits={}", report.hit_count);
+        if let Some(nearest) = report.nearest {
+            println!("bench_point.nearest_shape_id={}", nearest.shape_id);
+            println!(
+                "bench_point.nearest_distance_squared={}",
+                nearest.distance_squared
+            );
+        }
+        println!("bench_point.p50_ns={}", report.p50_ns);
+        println!("bench_point.p95_ns={}", report.p95_ns);
+    }
+    for report in &name_reports {
+        print_name_bench_report(report);
     }
 
     Ok(())
@@ -364,18 +504,78 @@ struct LayerQueryReport {
 struct PointQueryReport {
     hit_count: usize,
     layer_ids: Vec<u16>,
+    nearest: Option<NearestShape>,
     point: Point32,
     radius: i32,
     shape_ids: Vec<ShapeId>,
 }
 
 #[derive(Clone, Debug)]
+struct PointBenchReport {
+    hit_count: usize,
+    iterations: usize,
+    layer_ids: Vec<u16>,
+    mode: &'static str,
+    nearest: Option<NearestShape>,
+    p50_ns: u128,
+    p95_ns: u128,
+    point: Point32,
+    radius: i32,
+}
+
+#[derive(Clone, Debug)]
 struct NameBenchReport {
     hit_count: usize,
     iterations: usize,
+    kind: NameQueryKind,
     name: String,
     p50_ns: u128,
     p95_ns: u128,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NameQueryKind {
+    Name,
+    Net,
+    Instance,
+    Pin,
+    Bus,
+    Group,
+}
+
+impl NameQueryKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Net => "net",
+            Self::Instance => "instance",
+            Self::Pin => "pin",
+            Self::Bus => "bus",
+            Self::Group => "group",
+        }
+    }
+
+    fn bench_prefix(self) -> &'static str {
+        match self {
+            Self::Name => "bench_name",
+            Self::Net => "bench_net_name",
+            Self::Instance => "bench_instance_name",
+            Self::Pin => "bench_pin_name",
+            Self::Bus => "bench_bus_name",
+            Self::Group => "bench_group_name",
+        }
+    }
+
+    fn query(self, db: &ChipViewDb, name: &str) -> Vec<ShapeId> {
+        match self {
+            Self::Name => db.query_owner_name(name),
+            Self::Net => query_net_name(db, name),
+            Self::Instance => query_instance_name(db, name),
+            Self::Pin => db.query_pin_name(name),
+            Self::Bus => db.query_bus_name(name),
+            Self::Group => db.query_group_name(name),
+        }
+    }
 }
 
 fn query_layer(db: &ChipViewDb, layer_id: u16, bbox: Rect32) -> LayerQueryReport {
@@ -394,6 +594,7 @@ fn query_point(
     layer_id: Option<u16>,
     point: Point32,
     radius: i32,
+    include_nearest: bool,
 ) -> PointQueryReport {
     let layer_ids = layer_id.map(|layer_id| vec![layer_id]).unwrap_or_else(|| {
         db.layer_summaries()
@@ -406,9 +607,13 @@ fn query_point(
     } else {
         db.query_layers_at_point(&layer_ids, point)
     };
+    let nearest = include_nearest
+        .then(|| db.nearest_shape(&layer_ids, point, (radius > 0).then_some(radius)))
+        .flatten();
     PointQueryReport {
         hit_count: shape_ids.len(),
         layer_ids,
+        nearest,
         point,
         radius: radius.max(0),
         shape_ids,
@@ -430,6 +635,18 @@ fn format_shape_ids(shape_ids: &[ShapeId]) -> String {
     shape_ids
         .iter()
         .map(|shape_id| shape_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_names(names: &[String]) -> String {
+    names.join(",")
+}
+
+fn format_layer_ids(layer_ids: &[u16]) -> String {
+    layer_ids
+        .iter()
+        .map(|layer_id| layer_id.to_string())
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -456,12 +673,94 @@ fn bench_viewport(db: &ChipViewDb, layer_id: u16, bbox: Rect32, iterations: usiz
     }
 }
 
-fn bench_name_query(db: &ChipViewDb, name: &str, iterations: usize) -> NameBenchReport {
+fn bench_point_query(
+    db: &ChipViewDb,
+    layer_id: Option<u16>,
+    point: Point32,
+    radius: i32,
+    include_nearest: bool,
+    iterations: usize,
+) -> PointBenchReport {
+    let layer_ids = layer_id.map(|layer_id| vec![layer_id]).unwrap_or_else(|| {
+        db.layer_summaries()
+            .into_iter()
+            .map(|layer| layer.layer_id)
+            .collect()
+    });
+    let radius = radius.max(0);
+    let mut samples = Vec::with_capacity(iterations);
+    let mut hit_count = 0usize;
+    let mut nearest = None;
+    for _ in 0..iterations {
+        let start = Instant::now();
+        if include_nearest {
+            nearest = db.nearest_shape(&layer_ids, point, (radius > 0).then_some(radius));
+            hit_count = usize::from(nearest.is_some());
+        } else {
+            let hits = if radius > 0 {
+                db.query_layers_near_point(&layer_ids, point, radius)
+            } else {
+                db.query_layers_at_point(&layer_ids, point)
+            };
+            hit_count = hits.len();
+        }
+        let elapsed = start.elapsed();
+        samples.push(elapsed.as_nanos());
+    }
+
+    PointBenchReport {
+        hit_count,
+        iterations,
+        layer_ids,
+        mode: if include_nearest { "nearest" } else { "point" },
+        nearest,
+        p50_ns: percentile_nanos(&samples, 50.0),
+        p95_ns: percentile_nanos(&samples, 95.0),
+        point,
+        radius,
+    }
+}
+
+fn bench_name_reports(args: &Args, db: &ChipViewDb) -> Vec<NameBenchReport> {
+    let iterations = args.iterations.max(1);
+    let mut reports = Vec::new();
+    if let Some(name) = args.name.as_deref() {
+        reports.push(bench_name_query(db, NameQueryKind::Name, name, iterations));
+    }
+    if let Some(name) = args.net_name.as_deref() {
+        reports.push(bench_name_query(db, NameQueryKind::Net, name, iterations));
+    }
+    if let Some(name) = args.instance_name.as_deref() {
+        reports.push(bench_name_query(
+            db,
+            NameQueryKind::Instance,
+            name,
+            iterations,
+        ));
+    }
+    if let Some(name) = args.pin_name.as_deref() {
+        reports.push(bench_name_query(db, NameQueryKind::Pin, name, iterations));
+    }
+    if let Some(name) = args.bus_name.as_deref() {
+        reports.push(bench_name_query(db, NameQueryKind::Bus, name, iterations));
+    }
+    if let Some(name) = args.group_name.as_deref() {
+        reports.push(bench_name_query(db, NameQueryKind::Group, name, iterations));
+    }
+    reports
+}
+
+fn bench_name_query(
+    db: &ChipViewDb,
+    kind: NameQueryKind,
+    name: &str,
+    iterations: usize,
+) -> NameBenchReport {
     let mut samples = Vec::with_capacity(iterations);
     let mut hit_count = 0usize;
     for _ in 0..iterations {
         let start = Instant::now();
-        let hits = db.query_owner_name(name);
+        let hits = kind.query(db, name);
         let elapsed = start.elapsed();
         hit_count = hits.len();
         samples.push(elapsed.as_nanos());
@@ -470,10 +769,21 @@ fn bench_name_query(db: &ChipViewDb, name: &str, iterations: usize) -> NameBench
     NameBenchReport {
         hit_count,
         iterations,
+        kind,
         name: name.to_string(),
         p50_ns: percentile_nanos(&samples, 50.0),
         p95_ns: percentile_nanos(&samples, 95.0),
     }
+}
+
+fn print_name_bench_report(report: &NameBenchReport) {
+    let prefix = report.kind.bench_prefix();
+    println!("{prefix}.kind={}", report.kind.label());
+    println!("{prefix}.name={}", report.name);
+    println!("{prefix}.iterations={}", report.iterations);
+    println!("{prefix}.hits={}", report.hit_count);
+    println!("{prefix}.p50_ns={}", report.p50_ns);
+    println!("{prefix}.p95_ns={}", report.p95_ns);
 }
 
 fn parse_bbox_values(values: &[i32]) -> Result<Rect32> {
@@ -524,6 +834,10 @@ fn print_memory_stats(stats: &ChipViewMemoryStats) {
     println!("index_bytes.shape={}", stats.index_bytes.shape_index_bytes);
     println!("index_bytes.view={}", stats.index_bytes.view_index_bytes);
     println!("index_bytes.name={}", stats.index_bytes.name_index_bytes);
+    println!(
+        "index_bytes.connectivity={}",
+        stats.index_bytes.connectivity_index_bytes
+    );
     println!("mapped_plus_index_bytes={}", stats.mapped_plus_index_bytes);
 }
 
@@ -566,6 +880,7 @@ fn memory_stats_json(stats: &ChipViewMemoryStats) -> Value {
             "shape": stats.index_bytes.shape_index_bytes,
             "view": stats.index_bytes.view_index_bytes,
             "name": stats.index_bytes.name_index_bytes,
+            "connectivity": stats.index_bytes.connectivity_index_bytes,
         },
         "mapped_plus_index_bytes": stats.mapped_plus_index_bytes,
     })
@@ -657,6 +972,24 @@ fn owner_json(owner: &OwnerRef) -> Value {
     })
 }
 
+fn owner_local_info_json(local_name: &str) -> Option<Value> {
+    let local_info = OwnerLocalInfo::parse(local_name)?;
+    Some(json!({
+        "kind": local_info.kind,
+        "fields": local_info.fields,
+    }))
+}
+
+fn print_owner_local_info_text(shape_id: ShapeId, local_name: &str) {
+    let Some(local_info) = OwnerLocalInfo::parse(local_name) else {
+        return;
+    };
+    println!("shape.{}.owner_local.kind={}", shape_id, local_info.kind);
+    for (key, value) in local_info.fields {
+        println!("shape.{}.owner_local.{}={}", shape_id, key, value);
+    }
+}
+
 fn shape_query_json(
     shape_id: ShapeId,
     shape_and_owner: Option<(&ShapeRecord, Option<&OwnerRef>, Option<&str>, ShapeGeometry)>,
@@ -679,6 +1012,7 @@ fn shape_query_json(
         "geometry": shape_geometry_json(geometry),
         "owner": owner.map(owner_json),
         "owner_local_name": owner_local_name,
+        "owner_local_info": owner_local_name.and_then(owner_local_info_json),
     })
 }
 
@@ -699,6 +1033,39 @@ fn point_query_json(report: &PointQueryReport) -> Value {
         "layers": report.layer_ids,
         "hits": report.hit_count,
         "shape_ids": report.shape_ids,
+        "nearest": report.nearest.map(nearest_shape_json),
+    })
+}
+
+fn nearest_shape_json(nearest: NearestShape) -> Value {
+    json!({
+        "shape_id": nearest.shape_id,
+        "distance_squared": nearest.distance_squared,
+    })
+}
+
+fn point_bench_json(report: &PointBenchReport) -> Value {
+    json!({
+        "mode": report.mode,
+        "point": point_json(report.point),
+        "radius": report.radius,
+        "layers": report.layer_ids,
+        "iterations": report.iterations,
+        "hits": report.hit_count,
+        "nearest": report.nearest.map(nearest_shape_json),
+        "p50_ns": report.p50_ns,
+        "p95_ns": report.p95_ns,
+    })
+}
+
+fn name_bench_json(report: &NameBenchReport) -> Value {
+    json!({
+        "kind": report.kind.label(),
+        "name": report.name.as_str(),
+        "iterations": report.iterations,
+        "hits": report.hit_count,
+        "p50_ns": report.p50_ns,
+        "p95_ns": report.p95_ns,
     })
 }
 
@@ -733,12 +1100,13 @@ fn print_json(
     stats: &SnapshotStats,
     layer_query_report: Option<&LayerQueryReport>,
     point_query_report: Option<&PointQueryReport>,
+    point_bench_report: Option<&PointBenchReport>,
     bench_report: Option<&BenchReport>,
 ) -> Result<()> {
-    let name_report = args
-        .name
-        .as_deref()
-        .map(|name| bench_name_query(db, name, args.iterations.max(1)));
+    let name_reports = bench_name_reports(args, db);
+    let plain_name_report = name_reports
+        .iter()
+        .find(|report| report.kind == NameQueryKind::Name);
     let owner_type_counts = stats
         .owner_type_counts
         .iter()
@@ -758,30 +1126,36 @@ fn print_json(
         "name_count": stats.name_count,
         "site_count": stats.site_count,
         "master_count": stats.master_count,
+        "via_count": stats.via_count,
+        "grid_count": stats.grid_count,
         "connectivity_count": stats.connectivity_count,
         "bus_count": stats.bus_count,
         "group_count": stats.group_count,
         "memory": memory_stats_json(&db.memory_stats()),
         "delta": delta_stats_json(&db.delta_stats()),
         "layer_count": db.layer_summaries().len(),
-        "layers": db.layer_summaries().into_iter().map(|layer| json!({
-            "layer_id": layer.layer_id,
-            "name": layer.name,
-            "type": layer.layer_type,
-            "direction": layer.direction,
-            "order": layer.order,
-            "width": layer.width,
-            "pitch_x": layer.pitch_x,
-            "pitch_y": layer.pitch_y,
-            "min_spacing": layer.min_spacing,
-            "min_area": layer.min_area,
-            "min_step": layer.min_step,
-            "cut_spacing": layer.cut_spacing,
-            "enclosure_below": layer.enclosure_below,
-            "enclosure_above": layer.enclosure_above,
-            "lef58_rule_count": layer.lef58_rule_count,
-            "shape_count": layer.shape_count,
-        })).collect::<Vec<_>>(),
+        "layers": db.layer_summaries().into_iter().map(|layer| {
+            let display_role = layer_display_role(&layer.name, &layer.layer_type);
+            json!({
+                "layer_id": layer.layer_id,
+                "name": layer.name,
+                "type": layer.layer_type,
+                "display_role": display_role,
+                "direction": layer.direction,
+                "order": layer.order,
+                "width": layer.width,
+                "pitch_x": layer.pitch_x,
+                "pitch_y": layer.pitch_y,
+                "min_spacing": layer.min_spacing,
+                "min_area": layer.min_area,
+                "min_step": layer.min_step,
+                "cut_spacing": layer.cut_spacing,
+                "enclosure_below": layer.enclosure_below,
+                "enclosure_above": layer.enclosure_above,
+                "lef58_rule_count": layer.lef58_rule_count,
+                "shape_count": layer.shape_count,
+            })
+        }).collect::<Vec<_>>(),
         "sites": db.site_metadata().iter().map(|site| json!({
             "name": site.name.as_str(),
             "class": site.site_class.as_str(),
@@ -803,6 +1177,36 @@ fn print_json(
             "term_count": master.term_count,
             "obs_count": master.obs_count,
         })).collect::<Vec<_>>(),
+        "vias": db.via_metadata().iter().map(|via| json!({
+            "name": via.name.as_str(),
+            "master": via.master_name.as_str(),
+            "type": via.via_type.as_str(),
+            "rule": via.rule_name.as_str(),
+            "bottom": via.bottom_layer.as_str(),
+            "cut": via.cut_layer.as_str(),
+            "top": via.top_layer.as_str(),
+            "cut_width": via.cut_width,
+            "cut_height": via.cut_height,
+            "cut_spacing_x": via.cut_spacing_x,
+            "cut_spacing_y": via.cut_spacing_y,
+            "enclosure_bottom_x": via.enclosure_bottom_x,
+            "enclosure_bottom_y": via.enclosure_bottom_y,
+            "enclosure_top_x": via.enclosure_top_x,
+            "enclosure_top_y": via.enclosure_top_y,
+            "rows": via.rows,
+            "cols": via.cols,
+            "is_default": via.is_default,
+        })).collect::<Vec<_>>(),
+        "grids": db.grid_metadata().iter().map(|grid| json!({
+            "type": grid.grid_type.as_str(),
+            "index": grid.index,
+            "direction": grid.direction.as_str(),
+            "start": grid.start,
+            "step": grid.step,
+            "count": grid.count,
+            "width": grid.width,
+            "layers": grid.layer_names.iter().map(String::as_str).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "connectivity": db.connectivity_metadata().iter().map(|endpoint| json!({
             "net": endpoint.net_name.as_str(),
             "kind": endpoint.net_kind.as_str(),
@@ -818,11 +1222,14 @@ fn print_json(
             "right": bus.right,
             "net_count": bus.net_count,
             "pin_count": bus.pin_count,
+            "nets": bus.net_names.iter().map(String::as_str).collect::<Vec<_>>(),
+            "pins": bus.pin_names.iter().map(String::as_str).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "groups": db.group_metadata().iter().map(|group| json!({
             "name": group.name.as_str(),
             "region": group.region_name.as_str(),
             "instance_count": group.instance_count,
+            "instances": group.instance_names.iter().map(String::as_str).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "view_tile_count": db.view_tile_count(),
         "name_query": args.name.as_ref().map(|name| {
@@ -858,7 +1265,57 @@ fn print_json(
         "instance_query": args
             .instance_name
             .as_ref()
-            .map(|name| typed_name_query_json("instance", name, query_instance_name(db, name))),
+            .map(|name| {
+                let endpoints = db.connectivity_for_instance(name);
+                let mut value =
+                    typed_name_query_json("instance", name, query_instance_name(db, name));
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "endpoints".to_string(),
+                        json!(endpoints
+                            .into_iter()
+                            .map(|endpoint| json!({
+                                "net": endpoint.net_name.as_str(),
+                                "type": endpoint.endpoint_type.as_str(),
+                                "pin": endpoint.pin_name.as_str(),
+                                "master": endpoint.master_name.as_str(),
+                            }))
+                            .collect::<Vec<_>>()),
+                    );
+                }
+                value
+            }),
+        "pin_query": args
+            .pin_name
+            .as_ref()
+            .map(|name| {
+                let endpoints = db.connectivity_for_pin(name);
+                let mut value = typed_name_query_json("pin", name, db.query_pin_name(name));
+                if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "endpoints".to_string(),
+                        json!(endpoints
+                            .into_iter()
+                            .map(|endpoint| json!({
+                                "net": endpoint.net_name.as_str(),
+                                "type": endpoint.endpoint_type.as_str(),
+                                "instance": endpoint.instance_name.as_str(),
+                                "pin": endpoint.pin_name.as_str(),
+                                "master": endpoint.master_name.as_str(),
+                            }))
+                            .collect::<Vec<_>>()),
+                    );
+                }
+                value
+            }),
+        "bus_query": args
+            .bus_name
+            .as_ref()
+            .map(|name| typed_name_query_json("bus", name, db.query_bus_name(name))),
+        "group_query": args
+            .group_name
+            .as_ref()
+            .map(|name| typed_name_query_json("group", name, db.query_group_name(name))),
         "owner_query": args.owner_type.as_ref().and_then(|owner_type| {
             args.owner_id.map(|owner_id| {
                 let shape_ids = owner_type_from_label(owner_type)
@@ -879,13 +1336,9 @@ fn print_json(
         }),
         "layer_query": layer_query_report.map(layer_query_json),
         "point_query": point_query_report.map(point_query_json),
-        "bench_name": name_report.as_ref().map(|report| json!({
-            "name": report.name,
-            "iterations": report.iterations,
-            "hits": report.hit_count,
-            "p50_ns": report.p50_ns,
-            "p95_ns": report.p95_ns,
-        })),
+        "bench_point": point_bench_report.map(point_bench_json),
+        "bench_name": plain_name_report.map(name_bench_json),
+        "bench_queries": name_reports.iter().map(name_bench_json).collect::<Vec<_>>(),
         "bbox": stats.bbox.map(bbox_json),
         "owner_type_counts": owner_type_counts,
         "bench_viewport": bench_report.map(|report| json!({
@@ -924,6 +1377,10 @@ fn shape_state_label(state: u8) -> &'static str {
     }
 }
 
+fn layer_display_role(name: &str, layer_type: &str) -> &'static str {
+    LayerRole::from_metadata(name, layer_type).label()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -952,6 +1409,13 @@ mod tests {
     }
 
     #[test]
+    fn layer_display_role_uses_layer_name_before_type_fallback() {
+        assert_eq!(layer_display_role("M4", "routing"), "metal");
+        assert_eq!(layer_display_role("", "cut"), "cut");
+        assert_eq!(layer_display_role("ROW", "unknown"), "row");
+    }
+
+    #[test]
     fn percentile_nanos_uses_nearest_rank() {
         assert_eq!(percentile_nanos(&[10, 20, 30, 40], 50.0), 20);
         assert_eq!(percentile_nanos(&[10, 20, 30, 40], 95.0), 40);
@@ -976,17 +1440,19 @@ mod tests {
                 shape_index_bytes: 20,
                 view_index_bytes: 30,
                 name_index_bytes: 40,
-                total_bytes: 100,
+                connectivity_index_bytes: 50,
+                total_bytes: 150,
             },
-            mapped_plus_index_bytes: 145,
+            mapped_plus_index_bytes: 195,
         });
 
         assert_eq!(value["mmap_bytes"]["total"], 45);
         assert_eq!(value["mmap_bytes"]["delta"], 8);
         assert_eq!(value["mmap_bytes"]["view"], 9);
-        assert_eq!(value["index_bytes"]["total"], 100);
+        assert_eq!(value["index_bytes"]["total"], 150);
         assert_eq!(value["index_bytes"]["name"], 40);
-        assert_eq!(value["mapped_plus_index_bytes"], 145);
+        assert_eq!(value["index_bytes"]["connectivity"], 50);
+        assert_eq!(value["mapped_plus_index_bytes"], 195);
     }
 
     #[test]
@@ -1058,7 +1524,7 @@ mod tests {
             Some((
                 &shape,
                 Some(&owner),
-                Some("via:VIA1"),
+                Some("via:VIA1 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2"),
                 ShapeGeometry::Rect(shape.bbox),
             )),
         );
@@ -1076,7 +1542,17 @@ mod tests {
         assert_eq!(value["owner"]["owner_id"], 9001);
         assert_eq!(value["owner"]["path"], json!([5, 6, 7, 8]));
         assert_eq!(value["owner"]["name_id"], 11);
-        assert_eq!(value["owner_local_name"], "via:VIA1");
+        assert_eq!(
+            value["owner_local_name"],
+            "via:VIA1 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2"
+        );
+        assert_eq!(value["owner_local_info"]["kind"], "via");
+        assert_eq!(value["owner_local_info"]["fields"]["via"], "VIA1");
+        assert_eq!(value["owner_local_info"]["fields"]["master"], "VIA12");
+        assert_eq!(value["owner_local_info"]["fields"]["type"], "fixed");
+        assert_eq!(value["owner_local_info"]["fields"]["bottom"], "M1");
+        assert_eq!(value["owner_local_info"]["fields"]["cut"], "VIA12");
+        assert_eq!(value["owner_local_info"]["fields"]["top"], "M2");
 
         let missing = shape_query_json(99, None);
 
@@ -1169,6 +1645,10 @@ mod tests {
         let value = point_query_json(&PointQueryReport {
             hit_count: 2,
             layer_ids: vec![1, 3],
+            nearest: Some(chip_view_db::NearestShape {
+                shape_id: 9,
+                distance_squared: 25,
+            }),
             point: chipgeom_format::Point32 { x: 10, y: 20 },
             radius: 5,
             shape_ids: vec![7, 9],
@@ -1179,6 +1659,75 @@ mod tests {
         assert_eq!(value["layers"], json!([1, 3]));
         assert_eq!(value["hits"], 2);
         assert_eq!(value["shape_ids"], json!([7, 9]));
+        assert_eq!(value["nearest"]["shape_id"], 9);
+        assert_eq!(value["nearest"]["distance_squared"], 25);
+    }
+
+    #[test]
+    fn point_bench_json_reports_mode_layers_nearest_and_percentiles() {
+        let value = point_bench_json(&PointBenchReport {
+            hit_count: 1,
+            iterations: 25,
+            layer_ids: vec![2, 4],
+            mode: "nearest",
+            nearest: Some(chip_view_db::NearestShape {
+                shape_id: 99,
+                distance_squared: 16,
+            }),
+            p50_ns: 100,
+            p95_ns: 250,
+            point: chipgeom_format::Point32 { x: 30, y: 40 },
+            radius: 10,
+        });
+
+        assert_eq!(value["mode"], "nearest");
+        assert_eq!(value["point"], json!({"x": 30, "y": 40}));
+        assert_eq!(value["radius"], 10);
+        assert_eq!(value["layers"], json!([2, 4]));
+        assert_eq!(value["iterations"], 25);
+        assert_eq!(value["hits"], 1);
+        assert_eq!(value["nearest"]["shape_id"], 99);
+        assert_eq!(value["nearest"]["distance_squared"], 16);
+        assert_eq!(value["p50_ns"], 100);
+        assert_eq!(value["p95_ns"], 250);
+    }
+
+    #[test]
+    fn name_bench_json_reports_kind_name_and_percentiles() {
+        let value = name_bench_json(&NameBenchReport {
+            hit_count: 3,
+            iterations: 25,
+            kind: NameQueryKind::Pin,
+            name: "u0/A".to_string(),
+            p50_ns: 100,
+            p95_ns: 250,
+        });
+
+        assert_eq!(value["kind"], "pin");
+        assert_eq!(value["name"], "u0/A");
+        assert_eq!(value["iterations"], 25);
+        assert_eq!(value["hits"], 3);
+        assert_eq!(value["p50_ns"], 100);
+        assert_eq!(value["p95_ns"], 250);
+    }
+
+    #[test]
+    fn name_query_kind_reports_stable_labels_and_bench_prefixes() {
+        assert_eq!(NameQueryKind::Name.label(), "name");
+        assert_eq!(NameQueryKind::Net.label(), "net");
+        assert_eq!(NameQueryKind::Instance.label(), "instance");
+        assert_eq!(NameQueryKind::Pin.label(), "pin");
+        assert_eq!(NameQueryKind::Bus.label(), "bus");
+        assert_eq!(NameQueryKind::Group.label(), "group");
+        assert_eq!(NameQueryKind::Name.bench_prefix(), "bench_name");
+        assert_eq!(NameQueryKind::Net.bench_prefix(), "bench_net_name");
+        assert_eq!(
+            NameQueryKind::Instance.bench_prefix(),
+            "bench_instance_name"
+        );
+        assert_eq!(NameQueryKind::Pin.bench_prefix(), "bench_pin_name");
+        assert_eq!(NameQueryKind::Bus.bench_prefix(), "bench_bus_name");
+        assert_eq!(NameQueryKind::Group.bench_prefix(), "bench_group_name");
     }
 
     #[test]

@@ -188,6 +188,30 @@ describe('createEccRuntimeEnv', () => {
     )
   })
 
+  it('adds packaged ECC libraries even when only chip viewer subprocesses are bundled', () => {
+    const fixture = createRepoFixture()
+    const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
+    const binariesPath = join(resourcesPath, 'binaries')
+    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), { recursive: true })
+
+    const env = createEccRuntimeEnv({
+      appPath: fixture.appPath,
+      cwd: fixture.appPath,
+      env: {
+        ECOS_ELECTRON_RESOURCES_PATH: resourcesPath,
+        PATH: '/usr/bin',
+      },
+      isPackaged: true,
+      platform: 'linux',
+      userDataPath: fixture.userDataPath,
+    })
+
+    expect(env.PATH).toBe('/usr/bin')
+    expect(env.LD_LIBRARY_PATH).toBe(
+      join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'),
+    )
+  })
+
   it('does not inject bundled OSS CAD env when packaged resources include yosys', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
