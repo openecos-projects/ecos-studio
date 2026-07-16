@@ -40,8 +40,76 @@ describe('project QoR trend model', () => {
       ]),
     })
     expect(
-      detail.dimensions.reduce((total, dimension) => total + dimension.effectiveWeight, 0),
+      detail.dimensions.reduce(
+        (total, dimension) => total + dimension.effectiveWeight,
+        0,
+      ),
     ).toBeCloseTo(100)
+  })
+
+  it('uses Area records from only the last successful step for score and details', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0001',
+        {
+          Floor: JSON.stringify({ Tool: 'ecc', 'Die area [μm^2]': 1000 }),
+          Route: JSON.stringify({ Tool: 'ecc', 'Die area [μm^2]': 2000 }),
+          STA: JSON.stringify({ Tool: 'ecc', 'Die area [μm^2]': 2500 }),
+        },
+        {},
+        {},
+        'ws_0001',
+        { Floor: 'success', Route: 'success', STA: 'failed' },
+      ),
+    ])
+    const workspace = summary.workspaces[0]!
+    const detail = buildProjectQorScoreDetail(workspace)
+    const area = detail.dimensions.find(
+      (dimension) => dimension.dimension === 'area_cost',
+    )
+
+    expect(workspace.dimensionScores.area_cost).toBe(33.3)
+    expect(workspace.areaScoringStep).toBe('Route')
+    expect(area?.metrics).toEqual([
+      expect.objectContaining({ step: 'Route', metricName: 'die_area', value: 2000 }),
+    ])
+  })
+
+  it('omits Area scoring when the last successful step has no Area record', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0001',
+        { Route: JSON.stringify({ Tool: 'ecc', 'Die area [μm^2]': 2000 }) },
+        {},
+        {},
+        'ws_0001',
+        { Route: 'success', Harden: 'success' },
+      ),
+    ])
+    const workspace = summary.workspaces[0]!
+    const detail = buildProjectQorScoreDetail(workspace)
+
+    expect(workspace.areaScoringStep).toBe('Harden')
+    expect(workspace.dimensionScores.area_cost).toBeUndefined()
+    expect(
+      detail.dimensions.some((dimension) => dimension.dimension === 'area_cost'),
+    ).toBe(false)
+  })
+
+  it('does not use Area records when no step completed successfully', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0001',
+        { Route: JSON.stringify({ Tool: 'ecc', 'Die area [μm^2]': 2000 }) },
+        {},
+        {},
+        'ws_0001',
+        { Route: 'reused' },
+      ),
+    ])
+
+    expect(summary.workspaces[0]?.areaScoringStep).toBeNull()
+    expect(summary.workspaces[0]?.dimensionScores.area_cost).toBeUndefined()
   })
 
   it('normalizes current step analysis metrics into standard QoR metric records', () => {
@@ -823,9 +891,9 @@ describe('project QoR trend model', () => {
         metric_name: 'route_wirelength',
       }),
     )
-    expect(report.unsupported_modules.map((module: { id: string }) => module.id)).not.toContain(
-      'qor_report_export',
-    )
+    expect(
+      report.unsupported_modules.map((module: { id: string }) => module.id),
+    ).not.toContain('qor_report_export')
   })
 })
 
@@ -835,6 +903,7 @@ function workspaceInput(
   stepSummaryTexts: Partial<Record<string, string | null>> = {},
   stepHotspotTexts: Partial<Record<string, string | null>> = {},
   workspaceName = workspaceId,
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
 ): ProjectQorWorkspaceInput {
   return {
     workspaceId,
@@ -849,6 +918,6 @@ function workspaceInput(
     stepMetricTexts,
     stepSummaryTexts,
     stepHotspotTexts,
-    stepStatuses: {},
+    stepStatuses,
   }
 }

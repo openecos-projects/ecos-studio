@@ -90,6 +90,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   status: QorStatus
   overallScore: number | null
   hardGateCap: number
+  areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
   blockingIssues: ProjectQorBlockingIssue[]
@@ -927,7 +928,11 @@ export function buildProjectQorScoreDetail(
     if (score === undefined || configuredWeight <= 0) return []
 
     const metrics = workspace.records.flatMap((record) => {
-      if (record.dimension !== dimension) return []
+      if (
+        !isRecordIncludedInDimensionScore(record, dimension, workspace.areaScoringStep)
+      ) {
+        return []
+      }
       const metricScore = scoreRecord(record)
       if (metricScore === null || record.value === null) return []
       return [
@@ -952,14 +957,18 @@ export function buildProjectQorScoreDetail(
       },
     ]
   })
-  const usedWeight = dimensions.reduce((total, dimension) => total + dimension.configuredWeight, 0)
+  const usedWeight = dimensions.reduce(
+    (total, dimension) => total + dimension.configuredWeight,
+    0,
+  )
 
   return {
     overallScore: workspace.overallScore,
     hardGateCap: workspace.hardGateCap,
     hasHardGateCap: workspace.hardGateCap < 100,
     dimensions: dimensions.map((dimension) => {
-      const effectiveWeight = usedWeight === 0 ? 0 : dimension.configuredWeight / usedWeight
+      const effectiveWeight =
+        usedWeight === 0 ? 0 : dimension.configuredWeight / usedWeight
       return {
         ...dimension,
         effectiveWeight: roundScore(effectiveWeight * 100),
@@ -996,6 +1005,7 @@ export function buildProjectQorTrendReport(
       status: workspace.status,
       overall_score: workspace.overallScore,
       hard_gate_cap: workspace.hardGateCap,
+      area_scoring_step: workspace.areaScoringStep,
       dimension_scores: workspace.dimensionScores,
       record_count: workspace.records.length,
       records: workspace.records.map((record) => ({
@@ -1154,7 +1164,8 @@ function buildWorkspaceSummary(
     normalizeQorHotspots(step, workspace.stepHotspotTexts?.[step]),
   )
   const hardGateCap = hasDrcViolation(records) || blockingIssues.length > 0 ? 60 : 100
-  const dimensionScores = buildDimensionScores(records)
+  const areaScoringStep = resolveLastSuccessfulStep(workspace.stepStatuses)
+  const dimensionScores = buildDimensionScores(records, areaScoringStep)
   const weightedScore = weightedOverallScore(dimensionScores)
   const overallScore =
     weightedScore === null ? null : roundScore(Math.min(weightedScore, hardGateCap))
@@ -1166,6 +1177,7 @@ function buildWorkspaceSummary(
     status: workspaceStatus(workspace.status, overallScore, hardGateCap),
     overallScore,
     hardGateCap,
+    areaScoringStep,
     dimensionScores,
     records,
     blockingIssues,
@@ -1211,10 +1223,14 @@ function buildProjectQorRisks(
 
 function buildDimensionScores(
   records: ProjectQorMetricRecord[],
+  areaScoringStep: FlowStep | null,
 ): Partial<Record<QorDimension, number>> {
   const scoredByDimension = new Map<QorDimension, number[]>()
 
   for (const record of records) {
+    if (!isRecordIncludedInDimensionScore(record, record.dimension, areaScoringStep)) {
+      continue
+    }
     const score = scoreRecord(record)
     if (score === null) continue
 
@@ -1228,6 +1244,25 @@ function buildDimensionScores(
     roundScore(average(scores)),
   ])
   return Object.fromEntries(entries)
+}
+
+function isRecordIncludedInDimensionScore(
+  record: ProjectQorMetricRecord,
+  dimension: QorDimension,
+  areaScoringStep: FlowStep | null,
+): boolean {
+  if (record.dimension !== dimension) return false
+  return dimension !== 'area_cost' || record.step === areaScoringStep
+}
+
+function resolveLastSuccessfulStep(
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
+): FlowStep | null {
+  for (let index = QOR_FLOW_STEPS.length - 1; index >= 0; index -= 1) {
+    const step = QOR_FLOW_STEPS[index]!
+    if (stepStatuses[step] === 'success') return step
+  }
+  return null
 }
 
 function weightedOverallScore(
@@ -1589,9 +1624,7 @@ function normalizeQorSummaryBlockingIssues(
   })
 }
 
-function normalizeQorSummaryMissingMetrics(
-  text: string | null | undefined,
-): string[] {
+function normalizeQorSummaryMissingMetrics(text: string | null | undefined): string[] {
   const record = parseJsonObject(text)
   if (record?.schema_version !== 1 || !Array.isArray(record.missing_metrics)) {
     return []
@@ -1635,9 +1668,7 @@ function normalizeQorHotspots(
 }
 
 function hotspotSeverity(value: unknown): ProjectQorHotspot['severity'] {
-  return value === 'critical' || value === 'warning' || value === 'info'
-    ? value
-    : 'info'
+  return value === 'critical' || value === 'warning' || value === 'info' ? value : 'info'
 }
 
 function qorSummaryIssueValue(value: unknown): number | string | null {
