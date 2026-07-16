@@ -50,6 +50,7 @@ describe('createWorkspaceApi desktop bridge payload', () => {
     const { createWorkspaceApi } = await import('./workspace')
     const options = reactive({
       directory: '/workspace/demo',
+      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
       filelist: '',
       origin_def: '',
       origin_verilog: '/rtl/top.v',
@@ -76,6 +77,7 @@ describe('createWorkspaceApi desktop bridge payload', () => {
         parameters: expect.objectContaining({
           design: 'demo',
         }),
+        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
         rtl_list: ['/rtl/top.v'],
       }),
     }))

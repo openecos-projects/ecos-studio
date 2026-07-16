@@ -182,20 +182,115 @@
                     </div>
                   </section>
 
-                  <PathPicker
-                    v-if="selectedCore?.requires_filelist !== false"
-                    label="CPU Source Filelist"
-                    required
-                    icon="ri-file-list-3-line"
-                    :model-value="config.parameters.cpu_filelist"
-                    @browse="selectCpuFilelist"
-                  />
-                  <p
-                    v-if="selectedCoreId === CUSTOM_FILELIST_ID"
-                    class="-mt-5 text-xs leading-relaxed text-(--text-secondary)"
-                  >
-                    Include all CPU RTL sources in this filelist. They must define exactly one <code>cpu_top</code> module; the fixed ECOS SoC instantiates it directly, and the source filename is unrestricted.
-                  </p>
+                  <section v-if="selectedCore?.requires_filelist !== false" class="cpu-source-setup">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <label class="text-sm font-semibold text-(--text-primary)">CPU Design Files <span class="text-red-500">*</span></label>
+                        <p class="mt-1 text-xs text-(--text-secondary)">Provide an existing filelist or select the RTL files directly.</p>
+                      </div>
+                      <div class="cpu-source-mode" aria-label="CPU design file input method">
+                        <button
+                          type="button"
+                          :class="{ active: cpuSourceMode === 'filelist' }"
+                          @click="selectCpuSourceMode('filelist')"
+                        >
+                          <i class="ri-file-list-3-line"></i>
+                          <span>Use filelist</span>
+                        </button>
+                        <button
+                          type="button"
+                          :class="{ active: cpuSourceMode === 'files' }"
+                          @click="selectCpuSourceMode('files')"
+                        >
+                          <i class="ri-folder-open-line"></i>
+                          <span>Select RTL files</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="cpuSourceMode === 'filelist'" class="mt-5">
+                      <PathPicker
+                        label="CPU Source Filelist"
+                        required
+                        icon="ri-file-list-3-line"
+                        :model-value="config.parameters.cpu_filelist"
+                        @browse="selectCpuFilelist"
+                      />
+                    </div>
+
+                    <div v-else class="cpu-source-browser">
+                      <div class="cpu-source-actions">
+                        <div class="cpu-source-icon"><i class="ri-folder-code-line"></i></div>
+                        <div>
+                          <strong>Choose CPU RTL sources</strong>
+                          <p>Open a source folder and select the Verilog, SystemVerilog, and header files that make up your CPU.</p>
+                        </div>
+                        <button type="button" class="cpu-source-primary-action" @click="selectCpuRtlFiles">
+                          <i class="ri-folder-open-line"></i>
+                          {{ selectedCpuRtlFiles.length ? 'Add files' : 'Choose files' }}
+                        </button>
+                        <button
+                          v-if="selectedCpuRtlFiles.length"
+                          type="button"
+                          class="cpu-source-clear-action"
+                          @click="clearCpuRtlFiles"
+                        >
+                          Clear selection
+                        </button>
+                        <div class="cpu-source-summary">
+                          <span>Accepted formats</span>
+                          <strong>.v / .sv / headers</strong>
+                          <span>Selected</span>
+                          <strong>{{ selectedCpuRtlFiles.length }} files</strong>
+                        </div>
+                      </div>
+
+                      <div class="cpu-source-selection">
+                        <div class="cpu-source-selection-head">
+                          <div>
+                            <strong>Selected files</strong>
+                            <span>{{ selectedCpuRtlFiles.length ? 'Ready for interface validation' : 'No RTL files selected' }}</span>
+                          </div>
+                          <span class="cpu-source-count">{{ selectedCpuRtlFiles.length }}</span>
+                        </div>
+
+                        <div v-if="!selectedCpuRtlFiles.length" class="cpu-source-empty">
+                          <i class="ri-file-add-line"></i>
+                          <span>Your selected source files will appear here.</span>
+                        </div>
+                        <div v-else class="custom-scrollbar cpu-source-file-list">
+                          <div v-for="file in selectedCpuRtlFiles" :key="file" class="cpu-source-file-row">
+                            <i :class="cpuRtlFileIcon(file)"></i>
+                            <div>
+                              <strong :title="file">{{ cpuRtlFileName(file) }}</strong>
+                              <span :title="cpuRtlFileDirectory(file)">{{ cpuRtlFileDirectory(file) }}</span>
+                            </div>
+                            <button type="button" title="Remove file" @click="removeCpuRtlFile(file)">
+                              <i class="ri-close-line"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="cpu-source-selection-footer">
+                          <span v-if="cpuSelectionMessage" class="cpu-source-message">{{ cpuSelectionMessage }}</span>
+                          <button
+                            type="button"
+                            class="cpu-source-confirm"
+                            :disabled="!selectedCpuRtlFiles.length || cpuSelectionConfirming"
+                            @click="confirmCpuRtlSelection"
+                          >
+                            <i v-if="cpuSelectionConfirming" class="ri-loader-4-line animate-spin"></i>
+                            <i v-else class="ri-check-line"></i>
+                            {{ cpuSelectionConfirming ? 'Validating...' : 'Confirm selection' }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p v-if="selectedCoreId === CUSTOM_FILELIST_ID" class="mt-3 text-xs leading-relaxed text-(--text-secondary)">
+                      The selected CPU sources must define exactly one <code>cpu_top</code> module. The fixed ECOS SoC instantiates it directly, and source filenames are unrestricted.
+                    </p>
+                  </section>
 
                   <section>
                     <div class="mb-3 flex items-center justify-between gap-3">
@@ -360,7 +455,8 @@
                     <ReviewItem label="Compatible Tests" :value="compatibleTestSuitesLabel" />
                     <ReviewItem label="Toolchain" :value="selectedToolchain?.name || '-'" />
                     <ReviewItem label="Test Suite" :value="selectedTestSuite?.name || '-'" />
-                    <ReviewItem label="CPU Filelist" :value="effectiveCpuFilelist || '-'" monospace wide />
+                    <ReviewItem label="CPU Input Method" :value="cpuSourceMethodLabel" />
+                    <ReviewItem label="CPU Design Files" :value="cpuSourceReviewValue" monospace wide />
                     <ReviewItem label="CPU Reset PC" :value="requiredCpuResetVector || '-'" monospace />
                     <ReviewItem label="Program Link Base" :value="defaultProgramLinkBase || '-'" monospace />
                     <ReviewItem label="Boot Payload Base" :value="bootloaderPayloadLinkBase || '-'" monospace wide />
@@ -445,6 +541,7 @@ import { formatCpuTopModule, normalizeCpuPortContract } from './frontendCpuContr
 const FINAL_STEP = 3
 const CUSTOM_FILELIST_ID = 'custom-filelist'
 const LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'
+type CpuSourceMode = 'filelist' | 'files'
 const CUSTOM_CPU_TOP_MODULE = 'cpu_top'
 const CUSTOM_CPU_RESET_VECTOR = '0x20000000'
 const CUSTOM_CPU_TOP_PORT_CONTRACT: FrontendCpuPortContract[] = [
@@ -553,6 +650,11 @@ const selectedCoreId = ref('')
 const selectedSocHarnessId = ref('')
 const selectedToolchainId = ref('')
 const selectedTestSuiteId = ref('')
+const cpuSourceMode = ref<CpuSourceMode>('filelist')
+const selectedCpuRtlFiles = ref<string[]>([])
+const cpuSelectionConfirming = ref(false)
+const cpuSelectionConfirmed = ref(false)
+const cpuSelectionMessage = ref('')
 let validationToken = 0
 let cpuTopContractScrollPending = false
 
@@ -592,12 +694,23 @@ const selectedSocHarness = computed(() => entryById(catalog.value.soc_harnesses,
 const selectedToolchain = computed(() => entryById(catalog.value.toolchains, selectedToolchainId.value))
 const selectedTestSuite = computed(() => entryById(catalog.value.test_suites, selectedTestSuiteId.value))
 const selectedCompatibility = computed(() => compatibilityFor(selectedCoreId.value, selectedSocHarnessId.value))
-const effectiveCpuFilelist = computed(() =>
-  config.value.parameters.cpu_filelist
-  || validation.value?.normalized?.cpu_filelist
-  || stringField(selectedCore.value, 'cpu_filelist')
-  || '',
-)
+const requiresCpuInput = computed(() => selectedCore.value?.requires_filelist !== false)
+const effectiveCpuFilelist = computed(() => {
+  if (cpuSourceMode.value === 'files') return ''
+  return config.value.parameters.cpu_filelist
+    || validation.value?.normalized?.cpu_filelist
+    || stringField(selectedCore.value, 'cpu_filelist')
+    || ''
+})
+const cpuSourceMethodLabel = computed(() => {
+  if (selectedCore.value?.requires_filelist === false) return 'Built-in CPU RTL'
+  return cpuSourceMode.value === 'files' ? 'Selected RTL files' : 'Existing filelist'
+})
+const cpuSourceReviewValue = computed(() => {
+  if (selectedCore.value?.requires_filelist === false) return stringField(selectedCore.value, 'cpu_filelist') || 'Bundled with the CPU adapter'
+  if (cpuSourceMode.value === 'files') return `${selectedCpuRtlFiles.value.length} RTL files selected`
+  return effectiveCpuFilelist.value || '-'
+})
 const requiredCpuTopModule = computed(() =>
   validation.value?.normalized?.required_cpu_top_module
   || selectedCore.value?.required_cpu_top_module
@@ -735,6 +848,7 @@ const canProceed = computed(() => {
         && selectedSocHarnessId.value !== ''
         && selectedToolchainId.value !== ''
         && selectedTestSuiteId.value !== ''
+        && (!requiresCpuInput.value || cpuSourceMode.value === 'filelist' || cpuSelectionConfirmed.value)
         && validationOk.value
         && !validationBusy.value
   }
@@ -748,6 +862,8 @@ watch(
     selectedSocHarnessId,
     selectedToolchainId,
     selectedTestSuiteId,
+    cpuSourceMode,
+    selectedCpuRtlFiles,
     () => config.value.parameters.cpu_filelist,
   ],
   () => {
@@ -859,9 +975,11 @@ function syncParameters(): void {
 }
 
 function validationPayload(): Record<string, unknown> {
+  const includeCpuInput = requiresCpuInput.value
   return {
     core_id: selectedCoreId.value,
-    cpu_filelist: config.value.parameters.cpu_filelist,
+    cpu_filelist: includeCpuInput && cpuSourceMode.value === 'filelist' ? config.value.parameters.cpu_filelist : '',
+    cpu_rtl_files: includeCpuInput && cpuSourceMode.value === 'files' ? selectedCpuRtlFiles.value : [],
     soc_harness_id: selectedSocHarnessId.value,
     toolchain_id: selectedToolchainId.value,
     test_suite_id: selectedTestSuiteId.value,
@@ -870,12 +988,17 @@ function validationPayload(): Record<string, unknown> {
 
 function localValidationIssues(): FrontendValidationIssue[] {
   const issues: FrontendValidationIssue[] = []
-  if (selectedCore.value?.requires_filelist !== false && !config.value.parameters.cpu_filelist.trim()) {
+  const cpuInputMissing = cpuSourceMode.value === 'files'
+    ? selectedCpuRtlFiles.value.length === 0
+    : !config.value.parameters.cpu_filelist.trim()
+  if (requiresCpuInput.value && cpuInputMissing) {
     issues.push({
       severity: 'error',
-      code: 'missing_cpu_filelist',
-      field: 'cpu_filelist',
-      message: 'CPU filelist is required.',
+      code: cpuSourceMode.value === 'files' ? 'missing_cpu_rtl_files' : 'missing_cpu_filelist',
+      field: cpuSourceMode.value === 'files' ? 'cpu_rtl_files' : 'cpu_filelist',
+      message: cpuSourceMode.value === 'files'
+        ? 'Select at least one CPU RTL source file.'
+        : 'CPU filelist is required.',
     })
   }
   return issues
@@ -958,7 +1081,89 @@ const selectCpuFilelist = async () => {
   })
   const selected = result?.[0]
   if (selected) {
+    cpuSourceMode.value = 'filelist'
     config.value.parameters.cpu_filelist = selected
+  }
+}
+
+async function selectCpuSourceMode(mode: CpuSourceMode): Promise<void> {
+  cpuSourceMode.value = mode
+  cpuSelectionConfirmed.value = false
+  cpuSelectionMessage.value = ''
+  if (mode === 'files' && selectedCpuRtlFiles.value.length === 0) {
+    await selectCpuRtlFiles()
+  }
+}
+
+async function selectCpuRtlFiles(): Promise<void> {
+  const desktopApi = await waitForDesktopApi()
+  const result = await desktopApi.dialog.pickFiles({
+    multiple: true,
+    filters: [{
+      name: 'CPU RTL Sources',
+      extensions: ['v', 'sv', 'vh', 'svh'],
+    }],
+    title: 'Select CPU RTL Files',
+  })
+  if (!result?.length) return
+
+  const merged = new Set(selectedCpuRtlFiles.value)
+  for (const file of result) {
+    if (file.trim()) merged.add(file)
+  }
+  selectedCpuRtlFiles.value = [...merged]
+  cpuSelectionConfirmed.value = false
+  cpuSelectionMessage.value = ''
+}
+
+function removeCpuRtlFile(file: string): void {
+  selectedCpuRtlFiles.value = selectedCpuRtlFiles.value.filter((item) => item !== file)
+  cpuSelectionConfirmed.value = false
+  cpuSelectionMessage.value = ''
+}
+
+function clearCpuRtlFiles(): void {
+  selectedCpuRtlFiles.value = []
+  cpuSelectionConfirmed.value = false
+  cpuSelectionMessage.value = ''
+}
+
+function cpuRtlFileName(file: string): string {
+  return file.replace(/\\/g, '/').split('/').filter(Boolean).pop() || file
+}
+
+function cpuRtlFileDirectory(file: string): string {
+  const normalized = file.replace(/\\/g, '/')
+  const separator = normalized.lastIndexOf('/')
+  return separator > 0 ? normalized.slice(0, separator) : 'Selected folder'
+}
+
+function cpuRtlFileIcon(file: string): string {
+  const normalized = file.toLowerCase()
+  if (normalized.endsWith('.vh') || normalized.endsWith('.svh')) {
+    return 'ri-file-text-line text-amber-400'
+  }
+  return normalized.endsWith('.sv')
+    ? 'ri-code-s-slash-line text-sky-400'
+    : 'ri-file-code-line text-emerald-400'
+}
+
+async function confirmCpuRtlSelection(): Promise<void> {
+  if (!selectedCpuRtlFiles.value.length || cpuSelectionConfirming.value) return
+  cpuSelectionConfirming.value = true
+  cpuSelectionMessage.value = ''
+  try {
+    await refreshValidation()
+    if (validationOk.value) {
+      cpuSelectionConfirmed.value = true
+      nextStep()
+      return
+    }
+    cpuSelectionConfirmed.value = false
+    cpuSelectionMessage.value = validationIssues.value.find((issue) => issue.severity === 'error')?.message
+      || 'The selected RTL files could not be validated.'
+  } finally {
+    cpuSelectionConfirming.value = false
   }
 }
 
@@ -1040,8 +1245,10 @@ const createProject = () => {
   emit('create', {
     ...config.value,
     designTool: 'frontend',
+    cpu_rtl_files: requiresCpuInput.value && cpuSourceMode.value === 'files' ? [...selectedCpuRtlFiles.value] : [],
     parameters: {
       ...config.value.parameters,
+      cpu_filelist: requiresCpuInput.value && cpuSourceMode.value === 'filelist' ? config.value.parameters.cpu_filelist : '',
       frontend_core_id: selectedCore.value.id,
       core_id: selectedCore.value.id,
       soc_harness_id: selectedSocHarness.value.id,
@@ -1344,6 +1551,333 @@ const ReviewItem = defineComponent({
   margin-top: 0.15rem;
   color: var(--text-secondary);
   font-size: 0.68rem;
+}
+
+.cpu-source-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: min(100%, 22rem);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 38%, transparent);
+  padding: 0.2rem;
+}
+
+.cpu-source-mode button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.55rem 0.7rem;
+  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.cpu-source-mode button.active {
+  background: var(--bg-primary);
+  color: var(--accent-color);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+}
+
+.cpu-source-browser {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr);
+  min-height: 19rem;
+  margin-top: 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 28%, transparent);
+}
+
+.cpu-source-actions {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  border-right: 1px solid var(--border-color);
+  padding: 1.15rem;
+}
+
+.cpu-source-icon {
+  display: flex;
+  width: 2.5rem;
+  height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent-color) 9%, transparent);
+  color: var(--accent-color);
+  font-size: 1.15rem;
+}
+
+.cpu-source-actions strong,
+.cpu-source-actions p {
+  display: block;
+}
+
+.cpu-source-actions > div:nth-child(2) {
+  margin-top: 0.85rem;
+}
+
+.cpu-source-actions > div:nth-child(2) strong {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.cpu-source-actions > div:nth-child(2) p {
+  margin-top: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.cpu-source-primary-action,
+.cpu-source-clear-action,
+.cpu-source-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  transition: border-color 0.18s ease, background-color 0.18s ease, opacity 0.18s ease;
+}
+
+.cpu-source-primary-action {
+  width: 100%;
+  margin-top: 1rem;
+  border: 1px solid var(--accent-color);
+  background: var(--accent-color);
+  color: white;
+  padding: 0.65rem 0.8rem;
+}
+
+.cpu-source-clear-action {
+  width: 100%;
+  margin-top: 0.45rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.55rem 0.8rem;
+}
+
+.cpu-source-clear-action:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.cpu-source-summary {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 0.7rem;
+  margin-top: auto;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.85rem;
+  font-size: 0.68rem;
+}
+
+.cpu-source-summary span {
+  color: var(--text-secondary);
+}
+
+.cpu-source-summary strong {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  text-align: right;
+}
+
+.cpu-source-selection {
+  display: flex;
+  min-width: 0;
+  min-height: 19rem;
+  flex-direction: column;
+}
+
+.cpu-source-selection-head,
+.cpu-source-selection-footer {
+  display: flex;
+  min-height: 3.7rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.8rem 1rem;
+}
+
+.cpu-source-selection-head {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.cpu-source-selection-head strong,
+.cpu-source-selection-head span {
+  display: block;
+}
+
+.cpu-source-selection-head strong {
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.cpu-source-selection-head div > span {
+  margin-top: 0.15rem;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+}
+
+.cpu-source-count {
+  display: flex !important;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  color: var(--accent-color) !important;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.cpu-source-empty {
+  display: flex;
+  min-height: 10rem;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: var(--text-secondary);
+  padding: 1rem;
+  text-align: center;
+}
+
+.cpu-source-empty i {
+  font-size: 1.55rem;
+  opacity: 0.7;
+}
+
+.cpu-source-empty span {
+  font-size: 0.72rem;
+}
+
+.cpu-source-file-list {
+  min-height: 0;
+  max-height: 13rem;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 0;
+}
+
+.cpu-source-file-row {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) 1.75rem;
+  min-height: 3rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.85rem;
+}
+
+.cpu-source-file-row:hover {
+  background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+}
+
+.cpu-source-file-row > i {
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+.cpu-source-file-row strong,
+.cpu-source-file-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cpu-source-file-row strong {
+  color: var(--text-primary);
+  font-size: 0.72rem;
+}
+
+.cpu-source-file-row span {
+  margin-top: 0.12rem;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+}
+
+.cpu-source-file-row button {
+  display: flex;
+  width: 1.7rem;
+  height: 1.7rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.cpu-source-file-row button:hover {
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  color: #ef4444;
+}
+
+.cpu-source-selection-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border-color);
+}
+
+.cpu-source-message {
+  min-width: 0;
+  overflow: hidden;
+  color: #ef4444;
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cpu-source-confirm {
+  flex: 0 0 auto;
+  border: 1px solid var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  color: var(--accent-color);
+  padding: 0.58rem 0.8rem;
+}
+
+.cpu-source-confirm:disabled {
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 767px) {
+  .cpu-source-browser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cpu-source-actions {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .cpu-source-summary {
+    margin-top: 1rem;
+  }
 }
 
 .cpu-top-contract {

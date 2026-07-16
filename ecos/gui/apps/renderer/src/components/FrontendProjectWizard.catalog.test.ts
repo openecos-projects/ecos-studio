@@ -34,4 +34,16 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).toContain('container.scrollTop + targetRect.top - containerRect.top - 12')
     expect(wizardSource).toContain('fixed ECOS SoC instantiates it directly')
   })
+
+  it('supports filelist and direct RTL selection without exposing the generated filelist', () => {
+    expect(wizardSource).toContain("type CpuSourceMode = 'filelist' | 'files'")
+    expect(wizardSource).toContain('Use filelist')
+    expect(wizardSource).toContain('Select RTL files')
+    expect(wizardSource).toContain('multiple: true')
+    expect(wizardSource).toContain("extensions: ['v', 'sv', 'vh', 'svh']")
+    expect(wizardSource).toContain('selectedCpuRtlFiles')
+    expect(wizardSource).toContain('Confirm selection')
+    expect(wizardSource).toContain('cpu_rtl_files:')
+    expect(wizardSource).not.toContain('.cpu_sources.f')
+  })
 })

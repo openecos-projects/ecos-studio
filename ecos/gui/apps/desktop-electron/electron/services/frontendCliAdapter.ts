@@ -293,6 +293,7 @@ function normalizeCreateData(data: Record<string, unknown>): Record<string, unkn
   return {
     ...data,
     cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist),
+    cpu_rtl_files: readOptionalStringList(data.cpu_rtl_files ?? data.cpuRtlFiles) ?? [],
     designTool: 'frontend',
     sim_all_tests: data.sim_all_tests ?? data.simAllTests ?? false,
     sim_build_all_programs: data.sim_build_all_programs ?? data.simBuildAllPrograms ?? false,
@@ -333,6 +334,7 @@ function normalizeFrontendCatalogConfigData(data: Record<string, unknown>): Reco
     ...data,
     core_id: readString(data.core_id) || readString(data.coreId) || readString(parameters.frontend_core_id) || readString(parameters.core_id),
     cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist) || readString(parameters.cpu_filelist),
+    cpu_rtl_files: readOptionalStringList(data.cpu_rtl_files ?? data.cpuRtlFiles) ?? [],
     soc_harness_id: readString(data.soc_harness_id) || readString(data.socHarnessId) || readString(data.soc_id) || readString(data.soc_variant) || readString(parameters.soc_harness_id) || readString(parameters.soc_variant),
     test_suite_id: readString(data.test_suite_id) || readString(data.testSuiteId) || readString(data.sim_test_suite) || readString(parameters.test_suite_id) || readString(parameters.sim_test_suite),
     toolchain_id: readString(data.toolchain_id) || readString(data.toolchainId) || readString(parameters.toolchain_id),

@@ -14168,3 +14168,81 @@ fatal error: driver/difftest.h: No such file or directory
 - 当前 shell 的 `PATH` 不包含 Slang/Yosys，因此完整 `test_engine_flow.py` 会在真实工具步骤提前停止；定向测试已隔离验证本轮逻辑。
 - 两个旧测试夹具仍使用空 CPU filelist，不符合当前固定 `cpu_top` 合同，需要后续单独更新夹具。
 - 受禁止启动 GUI 的项目约束，本轮只完成类型与自动化测试，没有进行实际窗口尺寸和交互截图验证；需要用户在现有 `pnpm run dev` 环境中检查五步页面的最终视觉布局。
+
+# 第 241 次 开发
+
+## 开发目标
+
+增强 ecc-fe 新建工程的 Verification Setup：保留现有 CPU filelist 输入，并增加直接多选 CPU RTL/头文件的方式。GUI 展示可维护的已选文件清单，确认后自动完成接口校验并进入 Review；ecc-fe 在校验时使用临时 filelist，在工程创建时生成用户无感知的持久隐藏 filelist。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace.py`
+  - `workspace create` 和 `validate-config` 支持重复 `--cpu-rtl` 及 JSON `cpu_rtl_files`。
+  - 校验 CPU RTL 文件存在性、扩展名、去重和 filelist/文件选择互斥关系。
+  - 兼容性校验期间生成临时 filelist，并从 GUI 响应中移除临时路径。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/cli/workspace_typer.py`
+  - 为 Typer create/validate 命令增加重复 `--cpu-rtl` 参数。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/data/workspace.py`
+  - `CreateWorkspaceData` 接收 CPU RTL 文件列表。
+  - 在工程 `origin/.cpu_sources.f` 生成持久隐藏 filelist，并保存为工程 CPU 输入。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/common/rtl_inputs.py`
+  - 增加确定性的隐藏 filelist 写入能力，使用绝对路径、路径去重和 shell quoting。
+  - 自动写入所选文件父目录的 `+incdir+`，支持常见头文件引用。
+- `/home/luyoung/ecos-studio/ecc-fe/fecompiler/tools/prepare/runner.py`
+  - 使用 `shlex` 解析 filelist，支持带空格的引用路径和自动生成的 include 目录。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_data_workspace.py`
+  - 覆盖隐藏 filelist、重复文件、路径空格、头文件和 include 目录生成。
+- `/home/luyoung/ecos-studio/ecc-fe/test/test_engine_flow.py`
+  - 覆盖选定 CPU RTL 文件后的 validate/create、临时路径隐藏、持久 filelist 和 CLI 帮助。
+- `/home/luyoung/ecos-studio/ecos/gui/packages/shared/src/types/workspace.ts`
+  - WorkspaceConfig 增加可选 `cpu_rtl_files`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/frontendCatalog.ts`
+  - 验证结果类型支持已选 CPU RTL 文件列表。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/workspace.ts`
+  - 创建工程 API 透传 `cpu_rtl_files`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/api/workspace.desktop-ipc.test.ts`
+  - 覆盖响应式工程配置中的 CPU RTL 文件序列化。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/composables/useWorkspace.ts`
+  - frontend 工程创建时把向导选择的 CPU RTL 文件交给桌面 CLI。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/composables/useWorkspace.test.ts`
+  - 覆盖 frontend 工程创建的 CPU RTL 文件转发。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.vue`
+  - Verification Setup 增加 `Use filelist`/`Select RTL files` 分段选择。
+  - RTL 模式使用原生多选窗口，支持 `.v/.sv/.vh/.svh`、追加、去重、移除和清空。
+  - 以响应式双栏布局显示操作区和已选文件清单；确认时校验 `cpu_top` 合同，成功后进入 Review。
+  - Review 只展示输入方式和文件数量，不暴露自动生成的隐藏 filelist。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/renderer/src/components/FrontendProjectWizard.catalog.test.ts`
+  - 覆盖两种输入方式、多选格式、确认流程及隐藏路径不进入 UI。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.ts`
+  - create/validate JSON 规范化时透传 `cpu_rtl_files`。
+- `/home/luyoung/ecos-studio/ecos/gui/apps/desktop-electron/electron/services/frontendCliAdapter.test.ts`
+  - 覆盖 create 和 validate 的 CPU RTL 文件 JSON 转发。
+- `/home/luyoung/ecos-studio/dev_log.md`
+  - 记录本次 CPU 文件直接选择与隐藏 filelist 功能。
+
+## 验证情况
+
+- ecc-fe workspace、catalog、CLI 定向回归共 36 项通过。
+- ecc-fe Python `py_compile` 通过。
+- 使用现有 Ruff 检查本次 Python 文件，在忽略 4 条既有基线项 `F841/F402/E741` 后通过；本次未新增 lint 问题。
+- renderer `vue-tsc --noEmit` 与 desktop-electron `tsc --noEmit` 均通过。
+- renderer 向导/API 5 项、workspace 转发 1 项、Electron adapter 9 项定向 Vitest 均通过。
+- 完整 `useWorkspace.test.ts` 运行时 40 项通过、1 项既有断言失败：测试期望 `loadWorkspaceApi('/work/demo')`，当前实现调用 `('/work/demo', undefined)`；与本次功能无关且已在此前开发日志记录。
+- 主仓和 ecc-fe `git diff --check` 均通过。
+
+## 未执行项
+
+- 按项目约束，未执行 `pnpm run dev`、GUI 启动、make、原生构建或 Electron 打包。
+- 已按用户要求提交 ecc-fe 子模块改动：`a8285fc`（`feat(workspace): generate filelist from selected CPU RTL`）；主仓 GUI 与子模块指针随本次开发一并提交。
+- 未执行 push、merge、rebase、reset 或 clean。
+
+## 已知后续风险
+
+- 生成的隐藏 filelist 使用用户所选源文件的绝对路径；工程创建后若用户移动或删除原始 RTL，后续步骤会按现有 filelist 语义报告输入缺失。
+- 当前使用系统原生多文件选择窗口，不递归导入整个目录；用户必须明确选择参与 CPU 设计的源文件和位于额外 include 目录中的头文件。
+- 受项目禁止启动 GUI 的约束，本轮没有进行实际窗口截图和交互验收；用户需要在现有开发会话中检查桌面/窄窗口布局和原生文件选择流程。

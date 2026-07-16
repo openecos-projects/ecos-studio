@@ -73,6 +73,7 @@ export interface FrontendValidationResult {
     toolchain_id: string
     test_suite_id: string
     cpu_filelist: string
+    cpu_rtl_files?: string[]
     core_cpu_filelist?: string
     cpu_adapter_filelist?: string
     core_capability?: string

@@ -35,6 +35,7 @@ export interface WorkspaceParameters {
 export interface WorkspaceConfig {
   directory: string
   designTool?: DesignTool
+  cpu_rtl_files?: string[]
   pdk: string
   pdk_root: string
   parameters: Partial<WorkspaceParameters> & Record<string, unknown>

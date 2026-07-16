@@ -32,6 +32,7 @@ export interface CreateWorkspaceRequest {
   cmd: CMDEnum.create_workspace;
   data: {
     cpu_filelist?: string,
+    cpu_rtl_files?: string[],
     designTool?: DesignTool,
     directory: string,
     filelist: string,
@@ -107,6 +108,7 @@ export function createWorkspaceApi(
     pdk_root?: string
     filelist?: string
     cpu_filelist?: string
+    cpu_rtl_files?: string[]
     soc_filelist?: string
     testbench?: string
     sim_cpp_sources?: string[]
@@ -140,6 +142,7 @@ export function createWorkspaceApi(
 ) {
   const data = toDesktopCliData({
     cpu_filelist: options.cpu_filelist || '',
+    cpu_rtl_files: options.cpu_rtl_files || [],
     designTool: options.designTool,
     directory: options?.directory || '',
     filelist: options.filelist || '',

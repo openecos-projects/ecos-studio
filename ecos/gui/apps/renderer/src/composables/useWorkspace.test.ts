@@ -1706,6 +1706,44 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
   })
 
+  it('forwards selected CPU RTL files when creating a frontend workspace', async () => {
+    const workspace = useWorkspace()
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/frontend-project',
+        workspace_id: 'workspace-frontend-project',
+      },
+      message: [],
+    })
+
+    await expect(workspace.newProject({
+      directory: '/work/frontend-project',
+      designTool: 'frontend',
+      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+      pdk: '',
+      pdk_root: '',
+      parameters: {
+        cpu_filelist: '',
+        design: 'frontend_project',
+        frontend_core_id: 'custom-filelist',
+        soc_harness_id: 'ysyx-am-soc',
+        test_suite_id: 'cpu-tests',
+        toolchain_id: 'riscv32-unknown-elf',
+        top_module: 'ecos_sim_top',
+      },
+      origin_def: '',
+      origin_verilog: '',
+      rtl_list: [],
+    })).resolves.toBe(true)
+
+    expect(createWorkspaceApiMock).toHaveBeenCalledWith(expect.objectContaining({
+      cpu_filelist: '',
+      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+      designTool: 'frontend',
+    }))
+  })
+
   it('does not invalidate resources for read-only runtime events', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }

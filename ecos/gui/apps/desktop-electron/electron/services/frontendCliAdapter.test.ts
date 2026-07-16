@@ -104,7 +104,8 @@ describe('FrontendCliAdapter', () => {
     })
 
     const createPromise = adapter.execute(request('create_workspace', {
-      core_id: 'serv',
+      core_id: 'custom-filelist',
+      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
       directory: '/work/test06221',
       parameters: {
         Design: 'test06221',
@@ -120,6 +121,7 @@ describe('FrontendCliAdapter', () => {
     const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
     expect(harness.calls[0].command).toBe('ecc-fe')
     expect(input.soc_harness_id).toBe('ysyx-am-soc')
+    expect(input.cpu_rtl_files).toEqual(['/rtl/cpu_top.sv', '/rtl/alu.v'])
     expect(input.soc_variant).toBe('soc1')
     expect(input.soc_filelist).toBe('')
     expect(input.sim_soc_root).toBe('')
@@ -136,6 +138,41 @@ describe('FrontendCliAdapter', () => {
 
     await expect(createPromise).resolves.toMatchObject({
       cmd: 'create_workspace',
+      ok: true,
+      response: 'success',
+    })
+  })
+
+  it('passes selected CPU RTL files to frontend catalog validation', async () => {
+    const tempDir = createTempDir()
+    const harness = createSpawnHarness()
+    const adapter = new FrontendCliAdapter({
+      env: createFrontendCliEnv(tempDir),
+      frontendRoot: '/repo/ecc-fe',
+      spawn: harness.spawn,
+      tempDir,
+    })
+
+    const validatePromise = adapter.execute(request('validate_frontend_config', {
+      core_id: 'custom-filelist',
+      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+      soc_harness_id: 'ysyx-am-soc',
+      test_suite_id: 'cpu-tests',
+      toolchain_id: 'riscv32-unknown-elf',
+    }), { emit: vi.fn() })
+
+    const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
+    expect(input.cpu_filelist).toBe('')
+    expect(input.cpu_rtl_files).toEqual(['/rtl/cpu_top.sv', '/rtl/alu.v'])
+
+    complete(harness.children[0], {
+      cmd: 'validate_frontend_config',
+      data: { ok: true },
+      message: ['valid'],
+      response: 'success',
+    })
+
+    await expect(validatePromise).resolves.toMatchObject({
       ok: true,
       response: 'success',
     })
