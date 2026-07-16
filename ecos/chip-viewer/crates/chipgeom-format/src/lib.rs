@@ -79,6 +79,8 @@ pub enum OwnerType {
     TrackGrid = 14,
     GCellGrid = 15,
     Obs = 16,
+    InstancePinPortShape = 17,
+    IoPinPortShape = 18,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +140,8 @@ impl OwnerType {
             14 => OwnerType::TrackGrid,
             15 => OwnerType::GCellGrid,
             16 => OwnerType::Obs,
+            17 => OwnerType::InstancePinPortShape,
+            18 => OwnerType::IoPinPortShape,
             _ => return None,
         })
     }

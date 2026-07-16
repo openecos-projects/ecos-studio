@@ -13,7 +13,7 @@ import {
 } from '@ecos-studio/shared'
 
 const BUILD_HINT =
-  'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build ecc-geometry-snapshot in ecc/chipcompiler/thirdparty/ecc-tools.'
+  'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build ecc-geometry-snapshot in ecc/chipcompiler/thirdparty/ecc-tools and the ECC CLI package.'
 const DB_CONFIG_RELATIVE_PATH = 'config/db_default_config.json'
 
 type FileExists = (path: string) => boolean
@@ -43,6 +43,7 @@ type SpawnProcess = (
 ) => { unref(): void }
 
 interface ChipViewerBinaries {
+  eccPath: string
   snapshotPath: string
   viewerPath: string
 }
@@ -77,10 +78,13 @@ export interface ChipViewerServiceOptions {
 }
 
 interface SnapshotInputs {
+  dbPath: string
   defPath: string
   editCommandDirectory: string
   editResultDirectory: string
+  gdsPath: string
   geometryDir: string
+  imagePath: string
   manifestPath: string
   workspaceStepDirectory: string
 }
@@ -215,7 +219,9 @@ function parseDbGeometryConfig(raw: string, path: string): DbGeometryConfig {
   }
 }
 
-function snapshotInputPaths(dbConfig: DbGeometryConfig): { label: string; path: string }[] {
+function snapshotInputPaths(
+  dbConfig: DbGeometryConfig,
+): { label: string; path: string }[] {
   return [
     { label: 'tech LEF', path: dbConfig.techLefPath },
     ...dbConfig.lefPaths.map((path) => ({ label: 'LEF', path })),
@@ -437,7 +443,10 @@ export class ChipViewerService {
       id: 'layout',
       step,
     })
+    const dbPath = readStringInfo(layoutInfo, 'db')
     const defPath = readStringInfo(layoutInfo, 'def')
+    const gdsPath = readStringInfo(layoutInfo, 'gds')
+    const imagePath = readStringInfo(layoutInfo, 'image')
     const stepLabel = layoutInfo.step || step
 
     if (layoutInfo.response === 'error') {
@@ -457,8 +466,26 @@ export class ChipViewerService {
     if (!defPath) {
       throw new Error(`Workspace step ${step} does not expose an output DEF.`)
     }
+    if (!dbPath) {
+      throw new Error(`Workspace step ${step} does not expose an output DB path.`)
+    }
+    if (!gdsPath) {
+      throw new Error(`Workspace step ${step} does not expose an output GDS path.`)
+    }
+    if (!imagePath) {
+      throw new Error(`Workspace step ${step} does not expose an output image path.`)
+    }
     if (!isPathInside(projectPath, defPath)) {
       throw new Error(`Workspace step DEF is outside the project path: ${defPath}`)
+    }
+    for (const [label, path] of [
+      ['DB', dbPath],
+      ['GDS', gdsPath],
+      ['image', imagePath],
+    ] as const) {
+      if (!isPathInside(projectPath, path)) {
+        throw new Error(`Workspace step ${label} is outside the project path: ${path}`)
+      }
     }
     if (!this.fileExists(defPath)) {
       throw new Error(`Workspace step DEF does not exist: ${defPath}`)
@@ -470,10 +497,13 @@ export class ChipViewerService {
     const editDirectory = join(geometryDir, 'edit')
 
     return {
+      dbPath,
       defPath,
       editCommandDirectory: join(editDirectory, 'commands'),
       editResultDirectory: join(editDirectory, 'results'),
+      gdsPath,
       geometryDir,
+      imagePath,
       manifestPath: join(geometryDir, 'geometry.manifest'),
       workspaceStepDirectory,
     }
@@ -508,6 +538,10 @@ export class ChipViewerService {
         editResultPath,
         '--write-def',
         snapshotInputs.defPath,
+        '--write-db',
+        snapshotInputs.dbPath,
+        '--write-gds',
+        snapshotInputs.gdsPath,
       )
     }
     return args
@@ -554,6 +588,7 @@ export class ChipViewerService {
     const temporaryResultPath = `${resultPath}.tmp`
 
     try {
+      const gdsModifiedTimeBefore = await this.getFileModifiedTime(snapshotInputs.gdsPath)
       await this.execFile(
         binaries.snapshotPath,
         this.snapshotArgs(
@@ -564,10 +599,62 @@ export class ChipViewerService {
           temporaryResultPath,
         ),
       )
+      try {
+        await this.refreshLayoutImageIfGdsChanged(
+          binaries,
+          snapshotInputs,
+          gdsModifiedTimeBefore,
+        )
+      } catch (imageError) {
+        await this.appendEditResultMessage(
+          temporaryResultPath,
+          `layout image refresh failed: ${
+            imageError instanceof Error ? imageError.message : String(imageError)
+          }`,
+        )
+      }
       await this.renameFile(temporaryResultPath, resultPath)
     } catch (error) {
       await this.writeRejectedEditResult(commandPath, temporaryResultPath, error)
       await this.renameFile(temporaryResultPath, resultPath)
+    }
+  }
+
+  private async refreshLayoutImageIfGdsChanged(
+    binaries: ChipViewerBinaries,
+    snapshotInputs: SnapshotInputs,
+    gdsModifiedTimeBefore: number | null,
+  ): Promise<void> {
+    const gdsModifiedTimeAfter = await this.getFileModifiedTime(snapshotInputs.gdsPath)
+    if (gdsModifiedTimeAfter === null || gdsModifiedTimeAfter === gdsModifiedTimeBefore) {
+      return
+    }
+
+    await this.ensureDirectory(dirname(snapshotInputs.imagePath))
+    await this.execFile(binaries.eccPath, [
+      'layout-image',
+      '--gds',
+      snapshotInputs.gdsPath,
+      '--image',
+      snapshotInputs.imagePath,
+    ])
+  }
+
+  private async appendEditResultMessage(
+    resultPath: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      const parsed: unknown = JSON.parse(await this.readTextFile(resultPath))
+      if (!isRecord(parsed)) {
+        return
+      }
+      const currentMessage =
+        typeof parsed.message === 'string' ? parsed.message.trim() : ''
+      parsed.message = currentMessage ? `${currentMessage}; ${message}` : message
+      await this.writeTextFile(resultPath, `${JSON.stringify(parsed, null, 2)}\n`)
+    } catch {
+      // Keep the accepted edit result publishable even if warning annotation fails.
     }
   }
 
@@ -632,6 +719,7 @@ export class ChipViewerService {
 
   private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
+    const eccPath = join(binaryDir, executableName('ecc', this.platform))
     const snapshotPath = join(
       binaryDir,
       executableName('ecc-geometry-snapshot', this.platform),
@@ -640,18 +728,18 @@ export class ChipViewerService {
       binaryDir,
       executableName('chip-viewer-native', this.platform),
     )
-    const runtimePayloadPaths = packagedRuntimePayloadPaths(
-      binaryDir,
-      this.platform,
-    )
+    const runtimePayloadPaths = packagedRuntimePayloadPaths(binaryDir, this.platform)
 
-    const missingPaths = [snapshotPath, viewerPath, ...runtimePayloadPaths].filter(
-      (path) => !this.fileExists(path),
-    )
+    const missingPaths = [
+      eccPath,
+      snapshotPath,
+      viewerPath,
+      ...runtimePayloadPaths,
+    ].filter((path) => !this.fileExists(path))
 
     if (missingPaths.length === 0) {
       return {
-        binaries: { snapshotPath, viewerPath },
+        binaries: { eccPath, snapshotPath, viewerPath },
         missingPaths: [],
       }
     }
@@ -663,11 +751,12 @@ export class ChipViewerService {
   }
 
   private resolvePathBinaries(): ChipViewerBinaries {
+    const eccPath = this.resolveCommandFromPath('ecc')
     const snapshotPath = this.resolveCommandFromPath('ecc-geometry-snapshot')
     const viewerPath = this.resolveCommandFromPath('chip-viewer-native')
 
-    if (snapshotPath && viewerPath) {
-      return { snapshotPath, viewerPath }
+    if (eccPath && snapshotPath && viewerPath) {
+      return { eccPath, snapshotPath, viewerPath }
     }
 
     throw new Error('Chip viewer binaries were not found on PATH.')
@@ -698,15 +787,21 @@ export class ChipViewerService {
       repoRoot,
       'ecos/scripts/ecc-geometry-snapshot-wrapper.sh',
     )
+    const eccWrapperPath = join(repoRoot, 'ecos/scripts/ecc-wrapper.sh')
     const viewerWrapperPath = join(repoRoot, 'ecos/scripts/chip-viewer-native-wrapper.sh')
 
-    if (!this.fileExists(snapshotWrapperPath) || !this.fileExists(viewerWrapperPath)) {
+    if (
+      !this.fileExists(eccWrapperPath) ||
+      !this.fileExists(snapshotWrapperPath) ||
+      !this.fileExists(viewerWrapperPath)
+    ) {
       throw new Error(
         `Chip viewer wrappers were not found under ${join(repoRoot, 'ecos/scripts')}. ${BUILD_HINT}`,
       )
     }
 
     return {
+      eccPath: eccWrapperPath,
       snapshotPath: snapshotWrapperPath,
       viewerPath: viewerWrapperPath,
     }

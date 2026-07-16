@@ -1296,6 +1296,8 @@ impl ChipViewDb {
             Some(OwnerType::SpecialWireSegment) => "special_wire_segment",
             Some(OwnerType::Via) => "via",
             Some(OwnerType::PinPortShape) => "pin_port_shape",
+            Some(OwnerType::InstancePinPortShape) => "instance_pin_port_shape",
+            Some(OwnerType::IoPinPortShape) => "io_pin_port_shape",
             Some(OwnerType::Blockage) => "blockage",
             Some(OwnerType::Fill) => "fill",
             Some(OwnerType::Region) => "region",
@@ -1827,6 +1829,14 @@ mod tests {
             "gcell_grid"
         );
         assert_eq!(ChipViewDb::owner_type_label(OwnerType::Obs as u8), "obs");
+        assert_eq!(
+            ChipViewDb::owner_type_label(OwnerType::InstancePinPortShape as u8),
+            "instance_pin_port_shape"
+        );
+        assert_eq!(
+            ChipViewDb::owner_type_label(OwnerType::IoPinPortShape as u8),
+            "io_pin_port_shape"
+        );
     }
 
     #[test]
@@ -2156,7 +2166,7 @@ mod tests {
                 ..OwnerRef::default()
             },
             OwnerRef {
-                owner_type: OwnerType::PinPortShape as u8,
+                owner_type: OwnerType::InstancePinPortShape as u8,
                 owner_id: 11,
                 ..OwnerRef::default()
             },
@@ -2194,7 +2204,7 @@ mod tests {
             &owners,
             [
                 (OwnerType::NetWireSegment as u8, 10, "data[0]".to_string()),
-                (OwnerType::PinPortShape as u8, 11, "A".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 11, "A".to_string()),
                 (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
                 (OwnerType::Region as u8, 30, "region0".to_string()),
             ],
@@ -2231,12 +2241,12 @@ mod tests {
                 ..OwnerRef::default()
             },
             OwnerRef {
-                owner_type: OwnerType::PinPortShape as u8,
+                owner_type: OwnerType::IoPinPortShape as u8,
                 owner_id: 11,
                 ..OwnerRef::default()
             },
             OwnerRef {
-                owner_type: OwnerType::PinPortShape as u8,
+                owner_type: OwnerType::InstancePinPortShape as u8,
                 owner_id: 12,
                 ..OwnerRef::default()
             },
@@ -2269,8 +2279,12 @@ mod tests {
             &owners,
             [
                 (OwnerType::NetWireSegment as u8, 10, "clk".to_string()),
-                (OwnerType::PinPortShape as u8, 11, "A".to_string()),
-                (OwnerType::PinPortShape as u8, 12, "u0/A".to_string()),
+                (OwnerType::IoPinPortShape as u8, 11, "A".to_string()),
+                (
+                    OwnerType::InstancePinPortShape as u8,
+                    12,
+                    "u0/A".to_string(),
+                ),
                 (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
             ],
         );

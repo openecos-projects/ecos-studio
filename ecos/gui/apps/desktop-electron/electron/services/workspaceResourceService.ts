@@ -387,7 +387,9 @@ export class WorkspaceResourceService {
     switch (id) {
       case 'layout':
         return stepInfo({
+          db: step.resources.output.db?.path,
           def: step.resources.output.def?.path,
+          gds: step.resources.output.gds?.path,
           image: step.resources.output.image?.path,
           json: step.resources.output.json?.path,
           viewJson: step.resources.output.viewJson?.path,

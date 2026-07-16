@@ -37,6 +37,7 @@ struct LoadedViewer {
     edit_enabled: bool,
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
+    query_input_mode: QueryInputMode,
     search_text: String,
     search_mode: SearchMode,
     shape_id_text: String,
@@ -58,6 +59,7 @@ struct LoadedViewer {
     pan_drag: PanDragState,
     object_visibility: ObjectVisibility,
     coordinate_unit: CoordinateUnit,
+    sidebar_info_panel: Option<SidebarInfoPanel>,
 }
 
 struct LayerUiState {
@@ -158,6 +160,18 @@ enum SearchMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueryInputMode {
+    Search,
+    ShapeId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SidebarInfoPanel {
+    Selection,
+    Diagnostics,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CoordinateUnit {
     Dbu,
     Micron,
@@ -171,7 +185,8 @@ struct ObjectVisibility {
     vias: bool,
     io_pin: bool,
     placement: bool,
-    routing_guides: bool,
+    tracks: bool,
+    gcells: bool,
     obstructions: bool,
     boundaries: bool,
     fill: bool,
@@ -187,7 +202,8 @@ impl Default for ObjectVisibility {
             vias: true,
             io_pin: true,
             placement: true,
-            routing_guides: true,
+            tracks: true,
+            gcells: true,
             obstructions: true,
             boundaries: true,
             fill: true,
@@ -204,7 +220,8 @@ enum DrawingCategory {
     Vias,
     IoPins,
     Placement,
-    RoutingGuides,
+    Tracks,
+    GCells,
     Obstructions,
     Boundaries,
     Fill,
@@ -212,14 +229,15 @@ enum DrawingCategory {
 }
 
 impl DrawingCategory {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::Instances,
         Self::Net,
         Self::Pdn,
         Self::Vias,
         Self::IoPins,
         Self::Placement,
-        Self::RoutingGuides,
+        Self::Tracks,
+        Self::GCells,
         Self::Obstructions,
         Self::Boundaries,
         Self::Fill,
@@ -234,7 +252,8 @@ impl DrawingCategory {
             Self::Vias => "Vias",
             Self::IoPins => "IO Pins",
             Self::Placement => "Rows",
-            Self::RoutingGuides => "Tracks / GCells",
+            Self::Tracks => "Tracks",
+            Self::GCells => "GCells",
             Self::Obstructions => "Obstructions",
             Self::Boundaries => "Die / Core",
             Self::Fill => "Fill",
@@ -245,7 +264,7 @@ impl DrawingCategory {
     fn tooltip(self) -> &'static str {
         match self {
             Self::Vias => "Via owners are drawn on their assigned physical layer.",
-            Self::Placement | Self::RoutingGuides | Self::Obstructions => {
+            Self::Placement | Self::Tracks | Self::GCells | Self::Obstructions => {
                 "Context geometry is shown after zooming in to keep the fitted route view readable."
             }
             _ => "Toggle this geometry category in the layout canvas.",
@@ -261,11 +280,15 @@ impl DrawingCategory {
             Self::Net => owner_type == OwnerType::NetWireSegment,
             Self::Pdn => owner_type == OwnerType::SpecialWireSegment,
             Self::Vias => owner_type == OwnerType::Via,
-            Self::IoPins => owner_type == OwnerType::PinPortShape,
+            Self::IoPins => matches!(
+                owner_type,
+                OwnerType::PinPortShape
+                    | OwnerType::InstancePinPortShape
+                    | OwnerType::IoPinPortShape
+            ),
             Self::Placement => owner_type == OwnerType::Row,
-            Self::RoutingGuides => {
-                matches!(owner_type, OwnerType::TrackGrid | OwnerType::GCellGrid)
-            }
+            Self::Tracks => owner_type == OwnerType::TrackGrid,
+            Self::GCells => owner_type == OwnerType::GCellGrid,
             Self::Obstructions => matches!(owner_type, OwnerType::Blockage | OwnerType::Obs),
             Self::Boundaries => matches!(owner_type, OwnerType::Die | OwnerType::Core),
             Self::Fill => owner_type == OwnerType::Fill,
@@ -299,7 +322,8 @@ impl ObjectVisibility {
             DrawingCategory::Vias => self.vias,
             DrawingCategory::IoPins => self.io_pin,
             DrawingCategory::Placement => self.placement,
-            DrawingCategory::RoutingGuides => self.routing_guides,
+            DrawingCategory::Tracks => self.tracks,
+            DrawingCategory::GCells => self.gcells,
             DrawingCategory::Obstructions => self.obstructions,
             DrawingCategory::Boundaries => self.boundaries,
             DrawingCategory::Fill => self.fill,
@@ -315,7 +339,8 @@ impl ObjectVisibility {
             DrawingCategory::Vias => self.vias = visible,
             DrawingCategory::IoPins => self.io_pin = visible,
             DrawingCategory::Placement => self.placement = visible,
-            DrawingCategory::RoutingGuides => self.routing_guides = visible,
+            DrawingCategory::Tracks => self.tracks = visible,
+            DrawingCategory::GCells => self.gcells = visible,
             DrawingCategory::Obstructions => self.obstructions = visible,
             DrawingCategory::Boundaries => self.boundaries = visible,
             DrawingCategory::Fill => self.fill = visible,
@@ -331,6 +356,15 @@ impl ObjectVisibility {
 }
 
 impl SearchMode {
+    const ALL: [Self; 6] = [
+        Self::All,
+        Self::Net,
+        Self::Instance,
+        Self::Pin,
+        Self::Bus,
+        Self::Group,
+    ];
+
     fn label(self) -> &'static str {
         match self {
             SearchMode::All => "All",
@@ -361,6 +395,22 @@ impl SearchMode {
             SearchMode::Pin => db.query_pin_name(name),
             SearchMode::Bus => db.query_bus_name(name),
             SearchMode::Group => db.query_group_name(name),
+        }
+    }
+}
+
+impl SidebarInfoPanel {
+    fn label(self) -> &'static str {
+        match self {
+            SidebarInfoPanel::Selection => "Selection",
+            SidebarInfoPanel::Diagnostics => "Diagnostics",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            SidebarInfoPanel::Selection => "⌖",
+            SidebarInfoPanel::Diagnostics => "ⓘ",
         }
     }
 }
@@ -468,6 +518,7 @@ impl LoadedViewer {
             edit_enabled,
             edit_command_dir,
             edit_result_dir,
+            query_input_mode: QueryInputMode::Search,
             search_text: String::new(),
             search_mode: SearchMode::All,
             shape_id_text: String::new(),
@@ -489,127 +540,79 @@ impl LoadedViewer {
             pan_drag: PanDragState::default(),
             object_visibility: ObjectVisibility::default(),
             coordinate_unit: CoordinateUnit::Dbu,
+            sidebar_info_panel: None,
         }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .id_salt("chip_viewer_operations_scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| self.sidebar_contents(ui));
+        self.sidebar_contents(ui);
     }
 
     fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.label(
-            egui::RichText::new("CHIP VIEWER")
-                .small()
-                .strong()
-                .color(ecos_accent()),
-        );
-        if let Some(design_name) = self.db.snapshot().manifest().design_name.as_deref() {
-            ui.heading(design_name);
-        } else {
-            ui.heading("Layout");
-        }
-        ui.label(
-            egui::RichText::new(self.db.snapshot().manifest().path.display().to_string())
-                .small()
-                .color(ecos_text_secondary()),
-        );
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label(metric_label("Shapes", self.stats.shape_count));
-            ui.label(metric_label("Owners", self.stats.owner_count));
-            ui.label(metric_label("Names", self.stats.name_count));
-        });
-        if let Some(bbox) = self.stats.bbox {
-            ui.label(
-                egui::RichText::new(format!(
-                    "Bounds  {}  {}  {}  {}",
-                    bbox.lx, bbox.ly, bbox.hx, bbox.hy
-                ))
-                .small()
-                .color(ecos_text_secondary()),
-            );
-        }
-        ui.separator();
+        let available_height = ui.available_height().max(360.0);
+        let available_width = ui.available_width();
+        let view_height = (available_height * 1.0 / 13.0).clamp(54.0, 78.0);
+        let query_height = (available_height * 2.0 / 13.0).clamp(136.0, 180.0);
+        let list_total_height = (available_height - view_height - query_height - 34.0).max(220.0);
+        let physical_height = (list_total_height * 0.5).clamp(120.0, 420.0);
+        let drawing_height = (list_total_height - physical_height).clamp(120.0, 420.0);
 
-        section_heading(ui, "INSPECT");
+        ui.add_space(4.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(available_width, view_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| self.sidebar_view_section(ui),
+        );
+        ui.separator();
+        ui.allocate_ui_with_layout(
+            egui::vec2(available_width, physical_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| self.sidebar_physical_layers_section(ui, physical_height),
+        );
+        ui.separator();
+        ui.allocate_ui_with_layout(
+            egui::vec2(available_width, drawing_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| self.sidebar_drawing_data_section(ui, drawing_height),
+        );
+        ui.separator();
+        ui.allocate_ui_with_layout(
+            egui::vec2(available_width, query_height),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| self.sidebar_interaction_section(ui, query_height),
+        );
+    }
+
+    fn sidebar_view_section(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label("Search");
-            let response = ui.text_edit_singleline(&mut self.search_text);
-            if response.changed() {
-                self.refresh_highlight();
-            }
-        });
-        ui.horizontal(|ui| {
-            for mode in [
-                SearchMode::All,
-                SearchMode::Net,
-                SearchMode::Instance,
-                SearchMode::Pin,
-                SearchMode::Bus,
-                SearchMode::Group,
-            ] {
-                if ui
-                    .selectable_value(&mut self.search_mode, mode, mode.label())
-                    .changed()
-                {
-                    self.refresh_highlight();
-                }
-            }
-        });
-        if !self.search_text.trim().is_empty() {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{} matches", self.highlighted.len()))
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-                if !self.highlighted.is_empty() && ui.button("Locate").clicked() {
-                    self.pending_focus =
-                        focus_target_for_shape_ids(&self.highlighted, |shape_id| {
-                            self.db
-                                .find_shape(shape_id)
-                                .filter(|shape| self.shape_is_visible(shape))
-                                .map(|shape| shape.bbox)
-                        });
-                }
-                if ui.button("Clear").clicked() {
-                    clear_search_state(&mut self.search_text, &mut self.highlighted);
+            section_heading(ui, "VIEW");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for panel in [SidebarInfoPanel::Diagnostics, SidebarInfoPanel::Selection] {
+                    let active = self.sidebar_info_panel == Some(panel);
+                    if ui
+                        .add_sized(
+                            egui::vec2(28.0, 26.0),
+                            egui::Button::new(egui::RichText::new(panel.icon()).size(17.0))
+                                .selected(active),
+                        )
+                        .on_hover_text(panel.label())
+                        .clicked()
+                    {
+                        self.sidebar_info_panel = if active { None } else { Some(panel) };
+                    }
                 }
             });
-        }
-
-        ui.horizontal(|ui| {
-            ui.label("Shape ID");
-            let response = ui.text_edit_singleline(&mut self.shape_id_text);
-            let submit =
-                response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-            if ui.button("Select").clicked() || submit {
-                self.select_shape_id_from_input();
-            }
         });
-        if let Some(status) = &self.last_query_status {
-            ui.label(
-                egui::RichText::new(status)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
-        }
-
-        ui.separator();
-        section_heading(ui, "VIEW");
         ui.horizontal(|ui| {
-            if ui.button("Fit").clicked() {
+            if ui.button("⛶").on_hover_text("Fit layout to view").clicked() {
                 self.zoom = 1.0;
                 self.pan = egui::Vec2::ZERO;
                 self.pan_drag.reset();
             }
             let can_reload = self.pending_edit.is_none() && self.draft.is_none();
             if ui
-                .add_enabled(can_reload, egui::Button::new("Reload"))
+                .add_enabled(can_reload, egui::Button::new("↻"))
+                .on_hover_text("Reload geometry snapshot")
                 .clicked()
             {
                 match self.reload_snapshot() {
@@ -621,9 +624,7 @@ impl LoadedViewer {
                     }
                 }
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Units");
+            ui.separator();
             let dbu_per_micron = self.db.snapshot().manifest().dbu_per_micron;
             for unit in [CoordinateUnit::Dbu, CoordinateUnit::Micron] {
                 ui.add_enabled_ui(unit.is_available(dbu_per_micron), |ui| {
@@ -631,54 +632,9 @@ impl LoadedViewer {
                 });
             }
         });
+    }
 
-        ui.separator();
-        section_heading(ui, "DRAWING DATA");
-        let mut object_visibility_changed = false;
-        ui.horizontal(|ui| {
-            if ui.small_button("All").clicked() {
-                self.object_visibility.set_all_visible(true);
-                object_visibility_changed = true;
-            }
-            if ui.small_button("None").clicked() {
-                self.object_visibility.set_all_visible(false);
-                object_visibility_changed = true;
-            }
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} / {} shapes",
-                    self.visible_object_shape_count(),
-                    self.stats.shape_count
-                ))
-                .small()
-                .color(ecos_text_secondary()),
-            );
-        });
-        for category in DrawingCategory::ALL {
-            let shape_count = self.drawing_category_shape_count(category);
-            let mut visible = self.object_visibility.is_category_visible(category);
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut visible, category.label())
-                    .on_hover_text(category.tooltip());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(shape_count.to_string())
-                            .small()
-                            .color(ecos_text_secondary()),
-                    );
-                });
-            });
-            if visible != self.object_visibility.is_category_visible(category) {
-                self.object_visibility
-                    .set_category_visible(category, visible);
-                object_visibility_changed = true;
-            }
-        }
-        if object_visibility_changed {
-            self.apply_object_visibility();
-        }
-
-        ui.separator();
+    fn sidebar_physical_layers_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
         section_heading(ui, "PHYSICAL LAYERS");
         ui.horizontal(|ui| {
             if ui.small_button("All").clicked() {
@@ -714,8 +670,9 @@ impl LoadedViewer {
             );
         }
         let mut layer_visibility_changed = false;
+        let scroll_height = (max_height - 54.0).max(72.0);
         egui::ScrollArea::vertical()
-            .max_height(240.0)
+            .max_height(scroll_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for layer in &mut self.layers {
@@ -739,79 +696,67 @@ impl LoadedViewer {
         if layer_visibility_changed {
             self.apply_object_visibility();
         }
+    }
 
-        if let Some(shape_id) = self.selected {
-            ui.separator();
-            section_heading(ui, "SELECTION");
-            if let Some(shape) = self.db.find_shape(shape_id) {
-                let owner = self.db.owner_for_shape(shape);
-                let owner_name = owner.and_then(|owner| self.db.owner_name(owner));
-                let owner_local_name = owner.and_then(|owner| self.db.owner_local_name(owner));
-                for line in selection_detail_lines(shape, owner, owner_name, owner_local_name) {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .small()
-                            .color(ecos_text_secondary()),
-                    );
-                }
-                for line in edit_capability_lines(shape, owner, self.edit_enabled) {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .small()
-                            .color(ecos_text_secondary()),
-                    );
-                }
-                let endpoints = selection_connectivity_endpoints(&self.db, owner, owner_name);
-                let endpoint_header_lines = selection_connectivity_header_lines(&endpoints);
-                let endpoint_rows = endpoints
-                    .iter()
-                    .take(MAX_SELECTION_ENDPOINT_LINES)
-                    .map(|endpoint| {
-                        (
-                            selection_connectivity_endpoint_line(endpoint),
-                            endpoint_focus_targets(endpoint),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let endpoint_omitted_line = selection_connectivity_omitted_line(&endpoints);
-                for line in endpoint_header_lines {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .small()
-                            .color(ecos_text_secondary()),
-                    );
-                }
-                for (line, targets) in endpoint_rows {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            egui::RichText::new(line)
-                                .small()
-                                .color(ecos_text_secondary()),
-                        );
-                        for target in targets {
-                            if ui
-                                .small_button(target.mode.label())
-                                .on_hover_text(target.name.as_str())
-                                .clicked()
-                            {
-                                self.focus_endpoint_target(target);
-                            }
-                        }
-                    });
-                }
-                if let Some(line) = endpoint_omitted_line {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .small()
-                            .color(ecos_text_secondary()),
-                    );
-                }
+    fn sidebar_drawing_data_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
+        section_heading(ui, "DRAWING DATA");
+        let mut object_visibility_changed = false;
+        ui.horizontal(|ui| {
+            if ui.small_button("All").clicked() {
+                self.object_visibility.set_all_visible(true);
+                object_visibility_changed = true;
             }
+            if ui.small_button("None").clicked() {
+                self.object_visibility.set_all_visible(false);
+                object_visibility_changed = true;
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {} shapes",
+                    self.visible_object_shape_count(),
+                    self.stats.shape_count
+                ))
+                .small()
+                .color(ecos_text_secondary()),
+            );
+        });
+        let scroll_height = (max_height - 48.0).max(72.0);
+        egui::ScrollArea::vertical()
+            .id_salt("chip_viewer_drawing_data_scroll")
+            .max_height(scroll_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for category in DrawingCategory::ALL {
+                    let shape_count = self.drawing_category_shape_count(category);
+                    let mut visible = self.object_visibility.is_category_visible(category);
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut visible, category.label())
+                            .on_hover_text(category.tooltip());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(shape_count.to_string())
+                                    .small()
+                                    .color(ecos_text_secondary()),
+                            );
+                        });
+                    });
+                    if visible != self.object_visibility.is_category_visible(category) {
+                        self.object_visibility
+                            .set_category_visible(category, visible);
+                        object_visibility_changed = true;
+                    }
+                }
+            });
+        if object_visibility_changed {
+            self.apply_object_visibility();
         }
+    }
 
+    fn sidebar_interaction_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
+        section_heading(ui, "QUERY");
+        self.query_input_ui(ui, (max_height - 22.0).max(112.0));
         if self.edit_enabled {
-            ui.separator();
-            section_heading(ui, "EDIT");
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.edit_tool, EditTool::Move, "Move");
                 ui.selectable_value(&mut self.edit_tool, EditTool::Resize, "Resize");
@@ -834,45 +779,282 @@ impl LoadedViewer {
                 );
             }
         }
+    }
 
-        ui.separator();
-        egui::CollapsingHeader::new("Diagnostics").show(ui, |ui| {
-            for line in design_metadata_lines(self.db.snapshot().manifest()) {
+    fn query_input_ui(&mut self, ui: &mut egui::Ui, height: f32) {
+        egui::Frame::NONE
+            .fill(ecos_canvas())
+            .stroke(egui::Stroke::new(1.0, ecos_border()))
+            .corner_radius(14)
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_min_height(height);
+                ui.set_max_height(height);
+                ui.vertical(|ui| {
+                    let input_height = (height - 46.0).max(42.0);
+                    match self.query_input_mode {
+                        QueryInputMode::Search => self.search_input_ui(ui, input_height),
+                        QueryInputMode::ShapeId => self.shape_id_input_ui(ui, input_height),
+                    }
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                        ui.horizontal(|ui| {
+                            self.query_mode_picker(ui);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if self.query_send_button(ui).clicked() {
+                                        self.submit_query();
+                                    }
+                                },
+                            );
+                        });
+                    });
+                });
+            });
+    }
+
+    fn query_mode_picker(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_id_salt("chip_viewer_query_input_mode")
+            .selected_text(match self.query_input_mode {
+                QueryInputMode::Search => format!("⌕ {}", self.search_mode.label()),
+                QueryInputMode::ShapeId => "# Shape ID".to_string(),
+            })
+            .width(98.0)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_value(
+                        &mut self.query_input_mode,
+                        QueryInputMode::ShapeId,
+                        "# Shape ID",
+                    )
+                    .changed()
+                {
+                    self.last_query_status = None;
+                }
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("Search")
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+                for mode in SearchMode::ALL {
+                    let changed = ui
+                        .selectable_label(
+                            self.query_input_mode == QueryInputMode::Search
+                                && self.search_mode == mode,
+                            mode.label(),
+                        )
+                        .clicked();
+                    if changed {
+                        self.query_input_mode = QueryInputMode::Search;
+                        self.search_mode = mode;
+                        self.refresh_highlight();
+                    }
+                }
+            });
+    }
+
+    fn query_send_button(&self, ui: &mut egui::Ui) -> egui::Response {
+        let icon = match self.query_input_mode {
+            QueryInputMode::Search => "⌕",
+            QueryInputMode::ShapeId => "➤",
+        };
+        ui.add_sized(
+            egui::vec2(34.0, 34.0),
+            egui::Button::new(egui::RichText::new(icon).size(19.0).strong()),
+        )
+        .on_hover_text(match self.query_input_mode {
+            QueryInputMode::Search => "Search and locate",
+            QueryInputMode::ShapeId => "Select shape id",
+        })
+    }
+
+    fn submit_query(&mut self) {
+        match self.query_input_mode {
+            QueryInputMode::Search => {
+                self.refresh_highlight();
+                self.focus_highlighted_shapes();
+            }
+            QueryInputMode::ShapeId => self.select_shape_id_from_input(),
+        }
+    }
+
+    fn search_input_ui(&mut self, ui: &mut egui::Ui, input_height: f32) {
+        let response = ui.add_sized(
+            egui::vec2(ui.available_width(), input_height),
+            egui::TextEdit::multiline(&mut self.search_text)
+                .hint_text("Search name, net, instance, pin, bus, group")
+                .desired_rows(2)
+                .frame(false),
+        );
+        if response.changed() {
+            self.search_text = single_line_query_text(&self.search_text);
+            self.refresh_highlight();
+        }
+        let submit = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if submit {
+            self.submit_query();
+        }
+        if !self.search_text.trim().is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} matches", self.highlighted.len()))
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+                if ui.small_button("Locate").clicked() {
+                    self.focus_highlighted_shapes();
+                }
+                if ui.small_button("Clear").clicked() {
+                    clear_search_state(&mut self.search_text, &mut self.highlighted);
+                }
+            });
+        }
+    }
+
+    fn shape_id_input_ui(&mut self, ui: &mut egui::Ui, input_height: f32) {
+        let response = ui.add_sized(
+            egui::vec2(ui.available_width(), input_height),
+            egui::TextEdit::multiline(&mut self.shape_id_text)
+                .hint_text("Input shape id")
+                .desired_rows(2)
+                .frame(false),
+        );
+        if response.changed() {
+            self.shape_id_text = single_line_query_text(&self.shape_id_text);
+        }
+        let submit = response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if submit {
+            self.submit_query();
+        }
+        if let Some(status) = &self.last_query_status {
+            ui.label(
+                egui::RichText::new(status)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+    }
+
+    fn selection_panel(&mut self, ui: &mut egui::Ui) {
+        section_heading(ui, "SELECTION");
+        let Some(shape_id) = self.selected else {
+            ui.label(
+                egui::RichText::new("No shape selected")
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+            return;
+        };
+        let Some(shape) = self.db.find_shape(shape_id) else {
+            ui.label(
+                egui::RichText::new("Selected shape is no longer available")
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+            return;
+        };
+        let owner = self.db.owner_for_shape(shape);
+        let owner_name = owner.and_then(|owner| self.db.owner_name(owner));
+        let owner_local_name = owner.and_then(|owner| self.db.owner_local_name(owner));
+        for line in selection_detail_lines(shape, owner, owner_name, owner_local_name) {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+        for line in edit_capability_lines(shape, owner, self.edit_enabled) {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+        let endpoints = selection_connectivity_endpoints(&self.db, owner, owner_name);
+        let endpoint_header_lines = selection_connectivity_header_lines(&endpoints);
+        let endpoint_rows = endpoints
+            .iter()
+            .take(MAX_SELECTION_ENDPOINT_LINES)
+            .map(|endpoint| {
+                (
+                    selection_connectivity_endpoint_line(endpoint),
+                    endpoint_focus_targets(endpoint),
+                )
+            })
+            .collect::<Vec<_>>();
+        let endpoint_omitted_line = selection_connectivity_omitted_line(&endpoints);
+        for line in endpoint_header_lines {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+        for (line, targets) in endpoint_rows {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(
                     egui::RichText::new(line)
                         .small()
                         .color(ecos_text_secondary()),
                 );
-            }
-            for line in semantic_metadata_lines(
-                self.db.site_metadata().len(),
-                self.db.master_metadata().len(),
-                self.db.via_metadata().len(),
-                self.db.grid_metadata().len(),
-                self.db.connectivity_metadata().len(),
-                self.db.bus_metadata().len(),
-                self.db.group_metadata().len(),
-            ) {
-                ui.label(
-                    egui::RichText::new(line)
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-            }
-            for line in diagnostics_lines(
-                &self.db.memory_stats(),
-                &self.db.delta_stats(),
-                self.db.view_tile_count(),
-                self.render_cache.stats(),
-                self.view_tile_cache.stats(),
-            ) {
-                ui.label(
-                    egui::RichText::new(line)
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-            }
-        });
+                for target in targets {
+                    if ui
+                        .small_button(target.mode.label())
+                        .on_hover_text(target.name.as_str())
+                        .clicked()
+                    {
+                        self.focus_endpoint_target(target);
+                    }
+                }
+            });
+        }
+        if let Some(line) = endpoint_omitted_line {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+    }
+
+    fn diagnostics_panel(&mut self, ui: &mut egui::Ui) {
+        section_heading(ui, "DIAGNOSTICS");
+        for line in design_metadata_lines(self.db.snapshot().manifest()) {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+        for line in semantic_metadata_lines(
+            self.db.site_metadata().len(),
+            self.db.master_metadata().len(),
+            self.db.via_metadata().len(),
+            self.db.grid_metadata().len(),
+            self.db.connectivity_metadata().len(),
+            self.db.bus_metadata().len(),
+            self.db.group_metadata().len(),
+        ) {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
+        for line in diagnostics_lines(
+            &self.db.memory_stats(),
+            &self.db.delta_stats(),
+            self.db.view_tile_count(),
+            self.render_cache.stats(),
+            self.view_tile_cache.stats(),
+        ) {
+            ui.label(
+                egui::RichText::new(line)
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+        }
     }
 
     fn canvas(&mut self, ui: &mut egui::Ui) {
@@ -985,10 +1167,12 @@ impl LoadedViewer {
                 .interact_pointer_pos()
                 .and_then(|pos| self.pick_shape_at(pos, world, canvas, &query_layer_ids));
         }
-        if self.pan_drag.mode() == Some(CanvasDragMode::Pan) && response.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if response.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        if let Some(cursor_icon) = canvas_cursor_icon(
+            response.hovered(),
+            self.pan_drag.mode() == Some(CanvasDragMode::Pan)
+                && (response.drag_started() || response.dragged()),
+        ) {
+            ui.ctx().set_cursor_icon(cursor_icon);
         }
         let mut drawn = 0usize;
         let use_view_tiles = self.should_use_view_tiles(viewport, world);
@@ -1009,6 +1193,7 @@ impl LoadedViewer {
             })
         };
         let overlay_shape_ids = overlay_shape_ids(self.selected, &self.highlighted);
+        let mut label_overlays = Vec::new();
 
         if use_view_tiles {
             for (layer_id, style) in &visible_layers {
@@ -1050,16 +1235,22 @@ impl LoadedViewer {
                     continue;
                 };
                 let style = style_for_shape(*style, owner);
+                let geometry = self.db.shape_geometry(shape);
                 if paint_styled_shape_geometry(
-                    &painter,
-                    self.db.shape_geometry(shape),
-                    world,
-                    canvas,
-                    self.zoom,
-                    self.pan,
-                    &style,
+                    &painter, geometry, world, canvas, self.zoom, self.pan, &style,
                 ) {
                     drawn += 1;
+                    if let Some(label) = shape_label_overlay(
+                        geometry,
+                        owner,
+                        owner.and_then(|owner| self.db.owner_name(owner)),
+                        world,
+                        canvas,
+                        self.zoom,
+                        self.pan,
+                    ) {
+                        label_overlays.push(label);
+                    }
                 }
             }
         }
@@ -1074,6 +1265,10 @@ impl LoadedViewer {
             self.zoom,
             self.pan,
         );
+
+        for label in &label_overlays {
+            paint_shape_label_overlay(&painter, label, canvas);
+        }
 
         for shape_id in &overlay_shape_ids {
             let Some(shape) = self.db.find_shape(*shape_id) else {
@@ -1090,14 +1285,8 @@ impl LoadedViewer {
             }
             let geometry = self.db.shape_geometry(shape);
             if self.highlighted.contains(shape_id) {
-                paint_shape_overlay(
-                    &painter,
-                    geometry,
-                    world,
-                    canvas,
-                    self.zoom,
-                    self.pan,
-                    egui::Stroke::new(2.0, ecos_warning()),
+                paint_search_highlight_overlay(
+                    &painter, geometry, world, canvas, self.zoom, self.pan,
                 );
             }
             if self.selected == Some(*shape_id) {
@@ -1161,6 +1350,59 @@ impl LoadedViewer {
                 ecos_text_secondary(),
             );
         }
+        self.canvas_info_overlay(ui, canvas);
+    }
+
+    fn canvas_info_overlay(&mut self, ui: &mut egui::Ui, canvas: egui::Rect) {
+        let Some(panel) = self.sidebar_info_panel else {
+            return;
+        };
+
+        let ctx = ui.ctx().clone();
+        let popup_width = (canvas.width() * 0.32)
+            .clamp(320.0, 430.0)
+            .min((canvas.width() - 24.0).max(180.0));
+        let popup_height = (canvas.height() * 0.34)
+            .clamp(220.0, 310.0)
+            .min((canvas.height() - 24.0).max(160.0));
+        let popup_pos = egui::pos2(
+            (canvas.right() - popup_width - 12.0).max(canvas.left() + 12.0),
+            (canvas.bottom() - popup_height - 12.0).max(canvas.top() + 12.0),
+        );
+
+        egui::Area::new(egui::Id::new("chip_viewer_canvas_info_popup"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(popup_pos)
+            .show(&ctx, |ui| {
+                ui.set_width(popup_width);
+                egui::Frame::NONE
+                    .fill(ecos_panel())
+                    .stroke(egui::Stroke::new(1.0, ecos_border()))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(popup_width - 20.0, popup_height - 20.0));
+                        ui.horizontal(|ui| {
+                            section_heading(ui, panel.label());
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.small_button("×").on_hover_text("Hide panel").clicked() {
+                                        self.sidebar_info_panel = None;
+                                    }
+                                },
+                            );
+                        });
+                        egui::ScrollArea::vertical()
+                            .id_salt("chip_viewer_canvas_info_popup_scroll")
+                            .max_height(popup_height - 56.0)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| match panel {
+                                SidebarInfoPanel::Selection => self.selection_panel(ui),
+                                SidebarInfoPanel::Diagnostics => self.diagnostics_panel(ui),
+                            });
+                    });
+            });
     }
 
     fn should_use_view_tiles(&self, viewport: Rect32, world: Rect32) -> bool {
@@ -1409,6 +1651,18 @@ impl LoadedViewer {
         };
     }
 
+    fn focus_highlighted_shapes(&mut self) {
+        if self.highlighted.is_empty() {
+            return;
+        }
+        self.pending_focus = focus_target_for_shape_ids(&self.highlighted, |shape_id| {
+            self.db
+                .find_shape(shape_id)
+                .filter(|shape| self.shape_is_visible(shape))
+                .map(|shape| shape.bbox)
+        });
+    }
+
     fn focus_endpoint_target(&mut self, target: EndpointFocusTarget) {
         self.search_mode = target.mode;
         self.search_text = target.name;
@@ -1634,10 +1888,16 @@ fn section_heading(ui: &mut egui::Ui, label: &str) {
     );
 }
 
-fn metric_label(label: &str, value: usize) -> egui::RichText {
-    egui::RichText::new(format!("{label} {value}"))
-        .small()
-        .color(ecos_text_secondary())
+fn single_line_query_text(text: &str) -> String {
+    text.chars()
+        .map(|value| {
+            if value == '\n' || value == '\r' {
+                ' '
+            } else {
+                value
+            }
+        })
+        .collect()
 }
 
 fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
@@ -1646,84 +1906,71 @@ fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(style.rgba[0], style.rgba[1], style.rgba[2], alpha)
 }
 
-fn style_for_shape(mut style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
+fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
     match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
         Some(OwnerType::Die | OwnerType::Core) => context_style(style, 170, 2),
-        Some(OwnerType::Row) => context_style_with_frame(style, [104, 120, 132], 46, 1),
-        Some(OwnerType::TrackGrid) => context_style_with_frame(style, [64, 196, 184], 82, 1),
-        Some(OwnerType::GCellGrid) => context_style_with_frame(style, [228, 176, 72], 104, 2),
-        Some(OwnerType::Obs) => {
-            owner_style(style, [184, 92, 112], 52, 190, FillPattern::CrossHatch, 1)
+        Some(OwnerType::Row) => context_style(style, 46, 1),
+        Some(OwnerType::TrackGrid) => context_style(style, 82, 1),
+        Some(OwnerType::GCellGrid) => context_style(style, 104, 2),
+        Some(OwnerType::Obs) => owner_texture_style(style, 52, 190, FillPattern::CrossHatch, 1),
+        Some(OwnerType::Via) => owner_texture_style(style, 48, 220, FillPattern::XMark, 1),
+        Some(OwnerType::PinPortShape | OwnerType::InstancePinPortShape) => {
+            owner_texture_style(style, 64, 215, FillPattern::Grid, 2)
         }
-        Some(OwnerType::Via) => {
-            owner_style(style, [255, 232, 128], 58, 194, FillPattern::DenseDots, 1)
-        }
-        Some(OwnerType::PinPortShape) => {
-            owner_style(style, [92, 232, 190], 64, 215, FillPattern::Grid, 2)
-        }
+        Some(OwnerType::IoPinPortShape) => io_pin_texture_style(style),
         Some(OwnerType::NetWireSegment) => {
-            style.fill_alpha = style.fill_alpha.max(56);
-            style.rgba[3] = style.rgba[3].max(style.fill_alpha);
-            style.frame_alpha = style.frame_alpha.max(210);
-            style.frame_rgba[3] = style.frame_rgba[3].max(style.frame_alpha);
-            style.fill_pattern = FillPattern::DiagonalHatch;
-            style
+            let fill_alpha = style.fill_alpha.max(56);
+            let frame_alpha = style.frame_alpha.max(210);
+            let line_width_px = style.line_width_px;
+            owner_texture_style(
+                style,
+                fill_alpha,
+                frame_alpha,
+                FillPattern::DiagonalHatch,
+                line_width_px,
+            )
         }
         Some(OwnerType::SpecialWireSegment) => {
-            owner_style(style, [255, 196, 84], 76, 235, FillPattern::CrossHatch, 2)
+            owner_texture_style(style, 76, 235, FillPattern::Grid, 2)
         }
-        Some(OwnerType::InstanceBBox) => {
-            owner_style(style, [150, 132, 255], 72, 225, FillPattern::Grid, 2)
+        Some(OwnerType::InstanceBBox) => solid_owner_texture_style(style, 64, 172, 1),
+        Some(OwnerType::InstanceHalo) => {
+            owner_texture_style(style, 38, 156, FillPattern::HorizontalHatch, 1)
         }
-        Some(OwnerType::InstanceHalo) => owner_style(
-            style,
-            [176, 155, 255],
-            38,
-            156,
-            FillPattern::HorizontalHatch,
-            1,
-        ),
         Some(OwnerType::Blockage) => {
-            owner_style(style, [224, 88, 120], 66, 220, FillPattern::CrossHatch, 1)
+            owner_texture_style(style, 66, 220, FillPattern::CrossHatch, 1)
         }
-        Some(OwnerType::Fill) => {
-            owner_style(style, [126, 208, 142], 42, 150, FillPattern::SparseDots, 1)
+        Some(OwnerType::Fill) => owner_texture_style(style, 42, 150, FillPattern::SparseDots, 1),
+        Some(OwnerType::Region) => {
+            owner_texture_style(style, 36, 180, FillPattern::VerticalHatch, 1)
         }
-        Some(OwnerType::Region) => owner_style(
-            style,
-            [104, 156, 255],
-            36,
-            180,
-            FillPattern::VerticalHatch,
-            1,
-        ),
-        Some(OwnerType::Slot) => owner_style(
-            style,
-            [255, 148, 92],
-            48,
-            190,
-            FillPattern::HorizontalHatch,
-            1,
-        ),
+        Some(OwnerType::Slot) => {
+            owner_texture_style(style, 48, 190, FillPattern::HorizontalHatch, 1)
+        }
         _ => style,
     }
 }
 
-fn owner_style(
+fn io_pin_texture_style(mut style: LayerStyle) -> LayerStyle {
+    style.rgba = [245, 190, 32, 104];
+    style.frame_rgba = [255, 222, 89, 232];
+    style.fill_alpha = style.rgba[3];
+    style.frame_alpha = style.frame_rgba[3];
+    style.fill_pattern = FillPattern::CrossHatch;
+    style.line_width_px = 2;
+    style
+}
+
+fn owner_texture_style(
     mut style: LayerStyle,
-    rgb: [u8; 3],
     fill_alpha: u8,
     frame_alpha: u8,
     fill_pattern: FillPattern,
     line_width_px: u8,
 ) -> LayerStyle {
+    let rgb = layer_style_rgb(style);
     style.rgba = [rgb[0], rgb[1], rgb[2], fill_alpha];
-    style.frame_rgba = [
-        brighten_channel(rgb[0], 0.38),
-        brighten_channel(rgb[1], 0.38),
-        brighten_channel(rgb[2], 0.38),
-        frame_alpha,
-    ];
+    style.frame_rgba = [rgb[0], rgb[1], rgb[2], frame_alpha];
     style.fill_alpha = fill_alpha;
     style.frame_alpha = frame_alpha;
     style.fill_pattern = fill_pattern;
@@ -1731,30 +1978,35 @@ fn owner_style(
     style
 }
 
-fn brighten_channel(channel: u8, amount: f32) -> u8 {
-    (channel as f32 + (255.0 - channel as f32) * amount)
-        .round()
-        .clamp(0.0, 255.0) as u8
-}
-
-fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> LayerStyle {
-    style.rgba[3] = 0;
-    style.fill_alpha = 0;
-    style.fill_pattern = FillPattern::Hollow;
-    style.frame_rgba[3] = frame_alpha;
+fn solid_owner_texture_style(
+    mut style: LayerStyle,
+    fill_alpha: u8,
+    frame_alpha: u8,
+    line_width_px: u8,
+) -> LayerStyle {
+    let rgb = layer_style_rgb(style);
+    style.rgba = [rgb[0], rgb[1], rgb[2], fill_alpha];
+    style.frame_rgba = [rgb[0], rgb[1], rgb[2], frame_alpha];
+    style.fill_alpha = fill_alpha;
     style.frame_alpha = frame_alpha;
+    style.fill_pattern = FillPattern::Solid;
     style.line_width_px = line_width_px;
     style
 }
 
-fn context_style_with_frame(
-    mut style: LayerStyle,
-    frame_rgb: [u8; 3],
-    frame_alpha: u8,
-    line_width_px: u8,
-) -> LayerStyle {
-    style.frame_rgba = [frame_rgb[0], frame_rgb[1], frame_rgb[2], frame_alpha];
-    context_style(style, frame_alpha, line_width_px)
+fn layer_style_rgb(style: LayerStyle) -> [u8; 3] {
+    [style.rgba[0], style.rgba[1], style.rgba[2]]
+}
+
+fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> LayerStyle {
+    let rgb = layer_style_rgb(style);
+    style.rgba[3] = 0;
+    style.fill_alpha = 0;
+    style.fill_pattern = FillPattern::Hollow;
+    style.frame_rgba = [rgb[0], rgb[1], rgb[2], frame_alpha];
+    style.frame_alpha = frame_alpha;
+    style.line_width_px = line_width_px;
+    style
 }
 
 fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec<LayerUiState> {
@@ -1808,6 +2060,19 @@ enum ScreenShapePrimitive {
         center: egui::Pos2,
         radius: f32,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShapeLabelKind {
+    IoPin,
+    Instance,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ShapeLabelOverlay {
+    rect: egui::Rect,
+    text: String,
+    kind: ShapeLabelKind,
 }
 
 fn paint_styled_shape_geometry(
@@ -1881,6 +2146,17 @@ fn paint_styled_rect(
         FillPattern::Grid if can_pattern => {
             draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Horizontal);
             draw_axis_hatch(painter, visible_rect, fill_color, HatchAxis::Vertical);
+        }
+        FillPattern::XMark => {
+            painter.rect_filled(visible_rect, 0.0, fill_color);
+            if visible_rect.width() >= 6.0 && visible_rect.height() >= 6.0 {
+                draw_x_mark(
+                    painter,
+                    visible_rect,
+                    color32(style.frame_rgba),
+                    style.line_width_px.max(1) as f32,
+                );
+            }
         }
         _ => {}
     }
@@ -1966,6 +2242,114 @@ fn draw_axis_hatch(
         offset += 10.0;
     }
     count
+}
+
+fn draw_x_mark(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32, width: f32) {
+    let inset = 1.5_f32.min(rect.width() * 0.2).min(rect.height() * 0.2);
+    let rect = rect.shrink(inset);
+    if !rect.is_positive() {
+        return;
+    }
+    let stroke = egui::Stroke::new(width, color);
+    painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
+    painter.line_segment([rect.left_bottom(), rect.right_top()], stroke);
+}
+
+fn shape_label_overlay(
+    geometry: ShapeGeometry,
+    owner: Option<&OwnerRef>,
+    owner_name: Option<&str>,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> Option<ShapeLabelOverlay> {
+    let owner = owner?;
+    let owner_type = OwnerType::from_raw(owner.owner_type)?;
+    let text = owner_name?.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    let kind = match owner_type {
+        OwnerType::IoPinPortShape => ShapeLabelKind::IoPin,
+        OwnerType::PinPortShape if owner.path0 == 0 => ShapeLabelKind::IoPin,
+        OwnerType::InstanceBBox => ShapeLabelKind::Instance,
+        _ => return None,
+    };
+
+    let ShapeGeometry::Rect(rect) = geometry else {
+        return None;
+    };
+    let screen_rect = shape_screen_rect(rect, world, canvas, zoom, pan);
+    if !screen_rect.is_positive() || !screen_rect.intersects(canvas) {
+        return None;
+    }
+    Some(ShapeLabelOverlay {
+        rect: screen_rect,
+        text: text.to_string(),
+        kind,
+    })
+}
+
+fn paint_shape_label_overlay(
+    painter: &egui::Painter,
+    overlay: &ShapeLabelOverlay,
+    canvas: egui::Rect,
+) -> bool {
+    let rect = overlay.rect.intersect(canvas);
+    if !rect.is_positive() {
+        return false;
+    }
+
+    let (min_size, max_size, color) = match overlay.kind {
+        ShapeLabelKind::IoPin => (
+            7.0,
+            12.0,
+            egui::Color32::from_rgba_unmultiplied(42, 32, 8, 210),
+        ),
+        ShapeLabelKind::Instance => (
+            8.0,
+            18.0,
+            egui::Color32::from_rgba_unmultiplied(235, 238, 242, 110),
+        ),
+    };
+
+    let Some(font_size) = centered_label_font_size(rect, &overlay.text, min_size, max_size) else {
+        return false;
+    };
+
+    let clipped = painter.with_clip_rect(rect.shrink(1.0));
+    clipped.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        &overlay.text,
+        egui::FontId::proportional(font_size),
+        color,
+    );
+    true
+}
+
+fn centered_label_font_size(
+    rect: egui::Rect,
+    text: &str,
+    min_size: f32,
+    max_size: f32,
+) -> Option<f32> {
+    if text.trim().is_empty() || !rect.is_positive() {
+        return None;
+    }
+    let available_width = (rect.width() - 4.0).max(0.0);
+    let available_height = (rect.height() - 2.0).max(0.0);
+    if available_width < min_size * 2.0 || available_height < min_size {
+        return None;
+    }
+
+    let char_count = text.chars().count().max(1) as f32;
+    let width_fit = available_width / (char_count * 0.58);
+    let height_fit = available_height * 0.58;
+    let size = width_fit.min(height_fit).min(max_size);
+    (size >= min_size).then_some(size)
 }
 
 fn draw_hatch_direction(
@@ -2064,6 +2448,43 @@ fn paint_shape_overlay(
     true
 }
 
+fn search_highlight_outer_stroke() -> egui::Stroke {
+    egui::Stroke::new(4.0, egui::Color32::from_rgb(255, 64, 192))
+}
+
+fn search_highlight_inner_stroke() -> egui::Stroke {
+    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 248, 210))
+}
+
+fn paint_search_highlight_overlay(
+    painter: &egui::Painter,
+    geometry: ShapeGeometry,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> bool {
+    let outer = paint_shape_overlay(
+        painter,
+        geometry,
+        world,
+        canvas,
+        zoom,
+        pan,
+        search_highlight_outer_stroke(),
+    );
+    let inner = paint_shape_overlay(
+        painter,
+        geometry,
+        world,
+        canvas,
+        zoom,
+        pan,
+        search_highlight_inner_stroke(),
+    );
+    outer || inner
+}
+
 fn paint_parameterized_grid_overlay(
     painter: &egui::Painter,
     grids: &[GridMetadata],
@@ -2083,7 +2504,7 @@ fn paint_parameterized_grid_overlay(
         let Some(owner_type) = grid_owner_type(grid) else {
             continue;
         };
-        let stroke = parameterized_grid_stroke(owner_type);
+        let stroke = parameterized_grid_stroke(grid, layers, owner_type);
         for index in grid_visible_indices(grid, viewport) {
             let coordinate = saturating_i64_to_i32(grid_coordinate_at_index(grid, index));
             let (begin, end) = match grid.direction.trim().to_ascii_lowercase().as_str() {
@@ -2157,7 +2578,28 @@ fn grid_layer_filter_is_visible(grid: &GridMetadata, layers: &[LayerUiState]) ->
     })
 }
 
-fn parameterized_grid_stroke(owner_type: OwnerType) -> egui::Stroke {
+fn parameterized_grid_stroke(
+    grid: &GridMetadata,
+    layers: &[LayerUiState],
+    owner_type: OwnerType,
+) -> egui::Stroke {
+    if let Some(style) = grid_layer_style(grid, layers) {
+        let (width, alpha) = match owner_type {
+            OwnerType::TrackGrid => (1.0, 82),
+            OwnerType::GCellGrid => (2.0, 104),
+            _ => (1.0, style.frame_alpha),
+        };
+        return egui::Stroke::new(
+            width,
+            egui::Color32::from_rgba_unmultiplied(
+                style.rgba[0],
+                style.rgba[1],
+                style.rgba[2],
+                alpha,
+            ),
+        );
+    }
+
     match owner_type {
         OwnerType::TrackGrid => {
             egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 196, 184, 82))
@@ -2168,6 +2610,15 @@ fn parameterized_grid_stroke(owner_type: OwnerType) -> egui::Stroke {
         ),
         _ => egui::Stroke::new(1.0, ecos_text_secondary()),
     }
+}
+
+fn grid_layer_style<'a>(grid: &GridMetadata, layers: &'a [LayerUiState]) -> Option<&'a LayerStyle> {
+    grid.layer_names.iter().find_map(|name| {
+        layers
+            .iter()
+            .find(|layer| layer.visible && layer.name.as_str() == name.as_str())
+            .map(|layer| &layer.style)
+    })
 }
 
 fn grid_visible_indices(grid: &GridMetadata, viewport: Rect32) -> Vec<u32> {
@@ -2848,6 +3299,16 @@ fn canvas_status_line(
     line
 }
 
+fn canvas_cursor_icon(hovered: bool, pan_active: bool) -> Option<egui::CursorIcon> {
+    if pan_active {
+        Some(egui::CursorIcon::Move)
+    } else if hovered {
+        Some(egui::CursorIcon::Grab)
+    } else {
+        None
+    }
+}
+
 fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
     match tool {
         EditTool::Move => matches!(
@@ -2857,6 +3318,7 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
                     | OwnerType::NetWireSegment
                     | OwnerType::SpecialWireSegment
                     | OwnerType::PinPortShape
+                    | OwnerType::IoPinPortShape
                     | OwnerType::Blockage
                     | OwnerType::Fill
                     | OwnerType::Region
@@ -2869,6 +3331,7 @@ fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
                 OwnerType::NetWireSegment
                     | OwnerType::SpecialWireSegment
                     | OwnerType::PinPortShape
+                    | OwnerType::IoPinPortShape
                     | OwnerType::Blockage
                     | OwnerType::Fill
                     | OwnerType::Region
@@ -3167,7 +3630,9 @@ fn selection_connectivity_endpoints<'a>(
         Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo) => {
             db.connectivity_for_instance(owner_name)
         }
-        Some(OwnerType::PinPortShape) => db.connectivity_for_pin(owner_name),
+        Some(
+            OwnerType::PinPortShape | OwnerType::InstancePinPortShape | OwnerType::IoPinPortShape,
+        ) => db.connectivity_for_pin(owner_name),
         _ => db.connectivity_for_net(owner_name),
     }
 }
@@ -3963,6 +4428,20 @@ mod tests {
     }
 
     #[test]
+    fn canvas_cursor_icon_uses_hand_at_rest_and_move_while_panning() {
+        assert_eq!(canvas_cursor_icon(false, false), None);
+        assert_eq!(
+            canvas_cursor_icon(true, false),
+            Some(egui::CursorIcon::Grab)
+        );
+        assert_eq!(canvas_cursor_icon(true, true), Some(egui::CursorIcon::Move));
+        assert_eq!(
+            canvas_cursor_icon(false, true),
+            Some(egui::CursorIcon::Move)
+        );
+    }
+
+    #[test]
     fn edit_mode_keeps_precise_shapes_at_far_zoom() {
         let world = chipgeom_format::Rect32 {
             lx: 0,
@@ -4054,6 +4533,18 @@ mod tests {
             overlay_shape_ids(Some(30), &highlighted),
             BTreeSet::from([10, 20, 30])
         );
+    }
+
+    #[test]
+    fn search_highlight_uses_distinct_double_border() {
+        let outer = search_highlight_outer_stroke();
+        let inner = search_highlight_inner_stroke();
+
+        assert!(outer.width > inner.width);
+        assert_eq!(outer.color, egui::Color32::from_rgb(255, 64, 192));
+        assert_eq!(inner.color, egui::Color32::from_rgb(255, 248, 210));
+        assert_ne!(outer.color, ecos_warning());
+        assert_ne!(outer.color, ecos_accent());
     }
 
     #[test]
@@ -4600,6 +5091,8 @@ mod tests {
         assert!(!visibility.includes_owner_type(OwnerType::NetWireSegment as u8));
         assert!(visibility.includes_owner_type(OwnerType::SpecialWireSegment as u8));
         assert!(visibility.includes_owner_type(OwnerType::PinPortShape as u8));
+        assert!(visibility.includes_owner_type(OwnerType::InstancePinPortShape as u8));
+        assert!(visibility.includes_owner_type(OwnerType::IoPinPortShape as u8));
         assert!(visibility.includes_owner_type(OwnerType::TrackGrid as u8));
         assert!(!visibility.is_all_visible());
     }
@@ -4608,7 +5101,8 @@ mod tests {
     fn extended_drawing_categories_control_vias_and_context_geometry() {
         let mut visibility = ObjectVisibility::default();
         visibility.set_category_visible(DrawingCategory::Vias, false);
-        visibility.set_category_visible(DrawingCategory::RoutingGuides, false);
+        visibility.set_category_visible(DrawingCategory::Tracks, false);
+        visibility.set_category_visible(DrawingCategory::GCells, false);
         visibility.set_category_visible(DrawingCategory::Obstructions, false);
 
         assert!(!visibility.includes_owner_type(OwnerType::Via as u8));
@@ -4628,6 +5122,8 @@ mod tests {
             OwnerType::SpecialWireSegment,
             OwnerType::Via,
             OwnerType::PinPortShape,
+            OwnerType::InstancePinPortShape,
+            OwnerType::IoPinPortShape,
             OwnerType::Row,
             OwnerType::TrackGrid,
             OwnerType::GCellGrid,
@@ -4646,8 +5142,12 @@ mod tests {
     }
 
     #[test]
-    fn owner_styles_use_distinct_textures_for_layout_and_route_categories() {
+    fn owner_styles_preserve_layer_color_and_use_distinct_textures() {
         let base = LayerStyle::default_for_metadata(7, "MET1", 0);
+        let assert_layer_color = |style: LayerStyle| {
+            assert_eq!(&style.rgba[..3], &base.rgba[..3]);
+            assert_eq!(&style.frame_rgba[..3], &base.rgba[..3]);
+        };
         let track = OwnerRef {
             owner_type: OwnerType::TrackGrid as u8,
             ..OwnerRef::default()
@@ -4672,34 +5172,121 @@ mod tests {
             owner_type: OwnerType::PinPortShape as u8,
             ..OwnerRef::default()
         };
+        let instance_pin = OwnerRef {
+            owner_type: OwnerType::InstancePinPortShape as u8,
+            ..OwnerRef::default()
+        };
+        let io_pin = OwnerRef {
+            owner_type: OwnerType::IoPinPortShape as u8,
+            ..OwnerRef::default()
+        };
 
         let track_style = style_for_shape(base, Some(&track));
+        assert_layer_color(track_style);
         assert_eq!(track_style.fill_pattern, FillPattern::Hollow);
         assert_eq!(track_style.fill_alpha, 0);
-        assert_eq!(track_style.frame_rgba, [64, 196, 184, 82]);
         assert_eq!(track_style.frame_alpha, 82);
         assert_eq!(track_style.line_width_px, 1);
 
         let gcell_style = style_for_shape(base, Some(&gcell));
+        assert_layer_color(gcell_style);
         assert_eq!(gcell_style.fill_pattern, FillPattern::Hollow);
-        assert_eq!(gcell_style.frame_rgba, [228, 176, 72, 104]);
         assert_eq!(gcell_style.line_width_px, 2);
 
         let instance_style = style_for_shape(base, Some(&instance));
-        assert_eq!(instance_style.fill_pattern, FillPattern::Grid);
-        assert_eq!(instance_style.fill_alpha, 72);
+        assert_layer_color(instance_style);
+        assert_eq!(instance_style.fill_pattern, FillPattern::Solid);
+        assert_eq!(instance_style.fill_alpha, 64);
+        assert_eq!(instance_style.frame_alpha, 172);
+        assert_eq!(instance_style.line_width_px, 1);
 
         let net_style = style_for_shape(base, Some(&net));
+        assert_layer_color(net_style);
         assert_eq!(net_style.fill_pattern, FillPattern::DiagonalHatch);
         assert!(net_style.fill_alpha >= 56);
 
         let pdn_style = style_for_shape(base, Some(&pdn));
-        assert_eq!(pdn_style.fill_pattern, FillPattern::CrossHatch);
+        assert_layer_color(pdn_style);
+        assert_eq!(pdn_style.fill_pattern, FillPattern::Grid);
         assert_eq!(pdn_style.line_width_px, 2);
 
         let pin_style = style_for_shape(base, Some(&pin));
+        assert_layer_color(pin_style);
         assert_eq!(pin_style.fill_pattern, FillPattern::Grid);
         assert_eq!(pin_style.line_width_px, 2);
+
+        let instance_pin_style = style_for_shape(base, Some(&instance_pin));
+        assert_layer_color(instance_pin_style);
+        assert_eq!(instance_pin_style.fill_pattern, FillPattern::Grid);
+        assert_eq!(instance_pin_style.line_width_px, 2);
+
+        let io_pin_style = style_for_shape(base, Some(&io_pin));
+        assert_eq!(&io_pin_style.rgba[..3], &[245, 190, 32]);
+        assert_eq!(&io_pin_style.frame_rgba[..3], &[255, 222, 89]);
+        assert_eq!(io_pin_style.fill_pattern, FillPattern::CrossHatch);
+        assert_eq!(io_pin_style.line_width_px, 2);
+
+        let via = OwnerRef {
+            owner_type: OwnerType::Via as u8,
+            ..OwnerRef::default()
+        };
+        let via_style = style_for_shape(base, Some(&via));
+        assert_layer_color(via_style);
+        assert_eq!(via_style.fill_pattern, FillPattern::XMark);
+        assert_eq!(via_style.line_width_px, 1);
+    }
+
+    #[test]
+    fn shape_label_overlays_fit_centered_names_inside_rectangles() {
+        let world = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 1000,
+            hy: 1000,
+        };
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 1000.0));
+        let geometry = ShapeGeometry::Rect(Rect32 {
+            lx: 100,
+            ly: 100,
+            hx: 300,
+            hy: 220,
+        });
+
+        let io_owner = OwnerRef {
+            owner_type: OwnerType::IoPinPortShape as u8,
+            ..OwnerRef::default()
+        };
+        let io_overlay = shape_label_overlay(
+            geometry,
+            Some(&io_owner),
+            Some("IO_PAD"),
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        )
+        .expect("io pin label overlay");
+        assert_eq!(io_overlay.kind, ShapeLabelKind::IoPin);
+        assert!(centered_label_font_size(io_overlay.rect, &io_overlay.text, 7.0, 12.0).is_some());
+
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        let instance_overlay = shape_label_overlay(
+            geometry,
+            Some(&instance_owner),
+            Some("macro_pad_0"),
+            world,
+            canvas,
+            1.0,
+            egui::Vec2::ZERO,
+        )
+        .expect("instance label overlay");
+        assert_eq!(instance_overlay.kind, ShapeLabelKind::Instance);
+
+        let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(10.0, 5.0));
+        assert!(centered_label_font_size(tiny, "too_long", 8.0, 18.0).is_none());
     }
 
     #[test]
@@ -4726,6 +5313,10 @@ mod tests {
             OwnerType::SpecialWireSegment
         )));
         assert!(owner_uses_layer_visibility(Some(OwnerType::PinPortShape)));
+        assert!(owner_uses_layer_visibility(Some(
+            OwnerType::InstancePinPortShape
+        )));
+        assert!(owner_uses_layer_visibility(Some(OwnerType::IoPinPortShape)));
         assert!(owner_uses_layer_visibility(Some(OwnerType::Via)));
         assert!(owner_uses_layer_visibility(None));
     }
@@ -4844,13 +5435,41 @@ mod tests {
         ));
 
         let mut hidden_guides = ObjectVisibility::default();
-        hidden_guides.set_category_visible(DrawingCategory::RoutingGuides, false);
+        hidden_guides.set_category_visible(DrawingCategory::Tracks, false);
         assert!(!parameterized_grid_is_visible(
             &grid,
             &layers,
             hidden_guides,
             2.0
         ));
+    }
+
+    #[test]
+    fn parameterized_grid_stroke_uses_linked_layer_color() {
+        let mut layers = vec![layer_state(1, true), layer_state(2, true)];
+        layers[0].name = "M1".to_string();
+        layers[0].style.rgba = [17, 34, 51, 44];
+        layers[1].name = "M2".to_string();
+        layers[1].style.rgba = [90, 80, 70, 44];
+        let grid = GridMetadata {
+            grid_type: "track".to_string(),
+            layer_names: vec!["M2".to_string()],
+            ..GridMetadata::default()
+        };
+
+        let track_stroke = parameterized_grid_stroke(&grid, &layers, OwnerType::TrackGrid);
+        assert_eq!(track_stroke.width, 1.0);
+        assert_eq!(
+            track_stroke.color,
+            egui::Color32::from_rgba_unmultiplied(90, 80, 70, 82)
+        );
+
+        let gcell_stroke = parameterized_grid_stroke(&grid, &layers, OwnerType::GCellGrid);
+        assert_eq!(gcell_stroke.width, 2.0);
+        assert_eq!(
+            gcell_stroke.color,
+            egui::Color32::from_rgba_unmultiplied(90, 80, 70, 104)
+        );
     }
 
     #[test]
@@ -5155,6 +5774,22 @@ mod tests {
         ));
         assert!(edit_tool_is_allowed(
             chipgeom_format::OwnerType::PinPortShape as u8,
+            EditTool::Resize
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::IoPinPortShape as u8,
+            EditTool::Move
+        ));
+        assert!(edit_tool_is_allowed(
+            chipgeom_format::OwnerType::IoPinPortShape as u8,
+            EditTool::Resize
+        ));
+        assert!(!edit_tool_is_allowed(
+            chipgeom_format::OwnerType::InstancePinPortShape as u8,
+            EditTool::Move
+        ));
+        assert!(!edit_tool_is_allowed(
+            chipgeom_format::OwnerType::InstancePinPortShape as u8,
             EditTool::Resize
         ));
         assert!(!edit_tool_is_allowed(

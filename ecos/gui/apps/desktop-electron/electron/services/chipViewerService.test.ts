@@ -13,6 +13,9 @@ const PROJECT_ROOT = '/project'
 const STEP_NAME = 'Floorplan'
 const STEP_DIRECTORY = join(PROJECT_ROOT, 'Floorplan_ecc')
 const DEF_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.def.gz')
+const DB_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan_db')
+const GDS_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.gds')
+const IMAGE_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.png')
 const GEOMETRY_DIR = join(STEP_DIRECTORY, 'output', 'geometry')
 const GEOMETRY_MANIFEST = join(GEOMETRY_DIR, 'geometry.manifest')
 const EDIT_COMMAND_DIR = join(GEOMETRY_DIR, 'edit', 'commands')
@@ -34,6 +37,7 @@ function dbConfig() {
 function devChipViewerPaths() {
   return {
     cargoManifest: join(REPO_ROOT, 'ecos/chip-viewer/Cargo.toml'),
+    ecc: join(REPO_ROOT, 'ecos/scripts/ecc-wrapper.sh'),
     snapshot: join(REPO_ROOT, 'ecos/scripts/ecc-geometry-snapshot-wrapper.sh'),
     viewer: join(REPO_ROOT, 'ecos/scripts/chip-viewer-native-wrapper.sh'),
   }
@@ -46,6 +50,7 @@ function createService(options: {
   execFile?: (file: string, args: string[]) => Promise<ExecFileResult>
   existingPaths?: string[]
   files?: Record<string, string>
+  getFileModifiedTime?: (path: string) => Promise<number | null>
   includeDefaultDefPath?: boolean
   includeDefaultGeometryInputPaths?: boolean
   isPackaged?: boolean
@@ -54,11 +59,13 @@ function createService(options: {
   stepInfoResult?: WorkspaceStepInfoResult
 }) {
   const files = new Map(Object.entries(options.files ?? {}))
+  const devPaths = devChipViewerPaths()
   const existingPaths = new Set([
     ...(options.includeDefaultDefPath === false ? [] : [DEF_PATH]),
     ...(options.includeDefaultGeometryInputPaths === false
       ? []
       : [TECH_LEF, LEF_A, LEF_B]),
+    ...(options.isPackaged ? [] : [devPaths.ecc]),
     ...(options.existingPaths ?? []),
     ...files.keys(),
   ])
@@ -89,7 +96,10 @@ function createService(options: {
       const result: WorkspaceStepInfoResult = options.stepInfoResult ?? {
         id: request.id,
         info: {
+          db: DB_PATH,
           def: DEF_PATH,
+          gds: GDS_PATH,
+          image: IMAGE_PATH,
         },
         message: [],
         missing: [],
@@ -106,11 +116,13 @@ function createService(options: {
     ensureDirectory,
     execFile,
     fileExists: (path) => existingPaths.has(path),
-    getFileModifiedTime: async (path) => {
-      const modifiedTime = modifiedTimes.get(path)
-      if (modifiedTime !== undefined) return modifiedTime
-      return existingPaths.has(path) ? 100 : null
-    },
+    getFileModifiedTime:
+      options.getFileModifiedTime ??
+      (async (path) => {
+        const modifiedTime = modifiedTimes.get(path)
+        if (modifiedTime !== undefined) return modifiedTime
+        return existingPaths.has(path) ? 100 : null
+      }),
     isPackaged: options.isPackaged ?? false,
     platform: 'linux',
     readTextFile: async (path) => {
@@ -403,11 +415,64 @@ describe('ChipViewerService', () => {
         join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
         '--write-def',
         DEF_PATH,
+        '--write-db',
+        DB_PATH,
+        '--write-gds',
+        GDS_PATH,
       ])
       expect(renameFile).toHaveBeenCalledWith(
         join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
         join(EDIT_RESULT_DIR, 'result-42.json'),
       )
+    })
+  })
+
+  it('refreshes the layout image after apply-edit rewrites the step GDS', async () => {
+    const devBinaries = devChipViewerPaths()
+    let gdsStatCount = 0
+    const execFile = vi.fn(async () => ({
+      stderr: '',
+      stdout: '',
+    }))
+    const { ensureDirectory, service, watchDirectory } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        GDS_PATH,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      getFileModifiedTime: async (path) => {
+        if (path === GDS_PATH) {
+          gdsStatCount += 1
+          return gdsStatCount === 1 ? 100 : 200
+        }
+        return path === GEOMETRY_MANIFEST ? 100 : null
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+
+    editListener?.('command-42.json')
+
+    await vi.waitFor(() => {
+      expect(ensureDirectory).toHaveBeenCalledWith(join(STEP_DIRECTORY, 'output'))
+      expect(execFile).toHaveBeenCalledWith(devBinaries.ecc, [
+        'layout-image',
+        '--gds',
+        GDS_PATH,
+        '--image',
+        IMAGE_PATH,
+      ])
     })
   })
 
@@ -714,12 +779,13 @@ describe('ChipViewerService', () => {
   it('launches packaged chip viewer binaries from electron resources', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
+    const ecc = join(binaryDir, 'ecc')
     const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
     const eccToolsLibDir = join(eccToolsPackageDir, 'lib')
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [snapshot, viewer, eccToolsPackageDir, eccToolsLibDir],
+      existingPaths: [ecc, snapshot, viewer, eccToolsPackageDir, eccToolsLibDir],
       files: {
         [DB_CONFIG_PATH]: dbConfig(),
       },
@@ -760,6 +826,7 @@ describe('ChipViewerService', () => {
   it('reports missing packaged ecc-tools runtime payload before launching the viewer', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
+    const ecc = join(binaryDir, 'ecc')
     const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
@@ -768,7 +835,7 @@ describe('ChipViewerService', () => {
       env: {
         PATH: '',
       },
-      existingPaths: [snapshot, viewer, eccToolsPackageDir],
+      existingPaths: [ecc, snapshot, viewer, eccToolsPackageDir],
       files: {
         [DB_CONFIG_PATH]: dbConfig(),
       },
@@ -791,6 +858,7 @@ describe('ChipViewerService', () => {
   it('reports missing packaged chip viewer binaries before PATH fallback details', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
+    const ecc = join(binaryDir, 'ecc')
     const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const { service } = createService({
@@ -812,7 +880,7 @@ describe('ChipViewerService', () => {
         step: STEP_NAME,
       }),
     ).rejects.toThrow(
-      `Packaged chip viewer binaries are incomplete. Missing: ${snapshot}, ${viewer}`,
+      `Packaged chip viewer binaries are incomplete. Missing: ${ecc}, ${snapshot}, ${viewer}`,
     )
   })
 })

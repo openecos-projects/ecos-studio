@@ -98,6 +98,9 @@ describe('development wrappers', () => {
     const chipUnref = vi.fn()
     const chipSpawnProcess = vi.fn(() => ({ unref: chipUnref }))
     const chipDefPath = '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz'
+    const chipDbPath = '/project/Floorplan_ecc/output/gcd_Floorplan_db'
+    const chipGdsPath = '/project/Floorplan_ecc/output/gcd_Floorplan.gds'
+    const chipImagePath = '/project/Floorplan_ecc/output/gcd_Floorplan.png'
     const chipManifestPath = '/project/Floorplan_ecc/output/geometry/geometry.manifest'
     const chipDbConfigPath = '/project/config/db_default_config.json'
     const chipTechLefPath = '/pdk/tech.lef'
@@ -125,7 +128,10 @@ describe('development wrappers', () => {
         resolveStepInfo: async (request) => ({
           id: request.id,
           info: {
+            db: chipDbPath,
             def: chipDefPath,
+            gds: chipGdsPath,
+            image: chipImagePath,
           },
           message: [],
           missing: [],
@@ -147,12 +153,7 @@ describe('development wrappers', () => {
     )
     expect(chipSpawnProcess).toHaveBeenCalledWith(
       chipViewerWrapperPath,
-      [
-        '--manifest',
-        chipManifestPath,
-        '--mode',
-        'view',
-      ],
+      ['--manifest', chipManifestPath, '--mode', 'view'],
       expect.objectContaining({
         detached: true,
         stdio: 'ignore',

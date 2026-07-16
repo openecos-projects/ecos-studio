@@ -11,6 +11,7 @@ pub enum FillPattern {
     HorizontalHatch,
     VerticalHatch,
     Grid,
+    XMark,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
