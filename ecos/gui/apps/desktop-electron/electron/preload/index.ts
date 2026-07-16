@@ -5,7 +5,6 @@ import {
 } from '../../../../packages/shared/src/constants/ipcChannels.ts'
 import type {
   DesktopApi,
-  DesktopCliCommandEvent,
   DesignRuntimeEvent,
   DesktopDirectoryDialogOptions,
   EccRuntimeEvent,
@@ -295,17 +294,6 @@ const desktopApi: DesktopApi = {
         desktopApiEventChannels.resourcesProgress,
         (_event, payload: unknown) => {
           listener(payload as ResourceJob)
-        },
-      ),
-  },
-  cli: {
-    execute: (request) => invokeDesktop(desktopApiIpcChannels.cliExecute, request),
-    cancel: (jobId) => invokeDesktop(desktopApiIpcChannels.cliCancel, jobId),
-    onEvent: (listener) =>
-      subscribeToDesktopEvent(
-        desktopApiEventChannels.cliEvent,
-        (_event, payload: unknown) => {
-          listener(payload as DesktopCliCommandEvent)
         },
       ),
   },

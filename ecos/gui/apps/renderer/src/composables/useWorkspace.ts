@@ -744,7 +744,7 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
       }
 
-      // 3. 根据项目类型通过 ECC RPC 或 Frontend CLI 加载项目状态。
+      // 3. Load project state through the selected persistent RPC runtime.
       const response =
         requestedDesignTool === 'frontend'
           ? await loadWorkspaceApi(selectedPath, requestedDesignTool)
@@ -962,7 +962,7 @@ export function useWorkspace() {
         'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      // 3. 根据项目类型通过 ECC RPC 或 Frontend CLI 创建工作区。
+      // 3. Create the workspace through the selected persistent RPC runtime.
       const designTool = creationConfig?.designTool ?? 'backend'
       candidateDesignTool = designTool
       const frontendParams = creationConfig?.parameters || {}

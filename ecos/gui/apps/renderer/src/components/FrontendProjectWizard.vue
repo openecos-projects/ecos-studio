@@ -1104,7 +1104,7 @@ const validationTitle = computed(() => {
   return 'Compatibility warning'
 })
 const validationSummary = computed(() => {
-  if (validationBusy.value) return 'waiting for frontend CLI'
+  if (validationBusy.value) return 'waiting for frontend runtime'
   if (validation.value?.summary) return validation.value.summary
   return 'Select a CPU source, SoC harness, toolchain, and test suite.'
 })

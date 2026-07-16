@@ -11,9 +11,6 @@ import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
-  type DesktopCliCommandEvent,
-  type DesktopCliCommandRequest,
-  type DesktopCliCommandResult,
   type DesignRuntimeCancelRequest,
   type DesignRuntimeFlowRunRequest,
   type DesignRuntimeFlowRunStepRequest,
@@ -196,13 +193,6 @@ export interface DesktopBridgeServices {
       force?: boolean
       refreshRegistry?: boolean
     }): Promise<unknown>
-  }
-  frontendRuntimeManager: {
-    execute(
-      request: DesktopCliCommandRequest,
-      listener?: (event: DesktopCliCommandEvent) => void,
-    ): Promise<DesktopCliCommandResult>
-    cancel(jobId: string): Promise<DesktopCliCommandResult>
   }
   frontendRpcRuntimeService: {
     cancelOperation(
@@ -1052,26 +1042,6 @@ export function registerIpc(
     return await services.resourceManagerService.checkResourceUpdates(
       options as { force?: boolean; refreshRegistry?: boolean } | undefined,
     )
-  })
-
-  handle(desktopApiIpcChannels.cliExecute, async (event, request) => {
-    const sender = event.sender
-    const isSenderDestroyed = (): boolean =>
-      typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
-
-    return await services.frontendRuntimeManager.execute(
-      request as DesktopCliCommandRequest,
-      (payload) => {
-        if (isSenderDestroyed()) return
-        if (typeof sender.send === 'function') {
-          sender.send(desktopApiEventChannels.cliEvent, payload)
-        }
-      },
-    )
-  })
-
-  handle(desktopApiIpcChannels.cliCancel, async (_event, jobId) => {
-    return await services.frontendRuntimeManager.cancel(String(jobId))
   })
 
   handle(desktopApiIpcChannels.designRuntimeCancel, async (_event, request) => {

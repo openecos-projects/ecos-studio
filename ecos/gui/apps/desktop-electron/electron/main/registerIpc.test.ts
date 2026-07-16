@@ -138,10 +138,6 @@ function registerHandlers() {
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
     },
-    frontendRuntimeManager: {
-      cancel: vi.fn(),
-      execute: vi.fn(),
-    },
     frontendRpcRuntimeService: {
       cancelOperation: vi.fn(),
       catalogList: vi.fn(),

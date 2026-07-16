@@ -1,10 +1,5 @@
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { FrontendCliAdapter, type FrontendCliAdapterOptions } from './frontendCliAdapter'
-
-export interface FrontendRuntimeAdapterOptions extends FrontendCliAdapterOptions {
-  frontendRootSearchRoots?: string[]
-}
 
 function isFrontendDevelopmentRoot(root: string): boolean {
   return existsSync(join(root, 'fecompiler'))
@@ -46,20 +41,4 @@ export function resolveFrontendDevelopmentRoot(
     if (discovered) return discovered
   }
   return undefined
-}
-
-export function createFrontendRuntimeAdapter(
-  options: FrontendRuntimeAdapterOptions = {},
-): FrontendCliAdapter {
-  const { frontendRootSearchRoots, ...adapterOptions } = options
-  const frontendRoot =
-    adapterOptions.frontendRoot ??
-    resolveFrontendDevelopmentRoot({
-      env: adapterOptions.env,
-      searchRoots: frontendRootSearchRoots,
-    })
-  return new FrontendCliAdapter({
-    ...adapterOptions,
-    frontendRoot,
-  })
 }

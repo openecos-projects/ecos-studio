@@ -3,5 +3,3 @@ export function toDesktopBridgeData(
 ): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
 }
-
-export const toDesktopCliData = toDesktopBridgeData

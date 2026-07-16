@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EccRpcSidecarLaunch } from './eccRpc/sidecarProcess'
-import { resolveFrontendDevelopmentRoot } from './frontendRuntimeAdapter'
+import { resolveFrontendDevelopmentRoot } from './frontendDevelopmentRoot'
 
 export interface FrontendRpcLaunchResolverOptions {
   env?: NodeJS.ProcessEnv

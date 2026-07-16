@@ -5,15 +5,6 @@ export {
   type DesktopApiIpcChannel,
 } from './constants/ipcChannels.ts'
 export type {
-  DesktopCliCommandEvent,
-  DesktopCliCommandEventType,
-  DesktopCliCommandName,
-  DesktopCliCommandRequest,
-  DesktopCliCommandResponse,
-  DesktopCliCommandResult,
-  DesktopCliCommandSource,
-} from './contracts/desktopCli.ts'
-export type {
   DesignRuntimeApi,
   DesignRuntimeCancelRequest,
   DesignRuntimeCancelResult,

@@ -1,8 +1,3 @@
-import type {
-  DesktopCliCommandEvent,
-  DesktopCliCommandRequest,
-  DesktopCliCommandResult,
-} from './desktopCli.ts'
 import type { DesignRuntimeApi } from './designRuntime.ts'
 import type {
   WorkspaceResourceIndex,
@@ -264,11 +259,6 @@ export interface DesktopApi {
       refreshRegistry?: boolean
     }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
-  }
-  cli: {
-    execute(request: DesktopCliCommandRequest): Promise<DesktopCliCommandResult>
-    cancel(jobId: string): Promise<DesktopCliCommandResult>
-    onEvent(listener: (event: DesktopCliCommandEvent) => void): DesktopEventUnsubscribe
   }
   runtime: DesignRuntimeApi
   ecc: EccRuntimeApi

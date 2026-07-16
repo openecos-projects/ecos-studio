@@ -5,7 +5,6 @@ import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
 import { AppInfoService } from '../services/appInfoService'
-import { DesktopRuntimeManager } from '../services/desktopRuntimeManager'
 import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
@@ -13,7 +12,6 @@ import {
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
-import { createFrontendRuntimeAdapter } from '../services/frontendRuntimeAdapter'
 import { createFrontendRpcLaunchResolver } from '../services/frontendRpcRuntime'
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { LayoutViewerService } from '../services/layoutViewerService'
@@ -35,7 +33,6 @@ import { WorkspaceService } from '../services/workspaceService'
 let ipcRegistered = false
 let services: {
   appInfoService: AppInfoService
-  frontendRuntimeManager: DesktopRuntimeManager
   frontendRpcRuntimeService: FrontendRpcRuntimeService
   eccRuntimeService: EccRpcRuntimeService
   remoteContentService: RemoteContentService
@@ -73,7 +70,7 @@ configureElectronLoggerFile({
 })
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
-electronLogger.status('[runtime] Runtime: ECC RPC + frontend CLI')
+electronLogger.status('[runtime] Runtime: ECC RPC + frontend RPC')
 registerSurferProtocolSchemes(protocol)
 
 if (process.env.ECOS_ELECTRON_SMOKE === '1') {
@@ -132,13 +129,6 @@ function getDesktopServices() {
         onEvent,
       }),
   })
-  const frontendRuntimeManager = new DesktopRuntimeManager({
-    adapter: createFrontendRuntimeAdapter({
-      env: runtimeEnv,
-      envProvider: runtimeEnvProvider,
-      frontendRootSearchRoots: app.isPackaged ? [] : [process.cwd(), app.getAppPath()],
-    }),
-  })
   let frontendRpcRuntimeService: FrontendRpcRuntimeService
   const frontendRpcCore = new EccRpcRuntimeService({
     createSidecar: (onEvent) =>
@@ -166,8 +156,7 @@ function getDesktopServices() {
     runtimeMutationGuard: {
       isWorkspaceRuntimeActive: async (directory) =>
         eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
-        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory) ||
-        (await frontendRuntimeManager.isWorkspaceRuntimeActive(directory)),
+        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory),
     },
   })
   const shellService = new ShellPtyService({
@@ -197,7 +186,6 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
-    frontendRuntimeManager,
     frontendRpcRuntimeService,
     eccRuntimeService,
     remoteContentService,
@@ -219,7 +207,6 @@ async function launchMainWindow(): Promise<void> {
   if (!ipcRegistered) {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
-      frontendRuntimeManager: desktopServices.frontendRuntimeManager,
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       eccRuntimeService: desktopServices.eccRuntimeService,
       remoteContentService: desktopServices.remoteContentService,
@@ -255,16 +242,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  services?.frontendRuntimeManager.cancelAll(
-    'Cancelling running frontend commands before app quit',
-  )
   if (process.platform !== 'darwin') {
     app.quit()
   }
-})
-
-app.on('before-quit', () => {
-  services?.frontendRuntimeManager.cancelAll(
-    'Cancelling running frontend commands before app quit',
-  )
 })

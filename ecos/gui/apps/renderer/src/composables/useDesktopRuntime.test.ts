@@ -197,23 +197,6 @@ const desktopBridge = {
     }),
     onProgress: () => () => undefined,
   },
-  cli: {
-    execute: async (request) => ({
-      ok: true,
-      cmd: request.cmd,
-      response: 'success',
-      data: {},
-      message: [],
-    }),
-    cancel: async () => ({
-      ok: false,
-      cmd: 'clear',
-      response: 'cancelled',
-      data: {},
-      message: [],
-    }),
-    onEvent: () => () => undefined,
-  },
   runtime: {} as DesktopApi['runtime'],
   ecc: {
     events: {
