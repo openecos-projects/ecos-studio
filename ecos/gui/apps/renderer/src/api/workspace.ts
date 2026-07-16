@@ -1,4 +1,4 @@
-import { toDesktopBridgeData, toDesktopCliData } from './desktopPayload'
+import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum } from './type'
 import { getDesktopApi } from '@/platform/desktop'
 import type { DesignTool } from '@ecos-studio/shared'
@@ -60,19 +60,12 @@ export interface CreateWorkspaceRequest {
  * @param path - Full path to the project directory
  */
 export function loadWorkspaceApi(directory: string, designTool: DesignTool = 'backend') {
-  if (designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'load_workspace',
-      data: toDesktopCliData({ directory, designTool }),
-      source: 'button',
-    }) as unknown as Promise<WorkspaceResponse>
-  }
-
   return getDesktopApi()
-    .ecc.workspace.open({ directory })
+    .runtime.workspace.open({ designTool, directory })
     .then((result) => ({
       cmd: CMDEnum.load_workspace,
       data: {
+        designTool,
         directory: result.directory,
         workspace_handle: result.workspaceHandle,
         workspaceHandle: result.workspaceHandle,
@@ -82,8 +75,11 @@ export function loadWorkspaceApi(directory: string, designTool: DesignTool = 'ba
     })) as Promise<WorkspaceResponse>
 }
 
-export function closeWorkspaceApi(workspaceHandle: string) {
-  return getDesktopApi().ecc.workspace.close({ workspaceHandle })
+export function closeWorkspaceApi(
+  workspaceHandle: string,
+  designTool: DesignTool = 'backend',
+) {
+  return getDesktopApi().runtime.workspace.close({ designTool, workspaceHandle })
 }
 
 /**
@@ -142,7 +138,7 @@ export function createWorkspaceApi(options: {
   core_id?: string
 }) {
   if (options.designTool === 'frontend') {
-    const data = toDesktopCliData({
+    const payload = toDesktopBridgeData({
       cpu_filelist: options.cpu_filelist || '',
       cpu_rtl_files: options.cpu_rtl_files || [],
       designTool: 'frontend',
@@ -184,11 +180,22 @@ export function createWorkspaceApi(options: {
       toolchain_id: options.toolchain_id || '',
       core_id: options.core_id || '',
     })
-    return getDesktopApi().cli.execute({
-      cmd: 'create_workspace',
-      data,
-      source: 'button',
-    }) as unknown as Promise<WorkspaceResponse>
+    return getDesktopApi()
+      .runtime.workspace.create({
+        designTool: 'frontend',
+        payload: payload as { directory: string } & Record<string, unknown>,
+      })
+      .then((result) => ({
+        cmd: CMDEnum.create_workspace,
+        data: {
+          designTool: 'frontend' as const,
+          directory: result.directory,
+          workspace_handle: result.workspaceHandle,
+          workspaceHandle: result.workspaceHandle,
+        },
+        message: [],
+        response: ResponseEnum.success,
+      })) as Promise<WorkspaceResponse>
   }
 
   const data = toDesktopBridgeData({
@@ -209,18 +216,21 @@ export function createWorkspaceApi(options: {
     project_context: options.project_context || {},
   })
   return getDesktopApi()
-    .ecc.workspace.create({
-      directory: String(data.directory ?? ''),
-      filelist: String(data.filelist ?? ''),
-      flowConfig: (data.flow_config as Record<string, unknown>) ?? {},
-      originDef: String(data.origin_def ?? ''),
-      originVerilog: String(data.origin_verilog ?? ''),
-      parameters: (data.parameters as Record<string, unknown>) ?? {},
-      pdk: String(data.pdk ?? ''),
-      pdkJson: String(data.pdk_json ?? ''),
-      pdkRoot: String(data.pdk_root ?? ''),
-      rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
-      sdc: String(data.sdc ?? ''),
+    .runtime.workspace.create({
+      designTool: 'backend',
+      payload: {
+        directory: String(data.directory ?? ''),
+        filelist: String(data.filelist ?? ''),
+        flowConfig: (data.flow_config as Record<string, unknown>) ?? {},
+        originDef: String(data.origin_def ?? ''),
+        originVerilog: String(data.origin_verilog ?? ''),
+        parameters: (data.parameters as Record<string, unknown>) ?? {},
+        pdk: String(data.pdk ?? ''),
+        pdkJson: String(data.pdk_json ?? ''),
+        pdkRoot: String(data.pdk_root ?? ''),
+        rtlList: Array.isArray(data.rtl_list) ? (data.rtl_list as string[]) : [],
+        sdc: String(data.sdc ?? ''),
+      },
     })
     .then((result) => ({
       cmd: CMDEnum.create_workspace,

@@ -220,6 +220,7 @@ async function launchMainWindow(): Promise<void> {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
       frontendRuntimeManager: desktopServices.frontendRuntimeManager,
+      frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
       eccRuntimeService: desktopServices.eccRuntimeService,
       remoteContentService: desktopServices.remoteContentService,
       resourceManagerService: desktopServices.resourceManagerService,

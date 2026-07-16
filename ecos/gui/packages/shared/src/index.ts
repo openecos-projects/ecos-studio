@@ -14,6 +14,21 @@ export type {
   DesktopCliCommandSource,
 } from './contracts/desktopCli.ts'
 export type {
+  DesignRuntimeApi,
+  DesignRuntimeCancelRequest,
+  DesignRuntimeCancelResult,
+  DesignRuntimeEvent,
+  DesignRuntimeFlowRunRequest,
+  DesignRuntimeFlowRunStepRequest,
+  DesignRuntimeHelloResult,
+  DesignRuntimeTargetRequest,
+  DesignRuntimeWorkspaceCreateRequest,
+  DesignRuntimeWorkspaceHandleRequest,
+  DesignRuntimeWorkspaceInfoRequest,
+  DesignRuntimeWorkspaceOpenRequest,
+  DesignRuntimeWorkspaceSyncConfigRequest,
+} from './contracts/designRuntime.ts'
+export type {
   DesktopApi,
   DesktopDirectoryDialogOptions,
   DesktopFileDialogFilter,

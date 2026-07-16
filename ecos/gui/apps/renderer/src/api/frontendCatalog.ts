@@ -1,6 +1,5 @@
-import { toDesktopCliData } from './desktopPayload'
 import { getDesktopApi } from '@/platform/desktop'
-import type { ResponseData } from './type'
+import { CMDEnum, ResponseEnum, type ResponseData } from './type'
 
 export interface FrontendCpuPortContract {
   name: string
@@ -107,20 +106,23 @@ export interface FrontendValidationResult {
 }
 
 export function listFrontendCatalogApi() {
-  return getDesktopApi().cli.execute({
-    cmd: 'catalog_list',
-    data: toDesktopCliData({ designTool: 'frontend' }),
-    source: 'button',
-  }) as unknown as Promise<ResponseData<FrontendCatalogPayload>>
+  return getDesktopApi()
+    .runtime.frontend.catalog()
+    .then((data) => ({
+      cmd: CMDEnum.catalog_list,
+      data: data as unknown as FrontendCatalogPayload,
+      message: Array.isArray(data.message) ? (data.message as string[]) : [],
+      response: String(data.response ?? ResponseEnum.success),
+    })) as Promise<ResponseData<FrontendCatalogPayload>>
 }
 
 export function validateFrontendConfigApi(config: Record<string, unknown>) {
-  return getDesktopApi().cli.execute({
-    cmd: 'validate_frontend_config',
-    data: toDesktopCliData({
-      ...config,
-      designTool: 'frontend',
-    }),
-    source: 'button',
-  }) as unknown as Promise<ResponseData<FrontendValidationResult>>
+  return getDesktopApi()
+    .runtime.frontend.validateConfig(config)
+    .then((data) => ({
+      cmd: CMDEnum.validate_frontend_config,
+      data: data as unknown as FrontendValidationResult,
+      message: Array.isArray(data.message) ? (data.message as string[]) : [],
+      response: String(data.response ?? ResponseEnum.success),
+    })) as Promise<ResponseData<FrontendValidationResult>>
 }

@@ -3,6 +3,7 @@ import type {
   DesktopCliCommandRequest,
   DesktopCliCommandResult,
 } from './desktopCli.ts'
+import type { DesignRuntimeApi } from './designRuntime.ts'
 import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
@@ -269,6 +270,7 @@ export interface DesktopApi {
     cancel(jobId: string): Promise<DesktopCliCommandResult>
     onEvent(listener: (event: DesktopCliCommandEvent) => void): DesktopEventUnsubscribe
   }
+  runtime: DesignRuntimeApi
   ecc: EccRuntimeApi
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>

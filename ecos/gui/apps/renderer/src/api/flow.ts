@@ -1,4 +1,4 @@
-import { toDesktopBridgeData, toDesktopCliData } from './desktopPayload'
+import { toDesktopBridgeData } from './desktopPayload'
 import {
   RequestData,
   ResponseData,
@@ -12,6 +12,10 @@ import type { DesignTool } from '@ecos-studio/shared'
 
 function workspaceHandleFromData(data: Record<string, unknown>): string {
   return String(data.workspaceHandle ?? data.workspace_handle ?? data.directory ?? '')
+}
+
+function designToolFromData(data: Record<string, unknown>): DesignTool {
+  return data.designTool === 'frontend' ? 'frontend' : 'backend'
 }
 
 function success<T>(cmd: CMDEnum, data: T, message: string[] = []): ResponseData<T> {
@@ -39,16 +43,10 @@ export interface GetInfoResponse {
 }
 
 export function getInfoApi(request: RequestData<GetInfoRequest>) {
-  if (request.data.designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'get_info',
-      data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<GetInfoResponse>>
-  }
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
   return getDesktopApi()
-    .ecc.workspace.info({
+    .runtime.workspace.info({
+      designTool: designToolFromData(data),
       id: String(data.id ?? ''),
       step: String(data.step ?? ''),
       workspaceHandle: workspaceHandleFromData(data),
@@ -71,16 +69,10 @@ export interface RTL2GDSResponse {
 }
 
 export function rtl2gdsApi(request: RequestData<RTL2GDSRequest>) {
-  if (request.data.designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'rtl2gds',
-      data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<RTL2GDSResponse>>
-  }
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
   return getDesktopApi()
-    .ecc.flow.run({
+    .runtime.flow.run({
+      designTool: designToolFromData(data),
       rerun: Boolean(data.rerun),
       workspaceHandle: workspaceHandleFromData(data),
     })
@@ -115,16 +107,28 @@ export interface RunStepResponse {
 }
 
 export function runStepApi(request: RequestData<RunStepRequest>) {
-  if (request.data.designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'run_step',
-      data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<RunStepResponse>>
-  }
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
+  const options = Object.fromEntries(
+    [
+      'sim_test_suite',
+      'sim_cpu_test_mode',
+      'sim_cpu_test_cases',
+      'sim_compile_preset',
+      'sim_compile_opt_level',
+      'sim_compile_march',
+      'sim_compile_mabi',
+      'sim_compile_extra_cflags',
+      'sim_coremark_iterations',
+      'sim_coremark_total_data_size',
+      'sim_coremark_has_float',
+    ]
+      .filter((key) => data[key] !== undefined)
+      .map((key) => [key, data[key]]),
+  )
   return getDesktopApi()
-    .ecc.flow.runStep({
+    .runtime.flow.runStep({
+      designTool: designToolFromData(data),
+      options,
       rerun: Boolean(data.rerun),
       step: String(data.step ?? ''),
       workspaceHandle: workspaceHandleFromData(data),
@@ -147,16 +151,10 @@ export interface RefreshConfigResponse {
 }
 
 export function refreshConfigApi(request: RequestData<RefreshConfigRequest>) {
-  if (request.data.designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'refresh_config',
-      data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<RefreshConfigResponse>>
-  }
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
   return getDesktopApi()
-    .ecc.workspace.refreshConfig({
+    .runtime.workspace.refreshConfig({
+      designTool: designToolFromData(data),
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then((result) =>
@@ -180,17 +178,11 @@ export interface SyncConfigResponse {
 }
 
 export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
-  if (request.data.designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'sync_config',
-      data: toDesktopCliData(request.data as unknown as Record<string, unknown>),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<SyncConfigResponse>>
-  }
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
   return getDesktopApi()
-    .ecc.workspace.syncConfig({
+    .runtime.workspace.syncConfig({
       configPath: String(data.config_path ?? data.configPath ?? ''),
+      designTool: designToolFromData(data),
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then(
@@ -205,6 +197,7 @@ export function syncConfigApi(request: RequestData<SyncConfigRequest>) {
 }
 
 export interface ResetFlowRequest {
+  designTool?: DesignTool
   directory: string
   workspaceHandle?: string
   workspace_handle?: string
@@ -217,7 +210,8 @@ export interface ResetFlowResponse {
 export function resetFlowApi(request: RequestData<ResetFlowRequest>) {
   const data = toDesktopBridgeData(request.data as unknown as Record<string, unknown>)
   return getDesktopApi()
-    .ecc.workspace.resetFlow({
+    .runtime.workspace.resetFlow({
+      designTool: designToolFromData(data),
       workspaceHandle: workspaceHandleFromData(data),
     })
     .then((result) =>
@@ -239,15 +233,9 @@ export function getHomePageApi(
   designTool: DesignTool = 'backend',
   directory = '',
 ) {
-  if (designTool === 'frontend') {
-    return getDesktopApi().cli.execute({
-      cmd: 'home_page',
-      data: toDesktopCliData({ directory, designTool }),
-      source: 'button',
-    }) as unknown as Promise<ResponseData<HomePageResponse>>
-  }
+  void directory
   return getDesktopApi()
-    .ecc.workspace.home({ workspaceHandle })
+    .runtime.workspace.home({ designTool, workspaceHandle })
     .then((result) => success(CMDEnum.home_page, result as HomePageResponse)) as Promise<
     ResponseData<HomePageResponse>
   >

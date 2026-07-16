@@ -188,6 +188,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       }),
       onEvent: () => () => undefined,
     },
+    runtime: {} as DesktopApi['runtime'],
     ecc: {
       events: {
         onEvent: () => () => undefined,

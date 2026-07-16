@@ -142,10 +142,30 @@ function registerHandlers() {
       cancel: vi.fn(),
       execute: vi.fn(),
     },
+    frontendRpcRuntimeService: {
+      cancelOperation: vi.fn(),
+      catalogList: vi.fn(),
+      closeWorkspace: vi.fn(),
+      createWorkspace: vi.fn(),
+      onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
+      openWorkspace: vi.fn(),
+      refreshConfig: vi.fn(),
+      resetFlow: vi.fn(),
+      rpcHello: vi.fn(),
+      rpcPing: vi.fn(),
+      rpcShutdown: vi.fn(),
+      runFlow: vi.fn(),
+      runStep: vi.fn(),
+      syncConfig: vi.fn(),
+      validateConfig: vi.fn(),
+      workspaceHome: vi.fn(),
+      workspaceInfo: vi.fn(),
+    },
     appInfoService: {
       getVersions: vi.fn(),
     },
     eccRuntimeService: {
+      cancelOperation: vi.fn(),
       closeWorkspace: vi.fn(),
       createWorkspace: vi.fn(),
       exportSignoff: vi.fn(),
@@ -357,6 +377,72 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.eccRpcPing)?.(event),
     ).resolves.toEqual({ ok: true })
     expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes unified runtime calls to the selected design tool', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.frontendRpcRuntimeService.runStep.mockResolvedValue({
+      state: 'Success',
+      step: 'sim',
+    })
+    services.eccRuntimeService.runStep.mockResolvedValue({
+      state: 'Success',
+      step: 'placement',
+    })
+
+    await handlers.get(desktopApiIpcChannels.designRuntimeFlowRunStep)?.(event, {
+      designTool: 'frontend',
+      options: { sim_test_suite: 'coremark' },
+      rerun: true,
+      step: 'sim',
+      workspaceHandle: 'frontend-handle',
+    })
+    await handlers.get(desktopApiIpcChannels.designRuntimeFlowRunStep)?.(event, {
+      designTool: 'backend',
+      rerun: false,
+      step: 'placement',
+      workspaceHandle: 'backend-handle',
+    })
+
+    expect(services.frontendRpcRuntimeService.runStep).toHaveBeenCalledWith(
+      'frontend-handle',
+      {
+        rerun: true,
+        sim_test_suite: 'coremark',
+        step: 'sim',
+      },
+    )
+    expect(services.eccRuntimeService.runStep).toHaveBeenCalledWith({
+      rerun: false,
+      step: 'placement',
+      workspaceHandle: 'backend-handle',
+    })
+  })
+
+  it('tracks and closes frontend workspace handles through the unified runtime', async () => {
+    const { handlers, services } = registerHandlers()
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: vi.fn(() => false),
+    })
+    const event = { sender }
+    services.frontendRpcRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/frontend',
+      workspaceHandle: 'frontend-handle',
+    })
+
+    await handlers.get(desktopApiIpcChannels.designRuntimeWorkspaceOpen)?.(event, {
+      designTool: 'frontend',
+      directory: '/work/frontend',
+    })
+    sender.emit('destroyed')
+
+    await vi.waitFor(() => {
+      expect(services.frontendRpcRuntimeService.closeWorkspace).toHaveBeenCalledWith(
+        'frontend-handle',
+      )
+    })
+    expect(services.eccRuntimeService.closeWorkspace).not.toHaveBeenCalled()
   })
 
   it('delegates remote content requests to the remote content service', async () => {
@@ -1097,6 +1183,38 @@ describe('registerIpc', () => {
     expect(webContents.send).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
       type: 'runtime.ready',
     })
+    expect(webContents.send).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      {
+        designTool: 'backend',
+        type: 'runtime.ready',
+      },
+    )
+  })
+
+  it('broadcasts frontend events only through the unified runtime channel', () => {
+    const { services } = registerHandlers()
+    const webContents = { send: vi.fn() }
+    getAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        webContents,
+      },
+    ])
+    const listener = services.frontendRpcRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({ type: 'runtime.ready' })
+
+    expect(webContents.send).toHaveBeenCalledWith(
+      desktopApiEventChannels.designRuntimeEvent,
+      {
+        designTool: 'frontend',
+        type: 'runtime.ready',
+      },
+    )
+    expect(webContents.send).not.toHaveBeenCalledWith(
+      desktopApiEventChannels.eccEvent,
+      expect.anything(),
+    )
   })
 
   it('does not broadcast ECC runtime events to destroyed windows', () => {

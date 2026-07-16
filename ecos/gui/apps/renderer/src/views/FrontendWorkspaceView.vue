@@ -2010,7 +2010,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
+import type { DesignRuntimeEvent, WorkspaceStepResource } from '@ecos-studio/shared'
 import {
   getWorkspaceResourceIndexApi,
   resolveWorkspaceStepInfoApi,
@@ -2454,8 +2454,13 @@ interface ReviewHotspot {
 
 const route = useRoute()
 const router = useRouter()
-const { currentProject, resourceVersions, showToast, invalidateWorkspaceResources } =
-  useWorkspace()
+const {
+  currentProject,
+  resourceVersions,
+  showToast,
+  invalidateWorkspaceResources,
+  workspaceSession,
+} = useWorkspace()
 const { config } = useParameters()
 const CONSOLE_MIN_HEIGHT = 128
 const CONSOLE_DEFAULT_HEIGHT = 178
@@ -2529,7 +2534,7 @@ const waveformLoading = ref(false)
 const waveformError = ref('')
 let waveformLoadToken = 0
 let loadedWaveformKey = ''
-let unsubscribeCliEvents: (() => void) | null = null
+let unsubscribeRuntimeEvents: (() => void) | null = null
 let consoleResizeStartY = 0
 let consoleResizeStartHeight = 0
 let splitterResizing = false
@@ -3984,25 +3989,18 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
 }
 
 async function cancelCurrentRun(): Promise<void> {
-  const jobId = runJobId.value
-  if (!jobId) {
-    showToast({
-      severity: 'warn',
-      summary: 'Cancel Pending',
-      detail: 'The runtime job is still starting.',
-      life: 2500,
-    })
-    return
-  }
   try {
-    const response = await getDesktopApi().cli.cancel(jobId)
+    const response = await getDesktopApi().runtime.cancel({
+      designTool: 'frontend',
+      operationId: runJobId.value || undefined,
+    })
     invalidateWorkspaceResources(['flow', 'step', 'logs'])
     window.setTimeout(() => {
       void refresh()
     }, 400)
     showToast({
-      severity: response.response === 'cancelled' ? 'warn' : 'info',
-      summary: response.response === 'cancelled' ? 'Run Cancelled' : 'Cancel Request',
+      severity: response.cancelled ? 'warn' : 'info',
+      summary: response.cancelled ? 'Run Cancelled' : 'Cancel Request',
       detail: currentStepName.value,
       life: 3500,
     })
@@ -4010,38 +4008,27 @@ async function cancelCurrentRun(): Promise<void> {
     showToast({
       severity: 'error',
       summary: 'Cancel Failed',
-      detail: 'Unable to stop the current CLI job.',
+      detail: 'Unable to stop the current runtime operation.',
       life: 5000,
     })
   }
 }
 
-function handleCliEvent(event: DesktopCliCommandEvent): void {
-  const projectPath = currentProject.value?.path
+function handleRuntimeEvent(event: DesignRuntimeEvent): void {
+  if (event.designTool !== 'frontend') return
+  if (event.type === 'runtime.exited' || !('method' in event)) return
+  if (event.method !== 'flow.run_step' && event.method !== 'flow.run') return
   if (
-    !projectPath ||
-    !event.directory ||
-    normalizeWorkspacePath(event.directory) !== normalizeWorkspacePath(projectPath)
+    event.workspaceHandle &&
+    event.workspaceHandle !== workspaceSession.value.workspaceId
   ) {
     return
   }
-  if (event.cmd !== 'run_step' && event.cmd !== 'rtl2gds') return
-  if (runJobId.value && event.jobId && event.jobId !== runJobId.value) return
+  if (runJobId.value && event.operationId !== runJobId.value) return
 
-  if (event.type === 'queued') {
+  if (event.type === 'operation.started') {
     runBusy.value = true
-    runJobId.value = event.jobId
-    runPhase.value = 'queued'
-    runStartedAt.value = runStartedAt.value || Date.now()
-    startRunClock()
-    runningSimSuite.value =
-      runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
-    return
-  }
-
-  if (event.type === 'started') {
-    runBusy.value = true
-    runJobId.value = event.jobId
+    runJobId.value = event.operationId
     runPhase.value = 'running'
     runStartedAt.value = runStartedAt.value || Date.now()
     startRunClock()
@@ -4051,9 +4038,9 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
   }
 
   if (
-    event.type === 'completed' ||
-    event.type === 'failed' ||
-    event.type === 'cancelled'
+    event.type === 'operation.completed' ||
+    event.type === 'operation.failed' ||
+    event.type === 'operation.cancelled'
   ) {
     runBusy.value = false
     runPhase.value = 'idle'
@@ -5286,7 +5273,7 @@ function uniquePathItems(items: PathItem[]): PathItem[] {
 
 onMounted(refresh)
 onMounted(() => {
-  unsubscribeCliEvents = getDesktopApi().cli.onEvent(handleCliEvent)
+  unsubscribeRuntimeEvents = getDesktopApi().runtime.events.onEvent(handleRuntimeEvent)
   window.addEventListener('message', handleSurferMessage)
   document.addEventListener('mousedown', startSplitterResize)
   document.addEventListener('mouseup', stopSplitterResize)
@@ -5307,8 +5294,8 @@ onBeforeUnmount(() => {
   stopSplitterResize()
   stopConsoleResize()
   stopRunClock()
-  unsubscribeCliEvents?.()
-  unsubscribeCliEvents = null
+  unsubscribeRuntimeEvents?.()
+  unsubscribeRuntimeEvents = null
 })
 
 watch(

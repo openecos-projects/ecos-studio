@@ -14,6 +14,16 @@ import {
   type DesktopCliCommandEvent,
   type DesktopCliCommandRequest,
   type DesktopCliCommandResult,
+  type DesignRuntimeCancelRequest,
+  type DesignRuntimeFlowRunRequest,
+  type DesignRuntimeFlowRunStepRequest,
+  type DesignRuntimeTargetRequest,
+  type DesignRuntimeWorkspaceCreateRequest,
+  type DesignRuntimeWorkspaceHandleRequest,
+  type DesignRuntimeWorkspaceInfoRequest,
+  type DesignRuntimeWorkspaceOpenRequest,
+  type DesignRuntimeWorkspaceSyncConfigRequest,
+  type DesignTool,
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
   type DesktopProjectDirectoryEntry,
@@ -194,7 +204,36 @@ export interface DesktopBridgeServices {
     ): Promise<DesktopCliCommandResult>
     cancel(jobId: string): Promise<DesktopCliCommandResult>
   }
+  frontendRpcRuntimeService: {
+    cancelOperation(
+      operationId?: string,
+    ): Promise<{ cancelled: boolean; operationId?: string }>
+    catalogList(): Promise<Record<string, unknown>>
+    closeWorkspace(workspaceHandle: string): Promise<unknown>
+    createWorkspace(
+      payload: Record<string, unknown> & { directory: string },
+    ): Promise<unknown>
+    onEvent(listener: (event: EccRuntimeEvent) => void): () => void
+    openWorkspace(directory: string): Promise<unknown>
+    refreshConfig(workspaceHandle: string): Promise<unknown>
+    resetFlow(workspaceHandle: string): Promise<unknown>
+    rpcHello(): Promise<unknown>
+    rpcPing(): Promise<unknown>
+    rpcShutdown(): Promise<unknown>
+    runFlow(workspaceHandle: string, rerun?: boolean): Promise<unknown>
+    runStep(
+      workspaceHandle: string,
+      payload: Record<string, unknown> & { step: string },
+    ): Promise<unknown>
+    syncConfig(workspaceHandle: string, configPath: string): Promise<unknown>
+    validateConfig(payload: Record<string, unknown>): Promise<Record<string, unknown>>
+    workspaceHome(workspaceHandle: string): Promise<unknown>
+    workspaceInfo(workspaceHandle: string, step: string, id: string): Promise<unknown>
+  }
   eccRuntimeService: {
+    cancelOperation(
+      operationId?: string,
+    ): Promise<{ cancelled: boolean; operationId?: string }>
     closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
@@ -281,6 +320,11 @@ function serializeError(error: unknown): {
     message: String(error),
     name: 'Error',
   }
+}
+
+function requireDesignTool(value: unknown): DesignTool {
+  if (value === 'backend' || value === 'frontend') return value
+  throw new Error(`Unsupported design runtime: ${String(value)}`)
 }
 
 function summarizeIpcError(channel: string, args: unknown[], error: unknown): string {
@@ -453,18 +497,36 @@ export function registerIpc(
   const workspaceHandleSubscriptions = new Map<
     string,
     {
+      designTool: DesignTool
       sender: IpcMainInvokeEvent['sender']
       onDestroyed: () => void
     }
   >()
   const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
 
+  const publishDesignRuntimeEvent = (
+    designTool: DesignTool,
+    payload: EccRuntimeEvent,
+  ): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue
+      window.webContents.send(desktopApiEventChannels.designRuntimeEvent, {
+        ...payload,
+        designTool,
+      })
+    }
+  }
+
   services.eccRuntimeService.onEvent((payload) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (window.isDestroyed()) continue
       window.webContents.send(desktopApiEventChannels.eccEvent, payload)
     }
+    publishDesignRuntimeEvent('backend', payload)
   })
+  services.frontendRpcRuntimeService.onEvent((payload) =>
+    publishDesignRuntimeEvent('frontend', payload),
+  )
 
   const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
     const subscription = projectFileWatchSubscriptions.get(subscriptionId)
@@ -510,6 +572,7 @@ export function registerIpc(
 
   const closeTrackedWorkspaceHandle = async (
     workspaceHandle: string,
+    requestedDesignTool?: DesignTool,
   ): Promise<unknown> => {
     const existingClose = workspaceHandleClosePromises.get(workspaceHandle)
     if (existingClose) {
@@ -517,6 +580,7 @@ export function registerIpc(
     }
 
     const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
+    const designTool = requestedDesignTool ?? subscription?.designTool ?? 'backend'
     if (subscription) {
       workspaceHandleSubscriptions.delete(workspaceHandle)
       if (typeof subscription.sender.off === 'function') {
@@ -525,7 +589,9 @@ export function registerIpc(
     }
 
     const closePromise = Promise.resolve().then(() =>
-      services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
+      designTool === 'frontend'
+        ? services.frontendRpcRuntimeService.closeWorkspace(workspaceHandle)
+        : services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
     )
     const trackedClosePromise = closePromise.finally(() => {
       workspaceHandleClosePromises.delete(workspaceHandle)
@@ -537,6 +603,7 @@ export function registerIpc(
   const trackWorkspaceHandle = (
     sender: IpcMainInvokeEvent['sender'],
     workspaceHandle: string,
+    designTool: DesignTool = 'backend',
   ): void => {
     if (!workspaceHandle || workspaceHandleClosePromises.has(workspaceHandle)) {
       return
@@ -548,9 +615,10 @@ export function registerIpc(
     }
 
     const onDestroyed = (): void => {
-      void closeTrackedWorkspaceHandle(workspaceHandle)
+      void closeTrackedWorkspaceHandle(workspaceHandle, designTool)
     }
     workspaceHandleSubscriptions.set(workspaceHandle, {
+      designTool,
       sender,
       onDestroyed,
     })
@@ -1004,6 +1072,190 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.cliCancel, async (_event, jobId) => {
     return await services.frontendRuntimeManager.cancel(String(jobId))
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeCancel, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeCancelRequest
+    const designTool = requireDesignTool(runtimeRequest.designTool)
+    return designTool === 'frontend'
+      ? await services.frontendRpcRuntimeService.cancelOperation(
+          runtimeRequest.operationId,
+        )
+      : await services.eccRuntimeService.cancelOperation(runtimeRequest.operationId)
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeRpcHello, async (_event, request) => {
+    const designTool = requireDesignTool(
+      (request as DesignRuntimeTargetRequest).designTool,
+    )
+    return designTool === 'frontend'
+      ? await services.frontendRpcRuntimeService.rpcHello()
+      : await services.eccRuntimeService.rpcHello()
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeRpcPing, async (_event, request) => {
+    const designTool = requireDesignTool(
+      (request as DesignRuntimeTargetRequest).designTool,
+    )
+    return designTool === 'frontend'
+      ? await services.frontendRpcRuntimeService.rpcPing()
+      : await services.eccRuntimeService.rpcPing()
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeRpcShutdown, async (_event, request) => {
+    const designTool = requireDesignTool(
+      (request as DesignRuntimeTargetRequest).designTool,
+    )
+    return designTool === 'frontend'
+      ? await services.frontendRpcRuntimeService.rpcShutdown()
+      : await services.eccRuntimeService.rpcShutdown()
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeFrontendCatalog, async () => {
+    return await services.frontendRpcRuntimeService.catalogList()
+  })
+
+  handle(
+    desktopApiIpcChannels.designRuntimeFrontendValidateConfig,
+    async (_event, payload) => {
+      return await services.frontendRpcRuntimeService.validateConfig(
+        payload as Record<string, unknown>,
+      )
+    },
+  )
+
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceCreate, async (event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceCreateRequest
+    const designTool = requireDesignTool(runtimeRequest.designTool)
+    const result =
+      designTool === 'frontend'
+        ? await services.frontendRpcRuntimeService.createWorkspace(runtimeRequest.payload)
+        : await services.eccRuntimeService.createWorkspace(
+            runtimeRequest.payload as unknown as EccWorkspaceCreateRequest,
+          )
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) trackWorkspaceHandle(event.sender, workspaceHandle, designTool)
+    return result
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceOpen, async (event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceOpenRequest
+    const designTool = requireDesignTool(runtimeRequest.designTool)
+    const result =
+      designTool === 'frontend'
+        ? await services.frontendRpcRuntimeService.openWorkspace(runtimeRequest.directory)
+        : await services.eccRuntimeService.openWorkspace({
+            directory: runtimeRequest.directory,
+          })
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) trackWorkspaceHandle(event.sender, workspaceHandle, designTool)
+    return result
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceClose, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+    return await closeTrackedWorkspaceHandle(
+      runtimeRequest.workspaceHandle,
+      requireDesignTool(runtimeRequest.designTool),
+    )
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceHome, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+      ? await services.frontendRpcRuntimeService.workspaceHome(
+          runtimeRequest.workspaceHandle,
+        )
+      : await services.eccRuntimeService.workspaceHome({
+          workspaceHandle: runtimeRequest.workspaceHandle,
+        })
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeWorkspaceInfo, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeWorkspaceInfoRequest
+    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+      ? await services.frontendRpcRuntimeService.workspaceInfo(
+          runtimeRequest.workspaceHandle,
+          runtimeRequest.step,
+          runtimeRequest.id,
+        )
+      : await services.eccRuntimeService.workspaceInfo({
+          id: runtimeRequest.id,
+          step: runtimeRequest.step,
+          workspaceHandle: runtimeRequest.workspaceHandle,
+        })
+  })
+
+  handle(
+    desktopApiIpcChannels.designRuntimeWorkspaceRefreshConfig,
+    async (_event, request) => {
+      const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+      return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+        ? await services.frontendRpcRuntimeService.refreshConfig(
+            runtimeRequest.workspaceHandle,
+          )
+        : await services.eccRuntimeService.refreshConfig({
+            workspaceHandle: runtimeRequest.workspaceHandle,
+          })
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.designRuntimeWorkspaceSyncConfig,
+    async (_event, request) => {
+      const runtimeRequest = request as DesignRuntimeWorkspaceSyncConfigRequest
+      return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+        ? await services.frontendRpcRuntimeService.syncConfig(
+            runtimeRequest.workspaceHandle,
+            runtimeRequest.configPath,
+          )
+        : await services.eccRuntimeService.syncConfig({
+            configPath: runtimeRequest.configPath,
+            workspaceHandle: runtimeRequest.workspaceHandle,
+          })
+    },
+  )
+
+  handle(
+    desktopApiIpcChannels.designRuntimeWorkspaceResetFlow,
+    async (_event, request) => {
+      const runtimeRequest = request as DesignRuntimeWorkspaceHandleRequest
+      return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+        ? await services.frontendRpcRuntimeService.resetFlow(
+            runtimeRequest.workspaceHandle,
+          )
+        : await services.eccRuntimeService.resetFlow({
+            workspaceHandle: runtimeRequest.workspaceHandle,
+          })
+    },
+  )
+
+  handle(desktopApiIpcChannels.designRuntimeFlowRun, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeFlowRunRequest
+    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+      ? await services.frontendRpcRuntimeService.runFlow(
+          runtimeRequest.workspaceHandle,
+          Boolean(runtimeRequest.rerun),
+        )
+      : await services.eccRuntimeService.runFlow({
+          rerun: runtimeRequest.rerun,
+          workspaceHandle: runtimeRequest.workspaceHandle,
+        })
+  })
+
+  handle(desktopApiIpcChannels.designRuntimeFlowRunStep, async (_event, request) => {
+    const runtimeRequest = request as DesignRuntimeFlowRunStepRequest
+    return requireDesignTool(runtimeRequest.designTool) === 'frontend'
+      ? await services.frontendRpcRuntimeService.runStep(runtimeRequest.workspaceHandle, {
+          ...runtimeRequest.options,
+          rerun: Boolean(runtimeRequest.rerun),
+          step: runtimeRequest.step,
+        })
+      : await services.eccRuntimeService.runStep({
+          rerun: runtimeRequest.rerun,
+          step: runtimeRequest.step,
+          workspaceHandle: runtimeRequest.workspaceHandle,
+        })
   })
 
   handle(desktopApiIpcChannels.eccRpcHello, async () => {

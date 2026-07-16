@@ -105,12 +105,9 @@ function workspaceHandleFromResponseData(
 
 function workspaceRuntimeIdFromResponseData(
   data: { directory?: string; workspace_handle?: string; workspaceHandle?: string },
-  designTool: DesignTool,
+  _designTool: DesignTool,
   fallback?: string,
 ): string {
-  if (designTool === 'frontend') {
-    return data.directory || fallback || ''
-  }
   return workspaceHandleFromResponseData(data, fallback)
 }
 
@@ -203,11 +200,11 @@ export function useWorkspace() {
     workspaceHandle: string,
     designTool: DesignTool = 'backend',
   ): Promise<void> => {
-    if (!workspaceHandle || designTool === 'frontend') return
+    if (!workspaceHandle) return
     try {
-      await closeWorkspaceApi(workspaceHandle)
+      await closeWorkspaceApi(workspaceHandle, designTool)
     } catch (error) {
-      console.warn('Failed to close ECC workspace session:', error)
+      console.warn('Failed to close design workspace session:', error)
     }
   }
 

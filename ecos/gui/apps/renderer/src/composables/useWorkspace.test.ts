@@ -458,8 +458,8 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
     expect(activeProjectRoot).toBeNull()
     expect(settingsData.has('current_project_path')).toBe(false)
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new', 'backend')
   })
 
   it('does not let a delayed close clear a newer project root or persisted path', async () => {
@@ -502,7 +502,7 @@ describe('useWorkspace openProject', () => {
 
     const closeOldProject = workspace.closeProject()
     await vi.waitFor(() => {
-      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
     })
     await expect(workspace.openProject(newProject)).resolves.toBe(true)
     releaseOldWorkspace?.()
@@ -554,7 +554,7 @@ describe('useWorkspace openProject', () => {
     await expect(workspace.openProject(newProject)).resolves.toBe(true)
 
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-old', 'backend')
     expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-new')
   })
 
@@ -1296,8 +1296,8 @@ describe('useWorkspace openProject', () => {
       expect.anything(),
     ])
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/a')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/b')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/a', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/b', 'backend')
   })
 
   it('keeps the latest project when an older provided-project switch stalls before session creation', async () => {
@@ -1676,8 +1676,8 @@ describe('useWorkspace openProject', () => {
     expect(workspace.currentProject.value?.path).toBe('/work/b')
     expect(activeProjectRoot).toBe('/work/b')
     expect(settingsData.get('current_project_path')).toBe('/work/b')
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-a')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-b')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-a', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-b', 'backend')
   })
 
   it('keeps the active workspace when the selected workspace fails to load', async () => {
@@ -1801,8 +1801,8 @@ describe('useWorkspace openProject', () => {
       state: 'active',
     })
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/new')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('/work/new', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('/work/old', 'backend')
   })
 
   it('rolls back the candidate when persisting its project path fails', async () => {
@@ -1855,8 +1855,8 @@ describe('useWorkspace openProject', () => {
     expect(activeProjectRoot).toBe('/work/old')
     expect(settingsData.get('current_project_path')).toBe('/work/old')
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new')
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-old')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new', 'backend')
+    expect(closeWorkspaceApiMock).not.toHaveBeenCalledWith('workspace-old', 'backend')
   })
 
   it('checks only desktop bridge availability before workspace operations', async () => {
@@ -1955,7 +1955,7 @@ describe('useWorkspace openProject', () => {
 
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(closeWorkspaceApiMock).toHaveBeenCalledOnce()
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo', 'backend')
     expect(workspace.workspaceSession.value.state).toBe('idle')
   })
 
@@ -1968,9 +1968,9 @@ describe('useWorkspace openProject', () => {
     try {
       await expect(workspace.closeProject()).resolves.toBeUndefined()
 
-      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo')
+      expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-demo', 'backend')
       expect(warn).toHaveBeenCalledWith(
-        'Failed to close ECC workspace session:',
+        'Failed to close design workspace session:',
         closeError,
       )
       expect(workspace.currentProject.value).toBeNull()
@@ -2178,7 +2178,7 @@ describe('useWorkspace openProject', () => {
     expect(workspace.runtimeBackendConnecting.value).toBe(false)
   })
 
-  it('opens frontend workspaces through the CLI runtime scope', async () => {
+  it('opens and closes frontend workspaces through the unified runtime scope', async () => {
     const workspace = useWorkspace()
     const project: Project = {
       id: '/work/frontend-project',
@@ -2189,7 +2189,10 @@ describe('useWorkspace openProject', () => {
     }
     loadWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',
-      data: { directory: '/work/frontend-project' },
+      data: {
+        directory: '/work/frontend-project',
+        workspace_handle: 'workspace-frontend',
+      },
       message: [],
     })
 
@@ -2200,13 +2203,13 @@ describe('useWorkspace openProject', () => {
       'frontend',
     )
     expect(workspace.currentProject.value?.designTool).toBe('frontend')
-    expect(workspace.workspaceSession.value.workspaceId).toBe('/work/frontend-project')
-    expect(createRuntimeEventClientMock).toHaveBeenCalledWith('/work/frontend-project', {
+    expect(workspace.workspaceSession.value.workspaceId).toBe('workspace-frontend')
+    expect(createRuntimeEventClientMock).toHaveBeenCalledWith('workspace-frontend', {
       designTool: 'frontend',
     })
 
     await workspace.closeProject()
-    expect(closeWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-frontend', 'frontend')
   })
 
   it('forwards selected CPU RTL files when creating a frontend workspace', async () => {
@@ -2310,7 +2313,7 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(false)
 
-    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project')
+    expect(closeWorkspaceApiMock).toHaveBeenCalledWith('workspace-new-project', 'backend')
   })
 
   it('replaces an existing workspace by creating from a temporary backup directory', async () => {

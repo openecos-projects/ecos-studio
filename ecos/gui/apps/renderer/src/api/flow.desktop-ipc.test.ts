@@ -56,7 +56,7 @@ describe('flow API desktop bridge payloads', () => {
 
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           flow: {
             run,
             runStep,
@@ -125,24 +125,30 @@ describe('flow API desktop bridge payloads', () => {
     )
 
     expect(runStep).toHaveBeenCalledWith({
+      designTool: 'backend',
+      options: {},
       rerun: false,
       step: StepEnum.PLACEMENT,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(run).toHaveBeenCalledWith({
+      designTool: 'backend',
       rerun: true,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(info).toHaveBeenCalledWith({
+      designTool: 'backend',
       id: InfoEnum.layout,
       step: StepEnum.ROUTING,
       workspaceHandle: 'workspace-handle-1',
     })
     expect(refreshConfig).toHaveBeenCalledWith({
+      designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })
     expect(syncConfig).toHaveBeenCalledWith({
       configPath: '/work/demo/config/rt_default_config.json',
+      designTool: 'backend',
       workspaceHandle: 'workspace-handle-1',
     })
   })

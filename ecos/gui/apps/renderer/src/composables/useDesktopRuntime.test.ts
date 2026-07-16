@@ -214,6 +214,7 @@ const desktopBridge = {
     }),
     onEvent: () => () => undefined,
   },
+  runtime: {} as DesktopApi['runtime'],
   ecc: {
     events: {
       onEvent: () => () => undefined,

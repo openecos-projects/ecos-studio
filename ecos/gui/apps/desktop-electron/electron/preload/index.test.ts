@@ -45,6 +45,14 @@ async function loadDesktopBridge() {
         inspectSignoff(request: unknown): Promise<unknown>
       }
     }
+    runtime: {
+      events: {
+        onEvent(listener: (event: unknown) => void): () => void
+      }
+      flow: {
+        runStep(request: unknown): Promise<unknown>
+      }
+    }
     dialog: {
       saveFile(options: unknown): Promise<unknown>
     }
@@ -87,6 +95,10 @@ describe('preload desktop bridge contract', () => {
           flow: expect.objectContaining({
             runStep: expect.any(Function),
           }),
+        }),
+        runtime: expect.objectContaining({
+          events: expect.objectContaining({ onEvent: expect.any(Function) }),
+          flow: expect.objectContaining({ runStep: expect.any(Function) }),
         }),
         workspace: expect.objectContaining({
           readProjectTextFile: expect.any(Function),
@@ -188,6 +200,27 @@ describe('preload desktop bridge contract', () => {
     })
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
+      request,
+    )
+  })
+
+  it('routes unified runtime flow calls through the shared IPC channel', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      designTool: 'frontend',
+      options: { sim_test_suite: 'cpu_tests' },
+      rerun: true,
+      step: 'sim',
+      workspaceHandle: 'frontend-handle',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({ state: 'Success', step: 'sim' })
+
+    await expect(bridge.runtime.flow.runStep(request)).resolves.toEqual({
+      state: 'Success',
+      step: 'sim',
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.designRuntimeFlowRunStep,
       request,
     )
   })

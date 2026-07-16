@@ -104,6 +104,7 @@ function workspaceCreatePayload(
 type RuntimeOperation<T> = () => Promise<T>
 interface RuntimeOperationMetadata {
   rerun?: boolean
+  step?: string
 }
 
 interface InFlightOperation {
@@ -117,6 +118,7 @@ export class EccRpcRuntimeService {
   private client: EccRpcRuntimeClient | null = null
   private readonly activeRuntimeDirectories = new Set<string>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
+  private readonly cancelledOperationIds = new Set<string>()
   private helloResult: EccRpcHelloResult | null = null
   private inFlightOperation: InFlightOperation | null = null
   private queue = Promise.resolve()
@@ -161,6 +163,18 @@ export class EccRpcRuntimeService {
 
   rpcShutdown(): Promise<EccRpcShutdownResult> {
     return this.shutdownRuntime()
+  }
+
+  async cancelOperation(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const operation = this.inFlightOperation
+    if (!operation || (operationId && operation.operationId !== operationId)) {
+      return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    }
+    this.cancelledOperationIds.add(operation.operationId)
+    await this.shutdownRuntime()
+    return { cancelled: true, operationId: operation.operationId }
   }
 
   createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
@@ -408,7 +422,7 @@ export class EccRpcRuntimeService {
           { timeoutMs: 0 },
         )
       },
-      { rerun },
+      { rerun, step: request.step },
     )
   }
 
@@ -433,7 +447,7 @@ export class EccRpcRuntimeService {
           { timeoutMs: 0 },
         )
       },
-      { rerun },
+      { rerun, step: String(payload.step ?? '') },
     )
   }
 
@@ -524,18 +538,31 @@ export class EccRpcRuntimeService {
           operationId,
           workspaceHandle,
         })
-        this.emit({
-          logFile: normalized.logFile,
-          message: normalized.message,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.failed',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
+        if (this.cancelledOperationIds.has(operationId)) {
+          this.emit({
+            logFile: normalized.logFile,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.cancelled',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        } else {
+          this.emit({
+            logFile: normalized.logFile,
+            message: normalized.message,
+            method,
+            operationId,
+            ...metadata,
+            type: 'operation.failed',
+            workspaceDirectory: runtimeDirectory ?? undefined,
+            workspaceHandle,
+          })
+        }
         throw normalized
       } finally {
+        this.cancelledOperationIds.delete(operationId)
         if (this.inFlightOperation?.operationId === operationId) {
           this.inFlightOperation = null
         }

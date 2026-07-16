@@ -502,6 +502,54 @@ describe('EccRpcRuntimeService', () => {
     await expect(ping).resolves.toEqual({ ok: true })
   })
 
+  it('cancels the matching in-flight operation and emits a cancelled event', async () => {
+    const { client, events, service, sidecar } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+    )
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const blockedFlow = deferred<{ rerun: boolean }>()
+    client.responses.push(blockedFlow.promise)
+
+    const flow = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+    const started = events.find(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' && event.method === 'flow.run',
+    )
+
+    await expect(service.cancelOperation(started?.operationId)).resolves.toEqual({
+      cancelled: true,
+      operationId: started?.operationId,
+    })
+    expect(sidecar.shutdownCount).toBe(1)
+
+    blockedFlow.reject(new Error('RPC sidecar exited.'))
+    await expect(flow).rejects.toThrow('RPC sidecar exited.')
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        method: 'flow.run',
+        operationId: started?.operationId,
+        type: 'operation.cancelled',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    )
+  })
+
+  it('does not cancel an operation when the requested id does not match', async () => {
+    const { service, sidecar } = createService()
+
+    await expect(service.cancelOperation('operation-other')).resolves.toEqual({
+      cancelled: false,
+      operationId: 'operation-other',
+    })
+    expect(sidecar.shutdownCount).toBe(0)
+  })
+
   it('enriches unexpected runtime exits with the in-flight operation', async () => {
     const { client, events, service, sidecarEvent } = createService()
     client.responses.push(

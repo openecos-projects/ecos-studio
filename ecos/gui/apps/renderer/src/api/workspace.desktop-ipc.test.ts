@@ -37,7 +37,7 @@ describe('workspace desktop bridge', () => {
 
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           workspace: {
             create,
           },
@@ -80,17 +80,20 @@ describe('workspace desktop bridge', () => {
     })
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        parameters: expect.objectContaining({
-          design: 'demo',
+        designTool: 'backend',
+        payload: expect.objectContaining({
+          parameters: expect.objectContaining({
+            design: 'demo',
+          }),
+          rtlList: ['/rtl/top.v'],
+          flowConfig: {
+            start_step: 'Synthesis',
+            end_step: 'Harden',
+            steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+          },
+          pdkJson: '/pdks/ics55/pdk.json',
+          sdc: '/constraints/top.sdc',
         }),
-        rtlList: ['/rtl/top.v'],
-        flowConfig: {
-          start_step: 'Synthesis',
-          end_step: 'Harden',
-          steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
-        },
-        pdkJson: '/pdks/ics55/pdk.json',
-        sdc: '/constraints/top.sdc',
       }),
     )
   })
@@ -99,7 +102,7 @@ describe('workspace desktop bridge', () => {
     const close = vi.fn(async () => ({ ok: true }))
     setWindow({
       ecosDesktop: {
-        ecc: {
+        runtime: {
           workspace: {
             close,
           },
@@ -110,6 +113,9 @@ describe('workspace desktop bridge', () => {
     const { closeWorkspaceApi } = await import('./workspace')
 
     await expect(closeWorkspaceApi('workspace-handle-1')).resolves.toEqual({ ok: true })
-    expect(close).toHaveBeenCalledWith({ workspaceHandle: 'workspace-handle-1' })
+    expect(close).toHaveBeenCalledWith({
+      designTool: 'backend',
+      workspaceHandle: 'workspace-handle-1',
+    })
   })
 })
