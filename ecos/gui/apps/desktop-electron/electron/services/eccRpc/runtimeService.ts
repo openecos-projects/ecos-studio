@@ -200,6 +200,35 @@ export class EccRpcRuntimeService {
     })
   }
 
+  createWorkspacePayload(
+    payload: Record<string, unknown>,
+  ): Promise<EccWorkspaceCreateResult> {
+    return this.enqueue('workspace.create', undefined, async () => {
+      const client = await this.ensureStarted()
+      const response = await client.call<EccWorkspaceSessionResult>(
+        'workspace.create',
+        payload,
+        { timeoutMs: 0 },
+      )
+      const session = this.sessions.activate(response.directory, response.workspaceId)
+      return {
+        directory: session.directory,
+        workspaceHandle: session.workspaceHandle,
+      }
+    })
+  }
+
+  callRuntime<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.enqueue(method, undefined, async () => {
+      const client = await this.ensureStarted()
+      return await client.call<T>(method, params, options)
+    })
+  }
+
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
     return this.enqueue('workspace.open', undefined, async () => {
       const client = await this.ensureStarted()
@@ -374,6 +403,31 @@ export class EccRpcRuntimeService {
           {
             rerun,
             step: request.step,
+            workspaceId,
+          },
+          { timeoutMs: 0 },
+        )
+      },
+      { rerun },
+    )
+  }
+
+  runStepPayload(
+    workspaceHandle: string,
+    payload: Record<string, unknown>,
+  ): Promise<EccFlowRunStepResult> {
+    const rerun = Boolean(payload.rerun)
+    return this.enqueue(
+      'flow.run_step',
+      workspaceHandle,
+      async () => {
+        const client = await this.ensureStarted()
+        const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
+        return await client.call<EccFlowRunStepResult>(
+          'flow.run_step',
+          {
+            ...payload,
+            rerun,
             workspaceId,
           },
           { timeoutMs: 0 },

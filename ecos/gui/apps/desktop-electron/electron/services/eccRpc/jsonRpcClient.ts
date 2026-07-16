@@ -28,6 +28,7 @@ export class EccJsonRpcProtocolError extends Error {
 
 interface EccJsonRpcClientOptions {
   defaultTimeoutMs?: number
+  onNotification?(method: string, params: unknown): void
   writeFrame(frame: Buffer): void
 }
 
@@ -41,6 +42,8 @@ interface JsonRpcResponsePayload {
   error?: JsonRpcErrorPayload
   id?: unknown
   jsonrpc?: unknown
+  method?: unknown
+  params?: unknown
   result?: unknown
 }
 
@@ -120,6 +123,9 @@ export class EccJsonRpcClient {
   private handleResponse(message: string): void {
     const payload = this.parseResponse(message)
     if (payload.id === undefined || payload.id === null) {
+      if (typeof payload.method === 'string') {
+        this.options.onNotification?.(payload.method, payload.params)
+      }
       return
     }
     if (typeof payload.id !== 'number' || !Number.isSafeInteger(payload.id)) {

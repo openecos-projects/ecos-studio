@@ -56,6 +56,33 @@ describe('EccRpcSidecarProcess', () => {
     })
   })
 
+  it('uses a runtime-specific launch resolver', async () => {
+    const child = new FakeChild()
+    const spawn = vi.fn(() => child)
+    const resolveLaunch = vi.fn(() => ({
+      args: ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      command: 'python3',
+      env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
+    }))
+    const sidecar = new EccRpcSidecarProcess({
+      env: { PATH: '/bin' },
+      resolveLaunch,
+      spawn,
+    })
+
+    await sidecar.start()
+
+    expect(resolveLaunch).toHaveBeenCalledWith({ PATH: '/bin' })
+    expect(spawn).toHaveBeenCalledWith(
+      'python3',
+      ['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'],
+      {
+        env: { PATH: '/bin', PYTHONPATH: '/work/ecc-fe' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
+  })
+
   it('rechecks equivalent runtime environments before reusing the sidecar', async () => {
     const child = new FakeChild()
     const spawn = vi.fn(() => child)

@@ -14,6 +14,8 @@ import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import { createFrontendRuntimeAdapter } from '../services/frontendRuntimeAdapter'
+import { createFrontendRpcLaunchResolver } from '../services/frontendRpcRuntime'
+import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
@@ -34,6 +36,7 @@ let ipcRegistered = false
 let services: {
   appInfoService: AppInfoService
   frontendRuntimeManager: DesktopRuntimeManager
+  frontendRpcRuntimeService: FrontendRpcRuntimeService
   eccRuntimeService: EccRpcRuntimeService
   remoteContentService: RemoteContentService
   settingsStore: SettingsStore
@@ -136,11 +139,34 @@ function getDesktopServices() {
       frontendRootSearchRoots: app.isPackaged ? [] : [process.cwd(), app.getAppPath()],
     }),
   })
+  let frontendRpcRuntimeService: FrontendRpcRuntimeService
+  const frontendRpcCore = new EccRpcRuntimeService({
+    createSidecar: (onEvent) =>
+      new EccRpcSidecarProcess({
+        env: runtimeEnv,
+        envProvider: runtimeEnvProvider,
+        logDirectoryProvider: () => {
+          const directory = frontendRpcRuntimeService.activeWorkspaceDirectory
+          return directory ? join(directory, 'log') : null
+        },
+        onEvent,
+        resolveLaunch: createFrontendRpcLaunchResolver({
+          env: runtimeEnv,
+          frontendRootSearchRoots: app.isPackaged
+            ? []
+            : [process.cwd(), app.getAppPath()],
+        }),
+      }),
+  })
+  frontendRpcRuntimeService = new FrontendRpcRuntimeService({
+    runtime: frontendRpcCore,
+  })
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
     runtimeMutationGuard: {
       isWorkspaceRuntimeActive: async (directory) =>
         eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
+        frontendRpcRuntimeService.isWorkspaceRuntimeActive(directory) ||
         (await frontendRuntimeManager.isWorkspaceRuntimeActive(directory)),
     },
   })
@@ -172,6 +198,7 @@ function getDesktopServices() {
   services = {
     appInfoService,
     frontendRuntimeManager,
+    frontendRpcRuntimeService,
     eccRuntimeService,
     remoteContentService,
     resourceManagerService,

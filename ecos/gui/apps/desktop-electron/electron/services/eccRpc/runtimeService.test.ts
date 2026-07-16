@@ -96,6 +96,31 @@ function createService() {
 }
 
 describe('EccRpcRuntimeService', () => {
+  it('creates a workspace from a runtime-specific payload', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/frontend', workspaceId: 'frontend-1' },
+    )
+
+    const result = await service.createWorkspacePayload({
+      cpu_filelist: '/work/cpu.f',
+      directory: '/work/frontend',
+      soc_harness_id: 'ysyx-am-soc',
+    })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'workspace.create',
+      options: { timeoutMs: 0 },
+      params: {
+        cpu_filelist: '/work/cpu.f',
+        directory: '/work/frontend',
+        soc_harness_id: 'ysyx-am-soc',
+      },
+    })
+    expect(result).toMatchObject({ directory: '/work/frontend' })
+  })
+
   it('forwards the wizard flow range when creating a workspace', async () => {
     const { client, service } = createService()
     client.responses.push(
