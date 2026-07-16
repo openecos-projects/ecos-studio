@@ -9,4 +9,4 @@
 	url = https://github.com/openecos-projects/ecc.git
 [submodule "ecc-fe"]
 	path = ecc-fe
-	url = git@github.com:openecos-projects/ecc-fe.git
+	url = https://github.com/openecos-projects/ecc-fe.git

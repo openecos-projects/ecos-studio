@@ -16,7 +16,9 @@ describe('frontend workspace creation lifecycle', () => {
   it('prevents duplicate submit and close actions while creation is active', () => {
     expect(viewSource).toContain('if (wizardCreating.value) return')
     expect(wizardSource).toContain('const isCreating = computed(() => props.creating)')
-    expect(wizardSource).toContain('if (isCreating.value || !validationOk.value')
+    expect(wizardSource).toMatch(
+      /if\s*\(\s*isCreating\.value\s*\|\|\s*!validationOk\.value/,
+    )
     expect(wizardSource).toContain("if (!isCreating.value) emit('close')")
   })
 })

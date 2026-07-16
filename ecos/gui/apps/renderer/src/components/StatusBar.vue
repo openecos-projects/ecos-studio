@@ -52,6 +52,7 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
 
 .status-terminal-toggle {
   height: 20px;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -62,10 +63,6 @@ const guiVersion = computed(() => versions.value?.gui ?? '')
   background: transparent;
   font-size: 11px;
   cursor: pointer;
-}
-
-.status-terminal-toggle {
-  margin-left: auto;
 }
 
 .status-terminal-toggle:hover {

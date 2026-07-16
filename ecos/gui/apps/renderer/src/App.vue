@@ -41,7 +41,7 @@
     </div>
 
     <!-- 全局 Toast 通知 -->
-    <Toast position="bottom-right" class="app-toast" />
+    <Toast position="top-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
     <NewProjectWizard

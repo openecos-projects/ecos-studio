@@ -40,7 +40,7 @@ describe('FrontendProjectWizard catalog ownership', () => {
     expect(wizardSource).toContain(
       'container.scrollTop + targetRect.top - containerRect.top - 12',
     )
-    expect(wizardSource).toContain('fixed ECOS SoC instantiates it directly')
+    expect(wizardSource).toMatch(/fixed ECOS SoC instantiates it\s+directly/)
   })
 
   it('supports filelist and direct RTL selection without exposing the generated filelist', () => {

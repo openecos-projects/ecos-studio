@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { configureChromiumLogging } from './chromiumLogging'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
@@ -54,10 +53,6 @@ function readHostInfo(path: string): string {
   }
 }
 
-configureChromiumLogging({
-  app,
-  env: process.env,
-})
 configureGpuMode({
   app,
   env: process.env,
