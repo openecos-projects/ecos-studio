@@ -18,6 +18,9 @@ docs/superpowers/
 .superpowers/
 .worktrees/
 
+# Local development journal
+/dev_log.md
+
 # Resource Manager runtime cache and manifests
 ecos/server/ecos_server/resource/data/
 *.json.bak
