@@ -20,29 +20,27 @@ function restoreWindow() {
   delete (globalThis as { window?: unknown }).window
 }
 
-describe('createWorkspaceApi desktop bridge payload', () => {
+describe('workspace desktop bridge', () => {
   afterEach(() => {
     restoreWindow()
     vi.resetModules()
   })
 
   it('sends a structured-cloneable request when wizard config is reactive', async () => {
-    const execute = vi.fn(async (request: unknown) => {
+    const create = vi.fn(async (request: unknown) => {
       expect(() => structuredClone(request)).not.toThrow()
       return {
-        cmd: 'create_workspace',
-        data: { directory: '/workspace/demo' },
-        message: ['ok'],
-        ok: true,
-        response: 'success',
+        directory: '/workspace/demo',
+        workspaceHandle: 'workspace-handle-1',
       }
     })
 
     setWindow({
       ecosDesktop: {
-        cli: {
-          cancel: vi.fn(),
-          execute,
+        ecc: {
+          workspace: {
+            create,
+          },
         },
       },
     })
@@ -50,7 +48,6 @@ describe('createWorkspaceApi desktop bridge payload', () => {
     const { createWorkspaceApi } = await import('./workspace')
     const options = reactive({
       directory: '/workspace/demo',
-      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
       filelist: '',
       origin_def: '',
       origin_verilog: '/rtl/top.v',
@@ -64,22 +61,55 @@ describe('createWorkspaceApi desktop bridge payload', () => {
         top_module: 'top',
       },
       pdk: 'ics55',
+      pdk_json: '/pdks/ics55/pdk.json',
       pdk_root: '/pdks/ics55',
       rtl_list: ['/rtl/top.v'],
+      sdc: '/constraints/top.sdc',
+      flow_config: {
+        start_step: 'Synthesis',
+        end_step: 'Harden',
+        steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+      },
     })
 
     await expect(createWorkspaceApi(options)).resolves.toMatchObject({
       response: 'success',
+      data: {
+        workspace_handle: 'workspace-handle-1',
+      },
     })
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'create_workspace',
-      data: expect.objectContaining({
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
         parameters: expect.objectContaining({
           design: 'demo',
         }),
-        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
-        rtl_list: ['/rtl/top.v'],
+        rtlList: ['/rtl/top.v'],
+        flowConfig: {
+          start_step: 'Synthesis',
+          end_step: 'Harden',
+          steps: ['Synthesis', 'RCX', 'sta', 'Harden'],
+        },
+        pdkJson: '/pdks/ics55/pdk.json',
+        sdc: '/constraints/top.sdc',
       }),
-    }))
+    )
+  })
+
+  it('forwards workspace close requests with the GUI handle', async () => {
+    const close = vi.fn(async () => ({ ok: true }))
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          workspace: {
+            close,
+          },
+        },
+      },
+    })
+
+    const { closeWorkspaceApi } = await import('./workspace')
+
+    await expect(closeWorkspaceApi('workspace-handle-1')).resolves.toEqual({ ok: true })
+    expect(close).toHaveBeenCalledWith({ workspaceHandle: 'workspace-handle-1' })
   })
 })

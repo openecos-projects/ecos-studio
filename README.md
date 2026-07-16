@@ -100,6 +100,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 - [ECOS Studio User Guide](ecos/docs/user-guide.md)
 - [FAQ](ecos/docs/FAQ.md)
+- [Release Guide](ecos/docs/release.md)
 - [ECOS GUI Development](ecos/README.md)
 - [ECC CLI Flow Runner](https://github.com/openecos-projects/ecc/blob/main/README.md#cli-flow-runner)
 - [ECC Documentation Index](https://github.com/openecos-projects/ecc/blob/main/docs/index.md)

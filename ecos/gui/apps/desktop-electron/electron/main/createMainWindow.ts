@@ -20,7 +20,9 @@ function resolvePreloadPath(): string {
 }
 
 const preloadPath = resolvePreloadPath()
-const rendererIndexPath = fileURLToPath(new URL('../renderer/index.html', import.meta.url))
+const rendererIndexPath = fileURLToPath(
+  new URL('../renderer/index.html', import.meta.url),
+)
 const FORWARD_RENDERER_CONSOLE = process.env.ECOS_FORWARD_RENDERER_CONSOLE === '1'
 
 function shouldOpenDevTools(): boolean {
@@ -57,10 +59,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 
   if (FORWARD_RENDERER_CONSOLE) {
     mainWindow.webContents.on('console-message', (details) => {
-      const levelName =
-        details.level === 'warning'
-          ? 'warn'
-          : details.level
+      const levelName = details.level === 'warning' ? 'warn' : details.level
       const source = details.sourceId || 'renderer'
       logRendererConsoleMessage(
         `[renderer:${levelName}] ${source}:${details.lineNumber} ${details.message}`,

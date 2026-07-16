@@ -1,98 +1,125 @@
 <template>
-  <div class="flex flex-col h-full bg-(--bg-primary)">
+  <div class="flex h-full flex-col bg-(--bg-primary)">
     <!-- Tabs 标题栏 -->
     <div class="flex items-center border-b border-(--border-color)">
-      <button v-for="tab in tabs" :key="tab.id" @click="handleTabChange(tab.id)" :class="[
-        'flex-1 flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium transition-all border-b-2',
-        activeTab === tab.id
-          ? 'text-(--accent-color) border-(--accent-color) bg-(--accent-color)/5'
-          : 'text-(--text-secondary) border-transparent hover:text-(--text-primary) hover:bg-(--bg-secondary)/50'
-      ]">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        @click="handleTabChange(tab.id)"
+        :class="[
+          'flex flex-1 items-center justify-center gap-2 border-b-2 px-4 py-2 text-xs font-medium transition-all',
+          activeTab === tab.id
+            ? 'border-(--accent-color) bg-(--accent-color)/5 text-(--accent-color)'
+            : 'border-transparent text-(--text-secondary) hover:bg-(--bg-secondary)/50 hover:text-(--text-primary)',
+        ]"
+      >
         <i :class="tab.icon"></i>
         <span>{{ tab.label }}</span>
       </button>
     </div>
 
     <!-- Tab 内容区域 -->
-    <div class="flex-1 min-h-0 min-w-0 overflow-auto">
+    <div class="min-h-0 min-w-0 flex-1 overflow-auto">
       <!-- 加载状态 -->
-      <div v-if="isLoadingTab" class="flex items-center justify-center h-full">
+      <div v-if="isLoadingTab" class="flex h-full items-center justify-center">
         <div class="text-center">
-          <i class="ri-loader-4-line text-2xl text-(--accent-color) animate-spin"></i>
-          <p class="text-[11px] text-(--text-secondary) mt-2">Loading...</p>
+          <i class="ri-loader-4-line animate-spin text-2xl text-(--accent-color)"></i>
+          <p class="mt-2 text-[11px] text-(--text-secondary)">Loading...</p>
         </div>
       </div>
 
       <!-- 无 step 时的提示 -->
-      <div v-else-if="!currentStep" class="flex items-center justify-center h-full">
-        <div class="text-center px-4">
+      <div v-else-if="!currentStep" class="flex h-full items-center justify-center">
+        <div class="px-4 text-center">
           <i class="ri-information-line text-3xl text-(--text-secondary) opacity-50"></i>
-          <p class="text-[11px] text-(--text-secondary) mt-2">Please select a flow step first</p>
+          <p class="mt-2 text-[11px] text-(--text-secondary)">
+            Please select a flow step first
+          </p>
         </div>
       </div>
 
-
-
       <!-- 空数据提示 -->
-      <div v-else-if="Object.keys(currentTabInfo).length === 0" class="flex items-center justify-center h-full">
-        <div class="text-center px-4">
+      <div
+        v-else-if="Object.keys(currentTabInfo).length === 0"
+        class="flex h-full items-center justify-center"
+      >
+        <div class="px-4 text-center">
           <i class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"></i>
-          <p class="text-[11px] text-(--text-secondary) mt-2">No data</p>
+          <p class="mt-2 text-[11px] text-(--text-secondary)">No data</p>
         </div>
       </div>
 
       <!-- Info Keys 列表 -->
-      <div v-else class="p-3 w-full">
+      <div v-else class="w-full p-3">
         <!-- Analysis 网格布局 -->
-        <div v-if="activeTab === InfoEnum.analysis || activeTab === InfoEnum.sta" class="grid grid-cols-2 gap-2">
-          <a v-for="(value, key) in currentTabInfo" :key="key" @click="handleKeyClick(key as string, value)" :class="[
-            'group flex items-center gap-2.5 p-2.5 rounded-lg cursor-pointer',
-            'transition-all duration-200 ease-out',
-            'border',
-            loadingKey === key
-              ? 'bg-(--bg-secondary) border-(--border-color) opacity-60 pointer-events-none'
-              : [
-                'bg-(--bg-secondary)/50 border-(--border-color)/50',
-                'hover:bg-(--bg-secondary) hover:border-(--border-color)',
-                'hover:shadow-sm'
-              ]
-          ]">
-            <!-- 图标 -->
-            <div :class="[
-              'flex items-center justify-center w-7 h-7 rounded-md shrink-0',
-              'transition-colors duration-200',
+        <div
+          v-if="activeTab === InfoEnum.analysis || activeTab === InfoEnum.sta"
+          class="grid grid-cols-2 gap-2"
+        >
+          <a
+            v-for="(value, key) in currentTabInfo"
+            :key="key"
+            @click="handleKeyClick(key as string, value)"
+            :class="[
+              'group flex cursor-pointer items-center gap-2.5 rounded-lg p-2.5',
+              'transition-all duration-200 ease-out',
+              'border',
               loadingKey === key
-                ? 'bg-(--bg-tertiary) text-(--text-secondary)'
-                : 'bg-(--accent-color)/10 text-(--accent-color) group-hover:bg-(--accent-color)/15'
-            ]">
-              <i v-if="loadingKey === key" class="ri-loader-4-line animate-spin text-sm"></i>
+                ? 'pointer-events-none border-(--border-color) bg-(--bg-secondary) opacity-60'
+                : [
+                    'border-(--border-color)/50 bg-(--bg-secondary)/50',
+                    'hover:border-(--border-color) hover:bg-(--bg-secondary)',
+                    'hover:shadow-sm',
+                  ],
+            ]"
+          >
+            <!-- 图标 -->
+            <div
+              :class="[
+                'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                'transition-colors duration-200',
+                loadingKey === key
+                  ? 'bg-(--bg-tertiary) text-(--text-secondary)'
+                  : 'bg-(--accent-color)/10 text-(--accent-color) group-hover:bg-(--accent-color)/15',
+              ]"
+            >
+              <i
+                v-if="loadingKey === key"
+                class="ri-loader-4-line animate-spin text-sm"
+              ></i>
               <i v-else :class="[getAnalysisIcon(key as string), 'text-sm']"></i>
             </div>
             <!-- 文本 -->
-            <span :class="[
-              'text-[11px] font-medium truncate',
-              'transition-colors duration-200',
-              loadingKey === key
-                ? 'text-(--text-secondary)'
-                : 'text-(--text-primary) group-hover:text-(--accent-color)'
-            ]">{{ key }}</span>
+            <span
+              :class="[
+                'truncate text-[11px] font-medium',
+                'transition-colors duration-200',
+                loadingKey === key
+                  ? 'text-(--text-secondary)'
+                  : 'text-(--text-primary) group-hover:text-(--accent-color)',
+              ]"
+              >{{ key }}</span
+            >
           </a>
         </div>
 
         <!-- Maps 展示 -->
         <div v-else-if="activeTab === InfoEnum.maps" class="w-full">
-          <MapsGallery :maps-data="currentTabInfo as Record<string, MapInfoType>" @select="handleMapSelect" />
+          <MapsGallery
+            :maps-data="currentTabInfo as Record<string, MapInfoType>"
+            @select="handleMapSelect"
+          />
         </div>
 
         <!-- Checklist 表格 -->
-        <div v-else-if="activeTab === InfoEnum.checklist" class="w-full h-full min-h-0">
+        <div v-else-if="activeTab === InfoEnum.checklist" class="h-full min-h-0 w-full">
           <ChecklistTable :items="currentChecklistItems" />
         </div>
       </div>
 
       <!-- 错误提示 -->
       <div v-if="currentTabError" class="p-3">
-        <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+        <div class="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
           <p class="text-[11px] text-red-500">{{ currentTabError }}</p>
         </div>
       </div>
@@ -127,7 +154,7 @@ const tabs = [
   { id: InfoEnum.analysis, label: 'Analysis', icon: 'ri-pie-chart-line' },
   { id: InfoEnum.maps, label: 'Maps', icon: 'ri-map-2-line' },
   { id: InfoEnum.checklist, label: 'Checklist', icon: 'ri-list-check-line' },
-  { id: InfoEnum.sta, label: 'STA', icon: 'ri-timer-line' }
+  { id: InfoEnum.sta, label: 'STA', icon: 'ri-timer-line' },
 ]
 
 const activeTab = ref<InfoEnum>(InfoEnum.analysis)
@@ -171,7 +198,7 @@ const analysisIconMap: Record<string, string> = {
   design: 'ri-draft-line',
   floorplan: 'ri-layout-4-line',
   placement: 'ri-grid-line',
-  cts: 'ri-tree-line'
+  cts: 'ri-tree-line',
 }
 
 // 根据 key 获取图标
@@ -218,7 +245,7 @@ function setTabError(error: string | null) {
 const stepEnumValues = Object.values(StepEnum)
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
-  return stepEnumValues.find(step => step.toLowerCase() === path.toLowerCase())
+  return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
 }
 
 const currentStep = computed(() => {
@@ -324,7 +351,9 @@ async function loadChecklistItems(force = false): Promise<void> {
 
     const fileContent = await readProjectTextFile(localPath)
     const data = JSON.parse(fileContent) as { checklist?: ChecklistItem[] }
-    checklistItemsCache.value[itemsCacheKey] = Array.isArray(data.checklist) ? data.checklist : []
+    checklistItemsCache.value[itemsCacheKey] = Array.isArray(data.checklist)
+      ? data.checklist
+      : []
     setTabError(null)
   } catch (err) {
     console.error('loadChecklistItems error:', err)
@@ -353,7 +382,7 @@ async function fetchTabInfo(tabId: InfoEnum) {
   try {
     const response = await resolveWorkspaceStepInfoApi({
       step: currentStep.value,
-      id: tabId
+      id: tabId,
     })
 
     console.log('workspace resource tab response:', response)
@@ -428,13 +457,17 @@ async function handleKeyClick(key: string, value: unknown) {
     }
 
     // 构建 items 数组
-    const items: Array<{ label: string; content: unknown; format: 'json' | 'csv' | 'text' | 'html' }> = []
+    const items: Array<{
+      label: string
+      content: unknown
+      format: 'json' | 'csv' | 'text' | 'html'
+    }> = []
 
     // 添加文件内容
     items.push({
       label: path ? path.split('/').pop() || path : '[Data]',
       content,
-      format
+      format,
     })
 
     // 如果有 info 数组，添加额外的 info 信息
@@ -442,7 +475,7 @@ async function handleKeyClick(key: string, value: unknown) {
       items.push({
         label: 'Additional Info',
         content: infoArray.join('\n'),
-        format: 'text'
+        format: 'text',
       })
     }
 
@@ -450,9 +483,8 @@ async function handleKeyClick(key: string, value: unknown) {
     messageStore.addInfoMessage({
       title: key,
       step: currentStep.value,
-      items
+      items,
     })
-
   } catch (err) {
     console.error('handleKeyClick error:', err)
     setTabError(err instanceof Error ? err.message : 'Failed to read file')
@@ -469,12 +501,14 @@ function handleMapSelect(key: string, item: MapInfoType, blobUrl: string) {
   const localPath = convertToLocalPath(item.path)
 
   // 使用传入的 blobUrl，如果没有则使用占位图
-  const imageUrl = blobUrl || `https://placehold.co/400x400/1a1a2e/16a085?text=${encodeURIComponent(key)}`
+  const imageUrl =
+    blobUrl ||
+    `https://placehold.co/400x400/1a1a2e/16a085?text=${encodeURIComponent(key)}`
 
   // 格式化标题
   const formattedTitle = key
     .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 
   // 确定分类
@@ -491,21 +525,25 @@ function handleMapSelect(key: string, item: MapInfoType, blobUrl: string) {
     imageUrl,
     localPath,
     info: item.info || [],
-    category
+    category,
   })
 }
 
 // 监听 step 变化，重新获取数据
-watch(currentStep, async (newStep) => {
-  if (newStep) {
-    // 清除缓存
-    tabInfoCache.value = {}
-    tabErrorCache.value = {}
-    checklistItemsCache.value = {}
-    // 获取当前 tab 的数据
-    await fetchTabInfo(activeTab.value)
-  }
-}, { immediate: true })
+watch(
+  currentStep,
+  async (newStep) => {
+    if (newStep) {
+      // 清除缓存
+      tabInfoCache.value = {}
+      tabErrorCache.value = {}
+      checklistItemsCache.value = {}
+      // 获取当前 tab 的数据
+      await fetchTabInfo(activeTab.value)
+    }
+  },
+  { immediate: true },
+)
 
 watch(
   () => [

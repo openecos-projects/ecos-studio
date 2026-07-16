@@ -14,6 +14,12 @@ import { isFlowExecutionActiveForWorkspace } from './useFlowRunner'
 const stepEnumValues = Object.values(StepEnum)
 const FLOW_RUNNING_SAVE_BLOCKED_MESSAGE =
   'Flow is running. Configuration is read-only until the current run finishes.'
+const ROUTE_STEP_BOTTOM_LAYER = 'MET2'
+const ROUTE_STEP_TOP_LAYER = 'MET5'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
   return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
@@ -51,12 +57,27 @@ function stableJsonSig(v: unknown): string {
   }
 }
 
+function pinRouteStepConfigRoutingLayers(
+  value: unknown,
+  step: StepEnum | undefined,
+): unknown {
+  if (step !== StepEnum.ROUTING || !isRecord(value)) return value
+
+  const routeBlock = isRecord(value.RT) ? value.RT : value
+  routeBlock['-bottom_routing_layer'] = ROUTE_STEP_BOTTOM_LAYER
+  routeBlock['-top_routing_layer'] = ROUTE_STEP_TOP_LAYER
+  return value
+}
+
 function pickStepConfigPathFromInfo(data: Record<string, unknown>): string | undefined {
   const v = data.config
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
-function firstResponseMessage(response: { message?: string[] } | undefined, fallback: string): string {
+function firstResponseMessage(
+  response: { message?: string[] } | undefined,
+  fallback: string,
+): string {
   return response?.message?.[0] || fallback
 }
 
@@ -89,7 +110,9 @@ export function useStepConfigInfo() {
   const isSavingStepConfig = ref(false)
   const activeStepConfigSave = ref<symbol | null>(null)
   const stepConfigSaveError = ref<string | null>(null)
-  const isMutationLocked = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
+  const isMutationLocked = computed(() =>
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  )
   let activeRefetchToken: symbol | null = null
   let lastLoadedStep: StepEnum | null = null
 
@@ -128,9 +151,8 @@ export function useStepConfigInfo() {
     }
 
     try {
-      const response = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveWorkspaceStepInfoApi({
+      const response = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveWorkspaceStepInfoApi({
           step: stepEnum,
           id: InfoEnum.config,
         }),
@@ -169,7 +191,8 @@ export function useStepConfigInfo() {
 
       responseKind.value = 'error'
       info.value = null
-      error.value = (response.message && response.message[0]) || 'Failed to load step configuration'
+      error.value =
+        (response.message && response.message[0]) || 'Failed to load step configuration'
       clearFileState()
     } catch (e) {
       if (!canApply()) return
@@ -222,7 +245,10 @@ export function useStepConfigInfo() {
     }
     try {
       const parsed = JSON.parse(raw) as unknown
-      stepConfigDraft.value = deepClone(parsed)
+      stepConfigDraft.value = pinRouteStepConfigRoutingLayers(
+        deepClone(parsed),
+        currentStep.value,
+      )
       stepConfigBaselineSig.value = stableJsonSig(parsed)
       stepConfigTextDraft.value = ''
       stepConfigTextBaseline.value = ''
@@ -259,9 +285,8 @@ export function useStepConfigInfo() {
     }
 
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(localPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(localPath),
       )
       if (!canApply()) return
       if (!resolvedPath) {
@@ -269,9 +294,8 @@ export function useStepConfigInfo() {
         stepConfigReadError.value = `No file-system access to ${localPath}`
         return
       }
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
       if (!canApply() || fileContent === undefined) return
       stepConfigRaw.value = fileContent
@@ -292,10 +316,7 @@ export function useStepConfigInfo() {
   )
 
   watch(
-    () => [
-      resourceVersions.value['step-config'],
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value['step-config'], resourceVersions.value.all],
     () => {
       void refetch()
     },
@@ -374,7 +395,8 @@ export function useStepConfigInfo() {
     const step = currentStep.value
     const saveToken = Symbol('step-config-save')
     const isCurrentSave = () => activeStepConfigSave.value === saveToken
-    const canApply = () => workspaceLifecycle.isCurrentSession(sessionId) && isCurrentSave()
+    const canApply = () =>
+      workspaceLifecycle.isCurrentSession(sessionId) && isCurrentSave()
     const setSavingForToken = (value: boolean) => {
       if (activeStepConfigSave.value === saveToken) {
         isSavingStepConfig.value = value
@@ -394,13 +416,13 @@ export function useStepConfigInfo() {
     }
     const rawBeforeSave = stepConfigRaw.value
     const textDraftBeforeSave = stepConfigTextDraft.value
-    const draftBeforeSave = stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
+    const draftBeforeSave =
+      stepConfigDraft.value === null ? null : deepClone(stepConfigDraft.value)
     activeStepConfigSave.value = saveToken
     isSavingStepConfig.value = true
     try {
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(path),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(path),
       )
       if (!canApply()) return false
       if (!resolvedPath) {
@@ -417,13 +439,18 @@ export function useStepConfigInfo() {
           stepConfigSaveError.value = 'No workspace is open'
           return false
         }
-        const syncResult = await workspaceLifecycle.runForSession(
-          sessionId,
-          () => syncConfigApi({
+        const syncResult = await workspaceLifecycle.runForSession(sessionId, () =>
+          syncConfigApi({
             cmd: CMDEnum.sync_config,
             data: {
               config_path: resolvedPath,
+              ...(currentProject.value?.designTool === 'frontend'
+                ? { designTool: 'frontend' as const }
+                : {}),
               directory: projectPath,
+              ...(currentProject.value?.designTool === 'frontend'
+                ? {}
+                : { workspaceHandle: workspaceLifecycle.session.value.workspaceId }),
             },
           }),
         )
@@ -444,7 +471,10 @@ export function useStepConfigInfo() {
         }
 
         if (syncResult?.response !== ResponseEnum.success) {
-          stepConfigSaveError.value = firstResponseMessage(syncResult, 'Sync workspace config failed')
+          stepConfigSaveError.value = firstResponseMessage(
+            syncResult,
+            'Sync workspace config failed',
+          )
           return false
         }
 
@@ -470,17 +500,15 @@ export function useStepConfigInfo() {
         stepConfigSaveError.value = 'Nothing to save'
         return false
       }
-      text = JSON.stringify(draftBeforeSave, null, 4)
-      const writeResult = await workspaceLifecycle.runForSession(
-        sessionId,
-        async () => {
-          await writeProjectTextFile(resolvedPath, text)
-          return true
-        },
-      )
+      const normalizedDraft = pinRouteStepConfigRoutingLayers(draftBeforeSave, step)
+      text = JSON.stringify(normalizedDraft, null, 4)
+      const writeResult = await workspaceLifecycle.runForSession(sessionId, async () => {
+        await writeProjectTextFile(resolvedPath, text)
+        return true
+      })
       if (!canApply() || writeResult !== true) return false
       stepConfigRaw.value = text
-      stepConfigBaselineSig.value = stableJsonSig(draftBeforeSave)
+      stepConfigBaselineSig.value = stableJsonSig(normalizedDraft)
       return await syncWorkspaceConfig()
     } catch (e) {
       if (!canApply()) return false

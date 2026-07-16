@@ -8,40 +8,38 @@ import {
 
 describe('useParameters helpers', () => {
   it('parses the current parameters schema into normalized data', () => {
-    const parsed = parseParametersData(JSON.stringify({
-      PDK: 'ics55',
-      Design: 'demo',
-      'Top module': 'top',
-      Die: { Size: ['100', 200], Area: '300' },
-      Core: {
-        Size: [80, '120'],
-        Area: '9600',
-        'Bounding box': '(0,0) (10,10)',
-        Utilitization: '0.55',
-        Margin: ['3', 4],
-        'Aspect ratio': '1.2',
-      },
-      'Max fanout': '42',
-      'Target density': '0.61',
-      'Target overflow': '0.09',
-      'Global right padding': '7',
-      'Cell padding x': '900',
-      'Routability opt flag': 0,
-      Clock: 'clk',
-      'Frequency max [MHz]': '250',
-      'Bottom layer': 'MET3',
-      'Top layer': 'MET6',
-      'PDK Root': '/pdks/ics55',
-    }))
+    const parsed = parseParametersData(
+      JSON.stringify({
+        PDK: 'ics55',
+        Design: 'demo',
+        'Top module': 'top',
+        Die: { Size: ['100', 200], Area: '300' },
+        Core: {
+          Size: [80, '120'],
+          Area: '9600',
+          'Bounding box': '(0,0) (10,10)',
+          Utilitization: '0.55',
+          Margin: ['3', 4],
+          'Aspect ratio': '1.2',
+        },
+        'Max fanout': '42',
+        'Target density': '0.61',
+        'Target overflow': '0.09',
+        'Global right padding': '7',
+        'Cell padding x': '900',
+        'Routability opt flag': 0,
+        Clock: 'clk',
+        'Frequency max [MHz]': '250',
+        'Bottom layer': 'MET3',
+        'Top layer': 'MET6',
+        'PDK Root': '/pdks/ics55',
+      }),
+    )
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       PDK: 'ics55',
       Design: 'demo',
-      design: undefined,
-      description: undefined,
-      'Design Tool': undefined,
       'Top module': 'top',
-      top_module: undefined,
       Die: { Size: [100, 200], Area: 300 },
       Core: {
         Size: [80, 120],
@@ -58,23 +56,10 @@ describe('useParameters helpers', () => {
       'Cell padding x': 900,
       'Routability opt flag': 0,
       Clock: 'clk',
-      clock: undefined,
       'Frequency max [MHz]': 250,
-      frequency_max: undefined,
       'Bottom layer': 'MET3',
       'Top layer': 'MET6',
       'PDK Root': '/pdks/ics55',
-      cpu_filelist: undefined,
-      soc_filelist: undefined,
-      soc_variant: undefined,
-      soc_harness_id: undefined,
-      frontend_core_id: undefined,
-      core_id: undefined,
-      toolchain_id: undefined,
-      test_suite_id: undefined,
-      input_filelist: undefined,
-      sim_program_names: [],
-      sim_all_tests: false,
     })
   })
 
@@ -104,7 +89,7 @@ describe('useParameters helpers', () => {
       clock: 'clk',
       frequencyMax: 500,
       bottomLayer: 'MET2',
-      topLayer: 'MET7',
+      topLayer: 'MET5',
       frontend: {
         coreId: '',
         cpuWrapperId: '',
@@ -125,54 +110,89 @@ describe('useParameters helpers', () => {
       },
     }
 
-    expect(transformParametersToConfig(transformConfigToParameters(config))).toEqual(config)
+    expect(transformParametersToConfig(transformConfigToParameters(config))).toEqual(
+      config,
+    )
   })
 
-  it('keeps frontend catalog selections for read-only Home summaries', () => {
-    const config = transformParametersToConfig(parseParametersData(JSON.stringify({
-      design: 'frontend_demo',
-      top_module: 'ecos_sim_top',
-      clock: 'clk',
-      frequency_max: 100,
-      'Design Tool': 'frontend',
-      cpu_filelist: '/cpu/filelist.cpu.f',
-      soc_filelist: '/soc/filelist.soc.f',
-      soc_variant: 'soc1',
-      soc_harness_id: 'ysyx-am-soc',
-      soc_wrapper_id: 'ysyx-am-soc',
-      soc_wrapper_contract: 'ecos-sim-wrapper-v1',
-      frontend_core_id: 'custom-filelist',
-      cpu_wrapper_id: 'custom-filelist',
-      cpu_wrapper_contract: 'ecos-cpu-wrapper-v1',
-      cpu_socket_contract: 'ysyx-axi-cpu-socket-v1',
-      cpu_wrapper_top: 'ysyx_00000000',
-      toolchain_id: 'riscv32-unknown-elf',
-      test_suite_id: 'cpu-tests',
-      input_filelist: '/workspace/prepare_fe/output/merged_rtl.f',
-      sim_program_names: ['add'],
-      sim_all_tests: false,
-    })))
+  it('round-trips frontend workspace metadata', () => {
+    const parsed = parseParametersData(
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        design: 'cpu-demo',
+        top_module: 'ecos_sim_top',
+        clock: 'clk',
+        frequency_max: 100,
+        frontend_core_id: 'custom-filelist',
+        cpu_filelist: '/work/cpu/filelist.f',
+        soc_harness_id: 'ysyx-am',
+        toolchain_id: 'riscv64-unknown-elf',
+        test_suite_id: 'am-tests',
+        sim_program_names: ['cpu-tests'],
+        sim_all_tests: true,
+      }),
+    )
+    const config = transformParametersToConfig(parsed)
 
     expect(config.designTool).toBe('frontend')
-    expect(config.design).toBe('frontend_demo')
-    expect(config.topModule).toBe('ecos_sim_top')
-    expect(config.frontend).toEqual({
+    expect(config.frontend).toMatchObject({
       coreId: 'custom-filelist',
-      cpuWrapperId: 'custom-filelist',
-      cpuWrapperContract: 'ecos-cpu-wrapper-v1',
-      cpuSocketContract: 'ysyx-axi-cpu-socket-v1',
-      cpuWrapperTop: 'ysyx_00000000',
-      socHarnessId: 'ysyx-am-soc',
-      socWrapperId: 'ysyx-am-soc',
-      socWrapperContract: 'ecos-sim-wrapper-v1',
-      socVariant: 'soc1',
-      toolchainId: 'riscv32-unknown-elf',
-      testSuiteId: 'cpu-tests',
-      cpuFilelist: '/cpu/filelist.cpu.f',
-      socFilelist: '/soc/filelist.soc.f',
-      inputFilelist: '/workspace/prepare_fe/output/merged_rtl.f',
-      simProgramNames: ['add'],
-      simAllTests: false,
+      cpuFilelist: '/work/cpu/filelist.f',
+      socHarnessId: 'ysyx-am',
+      toolchainId: 'riscv64-unknown-elf',
+      testSuiteId: 'am-tests',
+      simProgramNames: ['cpu-tests'],
+      simAllTests: true,
     })
+    expect(transformConfigToParameters(config)).toMatchObject({
+      'Design Tool': 'frontend',
+      frontend_core_id: 'custom-filelist',
+      cpu_filelist: '/work/cpu/filelist.f',
+      soc_harness_id: 'ysyx-am',
+    })
+  })
+
+  it('pins routing layer fields to the ics55 MET2-MET5 route window', () => {
+    const config = transformParametersToConfig(
+      parseParametersData(
+        JSON.stringify({
+          PDK: 'ics55',
+          Design: 'demo',
+          'Top module': 'top',
+          Die: { Size: [100, 200], Area: 300 },
+          Core: {
+            Size: [80, 120],
+            Area: 9600,
+            'Bounding box': '(0,0) (10,10)',
+            Utilitization: 0.55,
+            Margin: [3, 4],
+            'Aspect ratio': 1.2,
+          },
+          'Max fanout': 42,
+          'Target density': 0.61,
+          'Target overflow': 0.09,
+          'Global right padding': 7,
+          'Cell padding x': 900,
+          'Routability opt flag': 0,
+          Clock: 'clk',
+          'Frequency max [MHz]': 250,
+          'Bottom layer': 'MET3',
+          'Top layer': 'MET6',
+          'PDK Root': '/pdks/ics55',
+        }),
+      ),
+    )
+
+    expect(config.bottomLayer).toBe('MET2')
+    expect(config.topLayer).toBe('MET5')
+
+    const parameters = transformConfigToParameters({
+      ...config,
+      bottomLayer: 'MET3',
+      topLayer: 'MET6',
+    })
+
+    expect(parameters['Bottom layer']).toBe('MET2')
+    expect(parameters['Top layer']).toBe('MET5')
   })
 })

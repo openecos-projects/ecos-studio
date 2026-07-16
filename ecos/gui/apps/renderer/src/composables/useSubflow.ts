@@ -51,7 +51,7 @@ const stepEnumValues = Object.values(StepEnum)
  * 根据路由路径查找对应的 StepEnum（忽略大小写）
  */
 function getStepEnumFromPath(path: string): StepEnum | undefined {
-  return stepEnumValues.find(step => step.toLowerCase() === path.toLowerCase())
+  return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
 }
 
 /**
@@ -92,7 +92,7 @@ function convertSubflowToSteps(subflow: SubflowData): SubflowStepItem[] {
     description: `Peak Memory: ${step['peak memory (mb)']} MB`,
     status: mapState(step.state),
     duration: step.runtime || undefined,
-    peakMemory: step['peak memory (mb)']
+    peakMemory: step['peak memory (mb)'],
   }))
 }
 
@@ -128,7 +128,7 @@ export function useSubflow() {
 
   /** 已完成的步骤数 */
   const completedSteps = computed(() => {
-    return subflowSteps.value.filter(s => s.status === 'completed').length
+    return subflowSteps.value.filter((s) => s.status === 'completed').length
   })
 
   /** 进度百分比 */
@@ -142,8 +142,8 @@ export function useSubflow() {
     if (subflowSteps.value.length === 0) return '--'
 
     const times = subflowSteps.value
-      .filter(s => s.duration)
-      .map(s => parseTimeString(s.duration!))
+      .filter((s) => s.duration)
+      .map((s) => parseTimeString(s.duration!))
 
     const total = times.reduce((a, b) => a + b, 0)
     return total > 0 ? `${total.toFixed(1)}s` : '--'
@@ -152,9 +152,9 @@ export function useSubflow() {
   /** 整体状态 */
   const overallStatus = computed<OverallStatus>(() => {
     if (subflowSteps.value.length === 0) return 'pending'
-    if (subflowSteps.value.some(s => s.status === 'running')) return 'running'
-    if (subflowSteps.value.every(s => s.status === 'completed')) return 'completed'
-    if (subflowSteps.value.some(s => s.status === 'failed')) return 'failed'
+    if (subflowSteps.value.some((s) => s.status === 'running')) return 'running'
+    if (subflowSteps.value.every((s) => s.status === 'completed')) return 'completed'
+    if (subflowSteps.value.some((s) => s.status === 'failed')) return 'failed'
     return 'pending'
   })
 
@@ -173,11 +173,10 @@ export function useSubflow() {
     error.value = null
 
     try {
-      const response = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveWorkspaceStepInfoApi({
+      const response = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveWorkspaceStepInfoApi({
           step: stepEnum,
-          id: InfoEnum.subflow
+          id: InfoEnum.subflow,
         }),
       )
       if (!isCurrent() || !response) return
@@ -197,7 +196,8 @@ export function useSubflow() {
         return
       }
 
-      const subflowPath = typeof response.info?.path === 'string' ? response.info.path : ''
+      const subflowPath =
+        typeof response.info?.path === 'string' ? response.info.path : ''
       if (!subflowPath) {
         console.warn('No subflow path in response')
         subflowSteps.value = []
@@ -214,18 +214,16 @@ export function useSubflow() {
       const localPath = projectPath
         ? convertRemoteToLocalPath(subflowPath, projectPath)
         : subflowPath
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(localPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(localPath),
       )
       if (!isCurrent()) return
       if (!resolvedPath) {
         subflowSteps.value = []
         return
       }
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
       if (!isCurrent() || fileContent === undefined) return
       const subflowData: SubflowData = JSON.parse(fileContent)
@@ -234,7 +232,6 @@ export function useSubflow() {
 
       // 3. 转换数据格式并更新步骤
       subflowSteps.value = convertSubflowToSteps(subflowData)
-
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to fetch subflow info:', err)
@@ -265,16 +262,14 @@ export function useSubflow() {
         : subflowPath
 
       console.log('Loading subflow from runtime event path:', localPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(localPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(localPath),
       )
       if (!isCurrent()) return
       if (!resolvedPath) return
 
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
       if (!isCurrent() || fileContent === undefined) return
       const subflowData: SubflowData = JSON.parse(fileContent)
@@ -347,17 +342,14 @@ export function useSubflow() {
         clearSubflow()
       }
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   watch(
-    () => [
-      resourceVersions.value.step,
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value.step, resourceVersions.value.all],
     async () => {
       await refreshCurrentSubflow()
-    }
+    },
   )
 
   return {
@@ -380,6 +372,6 @@ export function useSubflow() {
     refreshCurrentSubflow,
     loadSubflowFromPath,
     clearSubflow,
-    updateCurrentStep
+    updateCurrentStep,
   }
 }

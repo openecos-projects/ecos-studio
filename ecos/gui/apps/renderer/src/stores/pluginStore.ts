@@ -3,10 +3,11 @@ import { computed, ref } from 'vue'
 import {
   activatePdkApi,
   cancelResourceApi,
-  checkResourceUpdatesApi,
+  importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
   removePdkReferenceApi,
+  refreshRegistryApi,
   resourceListToTools,
   subscribeResourceProgress,
   uninstallResourceApi,
@@ -16,6 +17,7 @@ import {
 import type { InstallProgress, ResourceItem, ToolInfo } from '@/api/plugin'
 
 const PROGRESS_UPDATE_INTERVAL_MS = 180
+type LocalResourceImporter = (resourceId: string, path: string) => Promise<unknown>
 
 export const usePluginStore = defineStore('plugin', () => {
   const resources = ref<ResourceItem[]>([])
@@ -28,13 +30,11 @@ export const usePluginStore = defineStore('plugin', () => {
   const installProgress = ref<Record<string, InstallProgress>>({})
   const resourceErrors = ref<Record<string, string>>({})
   const resourceProgress = ref<Record<string, InstallProgress>>({})
-  const updateChecking = ref(false)
 
   const _sseConnections = new Map<string, { close: () => void }>()
   const _pendingProgress = new Map<string, InstallProgress>()
   const _progressTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _cancelledResources = new Set<string>()
-  let _backgroundUpdateCheckStarted = false
 
   const categories = computed(() => {
     const cats = new Set(tools.value.map((t) => t.category))
@@ -110,14 +110,17 @@ export const usePluginStore = defineStore('plugin', () => {
     const resourceId = progress.resourceId
     if (!_progressTimers.has(resourceId)) {
       _applyResourceProgress(progress)
-      _progressTimers.set(resourceId, setTimeout(() => {
-        _progressTimers.delete(resourceId)
-        const pending = _pendingProgress.get(resourceId)
-        _pendingProgress.delete(resourceId)
-        if (pending) {
-          _queueResourceProgress(pending)
-        }
-      }, PROGRESS_UPDATE_INTERVAL_MS))
+      _progressTimers.set(
+        resourceId,
+        setTimeout(() => {
+          _progressTimers.delete(resourceId)
+          const pending = _pendingProgress.get(resourceId)
+          _pendingProgress.delete(resourceId)
+          if (pending) {
+            _queueResourceProgress(pending)
+          }
+        }, PROGRESS_UPDATE_INTERVAL_MS),
+      )
       return
     }
 
@@ -155,29 +158,6 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyTools()
   }
 
-  function _missingDependenciesFor(resourceId: string): string[] {
-    const seen = new Set<string>()
-    const visit = (id: string): void => {
-      const resource = resources.value.find((item) => item.id === id)
-      for (const dependencyId of resource?.missing_requires ?? []) {
-        if (seen.has(dependencyId)) continue
-        seen.add(dependencyId)
-        visit(dependencyId)
-      }
-    }
-    visit(resourceId)
-    return [...seen]
-  }
-
-  function _markDependencyResourcesInstalling(resourceId: string): void {
-    for (const dependencyId of _missingDependenciesFor(resourceId)) {
-      delete resourceErrors.value[dependencyId]
-      _syncLegacyToolError(dependencyId)
-      _setResourceStatus(dependencyId, 'installing')
-      _subscribeResourceProgress(dependencyId)
-    }
-  }
-
   async function fetchTools(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent === true
     if (!silent) {
@@ -188,10 +168,6 @@ export const usePluginStore = defineStore('plugin', () => {
       const nextResources = await listResourcesApi()
       resources.value = nextResources
       _syncLegacyTools()
-      if (!_backgroundUpdateCheckStarted) {
-        _backgroundUpdateCheckStarted = true
-        void checkForUpdates({ background: true })
-      }
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to fetch tools'
     } finally {
@@ -201,43 +177,17 @@ export const usePluginStore = defineStore('plugin', () => {
     }
   }
 
-  async function checkForUpdates(options?: {
-    background?: boolean
-    force?: boolean
-    refreshRegistry?: boolean
-  }): Promise<void> {
-    if (updateChecking.value) {
-      return
-    }
-    _backgroundUpdateCheckStarted = true
-    updateChecking.value = true
-    if (!options?.background) {
-      error.value = null
-    }
-    try {
-      const result = await checkResourceUpdatesApi({
-        force: options?.force ?? !options?.background,
-        refreshRegistry: options?.refreshRegistry ?? false,
-      })
-      if (!options?.background || result.checked_count > 0 || result.update_count > 0) {
-        await fetchTools({ silent: true })
-      }
-    } catch (e) {
-      if (!options?.background) {
-        error.value = e instanceof Error ? e.message : 'Failed to check resource updates'
-      }
-    } finally {
-      updateChecking.value = false
-    }
-  }
-
   function _subscribeResourceProgress(resourceId: string): void {
     _sseConnections.get(resourceId)?.close()
 
     const conn = subscribeResourceProgress(
       resourceId,
       (progress) => {
-        if (progress.phase === 'done' || progress.phase === 'error' || progress.phase === 'cancelled') {
+        if (
+          progress.phase === 'done' ||
+          progress.phase === 'error' ||
+          progress.phase === 'cancelled'
+        ) {
           conn.close()
           _sseConnections.delete(resourceId)
           _clearResourceProgress(progress.resourceId)
@@ -245,7 +195,10 @@ export const usePluginStore = defineStore('plugin', () => {
             delete resourceErrors.value[progress.resourceId]
             _syncLegacyToolError(progress.resourceId)
           } else {
-            _setResourceError(progress.resourceId, progress.message || 'Installation failed')
+            _setResourceError(
+              progress.resourceId,
+              progress.message || 'Installation failed',
+            )
           }
           void fetchTools({ silent: true })
           return
@@ -266,7 +219,6 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyToolError(resourceId)
     _setResourceStatus(resourceId, 'installing')
     _subscribeResourceProgress(resourceId)
-    _markDependencyResourcesInstalling(resourceId)
     try {
       await installResourceApi(resourceId, version)
       _cancelledResources.delete(resourceId)
@@ -282,7 +234,9 @@ export const usePluginStore = defineStore('plugin', () => {
       } else {
         _setResourceError(
           resourceId,
-          e instanceof Error ? e.message : `Failed to install ${_resourceName(resourceId)}`,
+          e instanceof Error
+            ? e.message
+            : `Failed to install ${_resourceName(resourceId)}`,
         )
       }
     }
@@ -293,7 +247,6 @@ export const usePluginStore = defineStore('plugin', () => {
     _syncLegacyToolError(resourceId)
     _setResourceStatus(resourceId, 'installing')
     _subscribeResourceProgress(resourceId)
-    _markDependencyResourcesInstalling(resourceId)
     try {
       await updateResourceApi(resourceId)
       _cancelledResources.delete(resourceId)
@@ -309,7 +262,9 @@ export const usePluginStore = defineStore('plugin', () => {
       } else {
         _setResourceError(
           resourceId,
-          e instanceof Error ? e.message : `Failed to update ${_resourceName(resourceId)}`,
+          e instanceof Error
+            ? e.message
+            : `Failed to update ${_resourceName(resourceId)}`,
         )
       }
     }
@@ -343,7 +298,9 @@ export const usePluginStore = defineStore('plugin', () => {
     } catch (e) {
       _setResourceError(
         resourceId,
-        e instanceof Error ? e.message : `Failed to uninstall ${_resourceName(resourceId)}`,
+        e instanceof Error
+          ? e.message
+          : `Failed to uninstall ${_resourceName(resourceId)}`,
       )
       if (resource && prevStatus) {
         resource.status = prevStatus
@@ -377,11 +334,31 @@ export const usePluginStore = defineStore('plugin', () => {
     await fetchTools({ silent: true })
   }
 
+  async function importLocalResource(
+    resourceId: string,
+    path: string,
+    importer: LocalResourceImporter = importLocalResourcePathApi,
+  ): Promise<void> {
+    delete resourceErrors.value[resourceId]
+    _syncLegacyToolError(resourceId)
+    try {
+      await importer(resourceId, path)
+      await fetchTools({ silent: true })
+    } catch (e) {
+      _setResourceError(
+        resourceId,
+        e instanceof Error ? e.message : `Failed to import ${_resourceName(resourceId)}`,
+      )
+      await fetchTools({ silent: true })
+    }
+  }
+
   async function refresh(): Promise<void> {
     refreshing.value = true
     error.value = null
     try {
-      await checkForUpdates({ force: true, refreshRegistry: true })
+      await refreshRegistryApi()
+      await fetchTools({ silent: true })
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to refresh registry'
     } finally {
@@ -409,10 +386,8 @@ export const usePluginStore = defineStore('plugin', () => {
     installProgress,
     resourceErrors,
     resourceProgress,
-    updateChecking,
     categories,
     fetchTools,
-    checkForUpdates,
     installResource,
     updateResource,
     cancelResource,
@@ -422,6 +397,7 @@ export const usePluginStore = defineStore('plugin', () => {
     activatePdk,
     validatePdk,
     removePdkReference,
+    importLocalResource,
     refresh,
     cleanup,
   }

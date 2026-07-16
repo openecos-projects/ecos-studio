@@ -13,7 +13,8 @@ describe('ensureMonitorChartInstance', () => {
       getDom: vi.fn(() => secondEl),
       dispose: vi.fn(),
     }
-    const init = vi.fn()
+    const init = vi
+      .fn()
       .mockReturnValueOnce(firstInstance)
       .mockReturnValueOnce(secondInstance)
     const instances = new Map<string, any>()

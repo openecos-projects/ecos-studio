@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { TechCellMaster, TechLayer, TechPreviewGeometry, TechViaMaster } from '@/applications/editor/tech-library/types'
-import { buildCellPreviewGeometry, buildViaPreviewGeometry } from '@/applications/editor/tech-library/previewGeometry'
+import type {
+  TechCellMaster,
+  TechLayer,
+  TechPreviewGeometry,
+  TechViaMaster,
+} from '@/applications/editor/tech-library/types'
+import {
+  buildCellPreviewGeometry,
+  buildViaPreviewGeometry,
+} from '@/applications/editor/tech-library/previewGeometry'
 import { buildTechPreviewRenderGroups } from '@/applications/editor/tech-library/previewRendering'
 import { colorNumberToCss } from '@/applications/image-preview/themeUtils'
 
@@ -25,7 +33,10 @@ function geometryForSelection(): TechPreviewGeometry | null {
   return null
 }
 
-function ensureCanvasSize(width: number, height: number): CanvasRenderingContext2D | null {
+function ensureCanvasSize(
+  width: number,
+  height: number,
+): CanvasRenderingContext2D | null {
   const canvas = canvasRef.value
   if (!canvas) return null
 
@@ -39,7 +50,11 @@ function ensureCanvasSize(width: number, height: number): CanvasRenderingContext
   return canvas.getContext('2d')
 }
 
-function fitTransform(geometry: TechPreviewGeometry): { scale: number; offsetX: number; offsetY: number } {
+function fitTransform(geometry: TechPreviewGeometry): {
+  scale: number
+  offsetX: number
+  offsetY: number
+} {
   const padding = 26
   const scale = Math.min(
     (screenWidth - padding * 2) / Math.max(geometry.bounds.w, 1),
@@ -95,14 +110,14 @@ function draw(): void {
 
   const transform = fitTransform(geometry)
 
-  drawRectGroup(
-    ctx,
-    transform,
-    0x9ca3af,
-    0.12,
-    0.75,
-    [{ x: geometry.bounds.x, y: geometry.bounds.y, w: geometry.bounds.w, h: geometry.bounds.h }],
-  )
+  drawRectGroup(ctx, transform, 0x9ca3af, 0.12, 0.75, [
+    {
+      x: geometry.bounds.x,
+      y: geometry.bounds.y,
+      w: geometry.bounds.w,
+      h: geometry.bounds.h,
+    },
+  ])
 
   const groups = buildTechPreviewRenderGroups(geometry, props.layers ?? [])
   for (const group of groups) {
@@ -131,20 +146,24 @@ onBeforeUnmount(() => {
   resizeObserver = null
 })
 
-watch(host, (hostEl, _, onCleanup) => {
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (!hostEl) return
-
-  resizeObserver = new ResizeObserver(() => draw())
-  resizeObserver.observe(hostEl)
-  draw()
-
-  onCleanup(() => {
+watch(
+  host,
+  (hostEl, _, onCleanup) => {
     resizeObserver?.disconnect()
     resizeObserver = null
-  })
-}, { immediate: true })
+    if (!hostEl) return
+
+    resizeObserver = new ResizeObserver(() => draw())
+    resizeObserver.observe(hostEl)
+    draw()
+
+    onCleanup(() => {
+      resizeObserver?.disconnect()
+      resizeObserver = null
+    })
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

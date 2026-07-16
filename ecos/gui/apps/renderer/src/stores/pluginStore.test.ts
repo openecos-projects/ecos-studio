@@ -8,7 +8,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
     ...actual,
     activatePdkApi: vi.fn(),
     cancelResourceApi: vi.fn(),
-    checkResourceUpdatesApi: vi.fn(),
+    importLocalResourcePathApi: vi.fn(),
     installResourceApi: vi.fn(),
     installToolApi: vi.fn(),
     listResourcesApi: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('@/api/plugin', async (importOriginal) => {
 
 import {
   cancelResourceApi,
-  checkResourceUpdatesApi,
+  importLocalResourcePathApi,
   installResourceApi,
   listResourcesApi,
   resourceListToTools,
@@ -105,81 +105,12 @@ describe('pluginStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     vi.mocked(cancelResourceApi).mockReset()
-    vi.mocked(checkResourceUpdatesApi).mockReset()
-    vi.mocked(checkResourceUpdatesApi).mockResolvedValue({
-      status: 'ok',
-      checked_count: 0,
-      update_count: 0,
-      diagnostics: [],
-      resources: [],
-    })
+    vi.mocked(importLocalResourcePathApi).mockReset()
     vi.mocked(installResourceApi).mockReset()
     vi.mocked(listResourcesApi).mockReset()
     vi.mocked(subscribeResourceProgress).mockReset()
     vi.mocked(uninstallResourceApi).mockReset()
     vi.mocked(updateResourceApi).mockReset()
-  })
-
-  it('loads resources before the background sha256 update check finishes', async () => {
-    const installedTool = makeToolResource({
-      status: 'installed',
-      installed_version: 'latest',
-      available_versions: ['latest'],
-      actions: ['uninstall'],
-    })
-    const updatedTool = makeToolResource({
-      status: 'update_available',
-      installed_version: 'latest',
-      available_versions: ['latest'],
-      actions: ['update', 'uninstall'],
-    })
-    let resolveCheck: (() => void) | undefined
-    vi.mocked(listResourcesApi)
-      .mockResolvedValueOnce([installedTool])
-      .mockResolvedValue([updatedTool])
-    vi.mocked(checkResourceUpdatesApi).mockImplementation(async () => {
-      await new Promise<void>((resolve) => {
-        resolveCheck = resolve
-      })
-      return {
-        status: 'ok',
-        checked_count: 1,
-        update_count: 1,
-        diagnostics: [],
-        resources: [
-          {
-            resource_id: 'tool:yosys',
-            checked_at: '2026-07-01T00:00:00Z',
-            sha256: 'a'.repeat(64),
-            status: 'checked',
-            update_available: true,
-            error: null,
-          },
-        ],
-      }
-    })
-
-    const store = usePluginStore()
-    await store.fetchTools()
-
-    expect(store.loading).toBe(false)
-    expect(store.resources[0]).toMatchObject({
-      id: 'tool:yosys',
-      status: 'installed',
-    })
-    expect(checkResourceUpdatesApi).toHaveBeenCalledWith({
-      force: false,
-      refreshRegistry: false,
-    })
-
-    resolveCheck?.()
-    await flushPromises()
-
-    expect(store.resources[0]).toMatchObject({
-      id: 'tool:yosys',
-      status: 'update_available',
-    })
-    expect(listResourcesApi).toHaveBeenCalledTimes(2)
   })
 
   it('fetches unified resources while keeping tools as the legacy tool projection', async () => {
@@ -207,7 +138,10 @@ describe('pluginStore', () => {
       resources: unifiedResources,
       diagnostics: [],
     })
-    expect(store.resources.map((resource) => resource.id)).toEqual(['tool:yosys', 'pdk:ics55'])
+    expect(store.resources.map((resource) => resource.id)).toEqual([
+      'tool:yosys',
+      'pdk:ics55',
+    ])
     expect(store.tools).toEqual([
       {
         name: 'yosys',
@@ -331,7 +265,9 @@ describe('pluginStore', () => {
     await store.installResource('pdk:ics55', '1.01')
     await flushPromises()
 
-    expect(subscribeResourceProgress).toHaveBeenCalledBefore(vi.mocked(installResourceApi))
+    expect(subscribeResourceProgress).toHaveBeenCalledBefore(
+      vi.mocked(installResourceApi),
+    )
     expect(close).toHaveBeenCalledTimes(1)
     expect(store.resources[0]).toMatchObject({
       id: 'pdk:ics55',
@@ -496,9 +432,12 @@ describe('pluginStore', () => {
       .mockResolvedValueOnce([availableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
-    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectInstall = reject
-    }))
+    vi.mocked(installResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectInstall = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -557,9 +496,12 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([availableTool])
       .mockResolvedValueOnce([refreshedAvailableTool])
-    vi.mocked(installResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectInstall = reject
-    }))
+    vi.mocked(installResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectInstall = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -603,9 +545,12 @@ describe('pluginStore', () => {
     vi.mocked(listResourcesApi)
       .mockResolvedValueOnce([updateAvailableTool])
       .mockResolvedValueOnce([refreshedUpdateAvailableTool])
-    vi.mocked(updateResourceApi).mockImplementation(() => new Promise((_resolve, reject) => {
-      rejectUpdate = reject
-    }))
+    vi.mocked(updateResourceApi).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectUpdate = reject
+        }),
+    )
     vi.mocked(cancelResourceApi).mockResolvedValue({
       status: 'cancelled',
       resource_id: 'tool:yosys',
@@ -680,5 +625,91 @@ describe('pluginStore', () => {
     expect(subscribeResourceProgress).not.toHaveBeenCalled()
     expect(listResourcesApi).toHaveBeenCalledTimes(2)
     expect(store.resources).toEqual([])
+  })
+
+  it('imports a local resource path, clears row errors, and refreshes resources', async () => {
+    const localTool = makeToolResource({
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/oss-cad-suite',
+      actions: ['install', 'remove_reference'],
+      health: { managed: false },
+    })
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([makeToolResource()])
+      .mockResolvedValueOnce([localTool])
+    vi.mocked(importLocalResourcePathApi).mockResolvedValue(localTool)
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.resourceErrors['tool:yosys'] = 'Previous error'
+
+    await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
+
+    expect(importLocalResourcePathApi).toHaveBeenCalledWith(
+      'tool:yosys',
+      '/tmp/oss-cad-suite',
+    )
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    expect(store.resourceErrors['tool:yosys']).toBeUndefined()
+    expect(store.resources[0]).toMatchObject({
+      id: 'tool:yosys',
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/oss-cad-suite',
+    })
+  })
+
+  it('uses a caller-provided local importer while preserving row error handling', async () => {
+    const localPdk = makePdkResource({
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/pdk',
+      actions: ['validate', 'remove_reference'],
+      health: { managed: false },
+    })
+    const importPdkForResource = vi.fn(async () => localPdk)
+
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([makePdkResource()])
+      .mockResolvedValueOnce([localPdk])
+
+    const store = usePluginStore()
+    await store.fetchTools()
+    store.resourceErrors['pdk:ics55'] = 'Previous error'
+
+    await store.importLocalResource('pdk:ics55', '/tmp/pdk', importPdkForResource)
+
+    expect(importPdkForResource).toHaveBeenCalledWith('pdk:ics55', '/tmp/pdk')
+    expect(importLocalResourcePathApi).not.toHaveBeenCalled()
+    expect(store.resourceErrors['pdk:ics55']).toBeUndefined()
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
+    expect(store.resources[0]).toMatchObject({
+      id: 'pdk:ics55',
+      status: 'installed',
+      source: 'local',
+      path: '/tmp/pdk',
+    })
+  })
+
+  it('stores local import errors by resourceId and refreshes resources silently', async () => {
+    const availableTool = makeToolResource()
+    vi.mocked(listResourcesApi)
+      .mockResolvedValueOnce([availableTool])
+      .mockResolvedValueOnce([availableTool])
+    vi.mocked(importLocalResourcePathApi).mockRejectedValue(
+      new Error('Expected executable not found for yosys'),
+    )
+
+    const store = usePluginStore()
+    await store.fetchTools()
+
+    await store.importLocalResource('tool:yosys', '/tmp/oss-cad-suite')
+
+    expect(store.resourceErrors['tool:yosys']).toBe(
+      'Expected executable not found for yosys',
+    )
+    expect(listResourcesApi).toHaveBeenCalledTimes(2)
   })
 })

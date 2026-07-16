@@ -14,6 +14,7 @@ use layoutpkg_format::{
 use rstar::{RTree, RTreeObject, AABB};
 
 const EXPANDED_ARRAY_INSTANCE_THRESHOLD: u64 = 1;
+pub const SHAPE_FLAG_TOP_LEVEL_CONTEXT: u8 = 0x80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rect {
@@ -2808,20 +2809,33 @@ impl LayoutSession {
         }
         let layers_load = layers_started.elapsed();
         ensure_die_core_overlay_shapes(&mut db, source.package.boundaries());
+        let startup_large_objects = source.package.load_large_objects_only()?;
+        let startup_large_object_count = startup_large_objects.records.len();
+        let top_cell = db.top_cell();
+        for record in startup_large_objects.records.iter() {
+            let mut shape = ShapeRecord::from(record);
+            shape.flags |= SHAPE_FLAG_TOP_LEVEL_CONTEXT;
+            db.add_shape(top_cell, shape);
+        }
+        let detail_revision = if startup_large_object_count > 0 { 1 } else { 0 };
         Ok((
             Self {
                 source,
                 db,
                 loaded_detail_tiles: HashSet::new(),
-                large_objects_loaded: false,
+                large_objects_loaded: true,
                 detail_scopes: None,
                 overview_loaded: false,
                 applied_overview_units_per_bin: None,
-                last_load_stats: ViewportLoadStats::default(),
-                revision: 0,
+                last_load_stats: ViewportLoadStats {
+                    loaded_shapes: startup_large_object_count,
+                    new_shapes: startup_large_object_count,
+                    ..Default::default()
+                },
+                revision: detail_revision,
                 hierarchy_revision: 0,
                 overview_revision: 0,
-                detail_revision: 0,
+                detail_revision,
             },
             LayoutSessionLoadProfile {
                 total: total_started.elapsed(),
@@ -3150,6 +3164,99 @@ mod tests {
             detail_grid_columns: 2,
             detail_grid_rows: 2,
             max_tiles_per_object: 16,
+            target_primitives_per_tile: 6000,
+            max_subdivision_depth: 4,
+        })
+        .unwrap();
+
+        (tmp, output)
+    }
+
+    fn create_layoutpkg_with_top_level_large_wire() -> (TempDir, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join("design")).unwrap();
+        write_json(
+            &root.join("manifest.json"),
+            json!({
+                "schema": "ieda.view.v1",
+                "format": "layout_view_package",
+                "design_name": "large-wire-unit",
+                "unit": { "dbu_per_micron": 1000 },
+                "bbox": [0, 0, 1000, 1000],
+                "files": {
+                    "die": "design/die.json",
+                    "layers": "design/layers.json",
+                    "instances": "design/instances.json",
+                    "regular_wires": "design/regular_wires.json",
+                    "special_wires": "design/special_wires.json",
+                    "io_pins": "design/io_pins.json",
+                    "blockages": "design/blockages.json",
+                    "fills": "design/fills.json",
+                    "regions": "design/regions.json",
+                    "rows": "design/rows.json",
+                    "tracks": "design/tracks.json",
+                    "gcell_grids": "design/gcell_grids.json"
+                }
+            }),
+        );
+        write_json(
+            &root.join("design/die.json"),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "die",
+                "data": { "die_area": [0, 0, 1000, 1000], "core_area": [100, 100, 900, 900] }
+            }),
+        );
+        write_json(
+            &root.join("design/layers.json"),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "layers",
+                "data": [{ "id": 1, "name": "M1", "type": "routing", "direction": "HORIZONTAL" }]
+            }),
+        );
+        write_json(
+            &root.join("design/instances.json"),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "instances",
+                "data": []
+            }),
+        );
+        write_json(
+            &root.join("design/regular_wires.json"),
+            json!({
+                "schema": "ieda.view.v1",
+                "kind": "regular_wires",
+                "data": [
+                    { "id": 44, "kind": "path", "layer_id": 1, "width": 10, "points": [[0, 500], [1000, 500]] }
+                ]
+            }),
+        );
+        for file in [
+            "special_wires",
+            "io_pins",
+            "blockages",
+            "fills",
+            "regions",
+            "rows",
+            "tracks",
+            "gcell_grids",
+        ] {
+            write_json(
+                &root.join(format!("design/{file}.json")),
+                json!({ "schema": "ieda.view.v1", "kind": file, "data": [] }),
+            );
+        }
+
+        let output = root.join(".layoutpkg");
+        pack_viewjson_to_layoutpkg(PackLayoutPackageOptions {
+            input_root: root.to_path_buf(),
+            output_root: output.clone(),
+            detail_grid_columns: 4,
+            detail_grid_rows: 4,
+            max_tiles_per_object: 2,
             target_primitives_per_tile: 6000,
             max_subdivision_depth: 4,
         })
@@ -4888,6 +4995,29 @@ mod tests {
 
         assert_eq!(session.loaded_detail_tile_count(), 0);
         assert_eq!(session.db().package_layer_counts().get(&1), Some(&2));
+    }
+
+    #[test]
+    fn layout_session_imports_top_level_large_objects_on_startup_without_detail_tiles() {
+        let (_input, package_root) = create_layoutpkg_with_top_level_large_wire();
+        let source = PackageLayoutSource::open(package_root, 64).unwrap();
+        let session = LayoutSession::from_source(source).unwrap();
+        let top_shapes = session
+            .db()
+            .query_shapes(session.db().top_cell(), session.db().world_bbox());
+
+        assert_eq!(session.loaded_detail_tile_count(), 0);
+        assert!(top_shapes.iter().any(|shape| {
+            shape.source_id == 44
+                && shape.kind == ShapeKind::RegularWire
+                && shape.layer_id == 1
+                && shape.flags & 0x80 != 0
+                && shape.bbox.x1 <= 0
+                && shape.bbox.x2 >= 1000
+                && shape.bbox.y1 <= 500
+                && shape.bbox.y2 >= 500
+        }));
+        assert!(session.detail_revision() > 0);
     }
 
     #[test]

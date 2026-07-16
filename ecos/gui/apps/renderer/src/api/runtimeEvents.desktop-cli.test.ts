@@ -45,7 +45,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -67,16 +67,18 @@ describe('createRuntimeEventClient desktop CLI events', () => {
       type: 'completed',
     })
 
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'notify',
-      data: expect.objectContaining({
-        state: 'Success',
-        step: 'Synthesis',
-        type: 'step_complete',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'notify',
+        data: expect.objectContaining({
+          state: 'Success',
+          step: 'Synthesis',
+          type: 'step_complete',
+        }),
+        message: ['done'],
+        response: 'success',
       }),
-      message: ['done'],
-      response: 'success',
-    }))
+    )
     expect(allHandler.mock.calls[0]?.[0].data.id).toBeUndefined()
 
     client.close()
@@ -100,7 +102,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -137,16 +139,18 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     expect(allHandler).toHaveBeenCalledTimes(1)
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        directory: '/work/demo',
-        state: 'Success',
-        step: 'Synthesis',
-        type: 'step_complete',
-        workspaceId: '/work/demo',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          directory: '/work/demo',
+          state: 'Success',
+          step: 'Synthesis',
+          type: 'step_complete',
+          workspaceId: '/work/demo',
+        }),
+        message: ['demo done'],
       }),
-      message: ['demo done'],
-    }))
+    )
   })
 
   it('matches workspace lifecycle notifications with normalized path separators', async () => {
@@ -165,7 +169,9 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('C:/work/demo')
+    const client = createRuntimeEventClient('C:/work/demo', {
+      designTool: 'frontend',
+    })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -186,13 +192,15 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     expect(allHandler).toHaveBeenCalledTimes(1)
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        directory: 'C:\\work\\demo\\',
-        step: 'CTS',
-        type: 'step_complete',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          directory: 'C:\\work\\demo\\',
+          step: 'CTS',
+          type: 'step_complete',
+        }),
       }),
-    }))
+    )
   })
 
   it('ignores stdout and stderr stream events while publishing failed lifecycle notifications', async () => {
@@ -211,7 +219,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -246,13 +254,15 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     expect(allHandler).toHaveBeenCalledTimes(1)
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        type: 'error',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: 'error',
+        }),
+        message: ['failed'],
+        response: 'error',
       }),
-      message: ['failed'],
-      response: 'error',
-    }))
+    )
   })
 
   it('publishes rtl2gds completed as task_complete', async () => {
@@ -271,7 +281,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     const completeHandler = vi.fn()
     client.onAll(allHandler)
@@ -293,15 +303,17 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     expect(allHandler).toHaveBeenCalledTimes(1)
-    expect(completeHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        cmd: 'rtl2gds',
-        jobId: 'job-flow',
-        type: 'task_complete',
+    expect(completeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          jobId: 'job-flow',
+          type: 'task_complete',
+        }),
+        message: ['flow done'],
+        response: 'success',
       }),
-      message: ['flow done'],
-      response: 'success',
-    }))
+    )
   })
 
   it('publishes rtl2gds started rerun request data as a lifecycle message', async () => {
@@ -318,7 +330,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -334,18 +346,20 @@ describe('createRuntimeEventClient desktop CLI events', () => {
       workspaceId: '/work/demo',
     })
 
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        cmd: 'rtl2gds',
-        directory: '/work/demo',
-        jobId: 'job-flow',
-        rerun: true,
-        type: 'message',
-        workspaceId: '/work/demo',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          directory: '/work/demo',
+          jobId: 'job-flow',
+          rerun: true,
+          type: 'message',
+          workspaceId: '/work/demo',
+        }),
+        message: ['Started rtl2gds'],
+        response: 'success',
       }),
-      message: ['Started rtl2gds'],
-      response: 'success',
-    }))
+    )
   })
 
   it('preserves structured lifecycle event data from the desktop bridge', async () => {
@@ -364,7 +378,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -387,14 +401,16 @@ describe('createRuntimeEventClient desktop CLI events', () => {
       type: 'completed',
     })
 
-    expect(allHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        id: 'subflow',
-        step: 'Synthesis',
-        subflow_path: '/work/demo/Synthesis/subflow.json',
-        type: 'step_complete',
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: 'subflow',
+          step: 'Synthesis',
+          subflow_path: '/work/demo/Synthesis/subflow.json',
+          type: 'step_complete',
+        }),
       }),
-    }))
+    )
   })
 
   it('publishes cancelled lifecycle notifications', async () => {
@@ -413,7 +429,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const cancelledHandler = vi.fn()
     const allHandler = vi.fn()
     client.on('cancelled', cancelledHandler)
@@ -435,14 +451,16 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     expect(allHandler).toHaveBeenCalledTimes(1)
-    expect(cancelledHandler).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        step: 'floorplan',
-        type: 'cancelled',
+    expect(cancelledHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          step: 'floorplan',
+          type: 'cancelled',
+        }),
+        message: ['cancelled'],
+        response: 'cancelled',
       }),
-      message: ['cancelled'],
-      response: 'cancelled',
-    }))
+    )
   })
 
   it('does not emit notifications for completed read-only commands', async () => {
@@ -461,7 +479,7 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
 
     const { createRuntimeEventClient } = await import('./runtimeEvents')
-    const client = createRuntimeEventClient('/work/demo')
+    const client = createRuntimeEventClient('/work/demo', { designTool: 'frontend' })
     const allHandler = vi.fn()
     client.onAll(allHandler)
     client.connect()
@@ -524,5 +542,4 @@ describe('createRuntimeEventClient desktop CLI events', () => {
     })
     expect(allHandler).not.toHaveBeenCalled()
   })
-
 })

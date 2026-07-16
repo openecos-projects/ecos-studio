@@ -25,13 +25,23 @@ function createMenuAction(
   label: string,
   eventId: DesktopMenuEventId,
   accelerator?: string,
+  enabled?: boolean,
 ): MenuItemConstructorOptions {
   return {
     accelerator,
     click: () => {
       emitMenuAction(eventId)
     },
+    enabled,
+    id: eventId,
     label,
+  }
+}
+
+export function setMenuActionEnabled(action: DesktopMenuEventId, enabled: boolean): void {
+  const menuItem = Menu.getApplicationMenu()?.getMenuItemById(action)
+  if (menuItem) {
+    menuItem.enabled = enabled
   }
 }
 
@@ -59,6 +69,22 @@ export function registerApplicationMenu(): void {
       submenu: [
         createMenuAction('New Workspace', appMenuActionIds.newProject, 'CmdOrCtrl+N'),
         createMenuAction('Open Workspace', appMenuActionIds.openProject, 'CmdOrCtrl+O'),
+        createMenuAction(
+          'Reconfigure Workspace...',
+          appMenuActionIds.reconfigureWorkspace,
+        ),
+        createMenuAction(
+          'Export Signoff Package...',
+          appMenuActionIds.exportSignoffPackage,
+          undefined,
+          false,
+        ),
+      ],
+    },
+    {
+      label: 'Design',
+      submenu: [
+        createMenuAction('Manage RTL Files...', appMenuActionIds.manageDesignFiles),
       ],
     },
     {

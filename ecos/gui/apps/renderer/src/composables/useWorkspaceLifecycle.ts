@@ -11,7 +11,7 @@ export const WORKSPACE_INVALIDATION_SCOPES = [
   'all',
 ] as const
 
-export type WorkspaceInvalidationScope = typeof WORKSPACE_INVALIDATION_SCOPES[number]
+export type WorkspaceInvalidationScope = (typeof WORKSPACE_INVALIDATION_SCOPES)[number]
 
 export type WorkspaceSessionState =
   | 'idle'
@@ -138,7 +138,9 @@ function cleanupSession(sessionId: string): void {
   }
 }
 
-function updateCurrentSession(patch: Partial<Omit<WorkspaceSession, 'sessionId' | 'resourceVersions'>>): void {
+function updateCurrentSession(
+  patch: Partial<Omit<WorkspaceSession, 'sessionId' | 'resourceVersions'>>,
+): void {
   session.value = {
     ...session.value,
     ...patch,
@@ -215,7 +217,7 @@ export function useWorkspaceLifecycle() {
     cleanupRecords.push(record)
 
     return () => {
-      const index = cleanupRecords.findIndex(item => item.id === record.id)
+      const index = cleanupRecords.findIndex((item) => item.id === record.id)
       if (index !== -1) cleanupRecords.splice(index, 1)
     }
   }

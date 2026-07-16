@@ -119,6 +119,11 @@ pnpm run test
 pnpm run build
 ```
 
+### GUI Quality Checks
+
+For the GUI quality gate, targeted checks, doctor diagnostics, and Electron
+smoke test, see [ecos/gui/README.md](ecos/gui/README.md#quality-checks).
+
 Use the more focused package scripts when the change is limited to one package:
 
 ```bash

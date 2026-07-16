@@ -1,19 +1,54 @@
 import { EventEmitter } from 'node:events'
-import { desktopApiEventChannels, desktopApiIpcChannels } from '@ecos-studio/shared'
+import {
+  desktopApiEventChannels,
+  desktopApiIpcChannels,
+  desktopMenuEventIds,
+  type EccRuntimeEvent,
+} from '@ecos-studio/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { fromWebContents, openExternal, showOpenDialog } = vi.hoisted(() => ({
+interface MockBrowserWindow {
+  isDestroyed(): boolean
+  webContents: {
+    send(...args: unknown[]): void
+  }
+}
+
+const {
+  fromWebContents,
+  getAllWindows,
+  openExternal,
+  showOpenDialog,
+  showSaveDialog,
+  mkdirMock,
+  statMock,
+} = vi.hoisted(() => ({
   fromWebContents: vi.fn(),
+  getAllWindows: vi.fn<() => MockBrowserWindow[]>(() => []),
+  mkdirMock: vi.fn(),
   openExternal: vi.fn(),
   showOpenDialog: vi.fn(),
+  showSaveDialog: vi.fn(),
+  statMock: vi.fn(),
 }))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    mkdir: mkdirMock,
+    stat: statMock,
+  }
+})
 
 vi.mock('electron', () => ({
   BrowserWindow: {
     fromWebContents,
+    getAllWindows,
   },
   dialog: {
     showOpenDialog,
+    showSaveDialog,
   },
   ipcMain: {
     handle: vi.fn(),
@@ -29,6 +64,12 @@ const electronLogger = vi.hoisted(() => ({
 
 vi.mock('../services/logger', () => ({
   electronLogger,
+}))
+
+const setMenuActionEnabled = vi.hoisted(() => vi.fn())
+
+vi.mock('../services/menuService', () => ({
+  setMenuActionEnabled,
 }))
 
 import { registerIpc } from './registerIpc'
@@ -58,8 +99,17 @@ function registerHandlers() {
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectRoot: vi.fn(),
+      removeProjectDirectory: vi.fn(),
+      listProjectDirectory: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       scanPdkDirectory: vi.fn(),
+      scanRtlDirectory: vi.fn(),
+      listDesignFiles: vi.fn(),
+      addDesignFiles: vi.fn(),
+      removeDesignFile: vi.fn(),
+      prepareProjectDirectoryReplacement: vi.fn(),
+      restoreProjectDirectoryReplacement: vi.fn(),
+      finalizeProjectDirectoryReplacement: vi.fn(),
       subscribeProjectLogTail: vi.fn(),
       unwatchProjectFile: vi.fn(),
       unsubscribeProjectLogTail: vi.fn(),
@@ -77,6 +127,7 @@ function registerHandlers() {
       activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
+      importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
       listResources: vi.fn(),
@@ -87,13 +138,30 @@ function registerHandlers() {
       updateResource: vi.fn(),
       validatePdk: vi.fn(),
     },
+    frontendRuntimeManager: {
+      cancel: vi.fn(),
+      execute: vi.fn(),
+    },
     appInfoService: {
       getVersions: vi.fn(),
     },
-    desktopRuntimeManager: {
-      cancel: vi.fn(),
-      execute: vi.fn(),
-      onEvent: vi.fn(),
+    eccRuntimeService: {
+      closeWorkspace: vi.fn(),
+      createWorkspace: vi.fn(),
+      exportSignoff: vi.fn(),
+      inspectSignoff: vi.fn(),
+      onEvent: vi.fn((_listener: (event: EccRuntimeEvent) => void) => () => undefined),
+      openWorkspace: vi.fn(),
+      refreshConfig: vi.fn(),
+      resetFlow: vi.fn(),
+      rpcHello: vi.fn(),
+      rpcPing: vi.fn(),
+      rpcShutdown: vi.fn(),
+      runFlow: vi.fn(),
+      runStep: vi.fn(),
+      syncConfig: vi.fn(),
+      workspaceHome: vi.fn(),
+      workspaceInfo: vi.fn(),
     },
     shellService: {
       createSession: vi.fn(),
@@ -106,11 +174,14 @@ function registerHandlers() {
     },
   }
 
-  registerIpc({
-    handle: (channel, listener) => {
-      handlers.set(channel, listener as RegisteredHandler)
+  registerIpc(
+    {
+      handle: (channel, listener) => {
+        handlers.set(channel, listener as RegisteredHandler)
+      },
     },
-  }, services)
+    services,
+  )
 
   return {
     handlers,
@@ -132,79 +203,45 @@ function createWindowDouble(isMaximized = false) {
 describe('registerIpc', () => {
   beforeEach(() => {
     fromWebContents.mockReset()
+    getAllWindows.mockReset()
+    getAllWindows.mockReturnValue([])
     electronLogger.warn.mockReset()
     openExternal.mockReset()
     showOpenDialog.mockReset()
+    showSaveDialog.mockReset()
+    mkdirMock.mockReset()
+    setMenuActionEnabled.mockReset()
+    statMock.mockReset()
+    statMock.mockImplementation(async (path: string) => {
+      if (path === '/tmp/project') {
+        return { isDirectory: () => true, isFile: () => false }
+      }
+      if (path === '/tmp/rtl-dir') {
+        return { isDirectory: () => true, isFile: () => false }
+      }
+      if (path === '/tmp/a.v' || path === '/tmp/b.sv') {
+        return { isDirectory: () => false, isFile: () => true }
+      }
+      throw Object.assign(
+        new Error(`ENOENT: no such file or directory, stat '${path}'`),
+        { code: 'ENOENT', path },
+      )
+    })
   })
 
   it('registers a handler for every desktop bridge channel', () => {
     const { handlers } = registerHandlers()
 
-    expect(Array.from(handlers.keys()).sort()).toEqual([
-      desktopApiIpcChannels.windowMinimize,
-      desktopApiIpcChannels.windowToggleMaximize,
-      desktopApiIpcChannels.windowClose,
-      desktopApiIpcChannels.windowConfirmClose,
-      desktopApiIpcChannels.windowSetTitle,
-      desktopApiIpcChannels.windowIsMaximized,
-      desktopApiIpcChannels.settingsGet,
-      desktopApiIpcChannels.settingsSet,
-      desktopApiIpcChannels.settingsDelete,
-      desktopApiIpcChannels.remoteContentListFiles,
-      desktopApiIpcChannels.remoteContentReadTextFile,
-      desktopApiIpcChannels.remoteContentReadJsonFile,
-      desktopApiIpcChannels.dialogPickDirectory,
-      desktopApiIpcChannels.dialogPickFiles,
-      desktopApiIpcChannels.workspaceIsProjectDirectory,
-      desktopApiIpcChannels.workspaceRegisterProjectRoot,
-      desktopApiIpcChannels.workspaceClearProjectRoot,
-      desktopApiIpcChannels.workspaceRequestProjectPathAccess,
-      desktopApiIpcChannels.workspaceReadProjectTextFile,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFile,
-      desktopApiIpcChannels.workspaceReadProjectTextFileTail,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFileTail,
-      desktopApiIpcChannels.workspaceReadOptionalProjectTextFileUpdate,
-      desktopApiIpcChannels.workspaceSubscribeProjectLogTail,
-      desktopApiIpcChannels.workspaceUnsubscribeProjectLogTail,
-      desktopApiIpcChannels.workspaceReadProjectBinaryFile,
-      desktopApiIpcChannels.workspaceWriteProjectTextFile,
-      desktopApiIpcChannels.workspaceScanPdkDirectory,
-      desktopApiIpcChannels.workspaceWatchProjectFile,
-      desktopApiIpcChannels.workspaceUnwatchProjectFile,
-      desktopApiIpcChannels.workspaceResourcesGetIndex,
-      desktopApiIpcChannels.workspaceResourcesReadHome,
-      desktopApiIpcChannels.workspaceResourcesReadFlow,
-      desktopApiIpcChannels.workspaceResourcesReadParameters,
-      desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
-      desktopApiIpcChannels.resourcesList,
-      desktopApiIpcChannels.resourcesGet,
-      desktopApiIpcChannels.resourcesInstall,
-      desktopApiIpcChannels.resourcesUpdate,
-      desktopApiIpcChannels.resourcesCancel,
-      desktopApiIpcChannels.resourcesUninstall,
-      desktopApiIpcChannels.resourcesActivatePdk,
-      desktopApiIpcChannels.resourcesValidatePdk,
-      desktopApiIpcChannels.resourcesRemovePdkReference,
-      desktopApiIpcChannels.resourcesImportPdkPath,
-      desktopApiIpcChannels.resourcesRefreshRegistry,
-      desktopApiIpcChannels.resourcesCheckUpdates,
-      desktopApiIpcChannels.layoutViewerOpen,
-      desktopApiIpcChannels.systemOpenExternal,
-      desktopApiIpcChannels.cliCancel,
-      desktopApiIpcChannels.cliExecute,
-      desktopApiIpcChannels.shellCreateSession,
-      desktopApiIpcChannels.shellWrite,
-      desktopApiIpcChannels.shellResize,
-      desktopApiIpcChannels.shellKill,
-      desktopApiIpcChannels.appGetVersions,
-    ].sort())
+    expect(Array.from(handlers.keys()).sort()).toEqual(
+      Object.values(desktopApiIpcChannels).sort(),
+    )
   })
 
   it('returns version information from the app info service', async () => {
     const { handlers, services } = registerHandlers()
     const versions = {
       gui: '0.1.0-alpha.4',
-      runtime: 'ECC CLI',
+      runtime: 'ECC RPC',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     }
@@ -257,16 +294,16 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
-    services.resourceManagerService.checkResourceUpdates.mockResolvedValue({
-      status: 'ok',
-      checked_count: 1,
-      update_count: 1,
-      diagnostics: [],
-      resources: [],
-    })
-    services.resourceManagerService.importPdkPath.mockResolvedValue(resources.resources[0])
+    services.resourceManagerService.importPdkPath.mockResolvedValue(
+      resources.resources[0],
+    )
+    services.resourceManagerService.importLocalPath.mockResolvedValue(
+      resources.resources[0],
+    )
 
-    await expect(handlers.get(desktopApiIpcChannels.resourcesList)?.(event)).resolves.toEqual(resources)
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesList)?.(event),
+    ).resolves.toEqual(resources)
     await expect(
       handlers.get(desktopApiIpcChannels.resourcesInstall)?.(event, {
         resourceId: 'tool:yosys',
@@ -283,22 +320,16 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual(resources.resources[0])
     await expect(
+      handlers.get(desktopApiIpcChannels.resourcesImportLocalPath)?.(event, {
+        resourceId: 'pdk:ics55',
+        path: '/tmp/pdk',
+      }),
+    ).resolves.toEqual(resources.resources[0])
+    await expect(
       handlers.get(desktopApiIpcChannels.resourcesCancel)?.(event, 'tool:yosys'),
     ).resolves.toEqual({
       status: 'cancelled',
       resource_id: 'tool:yosys',
-    })
-    await expect(
-      handlers.get(desktopApiIpcChannels.resourcesCheckUpdates)?.(event, {
-        force: true,
-        refreshRegistry: true,
-      }),
-    ).resolves.toEqual({
-      status: 'ok',
-      checked_count: 1,
-      update_count: 1,
-      diagnostics: [],
-      resources: [],
     })
 
     expect(services.resourceManagerService.listResources).toHaveBeenCalledTimes(1)
@@ -308,11 +339,24 @@ describe('registerIpc', () => {
       expect.any(Function),
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
-    expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith('tool:yosys')
-    expect(services.resourceManagerService.checkResourceUpdates).toHaveBeenCalledWith({
-      force: true,
-      refreshRegistry: true,
-    })
+    expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith(
+      'pdk:ics55',
+      '/tmp/pdk',
+    )
+    expect(services.resourceManagerService.cancelResource).toHaveBeenCalledWith(
+      'tool:yosys',
+    )
+  })
+
+  it('delegates ECC ping to the runtime service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    services.eccRuntimeService.rpcPing.mockResolvedValue({ ok: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccRpcPing)?.(event),
+    ).resolves.toEqual({ ok: true })
+    expect(services.eccRuntimeService.rpcPing).toHaveBeenCalledTimes(1)
   })
 
   it('delegates remote content requests to the remote content service', async () => {
@@ -374,18 +418,20 @@ describe('registerIpc', () => {
       isDestroyed: vi.fn(() => false),
       send: vi.fn(),
     }
-    services.resourceManagerService.installResource.mockImplementation(async (_resourceId, _version, listener) => {
-      listener?.({
-        id: 'job-1',
-        resource_id: 'tool:yosys',
-        action: 'install',
-        phase: 'downloading',
-        progress: 0.5,
-        message: 'Downloading...',
-        error: null,
-      })
-      return { status: 'started', resource_id: 'tool:yosys', version: '0.61' }
-    })
+    services.resourceManagerService.installResource.mockImplementation(
+      async (_resourceId, _version, listener) => {
+        listener?.({
+          id: 'job-1',
+          resource_id: 'tool:yosys',
+          action: 'install',
+          phase: 'downloading',
+          progress: 0.5,
+          message: 'Downloading...',
+          error: null,
+        })
+        return { status: 'started', resource_id: 'tool:yosys', version: '0.61' }
+      },
+    )
 
     await handlers.get(desktopApiIpcChannels.resourcesInstall)?.(
       { sender },
@@ -433,7 +479,9 @@ describe('registerIpc', () => {
 
     await handlers.get(desktopApiIpcChannels.windowMinimize)?.(event)
     await handlers.get(desktopApiIpcChannels.windowSetTitle)?.(event, 'ECOS Studio')
-    const isMaximized = await handlers.get(desktopApiIpcChannels.windowIsMaximized)?.(event)
+    const isMaximized = await handlers.get(desktopApiIpcChannels.windowIsMaximized)?.(
+      event,
+    )
     await handlers.get(desktopApiIpcChannels.windowClose)?.(event)
     await handlers.get(desktopApiIpcChannels.windowConfirmClose)?.(event)
 
@@ -476,6 +524,89 @@ describe('registerIpc', () => {
     expect(openExternal).toHaveBeenCalledWith('https://openecos.org')
   })
 
+  it('shows a Save As dialog for the requesting window and returns its path', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/exports/gcd_signoff_package.tar.gz',
+      filters: [{ name: 'Tarball', extensions: ['tar.gz'] }],
+    }
+    fromWebContents.mockReturnValue(windowDouble)
+    showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: options.defaultPath,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, options),
+    ).resolves.toBe(options.defaultPath)
+
+    expect(fromWebContents).toHaveBeenCalledWith(event.sender)
+    expect(showSaveDialog).toHaveBeenCalledWith(windowDouble, options)
+  })
+
+  it('creates the requested default directory before showing Save As', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const windowDouble = createWindowDouble()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/projects/gcd/signoff/gcd_signoff_package.tar.gz',
+      ensureDirectory: true,
+    }
+    fromWebContents.mockReturnValue(windowDouble)
+    mkdirMock.mockResolvedValue(undefined)
+    showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: options.defaultPath,
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, options),
+    ).resolves.toBe(options.defaultPath)
+
+    expect(mkdirMock).toHaveBeenCalledWith('/projects/gcd/signoff', {
+      recursive: true,
+    })
+    expect(showSaveDialog).toHaveBeenCalledWith(windowDouble, {
+      title: options.title,
+      defaultPath: options.defaultPath,
+    })
+    expect(mkdirMock.mock.invocationCallOrder[0]).toBeLessThan(
+      showSaveDialog.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+  })
+
+  it('returns null when the Save As dialog is canceled', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    fromWebContents.mockReturnValue(createWindowDouble())
+    showSaveDialog.mockResolvedValue({ canceled: true })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogSaveFile)?.(event, {
+        title: 'Export Signoff Package',
+      }),
+    ).resolves.toBeNull()
+  })
+
+  it('delegates native menu enabled-state updates to the menu service', async () => {
+    const { handlers } = registerHandlers()
+
+    await handlers.get(desktopApiIpcChannels.menuSetActionEnabled)?.(
+      { sender: { id: 'web-contents' } },
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
+    )
+
+    expect(setMenuActionEnabled).toHaveBeenCalledWith(
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
+    )
+  })
+
   it('delegates settings, dialog, and workspace calls to the provided services', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
@@ -497,25 +628,40 @@ describe('registerIpc', () => {
       reset: false,
       truncated: false,
     })
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(async (_path, _options, listener) => {
-      listener({
-        subscriptionId: 'project-log-tail-1',
-        path: '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-        eventType: 'snapshot',
-        content: 'live log',
-        fromOffsetBytes: 0,
-        nextOffsetBytes: 8,
-        sizeBytes: 8,
-        reset: false,
-        truncated: false,
-      })
-      return 'project-log-tail-1'
-    })
+    services.workspaceService.subscribeProjectLogTail.mockImplementation(
+      async (_path, _options, listener) => {
+        listener({
+          subscriptionId: 'project-log-tail-1',
+          path: '/tmp/project/Synthesis_yosys/log/Synthesis.log',
+          eventType: 'snapshot',
+          content: 'live log',
+          fromOffsetBytes: 0,
+          nextOffsetBytes: 8,
+          sizeBytes: 8,
+          reset: false,
+          truncated: false,
+        })
+        return 'project-log-tail-1'
+      },
+    )
     services.workspaceService.readProjectBinaryFile.mockResolvedValue(
       Uint8Array.from([0x45, 0x43, 0x4f, 0x53]),
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
-    services.workspaceService.requestProjectPathAccess.mockResolvedValue('/tmp/project/home.json')
+    services.workspaceService.requestProjectPathAccess.mockResolvedValue(
+      '/tmp/project/home.json',
+    )
+    services.workspaceService.prepareProjectDirectoryReplacement.mockResolvedValue({
+      targetPath: '/tmp/project/ws_0001',
+      backupPath: '/tmp/project/.ws_0001.replace-backup',
+    })
+    services.workspaceService.listProjectDirectory.mockResolvedValue([
+      {
+        name: 'gcd_Floorplan.def.gz',
+        path: '/tmp/project/origin/gcd_Floorplan.def.gz',
+        type: 'file',
+      },
+    ])
     services.workspaceService.scanPdkDirectory.mockResolvedValue({
       canonicalPath: '/tmp/pdk',
       name: 'ics55',
@@ -532,9 +678,9 @@ describe('registerIpc', () => {
       filePaths: ['/tmp/project'],
     })
 
-    await expect(handlers.get(desktopApiIpcChannels.settingsGet)?.(event, 'recent_projects')).resolves.toEqual([
-      { id: 'recent' },
-    ])
+    await expect(
+      handlers.get(desktopApiIpcChannels.settingsGet)?.(event, 'recent_projects'),
+    ).resolves.toEqual([{ id: 'recent' }])
     await handlers.get(desktopApiIpcChannels.settingsSet)?.(event, 'recent_projects', [
       { id: 'recent' },
     ])
@@ -556,10 +702,16 @@ describe('registerIpc', () => {
       }),
     ).resolves.toEqual(['/tmp/a.v', '/tmp/b.sv'])
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceIsProjectDirectory)?.(event, '/tmp/project'),
+      handlers.get(desktopApiIpcChannels.workspaceIsProjectDirectory)?.(
+        event,
+        '/tmp/project',
+      ),
     ).resolves.toBe(true)
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(event, '/tmp/project'),
+      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+        event,
+        '/tmp/project',
+      ),
     ).resolves.toBe('/tmp/project')
     await handlers.get(desktopApiIpcChannels.workspaceClearProjectRoot)?.(event)
     await expect(
@@ -631,6 +783,38 @@ describe('registerIpc', () => {
       '{"PDK":"ics55"}',
     )
     await expect(
+      handlers.get(desktopApiIpcChannels.workspaceListProjectDirectory)?.(
+        event,
+        '/tmp/project/origin',
+      ),
+    ).resolves.toEqual([
+      {
+        name: 'gcd_Floorplan.def.gz',
+        path: '/tmp/project/origin/gcd_Floorplan.def.gz',
+        type: 'file',
+      },
+    ])
+    await handlers.get(desktopApiIpcChannels.workspaceRemoveProjectDirectory)?.(
+      event,
+      '/tmp/project/ws_0001',
+    )
+    const replacement = {
+      targetPath: '/tmp/project/ws_0001',
+      backupPath: '/tmp/project/.ws_0001.replace-backup',
+    }
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement)?.(
+        event,
+        '/tmp/project/ws_0001',
+      ),
+    ).resolves.toEqual(replacement)
+    await handlers.get(
+      desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+    )?.(event, replacement)
+    await handlers.get(
+      desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+    )?.(event, replacement)
+    await expect(
       handlers.get(desktopApiIpcChannels.workspaceScanPdkDirectory)?.(event, '/tmp/pdk'),
     ).resolves.toMatchObject({
       canonicalPath: '/tmp/pdk',
@@ -638,11 +822,14 @@ describe('registerIpc', () => {
     })
 
     expect(services.settingsStore.get).toHaveBeenCalledWith('recent_projects')
-    expect(services.settingsStore.set).toHaveBeenCalledWith('recent_projects', [{ id: 'recent' }])
+    expect(services.settingsStore.set).toHaveBeenCalledWith('recent_projects', [
+      { id: 'recent' },
+    ])
     expect(services.settingsStore.delete).toHaveBeenCalledWith('recent_projects')
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openDirectory'],
       title: 'Select Project',
+      buttonLabel: 'Select Folder',
     })
     expect(showOpenDialog).toHaveBeenCalledWith({
       properties: ['openFile', 'multiSelections'],
@@ -659,15 +846,12 @@ describe('registerIpc', () => {
       '/tmp/project/Synthesis_yosys/log/Synthesis.log',
       1024,
     )
-    expect(services.workspaceService.readOptionalProjectTextFileTail).toHaveBeenCalledWith(
-      '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-      1024,
-    )
-    expect(services.workspaceService.readOptionalProjectTextFileUpdate).toHaveBeenCalledWith(
-      '/tmp/project/Synthesis_yosys/log/Synthesis.log',
-      1024,
-      2048,
-    )
+    expect(
+      services.workspaceService.readOptionalProjectTextFileTail,
+    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024)
+    expect(
+      services.workspaceService.readOptionalProjectTextFileUpdate,
+    ).toHaveBeenCalledWith('/tmp/project/Synthesis_yosys/log/Synthesis.log', 1024, 2048)
     expect(services.workspaceService.subscribeProjectLogTail).toHaveBeenCalledWith(
       '/tmp/project/Synthesis_yosys/log/Synthesis.log',
       {
@@ -683,7 +867,65 @@ describe('registerIpc', () => {
       '/tmp/project/home/parameters.json',
       '{"PDK":"ics55"}',
     )
+    expect(services.workspaceService.listProjectDirectory).toHaveBeenCalledWith(
+      '/tmp/project/origin',
+    )
+    expect(services.workspaceService.removeProjectDirectory).toHaveBeenCalledWith(
+      '/tmp/project/ws_0001',
+    )
+    expect(
+      services.workspaceService.prepareProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith('/tmp/project/ws_0001')
+    expect(
+      services.workspaceService.restoreProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith(replacement)
+    expect(
+      services.workspaceService.finalizeProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith(replacement)
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens RTL source file picker as single file selection and rejects returned directories', async () => {
+    const { handlers } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/a.v'],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogPickRtlSources)?.(event, {
+        title: 'Add RTL Design Files',
+        multiple: false,
+      }),
+    ).resolves.toEqual({
+      directories: [],
+      files: ['/tmp/a.v'],
+    })
+
+    expect(showOpenDialog).toHaveBeenCalledWith({
+      properties: ['openFile'],
+      title: 'Add RTL Design Files',
+      filters: [{ name: 'HDL Files', extensions: ['v', 'sv', 'vhd', 'vhdl', 'gz'] }],
+    })
+
+    showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['/tmp/rtl-dir'],
+    })
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.dialogPickRtlSources)?.(event, {
+        title: 'Add RTL Design Files',
+        multiple: false,
+      }),
+    ).resolves.toEqual({
+      error: expect.objectContaining({
+        message:
+          'Please select RTL design files, not folders. Use Select design folder to scan a folder.',
+      }),
+      ok: false,
+    })
   })
 
   it('delegates native layout viewer launches to the layout viewer service', async () => {
@@ -717,10 +959,18 @@ describe('registerIpc', () => {
       design: 'gcd',
       flow: { steps: [] },
       home: {
-        checklistJson: { exists: false, kind: 'checklist', path: '/tmp/project/home/checklist.json' },
+        checklistJson: {
+          exists: false,
+          kind: 'checklist',
+          path: '/tmp/project/home/checklist.json',
+        },
         flowJson: { exists: true, kind: 'flow', path: '/tmp/project/home/flow.json' },
         homeJson: { exists: true, kind: 'home', path: '/tmp/project/home/home.json' },
-        parametersJson: { exists: true, kind: 'parameters', path: '/tmp/project/home/parameters.json' },
+        parametersJson: {
+          exists: true,
+          kind: 'parameters',
+          path: '/tmp/project/home/parameters.json',
+        },
       },
       homeData: {},
       messages: [],
@@ -731,7 +981,9 @@ describe('registerIpc', () => {
       topModule: 'gcd',
     }
     services.workspaceResourceService.getIndex.mockResolvedValue(index)
-    services.workspaceResourceService.readHome.mockResolvedValue({ flow: '/tmp/project/home/flow.json' })
+    services.workspaceResourceService.readHome.mockResolvedValue({
+      flow: '/tmp/project/home/flow.json',
+    })
     services.workspaceResourceService.readFlow.mockResolvedValue({ steps: [] })
     services.workspaceResourceService.readParameters.mockResolvedValue({ Design: 'gcd' })
     services.workspaceResourceService.resolveStepInfo.mockResolvedValue({
@@ -756,10 +1008,10 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.workspaceResourcesReadParameters)?.(event),
     ).resolves.toEqual({ Design: 'gcd' })
     await expect(
-      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(
-        event,
-        { step: 'route', id: 'layout' },
-      ),
+      handlers.get(desktopApiIpcChannels.workspaceResourcesResolveStepInfo)?.(event, {
+        step: 'route',
+        id: 'layout',
+      }),
     ).resolves.toMatchObject({
       id: 'layout',
       response: 'available',
@@ -776,122 +1028,157 @@ describe('registerIpc', () => {
     })
   })
 
-  it('executes desktop commands through the runtime manager', async () => {
+  it('runs ECC flow steps through the runtime service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
     const result = {
-      cmd: 'run_step',
-      data: { state: 'Success' },
-      message: ['ok'],
-      ok: true,
-      response: 'success',
+      state: 'Success',
+      step: 'place',
     }
-    services.desktopRuntimeManager.execute.mockResolvedValue(result)
     const request = {
-      cmd: 'run_step',
-      data: { step: 'place', rerun: false },
-      source: 'terminal',
+      rerun: false,
+      step: 'place',
+      workspaceHandle: 'workspace-handle-1',
     }
+    services.eccRuntimeService.runStep.mockResolvedValue(result)
 
     await expect(
-      handlers.get(desktopApiIpcChannels.cliExecute)?.(event, request),
+      handlers.get(desktopApiIpcChannels.eccFlowRunStep)?.(event, request),
     ).resolves.toEqual(result)
 
-    expect(services.desktopRuntimeManager.execute).toHaveBeenCalledWith(
-      request,
-      expect.any(Function),
-    )
+    expect(services.eccRuntimeService.runStep).toHaveBeenCalledWith(request)
   })
 
-  it('cancels desktop runtime jobs through the runtime manager', async () => {
+  it('exports ECC signoff through the runtime service', async () => {
     const { handlers, services } = registerHandlers()
     const event = { sender: { id: 'web-contents' } }
-    const result = {
-      cmd: 'run_step',
-      data: {},
-      message: ['Cancelling run_step'],
-      ok: false,
-      response: 'cancelled',
+    const request = {
+      outputPath: '/exports/custom package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
     }
-    services.desktopRuntimeManager.cancel.mockResolvedValue(result)
+    const result = { outputPath: request.outputPath }
+    services.eccRuntimeService.exportSignoff.mockResolvedValue(result)
 
     await expect(
-      handlers.get(desktopApiIpcChannels.cliCancel)?.(event, 'job-1'),
+      handlers.get(desktopApiIpcChannels.eccWorkspaceExportSignoff)?.(event, request),
     ).resolves.toEqual(result)
 
-    expect(services.desktopRuntimeManager.cancel).toHaveBeenCalledWith('job-1')
+    expect(services.eccRuntimeService.exportSignoff).toHaveBeenCalledWith(request)
   })
 
-  it('forwards command events to the requesting renderer when it is alive', async () => {
+  it('inspects ECC signoff through the runtime service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+    const request = { workspaceHandle: 'workspace-handle-1' }
+    const result = { groups: [], risks: [], status: 'ready' }
+    services.eccRuntimeService.inspectSignoff.mockResolvedValue(result)
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccWorkspaceInspectSignoff)?.(event, request),
+    ).resolves.toEqual(result)
+
+    expect(services.eccRuntimeService.inspectSignoff).toHaveBeenCalledWith(request)
+  })
+
+  it('broadcasts ECC runtime events to live renderer windows', () => {
+    const { services } = registerHandlers()
+    const webContents = {
+      send: vi.fn(),
+    }
+    getAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => false,
+        webContents,
+      },
+    ])
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({ type: 'runtime.ready' })
+
+    expect(webContents.send).toHaveBeenCalledWith(desktopApiEventChannels.eccEvent, {
+      type: 'runtime.ready',
+    })
+  })
+
+  it('does not broadcast ECC runtime events to destroyed windows', () => {
+    const { services } = registerHandlers()
+    const webContents = {
+      send: vi.fn(),
+    }
+    getAllWindows.mockReturnValue([
+      {
+        isDestroyed: () => true,
+        webContents,
+      },
+    ])
+    const listener = services.eccRuntimeService.onEvent.mock.calls[0]?.[0]
+    listener?.({ type: 'runtime.ready' })
+
+    expect(webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('closes ECC workspace handles when the requesting renderer is destroyed', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {
       isDestroyed: vi.fn(() => false),
-      send: vi.fn(),
     })
-    const cliEvent = {
-      cmd: 'run_step',
-      jobId: 'job-1',
-      stream: 'system',
-      text: 'queued',
-      type: 'queued',
-    }
-    services.desktopRuntimeManager.execute.mockImplementation(async (_request, listener) => {
-      listener(cliEvent)
-      return {
-        cmd: 'run_step',
-        data: {},
-        message: [],
-        ok: true,
-        response: 'success',
-      }
+    const event = { sender }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
     })
-    const request = {
-      cmd: 'run_step',
-      data: { step: 'place', rerun: false },
-      source: 'terminal',
-    }
 
-    await handlers.get(desktopApiIpcChannels.cliExecute)?.({ sender }, request)
+    await expect(
+      handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+        directory: '/work/demo',
+      }),
+    ).resolves.toEqual({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
 
-    expect(sender.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.cliEvent,
-      expect.objectContaining({ jobId: 'job-1', type: 'queued' }),
-    )
+    expect(sender.listenerCount('destroyed')).toBe(1)
+    sender.emit('destroyed')
+    const explicitClose = handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    await vi.waitFor(() => {
+      expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledWith({
+        workspaceHandle: 'workspace-handle-1',
+      })
+    })
+    await explicitClose
+
+    expect(services.eccRuntimeService.closeWorkspace).toHaveBeenCalledTimes(1)
+    expect(sender.listenerCount('destroyed')).toBe(0)
   })
 
-  it('does not send command events to destroyed renderer windows', async () => {
+  it('tracks a workspace handle again after a successful explicit close', async () => {
     const { handlers, services } = registerHandlers()
-    const destroyedSender = Object.assign(new EventEmitter(), {
-      isDestroyed: vi.fn(() => true),
-      send: vi.fn(),
+    const sender = Object.assign(new EventEmitter(), {
+      isDestroyed: vi.fn(() => false),
     })
-    services.desktopRuntimeManager.execute.mockImplementation(async (_request, listener) => {
-      listener({
-        cmd: 'run_step',
-        jobId: 'job-1',
-        stream: 'stdout',
-        text: 'running',
-        type: 'stdout',
-      })
-      return {
-        cmd: 'run_step',
-        data: {},
-        message: [],
-        ok: true,
-        response: 'success',
-      }
+    const event = { sender }
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
     })
 
-    await handlers.get(desktopApiIpcChannels.cliExecute)?.(
-      { sender: destroyedSender },
-      {
-        cmd: 'run_step',
-        data: { step: 'place', rerun: false },
-        source: 'terminal',
-      },
-    )
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
+    expect(sender.listenerCount('destroyed')).toBe(1)
 
-    expect(destroyedSender.send).not.toHaveBeenCalled()
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceClose)?.(event, {
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(sender.listenerCount('destroyed')).toBe(0)
+
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(event, {
+      directory: '/work/demo',
+    })
+
+    expect(sender.listenerCount('destroyed')).toBe(1)
   })
 
   it('creates shell sessions and forwards shell output to the requesting renderer', async () => {
@@ -928,20 +1215,14 @@ describe('registerIpc', () => {
       { cols: 120, rows: 32 },
       expect.any(Function),
     )
-    expect(sender.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.shellData,
-      {
-        data: 'ready\r\n',
-        sessionId: 'shell-1',
-      },
-    )
-    expect(sender.send).toHaveBeenCalledWith(
-      desktopApiEventChannels.shellExit,
-      {
-        exitCode: 0,
-        sessionId: 'shell-1',
-      },
-    )
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.shellData, {
+      data: 'ready\r\n',
+      sessionId: 'shell-1',
+    })
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.shellExit, {
+      exitCode: 0,
+      sessionId: 'shell-1',
+    })
     expect(sender.listenerCount('destroyed')).toBe(1)
   })
 
@@ -993,10 +1274,7 @@ describe('registerIpc', () => {
       expect(services.shellService.kill).toHaveBeenCalledWith('shell-1')
     })
 
-    await handlers.get(desktopApiIpcChannels.shellKill)?.(
-      { sender },
-      'shell-1',
-    )
+    await handlers.get(desktopApiIpcChannels.shellKill)?.({ sender }, 'shell-1')
 
     expect(services.shellService.kill).toHaveBeenCalledTimes(1)
     expect(sender.listenerCount('destroyed')).toBe(0)
@@ -1044,7 +1322,6 @@ describe('registerIpc', () => {
     )
   })
 
-
   it('sends project file change notifications to the requesting renderer', async () => {
     const { handlers, services } = registerHandlers()
     const sender = Object.assign(new EventEmitter(), {
@@ -1052,14 +1329,16 @@ describe('registerIpc', () => {
       send: vi.fn(),
     })
     const event = { sender }
-    services.workspaceService.watchProjectFile.mockImplementation(async (_path, listener) => {
-      listener({
-        subscriptionId: 'project-file-watch-1',
-        path: '/tmp/project/home/flow.json',
-        eventType: 'change',
-      })
-      return 'project-file-watch-1'
-    })
+    services.workspaceService.watchProjectFile.mockImplementation(
+      async (_path, listener) => {
+        listener({
+          subscriptionId: 'project-file-watch-1',
+          path: '/tmp/project/home/flow.json',
+          eventType: 'change',
+        })
+        return 'project-file-watch-1'
+      },
+    )
 
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceWatchProjectFile)?.(
@@ -1079,14 +1358,11 @@ describe('registerIpc', () => {
       '/tmp/project/home/flow.json',
       expect.any(Function),
     )
-    expect(sender.send).toHaveBeenCalledWith(
-      'workspace:file-changed',
-      {
-        subscriptionId: 'project-file-watch-1',
-        path: '/tmp/project/home/flow.json',
-        eventType: 'change',
-      },
-    )
+    expect(sender.send).toHaveBeenCalledWith('workspace:file-changed', {
+      subscriptionId: 'project-file-watch-1',
+      path: '/tmp/project/home/flow.json',
+      eventType: 'change',
+    })
     expect(services.workspaceService.unwatchProjectFile).toHaveBeenCalledWith(
       'project-file-watch-1',
     )
@@ -1132,15 +1408,17 @@ describe('registerIpc', () => {
       send: vi.fn(),
     })
     const event = { sender }
-    services.workspaceService.subscribeProjectLogTail.mockImplementation(async (_path, _options, listener) => {
-      listener({
-        subscriptionId: 'project-log-tail-1',
-        path: '/tmp/project/home/flow.log',
-        eventType: 'snapshot',
-        content: 'log chunk',
-      })
-      return 'project-log-tail-1'
-    })
+    services.workspaceService.subscribeProjectLogTail.mockImplementation(
+      async (_path, _options, listener) => {
+        listener({
+          subscriptionId: 'project-log-tail-1',
+          path: '/tmp/project/home/flow.log',
+          eventType: 'snapshot',
+          content: 'log chunk',
+        })
+        return 'project-log-tail-1'
+      },
+    )
 
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceSubscribeProjectLogTail)?.(

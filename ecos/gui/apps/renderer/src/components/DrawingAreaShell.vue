@@ -5,7 +5,10 @@ defineProps<{
 </script>
 
 <template>
-  <section class="drawing-area-shell" :class="{ 'drawing-area-shell--frameless': frameless }">
+  <section
+    class="drawing-area-shell"
+    :class="{ 'drawing-area-shell--frameless': frameless }"
+  >
     <div class="drawing-area-shell__body">
       <slot />
     </div>
@@ -37,7 +40,7 @@ defineProps<{
 }
 
 .drawing-area-shell__body::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 14px;
   border-radius: 8px;
@@ -45,7 +48,10 @@ defineProps<{
     linear-gradient(rgba(255, 250, 240, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 250, 240, 0.06) 1px, transparent 1px),
     linear-gradient(180deg, #10191c 0%, #263238 100%);
-  background-size: 24px 24px, 24px 24px, auto;
+  background-size:
+    24px 24px,
+    24px 24px,
+    auto;
   border: 1px solid rgba(255, 250, 240, 0.12);
   box-shadow:
     inset 0 1px 0 rgba(255, 250, 240, 0.05),

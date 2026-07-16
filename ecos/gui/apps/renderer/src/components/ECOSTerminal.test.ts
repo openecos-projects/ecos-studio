@@ -12,12 +12,12 @@ describe('ECOSTerminal', () => {
 
   it('starts as a node-pty shell terminal', () => {
     expect(terminalSource).toContain('startShellSession')
-    expect(terminalSource).toContain("desktopApi.shell.createSession")
-    expect(terminalSource).toContain("desktopApi.shell.write")
-    expect(terminalSource).toContain("desktopApi.shell.resize")
-    expect(terminalSource).toContain("desktopApi.shell.kill")
-    expect(terminalSource).toContain("desktopApi.shell.onData")
-    expect(terminalSource).toContain("desktopApi.shell.onExit")
+    expect(terminalSource).toContain('desktopApi.shell.createSession')
+    expect(terminalSource).toContain('desktopApi.shell.write')
+    expect(terminalSource).toContain('desktopApi.shell.resize')
+    expect(terminalSource).toContain('desktopApi.shell.kill')
+    expect(terminalSource).toContain('desktopApi.shell.onData')
+    expect(terminalSource).toContain('desktopApi.shell.onExit')
     expect(terminalSource).not.toContain('desktopApi.cli.execute')
   })
 
@@ -53,7 +53,7 @@ describe('ECOSTerminal', () => {
       /<div\s+class="app-main"[\s\S]*>\s*<div\s+class="app-content"[\s\S]*>\s*<router-view\s*\/>\s*<\/div>\s*<ECOSTerminal[^>]*\/>\s*<\/div>\s*<StatusBar/,
     )
     expect(appSource).toMatch(
-      /:style="terminalExpanded \? \{ '--terminal-panel-height': terminalPanelHeight \} : undefined"/,
+      /:style="\s*terminalExpanded\s*\?\s*\{\s*'--terminal-panel-height': terminalPanelHeight\s*\}\s*:\s*undefined\s*"/,
     )
     expect(appSource).toMatch(/const terminalPanelHeight = ref\('min\(300px, 42vh\)'\)/)
     expect(appSource).toContain(':maximized="terminalPanelMaximized"')
@@ -62,7 +62,9 @@ describe('ECOSTerminal', () => {
     expect(appSource).toMatch(/\.app-main\s*\{[\s\S]*position:\s*relative;/)
     expect(appSource).not.toContain('app-content--terminal-open')
     expect(appSource).toContain("'app-content--terminal-safe-area': terminalExpanded")
-    expect(appSource).not.toMatch(/^\s*padding-bottom:\s*var\(--terminal-panel-height\);/m)
+    expect(appSource).not.toMatch(
+      /^\s*padding-bottom:\s*var\(--terminal-panel-height\);/m,
+    )
   })
 
   it('keeps covered app content reachable with a scroll spacer instead of resizing it', () => {
@@ -74,7 +76,9 @@ describe('ECOSTerminal', () => {
     expect(appSource).toMatch(
       /\.app-content--terminal-safe-area\s*\{[\s\S]*scroll-padding-bottom:\s*var\(--terminal-panel-height\);/,
     )
-    expect(appSource).not.toMatch(/^\s*padding-bottom:\s*var\(--terminal-panel-height\);/m)
+    expect(appSource).not.toMatch(
+      /^\s*padding-bottom:\s*var\(--terminal-panel-height\);/m,
+    )
   })
 
   it('lets the terminal panel height be dragged and maximized like the VS Code panel', () => {
@@ -85,12 +89,18 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toContain('toggleMaximize: []')
     expect(terminalSource).toContain('class="terminal-resize-handle"')
     expect(terminalSource).toContain('@pointerdown="handleResizePointerDown"')
-    expect(terminalSource).toContain("document.body.classList.add('terminal-panel-resizing')")
-    expect(terminalSource).toContain("document.body.classList.remove('terminal-panel-resizing')")
+    expect(terminalSource).toContain(
+      "document.body.classList.add('terminal-panel-resizing')",
+    )
+    expect(terminalSource).toContain(
+      "document.body.classList.remove('terminal-panel-resizing')",
+    )
   })
 
   it('overlays the app content instead of taking flex layout space', () => {
-    expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*position:\s*absolute;/)
+    expect(terminalSource).toMatch(
+      /\.ecos-terminal-panel\s*\{[\s\S]*position:\s*absolute;/,
+    )
     expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*z-index:\s*\d+;/)
     expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*bottom:\s*0;/)
     expect(terminalSource).toMatch(
@@ -104,18 +114,28 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toMatch(/<div\s+ref="terminalBody"\s+class="terminal-body">/)
     expect(terminalSource).toMatch(/\.terminal-body\s*\{[\s\S]*padding:\s*8px 10px 0;/)
     expect(terminalSource).toMatch(/\.terminal-surface\s*\{[\s\S]*height:\s*100%;/)
-    expect(terminalSource.match(/\.terminal-surface\s*\{[^}]*\}/)?.[0] ?? '').not.toContain(
-      'padding:',
-    )
+    expect(
+      terminalSource.match(/\.terminal-surface\s*\{[^}]*\}/)?.[0] ?? '',
+    ).not.toContain('padding:')
   })
 
   it('uses theme tokens for terminal chrome and xterm surfaces', () => {
     expect(terminalSource).not.toContain("const terminalBackground = '#1e1e1e'")
-    expect(terminalSource).toMatch(/\.ecos-terminal-panel\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
-    expect(terminalSource).toMatch(/\.terminal-header\s*\{[\s\S]*background:\s*var\(--bg-secondary\);/)
-    expect(terminalSource).toMatch(/\.terminal-title\s*\{[\s\S]*color:\s*var\(--text-primary\);/)
-    expect(terminalSource).toMatch(/\.terminal-body\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
-    expect(terminalSource).toMatch(/\.terminal-surface\s*\{[\s\S]*background:\s*var\(--bg-primary\);/)
+    expect(terminalSource).toMatch(
+      /\.ecos-terminal-panel\s*\{[\s\S]*background:\s*var\(--bg-primary\);/,
+    )
+    expect(terminalSource).toMatch(
+      /\.terminal-header\s*\{[\s\S]*background:\s*var\(--bg-secondary\);/,
+    )
+    expect(terminalSource).toMatch(
+      /\.terminal-title\s*\{[\s\S]*color:\s*var\(--text-primary\);/,
+    )
+    expect(terminalSource).toMatch(
+      /\.terminal-body\s*\{[\s\S]*background:\s*var\(--bg-primary\);/,
+    )
+    expect(terminalSource).toMatch(
+      /\.terminal-surface\s*\{[\s\S]*background:\s*var\(--bg-primary\);/,
+    )
     expect(terminalSource).toMatch(
       /:deep\(\.xterm-viewport\),\s*:deep\(\.xterm-screen\)\s*\{[\s\S]*background:\s*var\(--bg-primary\);/,
     )
@@ -151,9 +171,15 @@ describe('ECOSTerminal', () => {
   })
 
   it('uses VS Code terminal colors for prompts, paths, and command output', () => {
-    expect(terminalSource).toContain("const terminalThemes: Record<'light' | 'dark', ITheme>")
-    expect(terminalSource).toMatch(/dark:\s*\{[\s\S]*background:\s*'#18181c'[\s\S]*foreground:\s*'#e3e3e8'/)
-    expect(terminalSource).toMatch(/light:\s*\{[\s\S]*background:\s*'#ffffff'[\s\S]*foreground:\s*'#111827'/)
+    expect(terminalSource).toContain(
+      "const terminalThemes: Record<'light' | 'dark', ITheme>",
+    )
+    expect(terminalSource).toMatch(
+      /dark:\s*\{[\s\S]*background:\s*'#18181c'[\s\S]*foreground:\s*'#e3e3e8'/,
+    )
+    expect(terminalSource).toMatch(
+      /light:\s*\{[\s\S]*background:\s*'#ffffff'[\s\S]*foreground:\s*'#111827'/,
+    )
     expect(terminalSource).toContain("blue: '#3b8eea'")
     expect(terminalSource).toContain("brightBlue: '#6cb6ff'")
     expect(terminalSource).toContain("green: '#23d18b'")
@@ -232,11 +258,15 @@ describe('ECOSTerminal', () => {
       )?.[1] ?? ''
 
     expect(terminalSource).toContain('interface TerminalRecord')
-    expect(terminalSource).toContain('const terminalRecords = shallowRef<TerminalRecord[]>([])')
+    expect(terminalSource).toContain(
+      'const terminalRecords = shallowRef<TerminalRecord[]>([])',
+    )
     expect(terminalSource).toMatch(
       /function createAndActivateTerminal\(\)[\s\S]*createTerminalRecord\(\)[\s\S]*terminalRecords\.value = \[\.\.\.terminalRecords\.value, record\][\s\S]*activeTerminalId\.value = record\.localId[\s\S]*startShellSession\(record\)/,
     )
-    expect(terminalSource).toMatch(/function closePanel\(\) \{[\s\S]*emit\('collapse'\)[\s\S]*\}/)
+    expect(terminalSource).toMatch(
+      /function closePanel\(\) \{[\s\S]*emit\('collapse'\)[\s\S]*\}/,
+    )
     expect(createAndActivateTerminalBody).not.toContain('stopShellSession(record)')
   })
 
@@ -251,7 +281,9 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toContain('aria-label="Close Terminal"')
     expect(terminalSource).toContain('@click.stop="deleteTerminal(record.localId)"')
     expect(terminalSource).toContain('ri-delete-bin-line')
-    expect(terminalSource).not.toContain('terminal-session-item--active .terminal-session-delete')
+    expect(terminalSource).not.toContain(
+      'terminal-session-item--active .terminal-session-delete',
+    )
     expect(terminalSource).toMatch(
       /\.terminal-session-item--active::before\s*\{[\s\S]*background:\s*var\(--accent-color\);/,
     )
@@ -280,8 +312,12 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).toMatch(
       /function handleSessionListResizePointerMove\(event: PointerEvent\)[\s\S]*workspaceRect\.right - event\.clientX[\s\S]*terminalSessionListWidth\.value = clampTerminalSessionListWidth\(width\)[\s\S]*fitTerminal\(\)/,
     )
-    expect(terminalSource).toContain("document.body.classList.add('terminal-session-list-resizing')")
-    expect(terminalSource).toContain("document.body.classList.remove('terminal-session-list-resizing')")
+    expect(terminalSource).toContain(
+      "document.body.classList.add('terminal-session-list-resizing')",
+    )
+    expect(terminalSource).toContain(
+      "document.body.classList.remove('terminal-session-list-resizing')",
+    )
     expect(terminalSource).toMatch(
       /\.terminal-session-resize-handle\s*\{[\s\S]*cursor:\s*col-resize;/,
     )
@@ -296,8 +332,8 @@ describe('ECOSTerminal', () => {
     expect(terminalSource).not.toContain('registerDecoration')
     expect(terminalSource).not.toContain('registerOscHandler')
     expect(terminalSource).not.toContain('terminal-command-decoration')
-    expect(terminalSource.match(/\.terminal-surface\s*\{[^}]*\}/)?.[0] ?? '').not.toContain(
-      'padding-left:',
-    )
+    expect(
+      terminalSource.match(/\.terminal-surface\s*\{[^}]*\}/)?.[0] ?? '',
+    ).not.toContain('padding-left:')
   })
 })

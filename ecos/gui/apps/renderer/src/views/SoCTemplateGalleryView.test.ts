@@ -298,7 +298,13 @@ async function loadVueRuntime() {
   return vueRuntime
 }
 
-function compileComponent(source: string, filename: string, id: string, vue: VueRuntime, extraModules: Record<string, unknown> = {}) {
+function compileComponent(
+  source: string,
+  filename: string,
+  id: string,
+  vue: VueRuntime,
+  extraModules: Record<string, unknown> = {},
+) {
   const { descriptor } = parse(source, { filename })
   const script = compileScript(descriptor, {
     id,
@@ -388,8 +394,13 @@ type ButtonQueryContainer = {
   querySelectorAll(selector: string): ArrayLike<FakeElement>
 }
 
-function findButton(container: ButtonQueryContainer, label: string): FakeElement | undefined {
-  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.trim().includes(label))
+function findButton(
+  container: ButtonQueryContainer,
+  label: string,
+): FakeElement | undefined {
+  return Array.from(container.querySelectorAll('button')).find((button) =>
+    button.textContent?.trim().includes(label),
+  )
 }
 
 describe('SoCTemplateGalleryView', () => {
@@ -444,7 +455,10 @@ describe('SoCTemplateGalleryView', () => {
 
     openButton?.click()
 
-    expect(push).toHaveBeenCalledWith({ name: 'SoCTemplateDetail', params: { templateId: 'demoSoC001' } })
+    expect(push).toHaveBeenCalledWith({
+      name: 'SoCTemplateDetail',
+      params: { templateId: 'demoSoC001' },
+    })
 
     app.unmount()
   })

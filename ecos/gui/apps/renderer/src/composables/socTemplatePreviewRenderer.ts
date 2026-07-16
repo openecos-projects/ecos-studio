@@ -39,11 +39,17 @@ export function getSocDisplayCoreLabel(coreId: number, name: string): string {
 }
 
 export function buildSocPreviewRects(template: SocTemplateDetail): SocPreviewRect[] {
-  return template.cores.map(core => ({
+  return template.cores.map((core) => ({
     coreId: core.id,
     label: getSocDisplayCoreLabel(core.id, core.name),
-    leftPct: toProjectedPercent(core.boundingBox.llx - template.coreArea.llx, template.coreArea.width),
-    topPct: toProjectedPercent(template.coreArea.ury - core.boundingBox.ury, template.coreArea.height),
+    leftPct: toProjectedPercent(
+      core.boundingBox.llx - template.coreArea.llx,
+      template.coreArea.width,
+    ),
+    topPct: toProjectedPercent(
+      template.coreArea.ury - core.boundingBox.ury,
+      template.coreArea.height,
+    ),
     widthPct: toProjectedPercent(core.boundingBox.width, template.coreArea.width),
     heightPct: toProjectedPercent(core.boundingBox.height, template.coreArea.height),
     align: core.align,
@@ -198,7 +204,9 @@ function formatMicronValue(value: number): string {
 
 export function formatSocBoundingBox(box: SocTemplateRect, dbu = 1): string {
   const d = normalizeDbu(dbu)
-  return [box.llx, box.lly, box.urx, box.ury].map(value => formatMicronValue(value / d)).join(', ')
+  return [box.llx, box.lly, box.urx, box.ury]
+    .map((value) => formatMicronValue(value / d))
+    .join(', ')
 }
 
 export function formatSocArea(area: number | undefined, dbu = 1): string {

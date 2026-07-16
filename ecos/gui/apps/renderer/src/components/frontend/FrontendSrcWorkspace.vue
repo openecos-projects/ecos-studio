@@ -71,7 +71,12 @@ interface FrontendSourceSelection {
 defineProps<{
   activeSource: FrontendSourceSelection | null
   sourceArtifacts: PathItem[]
-  sourceFocusTarget: { path?: string; line?: number; column?: number; token: number } | null
+  sourceFocusTarget: {
+    path?: string
+    line?: number
+    column?: number
+    token: number
+  } | null
   sourceItems: SourcePathItem[]
   fileIcon: (path: string) => string
   shortPath: (path: string) => string

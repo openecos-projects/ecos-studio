@@ -14,7 +14,14 @@ import { electronLogger } from './logger'
 
 type SpawnLike = typeof spawnChild
 type RuntimeEnvProvider = () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv
-type CliEventType = 'queued' | 'started' | 'stdout' | 'stderr' | 'completed' | 'failed' | 'cancelled'
+type CliEventType =
+  | 'queued'
+  | 'started'
+  | 'stdout'
+  | 'stderr'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
 const DEFAULT_FRONTEND_CLI_COMMAND = 'ecc-fe'
 const PYTHON_FRONTEND_MODULE_ARGS = ['-m', 'fecompiler.cli.main']
 
@@ -34,7 +41,7 @@ interface PreparedCommand {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readString(value: unknown): string {
@@ -42,9 +49,13 @@ function readString(value: unknown): string {
 }
 
 function readStringList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean)
+  if (Array.isArray(value))
+    return value.map((item) => String(item).trim()).filter(Boolean)
   if (typeof value === 'string' && value.trim()) {
-    return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+    return value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
   }
   return []
 }
@@ -61,11 +72,11 @@ function readMessage(value: unknown): string[] {
 }
 
 function readResponse(value: unknown): DesktopCliCommandResponse {
-  return value === 'success'
-    || value === 'failed'
-    || value === 'error'
-    || value === 'warning'
-    || value === 'cancelled'
+  return value === 'success' ||
+    value === 'failed' ||
+    value === 'error' ||
+    value === 'warning' ||
+    value === 'cancelled'
     ? value
     : 'error'
 }
@@ -85,15 +96,24 @@ function result(
   }
 }
 
-function failed(request: DesktopCliCommandRequest, message: string): DesktopCliCommandResult {
+function failed(
+  request: DesktopCliCommandRequest,
+  message: string,
+): DesktopCliCommandResult {
   return result(request.cmd, 'failed', [message])
 }
 
-function error(request: DesktopCliCommandRequest, message: string): DesktopCliCommandResult {
+function error(
+  request: DesktopCliCommandRequest,
+  message: string,
+): DesktopCliCommandResult {
   return result(request.cmd, 'error', [message])
 }
 
-function cancelled(request: DesktopCliCommandRequest, message: string): DesktopCliCommandResult {
+function cancelled(
+  request: DesktopCliCommandRequest,
+  message: string,
+): DesktopCliCommandResult {
   return result(request.cmd, 'cancelled', [message])
 }
 
@@ -104,7 +124,7 @@ function normalizeCliResult(
   const record = readRecord(payload)
   const response = readResponse(record.response)
   const rawCmd = readString(record.cmd)
-  const cmd = rawCmd ? rawCmd as DesktopCliCommandName : request.cmd
+  const cmd = rawCmd ? (rawCmd as DesktopCliCommandName) : request.cmd
 
   return {
     cmd,
@@ -118,11 +138,8 @@ function normalizeCliResult(
 function isResultPayload(value: unknown): boolean {
   const record = readRecord(value)
   return (
-    record.type === 'result'
-    || (
-      typeof record.response === 'string'
-      && typeof record.cmd === 'string'
-    )
+    record.type === 'result' ||
+    (typeof record.response === 'string' && typeof record.cmd === 'string')
   )
 }
 
@@ -136,13 +153,13 @@ function responseFromEventType(eventType: CliEventType): DesktopCliCommandRespon
 
 function normalizeEventType(value: unknown): CliEventType | null {
   if (
-    value === 'queued'
-    || value === 'started'
-    || value === 'stdout'
-    || value === 'stderr'
-    || value === 'completed'
-    || value === 'failed'
-    || value === 'cancelled'
+    value === 'queued' ||
+    value === 'started' ||
+    value === 'stdout' ||
+    value === 'stderr' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'cancelled'
   ) {
     return value
   }
@@ -216,14 +233,13 @@ function candidateFrontendPythonCommands(
   env: NodeJS.ProcessEnv,
   frontendRoot: string,
 ): string[] {
-  const siblingEccVenvPython = process.platform === 'win32'
-    ? join(dirname(frontendRoot), 'ecc', '.venv', 'Scripts', 'python.exe')
-    : join(dirname(frontendRoot), 'ecc', '.venv', 'bin', 'python')
-  return [
-    env.ECOS_FE_PYTHON ?? '',
-    env.PYTHON_INTERPRETER ?? '',
-    siblingEccVenvPython,
-  ].map((candidate) => candidate.trim()).filter(Boolean)
+  const siblingEccVenvPython =
+    process.platform === 'win32'
+      ? join(dirname(frontendRoot), 'ecc', '.venv', 'Scripts', 'python.exe')
+      : join(dirname(frontendRoot), 'ecc', '.venv', 'bin', 'python')
+  return [env.ECOS_FE_PYTHON ?? '', env.PYTHON_INTERPRETER ?? '', siblingEccVenvPython]
+    .map((candidate) => candidate.trim())
+    .filter(Boolean)
 }
 
 function resolveFrontendPythonCommand(
@@ -258,9 +274,10 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
     return existsSync(command) ? command : '(not found)'
   }
 
-  const candidates = process.platform === 'win32'
-    ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
-    : [command]
+  const candidates =
+    process.platform === 'win32'
+      ? [command, `${command}.cmd`, `${command}.exe`, `${command}.bat`]
+      : [command]
 
   for (const directory of pathEntriesForEnv(env)) {
     for (const candidate of candidates) {
@@ -274,9 +291,8 @@ function resolveCommandFromPath(command: string, env: NodeJS.ProcessEnv): string
 
 function resolveFrontendRootCli(frontendRoot: string): string {
   const binDir = join(frontendRoot, 'bin')
-  const candidates = process.platform === 'win32'
-    ? ['ecc-fe.cmd', 'ecc-fe.exe', 'ecc-fe']
-    : ['ecc-fe']
+  const candidates =
+    process.platform === 'win32' ? ['ecc-fe.cmd', 'ecc-fe.exe', 'ecc-fe'] : ['ecc-fe']
 
   for (const candidate of candidates) {
     const fullPath = join(binDir, candidate)
@@ -287,37 +303,54 @@ function resolveFrontendRootCli(frontendRoot: string): string {
 
 function normalizeCreateData(data: Record<string, unknown>): Record<string, unknown> {
   const parameters = readRecord(data.parameters)
-  const variant = readString(data.soc_variant)
-    || readString(data.socVariant)
-    || readString(parameters.soc_variant)
+  const variant =
+    readString(data.soc_variant) ||
+    readString(data.socVariant) ||
+    readString(parameters.soc_variant)
   return {
     ...data,
     cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist),
     cpu_rtl_files: readOptionalStringList(data.cpu_rtl_files ?? data.cpuRtlFiles) ?? [],
     designTool: 'frontend',
     sim_all_tests: data.sim_all_tests ?? data.simAllTests ?? false,
-    sim_build_all_programs: data.sim_build_all_programs ?? data.simBuildAllPrograms ?? false,
-    sim_build_test_script: readString(data.sim_build_test_script) || readString(data.simBuildTestScript),
+    sim_build_all_programs:
+      data.sim_build_all_programs ?? data.simBuildAllPrograms ?? false,
+    sim_build_test_script:
+      readString(data.sim_build_test_script) || readString(data.simBuildTestScript),
     sim_cflags: readOptionalStringList(data.sim_cflags ?? data.simCflags) ?? [],
-    sim_cpp_sources: readOptionalStringList(data.sim_cpp_sources ?? data.simCppSources) ?? [],
+    sim_cpp_sources:
+      readOptionalStringList(data.sim_cpp_sources ?? data.simCppSources) ?? [],
     sim_images: data.sim_images ?? data.simImages ?? [],
     sim_ldflags: readOptionalStringList(data.sim_ldflags ?? data.simLdflags) ?? [],
     sim_program_names: data.sim_program_names ?? data.simProgramNames ?? [],
     sim_program_sources: data.sim_program_sources ?? data.simProgramSources ?? [],
-    sim_programs_dir: readString(data.sim_programs_dir) || readString(data.simProgramsDir),
-    sim_compile_preset: readString(data.sim_compile_preset) || readString(data.simCompilePreset),
-    sim_compile_opt_level: readString(data.sim_compile_opt_level) || readString(data.simCompileOptLevel),
-    sim_compile_march: readString(data.sim_compile_march) || readString(data.simCompileMarch),
-    sim_compile_mabi: readString(data.sim_compile_mabi) || readString(data.simCompileMabi),
-    sim_compile_extra_cflags: readOptionalStringList(data.sim_compile_extra_cflags ?? data.simCompileExtraCflags) ?? [],
-    sim_coremark_iterations: readString(data.sim_coremark_iterations) || readString(data.simCoremarkIterations),
-    sim_coremark_total_data_size: readString(data.sim_coremark_total_data_size) || readString(data.simCoremarkTotalDataSize),
-    sim_coremark_has_float: data.sim_coremark_has_float ?? data.simCoremarkHasFloat ?? false,
+    sim_programs_dir:
+      readString(data.sim_programs_dir) || readString(data.simProgramsDir),
+    sim_compile_preset:
+      readString(data.sim_compile_preset) || readString(data.simCompilePreset),
+    sim_compile_opt_level:
+      readString(data.sim_compile_opt_level) || readString(data.simCompileOptLevel),
+    sim_compile_march:
+      readString(data.sim_compile_march) || readString(data.simCompileMarch),
+    sim_compile_mabi:
+      readString(data.sim_compile_mabi) || readString(data.simCompileMabi),
+    sim_compile_extra_cflags:
+      readOptionalStringList(
+        data.sim_compile_extra_cflags ?? data.simCompileExtraCflags,
+      ) ?? [],
+    sim_coremark_iterations:
+      readString(data.sim_coremark_iterations) || readString(data.simCoremarkIterations),
+    sim_coremark_total_data_size:
+      readString(data.sim_coremark_total_data_size) ||
+      readString(data.simCoremarkTotalDataSize),
+    sim_coremark_has_float:
+      data.sim_coremark_has_float ?? data.simCoremarkHasFloat ?? false,
     sim_run_args: data.sim_run_args ?? data.simRunArgs ?? [],
     sim_soc_root: readString(data.sim_soc_root) || readString(data.simSocRoot),
     sim_test_suite: readString(data.sim_test_suite) || readString(data.simTestSuite),
     sim_tests_dir: readString(data.sim_tests_dir) || readString(data.simTestsDir),
-    sim_tests_out_dir: readString(data.sim_tests_out_dir) || readString(data.simTestsOutDir),
+    sim_tests_out_dir:
+      readString(data.sim_tests_out_dir) || readString(data.simTestsOutDir),
     soc_filelist: readString(data.soc_filelist) || readString(data.socFilelist),
     soc_variant: variant,
     parameters: {
@@ -328,16 +361,39 @@ function normalizeCreateData(data: Record<string, unknown>): Record<string, unkn
   }
 }
 
-function normalizeFrontendCatalogConfigData(data: Record<string, unknown>): Record<string, unknown> {
+function normalizeFrontendCatalogConfigData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
   const parameters = readRecord(data.parameters)
   return {
     ...data,
-    core_id: readString(data.core_id) || readString(data.coreId) || readString(parameters.frontend_core_id) || readString(parameters.core_id),
-    cpu_filelist: readString(data.cpu_filelist) || readString(data.cpuFilelist) || readString(parameters.cpu_filelist),
+    core_id:
+      readString(data.core_id) ||
+      readString(data.coreId) ||
+      readString(parameters.frontend_core_id) ||
+      readString(parameters.core_id),
+    cpu_filelist:
+      readString(data.cpu_filelist) ||
+      readString(data.cpuFilelist) ||
+      readString(parameters.cpu_filelist),
     cpu_rtl_files: readOptionalStringList(data.cpu_rtl_files ?? data.cpuRtlFiles) ?? [],
-    soc_harness_id: readString(data.soc_harness_id) || readString(data.socHarnessId) || readString(data.soc_id) || readString(data.soc_variant) || readString(parameters.soc_harness_id) || readString(parameters.soc_variant),
-    test_suite_id: readString(data.test_suite_id) || readString(data.testSuiteId) || readString(data.sim_test_suite) || readString(parameters.test_suite_id) || readString(parameters.sim_test_suite),
-    toolchain_id: readString(data.toolchain_id) || readString(data.toolchainId) || readString(parameters.toolchain_id),
+    soc_harness_id:
+      readString(data.soc_harness_id) ||
+      readString(data.socHarnessId) ||
+      readString(data.soc_id) ||
+      readString(data.soc_variant) ||
+      readString(parameters.soc_harness_id) ||
+      readString(parameters.soc_variant),
+    test_suite_id:
+      readString(data.test_suite_id) ||
+      readString(data.testSuiteId) ||
+      readString(data.sim_test_suite) ||
+      readString(parameters.test_suite_id) ||
+      readString(parameters.sim_test_suite),
+    toolchain_id:
+      readString(data.toolchain_id) ||
+      readString(data.toolchainId) ||
+      readString(parameters.toolchain_id),
   }
 }
 
@@ -400,9 +456,10 @@ export class FrontendCliAdapter {
     try {
       const cliResult = await this.spawnCommand(request, prepared, context)
       if (cliResult.response === 'success') {
-        const directory = readString(cliResult.data.directory)
-          || readString(cliResult.data.workspace_id)
-          || readString(request.data.directory)
+        const directory =
+          readString(cliResult.data.directory) ||
+          readString(cliResult.data.workspace_id) ||
+          readString(request.data.directory)
         if (directory) this.activeWorkspace = directory
       }
       return cliResult
@@ -422,7 +479,11 @@ export class FrontendCliAdapter {
       case 'validate_frontend_config': {
         mkdirSync(this.tempDir, { recursive: true })
         const inputJson = join(this.tempDir, `fe-validate-config-${randomUUID()}.json`)
-        writeFileSync(inputJson, JSON.stringify(normalizeFrontendCatalogConfigData(request.data)), 'utf8')
+        writeFileSync(
+          inputJson,
+          JSON.stringify(normalizeFrontendCatalogConfigData(request.data)),
+          'utf8',
+        )
         return {
           args: ['workspace', 'validate-config', '--input-json', inputJson, '--json'],
           cleanup: () => {
@@ -437,7 +498,11 @@ export class FrontendCliAdapter {
       case 'create_workspace': {
         mkdirSync(this.tempDir, { recursive: true })
         const inputJson = join(this.tempDir, `fe-create-workspace-${randomUUID()}.json`)
-        writeFileSync(inputJson, JSON.stringify(normalizeCreateData(request.data)), 'utf8')
+        writeFileSync(
+          inputJson,
+          JSON.stringify(normalizeCreateData(request.data)),
+          'utf8',
+        )
         return {
           args: ['workspace', 'create', '--input-json', inputJson, '--json'],
           cleanup: () => {
@@ -501,27 +566,52 @@ export class FrontendCliAdapter {
         }
       }
       default:
-        return error(request, `Command "${request.cmd}" cannot be sent to the frontend CLI adapter.`)
+        return error(
+          request,
+          `Command "${request.cmd}" cannot be sent to the frontend CLI adapter.`,
+        )
     }
   }
 
-  private prepareRunStep(request: DesktopCliCommandRequest): PreparedCommand | DesktopCliCommandResult {
+  private prepareRunStep(
+    request: DesktopCliCommandRequest,
+  ): PreparedCommand | DesktopCliCommandResult {
     const directory = directoryFromRequest(request, this.activeWorkspace)
     const step = requiredString(request, 'step')
     if (!directory) return failed(request, 'missing required field: directory')
     if (!step) return failed(request, 'missing required field: step')
 
     const suite = readString(request.data.sim_test_suite || request.data.simTestSuite)
-    const cpuTestMode = readString(request.data.sim_cpu_test_mode || request.data.simCpuTestMode)
-    const cpuCases = readStringList(request.data.sim_cpu_test_cases || request.data.simCpuTestCases)
-    const compilePreset = readString(request.data.sim_compile_preset || request.data.simCompilePreset)
-    const compileOptLevel = readString(request.data.sim_compile_opt_level || request.data.simCompileOptLevel)
-    const compileMarch = readString(request.data.sim_compile_march || request.data.simCompileMarch)
-    const compileMabi = readString(request.data.sim_compile_mabi || request.data.simCompileMabi)
-    const compileExtraCflags = readStringList(request.data.sim_compile_extra_cflags || request.data.simCompileExtraCflags)
-    const coremarkIterations = readString(request.data.sim_coremark_iterations || request.data.simCoremarkIterations)
-    const coremarkTotalDataSize = readString(request.data.sim_coremark_total_data_size || request.data.simCoremarkTotalDataSize)
-    const coremarkHasFloat = readString(request.data.sim_coremark_has_float || request.data.simCoremarkHasFloat)
+    const cpuTestMode = readString(
+      request.data.sim_cpu_test_mode || request.data.simCpuTestMode,
+    )
+    const cpuCases = readStringList(
+      request.data.sim_cpu_test_cases || request.data.simCpuTestCases,
+    )
+    const compilePreset = readString(
+      request.data.sim_compile_preset || request.data.simCompilePreset,
+    )
+    const compileOptLevel = readString(
+      request.data.sim_compile_opt_level || request.data.simCompileOptLevel,
+    )
+    const compileMarch = readString(
+      request.data.sim_compile_march || request.data.simCompileMarch,
+    )
+    const compileMabi = readString(
+      request.data.sim_compile_mabi || request.data.simCompileMabi,
+    )
+    const compileExtraCflags = readStringList(
+      request.data.sim_compile_extra_cflags || request.data.simCompileExtraCflags,
+    )
+    const coremarkIterations = readString(
+      request.data.sim_coremark_iterations || request.data.simCoremarkIterations,
+    )
+    const coremarkTotalDataSize = readString(
+      request.data.sim_coremark_total_data_size || request.data.simCoremarkTotalDataSize,
+    )
+    const coremarkHasFloat = readString(
+      request.data.sim_coremark_has_float || request.data.simCoremarkHasFloat,
+    )
     return {
       args: [
         'workspace',
@@ -536,13 +626,23 @@ export class FrontendCliAdapter {
         ...(cpuTestMode ? ['--sim-cpu-test-mode', cpuTestMode] : []),
         ...cpuCases.flatMap((testCase) => ['--sim-cpu-test-case', testCase]),
         ...(compilePreset ? [optionEquals('--sim-compile-preset', compilePreset)] : []),
-        ...(compileOptLevel ? [optionEquals('--sim-compile-opt-level', compileOptLevel)] : []),
+        ...(compileOptLevel
+          ? [optionEquals('--sim-compile-opt-level', compileOptLevel)]
+          : []),
         ...(compileMarch ? [optionEquals('--sim-compile-march', compileMarch)] : []),
         ...(compileMabi ? [optionEquals('--sim-compile-mabi', compileMabi)] : []),
-        ...compileExtraCflags.map((flag) => optionEquals('--sim-compile-extra-cflag', flag)),
-        ...(coremarkIterations ? [optionEquals('--sim-coremark-iterations', coremarkIterations)] : []),
-        ...(coremarkTotalDataSize ? [optionEquals('--sim-coremark-total-data-size', coremarkTotalDataSize)] : []),
-        ...(coremarkHasFloat ? [optionEquals('--sim-coremark-has-float', coremarkHasFloat)] : []),
+        ...compileExtraCflags.map((flag) =>
+          optionEquals('--sim-compile-extra-cflag', flag),
+        ),
+        ...(coremarkIterations
+          ? [optionEquals('--sim-coremark-iterations', coremarkIterations)]
+          : []),
+        ...(coremarkTotalDataSize
+          ? [optionEquals('--sim-coremark-total-data-size', coremarkTotalDataSize)]
+          : []),
+        ...(coremarkHasFloat
+          ? [optionEquals('--sim-coremark-has-float', coremarkHasFloat)]
+          : []),
       ],
     }
   }
@@ -553,28 +653,36 @@ export class FrontendCliAdapter {
     context: DesktopRuntimeAdapterContext,
   ): Promise<DesktopCliCommandResult> {
     const baseEnv = this.envProvider ? await this.resolveProvidedEnv() : this.env
-    const frontendRoot = this.frontendRoot
-      ?? readString(baseEnv.ECOS_FE_COMPILER_ROOT).trim()
-    const hasFrontendRoot = Boolean(frontendRoot && existsSync(join(frontendRoot, 'fecompiler')))
-    const frontendRootCommand = !this.hasExplicitCommand && this.frontendRoot && hasFrontendRoot
-      ? resolveFrontendRootCli(frontendRoot)
-      : ''
+    const frontendRoot =
+      this.frontendRoot ?? readString(baseEnv.ECOS_FE_COMPILER_ROOT).trim()
+    const hasFrontendRoot = Boolean(
+      frontendRoot && existsSync(join(frontendRoot, 'fecompiler')),
+    )
+    const frontendRootCommand =
+      !this.hasExplicitCommand && this.frontendRoot && hasFrontendRoot
+        ? resolveFrontendRootCli(frontendRoot)
+        : ''
     const runtimeCommandOverride = readString(baseEnv.ECOS_FE_CLI).trim()
-    const command = frontendRootCommand
-      || (!this.hasExplicitCommand && runtimeCommandOverride
-      ? runtimeCommandOverride
-      : this.command)
-    const moduleArgs = !this.hasExplicitCommand && runtimeCommandOverride && !frontendRootCommand
-      ? defaultModuleArgsForCommand(command)
-      : this.moduleArgs
-    const lookupEnv = frontendRuntimeEnv(baseEnv, frontendRoot, { includePythonPath: false })
+    const command =
+      frontendRootCommand ||
+      (!this.hasExplicitCommand && runtimeCommandOverride
+        ? runtimeCommandOverride
+        : this.command)
+    const moduleArgs =
+      !this.hasExplicitCommand && runtimeCommandOverride && !frontendRootCommand
+        ? defaultModuleArgsForCommand(command)
+        : this.moduleArgs
+    const lookupEnv = frontendRuntimeEnv(baseEnv, frontendRoot, {
+      includePythonPath: false,
+    })
     const resolvedCommand = resolveCommandFromPath(command, lookupEnv)
-    const shouldUsePythonFallback = !this.hasExplicitCommand
-      && hasFrontendRoot
-      && (
-        (!runtimeCommandOverride && command === DEFAULT_FRONTEND_CLI_COMMAND && resolvedCommand === '(not found)')
-        || (Boolean(this.frontendRoot) && !frontendRootCommand)
-      )
+    const shouldUsePythonFallback =
+      !this.hasExplicitCommand &&
+      hasFrontendRoot &&
+      ((!runtimeCommandOverride &&
+        command === DEFAULT_FRONTEND_CLI_COMMAND &&
+        resolvedCommand === '(not found)') ||
+        (Boolean(this.frontendRoot) && !frontendRootCommand))
     const env = frontendRuntimeEnv(baseEnv, frontendRoot, {
       includePythonPath: shouldUsePythonFallback || isPythonCommand(command),
     })
@@ -598,7 +706,9 @@ export class FrontendCliAdapter {
       electronLogger.debug(
         '[Frontend CLI] spawn command=%s resolved=%s args=%s pathHead=%s frontendRoot=%s',
         spawnCommand,
-        shouldUsePythonFallback ? resolveCommandFromPath(spawnCommand, env) : resolvedCommand,
+        shouldUsePythonFallback
+          ? resolveCommandFromPath(spawnCommand, env)
+          : resolvedCommand,
         spawnArgs.join(' '),
         pathHeadForEnv(env),
         frontendRoot || '(none)',
@@ -643,7 +753,7 @@ export class FrontendCliAdapter {
           const eventType = normalizeEventType(record.phase ?? record.event)
           if (eventType) {
             const rawCmd = readString(record.cmd)
-            const cmd = rawCmd ? rawCmd as DesktopCliCommandName : request.cmd
+            const cmd = rawCmd ? (rawCmd as DesktopCliCommandName) : request.cmd
             const response = responseFromEventType(eventType)
             context.emit({
               result: {
@@ -653,11 +763,12 @@ export class FrontendCliAdapter {
                 ok: response === 'success' || response === 'warning',
                 response,
               },
-              stream: eventType === 'stderr'
-                ? 'stderr'
-                : eventType === 'stdout'
-                  ? 'stdout'
-                  : 'system',
+              stream:
+                eventType === 'stderr'
+                  ? 'stderr'
+                  : eventType === 'stdout'
+                    ? 'stdout'
+                    : 'system',
               text: readString(record.text),
               type: eventType,
             })
@@ -697,10 +808,12 @@ export class FrontendCliAdapter {
           settle(cancelled(request, `Cancelled ${request.cmd}`))
           return
         }
-        settle(error(
-          request,
-          spawnError instanceof Error ? spawnError.message : String(spawnError),
-        ))
+        settle(
+          error(
+            request,
+            spawnError instanceof Error ? spawnError.message : String(spawnError),
+          ),
+        )
       })
 
       child.once('close', (code, signal) => {
@@ -739,7 +852,10 @@ export class FrontendCliAdapter {
         }
 
         if (code === 0 && invalidJsonLine) {
-          const result = error(request, `Invalid JSON from frontend CLI: ${invalidJsonLine}`)
+          const result = error(
+            request,
+            `Invalid JSON from frontend CLI: ${invalidJsonLine}`,
+          )
           settle(result)
           return
         }
@@ -755,7 +871,7 @@ export class FrontendCliAdapter {
 
   private async resolveProvidedEnv(): Promise<NodeJS.ProcessEnv> {
     try {
-      return await this.envProvider?.() ?? this.env
+      return (await this.envProvider?.()) ?? this.env
     } catch (error) {
       electronLogger.debug(
         '[Frontend CLI] env provider failed: %s',

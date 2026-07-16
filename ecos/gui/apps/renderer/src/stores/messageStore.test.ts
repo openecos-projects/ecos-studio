@@ -14,7 +14,10 @@ describe('messageStore', () => {
     store.addMessage('hello')
     store.addAssistantMessage('hi there', 'done')
 
-    expect(store.messages.map(message => message.content)).toEqual(['hello', 'hi there'])
+    expect(store.messages.map((message) => message.content)).toEqual([
+      'hello',
+      'hi there',
+    ])
 
     store.clearMessages()
 

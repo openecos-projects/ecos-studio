@@ -1,16 +1,44 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DesktopApi, DesktopSettingsValue, ScannedPdkDirectory } from '@ecos-studio/shared'
+import type {
+  DesktopApi,
+  DesktopSettingsValue,
+  ScannedPdkDirectory,
+} from '@ecos-studio/shared'
 
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 
 const showToast = vi.fn()
-const settingsGet = vi.fn(async (_key: string): Promise<DesktopSettingsValue | null> => null)
+const settingsGet = vi.fn(
+  async (_key: string): Promise<DesktopSettingsValue | null> => null,
+)
 const settingsSet = vi.fn(async (_key: string, value: DesktopSettingsValue) => {
   structuredClone(value)
 })
 const settingsDelete = vi.fn(async () => undefined)
 const pickDirectory = vi.fn(async () => '/tmp/pdk')
 const importPdkPath = vi.fn(async () => ({
+  id: 'pdk:ics55',
+  type: 'pdk' as const,
+  name: 'ics55',
+  display_name: 'ics55',
+  description: '',
+  category: 'pdk',
+  status: 'installed' as const,
+  installed_version: null,
+  available_versions: [],
+  active_version: null,
+  active: false,
+  path: '/tmp/pdk',
+  managed_root: null,
+  platform: null,
+  size: null,
+  source: 'local',
+  homepage: '',
+  actions: ['validate' as const, 'activate' as const, 'remove_reference' as const],
+  health: {},
+  error: null,
+}))
+const importLocalPath = vi.fn(async () => ({
   id: 'pdk:ics55',
   type: 'pdk' as const,
   name: 'ics55',
@@ -50,6 +78,10 @@ const scannedPdk: ScannedPdkDirectory = {
 }
 
 const scanPdkDirectory = vi.fn(async () => scannedPdk)
+const scanRtlDirectory = vi.fn(async () => ({
+  rootPath: '/tmp/rtl',
+  files: [],
+}))
 const localStorageState = new Map<string, string>()
 const localStorageMock = {
   getItem: vi.fn((key: string) => localStorageState.get(key) ?? null),
@@ -68,7 +100,7 @@ const desktopBridge = {
   app: {
     getVersions: async () => ({
       gui: '0.1.0-alpha.4',
-      runtime: 'ECC CLI',
+      runtime: 'ECC RPC',
       ecc: 'unknown',
       dreamplace: 'unknown',
     }),
@@ -86,6 +118,7 @@ const desktopBridge = {
   },
   menu: {
     onAction: () => () => undefined,
+    setActionEnabled: async () => undefined,
   },
   system: {
     openExternal: async (_url: string) => undefined,
@@ -105,6 +138,8 @@ const desktopBridge = {
   dialog: {
     pickDirectory,
     pickFiles: async () => null,
+    pickRtlSources: async () => null,
+    saveFile: async () => null,
   },
   workspace: {
     isProjectDirectory: async () => false,
@@ -116,8 +151,17 @@ const desktopBridge = {
     readProjectTextFileTail: async () => null,
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
+    listProjectDirectory: async () => [],
+    removeProjectDirectory: async () => undefined,
+    prepareProjectDirectoryReplacement: async () => null,
+    restoreProjectDirectoryReplacement: async () => undefined,
+    finalizeProjectDirectoryReplacement: async () => undefined,
     scanPdkDirectory,
+    scanRtlDirectory,
     watchProjectFile: async () => () => undefined,
+    listDesignFiles: async () => [],
+    addDesignFiles: async () => ({ added: [], skipped: [] }),
+    removeDesignFile: async () => null,
   },
   layoutViewer: {
     open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
@@ -154,35 +198,88 @@ const desktopBridge = {
   },
   resources: {
     list: async () => ({ diagnostics: [], resources: [] }),
-    get: async () => { throw new Error('not found') },
-    install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
+    get: async () => {
+      throw new Error('not found')
+    },
+    install: async (request) => ({
+      status: 'started',
+      resource_id: request.resourceId,
+      version: request.version,
+    }),
     update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
     cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
     uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
     activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
-    validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
+    validatePdk: async (resourceId) => ({
+      resource_id: resourceId,
+      health: { status: 'ok' },
+    }),
     removePdkReference,
     importPdkPath,
+    importLocalPath,
     refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
-    checkUpdates: async () => ({ status: 'ok', checked_count: 0, update_count: 0, diagnostics: [], resources: [] }),
+    checkUpdates: async () => ({
+      status: 'checked',
+      checked_count: 0,
+      update_count: 0,
+      diagnostics: [],
+      resources: [],
+    }),
     onProgress: () => () => undefined,
   },
   cli: {
-    cancel: async (jobId) => ({
-      cmd: 'run_step',
-      data: { jobId },
-      message: [],
-      ok: false,
-      response: 'cancelled',
-    }),
     execute: async (request) => ({
+      ok: true,
       cmd: request.cmd,
+      response: 'success',
       data: {},
       message: [],
-      ok: true,
-      response: 'success',
+    }),
+    cancel: async () => ({
+      ok: false,
+      cmd: 'clear',
+      response: 'cancelled',
+      data: {},
+      message: [],
     }),
     onEvent: () => () => undefined,
+  },
+  ecc: {
+    events: {
+      onEvent: () => () => undefined,
+    },
+    flow: {
+      run: async (request) => ({ rerun: Boolean(request.rerun) }),
+      runStep: async (request) => ({ state: 'Success', step: request.step }),
+    },
+    rpc: {
+      hello: async () => ({ capabilities: [], eccVersion: 'unknown', version: 1 }),
+      ping: async () => ({ ok: true }),
+      shutdown: async () => ({ ok: true }),
+    },
+    workspace: {
+      close: async () => ({ ok: true }),
+      create: async (request) => ({
+        directory: request.directory,
+        workspaceHandle: 'workspace-handle-1',
+      }),
+      exportSignoff: async (request) => ({ outputPath: request.outputPath }),
+      inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
+      home: async () => ({ path: '' }),
+      info: async (request) => ({ id: request.id, info: {}, step: request.step }),
+      open: async (request) => ({
+        directory: request.directory,
+        workspaceHandle: 'workspace-handle-1',
+      }),
+      refreshConfig: async () => ({ directory: '', refreshed: true }),
+      resetFlow: async () => ({ directory: '' }),
+      syncConfig: async (request) => ({
+        configPath: request.configPath,
+        directory: '',
+        parametersChanged: false,
+        refreshed: true,
+      }),
+    },
   },
   shell: {
     createSession: async () => ({
@@ -221,6 +318,7 @@ describe('usePdkManager', () => {
     settingsDelete.mockReset()
     pickDirectory.mockReset()
     importPdkPath.mockReset()
+    importLocalPath.mockReset()
     removePdkReference.mockReset()
     scanPdkDirectory.mockReset()
     localStorageState.clear()
@@ -241,6 +339,7 @@ describe('usePdkManager', () => {
     })
     pickDirectory.mockResolvedValue('/tmp/pdk')
     importPdkPath.mockResolvedValue({} as never)
+    importLocalPath.mockResolvedValue({} as never)
     removePdkReference.mockImplementation(async (resourceId: string) => ({
       status: 'removed',
       resource_id: resourceId,
@@ -298,7 +397,7 @@ describe('usePdkManager', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('syncs persisted imported PDKs into the resource manager manifest during load', async () => {
+  it('syncs and refreshes persisted imported PDKs during load', async () => {
     settingsGet.mockResolvedValueOnce([
       {
         id: 'local-ics55',
@@ -308,14 +407,66 @@ describe('usePdkManager', () => {
         techNode: '55nm',
         pdkId: 'ics55',
         importedAt: '2026-05-14T00:00:00Z',
+        detectedFiles: {
+          directories: ['IP', 'prtech'],
+          files: [],
+        },
       },
     ])
+    scanPdkDirectory.mockResolvedValueOnce({
+      ...scannedPdk,
+      canonicalPath: '/tmp/pdks/ics55',
+      detectedFiles: {
+        directories: ['IP', 'IP/STD_cell', 'prtech', 'prtech/techLEF'],
+        files: [
+          'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+          'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+          'prtech/techLEF/N551P6M.lef',
+        ],
+      },
+    })
 
     const { loadPdks, importedPdks } = usePdkManager()
     await loadPdks()
 
-    expect(importedPdks.value).toHaveLength(1)
+    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdks/ics55')
     expect(importPdkPath).toHaveBeenCalledWith({ path: '/tmp/pdks/ics55' })
+    expect(importedPdks.value).toHaveLength(1)
+    expect(importedPdks.value[0]?.detectedFiles?.files).toEqual([
+      'IP/STD_cell/ics55_LLSC_H7CH/lef/ics55_LLSC_H7CH.lef',
+      'IP/STD_cell/ics55_LLSC_H7CH/liberty/ics55_LLSC_H7CH_typ.lib',
+      'prtech/techLEF/N551P6M.lef',
+    ])
+    expect(settingsSet).toHaveBeenCalledWith(
+      'imported_pdks',
+      expect.arrayContaining([
+        expect.objectContaining({
+          detectedFiles: expect.objectContaining({
+            files: expect.arrayContaining(['prtech/techLEF/N551P6M.lef']),
+          }),
+        }),
+      ]),
+    )
+  })
+
+  it('imports a row-bound PDK through the local resource API and persists it for project creation', async () => {
+    const { importPdkForResource, importedPdks } = usePdkManager()
+
+    const imported = await importPdkForResource('pdk:ics55', '/tmp/pdk')
+
+    expect(imported).toMatchObject({
+      path: '/tmp/pdk',
+      pdkId: 'ics55',
+    })
+    expect(scanPdkDirectory).toHaveBeenCalledWith('/tmp/pdk')
+    expect(importLocalPath).toHaveBeenCalledWith({
+      resourceId: 'pdk:ics55',
+      path: '/tmp/pdk',
+    })
+    expect(importPdkPath).not.toHaveBeenCalled()
+    expect(importedPdks.value).toHaveLength(1)
+    expect(settingsSet).toHaveBeenCalledWith('imported_pdks', expect.any(Array))
+    expect(showToast).not.toHaveBeenCalled()
   })
 
   it('removes the resource manager PDK reference before deleting a local PDK entry', async () => {

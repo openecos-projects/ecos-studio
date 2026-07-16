@@ -161,8 +161,12 @@ describe('useStepConfigInfo', () => {
 
     expect(result.responseKind.value).toBe('warning')
     expect(result.isEmpty.value).toBe(false)
-    expect(result.stepConfigPathResolved.value).toBe('/workspace/demo/config/fp_default_config.json')
-    expect(testState.readProjectTextFile).toHaveBeenCalledWith('/workspace/demo/config/fp_default_config.json')
+    expect(result.stepConfigPathResolved.value).toBe(
+      '/workspace/demo/config/fp_default_config.json',
+    )
+    expect(testState.readProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/demo/config/fp_default_config.json',
+    )
   })
 
   it('ignores stale step config reads after the workspace session changes', async () => {
@@ -189,9 +193,11 @@ describe('useStepConfigInfo', () => {
         step: 'Floorplan',
       })
     testState.readProjectTextFile
-      .mockReturnValueOnce(new Promise((resolve) => {
-        resolveOldRead = resolve
-      }))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOldRead = resolve
+        }),
+      )
       .mockResolvedValueOnce('{"owner":"current"}')
 
     const result = scope.run(() => useStepConfigInfo())!
@@ -217,22 +223,27 @@ describe('useStepConfigInfo', () => {
     await nextTick()
 
     expect(result.stepConfigRaw.value).toBe('{"owner":"current"}')
-    expect(result.stepConfigPathResolved.value).toBe('/workspace/other/config/fp_default_config.json')
+    expect(result.stepConfigPathResolved.value).toBe(
+      '/workspace/other/config/fp_default_config.json',
+    )
   })
 
   it('ignores older same-session refetch completions after a newer refetch wins', async () => {
-    let resolveOldResponse: ((response: {
-      response: 'available'
-      info: { config: string }
-      missing: string[]
-      message: string[]
-      id: string
-      step: string
-    }) => void) | undefined
+    let resolveOldResponse:
+      | ((response: {
+          response: 'available'
+          info: { config: string }
+          missing: string[]
+          message: string[]
+          id: string
+          step: string
+        }) => void)
+      | undefined
     testState.resolveWorkspaceStepInfoApi
-      .mockReturnValueOnce(new Promise((resolve) => {
-        resolveOldResponse = resolve
-      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveOldResponse = resolve
+        }),
       )
       .mockResolvedValueOnce({
         response: 'available',
@@ -244,9 +255,9 @@ describe('useStepConfigInfo', () => {
         id: 'config',
         step: 'Floorplan',
       })
-    testState.readProjectTextFile.mockImplementation(async (path: string) => (
-      path.includes('fp_a.json') ? '{"owner":"A"}' : '{"owner":"B"}'
-    ))
+    testState.readProjectTextFile.mockImplementation(async (path: string) =>
+      path.includes('fp_a.json') ? '{"owner":"A"}' : '{"owner":"B"}',
+    )
 
     const result = scope.run(() => useStepConfigInfo())!
 
@@ -278,7 +289,9 @@ describe('useStepConfigInfo', () => {
     expect(result.runtimeMessages.value).toEqual(['B'])
     expect(result.responseKind.value).toBe('success')
     expect(result.loading.value).toBe(false)
-    expect(testState.readProjectTextFile).not.toHaveBeenCalledWith('/workspace/demo/config/fp_a.json')
+    expect(testState.readProjectTextFile).not.toHaveBeenCalledWith(
+      '/workspace/demo/config/fp_a.json',
+    )
   })
 
   it('reloads the current step when step config resource versions change', async () => {
@@ -353,11 +366,64 @@ describe('useStepConfigInfo', () => {
       data: {
         config_path: '/workspace/demo/config/fp_default_config.json',
         directory: '/workspace/demo',
+        workspaceHandle: 'workspace-demo',
       },
     })
-    expect(lifecycle.resourceVersions.value['step-config']).toBe(stepConfigVersionBeforeSave + 1)
+    expect(lifecycle.resourceVersions.value['step-config']).toBe(
+      stepConfigVersionBeforeSave + 1,
+    )
     await vi.waitFor(() => {
       expect(result.stepConfigRaw.value).toBe('{\n    "density": 0.6\n}')
+      expect(result.hasStepConfigChanges.value).toBe(false)
+    })
+  })
+
+  it('pins route step config routing layers when loading and saving', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue({
+      response: 'available',
+      info: {
+        config: '/workspace/demo/config/rt_default_config.json',
+      },
+      missing: [],
+      message: [],
+      id: 'config',
+      step: 'route',
+    })
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        RT: {
+          '-bottom_routing_layer': 'MET1',
+          '-top_routing_layer': 'MET6',
+          '-thread_number': '50',
+        },
+      }),
+    )
+    testState.route.path = '/workspace/route'
+
+    const result = scope.run(() => useStepConfigInfo())!
+
+    await vi.waitFor(() => {
+      expect(result.stepConfigDraft.value).toEqual({
+        RT: {
+          '-bottom_routing_layer': 'MET2',
+          '-top_routing_layer': 'MET5',
+          '-thread_number': '50',
+        },
+      })
+    })
+    expect(result.hasStepConfigChanges.value).toBe(true)
+
+    await expect(result.saveStepConfig()).resolves.toBe(true)
+
+    const savedContent = testState.writeProjectTextFile.mock.calls[0][1] as string
+    expect(JSON.parse(savedContent)).toEqual({
+      RT: {
+        '-bottom_routing_layer': 'MET2',
+        '-top_routing_layer': 'MET5',
+        '-thread_number': '50',
+      },
+    })
+    await vi.waitFor(() => {
       expect(result.hasStepConfigChanges.value).toBe(false)
     })
   })
@@ -402,8 +468,12 @@ describe('useStepConfigInfo', () => {
       step: 'route',
     })
     testState.readProjectTextFile
-      .mockResolvedValueOnce('{"RT":{"-bottom_routing_layer":"MET2"}}')
-      .mockResolvedValue('{\n    "RT": {\n        "-bottom_routing_layer": "MET4"\n    }\n}')
+      .mockResolvedValueOnce(
+        '{"RT":{"-bottom_routing_layer":"MET2","-top_routing_layer":"MET5","-thread_number":"50"}}',
+      )
+      .mockResolvedValue(
+        '{\n    "RT": {\n        "-bottom_routing_layer": "MET4"\n    }\n}',
+      )
     testState.syncConfigApi.mockResolvedValue({
       cmd: 'sync_config',
       data: {
@@ -420,17 +490,33 @@ describe('useStepConfigInfo', () => {
     const result = scope.run(() => useStepConfigInfo())!
 
     await vi.waitFor(() => {
-      expect(result.stepConfigDraft.value).toEqual({ RT: { '-bottom_routing_layer': 'MET2' } })
+      expect(result.stepConfigDraft.value).toEqual({
+        RT: {
+          '-bottom_routing_layer': 'MET2',
+          '-top_routing_layer': 'MET5',
+          '-thread_number': '50',
+        },
+      })
     })
 
     const lifecycle = useWorkspaceLifecycle()
     const initialVersions = { ...lifecycle.resourceVersions.value }
-    result.stepConfigDraft.value = { RT: { '-bottom_routing_layer': 'MET4' } }
+    result.stepConfigDraft.value = {
+      RT: {
+        '-bottom_routing_layer': 'MET2',
+        '-top_routing_layer': 'MET5',
+        '-thread_number': '64',
+      },
+    }
 
     await expect(result.saveStepConfig()).resolves.toBe(true)
 
-    expect(lifecycle.resourceVersions.value['step-config']).toBe(initialVersions['step-config'] + 1)
-    expect(lifecycle.resourceVersions.value.parameters).toBe(initialVersions.parameters + 1)
+    expect(lifecycle.resourceVersions.value['step-config']).toBe(
+      initialVersions['step-config'] + 1,
+    )
+    expect(lifecycle.resourceVersions.value.parameters).toBe(
+      initialVersions.parameters + 1,
+    )
     expect(lifecycle.resourceVersions.value.home).toBe(initialVersions.home + 1)
   })
 
@@ -486,9 +572,11 @@ describe('useStepConfigInfo', () => {
       step: 'Floorplan',
     })
     testState.readProjectTextFile.mockResolvedValue('{"density":0.5}')
-    testState.writeProjectTextFile.mockReturnValue(new Promise<void>((resolve) => {
-      resolveWrite = resolve
-    }))
+    testState.writeProjectTextFile.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveWrite = resolve
+      }),
+    )
 
     const result = scope.run(() => useStepConfigInfo())!
 
@@ -538,9 +626,11 @@ describe('useStepConfigInfo', () => {
       .mockResolvedValueOnce('{"density":0.5}')
       .mockResolvedValue('{\n    "density": 0.8\n}')
     testState.writeProjectTextFile
-      .mockReturnValueOnce(new Promise<void>((resolve) => {
-        resolveOldWrite = resolve
-      }))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOldWrite = resolve
+        }),
+      )
       .mockResolvedValueOnce(undefined)
 
     const result = scope.run(() => useStepConfigInfo())!
@@ -565,14 +655,18 @@ describe('useStepConfigInfo', () => {
     await expect(newerSave).resolves.toBe(true)
     expect(result.stepConfigRaw.value).toBe('{\n    "density": 0.8\n}')
     expect(result.hasStepConfigChanges.value).toBe(false)
-    expect(lifecycle.resourceVersions.value['step-config']).toBe(stepConfigVersionBeforeSave + 1)
+    expect(lifecycle.resourceVersions.value['step-config']).toBe(
+      stepConfigVersionBeforeSave + 1,
+    )
 
     resolveOldWrite?.()
     await expect(oldSave).resolves.toBe(false)
 
     expect(result.stepConfigRaw.value).toBe('{\n    "density": 0.8\n}')
     expect(result.hasStepConfigChanges.value).toBe(false)
-    expect(lifecycle.resourceVersions.value['step-config']).toBe(stepConfigVersionBeforeSave + 1)
+    expect(lifecycle.resourceVersions.value['step-config']).toBe(
+      stepConfigVersionBeforeSave + 1,
+    )
   })
 
   it('captures the save payload before awaited path resolution completes', async () => {
@@ -589,9 +683,11 @@ describe('useStepConfigInfo', () => {
     })
     testState.resolveProjectPathAccess
       .mockResolvedValueOnce('/workspace/demo/config/fp_default_config.json')
-      .mockReturnValueOnce(new Promise((resolve) => {
-        resolveSavePath = resolve
-      }))
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSavePath = resolve
+        }),
+      )
     testState.readProjectTextFile.mockResolvedValue('{"density":0.5}')
     testState.writeProjectTextFile.mockResolvedValue(undefined)
 

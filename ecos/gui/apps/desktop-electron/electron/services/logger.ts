@@ -87,7 +87,10 @@ function resolveIsTty(isTty: boolean | (() => boolean)): boolean {
   return typeof isTty === 'function' ? isTty() : isTty
 }
 
-function shouldUseColor(env: NodeJS.ProcessEnv, isTty: boolean | (() => boolean)): boolean {
+function shouldUseColor(
+  env: NodeJS.ProcessEnv,
+  isTty: boolean | (() => boolean),
+): boolean {
   const colorMode = readColorMode(env)
   if (colorMode === 'always') return true
   if (colorMode === 'never') return false
@@ -160,7 +163,11 @@ function formatFileLine(level: LogLevelName, rawMessage: string, date: Date): st
   return `${date.toISOString()} ${LEVEL_LABELS[level]} ${scopePrefix}${body}`
 }
 
-function writeToConsole(consoleSink: ConsoleSink, level: LogLevelName, line: string): void {
+function writeToConsole(
+  consoleSink: ConsoleSink,
+  level: LogLevelName,
+  line: string,
+): void {
   if (level === 'debug') {
     consoleSink.debug(line)
     return
@@ -179,11 +186,14 @@ function writeToConsole(consoleSink: ConsoleSink, level: LogLevelName, line: str
   consoleSink.error(line)
 }
 
-export function createElectronLogger(options: ElectronLoggerOptions = {}): ElectronLogger {
+export function createElectronLogger(
+  options: ElectronLoggerOptions = {},
+): ElectronLogger {
   const consoleSink = options.consoleSink ?? console
   const env = options.env ?? process.env
   const fileSink = options.fileSink
-  const isTty = options.isTty ?? (() => Boolean(process.stderr.isTTY || process.stdout.isTTY))
+  const isTty =
+    options.isTty ?? (() => Boolean(process.stderr.isTTY || process.stdout.isTTY))
   const now = options.now ?? (() => new Date())
 
   const log = (
@@ -234,13 +244,17 @@ function uniqueFilePaths(paths: string[]): string[] {
   return [...new Set(paths)]
 }
 
-export function configureElectronLoggerFile(filePathOrConfig: string | ElectronLoggerFileConfig): void {
-  const sessionFilePath = typeof filePathOrConfig === 'string'
-    ? filePathOrConfig
-    : filePathOrConfig.sessionFilePath
-  const latestFilePath = typeof filePathOrConfig === 'string'
-    ? null
-    : filePathOrConfig.latestFilePath ?? null
+export function configureElectronLoggerFile(
+  filePathOrConfig: string | ElectronLoggerFileConfig,
+): void {
+  const sessionFilePath =
+    typeof filePathOrConfig === 'string'
+      ? filePathOrConfig
+      : filePathOrConfig.sessionFilePath
+  const latestFilePath =
+    typeof filePathOrConfig === 'string'
+      ? null
+      : (filePathOrConfig.latestFilePath ?? null)
   const filePaths = uniqueFilePaths(
     latestFilePath ? [sessionFilePath, latestFilePath] : [sessionFilePath],
   )

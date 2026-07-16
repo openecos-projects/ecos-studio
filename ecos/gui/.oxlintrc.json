@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "node", "vue", "vitest"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "vitest": true,
+    "vue": true
+  },
+  "rules": {
+    "vitest/no-conditional-expect": "off",
+    "vitest/require-mock-type-parameters": "off"
+  }
+}

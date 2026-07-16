@@ -16,4 +16,17 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain('<ThumbnailGallery />')
     expect(source).toContain('<ChatInspectorPanel />')
   })
+
+  it('does not render project labels above the workspace step canvas', () => {
+    expect(source).not.toContain('projectContext')
+    expect(source).not.toContain('project-context-strip')
+    expect(source).not.toContain('project-context-copy')
+    expect(source).not.toContain('{{ projectContext.projectName }}')
+    expect(source).not.toContain("{{ projectContext.workspaceId || 'workspace' }}")
+    expect(source).not.toContain('Back to Project')
+    expect(source).not.toContain('Create Workspace From Current Step')
+    expect(source).not.toContain('createWorkspaceFromCurrentStep')
+    expect(source).not.toContain('project-context-actions')
+    expect(source).not.toContain('useRoute')
+  })
 })

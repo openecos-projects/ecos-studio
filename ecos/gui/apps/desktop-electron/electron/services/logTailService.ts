@@ -38,16 +38,15 @@ function boundedRetryDelayMs(delayMs: number): number {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = relative(rootPath, candidatePath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function isSamePath(path: string, otherPath: string): boolean {
@@ -56,7 +55,9 @@ function isSamePath(path: string, otherPath: string): boolean {
 
 function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
   const relativePath = relative(path, descendantPath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -84,8 +85,6 @@ async function findProjectFileWatchDirectory(
 
   return rootPath
 }
-
-type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
 
 interface LogTailSubscriptionState {
   subscriptionId: string
@@ -134,9 +133,15 @@ export class LogTailService {
       canonicalPath,
       watchDirectory,
       listener,
-      maxInitialChars: boundedTextCharCount(options.maxInitialChars ?? DEFAULT_MAX_INITIAL_CHARS),
-      maxChunkChars: boundedTextCharCount(options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS),
-      baseRetryDelayMs: boundedRetryDelayMs(options.pollIntervalMs ?? DEFAULT_RETRY_DELAY_MS),
+      maxInitialChars: boundedTextCharCount(
+        options.maxInitialChars ?? DEFAULT_MAX_INITIAL_CHARS,
+      ),
+      maxChunkChars: boundedTextCharCount(
+        options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS,
+      ),
+      baseRetryDelayMs: boundedRetryDelayMs(
+        options.pollIntervalMs ?? DEFAULT_RETRY_DELAY_MS,
+      ),
       retryDelayMs: boundedRetryDelayMs(options.pollIntervalMs ?? DEFAULT_RETRY_DELAY_MS),
       hasSnapshot: false,
       wasMissing: false,
@@ -227,11 +232,11 @@ export class LogTailService {
 
     watcher.on('all', (eventType, changedPath) => {
       if (
-        eventType !== 'add'
-        && eventType !== 'addDir'
-        && eventType !== 'change'
-        && eventType !== 'unlink'
-        && eventType !== 'unlinkDir'
+        eventType !== 'add' &&
+        eventType !== 'addDir' &&
+        eventType !== 'change' &&
+        eventType !== 'unlink' &&
+        eventType !== 'unlinkDir'
       ) {
         return
       }
@@ -242,14 +247,13 @@ export class LogTailService {
     watcher.on('raw', (rawEventType, rawPath, details) => {
       if (rawEventType !== 'change' && rawEventType !== 'rename') return
       if (typeof rawPath !== 'string' || !rawPath) return
-      const watchedPath = (
-        typeof details === 'object'
-        && details !== null
-        && 'watchedPath' in details
-        && typeof details.watchedPath === 'string'
-      )
-        ? details.watchedPath
-        : state.watchDirectory
+      const watchedPath =
+        typeof details === 'object' &&
+        details !== null &&
+        'watchedPath' in details &&
+        typeof details.watchedPath === 'string'
+          ? details.watchedPath
+          : state.watchDirectory
       const changedPath = isAbsolute(rawPath) ? rawPath : join(watchedPath, rawPath)
       if (!isSamePath(changedPath, state.canonicalPath)) return
       this.scheduleSync(state)
@@ -303,12 +307,12 @@ export class LogTailService {
       const isInitialSnapshot = !state.hasSnapshot
       const wasMissing = state.wasMissing
       const isReset = !isInitialSnapshot && (update.reset || wasMissing)
-      const eventType = isInitialSnapshot ? 'snapshot' : (isReset ? 'reset' : 'append')
+      const eventType = isInitialSnapshot ? 'snapshot' : isReset ? 'reset' : 'append'
       const shouldSkip =
-        eventType === 'append'
-        && update.content.length === 0
-        && update.nextOffsetBytes === state.currentOffsetBytes
-        && update.sizeBytes === state.currentSizeBytes
+        eventType === 'append' &&
+        update.content.length === 0 &&
+        update.nextOffsetBytes === state.currentOffsetBytes &&
+        update.sizeBytes === state.currentSizeBytes
 
       if (shouldSkip) {
         state.wasMissing = false

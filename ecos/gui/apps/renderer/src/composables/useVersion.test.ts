@@ -38,6 +38,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     menu: {
       onAction: () => () => undefined,
+      setActionEnabled: async () => undefined,
     },
     system: {
       openExternal: async (_url: string) => undefined,
@@ -55,6 +56,8 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     dialog: {
       pickDirectory: async () => null,
       pickFiles: async () => null,
+      pickRtlSources: async () => null,
+      saveFile: async () => null,
     },
     workspace: {
       isProjectDirectory: async () => false,
@@ -66,6 +69,11 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       readProjectTextFileTail: async () => null,
       readProjectBinaryFile: async () => new Uint8Array(),
       writeProjectTextFile: async () => undefined,
+      listProjectDirectory: async () => [],
+      removeProjectDirectory: async () => undefined,
+      prepareProjectDirectoryReplacement: async () => null,
+      restoreProjectDirectoryReplacement: async () => undefined,
+      finalizeProjectDirectoryReplacement: async () => undefined,
       scanPdkDirectory: async () => ({
         canonicalPath: '',
         name: '',
@@ -77,7 +85,14 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
           files: [],
         },
       }),
+      scanRtlDirectory: async () => ({
+        rootPath: '',
+        files: [],
+      }),
       watchProjectFile: async () => () => undefined,
+      listDesignFiles: async () => [],
+      addDesignFiles: async () => ({ added: [], skipped: [] }),
+      removeDesignFile: async () => null,
     },
     layoutViewer: {
       open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
@@ -114,35 +129,101 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
     },
     resources: {
       list: async () => ({ diagnostics: [], resources: [] }),
-      get: async () => { throw new Error('not found') },
-      install: async (request) => ({ status: 'started', resource_id: request.resourceId, version: request.version }),
+      get: async () => {
+        throw new Error('not found')
+      },
+      install: async (request) => ({
+        status: 'started',
+        resource_id: request.resourceId,
+        version: request.version,
+      }),
       update: async (resourceId) => ({ status: 'started', resource_id: resourceId }),
       cancel: async (resourceId) => ({ status: 'cancelled', resource_id: resourceId }),
-      uninstall: async (resourceId) => ({ status: 'uninstalled', resource_id: resourceId }),
-      activatePdk: async (resourceId) => ({ status: 'activated', resource_id: resourceId }),
-      validatePdk: async (resourceId) => ({ resource_id: resourceId, health: { status: 'ok' } }),
-      removePdkReference: async (resourceId) => ({ status: 'removed', resource_id: resourceId }),
-      importPdkPath: async () => { throw new Error('not implemented') },
+      uninstall: async (resourceId) => ({
+        status: 'uninstalled',
+        resource_id: resourceId,
+      }),
+      activatePdk: async (resourceId) => ({
+        status: 'activated',
+        resource_id: resourceId,
+      }),
+      validatePdk: async (resourceId) => ({
+        resource_id: resourceId,
+        health: { status: 'ok' },
+      }),
+      removePdkReference: async (resourceId) => ({
+        status: 'removed',
+        resource_id: resourceId,
+      }),
+      importPdkPath: async () => {
+        throw new Error('not implemented')
+      },
+      importLocalPath: async () => {
+        throw new Error('not implemented')
+      },
       refreshRegistry: async () => ({ status: 'refreshed', tools_count: 0 }),
-      checkUpdates: async () => ({ status: 'ok', checked_count: 0, update_count: 0, diagnostics: [], resources: [] }),
+      checkUpdates: async () => ({
+        status: 'checked',
+        checked_count: 0,
+        update_count: 0,
+        diagnostics: [],
+        resources: [],
+      }),
       onProgress: () => () => undefined,
     },
     cli: {
-      cancel: async (jobId) => ({
-        cmd: 'run_step',
-        data: { jobId },
-        message: [],
-        ok: false,
-        response: 'cancelled',
-      }),
       execute: async (request) => ({
+        ok: true,
         cmd: request.cmd,
+        response: 'success',
         data: {},
         message: [],
-        ok: true,
-        response: 'success',
+      }),
+      cancel: async () => ({
+        ok: false,
+        cmd: 'clear',
+        response: 'cancelled',
+        data: {},
+        message: [],
       }),
       onEvent: () => () => undefined,
+    },
+    ecc: {
+      events: {
+        onEvent: () => () => undefined,
+      },
+      flow: {
+        run: async (request) => ({ rerun: Boolean(request.rerun) }),
+        runStep: async (request) => ({ state: 'Success', step: request.step }),
+      },
+      rpc: {
+        hello: async () => ({ capabilities: [], eccVersion: 'unknown', version: 1 }),
+        ping: async () => ({ ok: true }),
+        shutdown: async () => ({ ok: true }),
+      },
+      workspace: {
+        close: async () => ({ ok: true }),
+        create: async (request) => ({
+          directory: request.directory,
+          workspaceHandle: 'workspace-handle-1',
+        }),
+        exportSignoff: async (request) => ({ outputPath: request.outputPath }),
+        inspectSignoff: async () => ({ groups: [], risks: [], status: 'ready' as const }),
+        home: async () => ({ path: '' }),
+        info: async (request) => ({ id: request.id, info: {}, step: request.step }),
+        open: async (request) => ({
+          directory: request.directory,
+          workspaceHandle: 'workspace-handle-1',
+        }),
+        refreshConfig: async () => ({ directory: '', refreshed: true }),
+        resetFlow: async () => ({ directory: '' }),
+        syncConfig: async (request) => ({
+          configPath: request.configPath,
+          directory: '',
+          parametersChanged: false,
+          refreshed: true,
+        }),
+      },
     },
     shell: {
       createSession: async () => ({
@@ -169,7 +250,7 @@ describe('useVersion', () => {
   it('loads runtime versions through the Electron desktop bridge', async () => {
     const expectedVersions = {
       gui: '0.1.0-alpha.4',
-      runtime: 'ECC CLI',
+      runtime: 'ECC RPC',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     }
@@ -191,7 +272,7 @@ describe('useVersion', () => {
   it('does not refetch versions after they have been loaded', async () => {
     const getVersions = vi.fn().mockResolvedValue({
       gui: '0.1.0-alpha.4',
-      runtime: 'ECC CLI',
+      runtime: 'ECC RPC',
       ecc: '0.1.0a4',
       dreamplace: '0.1.0a2',
     })

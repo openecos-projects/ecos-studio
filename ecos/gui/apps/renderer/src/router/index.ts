@@ -8,16 +8,33 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/WelcomeView.vue'),
     children: [
       { path: '', name: 'ECOS', component: () => import('../views/ECOSView.vue') },
-      { path: 'soc', name: 'SoCGallery', component: () => import('../views/SoCTemplateGalleryView.vue') },
-      { path: 'soc/:templateId', name: 'SoCTemplateDetail', component: () => import('../views/SoCTemplateDetailView.vue'), props: true },
+      {
+        path: 'soc',
+        name: 'SoCGallery',
+        component: () => import('../views/SoCTemplateGalleryView.vue'),
+      },
+      {
+        path: 'soc/:templateId',
+        name: 'SoCTemplateDetail',
+        component: () => import('../views/SoCTemplateDetailView.vue'),
+        props: true,
+      },
       { path: 'ecc', name: 'ECC', component: () => import('../views/ECCView.vue') },
       { path: 'fe', name: 'FE', component: () => import('../views/FEView.vue') },
-      { path: 'tools', name: 'PluginTools', component: () => import('../views/PluginToolsView.vue') },
-      { path: 'projects', name: 'Projects', component: () => import('../views/ProjectsView.vue') }
+      {
+        path: 'tools',
+        name: 'PluginTools',
+        component: () => import('../views/PluginToolsView.vue'),
+      },
+      {
+        path: 'projects',
+        name: 'Projects',
+        component: () => import('../views/ProjectsView.vue'),
+      },
     ],
     meta: {
-      title: 'ECOS-Studio'
-    }
+      title: 'ECOS-Studio',
+    },
   },
   {
     path: '/workspace',
@@ -26,27 +43,39 @@ const routes: RouteRecordRaw[] = [
     redirect: '/workspace/home',
     children: [
       // 固定的设置页面
-      { path: 'home', name: 'Home', component: () => import('../views/WorkspaceRouteView.vue') },
-      { path: 'tech', name: 'TechLibrary', component: () => import('../views/TechLibraryView.vue') },
-      { path: 'configure', name: 'Configure', component: () => import('../views/ConfigureView.vue') },
+      {
+        path: 'home',
+        name: 'Home',
+        component: () => import('../views/WorkspaceRouteView.vue'),
+      },
+      {
+        path: 'tech',
+        name: 'TechLibrary',
+        component: () => import('../views/TechLibraryView.vue'),
+      },
+      {
+        path: 'configure',
+        name: 'Configure',
+        component: () => import('../views/ConfigureView.vue'),
+      },
       // 动态步骤路由：匹配所有 flow 步骤
       // 路由验证放宽，允许任何步骤路径（由 flow.json 动态决定）
       {
         path: ':step',
         name: ':step',
-        component: () => import('../views/WorkspaceRouteView.vue')
-      }
+        component: () => import('../views/WorkspaceRouteView.vue'),
+      },
     ],
     meta: {
       title: 'Workspace',
-      requiresProject: true
-    }
-  }
+      requiresProject: true,
+    },
+  },
 ]
 
 const router = createRouter({
   history: createWebHashHistory(),
-  routes
+  routes,
 })
 
 // 路由守卫：确保有项目才能进入工作区

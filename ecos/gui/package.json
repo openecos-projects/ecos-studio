@@ -1,20 +1,27 @@
 {
   "name": "ecos-studio-gui",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.0.9",
   "scripts": {
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run fmt:check && pnpm run test",
     "dev": "pnpm run desktop:dev",
-    "dev:vm": "LIBGL_ALWAYS_SOFTWARE=1 ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_OPEN_DEVTOOLS=1 pnpm run desktop:dev",
+    "dev:vm": "LIBGL_ALWAYS_SOFTWARE=1 ELECTRON_DISABLE_SANDBOX=1 ECOS_ELECTRON_DISABLE_GPU=1 ECOS_ELECTRON_OPEN_DEVTOOLS=1 CHOKIDAR_USEPOLLING=1 CHOKIDAR_INTERVAL=500 UV_NO_SYNC=1 SKBUILD_EDITABLE_SKIP=../../ecc/chipcompiler/thirdparty/ecc-dreamplace/build:../../ecc/chipcompiler/thirdparty/ecc-tools/build pnpm run desktop:dev",
     "build": "pnpm --filter @ecos-studio/renderer run typecheck && pnpm run desktop:build",
     "preview": "pnpm run desktop:preview",
-    "test": "pnpm -r --if-present run test",
+    "doctor": "node scripts/doctor.mjs",
+    "lint": "oxlint -c .oxlintrc.json apps packages --deny-warnings",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check .",
+    "test": "pnpm run test:infra && pnpm -r --if-present run test",
+    "test:infra": "vitest run scripts/*.test.mjs",
     "typecheck": "pnpm -r --if-present run typecheck",
     "desktop:dev": "pnpm --filter @ecos-studio/desktop-electron run dev",
     "desktop:build": "pnpm --filter @ecos-studio/desktop-electron run build",
     "desktop:preview": "pnpm --filter @ecos-studio/desktop-electron run preview",
     "desktop:package": "pnpm --filter @ecos-studio/desktop-electron run package",
+    "desktop:smoke": "pnpm --filter @ecos-studio/desktop-electron run smoke",
     "desktop:test": "pnpm --filter @ecos-studio/desktop-electron run test",
     "desktop:typecheck": "pnpm --filter @ecos-studio/desktop-electron run typecheck",
     "renderer:dev": "pnpm --filter @ecos-studio/renderer run dev",
@@ -22,5 +29,13 @@
     "renderer:preview": "pnpm --filter @ecos-studio/renderer run preview",
     "renderer:test": "pnpm --filter @ecos-studio/renderer run test",
     "renderer:typecheck": "pnpm --filter @ecos-studio/renderer run typecheck"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
+    "lefthook": "^2.1.9",
+    "oxfmt": "^0.57.0",
+    "oxlint": "^1.72.0",
+    "vitest": "^4.0.18"
   }
 }

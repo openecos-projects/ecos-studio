@@ -1,6 +1,6 @@
 {
   "name": "@ecos-studio/desktop-electron",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "description": "ECOS Studio desktop shell built with Electron.",
   "homepage": "https://github.com/openecos-projects/ecos-studio",
@@ -14,9 +14,8 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "prepare:native-layout-viewer": "node scripts/prepare-native-layout-viewer-binaries.mjs",
-    "verify:package": "node scripts/verify-package.mjs",
-    "package": "pnpm run build && pnpm run prepare:native-layout-viewer && rm -rf release && electron-builder --config electron-builder.yml && pnpm run verify:package",
+    "package": "pnpm run build && rm -rf release && electron-builder --config electron-builder.yml",
+    "smoke": "node scripts/smoke-electron.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

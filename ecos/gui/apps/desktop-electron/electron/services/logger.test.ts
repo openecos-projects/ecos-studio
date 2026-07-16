@@ -24,6 +24,7 @@ function createConsoleSink() {
 }
 
 function stripAnsi(value: string): string {
+  // oxlint-disable-next-line no-control-regex -- ANSI escape sequences contain ESC.
   return value.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
@@ -36,9 +37,11 @@ describe('createElectronLogger', () => {
 
   afterEach(async () => {
     resetElectronLoggerFileForTest()
-    await Promise.all(tempDirectories.splice(0).map(directory =>
-      rm(directory, { force: true, recursive: true }),
-    ))
+    await Promise.all(
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
+    )
   })
 
   it('colors terminal output when color mode is auto and the stream is a TTY', () => {
@@ -55,10 +58,10 @@ describe('createElectronLogger', () => {
 
     logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
 
-    expect(consoleSink.warn).toHaveBeenCalledWith(
-      expect.stringContaining('\x1b['),
+    expect(consoleSink.warn).toHaveBeenCalledWith(expect.stringContaining('\x1b['))
+    expect(stripAnsi(consoleSink.warn.mock.calls[0]?.[0] ?? '')).toContain(
+      '16:36:17 WARN',
     )
-    expect(stripAnsi(consoleSink.warn.mock.calls[0]?.[0] ?? '')).toContain('16:36:17 WARN')
   })
 
   it('keeps terminal output plain when color is disabled or unavailable', () => {
@@ -76,9 +79,7 @@ describe('createElectronLogger', () => {
 
       logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
 
-      expect(consoleSink.warn).toHaveBeenCalledWith(
-        expect.not.stringContaining('\x1b['),
-      )
+      expect(consoleSink.warn).toHaveBeenCalledWith(expect.not.stringContaining('\x1b['))
     }
 
     const consoleSink = createConsoleSink()
@@ -94,9 +95,7 @@ describe('createElectronLogger', () => {
 
     logger.warn('[tile] Missing layout JSON: /tmp/project/route.json')
 
-    expect(consoleSink.warn).toHaveBeenCalledWith(
-      expect.not.stringContaining('\x1b['),
-    )
+    expect(consoleSink.warn).toHaveBeenCalledWith(expect.not.stringContaining('\x1b['))
   })
 
   it('writes complete plain text records to the file sink', () => {
@@ -123,7 +122,9 @@ describe('createElectronLogger', () => {
       '2026-05-12T08:36:17.209Z DEBUG [tile] Preparing cache at /tmp/cache',
     )
     expect(fileSink).toHaveBeenCalledWith(
-      expect.stringContaining('2026-05-12T08:36:17.209Z ERROR [tile] Tile generation failed Error: missing layout'),
+      expect.stringContaining(
+        '2026-05-12T08:36:17.209Z ERROR [tile] Tile generation failed Error: missing layout',
+      ),
     )
     expect(fileSink).toHaveBeenCalledWith(
       expect.stringContaining('Error: missing layout\n    at generateTiles'),
@@ -154,7 +155,13 @@ describe('createElectronLogger', () => {
   it('writes configured file logs to the launch session and latest files', async () => {
     const directory = await createTempDirectory('ecos-logger-session-')
     tempDirectories.push(directory)
-    const sessionFilePath = join(directory, 'logs', 'sessions', '20260512-223000-1234', 'main.log')
+    const sessionFilePath = join(
+      directory,
+      'logs',
+      'sessions',
+      '20260512-223000-1234',
+      'main.log',
+    )
     const latestFilePath = join(directory, 'logs', 'main.log')
 
     configureElectronLoggerFile({

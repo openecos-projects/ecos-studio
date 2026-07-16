@@ -36,7 +36,10 @@ export function reconcileSelectedFlowLogKey(
     if (liveSegment) return flowLogStepKey(liveSegment)
   }
 
-  if (selectedKey && segments.some((segment) => flowLogStepKey(segment) === selectedKey)) {
+  if (
+    selectedKey &&
+    segments.some((segment) => flowLogStepKey(segment) === selectedKey)
+  ) {
     return selectedKey
   }
   return getDefaultSelectedFlowLogKey(segments)

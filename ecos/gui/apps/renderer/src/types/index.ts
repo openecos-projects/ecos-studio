@@ -79,13 +79,14 @@ export type WorkspaceConfig = SharedWorkspaceConfig
 // 已导入的 PDK 信息（持久化存储）
 export interface ImportedPdk {
   id: string
-  name: string           // 显示名称，如 "ICS55 PDK"
-  path: string           // PDK 根目录绝对路径
-  description: string    // 描述
-  techNode: string       // 工艺节点，如 "55nm"
-  pdkId: string          // 后端 pdk 标识符，如 "ics55"
-  importedAt: string     // ISO 日期字符串
-  detectedFiles?: {      // 扫描到的目录结构摘要
+  name: string // 显示名称，如 "ICS55 PDK"
+  path: string // PDK 根目录绝对路径
+  description: string // 描述
+  techNode: string // 工艺节点，如 "55nm"
+  pdkId: string // 后端 pdk 标识符，如 "ics55"
+  importedAt: string // ISO 日期字符串
+  detectedFiles?: {
+    // 扫描到的目录结构摘要
     directories: string[]
     files: string[]
   }

@@ -1,13 +1,16 @@
 <template>
-  <div class="w-8 shrink-0 bg-(--bg-sidebar) border-l border-(--border-color) h-full flex flex-col items-center py-4">
-    <div class="vertical-text text-[11px] text-(--text-secondary) font-medium tracking-widest py-4">
-    Inspector
+  <div
+    class="flex h-full w-8 shrink-0 flex-col items-center border-l border-(--border-color) bg-(--bg-sidebar) py-4"
+  >
+    <div
+      class="vertical-text py-4 text-[11px] font-medium tracking-widest text-(--text-secondary)"
+    >
+      Inspector
     </div>
   </div>
 </template>
 
-<script setup lang="ts">
-</script>
+<script setup lang="ts"></script>
 
 <style scoped>
 .vertical-text {

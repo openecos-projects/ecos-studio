@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 90,
+  "semi": false,
+  "singleQuote": true,
+  "sortPackageJson": false,
+  "sortTailwindcss": true,
+  "trailingComma": "all"
+}

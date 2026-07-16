@@ -12,6 +12,9 @@ export const desktopMenuEventIds = {
   releaseNotes: 'release_notes',
   reportIssue: 'report_issue',
   about: 'about',
+  manageDesignFiles: 'manage_design_files',
+  reconfigureWorkspace: 'reconfigure_workspace',
+  exportSignoffPackage: 'export_signoff_package',
 } as const
 
 export type DesktopMenuEventId =
@@ -22,6 +25,9 @@ export const appMenuActionIds = {
   about: desktopMenuEventIds.about,
   newProject: desktopMenuEventIds.newProject,
   openProject: desktopMenuEventIds.openProject,
+  manageDesignFiles: desktopMenuEventIds.manageDesignFiles,
+  reconfigureWorkspace: desktopMenuEventIds.reconfigureWorkspace,
+  exportSignoffPackage: desktopMenuEventIds.exportSignoffPackage,
 } as const
 
 export type AppMenuAction = (typeof appMenuActionIds)[keyof typeof appMenuActionIds]

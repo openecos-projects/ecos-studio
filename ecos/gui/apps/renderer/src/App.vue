@@ -3,13 +3,25 @@
     <!-- 主应用容器 -->
     <div class="app-container">
       <!-- 全局顶部菜单栏 -->
-      <TopBar :project-name="isWelcome ? null : currentProject?.name" @menu-action="handleMenuAction" />
+      <TopBar
+        :project-name="isWelcome ? null : currentProject?.name"
+        :has-workspace="Boolean(currentProject?.path)"
+        :signoff-package-export-enabled="signoffPackageExportEnabled"
+        @menu-action="handleMenuAction"
+      />
       <!-- 页面内容 -->
       <div
         class="app-main"
-        :style="terminalExpanded ? { '--terminal-panel-height': terminalPanelHeight } : undefined"
+        :style="
+          terminalExpanded
+            ? { '--terminal-panel-height': terminalPanelHeight }
+            : undefined
+        "
       >
-        <div class="app-content" :class="{ 'app-content--terminal-safe-area': terminalExpanded }">
+        <div
+          class="app-content"
+          :class="{ 'app-content--terminal-safe-area': terminalExpanded }"
+        >
           <router-view />
         </div>
         <ECOSTerminal
@@ -32,9 +44,73 @@
     <Toast position="bottom-right" class="app-toast" />
 
     <!-- 全局新建工程向导 -->
-    <NewProjectWizard v-if="showNewProjectWizard" @close="showNewProjectWizard = false" @create="handleWizardCreate" />
+    <NewProjectWizard
+      v-if="showNewProjectWizard"
+      :title="workspaceWizardTitle"
+      :initial-config="workspaceWizardInitialConfig"
+      @close="handleWizardClose"
+      @create="handleWizardCreate"
+    />
+
+    <Teleport to="body">
+      <div
+        v-if="showWorkspaceUpdateBackupDialog"
+        class="workspace-update-backup-overlay"
+        role="presentation"
+        @click.self="cancelWorkspaceUpdateBackup"
+      >
+        <section
+          class="workspace-update-backup-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="workspace-update-backup-title"
+        >
+          <p class="workspace-update-backup-eyebrow">Update Workspace</p>
+          <h2 id="workspace-update-backup-title">Backup Original Workspace?</h2>
+          <p>
+            Keep a copy of the current workspace before replacing it. If backup is
+            selected, the backup workspace will be recorded in project.json.
+          </p>
+          <div class="workspace-update-backup-actions">
+            <button
+              type="button"
+              class="workspace-update-backup-secondary"
+              @click="cancelWorkspaceUpdateBackup"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="workspace-update-backup-secondary"
+              @click="runWorkspaceUpdate(false)"
+            >
+              Do Not Backup
+            </button>
+            <button
+              type="button"
+              class="workspace-update-backup-primary"
+              @click="confirmWorkspaceUpdateBackup"
+            >
+              Backup Original
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <AboutDialog v-model="showAboutDialog" />
+
+    <SignoffPackageReviewDialog
+      :error="signoffPackageReview.error"
+      :loading="signoffPackageReview.loading"
+      :result="signoffPackageReview.result"
+      :visible="signoffPackageReview.visible"
+      @close="closeSignoffPackageReview"
+      @export="confirmSignoffPackageExport"
+      @refresh="refreshSignoffPackageReview"
+    />
+
+    <DesignFilesManageDialog v-model="showManageDialog" />
 
     <!-- Full-screen loading while the workspace is being prepared (open/new project, session restore) -->
     <Teleport to="body">
@@ -64,19 +140,38 @@ import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
 import { useAppWindowClose } from '@/composables/useAppWindowClose'
+import { useSignoffPackageExport } from '@/composables/useSignoffPackageExport'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
+import {
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from '@/platform/desktop'
 
 import TopBar from '@/components/TopBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ECOSTerminal from '@/components/ECOSTerminal.vue'
 import AboutDialog from '@/components/AboutDialog.vue'
+import SignoffPackageReviewDialog from '@/components/SignoffPackageReviewDialog.vue'
 import Toast from 'primevue/toast'
 import NewProjectWizard from '@/components/NewProjectWizard.vue'
+import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
+import { useDesignFiles } from '@/composables/useDesignFiles'
+import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import {
+  projectContextFromWorkspaceConfig,
+  registerProjectManagedWorkspace,
+} from '@/utils/projectManifestRegistration'
+
+type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
+  managedWorkspaceRoot?: string
+  deriveDirectoryFromDesign?: boolean
+  lockWorkspaceDirectory?: boolean
+}
 
 const router = useRouter()
 const themeStore = useThemeStore()
@@ -85,22 +180,45 @@ const isWelcome = computed(() => route.path === '/')
 const {
   loadRecentProjects,
   currentProject,
+  resourceVersions,
+  workspaceSession,
   openProject,
   newProject,
   closeProject,
   runtimeBackendConnecting,
   runtimeBackendTitle,
   runtimeBackendSubtitle,
-} =
-  useWorkspace()
+} = useWorkspace()
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
+const { showManageDialog, openManageDialog } = useDesignFiles()
+const {
+  closeSignoffPackageReview,
+  confirmSignoffPackageExport,
+  exportSignoffPackage,
+  refreshSignoffPackageReview,
+  signoffPackageExportEnabled,
+  signoffPackageReview,
+} = useSignoffPackageExport({
+  currentProject,
+  resourceVersions,
+  showToast,
+  workspaceSession,
+})
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
 const showNewProjectWizard = ref(false)
+const workspaceWizardInitialConfig = ref<WorkspaceWizardInitialConfig | undefined>()
+const reconfigureWorkspacePath = ref('')
+const pendingWorkspaceUpdateConfig = ref<WorkspaceConfig | null>(null)
+const pendingWorkspaceUpdatePath = ref('')
+const showWorkspaceUpdateBackupDialog = ref(false)
+const workspaceWizardTitle = computed(() => {
+  return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'
+})
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')
@@ -115,19 +233,541 @@ function handleTerminalHeightChange(height: string) {
 
 function toggleTerminalMaximized() {
   terminalPanelMaximized.value = !terminalPanelMaximized.value
-  terminalPanelHeight.value = terminalPanelMaximized.value ? '100%' : terminalPanelRestoredHeight.value
+  terminalPanelHeight.value = terminalPanelMaximized.value
+    ? '100%'
+    : terminalPanelRestoredHeight.value
+}
+
+function resetWorkspaceWizard() {
+  showNewProjectWizard.value = false
+  workspaceWizardInitialConfig.value = undefined
+  reconfigureWorkspacePath.value = ''
+  pendingWorkspaceUpdateConfig.value = null
+  pendingWorkspaceUpdatePath.value = ''
+  showWorkspaceUpdateBackupDialog.value = false
+}
+
+function handleWizardClose() {
+  resetWorkspaceWizard()
+}
+
+function showCreateWorkspaceWizard() {
+  workspaceWizardInitialConfig.value = undefined
+  reconfigureWorkspacePath.value = ''
+  showNewProjectWizard.value = true
 }
 
 const handleWizardCreate = async (config: WorkspaceConfig) => {
-  showNewProjectWizard.value = false
+  const targetReconfigurePath = reconfigureWorkspacePath.value
+
+  if (targetReconfigurePath) {
+    pendingWorkspaceUpdateConfig.value = config
+    pendingWorkspaceUpdatePath.value = targetReconfigurePath
+    showWorkspaceUpdateBackupDialog.value = true
+    return
+  }
+
+  resetWorkspaceWizard()
   const success = await newProject(config)
-  if (success) router.push('/workspace')
+  if (!success) return
+
+  await syncProjectManagedWorkspace(config)
+  router.push('/workspace')
+}
+
+function cancelWorkspaceUpdateBackup() {
+  showWorkspaceUpdateBackupDialog.value = false
+  pendingWorkspaceUpdateConfig.value = null
+  pendingWorkspaceUpdatePath.value = ''
+}
+
+function confirmWorkspaceUpdateBackup() {
+  void runWorkspaceUpdate(true)
+}
+
+async function runWorkspaceUpdate(keepReplacementBackup: boolean) {
+  const config = pendingWorkspaceUpdateConfig.value
+  const targetReconfigurePath =
+    pendingWorkspaceUpdatePath.value || reconfigureWorkspacePath.value
+  if (!config || !targetReconfigurePath) {
+    cancelWorkspaceUpdateBackup()
+    return
+  }
+
+  resetWorkspaceWizard()
+  const success = await newProject({
+    ...config,
+    directory: normalizeLocalPath(targetReconfigurePath),
+    replaceExistingWorkspace: true,
+    keepReplacementBackup,
+  })
+  if (success) {
+    await syncProjectManagedWorkspace(config, normalizeLocalPath(targetReconfigurePath))
+    router.push({
+      path: route.path.startsWith('/workspace') ? route.path : '/workspace',
+      query: route.query,
+    })
+  }
+}
+
+async function syncProjectManagedWorkspace(
+  config: WorkspaceConfig,
+  workspacePath?: string,
+) {
+  const projectContext = projectContextFromWorkspaceConfig(config)
+  if (!projectContext) return
+
+  await registerProjectManagedWorkspace({
+    workspacePath: workspacePath ?? currentProject.value?.path ?? config.directory,
+    config,
+    projectContext,
+    routeQuery: route.query,
+    onWarning: (summary, detail) => {
+      showToast({
+        severity: 'warn',
+        summary,
+        detail,
+      })
+    },
+  })
+}
+
+async function openWorkspaceReconfigureWizard() {
+  const workspacePath = currentProject.value?.path
+  if (!workspacePath) {
+    showToast({
+      severity: 'warn',
+      summary: 'Workspace Required',
+      detail: 'Open a workspace before updating it.',
+      life: 3000,
+    })
+    return
+  }
+
+  try {
+    const normalizedWorkspacePath = normalizeLocalPath(workspacePath)
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    await api.workspace.registerProjectRoot(normalizedWorkspacePath)
+
+    workspaceWizardInitialConfig.value = await buildReconfigureWizardInitialConfig(
+      normalizedWorkspacePath,
+    )
+    reconfigureWorkspacePath.value = normalizedWorkspacePath
+    showNewProjectWizard.value = true
+  } catch (error) {
+    console.error('Failed to prepare workspace reconfiguration:', error)
+    showToast({
+      severity: 'error',
+      summary: 'Failed to Update Workspace',
+      detail: error instanceof Error ? error.message : String(error),
+      life: 5000,
+    })
+  }
+}
+
+async function buildReconfigureWizardInitialConfig(
+  workspacePath: string,
+): Promise<WorkspaceWizardInitialConfig> {
+  const [parametersText, pdkText, dbConfigText, flowText] = await Promise.all([
+    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
+    readOptionalProjectTextFile('home/pdk.json', { projectPath: workspacePath }),
+    readOptionalProjectTextFile('config/db_default_config.json', {
+      projectPath: workspacePath,
+    }),
+    readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
+  ])
+
+  const parametersJson = parseOptionalJson(parametersText)
+  const pdkJson = parseOptionalJson(pdkText)
+  const dbConfigJson = parseOptionalJson(dbConfigText)
+  const flowConfig = normalizeWorkspaceFlowConfig(flowText)
+  const normalizedParameters = normalizeWorkspaceParameters(parametersJson, workspacePath)
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const pdkConfig = normalizePdkConfig(pdkJson, dbConfigJson)
+  const designName =
+    optionalString(parametersJson?.Design) ||
+    optionalString(parametersJson?.design) ||
+    getPathLeafName(workspacePath)
+  const projectRoot =
+    queryString(route.query.projectRoot) || parentLocalPath(workspacePath)
+  const projectName = queryString(route.query.projectName) || getPathLeafName(projectRoot)
+  const originInputs = await scanWorkspaceOriginDesignInputs(workspacePath)
+  const rtlList =
+    flowConfig.start_step === 'Synthesis'
+      ? await existingWorkspaceFiles(workspacePath, [
+          ...originInputs.rtlFiles,
+          `origin/${designName}.v`,
+          `origin/${designName}.v.gz`,
+          `origin/${designName}.sv`,
+          `origin/${designName}.sv.gz`,
+          `origin/${designName}.vhd`,
+          `origin/${designName}.vhdl`,
+          ...stringList(dbInput?.rtl_paths),
+          ...stringList(dbInput?.rtl_list),
+        ])
+      : []
+  const filelist =
+    flowConfig.start_step === 'Synthesis'
+      ? await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.filelists,
+          'origin/filelist',
+          optionalString(dbInput?.filelist),
+          optionalString(dbInput?.filelist_path),
+        ])
+      : ''
+  const originDef =
+    flowConfig.start_step === 'Synthesis'
+      ? ''
+      : await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.defFiles,
+          `origin/${designName}.def`,
+          `origin/${designName}.def.gz`,
+          optionalString(dbInput?.origin_def),
+          optionalString(dbInput?.def_path),
+        ])
+  const originVerilog =
+    flowConfig.start_step === 'Synthesis'
+      ? ''
+      : await firstExistingWorkspaceFile(workspacePath, [
+          ...originInputs.verilogFiles,
+          `origin/${designName}.v`,
+          `origin/${designName}.v.gz`,
+          `origin/${designName}.sv`,
+          `origin/${designName}.sv.gz`,
+          `origin/${designName}.vg`,
+          `origin/${designName}.vg.gz`,
+          optionalString(dbInput?.origin_verilog),
+          optionalString(dbInput?.verilog_path),
+        ])
+  const sdc =
+    (await firstExistingWorkspaceFile(workspacePath, [
+      ...originInputs.sdcFiles,
+      `origin/${designName}.sdc`,
+      `origin/${designName}.sdc.gz`,
+      optionalString(dbInput?.sdc_path),
+      optionalString(pdkJson?.sdc),
+    ])) || ''
+
+  return {
+    directory: workspacePath,
+    lockWorkspaceDirectory: true,
+    pdk:
+      optionalString(parametersJson?.PDK) ||
+      optionalString(parametersJson?.pdk) ||
+      'ics55',
+    pdk_root:
+      optionalString(parametersJson?.['PDK Root']) ||
+      optionalString(parametersJson?.pdk_root),
+    parameters: normalizedParameters,
+    origin_def: originDef,
+    origin_verilog: originVerilog,
+    rtl_list: rtlList,
+    filelist,
+    design_input_mode: flowConfig.start_step === 'Synthesis' ? 'rtl' : 'post_synthesis',
+    sdc,
+    pdk_config_mode: pdkConfig.mode,
+    pdk_config: pdkConfig,
+    pdk_json: pdkText ? `${workspacePath}/home/pdk.json` : '',
+    flow_config: flowConfig,
+    project_context: {
+      mode: 'select',
+      project_name: projectName,
+      project_root: projectRoot,
+      project_json_path: `${projectRoot}/project.json`,
+    },
+  }
+}
+
+function parseOptionalJson(content: string | null): Record<string, unknown> | null {
+  if (!content) return null
+  try {
+    return JSON.parse(content) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function normalizeWorkspaceParameters(
+  parametersJson: Record<string, unknown> | null,
+  workspacePath: string,
+): WorkspaceConfig['parameters'] {
+  const dieArea = optionalRecord(parametersJson?.['Die Area']) ?? {}
+  const die = optionalRecord(parametersJson?.Die) ?? {}
+  const core = optionalRecord(parametersJson?.Core) ?? {}
+  const dieSize = numberList(die.Size)
+  const coreMargin = numberList(core.Margin)
+  const hasDieSize = dieSize.length >= 2
+
+  return {
+    design:
+      optionalString(parametersJson?.Design) ||
+      optionalString(parametersJson?.design) ||
+      getPathLeafName(workspacePath),
+    description: optionalString(parametersJson?.description),
+    top_module:
+      optionalString(parametersJson?.['Top module']) ||
+      optionalString(parametersJson?.top_module),
+    clock: optionalString(parametersJson?.Clock) || optionalString(parametersJson?.clock),
+    frequency_max: optionalNumber(
+      parametersJson?.['Frequency max [MHz]'] ?? parametersJson?.frequency_max,
+      50,
+    ),
+    max_fanout: optionalNumber(
+      parametersJson?.['Max fanout'] ?? parametersJson?.max_fanout,
+      32,
+    ),
+    die_area_mode: normalizeDieAreaMode(
+      dieArea.mode ?? parametersJson?.die_area_mode,
+      hasDieSize ? 'width_height' : 'utilitization_margin',
+    ),
+    die_width: optionalNumber(dieArea.width ?? dieSize[0], 100),
+    die_height: optionalNumber(dieArea.height ?? dieSize[1], 100),
+    utilitization: optionalNumber(
+      dieArea.utilitization ?? core.Utilitization ?? parametersJson?.utilitization,
+      0.6,
+    ),
+    margin: optionalNumber(dieArea.margin ?? coreMargin[0] ?? parametersJson?.margin, 0),
+  }
+}
+
+function normalizeWorkspaceFlowConfig(
+  flowText: string | null,
+): NonNullable<WorkspaceConfig['flow_config']> {
+  const flowJson = parseOptionalJson(flowText)
+  const steps = Array.isArray(flowJson?.steps)
+    ? flowJson.steps
+        .map((step) => {
+          if (typeof step === 'string') return step
+          if (optionalRecord(step)) return optionalString(optionalRecord(step)?.name)
+          return ''
+        })
+        .filter((step): step is string => step.trim() !== '')
+    : []
+  const normalizedSteps = steps.length > 0 ? steps : ['Synthesis', 'Harden']
+
+  return {
+    start_step: normalizedSteps[0],
+    end_step: normalizedSteps[normalizedSteps.length - 1],
+    steps: normalizedSteps,
+  }
+}
+
+function normalizePdkConfig(
+  pdkJson: Record<string, unknown> | null,
+  dbConfigJson: Record<string, unknown> | null,
+): NonNullable<WorkspaceConfig['pdk_config']> & { mode: 'default' | 'manual' } {
+  const dbInput = optionalRecord(dbConfigJson?.INPUT)
+  const techLef = stringList(
+    pdkJson?.tech_lef ??
+      pdkJson?.tech ??
+      pdkJson?.selected_tech_lef ??
+      dbInput?.tech_lef_path,
+  )
+  const cellLef = stringList(
+    pdkJson?.cell_lef ?? pdkJson?.lefs ?? pdkJson?.cell_lef_list ?? dbInput?.lef_paths,
+  )
+  const liberty = stringList(
+    pdkJson?.liberty ?? pdkJson?.libs ?? pdkJson?.liberty_list ?? dbInput?.lib_path,
+  )
+  const hasManualResources =
+    techLef.length > 0 || cellLef.length > 0 || liberty.length > 0
+
+  return {
+    mode: hasManualResources ? 'manual' : 'default',
+    tech_lef: techLef,
+    cell_lef: cellLef,
+    liberty,
+  }
+}
+
+async function firstExistingWorkspaceFile(
+  workspacePath: string,
+  candidates: string[],
+): Promise<string> {
+  const files = await existingWorkspaceFiles(workspacePath, candidates)
+  return files[0] ?? ''
+}
+
+interface WorkspaceOriginDesignInputs {
+  rtlFiles: string[]
+  filelists: string[]
+  defFiles: string[]
+  verilogFiles: string[]
+  sdcFiles: string[]
+}
+
+function emptyWorkspaceOriginDesignInputs(): WorkspaceOriginDesignInputs {
+  return {
+    rtlFiles: [],
+    filelists: [],
+    defFiles: [],
+    verilogFiles: [],
+    sdcFiles: [],
+  }
+}
+
+async function scanWorkspaceOriginDesignInputs(
+  workspacePath: string,
+): Promise<WorkspaceOriginDesignInputs> {
+  const inputs = emptyWorkspaceOriginDesignInputs()
+  try {
+    const api = desktopApi.value ?? (await waitForDesktopApi())
+    desktopApi.value = api
+    const entries = await api.workspace.listProjectDirectory(`${workspacePath}/origin`)
+    for (const entry of entries) {
+      if (entry.type !== 'file') continue
+      const filePath = normalizeLocalPath(entry.path)
+      if (hasAnySuffix(filePath, ['.def', '.def.gz'])) {
+        inputs.defFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.v', '.v.gz', '.sv', '.sv.gz', '.vg', '.vg.gz'])) {
+        inputs.rtlFiles.push(filePath)
+        inputs.verilogFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.vhd', '.vhd.gz', '.vhdl', '.vhdl.gz'])) {
+        inputs.rtlFiles.push(filePath)
+      }
+      if (hasAnySuffix(filePath, ['.sdc', '.sdc.gz'])) {
+        inputs.sdcFiles.push(filePath)
+      }
+      const fileName = getPathLeafName(filePath).toLowerCase()
+      if (
+        fileName === 'filelist' ||
+        hasAnySuffix(filePath, [
+          '.f',
+          '.f.gz',
+          '.fl',
+          '.fl.gz',
+          '.flist',
+          '.flist.gz',
+          '.filelist',
+          '.filelist.gz',
+          '.lst',
+          '.lst.gz',
+          '.txt',
+          '.txt.gz',
+        ])
+      ) {
+        inputs.filelists.push(filePath)
+      }
+    }
+    return {
+      rtlFiles: uniquePathList(inputs.rtlFiles),
+      filelists: uniquePathList(inputs.filelists),
+      defFiles: uniquePathList(inputs.defFiles),
+      verilogFiles: uniquePathList(inputs.verilogFiles),
+      sdcFiles: uniquePathList(inputs.sdcFiles),
+    }
+  } catch {
+    return inputs
+  }
+}
+
+function hasAnySuffix(filePath: string, suffixes: string[]): boolean {
+  const lowerPath = filePath.toLowerCase()
+  return suffixes.some((suffix) => lowerPath.endsWith(suffix))
+}
+
+function uniquePathList(paths: string[]): string[] {
+  return [...new Set(paths)]
+}
+
+async function existingWorkspaceFiles(
+  workspacePath: string,
+  candidates: string[],
+): Promise<string[]> {
+  const existing: string[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const relativeOrAbsolute = candidate.trim()
+    if (!relativeOrAbsolute) continue
+    const path = isAbsoluteLocalPath(relativeOrAbsolute)
+      ? normalizeLocalPath(relativeOrAbsolute)
+      : `${workspacePath}/${relativeOrAbsolute.replace(/^\/+/, '')}`
+    if (seen.has(path)) continue
+    seen.add(path)
+    if (await workspaceTextFileExists(path)) {
+      existing.push(path)
+    }
+  }
+  return existing
+}
+
+async function workspaceTextFileExists(path: string): Promise<boolean> {
+  try {
+    return (await readOptionalProjectTextFile(path)) !== null
+  } catch {
+    return false
+  }
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function optionalString(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+function optionalNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function normalizeDieAreaMode(
+  value: unknown,
+  fallback: NonNullable<WorkspaceConfig['parameters']['die_area_mode']>,
+): NonNullable<WorkspaceConfig['parameters']['die_area_mode']> {
+  return value === 'width_height' || value === 'utilitization_margin' ? value : fallback
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.trim() !== '',
+    )
+  }
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
+function numberList(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return value.map(Number).filter(Number.isFinite)
+}
+
+function queryString(value: unknown): string {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : ''
+  return typeof value === 'string' ? value : ''
+}
+
+function normalizeLocalPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.length > 1 ? normalized.replace(/\/+$/g, '') : normalized
+}
+
+function parentLocalPath(path: string): string {
+  const normalized = normalizeLocalPath(path)
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+  const parent = parts.slice(0, -1).join('/')
+  return normalized.startsWith('/') ? `/${parent}` : parent
+}
+
+function getPathLeafName(path: string): string {
+  return normalizeLocalPath(path).split('/').filter(Boolean).pop() || path
+}
+
+function isAbsoluteLocalPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
 }
 
 const openDocumentation = async () => {
   try {
     if (desktopApi.value ?? hasDesktopApi()) {
-      const api = desktopApi.value ?? await waitForDesktopApi()
+      const api = desktopApi.value ?? (await waitForDesktopApi())
       desktopApi.value = api
       await api.system.openExternal(documentationUrl)
     } else {
@@ -139,7 +779,7 @@ const openDocumentation = async () => {
       severity: 'error',
       summary: 'Error',
       detail: `Failed to open documentation because of ${error instanceof Error ? error.message : String(error)}`,
-      life: 3000
+      life: 3000,
     })
   }
 }
@@ -153,9 +793,10 @@ const { handleMenuAction } = useAppMenuActions({
   showAboutDialog: () => {
     showAboutDialog.value = true
   },
-  showNewProjectWizard: () => {
-    showNewProjectWizard.value = true
-  },
+  showNewProjectWizard: showCreateWorkspaceWizard,
+  reconfigureWorkspace: openWorkspaceReconfigureWizard,
+  exportSignoffPackage,
+  manageDesignFiles: openManageDialog,
 })
 useAppWindowClose(closeProject)
 
@@ -274,9 +915,11 @@ onMounted(async () => {
   unlistenWindowResized = desktopApi.value.window.onResized(() => {
     markResizing()
   })
-  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged((isMaximized) => {
-    document.body.classList.toggle('window-maximized', isMaximized)
-  })
+  unlistenWindowMaximizedChanged = desktopApi.value.window.onMaximizedChanged(
+    (isMaximized) => {
+      document.body.classList.toggle('window-maximized', isMaximized)
+    },
+  )
 })
 
 onUnmounted(() => {
@@ -355,7 +998,9 @@ onUnmounted(() => {
 
 .runtime-backend-overlay-enter-active .runtime-backend-panel,
 .runtime-backend-overlay-leave-active .runtime-backend-panel {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition:
+    transform 0.22s ease,
+    opacity 0.22s ease;
 }
 
 .runtime-backend-overlay-enter-from,
@@ -515,6 +1160,91 @@ body.window-maximized .app-container {
   display: block;
   height: var(--terminal-panel-height);
   pointer-events: none;
+}
+
+.workspace-update-backup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.workspace-update-backup-dialog {
+  width: min(460px, 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.42);
+  padding: 22px;
+  color: var(--text-primary);
+}
+
+.workspace-update-backup-eyebrow {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+
+.workspace-update-backup-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 750;
+}
+
+.workspace-update-backup-dialog p:not(.workspace-update-backup-eyebrow) {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.workspace-update-backup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.workspace-update-backup-primary,
+.workspace-update-backup-secondary {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    opacity 0.15s;
+}
+
+.workspace-update-backup-primary {
+  border: 1px solid var(--accent-color);
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.workspace-update-backup-primary:hover {
+  opacity: 0.9;
+}
+
+.workspace-update-backup-secondary {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.workspace-update-backup-secondary:hover {
+  border-color: var(--accent-color);
 }
 
 /* 调整大小的边缘区域 */

@@ -4,6 +4,7 @@
   fetchPnpmDeps,
   chipcompiler-cli,
   electron,
+  layout-viewer,
   makeWrapper,
   nodejs,
   pnpmConfigHook,
@@ -14,7 +15,7 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "ecos-studio";
-  version = "0.1.0-alpha.5";
+  version = "0.1.0-alpha.6";
 
   src =
     with lib.fileset;
@@ -36,8 +37,8 @@ stdenv.mkDerivation (finalAttrs: {
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) version src;
     pname = "${finalAttrs.pname}-${finalAttrs.version}-pnpm-deps";
-    fetcherVersion = 2;
-    hash = "sha256-yspTctYMugjfMTyyaWd+diJHHbByI4T7WlTSnO/eSyg=";
+    fetcherVersion = 3;
+    hash = "sha256-bYH70N1cNHyKudCbirdXTa6jCyQTqiScqwKrnv+heBg=";
   };
 
   nativeBuildInputs = [
@@ -79,7 +80,13 @@ stdenv.mkDerivation (finalAttrs: {
 
     makeWrapper ${electron}/bin/electron "$out/bin/ecos-studio" \
       --add-flags "$app_root/apps/desktop-electron" \
-      --prefix PATH : ${lib.makeBinPath [ chipcompiler-cli yosysWithSlang ]} \
+      --prefix PATH : ${
+        lib.makeBinPath [
+          chipcompiler-cli
+          layout-viewer
+          yosysWithSlang
+        ]
+      }
 
     runHook postInstall
   '';

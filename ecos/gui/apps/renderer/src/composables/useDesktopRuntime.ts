@@ -14,7 +14,7 @@ export function requireDesktopRuntime() {
  */
 export function useDesktopRuntime() {
   const isDesktopRuntimeAvailable = isDesktopRuntime()
-  
+
   /**
    * 确保在桌面运行时中执行操作
    * @returns 是否存在桌面桥接
@@ -22,7 +22,7 @@ export function useDesktopRuntime() {
   function ensureDesktopRuntime(): boolean {
     return isDesktopRuntimeAvailable
   }
-  
+
   return {
     /** 是否在 desktop runtime 环境中 */
     isDesktopRuntimeAvailable,

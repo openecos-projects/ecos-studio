@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configureChromiumLogging } from './chromiumLogging'
@@ -11,8 +11,10 @@ import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
 } from '../services/desktopLogPaths'
-import { createEccCliRuntimeEnv } from '../services/eccCliRuntime'
-import { createFrontendAwareRuntimeAdapter } from '../services/frontendAwareRuntimeAdapter'
+import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
+import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
+import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
+import { createFrontendRuntimeAdapter } from '../services/frontendRuntimeAdapter'
 import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import { registerApplicationMenu } from '../services/menuService'
@@ -21,26 +23,28 @@ import { RemoteContentService } from '../services/remoteContentService'
 import { ResourceManagerService } from '../services/resourceManagerService'
 import { SettingsStore } from '../services/settingsStore'
 import { ShellPtyService } from '../services/shellPtyService'
-import { registerSurferProtocolSchemes, SurferProtocolService } from '../services/surferProtocolService'
+import {
+  registerSurferProtocolSchemes,
+  SurferProtocolService,
+} from '../services/surferProtocolService'
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
 
 let ipcRegistered = false
-let services:
-  | {
-      appInfoService: AppInfoService
-      desktopRuntimeManager: DesktopRuntimeManager
-      remoteContentService: RemoteContentService
-      settingsStore: SettingsStore
-      resourceManagerService: ResourceManagerService
-      layoutViewerService: LayoutViewerService
-      shellService: ShellPtyService
-      surferProtocolService: SurferProtocolService
-      workspaceResourceService: WorkspaceResourceService
-      workspaceService: WorkspaceService
-    }
-  | null = null
+let services: {
+  appInfoService: AppInfoService
+  frontendRuntimeManager: DesktopRuntimeManager
+  eccRuntimeService: EccRpcRuntimeService
+  remoteContentService: RemoteContentService
+  settingsStore: SettingsStore
+  resourceManagerService: ResourceManagerService
+  layoutViewerService: LayoutViewerService
+  shellService: ShellPtyService
+  surferProtocolService: SurferProtocolService
+  workspaceResourceService: WorkspaceResourceService
+  workspaceService: WorkspaceService
+} | null = null
 
 function readHostInfo(path: string): string {
   try {
@@ -71,8 +75,18 @@ configureElectronLoggerFile({
 })
 electronLogger.status('[desktop] Logs: %s', mainLogFile)
 electronLogger.status('[desktop] Latest logs: %s', mainLatestLogFile)
-electronLogger.status('[runtime] Runtime: ECC CLI + frontend CLI')
+electronLogger.status('[runtime] Runtime: ECC RPC + frontend CLI')
 registerSurferProtocolSchemes(protocol)
+
+if (process.env.ECOS_ELECTRON_SMOKE === '1') {
+  ipcMain.on('ecos-smoke:complete', () => {
+    app.exit(0)
+  })
+  ipcMain.on('ecos-smoke:failed', (_event, message) => {
+    electronLogger.error('[desktop] Smoke test failed: %s', String(message))
+    app.exit(1)
+  })
+}
 
 function getDesktopServices() {
   if (services) {
@@ -83,7 +97,7 @@ function getDesktopServices() {
     filePath: join(app.getPath('userData'), 'settings.json'),
   })
   const projectScopeService = new ProjectScopeService()
-  const runtimeEnv = createEccCliRuntimeEnv({
+  const runtimeEnv = createEccRuntimeEnv({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
     env: {
@@ -107,23 +121,33 @@ function getDesktopServices() {
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,
     })
-  const desktopRuntimeManager = new DesktopRuntimeManager({
-    adapter: createFrontendAwareRuntimeAdapter({
-      backend: {
+  let eccRuntimeService: EccRpcRuntimeService
+  eccRuntimeService = new EccRpcRuntimeService({
+    createSidecar: (onEvent) =>
+      new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        isPackaged: app.isPackaged,
-      },
-      frontend: {
-        env: runtimeEnv,
-        envProvider: runtimeEnvProvider,
-      },
+        logDirectoryProvider: () => {
+          const directory = eccRuntimeService.activeWorkspaceDirectory
+          return directory ? join(directory, 'log') : null
+        },
+        onEvent,
+      }),
+  })
+  const frontendRuntimeManager = new DesktopRuntimeManager({
+    adapter: createFrontendRuntimeAdapter({
+      env: runtimeEnv,
+      envProvider: runtimeEnvProvider,
       frontendRootSearchRoots: app.isPackaged ? [] : [process.cwd(), app.getAppPath()],
     }),
   })
   const workspaceService = new WorkspaceService({
     projectScopeProvider: projectScopeService,
-    runtimeMutationGuard: desktopRuntimeManager,
+    runtimeMutationGuard: {
+      isWorkspaceRuntimeActive: async (directory) =>
+        eccRuntimeService.isWorkspaceRuntimeActive(directory) ||
+        (await frontendRuntimeManager.isWorkspaceRuntimeActive(directory)),
+    },
   })
   const shellService = new ShellPtyService({
     env: runtimeEnv,
@@ -152,7 +176,8 @@ function getDesktopServices() {
 
   services = {
     appInfoService,
-    desktopRuntimeManager,
+    frontendRuntimeManager,
+    eccRuntimeService,
     remoteContentService,
     resourceManagerService,
     layoutViewerService,
@@ -172,7 +197,8 @@ async function launchMainWindow(): Promise<void> {
   if (!ipcRegistered) {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
-      desktopRuntimeManager: desktopServices.desktopRuntimeManager,
+      frontendRuntimeManager: desktopServices.frontendRuntimeManager,
+      eccRuntimeService: desktopServices.eccRuntimeService,
       remoteContentService: desktopServices.remoteContentService,
       resourceManagerService: desktopServices.resourceManagerService,
       layoutViewerService: desktopServices.layoutViewerService,
@@ -206,12 +232,16 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  services?.desktopRuntimeManager.cancelAll('Cancelling running ECOS commands before app quit')
+  services?.frontendRuntimeManager.cancelAll(
+    'Cancelling running frontend commands before app quit',
+  )
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', () => {
-  services?.desktopRuntimeManager.cancelAll('Cancelling running ECOS commands before app quit')
+  services?.frontendRuntimeManager.cancelAll(
+    'Cancelling running frontend commands before app quit',
+  )
 })

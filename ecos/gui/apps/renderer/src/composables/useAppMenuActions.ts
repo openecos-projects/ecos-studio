@@ -5,16 +5,22 @@ interface AppMenuActionDependencies {
   navigateToWorkspace(): void
   openDocumentation(): Promise<void>
   openProject(): Promise<boolean | undefined>
+  exportSignoffPackage?(): void | Promise<void>
+  reconfigureWorkspace?(): void | Promise<void>
   showAboutDialog(): void
   showNewProjectWizard(): void
+  manageDesignFiles?(): void | Promise<void>
 }
 
 export function useAppMenuActions({
   navigateToWorkspace,
   openDocumentation,
   openProject,
+  exportSignoffPackage,
+  reconfigureWorkspace,
   showAboutDialog,
   showNewProjectWizard,
+  manageDesignFiles,
 }: AppMenuActionDependencies) {
   const handleMenuAction = async (action: AppMenuAction) => {
     switch (action) {
@@ -25,6 +31,15 @@ export function useAppMenuActions({
         if (await openProject()) {
           navigateToWorkspace()
         }
+        break
+      case appMenuActionIds.manageDesignFiles:
+        await manageDesignFiles?.()
+        break
+      case appMenuActionIds.reconfigureWorkspace:
+        await reconfigureWorkspace?.()
+        break
+      case appMenuActionIds.exportSignoffPackage:
+        await exportSignoffPackage?.()
         break
       case appMenuActionIds.documentation:
         await openDocumentation()
@@ -49,6 +64,15 @@ export function useAppMenuActions({
     },
     [appMenuActionIds.about]: () => {
       void handleMenuAction(appMenuActionIds.about)
+    },
+    [appMenuActionIds.manageDesignFiles]: () => {
+      void handleMenuAction(appMenuActionIds.manageDesignFiles)
+    },
+    [appMenuActionIds.reconfigureWorkspace]: () => {
+      void handleMenuAction(appMenuActionIds.reconfigureWorkspace)
+    },
+    [appMenuActionIds.exportSignoffPackage]: () => {
+      void handleMenuAction(appMenuActionIds.exportSignoffPackage)
     },
   })
 

@@ -3,24 +3,27 @@ mod raster_plane;
 mod render_surface;
 
 use std::{
-    collections::BTreeMap,
-    path::PathBuf,
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use eframe::egui;
+use flate2::read::GzDecoder;
 use layout_display::{Color, DisplayModel, LayerStyle, Pattern, ResolvedDisplayLayer};
 use layout_render::{
-    classify_lod, DrawItem, LodHysteresisState, LodLevel, LodStats, PickHit, PickHitTarget,
-    PickRequest, RenderPlan, RenderPlanSource, RenderPlane, RenderPlanner, RenderSettings,
-    Viewport,
+    classify_lod, DrawItem, LodHysteresisState, LodLevel, LodStats, PickHit, PickRequest,
+    RenderPlan, RenderPlanSource, RenderPlane, RenderPlanner, RenderSettings, Viewport,
 };
 use layoutdb::{
-    CellViewState, HierarchyPolicy, HierarchyTreeRow, InstancePath, LayoutSession,
-    PackageLayoutSource, Rect, ShapeKind, ViewportLoadBatch,
+    CellViewState, HierarchyPolicy, LayoutSession, PackageLayoutSource, Rect, ShapeKind,
+    ViewportLoadBatch,
 };
+use serde_json::Value;
 
 const TARGET_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 const MAX_FPS_SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
@@ -30,16 +33,15 @@ const PLANE_CACHE_MARGIN_TILES: i32 = 1;
 const DETAIL_LOAD_TILE_PX: f32 = 256.0;
 const DETAIL_LOAD_MARGIN_TILES: i32 = 1;
 const DETAIL_LOAD_MAX_VIEWPORT_WORLD_AREA_RATIO: f64 = 0.15;
-const HIERARCHY_ROWS_STEADY_LIMIT: usize = 512;
-const HIERARCHY_ROWS_INTERACTION_LIMIT: usize = 64;
 const SIDEBAR_DEFAULT_WIDTH: f32 = 320.0;
 const SIDEBAR_MIN_WIDTH: f32 = 190.0;
 const SIDEBAR_MAX_WIDTH: f32 = 640.0;
-const HIERARCHY_ROW_RIGHT_GUTTER: f32 = 12.0;
+const SIDEBAR_VALUE_MIN_WIDTH: f32 = 80.0;
 const MAX_PATTERN_OPS_PER_RECT: usize = 512;
 const MAX_HATCH_OPS_PER_RECT: usize = 256;
 const PATTERN_TILE_PX: f32 = 10.0;
 const SPARSE_DOT_SPACING_PX: f32 = 9.0;
+const DENSE_DOT_SPACING_PX: f32 = 5.0;
 const NEAR_RASTER_ITEM_THRESHOLD: usize = 10_000;
 const NEAR_RASTER_OPS_THRESHOLD: usize = 6_000;
 const DIE_BOUNDARY_WIDTH: f32 = 2.0;
@@ -110,62 +112,557 @@ struct LayoutViewerV2App {
     last_used_plane_renderer: bool,
     last_paint_ops: usize,
     last_lod_stats: LodStats,
-    hierarchy_rows_cache: HierarchyRowsCache,
     layer_counts_cache: LayerCountsCache,
+    sidebar_had_selection: bool,
 }
 
 struct LoadedViewerState {
     session: LayoutSession,
     display: DisplayModel,
     cell_view: CellViewState,
+    package_root: PathBuf,
+    selection_names: SelectionNameIndex,
+    selection_name_load: Option<SelectionNameLoadHandle>,
+    selection_names_loaded: bool,
     background_load: BackgroundLoadHandle,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HierarchyRowsCacheKey {
-    revision: u64,
-    cell_view: CellViewState,
-    max_depth: usize,
-    max_rows: usize,
+#[derive(Debug, Default, Clone)]
+struct SelectionNameIndex {
+    io_pins: BTreeMap<u32, String>,
+    instances: BTreeMap<u32, String>,
+    regular_wires: BTreeMap<u32, String>,
+    special_wires: BTreeMap<u32, String>,
+    blockages: BTreeMap<u32, String>,
+    fills: BTreeMap<u32, String>,
+    regions: BTreeMap<u32, String>,
+    cell_master_pins: BTreeMap<(u32, usize), String>,
+    regular_nets: BTreeMap<u32, String>,
+    special_nets: BTreeMap<u32, String>,
+    io_pin_net_ids: BTreeMap<u32, NetRef>,
+    regular_wire_net_ids: BTreeMap<u32, NetRef>,
+    special_wire_net_ids: BTreeMap<u32, NetRef>,
+    via_net_ids: BTreeMap<ViaKey, NetRef>,
 }
 
-#[derive(Debug, Default)]
-struct HierarchyRowsCache {
-    key: Option<HierarchyRowsCacheKey>,
-    rows: layoutdb::HierarchyTreeRows,
-    hits: usize,
-    misses: usize,
+#[derive(Debug, Default, Clone)]
+struct ViaLayerResolver {
+    cut_layers: BTreeSet<u16>,
+    via_master_cut_layers: BTreeMap<u32, Vec<u16>>,
 }
 
-impl HierarchyRowsCache {
-    fn get_or_build(
-        &mut self,
-        db: &layoutdb::LayoutDb,
-        revision: u64,
-        cell_view: &CellViewState,
-        max_depth: usize,
-        max_rows: usize,
-    ) -> &layoutdb::HierarchyTreeRows {
-        let key = HierarchyRowsCacheKey {
-            revision,
-            cell_view: cell_view.clone(),
-            max_depth,
-            max_rows,
+impl SelectionNameIndex {
+    fn load(package_root: &Path) -> Result<Self> {
+        let Some(source_root) = source_root_for_package(package_root)? else {
+            return Ok(Self::default());
         };
-        if self.key.as_ref() == Some(&key) {
-            self.hits += 1;
-            return &self.rows;
-        }
-        self.misses += 1;
-        self.key = Some(key);
-        self.rows = db.hierarchy_tree_rows(cell_view.clone(), max_depth, max_rows);
-        &self.rows
+        let manifest = read_json_value(&source_root.join("manifest.json"))?;
+        let files = manifest
+            .get("files")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let mut index = Self::default();
+        index.io_pins = read_named_data_map(&source_root, &files, "io_pins")?;
+        index.instances = read_named_data_map(&source_root, &files, "instances")?;
+        index.regular_wires = read_named_data_map(&source_root, &files, "regular_wires")?;
+        index.special_wires = read_named_data_map(&source_root, &files, "special_wires")?;
+        index.blockages = read_named_data_map(&source_root, &files, "blockages")?;
+        index.fills = read_named_data_map(&source_root, &files, "fills")?;
+        index.regions = read_named_data_map(&source_root, &files, "regions")?;
+        index.cell_master_pins = read_cell_master_pin_names(&source_root, &files)?;
+        index.regular_nets = read_named_data_map(&source_root, &files, "regular_nets")?;
+        index.special_nets = read_named_data_map(&source_root, &files, "special_nets")?;
+        index.io_pin_net_ids = read_net_ref_data_map(&source_root, &files, "io_pins")?;
+        index.regular_wire_net_ids = read_net_ref_data_map(&source_root, &files, "regular_wires")?;
+        index.special_wire_net_ids = read_net_ref_data_map(&source_root, &files, "special_wires")?;
+        let via_layers = read_via_layer_resolver(&source_root, &files)?;
+        index.via_net_ids.extend(read_via_net_ref_data_map(
+            &source_root,
+            &files,
+            "regular_wires",
+            &via_layers,
+        )?);
+        index.via_net_ids.extend(read_via_net_ref_data_map(
+            &source_root,
+            &files,
+            "special_wires",
+            &via_layers,
+        )?);
+        index.via_net_ids.extend(read_via_net_ref_data_map(
+            &source_root,
+            &files,
+            "io_pins",
+            &via_layers,
+        )?);
+        Ok(index)
     }
 
-    fn clear(&mut self) {
-        self.key = None;
-        self.rows = layoutdb::HierarchyTreeRows::default();
+    fn name_for_hit(&self, hit: &PickHit) -> Option<&str> {
+        if let ShapeKind::IoPin = hit.kind {
+            if is_hierarchy_cell_shape(hit) {
+                return hierarchy_pin_shape_index(hit).and_then(|shape_index| {
+                    self.cell_master_pins
+                        .get(&(hit.source_id, shape_index))
+                        .map(String::as_str)
+                });
+            }
+        }
+        let names = match hit.kind {
+            ShapeKind::Instance => &self.instances,
+            ShapeKind::RegularWire => &self.regular_wires,
+            ShapeKind::SpecialWire => &self.special_wires,
+            ShapeKind::IoPin | ShapeKind::Via => &self.io_pins,
+            ShapeKind::Blockage => &self.blockages,
+            ShapeKind::Fill => &self.fills,
+            ShapeKind::Region => &self.regions,
+            ShapeKind::Die
+            | ShapeKind::Core
+            | ShapeKind::Row
+            | ShapeKind::Track
+            | ShapeKind::GCellGrid => {
+                return None;
+            }
+        };
+        names.get(&hit.source_id).map(String::as_str)
     }
+
+    fn net_name_for_hit(&self, hit: &PickHit) -> Option<&str> {
+        if matches!(hit.kind, ShapeKind::IoPin) && is_hierarchy_cell_shape(hit) {
+            return None;
+        }
+        let net_ref = match hit.kind {
+            ShapeKind::IoPin => self.io_pin_net_ids.get(&hit.source_id),
+            ShapeKind::RegularWire => self.regular_wire_net_ids.get(&hit.source_id),
+            ShapeKind::SpecialWire => self.special_wire_net_ids.get(&hit.source_id),
+            ShapeKind::Via => self.net_ref_for_via(hit),
+            _ => None,
+        }?;
+        match net_ref {
+            NetRef::Regular(id) => self.regular_nets.get(id).map(String::as_str),
+            NetRef::Special(id) => self.special_nets.get(id).map(String::as_str),
+        }
+    }
+
+    fn net_ref_for_via(&self, hit: &PickHit) -> Option<&NetRef> {
+        let key = ViaKey {
+            source_id: hit.source_id,
+            layer_id: hit.layer_id,
+            bbox: [hit.bbox.x1, hit.bbox.y1, hit.bbox.x2, hit.bbox.y2],
+        };
+        if let Some(net_ref) = self.via_net_ids.get(&key) {
+            return Some(net_ref);
+        }
+        let regular = self.regular_wire_net_ids.get(&hit.source_id);
+        let special = self.special_wire_net_ids.get(&hit.source_id);
+        match (regular, special) {
+            (Some(regular), None) => Some(regular),
+            (None, Some(special)) => Some(special),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NetRef {
+    Regular(u32),
+    Special(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ViaKey {
+    source_id: u32,
+    layer_id: u16,
+    bbox: [i32; 4],
+}
+
+fn source_root_for_package(package_root: &Path) -> Result<Option<PathBuf>> {
+    let package_manifest = if package_root.join("manifest.json").is_file() {
+        package_root.join("manifest.json")
+    } else {
+        package_root.join(".layoutpkg/manifest.json")
+    };
+    if !package_manifest.is_file() {
+        return Ok(None);
+    }
+    let manifest = read_json_value(&package_manifest)?;
+    let Some(root) = manifest
+        .get("source")
+        .and_then(|source| source.get("root"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(PathBuf::from(root)))
+}
+
+fn read_named_data_map(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<BTreeMap<u32, String>> {
+    let Some(path) = source_file_path(source_root, files, key) else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let value = read_json_value(&path)?;
+    Ok(named_items_from_data(&value))
+}
+
+fn read_net_ref_data_map(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<BTreeMap<u32, NetRef>> {
+    let Some(path) = source_file_path(source_root, files, key) else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let value = read_json_value(&path)?;
+    Ok(net_ref_items_from_data(&value))
+}
+
+fn read_via_net_ref_data_map(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+    key: &str,
+    via_layers: &ViaLayerResolver,
+) -> Result<BTreeMap<ViaKey, NetRef>> {
+    let Some(path) = source_file_path(source_root, files, key) else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let value = read_json_value(&path)?;
+    Ok(via_net_ref_items_from_data(&value, via_layers))
+}
+
+fn read_via_layer_resolver(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+) -> Result<ViaLayerResolver> {
+    let mut cut_layers = BTreeSet::new();
+    if let Some(path) = source_file_path(source_root, files, "layers").filter(|path| path.is_file())
+    {
+        let value = read_json_value(&path)?;
+        if let Some(layers) = value.get("data").and_then(Value::as_array) {
+            for layer in layers {
+                let Some(layer_id) = layer.get("id").and_then(Value::as_u64) else {
+                    continue;
+                };
+                if layer_id > u16::MAX as u64 {
+                    continue;
+                }
+                let is_cut = layer
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|layer_type| layer_type.eq_ignore_ascii_case("CUT"));
+                if is_cut {
+                    cut_layers.insert(layer_id as u16);
+                }
+            }
+        }
+    }
+    let mut via_master_cut_layers = BTreeMap::new();
+    if let Some(path) = source_file_path(source_root, files, "vias").filter(|path| path.is_file()) {
+        let value = read_json_value(&path)?;
+        if let Some(vias) = value.get("data").and_then(Value::as_array) {
+            for via in vias {
+                let Some(master_id) = source_id_value(via) else {
+                    continue;
+                };
+                let cut_shape_layers = via
+                    .get("shapes")
+                    .and_then(Value::as_array)
+                    .map(|shapes| {
+                        shapes
+                            .iter()
+                            .filter_map(|shape| shape.get("layer_id").and_then(Value::as_u64))
+                            .filter(|layer| *layer <= u16::MAX as u64)
+                            .map(|layer| layer as u16)
+                            .filter(|layer| cut_layers.contains(layer))
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if !cut_shape_layers.is_empty() {
+                    via_master_cut_layers.insert(master_id, cut_shape_layers);
+                }
+            }
+        }
+    }
+    Ok(ViaLayerResolver {
+        cut_layers,
+        via_master_cut_layers,
+    })
+}
+
+fn read_cell_master_pin_names(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+) -> Result<BTreeMap<(u32, usize), String>> {
+    let Some(path) = source_file_path(source_root, files, "cell_masters") else {
+        return Ok(BTreeMap::new());
+    };
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let value = read_json_value(&path)?;
+    let mut names = BTreeMap::new();
+    let Some(masters) = value.get("data").and_then(Value::as_array) else {
+        return Ok(names);
+    };
+    for master in masters {
+        let Some(master_id) = source_id_value(master) else {
+            continue;
+        };
+        let master_name = master.get("name").and_then(Value::as_str).unwrap_or("cell");
+        let Some(pins) = master.get("pins").and_then(Value::as_array) else {
+            continue;
+        };
+        let mut shape_index = 0usize;
+        for pin in pins {
+            let pin_name = pin.get("name").and_then(Value::as_str).unwrap_or("");
+            let display_name = if pin_name.is_empty() {
+                master_name.to_owned()
+            } else {
+                format!("{master_name}/{pin_name}")
+            };
+            if let Some(ports) = pin.get("ports").and_then(Value::as_array) {
+                for port in ports {
+                    if let Some(rects) = port.get("rects").and_then(Value::as_array) {
+                        for rect in rects {
+                            if is_valid_bbox_value(rect) {
+                                names.insert((master_id, shape_index), display_name.clone());
+                                shape_index += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(names)
+}
+
+fn source_file_path(
+    source_root: &Path,
+    files: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Option<PathBuf> {
+    files
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|relative| source_root.join(relative))
+        .or_else(|| {
+            let candidates = [
+                source_root.join(format!("design/{key}.json")),
+                source_root.join(format!("design/{key}.json.gz")),
+                source_root.join(format!("tech/{key}.json")),
+                source_root.join(format!("tech/{key}.json.gz")),
+            ];
+            candidates.into_iter().find(|path| path.is_file())
+        })
+}
+
+fn read_json_value(path: &Path) -> Result<Value> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let text = if path.extension().and_then(|extension| extension.to_str()) == Some("gz") {
+        let mut decoder = GzDecoder::new(bytes.as_slice());
+        let mut decoded = String::new();
+        decoder
+            .read_to_string(&mut decoded)
+            .with_context(|| format!("failed to decompress {}", path.display()))?;
+        decoded
+    } else {
+        String::from_utf8(bytes)
+            .with_context(|| format!("{} is not valid UTF-8", path.display()))?
+    };
+    serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn named_items_from_data(value: &Value) -> BTreeMap<u32, String> {
+    let mut names = BTreeMap::new();
+    let Some(items) = value.get("data").and_then(Value::as_array) else {
+        return names;
+    };
+    for item in items {
+        let Some(id) = source_id_value(item) else {
+            continue;
+        };
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if !name.is_empty() {
+            names.insert(id, name.to_owned());
+        }
+    }
+    names
+}
+
+fn net_ref_items_from_data(value: &Value) -> BTreeMap<u32, NetRef> {
+    let mut nets = BTreeMap::new();
+    let Some(items) = value.get("data").and_then(Value::as_array) else {
+        return nets;
+    };
+    for item in items {
+        let Some(id) = source_id_value(item) else {
+            continue;
+        };
+        if let Some(net_ref) = net_ref_value(item) {
+            nets.insert(id, net_ref);
+        }
+    }
+    nets
+}
+
+fn via_net_ref_items_from_data(
+    value: &Value,
+    via_layers: &ViaLayerResolver,
+) -> BTreeMap<ViaKey, NetRef> {
+    let mut nets = BTreeMap::new();
+    let Some(items) = value.get("data").and_then(Value::as_array) else {
+        return nets;
+    };
+    for item in items {
+        if item.get("kind").and_then(Value::as_str) != Some("via") {
+            continue;
+        }
+        let Some(source_id) = source_id_value(item) else {
+            continue;
+        };
+        let Some(net_ref) = net_ref_value(item) else {
+            continue;
+        };
+        let Some(bbox) = bbox_value(item.get("bbox").unwrap_or(&Value::Null)) else {
+            continue;
+        };
+        for layer_id in via_layers.layers_for_item(item) {
+            nets.insert(
+                ViaKey {
+                    source_id,
+                    layer_id,
+                    bbox,
+                },
+                net_ref,
+            );
+        }
+    }
+    nets
+}
+
+fn source_id_value(item: &Value) -> Option<u32> {
+    item.get("id")
+        .and_then(Value::as_u64)
+        .map(|id| id.min(u32::MAX as u64) as u32)
+}
+
+fn net_ref_value(item: &Value) -> Option<NetRef> {
+    if let Some(net_id) = item.get("net_id").and_then(Value::as_u64) {
+        Some(NetRef::Regular(net_id.min(u32::MAX as u64) as u32))
+    } else {
+        item.get("special_net_id")
+            .and_then(Value::as_u64)
+            .map(|id| NetRef::Special(id.min(u32::MAX as u64) as u32))
+    }
+}
+
+impl ViaLayerResolver {
+    fn layers_for_item(&self, item: &Value) -> Vec<u16> {
+        if let Some(master_id) = source_id_for_key(item, "via_master_id") {
+            if let Some(layers) = self.via_master_cut_layers.get(&master_id) {
+                return layers.clone();
+            }
+        }
+        if let Some(layer_id) = item
+            .get("layer_id")
+            .and_then(Value::as_u64)
+            .map(|layer| layer.min(u16::MAX as u64) as u16)
+        {
+            return vec![layer_id];
+        }
+        let mut layers = item
+            .get("layers")
+            .or_else(|| item.get("layer_ids"))
+            .and_then(Value::as_array)
+            .map(|layers| {
+                layers
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .map(|layer| layer.min(u16::MAX as u64) as u16)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !self.cut_layers.is_empty() {
+            let cut_layers = layers
+                .iter()
+                .copied()
+                .filter(|layer| self.cut_layers.contains(layer))
+                .collect::<Vec<_>>();
+            if !cut_layers.is_empty() {
+                return cut_layers;
+            }
+        }
+        layers.sort_unstable();
+        layers.dedup();
+        layers
+    }
+}
+
+fn source_id_for_key(item: &Value, key: &str) -> Option<u32> {
+    item.get(key)
+        .and_then(Value::as_u64)
+        .map(|id| id.min(u32::MAX as u64) as u32)
+}
+
+fn bbox_value(value: &Value) -> Option<[i32; 4]> {
+    let items = value.as_array()?;
+    if items.len() < 4 {
+        return None;
+    }
+    let x1 = items[0].as_i64()?.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    let y1 = items[1].as_i64()?.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    let x2 = items[2].as_i64()?.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    let y2 = items[3].as_i64()?.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+    if x1 == x2 || y1 == y2 {
+        return None;
+    }
+    Some([x1.min(x2), y1.min(y2), x1.max(x2), y1.max(y2)])
+}
+
+fn is_valid_bbox_value(value: &Value) -> bool {
+    bbox_value(value).is_some()
+}
+
+#[cfg(any(debug_assertions, test))]
+#[derive(Debug, Clone, Copy)]
+struct DebugPanelSnapshot {
+    scale_units_per_pixel: Option<f32>,
+    render_source: Option<RenderPlanSource>,
+    render_revision: u64,
+    interaction_active: bool,
+    interaction_coarse: bool,
+    plan_reused: bool,
+    plan_batches: usize,
+    plan_items: usize,
+    plan_truncated: bool,
+    candidates_checked: usize,
+    total_shapes: usize,
+    hierarchy_candidates_checked: usize,
+    total_hierarchy_instances: usize,
+    display_cache_hits: usize,
+    display_cache_misses: usize,
+    plane_cache_hits: usize,
+    plane_cache_misses: usize,
+    used_plane_renderer: bool,
+    paint_ops: usize,
+    lod_stats: LodStats,
 }
 
 #[derive(Debug, Default)]
@@ -283,6 +780,10 @@ struct SessionLoadHandle {
     results: Receiver<Result<LoadedViewerState, String>>,
 }
 
+struct SelectionNameLoadHandle {
+    results: Receiver<Result<SelectionNameIndex, String>>,
+}
+
 impl SessionLoadHandle {
     fn spawn(package_root: PathBuf, cache_capacity: usize) -> Self {
         let (result_tx, result_rx) = mpsc::channel::<Result<LoadedViewerState, String>>();
@@ -304,13 +805,32 @@ fn load_viewer_state(package_root: PathBuf, cache_capacity: usize) -> Result<Loa
     let session = LayoutSession::from_source(source)?;
     let display = DisplayModel::from_layout_layers(session.db().layers());
     let cell_view = CellViewState::top(session.db());
-    let background_load = BackgroundLoadHandle::spawn(package_root, cache_capacity);
+    let background_load = BackgroundLoadHandle::spawn(package_root.clone(), cache_capacity);
     Ok(LoadedViewerState {
         session,
         display,
         cell_view,
+        package_root,
+        selection_names: SelectionNameIndex::default(),
+        selection_name_load: None,
+        selection_names_loaded: false,
         background_load,
     })
+}
+
+impl SelectionNameLoadHandle {
+    fn spawn(package_root: PathBuf) -> Self {
+        let (result_tx, result_rx) = mpsc::channel::<Result<SelectionNameIndex, String>>();
+        std::thread::spawn(move || {
+            let result = SelectionNameIndex::load(&package_root).map_err(|error| error.to_string());
+            let _ = result_tx.send(result);
+        });
+        Self { results: result_rx }
+    }
+
+    fn try_recv(&self) -> Option<Result<SelectionNameIndex, String>> {
+        self.results.try_recv().ok()
+    }
 }
 
 impl BackgroundLoadHandle {
@@ -633,10 +1153,37 @@ fn is_top_cell_view(db: &layoutdb::LayoutDb, cell_view: &CellViewState) -> bool 
 }
 
 fn is_layers_panel_layer(layer: &layout_display::DisplayLayer) -> bool {
-    !matches!(
+    matches!(
         layer.source,
-        layout_display::SourceSelector::ShapeKind(ShapeKind::Die | ShapeKind::Core)
+        layout_display::SourceSelector::PhysicalLayer(_)
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ObjectVisibilityRow {
+    label: &'static str,
+    kind: ShapeKind,
+}
+
+fn object_visibility_rows() -> [ObjectVisibilityRow; 4] {
+    [
+        ObjectVisibilityRow {
+            label: "Instances",
+            kind: ShapeKind::Instance,
+        },
+        ObjectVisibilityRow {
+            label: "PDN",
+            kind: ShapeKind::SpecialWire,
+        },
+        ObjectVisibilityRow {
+            label: "Net",
+            kind: ShapeKind::RegularWire,
+        },
+        ObjectVisibilityRow {
+            label: "IO Pin",
+            kind: ShapeKind::IoPin,
+        },
+    ]
 }
 
 fn die_core_boundaries(db: &layoutdb::LayoutDb) -> (Option<Rect>, Option<Rect>) {
@@ -716,87 +1263,69 @@ fn sync_hierarchy_policy_from_tuning(policy: &mut HierarchyPolicy, tuning: LodTu
     policy.max_depth = tuning.hierarchy_expand_depth.max(1);
 }
 
-fn cell_label(db: &layoutdb::LayoutDb, cell_id: layoutdb::CellId) -> String {
-    let name = db
-        .cell(cell_id)
-        .map(|cell| cell.name().to_owned())
-        .unwrap_or_else(|| "<missing>".to_owned());
-    format!("{name} ({})", cell_id.raw())
-}
-
-fn hierarchy_summary_text(
-    db: &layoutdb::LayoutDb,
-    cell_view: &CellViewState,
-    policy: &HierarchyPolicy,
-) -> String {
-    format!(
-        "context: {}\ntarget: {}\npath depth: {}\npolicy depth: {}..{}\nexpand arrays: {}",
-        cell_label(db, cell_view.context_cell()),
-        cell_label(db, cell_view.target_cell()),
-        cell_view.specific_path().depth(),
-        policy.min_depth,
-        policy.max_depth,
-        policy.expand_arrays
-    )
-}
-
-fn enter_path_for_hit(hit: &PickHit) -> Option<InstancePath> {
-    if hit.instance_path.is_empty() {
-        return None;
-    }
-    match hit.target {
-        PickHitTarget::Shape | PickHitTarget::Instance { .. } => Some(hit.instance_path.clone()),
-    }
-}
-
 #[cfg(test)]
-fn selection_summary_text(hit: &PickHit) -> String {
-    selection_inspector_rows(hit)
+fn selection_summary_text_with_layer(hit: &PickHit, layer: SelectionLayerMetadata<'_>) -> String {
+    selection_inspector_rows(hit, None, None, layer)
         .into_iter()
         .map(|(label, value)| format!("{}: {value}", label.to_ascii_lowercase()))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn selection_inspector_rows(hit: &PickHit) -> Vec<(&'static str, String)> {
-    let target = match hit.target {
-        PickHitTarget::Shape => "shape".to_owned(),
-        PickHitTarget::Instance {
-            parent_cell,
-            child_cell,
-            instance_id,
-            array_column,
-            array_row,
-        } => format!(
-            "instance id={} parent={} child={} array={},{}",
-            instance_id,
-            parent_cell.raw(),
-            child_cell.raw(),
-            array_column,
-            array_row
-        ),
-    };
+#[derive(Debug, Clone, Copy, Default)]
+struct SelectionLayerMetadata<'a> {
+    name: Option<&'a str>,
+    layer_type: Option<&'a str>,
+}
+
+fn selection_inspector_rows(
+    hit: &PickHit,
+    source_name: Option<&str>,
+    net_name: Option<&str>,
+    layer: SelectionLayerMetadata<'_>,
+) -> Vec<(&'static str, String)> {
     let (source_kind, source_file) = source_trace_for_hit(hit);
-    vec![
-        ("Target", target),
+    let mut rows = vec![
         ("Source Kind", source_kind.to_owned()),
         ("Source File", source_file.to_owned()),
         ("Source ID", hit.source_id.to_string()),
-        ("Display Layer", hit.display_layer_id.clone()),
-        ("Layer", hit.layer_id.to_string()),
-        ("Shape Kind", shape_kind_label(hit.kind).to_owned()),
-        ("Cell", hit.cell.raw().to_string()),
-        ("Depth", hit.depth.to_string()),
+    ];
+    if let Some(source_name) = source_name.filter(|name| !name.is_empty()) {
+        rows.push(("Name", source_name.to_owned()));
+    }
+    if let Some(net_name) = net_name.filter(|name| !name.is_empty()) {
+        rows.push(("Net Name", net_name.to_owned()));
+    }
+    rows.extend([
+        ("Layer", layer.name.unwrap_or("Unknown").to_owned()),
+        ("Layer ID", hit.layer_id.to_string()),
         (
-            "BBox",
+            "Layer Type",
+            layer.layer_type.unwrap_or("Unknown").to_owned(),
+        ),
+        (
+            "Display BBox",
             format!(
                 "{}, {}, {}, {}",
                 hit.bbox.x1, hit.bbox.y1, hit.bbox.x2, hit.bbox.y2
             ),
         ),
-        ("Instance Path", instance_path_summary(&hit.instance_path)),
-        ("Object Path", object_path_summary(&hit.object_path)),
-    ]
+    ]);
+    rows
+}
+
+fn selection_layer_metadata_for_id(
+    layers: &[layoutdb::LayerInfo],
+    layer_id: u16,
+) -> SelectionLayerMetadata<'_> {
+    layers
+        .iter()
+        .find(|layer| layer.id == layer_id)
+        .map(|layer| SelectionLayerMetadata {
+            name: Some(layer.name.as_str()),
+            layer_type: layer.layer_type.as_deref(),
+        })
+        .unwrap_or_default()
 }
 
 fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
@@ -810,6 +1339,9 @@ fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
             "via",
             "design/regular_wires.json | design/special_wires.json | design/io_pins.json",
         ),
+        ShapeKind::IoPin if is_hierarchy_cell_shape(hit) => {
+            ("instance_pin", "tech/cell_masters.json")
+        }
         ShapeKind::IoPin => ("io_pin", "design/io_pins.json"),
         ShapeKind::Blockage => ("blockage", "design/blockages.json"),
         ShapeKind::Fill => ("fill", "design/fills.json"),
@@ -820,142 +1352,31 @@ fn source_trace_for_hit(hit: &PickHit) -> (&'static str, &'static str) {
     }
 }
 
-fn shape_kind_label(kind: ShapeKind) -> &'static str {
-    match kind {
-        ShapeKind::Die => "die",
-        ShapeKind::Core => "core",
-        ShapeKind::Instance => "instance",
-        ShapeKind::RegularWire => "regular_wire",
-        ShapeKind::SpecialWire => "special_wire",
-        ShapeKind::Via => "via",
-        ShapeKind::IoPin => "io_pin",
-        ShapeKind::Blockage => "blockage",
-        ShapeKind::Fill => "fill",
-        ShapeKind::Region => "region",
-        ShapeKind::Row => "row",
-        ShapeKind::Track => "track",
-        ShapeKind::GCellGrid => "gcell_grid",
-    }
+fn is_hierarchy_cell_shape(hit: &PickHit) -> bool {
+    let layoutdb::ObjectPathTarget::Shape(shape) = &hit.object_path.target else {
+        return false;
+    };
+    let Some(root_cell) = hit
+        .object_path
+        .instance_path
+        .elements()
+        .first()
+        .map(|element| element.parent_cell)
+    else {
+        return false;
+    };
+    shape.cell != root_cell
 }
 
-fn instance_path_summary(path: &InstancePath) -> String {
-    if path.is_empty() {
-        return "top".to_owned();
-    }
-    path.elements()
-        .iter()
-        .map(|element| {
-            format!(
-                "{}:{}->{}[{},{}]",
-                element.instance_id,
-                element.parent_cell.raw(),
-                element.child_cell.raw(),
-                element.array_column,
-                element.array_row
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
-fn object_path_summary(path: &layoutdb::ObjectPath) -> String {
-    match &path.target {
-        layoutdb::ObjectPathTarget::Shape(shape) => {
-            format!(
-                "shape cell={} index={} source={}",
-                shape.cell.raw(),
-                shape.shape_index,
-                shape.source_id
-            )
-        }
-        layoutdb::ObjectPathTarget::Instance {
-            parent_cell,
-            instance_id,
-            source_id,
-            child_cell,
-            array_column,
-            array_row,
-        } => format!(
-            "instance id={} source={} parent={} child={} array={},{}",
-            instance_id,
-            source_id,
-            parent_cell.raw(),
-            child_cell.raw(),
-            array_column,
-            array_row
-        ),
-    }
+fn hierarchy_pin_shape_index(hit: &PickHit) -> Option<usize> {
+    let layoutdb::ObjectPathTarget::Shape(shape) = &hit.object_path.target else {
+        return None;
+    };
+    Some(shape.shape_index)
 }
 
 fn canvas_interaction_sense() -> egui::Sense {
     egui::Sense::click_and_drag()
-}
-
-fn hierarchy_row_label(db: &layoutdb::LayoutDb, row: &HierarchyTreeRow) -> String {
-    if row.instance_id.is_none() {
-        return row.cell_name.clone();
-    }
-    let cell_name = db
-        .cell(row.cell)
-        .map(|cell| cell.name())
-        .unwrap_or(row.cell_name.as_str());
-    let instance_name = if row.name.is_empty() {
-        "<unnamed>"
-    } else {
-        row.name.as_str()
-    };
-    format!(
-        "{}inst {}  {} -> {}",
-        "  ".repeat(row.depth),
-        row.instance_id.unwrap_or_default(),
-        instance_name,
-        cell_name
-    )
-}
-
-fn hierarchy_rows_content_width(available_width: f32) -> f32 {
-    available_width.clamp(1.0, SIDEBAR_MAX_WIDTH)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct HierarchyRowLayout {
-    row_width: f32,
-    label_width: f32,
-    button_width: f32,
-    button_visible: bool,
-}
-
-fn hierarchy_row_layout(
-    content_width: f32,
-    has_focus_action: bool,
-    spacing_x: f32,
-) -> HierarchyRowLayout {
-    let row_width = hierarchy_rows_content_width(content_width);
-    let desired_button_width = if has_focus_action { 44.0 } else { 0.0 };
-    let right_gutter = HIERARCHY_ROW_RIGHT_GUTTER.min((row_width - 1.0).max(0.0));
-    let spacing = if desired_button_width > 0.0 {
-        spacing_x.max(0.0)
-    } else {
-        0.0
-    };
-    let button_visible = desired_button_width > 0.0
-        && row_width >= desired_button_width + spacing + right_gutter + 48.0;
-    let button_width = if button_visible {
-        desired_button_width
-    } else {
-        0.0
-    };
-    let label_width = (row_width
-        - button_width
-        - if button_visible { spacing } else { 0.0 }
-        - if button_visible { right_gutter } else { 0.0 })
-    .max(1.0);
-    HierarchyRowLayout {
-        row_width,
-        label_width,
-        button_width,
-        button_visible,
-    }
 }
 
 fn layer_swatch_size() -> egui::Vec2 {
@@ -970,86 +1391,125 @@ fn layer_swatch_rect(slot: egui::Rect, swatch_size: egui::Vec2) -> egui::Rect {
     egui::Rect::from_center_size(slot.center(), swatch_size)
 }
 
+#[cfg(any(debug_assertions, test))]
+fn debug_panel_rows(snapshot: DebugPanelSnapshot) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "Scale",
+            snapshot
+                .scale_units_per_pixel
+                .map(|scale| format!("{scale:.3} units/px"))
+                .unwrap_or_else(|| "n/a".to_string()),
+        ),
+        (
+            "LOD Source",
+            snapshot
+                .render_source
+                .map(|source| format!("{source:?}"))
+                .unwrap_or_else(|| "none".to_string()),
+        ),
+        (
+            "Interaction",
+            if snapshot.interaction_active {
+                "active".to_string()
+            } else {
+                "idle".to_string()
+            },
+        ),
+        (
+            "Coarse LOD",
+            yes_no(snapshot.interaction_coarse).to_string(),
+        ),
+        ("Plan Reused", yes_no(snapshot.plan_reused).to_string()),
+        ("Revision", snapshot.render_revision.to_string()),
+        (
+            "Plan",
+            format!(
+                "{} batches / {} items",
+                snapshot.plan_batches, snapshot.plan_items
+            ),
+        ),
+        ("Truncated", yes_no(snapshot.plan_truncated).to_string()),
+        (
+            "Query",
+            format!(
+                "{}/{} shapes",
+                snapshot.candidates_checked, snapshot.total_shapes
+            ),
+        ),
+        (
+            "Hierarchy Query",
+            format!(
+                "{}/{} instances",
+                snapshot.hierarchy_candidates_checked, snapshot.total_hierarchy_instances
+            ),
+        ),
+        (
+            "Display Cache",
+            format!(
+                "{} hits / {} misses",
+                snapshot.display_cache_hits, snapshot.display_cache_misses
+            ),
+        ),
+        (
+            "Plane Cache",
+            format!(
+                "{} hits / {} misses",
+                snapshot.plane_cache_hits, snapshot.plane_cache_misses
+            ),
+        ),
+        (
+            "Renderer",
+            if snapshot.used_plane_renderer {
+                "raster plane".to_string()
+            } else {
+                "egui vectors".to_string()
+            },
+        ),
+        ("Paint Ops", snapshot.paint_ops.to_string()),
+        ("LOD Exact", snapshot.lod_stats.exact.to_string()),
+        ("LOD Frame", snapshot.lod_stats.frame_only.to_string()),
+        ("LOD Marker", snapshot.lod_stats.marker.to_string()),
+        (
+            "LOD Hierarchy BBox",
+            snapshot.lod_stats.hierarchy_bbox.to_string(),
+        ),
+        ("LOD Array BBox", snapshot.lod_stats.array_bbox.to_string()),
+        ("LOD Array Grid", snapshot.lod_stats.array_grid.to_string()),
+        ("LOD Coarse", snapshot.lod_stats.coarse.to_string()),
+        ("LOD Suppress", snapshot.lod_stats.suppress.to_string()),
+    ]
+}
+
+#[cfg(any(debug_assertions, test))]
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+#[cfg(any(debug_assertions, test))]
+fn should_show_debug_panel() -> bool {
+    cfg!(debug_assertions)
+}
+
 #[cfg(test)]
 fn sidebar_title_text() -> Option<&'static str> {
     None
 }
 
-fn hierarchy_row_has_focus_action(row: &HierarchyTreeRow) -> bool {
-    row.instance_id.is_some()
+fn sidebar_value_width(available_width: f32, item_spacing_x: f32) -> f32 {
+    (available_width - item_spacing_x).max(SIDEBAR_VALUE_MIN_WIDTH)
 }
 
-fn visible_hierarchy_row_slice(
-    rows: &[HierarchyTreeRow],
-    visible_range: std::ops::Range<usize>,
-) -> &[HierarchyTreeRow] {
-    if visible_range.start >= visible_range.end {
-        return &[];
-    }
-    let start = visible_range.start.min(rows.len());
-    let end = visible_range.end.min(rows.len());
-    if start >= end {
-        &[]
-    } else {
-        &rows[start..end]
-    }
+fn should_reset_sidebar_width(had_selection: bool, has_selection: bool) -> bool {
+    had_selection && !has_selection
 }
 
-fn render_visible_hierarchy_rows(
-    ui: &mut egui::Ui,
-    db: &layoutdb::LayoutDb,
-    rows: &[HierarchyTreeRow],
-    visible_range: std::ops::Range<usize>,
-    content_width: f32,
-) -> Option<InstancePath> {
-    let mut focused_path = None;
-    for row in visible_hierarchy_row_slice(rows, visible_range) {
-        let row_layout = hierarchy_row_layout(
-            content_width.min(ui.available_width()),
-            hierarchy_row_has_focus_action(row),
-            ui.spacing().item_spacing.x,
-        );
-        let row_height = ui.spacing().interact_size.y;
-        let (row_rect, _) = ui.allocate_exact_size(
-            egui::vec2(row_layout.row_width, row_height),
-            egui::Sense::hover(),
-        );
-        let mut row_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(row_rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        row_ui.shrink_clip_rect(row_rect);
-        row_ui.set_width(row_layout.row_width);
-        row_ui.spacing_mut().item_spacing.x = 6.0;
-
-        let label = hierarchy_row_label(db, row);
-        let (label_rect, _) = row_ui.allocate_exact_size(
-            egui::vec2(row_layout.label_width, row_height),
-            egui::Sense::hover(),
-        );
-        let mut label_ui = row_ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(label_rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        );
-        label_ui.shrink_clip_rect(label_rect);
-        label_ui.set_width(row_layout.label_width);
-        label_ui.add(
-            egui::Label::new(egui::RichText::new(label).monospace())
-                .truncate()
-                .halign(egui::Align::LEFT),
-        );
-
-        if row_layout.button_visible
-            && row_ui
-                .add_sized([row_layout.button_width, 18.0], egui::Button::new("Focus"))
-                .clicked()
-        {
-            focused_path = Some(row.instance_path.clone());
-        }
-    }
-    focused_path
+fn selection_row_value_width(available_width: f32) -> f32 {
+    available_width.max(SIDEBAR_VALUE_MIN_WIDTH)
 }
 
 fn draw_layer_visibility_row(
@@ -1070,6 +1530,16 @@ fn draw_layer_visibility_row(
     .inner
 }
 
+fn object_visibility_color(kind: ShapeKind) -> Color {
+    match kind {
+        ShapeKind::Instance => Color::rgb(176, 155, 255),
+        ShapeKind::SpecialWire => Color::rgb(255, 214, 118),
+        ShapeKind::RegularWire => Color::rgb(160, 218, 255),
+        ShapeKind::IoPin => Color::rgb(144, 208, 255),
+        _ => Color::rgb(132, 146, 156),
+    }
+}
+
 fn focus_view_on_cell_bbox(
     view: &mut Option<V2ViewState>,
     db: &layoutdb::LayoutDb,
@@ -1085,10 +1555,6 @@ fn focus_view_on_cell_bbox(
     } else {
         *view = Some(V2ViewState::fit(bbox, 1.0, 1.0));
     }
-}
-
-fn ascended_cell_view(cell_view: &CellViewState) -> CellViewState {
-    cell_view.ascend()
 }
 
 fn overview_density_usable(
@@ -1251,8 +1717,8 @@ impl LayoutViewerV2App {
             last_used_plane_renderer: false,
             last_paint_ops: 0,
             last_lod_stats: LodStats::default(),
-            hierarchy_rows_cache: HierarchyRowsCache::default(),
             layer_counts_cache: LayerCountsCache::default(),
+            sidebar_had_selection: false,
         })
     }
 
@@ -1277,6 +1743,35 @@ impl LayoutViewerV2App {
                 ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
             }
         }
+    }
+
+    fn poll_selection_name_load(&mut self, ctx: &egui::Context) {
+        let Some(loaded) = self.loaded.as_mut() else {
+            return;
+        };
+        if self.selected.is_some()
+            && !loaded.selection_names_loaded
+            && loaded.selection_name_load.is_none()
+        {
+            loaded.selection_name_load =
+                Some(SelectionNameLoadHandle::spawn(loaded.package_root.clone()));
+        }
+        let Some(result) = loaded
+            .selection_name_load
+            .as_ref()
+            .and_then(SelectionNameLoadHandle::try_recv)
+        else {
+            if loaded.selection_name_load.is_some() {
+                ctx.request_repaint_after(TARGET_REPAINT_INTERVAL);
+            }
+            return;
+        };
+        if let Ok(selection_names) = result {
+            loaded.selection_names = selection_names;
+        }
+        loaded.selection_name_load = None;
+        loaded.selection_names_loaded = true;
+        ctx.request_repaint();
     }
 
     fn draw_loading_canvas(&self, ui: &mut egui::Ui, rect: egui::Rect) {
@@ -1594,50 +2089,114 @@ impl LayoutViewerV2App {
     }
 
     fn draw_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("v2-display-panel-default-320")
+        let has_selection = self.selected.is_some();
+        let reset_width = should_reset_sidebar_width(self.sidebar_had_selection, has_selection);
+        self.sidebar_had_selection = has_selection;
+
+        let mut panel = egui::SidePanel::right("v2-display-panel-default-320")
             .resizable(true)
             .default_width(SIDEBAR_DEFAULT_WIDTH)
             .min_width(SIDEBAR_MIN_WIDTH)
-            .max_width(SIDEBAR_MAX_WIDTH)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("v2-display-panel-scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if let Some(mut loaded) = self.loaded.take() {
-                            self.draw_hierarchy_panel(ui, &mut loaded);
+            .max_width(SIDEBAR_MAX_WIDTH);
+        if reset_width {
+            panel = panel.exact_width(SIDEBAR_DEFAULT_WIDTH);
+        }
+        panel.show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("v2-display-panel-scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(mut loaded) = self.loaded.take() {
+                        self.draw_layers_panel(ui, &mut loaded);
+                        ui.separator();
+                        self.draw_objects_panel(ui, &mut loaded);
+                        #[cfg(debug_assertions)]
+                        if should_show_debug_panel() {
                             ui.separator();
-                            self.draw_layers_panel(ui, &mut loaded);
-                            ui.separator();
-                            ui.label("Selection");
-                            if let Some(hit) = self.selected.clone() {
-                                egui::Grid::new("selection-inspector-grid")
-                                    .num_columns(2)
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        for (label, value) in selection_inspector_rows(&hit) {
-                                            ui.label(label);
-                                            ui.monospace(value);
-                                            ui.end_row();
-                                        }
-                                    });
-                                let enter_path = enter_path_for_hit(&hit);
-                                if ui
-                                    .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
-                                    .clicked()
-                                {
-                                    if let Some(path) = enter_path {
-                                        self.enter_instance_path(&mut loaded, path);
-                                    }
-                                }
-                            } else {
-                                ui.label("No object selected");
-                            }
-                            self.loaded = Some(loaded);
-                        } else {
-                            ui.label(self.last_error.as_deref().unwrap_or("Loading layout..."));
+                            self.draw_debug_panel(ui);
                         }
-                    });
+                        ui.separator();
+                        ui.label("Selection");
+                        if let Some(hit) = self.selected.clone() {
+                            let source_name = loaded.selection_names.name_for_hit(&hit);
+                            let net_name = loaded.selection_names.net_name_for_hit(&hit);
+                            let layer = selection_layer_metadata_for_id(
+                                loaded.session.db().layers(),
+                                hit.layer_id,
+                            );
+                            for (label, value) in
+                                selection_inspector_rows(&hit, source_name, net_name, layer)
+                            {
+                                Self::draw_selection_row(ui, label, value);
+                            }
+                        } else {
+                            ui.label("No object selected");
+                        }
+                        self.loaded = Some(loaded);
+                    } else {
+                        ui.label(self.last_error.as_deref().unwrap_or("Loading layout..."));
+                    }
+                });
+        });
+    }
+
+    #[cfg(debug_assertions)]
+    fn debug_panel_snapshot(&self) -> DebugPanelSnapshot {
+        DebugPanelSnapshot {
+            scale_units_per_pixel: self.view.as_ref().map(|view| view.units_per_pixel),
+            render_source: self.last_render_plan.as_ref().map(|plan| plan.source),
+            render_revision: self.last_render_plan_revision,
+            interaction_active: self.interaction_active(),
+            interaction_coarse: self.last_render_plan_interaction_coarse,
+            plan_reused: self.last_plan_reused,
+            plan_batches: self.last_plan_batches,
+            plan_items: self.last_plan_items,
+            plan_truncated: self.last_plan_truncated,
+            candidates_checked: self.last_candidates_checked,
+            total_shapes: self.last_total_shapes,
+            hierarchy_candidates_checked: self.last_hierarchy_candidates_checked,
+            total_hierarchy_instances: self.last_total_hierarchy_instances,
+            display_cache_hits: self.last_display_cache_hits,
+            display_cache_misses: self.last_display_cache_misses,
+            plane_cache_hits: self.last_plane_cache_hits,
+            plane_cache_misses: self.last_plane_cache_misses,
+            used_plane_renderer: self.last_used_plane_renderer,
+            paint_ops: self.last_paint_ops,
+            lod_stats: self.last_lod_stats,
+        }
+    }
+
+    fn draw_selection_row(ui: &mut egui::Ui, label: &'static str, value: String) {
+        egui::Frame::NONE
+            .fill(ui.visuals().faint_bg_color)
+            .inner_margin(egui::Margin::symmetric(4, 3))
+            .show(ui, |ui| {
+                ui.label(label);
+                let value_width = selection_row_value_width(ui.available_width());
+                ui.add_sized(
+                    egui::vec2(value_width, 0.0),
+                    egui::Label::new(egui::RichText::new(value).monospace()).wrap(),
+                );
+            });
+    }
+
+    #[cfg(debug_assertions)]
+    fn draw_debug_panel(&self, ui: &mut egui::Ui) {
+        ui.label("Debug");
+        egui::Grid::new("debug-inspector-grid")
+            .num_columns(2)
+            .striped(true)
+            .show(ui, |ui| {
+                for (label, value) in debug_panel_rows(self.debug_panel_snapshot()) {
+                    ui.label(label);
+                    let value_width =
+                        sidebar_value_width(ui.available_width(), ui.spacing().item_spacing.x);
+                    ui.add_sized(
+                        egui::vec2(value_width, 0.0),
+                        egui::Label::new(egui::RichText::new(value).monospace()).wrap(),
+                    );
+                    ui.end_row();
+                }
             });
     }
 
@@ -1672,87 +2231,24 @@ impl LayoutViewerV2App {
             });
     }
 
-    fn draw_hierarchy_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
-        egui::CollapsingHeader::new("Hierarchy")
-            .default_open(true)
-            .show(ui, |ui| {
-                sync_hierarchy_policy_from_tuning(&mut self.hierarchy_policy, self.lod_tuning);
-                ui.horizontal(|ui| {
-                    if ui.button("Top").clicked() {
-                        loaded.cell_view = CellViewState::reset_to_top(loaded.session.db());
-                        self.selected = None;
-                        self.clear_render_history();
-                        focus_view_on_cell_bbox(
-                            &mut self.view,
-                            loaded.session.db(),
-                            &loaded.cell_view,
-                        );
-                    }
-                    let can_ascend = !loaded.cell_view.specific_path().is_empty();
-                    if ui
-                        .add_enabled(can_ascend, egui::Button::new("Up"))
-                        .clicked()
-                    {
-                        loaded.cell_view = ascended_cell_view(&loaded.cell_view);
-                        self.selected = None;
-                        self.clear_render_history();
-                        focus_view_on_cell_bbox(
-                            &mut self.view,
-                            loaded.session.db(),
-                            &loaded.cell_view,
-                        );
-                    }
-                    let enter_path = self.selected.as_ref().and_then(enter_path_for_hit);
-                    if ui
-                        .add_enabled(enter_path.is_some(), egui::Button::new("Enter"))
-                        .clicked()
-                    {
-                        if let Some(path) = enter_path {
-                            self.enter_instance_path(loaded, path);
-                        }
-                    }
-                });
-                ui.monospace(hierarchy_summary_text(
-                    loaded.session.db(),
-                    &loaded.cell_view,
-                    &self.hierarchy_policy,
-                ));
-                let max_rows = if self.interaction_active() {
-                    HIERARCHY_ROWS_INTERACTION_LIMIT
-                } else {
-                    HIERARCHY_ROWS_STEADY_LIMIT
-                };
-                let rows = self.hierarchy_rows_cache.get_or_build(
-                    loaded.session.db(),
-                    loaded.session.hierarchy_revision(),
-                    &loaded.cell_view,
-                    8,
-                    max_rows,
-                );
-                let rows_truncated = rows.truncated;
-                let row_height = ui.spacing().interact_size.y;
-                let focused_path = egui::ScrollArea::vertical()
-                    .max_height(260.0)
-                    .show_rows(ui, row_height, rows.rows.len(), |ui, visible_range| {
-                        let hierarchy_rows_width =
-                            hierarchy_rows_content_width(ui.available_width());
-                        ui.set_width(hierarchy_rows_width);
-                        render_visible_hierarchy_rows(
-                            ui,
-                            loaded.session.db(),
-                            &rows.rows,
-                            visible_range,
-                            hierarchy_rows_width,
-                        )
-                    })
-                    .inner;
-                if let Some(path) = focused_path {
-                    self.focus_instance_path(loaded, path);
-                }
-                if rows_truncated {
-                    ui.label("Hierarchy rows truncated");
-                }
-            });
+    fn draw_objects_panel(&mut self, ui: &mut egui::Ui, loaded: &mut LoadedViewerState) {
+        ui.label("Objects");
+        let visibility = loaded.display.object_visibility_mut();
+        for row in object_visibility_rows() {
+            let visible = match row.kind {
+                ShapeKind::Instance => &mut visibility.instances,
+                ShapeKind::SpecialWire => &mut visibility.pdn,
+                ShapeKind::RegularWire => &mut visibility.net,
+                ShapeKind::IoPin => &mut visibility.io_pin,
+                _ => unreachable!("object visibility row uses supported kinds"),
+            };
+            draw_layer_visibility_row(
+                ui,
+                visible,
+                row.label.to_string(),
+                object_visibility_color(row.kind),
+            );
+        }
     }
 
     fn clear_render_history(&mut self) {
@@ -1761,28 +2257,14 @@ impl LayoutViewerV2App {
         self.last_render_plan_revision = 0;
         self.last_render_plan_interaction_coarse = false;
         self.last_plan_reused = false;
-        self.hierarchy_rows_cache.clear();
         self.layer_counts_cache.clear();
-    }
-
-    fn enter_instance_path(&mut self, loaded: &mut LoadedViewerState, path: InstancePath) {
-        loaded.cell_view = CellViewState::from_path(loaded.cell_view.context_cell(), path);
-        self.selected = None;
-        self.clear_render_history();
-        focus_view_on_cell_bbox(&mut self.view, loaded.session.db(), &loaded.cell_view);
-    }
-
-    fn focus_instance_path(&mut self, loaded: &mut LoadedViewerState, path: InstancePath) {
-        loaded.cell_view = CellViewState::from_path(loaded.cell_view.context_cell(), path);
-        self.selected = None;
-        self.clear_render_history();
-        focus_view_on_cell_bbox(&mut self.view, loaded.session.db(), &loaded.cell_view);
     }
 }
 
 impl eframe::App for LayoutViewerV2App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_session_load(ctx);
+        self.poll_selection_name_load(ctx);
         self.draw_sidebar(ctx);
         let mut layout_active_frame = false;
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1955,8 +2437,13 @@ fn draw_plan_vectors(
                 (RenderPlane::Fill, DrawItem::Rect(item)) => {
                     let draw_rect = world_rect_to_screen(item.world, view, rect);
                     if let Some(fill_rect) = clipped_screen_rect(draw_rect, rect) {
-                        paint_ops +=
-                            draw_fill_rect(painter, fill_rect, &batch.style, interaction_active);
+                        paint_ops += draw_fill_rect(
+                            painter,
+                            fill_rect,
+                            &batch.style,
+                            interaction_active,
+                            draw_rect.size(),
+                        );
                     }
                 }
                 (RenderPlane::Hierarchy, DrawItem::Rect(item)) => {
@@ -2000,6 +2487,7 @@ fn draw_plan_vectors(
                                 fill_rect,
                                 &batch.style,
                                 interaction_active,
+                                draw_rect.size(),
                             );
                         }
                         painter.rect_stroke(
@@ -2241,6 +2729,7 @@ enum FillDrawMode {
     None,
     Solid,
     SparseDots,
+    DenseDots,
     DiagonalHatch,
     CrossHatch,
 }
@@ -2249,12 +2738,13 @@ fn fill_draw_mode(pattern: Pattern, interaction_active: bool) -> FillDrawMode {
     match pattern {
         Pattern::Hollow => FillDrawMode::None,
         Pattern::Solid => FillDrawMode::Solid,
-        Pattern::SparseDots | Pattern::DiagonalHatch | Pattern::CrossHatch
+        Pattern::SparseDots | Pattern::DenseDots | Pattern::DiagonalHatch | Pattern::CrossHatch
             if interaction_active =>
         {
             FillDrawMode::Solid
         }
         Pattern::SparseDots => FillDrawMode::SparseDots,
+        Pattern::DenseDots => FillDrawMode::DenseDots,
         Pattern::DiagonalHatch => FillDrawMode::DiagonalHatch,
         Pattern::CrossHatch => FillDrawMode::CrossHatch,
     }
@@ -2265,6 +2755,7 @@ fn draw_fill_rect(
     rect: egui::Rect,
     style: &LayerStyle,
     interaction_active: bool,
+    orientation_size: egui::Vec2,
 ) -> usize {
     match fill_draw_mode(style.fill_pattern, interaction_active) {
         FillDrawMode::None => 0,
@@ -2283,9 +2774,14 @@ fn draw_fill_rect(
             );
             1
         }
-        FillDrawMode::SparseDots => draw_sparse_dots(painter, rect, style),
-        FillDrawMode::DiagonalHatch => draw_diagonal_hatch(painter, rect, style, false),
-        FillDrawMode::CrossHatch => draw_diagonal_hatch(painter, rect, style, true),
+        FillDrawMode::SparseDots => draw_dots(painter, rect, style, SPARSE_DOT_SPACING_PX),
+        FillDrawMode::DenseDots => draw_dots(painter, rect, style, DENSE_DOT_SPACING_PX),
+        FillDrawMode::DiagonalHatch => {
+            draw_diagonal_hatch(painter, rect, style, false, orientation_size)
+        }
+        FillDrawMode::CrossHatch => {
+            draw_diagonal_hatch(painter, rect, style, true, orientation_size)
+        }
     }
 }
 
@@ -2297,9 +2793,14 @@ fn interaction_fill_alpha(pattern: Pattern, alpha: u8, interaction_active: bool)
     }
 }
 
-fn draw_sparse_dots(painter: &egui::Painter, rect: egui::Rect, style: &LayerStyle) -> usize {
+fn draw_dots(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    style: &LayerStyle,
+    base_spacing: f32,
+) -> usize {
     let color = color_to_egui(style.fill_color, style.fill_alpha);
-    let spacing = dot_spacing_for_rect(rect, SPARSE_DOT_SPACING_PX);
+    let spacing = dot_spacing_for_rect(rect, base_spacing);
     let mut ops = 0;
     let mut y = snap_to_grid(rect.top(), spacing);
     while y <= rect.bottom() {
@@ -2326,29 +2827,39 @@ fn draw_diagonal_hatch(
     rect: egui::Rect,
     style: &LayerStyle,
     cross: bool,
+    orientation_size: egui::Vec2,
 ) -> usize {
     let color = color_to_egui(style.fill_color, style.fill_alpha);
     let stroke = egui::Stroke::new(1.0, color);
     let mut ops = 0;
-    for segment in hatch_segments(rect, cross) {
+    for segment in hatch_segments(rect, cross, orientation_size) {
         painter.line_segment(segment, stroke);
         ops += 1;
     }
     ops
 }
 
-fn hatch_segments(rect: egui::Rect, cross: bool) -> Vec<[egui::Pos2; 2]> {
+fn hatch_segments(
+    rect: egui::Rect,
+    cross: bool,
+    orientation_size: egui::Vec2,
+) -> Vec<[egui::Pos2; 2]> {
     let rect = rect.shrink(2.0);
     if rect.width() < 3.0 || rect.height() < 3.0 {
         return Vec::new();
     }
     let spacing = hatch_spacing_for_rect(rect, PATTERN_TILE_PX, cross);
     let mut segments = Vec::new();
-    append_hatch_segments(&mut segments, rect, spacing, false);
+    let reverse = !cross && use_reversed_diagonal_hatch(orientation_size.x, orientation_size.y);
+    append_hatch_segments(&mut segments, rect, spacing, reverse);
     if cross {
         append_hatch_segments(&mut segments, rect, spacing, true);
     }
     segments
+}
+
+fn use_reversed_diagonal_hatch(width: f32, height: f32) -> bool {
+    width > height
 }
 
 fn append_hatch_segments(
@@ -2507,6 +3018,7 @@ fn estimated_vector_paint_ops(plan: &layout_render::RenderPlan) -> usize {
             let item_cost = match (batch.plane, batch.style.fill_pattern) {
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::CrossHatch) => 4,
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::DiagonalHatch) => 3,
+                (RenderPlane::Fill | RenderPlane::Frame, Pattern::DenseDots) => 3,
                 (RenderPlane::Fill | RenderPlane::Frame, Pattern::SparseDots) => 2,
                 (RenderPlane::Frame, _) => 2,
                 _ => 1,
@@ -2531,15 +3043,15 @@ mod tests {
         overview_error_is_unavailable, plan_source_for_units_per_pixel, plane_cache_world_rect,
         scroll_zoom_factor, selection_inspector_rows, should_check_overview_density,
         should_request_detail_tiles, should_request_smooth_repaint, should_reuse_render_plan,
-        should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect,
-        visible_hierarchy_row_slice, Args, AsyncLoadState, CachedPlaneTextureAction, FillDrawMode,
-        FrameRateState, LayoutViewerV2App, LoadRequest, LodTuningState,
+        should_sample_layout_fps, use_plane_renderer, viewport_for_world_rect, Args,
+        AsyncLoadState, CachedPlaneTextureAction, FillDrawMode, FrameRateState, LayoutViewerV2App,
+        LoadRequest, LodTuningState, SelectionLayerMetadata,
     };
     use crate::plane_cache::PlaneKey;
     use layout_display::{Color, DisplayLayer, DisplayModel, LayerStyle, Pattern};
     use layout_render::{
-        DrawBatch, DrawItem, DrawRect, LodHysteresisState, PickHit, PickHitTarget, RenderPlan,
-        RenderPlanSource, RenderPlane, RenderSettings,
+        DrawBatch, DrawItem, DrawRect, LodHysteresisState, LodStats, PickHit, PickHitTarget,
+        RenderPlan, RenderPlanSource, RenderPlane, RenderSettings,
     };
     use layoutdb::{
         CellViewState, HierarchyPolicy, InstancePath, InstancePathElement, LayerInfo, LayoutDb,
@@ -2548,10 +3060,23 @@ mod tests {
     use std::{
         collections::BTreeMap,
         fs,
+        path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     static HIERARCHY_TEST_PACKAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn hatch_segment_has_positive_slope(segment: &[egui::Pos2; 2]) -> bool {
+        let dx = segment[1].x - segment[0].x;
+        let dy = segment[1].y - segment[0].y;
+        dx.abs() >= f32::EPSILON && dy / dx > 0.0
+    }
+
+    fn hatch_segment_has_negative_slope(segment: &[egui::Pos2; 2]) -> bool {
+        let dx = segment[1].x - segment[0].x;
+        let dy = segment[1].y - segment[0].y;
+        dx.abs() >= f32::EPSILON && dy / dx < 0.0
+    }
 
     #[test]
     fn app_open_returns_before_package_io() {
@@ -2652,7 +3177,15 @@ mod tests {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let rows = selection_inspector_rows(&hit);
+        let rows = selection_inspector_rows(
+            &hit,
+            Some("wire_9"),
+            Some("req_msg_12_"),
+            SelectionLayerMetadata {
+                name: Some("M1"),
+                layer_type: Some("ROUTING"),
+            },
+        );
 
         assert!(rows
             .iter()
@@ -2665,16 +3198,29 @@ mod tests {
             .any(|(label, value)| *label == "Source ID" && value == "9"));
         assert!(rows
             .iter()
-            .any(|(label, value)| *label == "Layer" && value == "1"));
+            .any(|(label, value)| *label == "Name" && value == "wire_9"));
         assert!(rows
             .iter()
-            .any(|(label, value)| *label == "BBox" && value == "2, 2, 8, 8"));
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Instance Path" && value.contains("10") && value.contains("20")
-        }));
-        assert!(rows.iter().any(|(label, value)| {
-            *label == "Object Path" && value.contains("shape") && value.contains("source=9")
-        }));
+            .any(|(label, value)| *label == "Net Name" && value == "req_msg_12_"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer" && value == "M1"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer ID" && value == "1"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer Type" && value == "ROUTING"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Display Layer"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Shape Kind"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Target"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Cell"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Depth"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Instance Path"));
+        assert!(!rows.iter().any(|(label, _value)| *label == "Object Path"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Display BBox" && value == "2, 2, 8, 8"));
     }
 
     #[test]
@@ -2683,7 +3229,15 @@ mod tests {
         let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
         hit.kind = ShapeKind::Via;
 
-        let rows = selection_inspector_rows(&hit);
+        let rows = selection_inspector_rows(
+            &hit,
+            None,
+            None,
+            SelectionLayerMetadata {
+                name: Some("VIA1"),
+                layer_type: Some("CUT"),
+            },
+        );
 
         let source_file = rows
             .iter()
@@ -2693,6 +3247,286 @@ mod tests {
         assert!(source_file.contains("design/regular_wires.json"));
         assert!(source_file.contains("design/special_wires.json"));
         assert!(source_file.contains("design/io_pins.json"));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Layer Type" && value == "CUT"));
+    }
+
+    #[test]
+    fn selection_inspector_traces_hierarchy_io_pin_shapes_to_cell_masters() {
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+        hit.kind = ShapeKind::IoPin;
+        hit.source_id = 564;
+        hit.cell = leaf_view.target_cell();
+
+        let rows = selection_inspector_rows(
+            &hit,
+            Some("OAI21X0P5H7R/Y"),
+            None,
+            SelectionLayerMetadata {
+                name: Some("MET1"),
+                layer_type: Some("ROUTING"),
+            },
+        );
+
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Source Kind" && value == "instance_pin"));
+        assert!(rows.iter().any(|(label, value)| {
+            *label == "Source File" && value == "tech/cell_masters.json"
+        }));
+        assert!(rows
+            .iter()
+            .any(|(label, value)| *label == "Name" && value == "OAI21X0P5H7R/Y"));
+    }
+
+    #[test]
+    fn selection_layer_metadata_reads_layer_type_from_layer_info() {
+        let mut routing = LayerInfo::new(15, "MET5");
+        routing.layer_type = Some("ROUTING".to_owned());
+        let mut cut = LayerInfo::new(14, "VIA4");
+        cut.layer_type = Some("CUT".to_owned());
+        let layers = vec![routing, cut];
+
+        let routing_metadata = super::selection_layer_metadata_for_id(&layers, 15);
+        let cut_metadata = super::selection_layer_metadata_for_id(&layers, 14);
+        let missing_metadata = super::selection_layer_metadata_for_id(&layers, 99);
+
+        assert_eq!(routing_metadata.name, Some("MET5"));
+        assert_eq!(routing_metadata.layer_type, Some("ROUTING"));
+        assert_eq!(cut_metadata.name, Some("VIA4"));
+        assert_eq!(cut_metadata.layer_type, Some("CUT"));
+        assert_eq!(missing_metadata.name, None);
+        assert_eq!(missing_metadata.layer_type, None);
+    }
+
+    fn name_index_test_package() -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "layout_viewer_native_name_index_test_{}_{}",
+            std::process::id(),
+            HIERARCHY_TEST_PACKAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join(".layoutpkg");
+        let source_root = root.join("source");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&package_root).unwrap();
+        fs::create_dir_all(source_root.join("design")).unwrap();
+        fs::write(
+            package_root.join("manifest.json"),
+            format!(
+                r#"{{
+                    "schema": "ecos.layoutpkg.v1",
+                    "design_name": "unit",
+                    "world_bbox": [0, 0, 1000, 1000],
+                    "tilesets": {{ "detail": "detail/index.json" }},
+                    "source": {{ "kind": "view-json", "root": "{}" }}
+                }}"#,
+                source_root.display()
+            ),
+        )
+        .unwrap();
+        fs::create_dir_all(package_root.join("detail")).unwrap();
+        fs::write(package_root.join("detail/index.json"), r#"{ "tiles": [] }"#).unwrap();
+        fs::write(
+            source_root.join("manifest.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "files": {
+                    "layers": "tech/layers.json",
+                    "vias": "tech/vias.json",
+                    "io_pins": "design/io_pins.json",
+                    "regular_wires": "design/regular_wires.json",
+                    "special_wires": "design/special_wires.json",
+                    "regular_nets": "design/regular_nets.json",
+                    "special_nets": "design/special_nets.json"
+                }
+            }"#,
+        )
+        .unwrap();
+        fs::create_dir_all(source_root.join("tech")).unwrap();
+        fs::write(
+            source_root.join("tech/layers.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "layers",
+                "data": [
+                    { "id": 1, "name": "M1", "type": "ROUTING" },
+                    { "id": 2, "name": "VIA1", "type": "CUT" },
+                    { "id": 3, "name": "M2", "type": "ROUTING" },
+                    { "id": 4, "name": "VIA2", "type": "CUT" },
+                    { "id": 5, "name": "M3", "type": "ROUTING" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("tech/vias.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "vias",
+                "data": [
+                    {
+                        "id": 10,
+                        "name": "M2_M1_VIA1",
+                        "shapes": [
+                            { "layer_id": 1, "rects": [[-50, -50, 50, 50]] },
+                            { "layer_id": 2, "rects": [[-40, -40, 40, 40]] },
+                            { "layer_id": 3, "rects": [[-50, -50, 50, 50]] }
+                        ]
+                    },
+                    {
+                        "id": 11,
+                        "name": "M3_M2_VIA2",
+                        "shapes": [
+                            { "layer_id": 3, "rects": [[-50, -50, 50, 50]] },
+                            { "layer_id": 4, "rects": [[-40, -40, 40, 40]] },
+                            { "layer_id": 5, "rects": [[-50, -50, 50, 50]] }
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("design/io_pins.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "io_pins",
+                "data": [
+                    { "id": 14, "name": "req_msg_12_", "net_id": 2 }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("design/regular_wires.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "regular_wires",
+                "data": [
+                    { "id": 4, "kind": "via", "via_master_id": 10, "net_id": 0, "bbox": [10, 10, 20, 20], "layers": [1, 3, 2] },
+                    { "id": 7, "kind": "path", "net_id": 1 }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("design/special_wires.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "special_wires",
+                "data": [
+                    { "id": 0, "kind": "path", "special_net_id": 0 },
+                    { "id": 4, "kind": "via", "via_master_id": 11, "special_net_id": 0, "bbox": [30, 30, 40, 40], "layers": [3, 5, 4] }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("design/regular_nets.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "regular_nets",
+                "data": [
+                    { "id": 0, "name": "clk" },
+                    { "id": 1, "name": "reset" },
+                    { "id": 2, "name": "req_msg_12_" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("design/special_nets.json"),
+            r#"{
+                "schema": "ieda.view.v1",
+                "kind": "special_nets",
+                "data": [
+                    { "id": 0, "name": "VDD" }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        (root, package_root)
+    }
+
+    #[test]
+    fn load_viewer_state_defers_selection_name_index_loading() {
+        let (root, package_root) = name_index_test_package();
+
+        let loaded = super::load_viewer_state(package_root, 1).unwrap();
+
+        assert!(loaded.selection_names.io_pins.is_empty());
+        assert!(loaded.selection_name_load.is_none());
+        assert!(!loaded.selection_names_loaded);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn selection_name_load_handle_loads_io_pin_names_in_background() {
+        let (root, package_root) = name_index_test_package();
+
+        let load = super::SelectionNameLoadHandle::spawn(package_root);
+        let mut loaded_names = None;
+        for _ in 0..100 {
+            if let Some(result) = load.try_recv() {
+                loaded_names = Some(result.unwrap());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let names = loaded_names.expect("background selection name index load should finish");
+
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+        hit.kind = ShapeKind::IoPin;
+        hit.source_id = 14;
+        hit.instance_path = InstancePath::new();
+        hit.object_path.instance_path = InstancePath::new();
+
+        assert_eq!(names.name_for_hit(&hit), Some("req_msg_12_"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn selection_name_index_reads_io_pin_names_from_source_root() {
+        let (root, package_root) = name_index_test_package();
+
+        let names = super::SelectionNameIndex::load(&package_root).unwrap();
+        let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
+        let mut hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
+        hit.kind = ShapeKind::IoPin;
+        hit.source_id = 14;
+        hit.instance_path = InstancePath::new();
+        hit.object_path.instance_path = InstancePath::new();
+
+        assert_eq!(names.name_for_hit(&hit), Some("req_msg_12_"));
+        assert_eq!(names.net_name_for_hit(&hit), Some("req_msg_12_"));
+
+        hit.kind = ShapeKind::RegularWire;
+        hit.source_id = 7;
+        assert_eq!(names.name_for_hit(&hit), None);
+        assert_eq!(names.net_name_for_hit(&hit), Some("reset"));
+
+        hit.kind = ShapeKind::SpecialWire;
+        hit.source_id = 0;
+        assert_eq!(names.net_name_for_hit(&hit), Some("VDD"));
+
+        hit.kind = ShapeKind::Via;
+        hit.source_id = 4;
+        hit.layer_id = 2;
+        hit.bbox = Rect::new(10, 10, 20, 20);
+        assert_eq!(names.name_for_hit(&hit), None);
+        assert_eq!(names.net_name_for_hit(&hit), Some("clk"));
+
+        hit.layer_id = 4;
+        hit.bbox = Rect::new(30, 30, 40, 40);
+        assert_eq!(names.net_name_for_hit(&hit), Some("VDD"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2952,22 +3786,6 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_rows_cache_reuses_rows_for_matching_revision_view_and_limit() {
-        let (db, _) = hierarchy_test_db_and_leaf_view();
-        let mut cache = super::HierarchyRowsCache::default();
-        let cell_view = CellViewState::top(&db);
-
-        let first = cache.get_or_build(&db, 1, &cell_view, 8, 16).clone();
-        let second = cache.get_or_build(&db, 1, &cell_view, 8, 16).clone();
-        let third = cache.get_or_build(&db, 2, &cell_view, 8, 16).clone();
-
-        assert_eq!(first, second);
-        assert_eq!(cache.hits, 1);
-        assert_eq!(cache.misses, 2);
-        assert_eq!(third, db.hierarchy_tree_rows(cell_view, 8, 16));
-    }
-
-    #[test]
     fn layer_counts_cache_reuses_counts_for_matching_revision() {
         let mut db = LayoutDb::new("unit", Rect::new(0, 0, 100, 100));
         db.add_layer(LayerInfo::new(1, "M1"));
@@ -2986,31 +3804,6 @@ mod tests {
         assert_eq!(third.get(&1), Some(&1));
         assert_eq!(cache.hits, 1);
         assert_eq!(cache.misses, 2);
-    }
-
-    #[test]
-    fn hierarchy_rows_interaction_limit_is_smaller_than_steady_limit() {
-        assert!(super::HIERARCHY_ROWS_INTERACTION_LIMIT < super::HIERARCHY_ROWS_STEADY_LIMIT);
-    }
-
-    #[test]
-    fn visible_hierarchy_row_slice_clamps_to_visible_range_only() {
-        let db = LayoutDb::new("unit", Rect::new(0, 0, 100, 100));
-        let cell = db.top_cell();
-        let rows = (0..512)
-            .map(|index| sample_hierarchy_row(index, cell, &format!("cell_{index}")))
-            .collect::<Vec<_>>();
-
-        let visible = visible_hierarchy_row_slice(&rows, 10..24);
-        let over_scrolled = visible_hierarchy_row_slice(&rows, 500..540);
-        let reversed = visible_hierarchy_row_slice(&rows, 42..12);
-
-        assert_eq!(visible.len(), 14);
-        assert_eq!(visible[0].cell_name, "cell_10");
-        assert_eq!(visible[13].cell_name, "cell_23");
-        assert_eq!(over_scrolled.len(), 12);
-        assert_eq!(over_scrolled[0].cell_name, "cell_500");
-        assert!(reversed.is_empty());
     }
 
     #[test]
@@ -3292,75 +4085,27 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_summary_text_includes_target_and_depth() {
-        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
-        let mut policy = super::hierarchy_policy_from_tuning(LodTuningState {
-            hierarchy_expand_depth: 3,
-            ..Default::default()
-        });
-        policy.expand_arrays = false;
-
-        let text = super::hierarchy_summary_text(&db, &leaf_view, &policy);
-
-        assert!(text.contains("context: top"));
-        assert!(text.contains("target: leaf"));
-        assert!(text.contains("path depth: 2"));
-        assert!(text.contains("policy depth: 0..3"));
-        assert!(text.contains("expand arrays: false"));
-    }
-
-    #[test]
-    fn enter_path_for_shape_hit_uses_shape_instance_path() {
+    fn selection_summary_omits_internal_hierarchy_fields() {
         let (_db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
 
-        let enter_path = super::enter_path_for_hit(&hit).expect("shape path should be enterable");
-
-        assert_eq!(enter_path, leaf_view.specific_path().clone());
-    }
-
-    #[test]
-    fn selection_summary_includes_target_and_path_depth() {
-        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
-        let hit = sample_pick_hit(PickHitTarget::Shape, leaf_view.specific_path().clone());
-
-        let text = super::selection_summary_text(&hit);
-
-        assert!(text.contains("target: shape"));
-        assert!(text.contains("depth: 2"));
-        assert!(text.contains(&format!("cell: {}", db.cell_by_name("leaf").unwrap().raw())));
-        assert!(text.contains("layer: 1"));
-        assert!(text.contains("bbox: 2, 2, 8, 8"));
-    }
-
-    #[test]
-    fn hierarchy_row_label_includes_instance_and_cell_name() {
-        let (db, _leaf_view) = hierarchy_test_db_and_leaf_view();
-        let rows = db.hierarchy_tree_rows(CellViewState::top(&db), 8, 16);
-        let root = &rows.rows[0];
-        let mid = rows
-            .rows
-            .iter()
-            .find(|row| row.name == "mid0")
-            .expect("fixture should include mid0 instance row");
-
-        let root_label = super::hierarchy_row_label(&db, root);
-        let mid_label = super::hierarchy_row_label(&db, mid);
-
-        assert!(root_label.contains("top"));
-        assert!(!root_label.contains("inst"));
-        assert!(mid_label.contains("mid0"));
-        assert!(mid_label.contains("inst 10"));
-        assert!(mid_label.contains("mid"));
-    }
-
-    #[test]
-    fn sidebar_content_does_not_expand_to_unbounded_available_width() {
-        assert_eq!(
-            super::hierarchy_rows_content_width(10_000.0),
-            super::SIDEBAR_MAX_WIDTH
+        let text = super::selection_summary_text_with_layer(
+            &hit,
+            SelectionLayerMetadata {
+                name: Some("M1"),
+                layer_type: Some("ROUTING"),
+            },
         );
-        assert_eq!(super::hierarchy_rows_content_width(20.0), 20.0);
+
+        assert!(!text.contains("target:"));
+        assert!(!text.contains("cell:"));
+        assert!(!text.contains("depth:"));
+        assert!(!text.contains("instance path:"));
+        assert!(!text.contains("object path:"));
+        assert!(text.contains("layer: M1"));
+        assert!(text.contains("layer id: 1"));
+        assert!(text.contains("layer type: ROUTING"));
+        assert!(text.contains("display bbox: 2, 2, 8, 8"));
     }
 
     #[test]
@@ -3370,36 +4115,161 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_selection_values_wrap_within_default_width() {
+        let value_width = super::sidebar_value_width(super::SIDEBAR_DEFAULT_WIDTH, 8.0);
+
+        assert!(value_width > super::SIDEBAR_DEFAULT_WIDTH - 16.0);
+        assert!(value_width >= super::SIDEBAR_VALUE_MIN_WIDTH);
+    }
+
+    #[test]
+    fn sidebar_width_resets_when_selection_is_cleared() {
+        assert!(super::should_reset_sidebar_width(true, false));
+        assert!(!super::should_reset_sidebar_width(false, false));
+        assert!(!super::should_reset_sidebar_width(false, true));
+        assert!(!super::should_reset_sidebar_width(true, true));
+    }
+
+    #[test]
     fn sidebar_omits_redundant_display_title() {
         assert_eq!(super::sidebar_title_text(), None);
     }
 
     #[test]
-    fn window_title_omits_version_suffix() {
-        assert_eq!(super::window_title(), "ECOS Layout Viewer");
+    fn sidebar_layers_panel_accepts_only_physical_layers() {
+        let physical = DisplayLayer::physical_layer(1, "M1", LayerStyle::default_for_index(0));
+        let instance = DisplayLayer::shape_kind(
+            ShapeKind::Instance,
+            "Instances",
+            LayerStyle::default_for_index(1),
+        );
+        let net = DisplayLayer::shape_kind(
+            ShapeKind::RegularWire,
+            "Net",
+            LayerStyle::default_for_index(2),
+        );
+
+        assert!(super::is_layers_panel_layer(&physical));
+        assert!(!super::is_layers_panel_layer(&instance));
+        assert!(!super::is_layers_panel_layer(&net));
     }
 
     #[test]
-    fn hierarchy_row_layout_keeps_label_and_focus_button_inside_sidebar_width() {
-        let layout = super::hierarchy_row_layout(10_000.0, true, 6.0);
+    fn sidebar_objects_panel_lists_instances_pdn_net_and_io_pin() {
+        let rows = super::object_visibility_rows();
 
-        assert_eq!(layout.row_width, super::SIDEBAR_MAX_WIDTH);
-        assert!(layout.button_visible);
-        assert_eq!(layout.button_width, 44.0);
-        assert!(
-            layout.label_width + layout.button_width + 6.0 + super::HIERARCHY_ROW_RIGHT_GUTTER
-                <= layout.row_width
+        assert_eq!(
+            rows.iter().map(|row| row.label).collect::<Vec<_>>(),
+            vec!["Instances", "PDN", "Net", "IO Pin"]
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
+            vec![
+                ShapeKind::Instance,
+                ShapeKind::SpecialWire,
+                ShapeKind::RegularWire,
+                ShapeKind::IoPin,
+            ]
         );
     }
 
     #[test]
-    fn hierarchy_row_layout_hides_focus_button_when_row_is_too_narrow() {
-        let layout = super::hierarchy_row_layout(80.0, true, 6.0);
+    fn debug_panel_rows_include_scale_and_lod_source() {
+        let rows = super::debug_panel_rows(super::DebugPanelSnapshot {
+            scale_units_per_pixel: Some(12.5),
+            render_source: Some(RenderPlanSource::HierarchyMid),
+            render_revision: 7,
+            interaction_active: true,
+            interaction_coarse: true,
+            plan_reused: false,
+            plan_batches: 3,
+            plan_items: 42,
+            plan_truncated: false,
+            candidates_checked: 9,
+            total_shapes: 100,
+            hierarchy_candidates_checked: 2,
+            total_hierarchy_instances: 6,
+            display_cache_hits: 4,
+            display_cache_misses: 1,
+            plane_cache_hits: 5,
+            plane_cache_misses: 0,
+            used_plane_renderer: true,
+            paint_ops: 123,
+            lod_stats: LodStats {
+                exact: 1,
+                frame_only: 2,
+                marker: 3,
+                hierarchy_bbox: 4,
+                array_bbox: 5,
+                array_grid: 6,
+                coarse: 7,
+                suppress: 8,
+            },
+        });
 
-        assert_eq!(layout.row_width, 80.0);
-        assert!(!layout.button_visible);
-        assert_eq!(layout.button_width, 0.0);
-        assert_eq!(layout.label_width, 80.0);
+        assert!(rows.contains(&("Scale", "12.500 units/px".to_string())));
+        assert!(rows.contains(&("LOD Source", "HierarchyMid".to_string())));
+        assert!(rows.contains(&("Coarse LOD", "yes".to_string())));
+        assert!(rows.contains(&("LOD Exact", "1".to_string())));
+        assert!(rows.contains(&("LOD Suppress", "8".to_string())));
+    }
+
+    #[test]
+    fn debug_panel_rows_keep_values_compact_for_sidebar_width() {
+        let rows = super::debug_panel_rows(super::DebugPanelSnapshot {
+            scale_units_per_pixel: Some(85.232),
+            render_source: Some(RenderPlanSource::HierarchyNear),
+            render_revision: 0,
+            interaction_active: false,
+            interaction_coarse: false,
+            plan_reused: true,
+            plan_batches: 4,
+            plan_items: 6799,
+            plan_truncated: false,
+            candidates_checked: 2,
+            total_shapes: 2,
+            hierarchy_candidates_checked: 607,
+            total_hierarchy_instances: 775,
+            display_cache_hits: 0,
+            display_cache_misses: 0,
+            plane_cache_hits: 1,
+            plane_cache_misses: 0,
+            used_plane_renderer: true,
+            paint_ops: 7577,
+            lod_stats: LodStats {
+                exact: 0,
+                frame_only: 389,
+                marker: 6410,
+                hierarchy_bbox: 0,
+                array_bbox: 0,
+                array_grid: 0,
+                coarse: 0,
+                suppress: 0,
+            },
+        });
+
+        assert!(
+            rows.iter().all(|(_label, value)| value.len() <= 32),
+            "debug values should stay compact enough for the default sidebar: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn debug_panel_is_visible_only_in_debug_builds() {
+        assert_eq!(super::should_show_debug_panel(), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn sidebar_does_not_render_hierarchy_module() {
+        let source = include_str!("main.rs");
+
+        assert!(!source.contains(&["self.", "draw_", "hierarchy_panel"].concat()));
+        assert!(!source.contains(&["CollapsingHeader::new(", "\"Hier", "archy\"", ")",].concat()));
+    }
+
+    #[test]
+    fn window_title_omits_version_suffix() {
+        assert_eq!(super::window_title(), "ECOS Layout Viewer");
     }
 
     #[test]
@@ -3421,21 +4291,6 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_focus_action_is_only_for_instance_rows() {
-        let (db, _leaf_view) = hierarchy_test_db_and_leaf_view();
-        let rows = db.hierarchy_tree_rows(CellViewState::top(&db), 8, 16);
-        let root = &rows.rows[0];
-        let instance = rows
-            .rows
-            .iter()
-            .find(|row| row.instance_id.is_some())
-            .expect("fixture should include an instance row");
-
-        assert!(!super::hierarchy_row_has_focus_action(root));
-        assert!(super::hierarchy_row_has_focus_action(instance));
-    }
-
-    #[test]
     fn focus_view_on_cell_bbox_uses_existing_canvas_size() {
         let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
         let mut view = Some(super::V2ViewState::fit(
@@ -3450,19 +4305,6 @@ mod tests {
         assert_eq!(focused.center_x, 10.0);
         assert_eq!(focused.center_y, 10.0);
         assert!((focused.units_per_pixel - 0.08).abs() < 0.001);
-    }
-
-    #[test]
-    fn hierarchy_up_button_helper_ascends_until_top_path() {
-        let (db, leaf_view) = hierarchy_test_db_and_leaf_view();
-
-        let mid_view = super::ascended_cell_view(&leaf_view);
-        assert_eq!(mid_view.target_cell(), db.cell_by_name("mid").unwrap());
-        assert_eq!(mid_view.specific_path().depth(), 1);
-
-        let top_view = super::ascended_cell_view(&mid_view);
-        assert_eq!(top_view.target_cell(), db.top_cell());
-        assert!(top_view.specific_path().is_empty());
     }
 
     #[test]
@@ -3848,7 +4690,7 @@ mod tests {
     fn hatch_pattern_uses_continuous_visible_segments() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 90.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(!segments.is_empty());
         assert!(segments.iter().any(|segment| {
@@ -3859,10 +4701,41 @@ mod tests {
     }
 
     #[test]
+    fn diagonal_hatch_reverses_for_horizontal_rects() {
+        let horizontal = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 20.0));
+        let vertical = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(20.0, 80.0));
+        let square = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(40.0, 40.0));
+
+        let horizontal_segments = super::hatch_segments(horizontal, false, horizontal.size());
+        let vertical_segments = super::hatch_segments(vertical, false, vertical.size());
+        let square_segments = super::hatch_segments(square, false, square.size());
+
+        assert!(horizontal_segments
+            .iter()
+            .any(hatch_segment_has_positive_slope));
+        assert!(vertical_segments
+            .iter()
+            .any(hatch_segment_has_negative_slope));
+        assert!(square_segments.iter().any(hatch_segment_has_negative_slope));
+    }
+
+    #[test]
+    fn diagonal_hatch_keeps_horizontal_direction_after_clipping() {
+        let clipped_visible_part =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(8.0, 20.0));
+        let original_size = egui::vec2(100.0, 20.0);
+
+        let segments = super::hatch_segments(clipped_visible_part, false, original_size);
+
+        assert!(segments.iter().any(hatch_segment_has_positive_slope));
+        assert!(!segments.iter().any(hatch_segment_has_negative_slope));
+    }
+
+    #[test]
     fn hatch_pattern_segments_scale_with_perimeter_not_area() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 180);
     }
@@ -3871,7 +4744,7 @@ mod tests {
     fn hatch_pattern_keeps_viewport_sized_rects_under_budget() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 1000.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 300);
     }
@@ -3880,7 +4753,7 @@ mod tests {
     fn hatch_pattern_caps_large_screen_rect_segments() {
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2400.0, 1600.0));
 
-        let segments = super::hatch_segments(rect, true);
+        let segments = super::hatch_segments(rect, true, rect.size());
 
         assert!(segments.len() <= 512);
         assert!(!segments.is_empty());
@@ -3890,6 +4763,10 @@ mod tests {
     fn patterned_fills_degrade_to_solid_during_interaction() {
         assert_eq!(
             fill_draw_mode(Pattern::SparseDots, true),
+            FillDrawMode::Solid
+        );
+        assert_eq!(
+            fill_draw_mode(Pattern::DenseDots, true),
             FillDrawMode::Solid
         );
         assert_eq!(
@@ -3903,6 +4780,10 @@ mod tests {
         assert_eq!(fill_draw_mode(Pattern::Hollow, true), FillDrawMode::None);
 
         assert_eq!(
+            fill_draw_mode(Pattern::DenseDots, false),
+            FillDrawMode::DenseDots
+        );
+        assert_eq!(
             fill_draw_mode(Pattern::DiagonalHatch, false),
             FillDrawMode::DiagonalHatch
         );
@@ -3912,6 +4793,10 @@ mod tests {
     fn patterned_interaction_fill_uses_low_alpha_placeholder() {
         assert_eq!(
             super::interaction_fill_alpha(Pattern::SparseDots, 90, true),
+            40
+        );
+        assert_eq!(
+            super::interaction_fill_alpha(Pattern::DenseDots, 90, true),
             40
         );
         assert_eq!(
@@ -4165,26 +5050,6 @@ mod tests {
             instance_path,
             object_path,
             target,
-        }
-    }
-
-    fn sample_hierarchy_row(
-        index: usize,
-        cell: layoutdb::CellId,
-        cell_name: &str,
-    ) -> layoutdb::HierarchyTreeRow {
-        layoutdb::HierarchyTreeRow {
-            depth: index % 4,
-            cell,
-            parent_cell: None,
-            instance_id: Some(index as u32),
-            source_id: Some(index as u32),
-            name: format!("inst_{index}"),
-            cell_name: cell_name.to_owned(),
-            bbox: Rect::new(0, 0, 10, 10),
-            instance_path: InstancePath::new(),
-            child_instance_count: 0,
-            shape_count: 0,
         }
     }
 }

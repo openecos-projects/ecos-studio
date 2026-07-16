@@ -15,8 +15,6 @@ const workspacePackageAliases = {
 }
 
 export default defineConfig(({ command, mode }) => {
-  const isProd = command === 'build' && mode !== 'development'
-
   return {
     main: {
       resolve: {

@@ -29,11 +29,7 @@ const testState = vi.hoisted(() => ({
   unmountCallbacks: [] as Array<() => void>,
   subscribeProjectLogTail: vi.fn(),
   projectFileWatchers: [] as Array<{
-    listener: (event: {
-      subscriptionId: string
-      path: string
-      eventType: string
-    }) => void
+    listener: (event: { subscriptionId: string; path: string; eventType: string }) => void
     path: string
     unwatch: ReturnType<typeof vi.fn>
   }>,
@@ -203,7 +199,9 @@ describe('useHomeData live project file watchers', () => {
 
     testState.readWorkspaceHomeResourceApi.mockImplementation(async () => {
       const projectPath = testState.currentProject!.value?.path ?? '/workspace/a'
-      return JSON.parse(await testState.readProjectTextFile(`${projectPath}/home/home.json`))
+      return JSON.parse(
+        await testState.readProjectTextFile(`${projectPath}/home/home.json`),
+      )
     })
     testState.getWorkspaceResourceIndexApi.mockImplementation(async () => {
       const projectPath = testState.currentProject!.value?.path ?? '/workspace/a'
@@ -216,8 +214,16 @@ describe('useHomeData live project file watchers', () => {
         home: {
           homeJson: { path: `${projectPath}/home/home.json`, exists: true, kind: 'home' },
           flowJson: { path: `${projectPath}/home/flow.json`, exists: true, kind: 'flow' },
-          parametersJson: { path: `${projectPath}/home/parameters.json`, exists: true, kind: 'parameters' },
-          checklistJson: { path: `${projectPath}/home/checklist.json`, exists: false, kind: 'checklist' },
+          parametersJson: {
+            path: `${projectPath}/home/parameters.json`,
+            exists: true,
+            kind: 'parameters',
+          },
+          checklistJson: {
+            path: `${projectPath}/home/checklist.json`,
+            exists: false,
+            kind: 'checklist',
+          },
         },
         homeData: homeDataFor(projectPath),
         parameters: {},
@@ -257,15 +263,21 @@ describe('useHomeData live project file watchers', () => {
     })
     testState.requestProjectPathAccess.mockResolvedValue(true)
     testState.resolveProjectPathAccess.mockImplementation(async (path: string) => path)
-    testState.subscribeProjectLogTail.mockImplementation(async (
-      path: string,
-      listener: (event: any) => void,
-      options: { maxInitialChars?: number; maxChunkChars?: number; pollIntervalMs?: number },
-    ) => {
-      const unwatch = vi.fn()
-      testState.logTailListeners.push({ path, options, listener, unwatch })
-      return unwatch
-    })
+    testState.subscribeProjectLogTail.mockImplementation(
+      async (
+        path: string,
+        listener: (event: any) => void,
+        options: {
+          maxInitialChars?: number
+          maxChunkChars?: number
+          pollIntervalMs?: number
+        },
+      ) => {
+        const unwatch = vi.fn()
+        testState.logTailListeners.push({ path, options, listener, unwatch })
+        return unwatch
+      },
+    )
     testState.readProjectBlobUrl.mockResolvedValue('blob:unused')
     testState.readProjectTextFile.mockImplementation(async (path: string) => {
       if (path.endsWith('/home/home.json')) {
@@ -279,38 +291,50 @@ describe('useHomeData live project file watchers', () => {
     testState.readOptionalProjectTextFile.mockImplementation(async (path: string) => {
       return await testState.readProjectTextFile(path)
     })
-    testState.readOptionalProjectTextFileTail.mockImplementation(async (path: string, maxChars: number) => {
-      const content = await testState.readProjectTextFile(path)
-      return {
-        content: content.slice(-maxChars),
-        truncated: content.length > maxChars,
-        sizeBytes: content.length,
-      }
-    })
-    testState.readOptionalProjectTextFileUpdate.mockImplementation(async (path: string, fromOffsetBytes: number, maxChars: number) => {
-      const content = await testState.readProjectTextFile(path)
-      const reset = fromOffsetBytes > content.length
-      const next = reset ? content.slice(-maxChars) : content.slice(fromOffsetBytes).slice(-maxChars)
-      return {
-        content: next,
-        fromOffsetBytes: reset ? 0 : fromOffsetBytes,
-        nextOffsetBytes: content.length,
-        sizeBytes: content.length,
-        reset,
-        truncated: reset || next.length >= maxChars,
-      }
-    })
+    testState.readOptionalProjectTextFileTail.mockImplementation(
+      async (path: string, maxChars: number) => {
+        const content = await testState.readProjectTextFile(path)
+        return {
+          content: content.slice(-maxChars),
+          truncated: content.length > maxChars,
+          sizeBytes: content.length,
+        }
+      },
+    )
+    testState.readOptionalProjectTextFileUpdate.mockImplementation(
+      async (path: string, fromOffsetBytes: number, maxChars: number) => {
+        const content = await testState.readProjectTextFile(path)
+        const reset = fromOffsetBytes > content.length
+        const next = reset
+          ? content.slice(-maxChars)
+          : content.slice(fromOffsetBytes).slice(-maxChars)
+        return {
+          content: next,
+          fromOffsetBytes: reset ? 0 : fromOffsetBytes,
+          nextOffsetBytes: content.length,
+          sizeBytes: content.length,
+          reset,
+          truncated: reset || next.length >= maxChars,
+        }
+      },
+    )
     testState.readProjectTextFileTail.mockImplementation(async (path: string) => {
       return await testState.readProjectTextFile(path)
     })
-    testState.watchProjectFile.mockImplementation(async (
-      path: string,
-      listener: (event: { subscriptionId: string; path: string; eventType: string }) => void,
-    ) => {
-      const unwatch = vi.fn()
-      testState.projectFileWatchers.push({ path, listener, unwatch })
-      return unwatch
-    })
+    testState.watchProjectFile.mockImplementation(
+      async (
+        path: string,
+        listener: (event: {
+          subscriptionId: string
+          path: string
+          eventType: string
+        }) => void,
+      ) => {
+        const unwatch = vi.fn()
+        testState.projectFileWatchers.push({ path, listener, unwatch })
+        return unwatch
+      },
+    )
   })
 
   afterEach(() => {
@@ -343,8 +367,8 @@ describe('useHomeData live project file watchers', () => {
       }),
     )
 
-    const liveTail = testState.logTailListeners.find((entry) =>
-      entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log'
+    const liveTail = testState.logTailListeners.find(
+      (entry) => entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log',
     )
     expect(liveTail).toBeDefined()
 
@@ -392,8 +416,16 @@ describe('useHomeData live project file watchers', () => {
       home: {
         homeJson: { path: '/workspace/a/home/home.json', exists: true, kind: 'home' },
         flowJson: { path: '/workspace/a/home/flow.json', exists: true, kind: 'flow' },
-        parametersJson: { path: '/workspace/a/home/parameters.json', exists: true, kind: 'parameters' },
-        checklistJson: { path: '/workspace/a/home/checklist.json', exists: false, kind: 'checklist' },
+        parametersJson: {
+          path: '/workspace/a/home/parameters.json',
+          exists: true,
+          kind: 'parameters',
+        },
+        checklistJson: {
+          path: '/workspace/a/home/checklist.json',
+          exists: false,
+          kind: 'checklist',
+        },
       },
       homeData: homeDataFor('/workspace/a'),
       parameters: {},
@@ -464,8 +496,8 @@ describe('useHomeData live project file watchers', () => {
       expect(testState.subscribeProjectLogTail).toHaveBeenCalledTimes(1)
     })
 
-    const firstTail = testState.logTailListeners.find((entry) =>
-      entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log'
+    const firstTail = testState.logTailListeners.find(
+      (entry) => entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log',
     )
     expect(firstTail).toBeDefined()
 
@@ -508,8 +540,8 @@ describe('useHomeData live project file watchers', () => {
       )
     })
 
-    const flowWatch = testState.projectFileWatchers.find((entry) =>
-      entry.path === '/workspace/a/home/flow.json'
+    const flowWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/flow.json',
     )
     expect(flowWatch).toBeDefined()
 
@@ -528,7 +560,9 @@ describe('useHomeData live project file watchers', () => {
       )
     })
 
-    expect(home.flowLogSegments.value.find((segment) => segment.live)?.stepName).toBe('Floorplan')
+    expect(home.flowLogSegments.value.find((segment) => segment.live)?.stepName).toBe(
+      'Floorplan',
+    )
   })
 
   it('watches home.json during live execution and reloads Home assets when it changes', async () => {
@@ -564,7 +598,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -577,8 +613,8 @@ describe('useHomeData live project file watchers', () => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-1.png')
     })
 
-    const homeWatch = testState.projectFileWatchers.find((entry) =>
-      entry.path === '/workspace/a/home/home.json'
+    const homeWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/home.json',
     )
     expect(homeWatch).toBeDefined()
 
@@ -613,8 +649,8 @@ describe('useHomeData live project file watchers', () => {
     testState.flowExecutionActive!.value = true
 
     const parametersWatch = await vi.waitFor(() => {
-      const watcher = testState.projectFileWatchers.find((entry) =>
-        entry.path === '/workspace/a/home/parameters.json'
+      const watcher = testState.projectFileWatchers.find(
+        (entry) => entry.path === '/workspace/a/home/parameters.json',
       )
       expect(watcher).toBeDefined()
       return watcher!
@@ -659,7 +695,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -672,8 +710,8 @@ describe('useHomeData live project file watchers', () => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-1.png')
     })
 
-    const homeWatch = testState.projectFileWatchers.find((entry) =>
-      entry.path === '/workspace/a/home/home.json'
+    const homeWatch = testState.projectFileWatchers.find(
+      (entry) => entry.path === '/workspace/a/home/home.json',
     )
     expect(homeWatch).toBeDefined()
 
@@ -697,26 +735,34 @@ describe('useHomeData live project file watchers', () => {
       expect(delayedHomeReads.map((entry) => entry.version)).toContain(3)
     })
 
-    delayedHomeReads.find((entry) => entry.version === 3)!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      layout: '/workspace/a/home/layout-3.png',
-      monitor: {
-        step: ['Synthesis'],
-        frequency: [3],
-      },
-    }))
+    delayedHomeReads
+      .find((entry) => entry.version === 3)!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/a'),
+          layout: '/workspace/a/home/layout-3.png',
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [3],
+          },
+        }),
+      )
     await vi.waitFor(() => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
     })
 
-    delayedHomeReads.find((entry) => entry.version === 2)!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      layout: '/workspace/a/home/layout-2.png',
-      monitor: {
-        step: ['Synthesis'],
-        frequency: [2],
-      },
-    }))
+    delayedHomeReads
+      .find((entry) => entry.version === 2)!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/a'),
+          layout: '/workspace/a/home/layout-2.png',
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [2],
+          },
+        }),
+      )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
@@ -729,19 +775,25 @@ describe('useHomeData live project file watchers', () => {
   it('does not leave a stale flow polling timer when live startup is superseded during home watch setup', async () => {
     vi.useFakeTimers()
     const homeWatchResolvers: Array<(unwatch: () => void) => void> = []
-    testState.watchProjectFile.mockImplementation(async (
-      path: string,
-      listener: (event: { subscriptionId: string; path: string; eventType: string }) => void,
-    ) => {
-      const unwatch = vi.fn()
-      testState.projectFileWatchers.push({ path, listener, unwatch })
-      if (path.endsWith('/home/home.json')) {
-        return await new Promise((resolve) => {
-          homeWatchResolvers.push(resolve)
-        })
-      }
-      return unwatch
-    })
+    testState.watchProjectFile.mockImplementation(
+      async (
+        path: string,
+        listener: (event: {
+          subscriptionId: string
+          path: string
+          eventType: string
+        }) => void,
+      ) => {
+        const unwatch = vi.fn()
+        testState.projectFileWatchers.push({ path, listener, unwatch })
+        if (path.endsWith('/home/home.json')) {
+          return await new Promise((resolve) => {
+            homeWatchResolvers.push(resolve)
+          })
+        }
+        return unwatch
+      },
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -765,7 +817,9 @@ describe('useHomeData live project file watchers', () => {
     homeWatchResolvers[1]!(vi.fn())
     await Promise.resolve()
     await vi.advanceTimersByTimeAsync(1600)
-    expect(testState.readProjectTextFile).toHaveBeenCalledWith('/workspace/b/home/flow.json')
+    expect(testState.readProjectTextFile).toHaveBeenCalledWith(
+      '/workspace/b/home/flow.json',
+    )
 
     testState.readProjectTextFile.mockClear()
     testState.currentProject!.value = null
@@ -791,7 +845,9 @@ describe('useHomeData live project file watchers', () => {
 
     const liveSegment = home.flowLogSegments.value.find((segment) => segment.live)
     expect(liveSegment).toBeDefined()
-    await expect(home.ensureFlowLogSegmentContentLoaded(liveSegment!)).resolves.toBe(false)
+    await expect(home.ensureFlowLogSegmentContentLoaded(liveSegment!)).resolves.toBe(
+      false,
+    )
     expect(testState.readOptionalProjectTextFileUpdate).not.toHaveBeenCalled()
   })
 
@@ -885,7 +941,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -915,7 +973,9 @@ describe('useHomeData live project file watchers', () => {
     const remountedHome = secondScope.run(() => useHomeData())!
 
     await vi.waitFor(() => {
-      expect(remountedHome.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-2.png')
+      expect(remountedHome.layoutBlobUrl.value).toBe(
+        'blob:/workspace/a/home/layout-2.png',
+      )
     })
     expect(remountedHome.analysisCharts.value).toEqual([
       { label: 'metric-2', imageBlobUrl: 'blob:/workspace/a/home/metric-2.png' },
@@ -944,10 +1004,13 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Filler', 'Success')
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Filler', 'Success')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     const { requestHomeRunArtifactReset } = await import('./homeRunArtifacts')
@@ -1009,7 +1072,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1039,26 +1104,34 @@ describe('useHomeData live project file watchers', () => {
       expect(delayedReads.map((entry) => entry.version)).toContain(3)
     })
 
-    delayedReads.find((entry) => entry.version === 3)!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      layout: '/workspace/a/home/layout-3.png',
-      monitor: {
-        step: ['Synthesis'],
-        frequency: [3],
-      },
-    }))
+    delayedReads
+      .find((entry) => entry.version === 3)!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/a'),
+          layout: '/workspace/a/home/layout-3.png',
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [3],
+          },
+        }),
+      )
     await vi.waitFor(() => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
     })
 
-    delayedReads.find((entry) => entry.version === 2)!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      layout: '/workspace/a/home/layout-2.png',
-      monitor: {
-        step: ['Synthesis'],
-        frequency: [2],
-      },
-    }))
+    delayedReads
+      .find((entry) => entry.version === 2)!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/a'),
+          layout: '/workspace/a/home/layout-2.png',
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [2],
+          },
+        }),
+      )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-3.png')
@@ -1097,10 +1170,13 @@ describe('useHomeData live project file watchers', () => {
           ],
         })
       }
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'old synthesis log'
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'old synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1112,7 +1188,10 @@ describe('useHomeData live project file watchers', () => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-old.png')
     })
     expect(home.analysisCharts.value).toEqual([
-      { label: 'instances dist.', imageBlobUrl: 'blob:/workspace/a/home/instances-old.png' },
+      {
+        label: 'instances dist.',
+        imageBlobUrl: 'blob:/workspace/a/home/instances-old.png',
+      },
     ])
     expect(home.monitorData.value).toEqual({
       step: ['Synthesis'],
@@ -1127,6 +1206,7 @@ describe('useHomeData live project file watchers', () => {
           directory: '/workspace/a',
           rerun: true,
           type: 'message',
+          workspaceId: 'workspace-handle-a',
         },
         message: ['Started rtl2gds'],
         response: 'success',
@@ -1156,10 +1236,13 @@ describe('useHomeData live project file watchers', () => {
         }
         return JSON.stringify(homeDataFor(projectPath))
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', 'Ongoing')
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', 'Ongoing')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1198,17 +1281,19 @@ describe('useHomeData live project file watchers', () => {
       expect(home.layoutBlobUrl.value).toBe('')
     })
 
-    delayedHomeReads[0]!(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      layout: '/workspace/a/home/layout-old.png',
-      metrics: {
-        'old chart': '/workspace/a/home/old-chart.png',
-      },
-      monitor: {
-        step: ['Filler'],
-        frequency: [814.33],
-      },
-    }))
+    delayedHomeReads[0]!(
+      JSON.stringify({
+        ...homeDataFor('/workspace/a'),
+        layout: '/workspace/a/home/layout-old.png',
+        metrics: {
+          'old chart': '/workspace/a/home/old-chart.png',
+        },
+        monitor: {
+          step: ['Filler'],
+          frequency: [814.33],
+        },
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(home.layoutBlobUrl.value).toBe('')
@@ -1223,8 +1308,10 @@ describe('useHomeData live project file watchers', () => {
         const projectPath = path.replace(/\/home\/home\.json$/, '')
         return JSON.stringify(homeDataFor(projectPath))
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'old synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'old synthesis log'
       return '{}'
     })
 
@@ -1236,9 +1323,11 @@ describe('useHomeData live project file watchers', () => {
     testState.flowExecutionActive!.value = true
 
     await vi.waitFor(() => {
-      expect(testState.projectFileWatchers.some((entry) =>
-        entry.path === '/workspace/a/home/flow.json'
-      )).toBe(true)
+      expect(
+        testState.projectFileWatchers.some(
+          (entry) => entry.path === '/workspace/a/home/flow.json',
+        ),
+      ).toBe(true)
     })
 
     testState.runtimeEvents!.value = [
@@ -1262,9 +1351,9 @@ describe('useHomeData live project file watchers', () => {
     expect(home.currentWorkspaceFlowExecutionActive.value).toBe(true)
 
     flowState = 'Ongoing'
-    const flowWatch = [...testState.projectFileWatchers].reverse().find((entry) =>
-      entry.path === '/workspace/a/home/flow.json'
-    )
+    const flowWatch = [...testState.projectFileWatchers]
+      .reverse()
+      .find((entry) => entry.path === '/workspace/a/home/flow.json')
     expect(flowWatch).toBeDefined()
     flowWatch!.listener({
       subscriptionId: 'flow-watch-rerun',
@@ -1280,9 +1369,9 @@ describe('useHomeData live project file watchers', () => {
       )
     })
 
-    const liveTail = [...testState.logTailListeners].reverse().find((entry) =>
-      entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log'
-    )
+    const liveTail = [...testState.logTailListeners]
+      .reverse()
+      .find((entry) => entry.path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
     expect(liveTail).toBeDefined()
     liveTail!.listener({
       subscriptionId: 'project-log-tail-rerun',
@@ -1326,7 +1415,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Synthesis')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1426,20 +1517,28 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/checklist-old.json') {
         return JSON.stringify({
           path,
-          checklist: [{ step: 'Floorplan', type: 'Area', item: 'old check', state: 'Accepted' }],
+          checklist: [
+            { step: 'Floorplan', type: 'Area', item: 'old check', state: 'Accepted' },
+          ],
         })
       }
       if (path === '/workspace/a/home/checklist-new.json') {
         return JSON.stringify({
           path,
-          checklist: [{ step: 'Floorplan', type: 'Area', item: 'new check', state: 'Accepted' }],
+          checklist: [
+            { step: 'Floorplan', type: 'Area', item: 'new check', state: 'Accepted' },
+          ],
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'new synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'new synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1472,8 +1571,8 @@ describe('useHomeData live project file watchers', () => {
     homeVersion = 'new'
     flowState = 'Ongoing'
     const flowWatches = await vi.waitFor(() => {
-      const active = testState.projectFileWatchers.filter((entry) =>
-        entry.path === '/workspace/a/home/flow.json'
+      const active = testState.projectFileWatchers.filter(
+        (entry) => entry.path === '/workspace/a/home/flow.json',
       )
       expect(active.length).toBeGreaterThan(0)
       return active
@@ -1487,8 +1586,8 @@ describe('useHomeData live project file watchers', () => {
     }
 
     const homeWatches = await vi.waitFor(() => {
-      const active = testState.projectFileWatchers.filter((entry) =>
-        entry.path === '/workspace/a/home/home.json'
+      const active = testState.projectFileWatchers.filter(
+        (entry) => entry.path === '/workspace/a/home/home.json',
       )
       expect(active.length).toBeGreaterThan(0)
       return active
@@ -1538,11 +1637,15 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'new synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'new synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1575,8 +1678,8 @@ describe('useHomeData live project file watchers', () => {
     homeVersion = 'empty'
     flowState = 'Ongoing'
     const flowWatches = await vi.waitFor(() => {
-      const active = testState.projectFileWatchers.filter((entry) =>
-        entry.path === '/workspace/a/home/flow.json'
+      const active = testState.projectFileWatchers.filter(
+        (entry) => entry.path === '/workspace/a/home/flow.json',
       )
       expect(active.length).toBeGreaterThan(0)
       return active
@@ -1631,11 +1734,15 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'rerun synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1716,11 +1823,15 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', 'Ongoing')
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', 'Ongoing')
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'rerun synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1735,12 +1846,16 @@ describe('useHomeData live project file watchers', () => {
       { label: 'old chart', imageBlobUrl: 'blob:/workspace/a/home/old-chart.png' },
     ])
 
-    ;(await import('./homeRunArtifacts')).markHomeRunArtifactResetAwaitingBackendStart('/workspace/a')
+    ;(await import('./homeRunArtifacts')).markHomeRunArtifactResetAwaitingBackendStart(
+      '/workspace/a',
+    )
     testState.flowExecutionActive!.value = true
     await vi.waitFor(() => {
-      expect(testState.projectFileWatchers.some((entry) =>
-        entry.path === '/workspace/a/home/home.json'
-      )).toBe(true)
+      expect(
+        testState.projectFileWatchers.some(
+          (entry) => entry.path === '/workspace/a/home/home.json',
+        ),
+      ).toBe(true)
     })
 
     homeVersion = 'empty'
@@ -1794,10 +1909,13 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     const { requestHomeRunArtifactReset } = await import('./homeRunArtifacts')
@@ -1854,11 +1972,15 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'rerun synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'rerun synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1900,7 +2022,9 @@ describe('useHomeData live project file watchers', () => {
     await vi.advanceTimersByTimeAsync(1600)
 
     await vi.waitFor(() => {
-      expect(home.flowLogSegments.value.map((segment) => segment.state)).toEqual(['Ongoing'])
+      expect(home.flowLogSegments.value.map((segment) => segment.state)).toEqual([
+        'Ongoing',
+      ])
     })
     expect(testState.flowExecutionActive!.value).toBe(true)
   })
@@ -1923,11 +2047,15 @@ describe('useHomeData live project file watchers', () => {
           },
         })
       }
-      if (path === '/workspace/a/home/flow.json') return flowJsonWithState('Synthesis', flowState)
-      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log') return 'stable synthesis log'
+      if (path === '/workspace/a/home/flow.json')
+        return flowJsonWithState('Synthesis', flowState)
+      if (path === '/workspace/a/Synthesis_yosys/log/Synthesis.log')
+        return 'stable synthesis log'
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -1943,9 +2071,11 @@ describe('useHomeData live project file watchers', () => {
     flowState = 'Ongoing'
     testState.flowExecutionActive!.value = true
     await vi.waitFor(() => {
-      expect(testState.projectFileWatchers.some((entry) =>
-        entry.path === '/workspace/a/home/home.json'
-      )).toBe(true)
+      expect(
+        testState.projectFileWatchers.some(
+          (entry) => entry.path === '/workspace/a/home/home.json',
+        ),
+      ).toBe(true)
     })
 
     testState.readProjectBlobUrl.mockClear()
@@ -1978,7 +2108,9 @@ describe('useHomeData live project file watchers', () => {
       if (path === '/workspace/a/home/flow.json') return flowJsonFor('Filler')
       return '{}'
     })
-    testState.readProjectBlobUrl.mockImplementation(async (path: string) => `blob:${path}`)
+    testState.readProjectBlobUrl.mockImplementation(
+      async (path: string) => `blob:${path}`,
+    )
 
     const { useHomeData } = await importFreshHomeDataModule()
     await startLifecycleSession('/workspace/a')
@@ -2030,7 +2162,10 @@ describe('useHomeData live project file watchers', () => {
       expect(home.layoutBlobUrl.value).toBe('blob:/workspace/a/home/layout-final.png')
     })
     expect(home.analysisCharts.value).toEqual([
-      { label: 'instances dist.', imageBlobUrl: 'blob:/workspace/a/home/instances-final.png' },
+      {
+        label: 'instances dist.',
+        imageBlobUrl: 'blob:/workspace/a/home/instances-final.png',
+      },
     ])
     expect(home.monitorData.value).toEqual({
       step: ['Filler'],
@@ -2072,13 +2207,17 @@ describe('useHomeData live project file watchers', () => {
       expect(delayedReads.map((entry) => entry.projectPath)).toContain('/workspace/b')
     })
 
-    delayedReads.find((entry) => entry.projectPath === '/workspace/b')!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/b'),
-      monitor: {
-        step: ['Floorplan'],
-        frequency: [2],
-      },
-    }))
+    delayedReads
+      .find((entry) => entry.projectPath === '/workspace/b')!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/b'),
+          monitor: {
+            step: ['Floorplan'],
+            frequency: [2],
+          },
+        }),
+      )
 
     await vi.waitFor(() => {
       expect(home.monitorData.value).toEqual({
@@ -2087,13 +2226,17 @@ describe('useHomeData live project file watchers', () => {
       })
     })
 
-    delayedReads.find((entry) => entry.projectPath === '/workspace/a')!.resolve(JSON.stringify({
-      ...homeDataFor('/workspace/a'),
-      monitor: {
-        step: ['Synthesis'],
-        frequency: [1],
-      },
-    }))
+    delayedReads
+      .find((entry) => entry.projectPath === '/workspace/a')!
+      .resolve(
+        JSON.stringify({
+          ...homeDataFor('/workspace/a'),
+          monitor: {
+            step: ['Synthesis'],
+            frequency: [1],
+          },
+        }),
+      )
     await Promise.resolve()
 
     expect(home.monitorData.value).toEqual({

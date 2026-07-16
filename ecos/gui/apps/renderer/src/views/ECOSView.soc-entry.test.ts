@@ -17,15 +17,14 @@ type GlobalKey =
   | 'SVGElement'
   | 'DocumentFragment'
 
-const {
-  push,
-  loadRecentProjects,
-  openProject,
-} = vi.hoisted(() => ({
-  push: vi.fn(),
-  loadRecentProjects: vi.fn(async () => {}),
-  openProject: vi.fn(async () => true),
-}))
+const { push, loadRecentProjects, openProject, recentProjectFixtures } = vi.hoisted(
+  () => ({
+    push: vi.fn(),
+    loadRecentProjects: vi.fn(async () => {}),
+    openProject: vi.fn(async () => true),
+    recentProjectFixtures: [] as Array<Record<string, unknown>>,
+  }),
+)
 
 const originalGlobals = {
   document: globalThis.document,
@@ -347,7 +346,7 @@ function loadECOSViewComponent(vue: VueRuntime) {
     if (id === '../composables/useWorkspace') {
       return {
         useWorkspace: () => ({
-          recentProjects: vue.ref([]),
+          recentProjects: vue.ref(recentProjectFixtures),
           openProject,
           loadRecentProjects,
         }),
@@ -368,6 +367,7 @@ describe('ECOSView SoC entry card', () => {
     push.mockReset()
     loadRecentProjects.mockClear()
     openProject.mockClear()
+    recentProjectFixtures.splice(0)
     document.body.innerHTML = ''
   })
 
@@ -413,12 +413,38 @@ describe('ECOSView SoC entry card', () => {
     expect(container.textContent).toContain('IP Catalog')
     expect(container.textContent).toContain('Benchmarks')
     expect(container.textContent.indexOf('Resource Manager')).toBeLessThan(
-      container.textContent.indexOf('IP Catalog')
+      container.textContent.indexOf('IP Catalog'),
     )
     expect(container.textContent).not.toContain('Resources')
     expect(container.textContent).not.toContain('Explore')
     expect(container.textContent).not.toContain('Documentation')
     expect(container.textContent).not.toContain('PDK Manager')
+
+    app.unmount()
+  })
+
+  it('keeps the home page clear of workspace history', async () => {
+    recentProjectFixtures.push({
+      id: 'recent-ws',
+      name: 'recent_workspace',
+      path: '/tmp/recent_workspace',
+      lastOpened: new Date(),
+      workspaceRecognized: true,
+    })
+
+    const vue = await loadVueRuntime()
+    const ECOSView = loadECOSViewComponent(vue)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    const app = vue.createApp(ECOSView)
+    app.mount(container as never)
+    await vue.nextTick()
+
+    expect(loadRecentProjects).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('Continue Working')
+    expect(container.textContent).not.toContain('Resume')
+    expect(container.textContent).not.toContain('recent_workspace')
 
     app.unmount()
   })

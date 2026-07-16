@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 const resourcesBridge = vi.hoisted(() => ({
   activatePdk: vi.fn(),
   cancel: vi.fn(),
-  checkUpdates: vi.fn(),
   get: vi.fn(),
+  importLocalPath: vi.fn(),
   importPdkPath: vi.fn(),
   install: vi.fn(),
   list: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('@/platform/desktop', () => ({
 
 import {
   cancelResourceApi,
-  checkResourceUpdatesApi,
+  importLocalResourcePathApi,
   importPdkPathApi,
   resourceJobToInstallProgress,
   resourceListToResources,
@@ -237,6 +237,41 @@ describe('Resource Manager tool API adapter', () => {
     })
   })
 
+  it('imports row-bound local resource paths through the desktop resource bridge', async () => {
+    const imported = {
+      id: 'tool:yosys',
+      type: 'tool' as const,
+      name: 'yosys',
+      display_name: 'Yosys',
+      description: 'RTL synthesis',
+      category: 'synthesis',
+      status: 'installed' as const,
+      installed_version: '',
+      available_versions: ['2026-05-13'],
+      active_version: '',
+      active: true,
+      path: '/tmp/oss-cad-suite',
+      managed_root: null,
+      platform: null,
+      size: null,
+      source: 'local',
+      homepage: '',
+      actions: ['install' as const, 'remove_reference' as const],
+      health: { managed: false },
+      error: null,
+    }
+    resourcesBridge.importLocalPath.mockResolvedValue(imported)
+
+    await expect(
+      importLocalResourcePathApi('tool:yosys', '/tmp/oss-cad-suite'),
+    ).resolves.toEqual(imported)
+
+    expect(resourcesBridge.importLocalPath).toHaveBeenCalledWith({
+      resourceId: 'tool:yosys',
+      path: '/tmp/oss-cad-suite',
+    })
+  })
+
   it('cancels resource jobs through the desktop resource bridge', async () => {
     resourcesBridge.cancel.mockResolvedValue({
       status: 'cancelled',
@@ -251,32 +286,11 @@ describe('Resource Manager tool API adapter', () => {
     expect(resourcesBridge.cancel).toHaveBeenCalledWith('tool:yosys')
   })
 
-  it('checks resource updates through the desktop resource bridge', async () => {
-    resourcesBridge.checkUpdates.mockResolvedValue({
-      status: 'ok',
-      checked_count: 1,
-      update_count: 0,
-      diagnostics: [],
-      resources: [],
-    })
-
-    await expect(checkResourceUpdatesApi({ force: true, refreshRegistry: true })).resolves.toEqual({
-      status: 'ok',
-      checked_count: 1,
-      update_count: 0,
-      diagnostics: [],
-      resources: [],
-    })
-
-    expect(resourcesBridge.checkUpdates).toHaveBeenCalledWith({
-      force: true,
-      refreshRegistry: true,
-    })
-  })
-
   it('subscribes to resource progress through the desktop event bridge', () => {
     const unsubscribe = vi.fn()
-    let listener: ((job: Parameters<Parameters<typeof subscribeResourceProgress>[1]>[0]) => void) | undefined
+    let listener:
+      | ((job: Parameters<Parameters<typeof subscribeResourceProgress>[1]>[0]) => void)
+      | undefined
     resourcesBridge.onProgress.mockImplementation((callback) => {
       listener = callback
       return unsubscribe

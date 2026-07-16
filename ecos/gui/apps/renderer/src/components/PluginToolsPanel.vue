@@ -37,7 +37,9 @@ const filteredTools = computed(() => {
   return result
 })
 
-function statusSeverity(status: string): 'success' | 'warn' | 'info' | 'danger' | 'secondary' {
+function statusSeverity(
+  status: string,
+): 'success' | 'warn' | 'info' | 'danger' | 'secondary' {
   switch (status) {
     case 'installed':
       return 'success'
@@ -85,25 +87,28 @@ onUnmounted(() => {
 <template>
   <div
     :class="[
-      'bg-(--bg-secondary) rounded-xl border border-(--border-color) overflow-hidden transition-colors duration-200',
-      props.layout === 'page' ? 'flex flex-col flex-1 min-h-0 h-full' : '',
+      'overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary) transition-colors duration-200',
+      props.layout === 'page' ? 'flex h-full min-h-0 flex-1 flex-col' : '',
     ]"
   >
     <div class="flex items-center justify-between px-4 py-3">
-      <div class="flex items-center gap-2 min-w-0">
-        <i class="ri-tools-line text-lg text-(--text-secondary) shrink-0" aria-hidden="true" />
-        <span class="text-sm font-medium text-(--text-primary) truncate">EDA Tools</span>
+      <div class="flex min-w-0 items-center gap-2">
+        <i
+          class="ri-tools-line shrink-0 text-lg text-(--text-secondary)"
+          aria-hidden="true"
+        />
+        <span class="truncate text-sm font-medium text-(--text-primary)">EDA Tools</span>
       </div>
       <button
         type="button"
-        :disabled="pluginStore.refreshing || pluginStore.updateChecking"
-        class="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-(--accent-color) hover:bg-(--accent-color)/10 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="pluginStore.refreshing"
+        class="flex cursor-pointer items-center gap-1 rounded-md px-2.5 py-1 text-xs text-(--accent-color) transition-colors duration-200 hover:bg-(--accent-color)/10 disabled:cursor-not-allowed disabled:opacity-50"
         @click="pluginStore.refresh()"
       >
         <i
           :class="[
             'text-sm',
-            pluginStore.refreshing || pluginStore.updateChecking ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line',
+            pluginStore.refreshing ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line',
           ]"
           aria-hidden="true"
         />
@@ -113,8 +118,8 @@ onUnmounted(() => {
 
     <div
       :class="[
-        'px-4 pb-3 space-y-3 border-t border-(--border-color) pt-3',
-        props.layout === 'page' ? 'flex flex-col flex-1 min-h-0 overflow-hidden' : '',
+        'space-y-3 border-t border-(--border-color) px-4 pt-3 pb-3',
+        props.layout === 'page' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : '',
       ]"
     >
       <InputText
@@ -144,34 +149,43 @@ onUnmounted(() => {
       </div>
 
       <div v-if="pluginStore.loading" class="flex justify-center py-6">
-        <i class="ri-loader-4-line animate-spin text-2xl text-(--accent-color)" aria-hidden="true" />
+        <i
+          class="ri-loader-4-line animate-spin text-2xl text-(--accent-color)"
+          aria-hidden="true"
+        />
       </div>
 
-      <p v-else-if="pluginStore.error" class="text-sm text-red-400 text-center py-2">
+      <p v-else-if="pluginStore.error" class="py-2 text-center text-sm text-red-400">
         {{ pluginStore.error }}
       </p>
 
       <div
         v-else
         :class="[
-          'grid grid-cols-1 gap-3 overflow-y-auto pr-1 items-start content-start',
+          'grid grid-cols-1 content-start items-start gap-3 overflow-y-auto pr-1',
           props.layout === 'page'
-            ? 'flex-1 min-h-0 max-h-none'
+            ? 'max-h-none min-h-0 flex-1'
             : 'max-h-[min(420px,50vh)]',
         ]"
       >
         <div
           v-for="tool in filteredTools"
           :key="tool.name"
-          class="rounded-lg border border-(--border-color) bg-(--bg-primary)/40 p-3 flex flex-col gap-2 transition-colors duration-200 w-full self-start"
+          class="flex w-full flex-col gap-2 self-start rounded-lg border border-(--border-color) bg-(--bg-primary)/40 p-3 transition-colors duration-200"
         >
-          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div class="min-w-0 flex-1">
-              <h4 class="text-sm font-medium text-(--text-primary)">{{ tool.display_name }}</h4>
-              <p class="text-xs text-(--text-secondary) mt-0.5 line-clamp-2">{{ tool.description }}</p>
+              <h4 class="text-sm font-medium text-(--text-primary)">
+                {{ tool.display_name }}
+              </h4>
+              <p class="mt-0.5 line-clamp-2 text-xs text-(--text-secondary)">
+                {{ tool.description }}
+              </p>
             </div>
             <!-- 状态 + 操作在同一列，避免整行宽按钮被撑到面板底部、看起来像「全局安装」 -->
-            <div class="flex flex-row sm:flex-col items-center sm:items-end gap-2 shrink-0">
+            <div
+              class="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-end"
+            >
               <Tag
                 :value="statusLabel(tool.status)"
                 :severity="statusSeverity(tool.status)"
@@ -180,7 +194,7 @@ onUnmounted(() => {
               <Button
                 v-if="tool.status === 'available'"
                 size="small"
-                class="cursor-pointer transition-colors duration-200 whitespace-nowrap"
+                class="cursor-pointer whitespace-nowrap transition-colors duration-200"
                 @click="handleInstall(tool)"
               >
                 <span class="inline-flex items-center justify-center gap-1.5">
@@ -193,7 +207,7 @@ onUnmounted(() => {
                 severity="danger"
                 variant="outlined"
                 size="small"
-                class="cursor-pointer transition-colors duration-200 whitespace-nowrap"
+                class="cursor-pointer whitespace-nowrap transition-colors duration-200"
                 @click="handleUninstall(tool)"
               >
                 <span class="inline-flex items-center justify-center gap-1.5">
@@ -205,7 +219,7 @@ onUnmounted(() => {
                 v-else-if="tool.status === 'update_available'"
                 severity="info"
                 size="small"
-                class="cursor-pointer transition-colors duration-200 whitespace-nowrap"
+                class="cursor-pointer whitespace-nowrap transition-colors duration-200"
                 @click="handleInstall(tool)"
               >
                 <span class="inline-flex items-center justify-center gap-1.5">
@@ -241,7 +255,7 @@ onUnmounted(() => {
                 v-else-if="tool.status === 'error'"
                 severity="danger"
                 size="small"
-                class="cursor-pointer transition-colors duration-200 whitespace-nowrap"
+                class="cursor-pointer whitespace-nowrap transition-colors duration-200"
                 @click="handleInstall(tool)"
               >
                 <span class="inline-flex items-center justify-center gap-1.5">
@@ -255,7 +269,9 @@ onUnmounted(() => {
           <div class="flex items-center gap-2 text-[11px] text-(--text-secondary)">
             <Tag :value="tool.category" severity="secondary" class="text-[10px]" />
             <span v-if="tool.installed_version">v{{ tool.installed_version }}</span>
-            <span v-else-if="tool.available_versions.length">Latest: v{{ tool.available_versions[0] }}</span>
+            <span v-else-if="tool.available_versions.length"
+              >Latest: v{{ tool.available_versions[0] }}</span
+            >
           </div>
 
           <div v-if="getProgress(tool)" class="flex flex-col gap-1">
@@ -264,10 +280,12 @@ onUnmounted(() => {
               :show-value="true"
               class="h-1.5"
             />
-            <span class="text-[11px] text-(--text-secondary)">{{ getProgress(tool)!.message }}</span>
+            <span class="text-[11px] text-(--text-secondary)">{{
+              getProgress(tool)!.message
+            }}</span>
           </div>
 
-          <p v-if="toolError(tool)" class="text-[11px] text-red-400/90 leading-snug">
+          <p v-if="toolError(tool)" class="text-[11px] leading-snug text-red-400/90">
             {{ toolError(tool) }}
           </p>
         </div>
@@ -275,7 +293,7 @@ onUnmounted(() => {
 
       <p
         v-if="!pluginStore.loading && !pluginStore.error && filteredTools.length === 0"
-        class="text-center text-xs text-(--text-secondary) opacity-70 py-4"
+        class="py-4 text-center text-xs text-(--text-secondary) opacity-70"
       >
         No tools found.
       </p>

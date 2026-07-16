@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import routerSource from './index.ts?raw'
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -22,10 +21,17 @@ describe('router SoC welcome routes', () => {
     const detailRoute = router.resolve('/soc/retro-template')
     expect(detailRoute.name).toBe('SoCTemplateDetail')
     expect(detailRoute.params).toEqual({ templateId: 'retro-template' })
-    expect(detailRoute.matched.map((record) => record.path)).toEqual(['/', '/soc/:templateId'])
+    expect(detailRoute.matched.map((record) => record.path)).toEqual([
+      '/',
+      '/soc/:templateId',
+    ])
 
-    const galleryRecord = router.getRoutes().find((record) => record.name === 'SoCGallery')
-    const detailRecord = router.getRoutes().find((record) => record.name === 'SoCTemplateDetail')
+    const galleryRecord = router
+      .getRoutes()
+      .find((record) => record.name === 'SoCGallery')
+    const detailRecord = router
+      .getRoutes()
+      .find((record) => record.name === 'SoCTemplateDetail')
 
     expect(galleryRecord?.components?.default).toBeTypeOf('function')
     expect(detailRecord?.components?.default).toBeTypeOf('function')
@@ -36,12 +42,6 @@ describe('router SoC welcome routes', () => {
     const galleryResolvedPath = '/src/views/SoCTemplateGalleryView.vue'
     const detailResolvedPath = '/src/views/SoCTemplateDetailView.vue'
 
-    expect(routerSource).toContain(
-      `{ path: 'soc', name: 'SoCGallery', component: () => import('${galleryImportPath}') }`,
-    )
-    expect(routerSource).toContain(
-      `{ path: 'soc/:templateId', name: 'SoCTemplateDetail', component: () => import('${detailImportPath}'), props: true }`,
-    )
     expect(String(galleryRecord?.components?.default)).toContain(galleryResolvedPath)
     expect(String(detailRecord?.components?.default)).toContain(detailResolvedPath)
     expect(existsSync(resolve(routerDir, galleryImportPath))).toBe(true)
@@ -54,12 +54,15 @@ describe('router workspace Tech Library route', () => {
     const techRoute = router.resolve('/workspace/tech')
 
     expect(techRoute.name).toBe('TechLibrary')
-    expect(techRoute.matched.map((record) => record.path)).toEqual(['/workspace', '/workspace/tech'])
+    expect(techRoute.matched.map((record) => record.path)).toEqual([
+      '/workspace',
+      '/workspace/tech',
+    ])
 
     const techRecord = router.getRoutes().find((record) => record.name === 'TechLibrary')
     expect(techRecord?.components?.default).toBeTypeOf('function')
-    expect(routerSource).toContain(
-      `{ path: 'tech', name: 'TechLibrary', component: () => import('../views/TechLibraryView.vue') }`,
+    expect(String(techRecord?.components?.default)).toContain(
+      '/src/views/TechLibraryView.vue',
     )
   })
 })

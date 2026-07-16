@@ -8,7 +8,10 @@ export interface RemoteContentSourceConfig {
   rootPath: string
 }
 
-export const remoteContentSources: Record<RemoteContentSourceId, RemoteContentSourceConfig> = {
+export const remoteContentSources: Record<
+  RemoteContentSourceId,
+  RemoteContentSourceConfig
+> = {
   socTemplateCatalog: {
     provider: 'github',
     owner: 'KoEkko',

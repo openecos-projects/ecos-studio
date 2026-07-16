@@ -52,19 +52,24 @@ import {
   isChecklistPassed,
 } from '@/utils/checklistState'
 
-const props = withDefaults(defineProps<{
-  items: ChecklistItem[]
-  showSummary?: boolean
-  emptyTitle?: string
-  emptyHint?: string
-}>(), {
-  showSummary: true,
-  emptyTitle: 'No checklist items',
-  emptyHint: 'Run this step to populate the checklist.',
-})
+const props = withDefaults(
+  defineProps<{
+    items: ChecklistItem[]
+    showSummary?: boolean
+    emptyTitle?: string
+    emptyHint?: string
+  }>(),
+  {
+    showSummary: true,
+    emptyTitle: 'No checklist items',
+    emptyHint: 'Run this step to populate the checklist.',
+  },
+)
 
-const hasInfo = computed(() => props.items.some(item => Boolean(item.info?.trim())))
-const passedCount = computed(() => props.items.filter(item => isChecklistPassed(item.state)).length)
+const hasInfo = computed(() => props.items.some((item) => Boolean(item.info?.trim())))
+const passedCount = computed(
+  () => props.items.filter((item) => isChecklistPassed(item.state)).length,
+)
 </script>
 
 <style scoped>
@@ -93,11 +98,21 @@ const passedCount = computed(() => props.items.filter(item => isChecklistPassed(
   font-size: 10px;
 }
 
-.checklist-table thead th:nth-child(1) { width: 16%; }
-.checklist-table thead th:nth-child(2) { width: 14%; }
-.checklist-table thead th:nth-child(3) { width: auto; }
-.checklist-table thead th:nth-child(4) { width: 14%; }
-.checklist-table thead th:nth-child(5) { width: 22%; }
+.checklist-table thead th:nth-child(1) {
+  width: 16%;
+}
+.checklist-table thead th:nth-child(2) {
+  width: 14%;
+}
+.checklist-table thead th:nth-child(3) {
+  width: auto;
+}
+.checklist-table thead th:nth-child(4) {
+  width: 14%;
+}
+.checklist-table thead th:nth-child(5) {
+  width: 22%;
+}
 
 .checklist-table thead th {
   position: sticky;
@@ -229,8 +244,12 @@ const passedCount = computed(() => props.items.filter(item => isChecklistPassed(
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 :global(.window-resizing) .checklist-table td {

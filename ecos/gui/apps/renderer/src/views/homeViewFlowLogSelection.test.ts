@@ -33,28 +33,34 @@ describe('homeViewFlowLogSelection', () => {
   })
 
   it('falls back to the last segment when no live segment exists', () => {
-    expect(getDefaultSelectedFlowLogKey([
-      segments[0],
-      {
-        ...segments[1],
-        live: false,
-        state: 'Success',
-      },
-    ])).toBe('Synthesis\u001fyosys')
+    expect(
+      getDefaultSelectedFlowLogKey([
+        segments[0],
+        {
+          ...segments[1],
+          live: false,
+          state: 'Success',
+        },
+      ]),
+    ).toBe('Synthesis\u001fyosys')
   })
 
   it('keeps a user-selected historical segment when it still exists', () => {
-    expect(reconcileSelectedFlowLogKey(segments, 'Import\u001fpython')).toBe('Import\u001fpython')
-  })
-
-  it('prefers the live segment while a flow is running', () => {
-    expect(reconcileSelectedFlowLogKey(segments, 'Import\u001fpython', { preferLive: true })).toBe(
-      'Synthesis\u001fyosys',
+    expect(reconcileSelectedFlowLogKey(segments, 'Import\u001fpython')).toBe(
+      'Import\u001fpython',
     )
   })
 
+  it('prefers the live segment while a flow is running', () => {
+    expect(
+      reconcileSelectedFlowLogKey(segments, 'Import\u001fpython', { preferLive: true }),
+    ).toBe('Synthesis\u001fyosys')
+  })
+
   it('falls back to the default selection when the previous key disappears', () => {
-    expect(reconcileSelectedFlowLogKey(segments, 'missing\u001fstep')).toBe('Synthesis\u001fyosys')
+    expect(reconcileSelectedFlowLogKey(segments, 'missing\u001fstep')).toBe(
+      'Synthesis\u001fyosys',
+    )
   })
 
   it('projects the minimal list item metadata for the step navigator', () => {

@@ -15,9 +15,9 @@ async function createTempDir(prefix: string): Promise<string> {
 describe('SettingsStore', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 

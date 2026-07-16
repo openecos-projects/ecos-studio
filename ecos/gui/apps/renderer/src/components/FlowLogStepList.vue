@@ -70,7 +70,11 @@ const STEP_ITEM_SIZE = 48
                 @click.stop="emit('expand', item.key)"
               >
                 <i
-                  :class="expandingKeys[item.key] ? 'ri-loader-4-line flow-log-step-item-spinner' : 'ri-expand-up-down-line'"
+                  :class="
+                    expandingKeys[item.key]
+                      ? 'ri-loader-4-line flow-log-step-item-spinner'
+                      : 'ri-expand-up-down-line'
+                  "
                 ></i>
               </button>
             </div>

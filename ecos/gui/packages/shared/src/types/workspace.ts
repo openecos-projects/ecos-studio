@@ -1,4 +1,10 @@
-export type WorkspaceStatus = 'success' | 'failed' | 'running' | 'in_progress' | 'not_started'
+export type WorkspaceStatus =
+  | 'success'
+  | 'failed'
+  | 'running'
+  | 'in_progress'
+  | 'not_started'
+
 export type DesignTool = 'backend' | 'frontend'
 
 export interface WorkspaceSummary {
@@ -30,6 +36,11 @@ export interface WorkspaceParameters {
   core_utilization: number
   target_density: number
   max_fanout: number
+  die_area_mode?: 'width_height' | 'utilitization_margin'
+  die_width?: number
+  die_height?: number
+  utilitization?: number
+  margin?: number
 }
 
 export interface WorkspaceConfig {
@@ -42,4 +53,40 @@ export interface WorkspaceConfig {
   origin_def: string
   origin_verilog: string
   rtl_list: string[]
+  filelist?: string
+  design_input_mode?: 'rtl' | 'post_synthesis'
+  sdc?: string
+  pdk_config_mode?: 'default' | 'manual'
+  flow_config?: {
+    start_step: string
+    end_step: string
+    steps: string[]
+  }
+  pdk_config?: {
+    mode?: 'default' | 'manual'
+    tech_lef: string[]
+    cell_lef: string[]
+    liberty: string[]
+  }
+  pdk_json?: string
+  replaceExistingWorkspace?: boolean
+  keepReplacementBackup?: boolean
+  project_context?: {
+    mode: 'select' | 'create'
+    project_name: string
+    project_root: string
+    project_json_path: string
+  }
+  source_context?: {
+    projectName?: string
+    projectRoot?: string
+    workspaceId?: string
+    workspaceName?: string
+    workspacePath?: string
+    step?: string
+    outputPath?: string
+    outputType?: string
+    startStep?: string
+  }
+  source_config?: Partial<WorkspaceConfig>
 }

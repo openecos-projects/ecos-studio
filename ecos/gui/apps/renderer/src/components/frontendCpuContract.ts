@@ -1,7 +1,11 @@
 import type { FrontendCpuPortContract } from '@/api/frontendCatalog'
 
 const VERILOG_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_$]*$/
-const PORT_DIRECTIONS = new Set<FrontendCpuPortContract['direction']>(['input', 'output', 'inout'])
+const PORT_DIRECTIONS = new Set<FrontendCpuPortContract['direction']>([
+  'input',
+  'output',
+  'inout',
+])
 
 export function normalizeCpuPortContract(value: unknown): FrontendCpuPortContract[] {
   if (!Array.isArray(value)) return []
@@ -12,14 +16,15 @@ export function normalizeCpuPortContract(value: unknown): FrontendCpuPortContrac
     if (!rawPort || typeof rawPort !== 'object') continue
     const record = rawPort as Record<string, unknown>
     const name = typeof record.name === 'string' ? record.name.trim() : ''
-    const direction = typeof record.direction === 'string' ? record.direction.trim().toLowerCase() : ''
+    const direction =
+      typeof record.direction === 'string' ? record.direction.trim().toLowerCase() : ''
     const width = Number(record.width)
     if (
-      !VERILOG_IDENTIFIER_RE.test(name)
-      || !PORT_DIRECTIONS.has(direction as FrontendCpuPortContract['direction'])
-      || !Number.isSafeInteger(width)
-      || width < 1
-      || names.has(name)
+      !VERILOG_IDENTIFIER_RE.test(name) ||
+      !PORT_DIRECTIONS.has(direction as FrontendCpuPortContract['direction']) ||
+      !Number.isSafeInteger(width) ||
+      width < 1 ||
+      names.has(name)
     ) {
       continue
     }
@@ -33,7 +38,10 @@ export function normalizeCpuPortContract(value: unknown): FrontendCpuPortContrac
   return ports
 }
 
-export function formatCpuTopModule(moduleName: string, ports: FrontendCpuPortContract[]): string {
+export function formatCpuTopModule(
+  moduleName: string,
+  ports: FrontendCpuPortContract[],
+): string {
   const normalizedName = moduleName.trim()
   if (!VERILOG_IDENTIFIER_RE.test(normalizedName) || ports.length === 0) return ''
 

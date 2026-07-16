@@ -102,161 +102,34 @@ After launching ECOS Studio, you'll see the home screen with the backend design 
 
 ## Creating a New Workspace
 
-Click **"New Workspace"** to start the project creation wizard. The wizard guides you through 4 steps:
+Click **New Workspace** to start the workspace wizard. The wizard guides you through 6 steps:
 
-<div align="center">
-  <img src="asset/create-workspace.png" alt="Create Workspace" style="max-width: 80%; height: auto;">
-</div>
-</br>
+1. **Project Setup** - choose an existing project root or create a project root.
+2. **Basic Info** - set the workspace name and confirm its directory.
+3. **Flow Setup** - choose the fixed harden flow range from `Synthesis` through `Harden`.
+4. **Design Files** - provide RTL/filelist for synthesis starts, or `DEF` plus Verilog netlist for post-synthesis starts. `SDC` is configured here.
+5. **PDK Config** - use ECC default PDK config or manually select technology LEF, cell LEF, and Liberty files.
+6. **Spec Setting** - configure design, clock, die area, utilization, fanout, and related `parameters.json` fields.
 
-### Step 1: Project Basics
+When the wizard is opened from Project Management, the workspace path defaults to:
 
-Set up your project's fundamental information:
+```text
+<project_root>/<workspace_name>
+```
 
-<div align="center">
-  <img src="asset/wizard-step1-basics.png" alt="Step 1: Project Basics" style="max-width: 80%; height: auto;">
-</div>
-</br>
+You can still use the existing Browse action to choose a different location when needed.
 
-**Required Fields:**
-- **Project Name** - Unique identifier for your project (letters, numbers, underscores only)
-  - Example: `my_chip_design`, `riscv_core`, `dsp_accelerator`
-- **Save Location** - Directory where project files will be stored
-  - Click **Browse** to select a folder
+### Creating From a Step Output
 
-**Optional Fields:**
-- **Project Description** - Brief description of your chip design
+Project Management can create a new workspace from an existing workspace step output. For example, selecting `Floorplan` in `/workspaces/gcd_project/ics55_gcd_harden` and creating `ws_001` will prefill the wizard with the source project, source workspace, source step, and selected output files.
 
-**Tips:**
-- Choose a descriptive project name that reflects your design
-- Select a location with sufficient disk space (recommended: 1GB+)
+In this derived flow:
 
----
-
-### Step 2: Design Files
-
-Upload your RTL design files:
-
-<div align="center">
-  <img src="asset/wizard-step2-design.png" alt="Step 2: Design Files" style="max-width: 80%; height: auto;">
-</div>
-</br>
-
-**Adding Files:**
-- **Drag & Drop** - Drag files directly into the upload zone
-- **Browse Files** - Click to select files from your file system
-
-**Supported Formats:**
-- Verilog (`.v`)
-- SystemVerilog (`.sv`)
-- VHDL (`.vhd`)
-
-**Required Information:**
-- **Top Module Name** - The top-level module of your design
-  - Example: `top`, `chip_top`, `soc_top`
-- **Clock Signal Name** - Main clock signal for timing constraints
-  - Example: `clk`, `clock`, `sys_clk`
-
-
-**File Management:**
-- View all added files in the file list
-- Remove files by clicking the delete icon (appears on hover)
-- Files are validated for correct format
-
-**Tips:**
-- Ensure all dependencies are included
-- Verify the top module name matches your RTL
-- Use consistent clock naming across your design
-
----
-
-### Step 3: Technology Setup
-
-Configure process technology and design constraints:
-
-<div align="center">
-  <img src="asset/wizard-step3-technology.png" alt="Step 3: Technology Setup" style="max-width: 80%; height: auto;">
-</div>
-</br>
-
-#### PDK Selection
-
-**Process Design Kit (PDK)** defines the manufacturing technology:
-
-**Currently Supported:**
-- **icsprout55-pdk** - 55nm process technology
-  - Open-source PDK
-  - Includes standard cell library, I/O cells
-  - Suitable for general-purpose digital designs
-
-**Note:** Custom PDK import is not currently supported.
-
-#### Design Parameters
-
-Configure key design specifications:
-
-<div align="center">
-  <img src="asset/wizard-step3-parameters.png" alt="Design Parameters" style="max-width: 80%; height: auto;">
-</div>
-
-**Die Size:**
-- **Width** - Chip width in micrometers (μm)
-- **Height** - Chip height in micrometers (μm)
-- Example: 1000 × 1000 μm for a 1mm² chip
-
-**Clock Frequency:**
-- Target operating frequency in MHz
-- Example: 100 MHz, 500 MHz, 1000 MHz
-- Affects timing constraints and optimization
-
-**Cell Libraries:**
-- **Buffer Cells** - Cells used for signal buffering
-- **Filler Cells** - Cells to fill empty spaces
-- **Tie Cells** - Cells for tying signals to VDD/GND
-
-**Tips:**
-- Start with conservative die size (can adjust later)
-- Set realistic clock frequency based on technology
-- Use default cell selections if unsure
-
----
-
-### Step 4: Review & Create
-
-Review your project configuration before creating the workspace:
-
-<div align="center">
-  <img src="asset/wizard-step4-review.png" alt="Step 4: Review and Create" style="max-width: 80%; height: auto">
-</div>
-</br>
-
-**Review Sections:**
-
-**1. Basic Info**
-- Project Name
-- Save Location
-- Project Description
-- Click **Edit** to return to Step 1 if changes needed
-
-**2. Design Files**
-- List of uploaded RTL files
-- Top Module Name
-- Clock Signal Name
-- Click **Edit** to return to Step 2 if changes needed
-
-**3. Technology Setup**
-- Selected PDK (Process Design Kit)
-- Die Size (Width × Height)
-- Clock Frequency
-- Core Utilization
-- Target Density
-- Max Fanout
-- Click **Edit** to return to Step 3 if changes needed
-
-**Tips:**
-- Carefully review all settings before creating
-- Use Edit buttons to quickly jump back to any step
-- All settings can be modified later in project settings
+- **New Workspace** shows where the workspace comes from: project, source workspace, and source step.
+- **Flow Setup** starts from the next runnable step. For a `Floorplan` source, the new workspace starts at `fixFanout`; `Synthesis` and `Floorplan` are shown as reused and cannot be selected.
+- **Design Files** reuses the source workspace data. `DEF` comes from the selected step output, while Verilog and `SDC` default to the source workspace configuration.
+- **PDK Config** defaults to the source workspace PDK selection, including tech LEF, cell LEF, Liberty, or ECC default PDK configuration.
+- **Spec Setting** defaults to the source workspace parameters.
 
 ---
 
@@ -267,9 +140,10 @@ After completing all steps:
 1. Review your configuration summary
 2. Click **"Create Workspace"**
 3. ECOS Studio will:
-   - Create project directory structure
-   - Copy design files
-   - Generate configuration files
+   - Create the workspace directory structure
+   - Generate configuration files from the wizard state
+   - Reuse source step artifacts when the workspace is derived
+   - Register the workspace in the current project `project.json` when launched from Project Management
    - Initialize workspace database
 
 ---
@@ -491,4 +365,3 @@ View design metrics and analysis charts generated during the flow:
 - **Explore Examples** - Check `docs/examples/` for sample projects
 - **Read API Guide** - Learn backend integration with REST API
 - **Join Community** - Participate in discussions and contribute
-

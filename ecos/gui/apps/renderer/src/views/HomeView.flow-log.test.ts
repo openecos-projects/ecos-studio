@@ -2,15 +2,11 @@ import { reactive, toRef } from 'vue'
 import { describe, expect, it } from 'vitest'
 import homeViewSource from './HomeView.vue?raw'
 
-function loadFlowLogChooserController() {
-  const helperScript = homeViewSource.match(/<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/)
-
-  expect(helperScript?.[1]).toBeTruthy()
-
-  const normalizedScript = helperScript![1]
+function normalizeHomeViewHelperScript(script: string) {
+  return script
     .replace(/export interface[\s\S]*?\n}\n/g, '')
     .replace(
-      /export function createFlowLogChooserController\(initialSelectedKey: string \| null = null\): FlowLogChooserController/,
+      /export function createFlowLogChooserController\(\s*initialSelectedKey: string \| null = null,?\s*\): FlowLogChooserController/,
       'function createFlowLogChooserController(initialSelectedKey = null)',
     )
     .replace(
@@ -18,17 +14,32 @@ function loadFlowLogChooserController() {
       'function computeFlowLogChooserAnchorStyle(triggerRect, viewport, chooserSize)',
     )
     .replace(/const controller: FlowLogChooserController =/, 'const controller =')
-    .replace(/toggleFlowLogStepChooser\(this: FlowLogChooserController\)/, 'toggleFlowLogStepChooser()')
-    .replace(/closeFlowLogStepChooser\(this: FlowLogChooserController\)/, 'closeFlowLogStepChooser()')
-    .replace(/onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
-    .replace(/onSelectFlowLogStep\(key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): string \| null,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): string,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): FlowLogChooserEscapeEvent,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(/(\w+)\(\s*this: FlowLogChooserController,?\s*\)/g, '$1()')
+}
+
+function loadFlowLogChooserController() {
+  const helperScript = homeViewSource.match(
+    /<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/,
+  )
+
+  expect(helperScript?.[1]).toBeTruthy()
+
+  const normalizedScript = normalizeHomeViewHelperScript(helperScript![1])
 
   return new Function(`${normalizedScript}\nreturn createFlowLogChooserController`)() as (
-    initialSelectedKey?: string | null
+    initialSelectedKey?: string | null,
   ) => {
     selectedFlowLogKey: string | null
     isFlowLogStepChooserOpen: boolean

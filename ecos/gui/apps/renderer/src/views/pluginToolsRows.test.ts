@@ -2,15 +2,18 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ResourceItem } from '@/api/plugin'
 import {
+  compactResourceMessage,
   formatResourceSize,
   formatResourceSizeMb,
-  frontendFlowTagsFor,
-  isEdaToolRow,
   managedInstallLocation,
   primaryActionForRow,
   resourceToRow,
+  removalActionForRow,
   rowActionForStatus,
+  selectedResourceMetaText,
   runBatchDownload,
+  createPrimaryActionTask,
+  canImportLocalResource,
 } from './pluginToolsRows'
 
 function resource(overrides: Partial<ResourceItem>): ResourceItem {
@@ -35,9 +38,6 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
     actions: ['install'],
     health: {},
     error: null,
-    requires: [],
-    installed_requires: [],
-    missing_requires: [],
     ...overrides,
   }
 }
@@ -52,115 +52,9 @@ describe('pluginToolsRows', () => {
       name: 'ICSPROUT 55nm PDK',
       version: 'v1.01',
       sizeLabel: '411.99 MB',
-      sizeMb: 411.9873046875,
       statusKind: 'available',
       statusText: 'Available',
     })
-    expect(row.isFrontendTool).toBe(false)
-    expect(row.flowTags).toEqual([])
-  })
-
-  it('marks ECC-FE frontend tool resources with flow tags', () => {
-    const yosys = resourceToRow(
-      resource({
-        id: 'tool:yosys',
-        type: 'tool',
-        name: 'yosys',
-        display_name: 'Yosys',
-        description: 'Yosys from the OSS CAD Suite distribution.',
-        category: 'synthesis',
-        status: 'available',
-        available_versions: ['2026-05-13'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
-      }),
-      undefined,
-    )
-    const riscv = resource({
-      id: 'tool:riscv-toolchain',
-      type: 'tool',
-      name: 'riscv-toolchain',
-      display_name: 'RISC-V GNU Toolchain',
-      description: 'xPack RISC-V bare-metal GCC toolchain.',
-      category: 'toolchain',
-      status: 'available',
-      available_versions: ['15.2.0-1'],
-      managed_root: '/home/user/.local/share/ecos-studio/tools',
-    })
-
-    expect(yosys.isFrontendTool).toBe(true)
-    expect(isEdaToolRow(yosys)).toBe(true)
-    expect(yosys.flowTags).toEqual(['Review', 'Yosys', 'Lint', 'Sim'])
-    expect(frontendFlowTagsFor(riscv)).toEqual(['CPU Tests', 'CoreMark'])
-    expect(isEdaToolRow(resourceToRow(riscv, undefined))).toBe(false)
-  })
-
-  it('keeps EDA tool identity separate from ECC-FE frontend flow usage', () => {
-    const openroad = resourceToRow(
-      resource({
-        id: 'tool:openroad',
-        type: 'tool',
-        name: 'openroad',
-        display_name: 'OpenROAD',
-        description: 'Digital physical design and place-and-route tool.',
-        category: 'place-route',
-        status: 'available',
-        available_versions: ['2026-06-01'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
-      }),
-      undefined,
-    )
-
-    expect(openroad.type).toBe('tool')
-    expect(openroad.isFrontendTool).toBe(false)
-    expect(openroad.flowTags).toEqual([])
-    expect(isEdaToolRow(openroad)).toBe(true)
-  })
-
-  it('treats ecc-fe as a frontend flow runtime instead of an EDA tool', () => {
-    const eccFe = resourceToRow(
-      resource({
-        id: 'tool:ecc-fe',
-        type: 'tool',
-        name: 'ecc-fe',
-        display_name: 'ECC-FE Frontend Flow',
-        description: 'ECOS frontend flow runtime CLI for Review, Elab, Lint, Sim, and Wave integration.',
-        category: 'frontend',
-        status: 'available',
-        available_versions: ['0.1.0-alpha.0-ecos'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
-        requires: ['tool:ecc-fe-soc-ysyx-am'],
-        missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
-      }),
-      undefined,
-    )
-
-    expect(eccFe.icon).toBe('FE')
-    expect(eccFe.isFrontendTool).toBe(true)
-    expect(eccFe.flowTags).toEqual(['Frontend CLI'])
-    expect(isEdaToolRow(eccFe)).toBe(false)
-    expect(eccFe.dependencyLabel).toBe('Installs 1 required: ecc-fe-soc-ysyx-am')
-  })
-
-  it('treats ecc-fe SoC harness resources as frontend resources instead of EDA tools', () => {
-    const soc = resourceToRow(
-      resource({
-        id: 'tool:ecc-fe-soc-ysyx-am',
-        type: 'tool',
-        name: 'ecc-fe-soc-ysyx-am',
-        display_name: 'ECC-FE YSYX AM SoC Harness',
-        description: 'Installable SoC harness resource assembled with the ECC-FE frontend flow runtime.',
-        category: 'frontend',
-        status: 'available',
-        available_versions: ['0.1.0-alpha.0-ecos'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
-      }),
-      undefined,
-    )
-
-    expect(soc.icon).toBe('SOC')
-    expect(soc.isFrontendTool).toBe(true)
-    expect(soc.flowTags).toContain('SoC Harness')
-    expect(isEdaToolRow(soc)).toBe(false)
   })
 
   it('maps active managed PDK to installed row', () => {
@@ -182,40 +76,6 @@ describe('pluginToolsRows', () => {
     expect(row.version).toBe('v1.01')
   })
 
-  it('labels imported local PDK references without implying a managed download', () => {
-    const inactive = resourceToRow(
-      resource({
-        status: 'installed',
-        source: 'local',
-        active: false,
-        active_version: null,
-        installed_version: null,
-        available_versions: [],
-        path: '/home/user/pdk/ics55',
-        actions: ['validate', 'remove_reference'],
-      }),
-      undefined,
-    )
-    const active = resourceToRow(
-      resource({
-        status: 'installed',
-        source: 'local',
-        active: true,
-        active_version: null,
-        installed_version: null,
-        available_versions: [],
-        path: '/home/user/pdk/ics55',
-        actions: ['validate', 'remove_reference'],
-      }),
-      undefined,
-    )
-
-    expect(inactive.statusKind).toBe('installed')
-    expect(inactive.statusText).toBe('Local reference')
-    expect(inactive.version).toBe('Local')
-    expect(active.statusText).toBe('Active local')
-  })
-
   it('maps progress to installing state', () => {
     const row = resourceToRow(resource({ status: 'installing' }), {
       resourceId: 'pdk:ics55',
@@ -223,11 +83,13 @@ describe('pluginToolsRows', () => {
       tool: 'ics55',
       phase: 'downloading',
       progress: 0.5,
-      message: 'Downloading...',
+      message:
+        'Downloading ICsprout 55nm PDK post-install asset 1/7: ics55_LLSC_H7CH_liberty.tar.bz2',
     })
 
     expect(row.statusKind).toBe('installing')
-    expect(row.statusText).toBe('Downloading 50%')
+    expect(row.statusText).toBe('Downloading')
+    expect(row).not.toHaveProperty('statusIcon')
     expect(row.progressPercent).toBe(50)
   })
 
@@ -242,30 +104,106 @@ describe('pluginToolsRows', () => {
     })
 
     expect(row.statusKind).toBe('installing')
-    expect(row.statusText).toBe('Running PDK post-install steps...')
+    expect(row.statusText).toBe('Post-install')
+    expect(row).not.toHaveProperty('statusIcon')
+  })
+
+  it('keeps backend error details compact in visible row copy', () => {
+    const error =
+      'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const row = resourceToRow(
+      resource({
+        status: 'error',
+        description: '',
+        path: null,
+        error,
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('error')
+    expect(row.statusText).toBe('Error')
+    expect(row.description).toBe('Connection timeout')
+    expect(row.description).not.toContain('https://')
+    expect(row.description).not.toContain('UND_ERR')
+    expect(row.descriptionTitle).toBe(error)
+    expect(row.statusTitle).toBe(error)
+  })
+
+  it('prefers compact error summaries over registry descriptions on failed rows', () => {
+    const error =
+      'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)'
+    const row = resourceToRow(
+      resource({
+        status: 'error',
+        description: 'Integrated Circuit Systems 55nm PDK',
+        path: null,
+        error,
+      }),
+      undefined,
+    )
+
+    expect(row.description).toBe('Connection timeout')
+    expect(row.descriptionTitle).toBe(error)
+  })
+
+  it('compacts verbose resource messages for visible alerts', () => {
+    expect(
+      compactResourceMessage(
+        'Failed to download https://github.com/openecos-projects/icsprout55-pdk/archive/refs/tags/v1.10.100.tar.gz: fetch failed (UND_ERR_CONNECT_TIMEOUT: Connect Timeout)',
+      ),
+    ).toBe('Connection timeout')
+    expect(
+      compactResourceMessage(
+        'Failed to download https://example.invalid/archive.tar.gz: fetch failed',
+      ),
+    ).toBe('Download failed')
+    expect(compactResourceMessage('Checksum mismatch')).toBe('Checksum mismatch')
   })
 
   it('formats resource sizes from bytes', () => {
     expect(formatResourceSize(null)).toEqual({ sizeLabel: '-', sizeMb: 0 })
-    expect(formatResourceSize(432000000)).toEqual({ sizeLabel: '411.99 MB', sizeMb: 411.9873046875 })
-    expect(formatResourceSize(300 * 1024)).toEqual({ sizeLabel: '0.29 MB', sizeMb: 0.29296875 })
-    expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({ sizeLabel: '2.00 GB', sizeMb: 2048 })
+    expect(formatResourceSize(432000000)).toEqual({
+      sizeLabel: '411.99 MB',
+      sizeMb: 411.9873046875,
+    })
+    expect(formatResourceSize(300 * 1024)).toEqual({
+      sizeLabel: '0.29 MB',
+      sizeMb: 0.29296875,
+    })
+    expect(formatResourceSize(2 * 1024 * 1024 * 1024)).toEqual({
+      sizeLabel: '2.00 GB',
+      sizeMb: 2048,
+    })
     expect(formatResourceSizeMb(0)).toBe('0.00 MB')
     expect(formatResourceSizeMb(0.125)).toBe('0.13 MB')
     expect(formatResourceSizeMb(2048)).toBe('2.00 GB')
   })
 
   it('chooses actions from resource action list', () => {
-    expect(rowActionForStatus(resource({ status: 'available', actions: ['install'] }))).toBe('install')
-    expect(rowActionForStatus(resource({ status: 'update_available', actions: ['update'] }))).toBe('update')
-    expect(rowActionForStatus(resource({ status: 'missing', actions: ['update', 'uninstall'] }))).toBe('update')
-    expect(rowActionForStatus(resource({ status: 'invalid', actions: ['update', 'uninstall'] }))).toBe('update')
-    expect(rowActionForStatus(resource({ status: 'missing', actions: ['install'] }))).toBe('install')
-    expect(rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] }))).toBe('uninstall')
-    expect(rowActionForStatus(resource({ status: 'installed', actions: ['remove_reference'] }))).toBe('remove_reference')
-    expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe('cancel')
-    expect(rowActionForStatus(resource({ status: 'uninstalling', actions: ['uninstall'] }))).toBe('none')
-    expect(rowActionForStatus(resource({ status: 'removing', actions: ['remove_reference'] }))).toBe('none')
+    expect(
+      rowActionForStatus(resource({ status: 'available', actions: ['install'] })),
+    ).toBe('install')
+    expect(
+      rowActionForStatus(resource({ status: 'update_available', actions: ['update'] })),
+    ).toBe('update')
+    expect(
+      rowActionForStatus(resource({ status: 'installed', actions: ['uninstall'] })),
+    ).toBe('uninstall')
+    expect(
+      rowActionForStatus(
+        resource({ status: 'installed', actions: ['remove_reference'] }),
+      ),
+    ).toBe('remove_reference')
+    expect(rowActionForStatus(resource({ status: 'installing', actions: [] }))).toBe(
+      'cancel',
+    )
+    expect(
+      rowActionForStatus(resource({ status: 'uninstalling', actions: ['uninstall'] })),
+    ).toBe('none')
+    expect(
+      rowActionForStatus(resource({ status: 'removing', actions: ['remove_reference'] })),
+    ).toBe('none')
   })
 
   it('identifies rows with primary download actions', () => {
@@ -276,12 +214,10 @@ describe('pluginToolsRows', () => {
     ).toBe('install')
     expect(
       primaryActionForRow(
-        resourceToRow(resource({ status: 'update_available', actions: ['update'] }), undefined),
-      ),
-    ).toBe('update')
-    expect(
-      primaryActionForRow(
-        resourceToRow(resource({ status: 'invalid', actions: ['update', 'uninstall'] }), undefined),
+        resourceToRow(
+          resource({ status: 'update_available', actions: ['update'] }),
+          undefined,
+        ),
       ),
     ).toBe('update')
     expect(
@@ -298,12 +234,109 @@ describe('pluginToolsRows', () => {
     ).toBeNull()
   })
 
+  it('maps local unmanaged tools with install action to replace rows', async () => {
+    const installResource = vi.fn(async () => undefined)
+    const updateResource = vi.fn(async () => undefined)
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: '0.66+154',
+        available_versions: ['2026-05-13'],
+        active_version: '0.66+154',
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['install', 'remove_reference'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.statusKind).toBe('installed')
+    expect(row.statusText).toBe('Local')
+    expect(rowActionForStatus(row.resource)).toBe('replace')
+    expect(primaryActionForRow(row)).toBe('replace')
+    expect(removalActionForRow(row)).toBe('remove_reference')
+    expect(selectedResourceMetaText(row)).toBe('Replace with managed v2026-05-13')
+
+    await createPrimaryActionTask(row, { installResource, updateResource })
+
+    expect(installResource).toHaveBeenCalledWith('tool:yosys')
+    expect(updateResource).not.toHaveBeenCalled()
+  })
+
+  it('maps local unmanaged tools without install action to removable local rows', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: '0.66+154',
+        available_versions: ['2026-05-13'],
+        active_version: '0.66+154',
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['remove_reference'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.statusText).toBe('Local')
+    expect(rowActionForStatus(row.resource)).toBe('remove_reference')
+    expect(primaryActionForRow(row)).toBeNull()
+    expect(removalActionForRow(row)).toBe('remove_reference')
+  })
+
+  it('maps local unmanaged tools with unknown versions to local rows', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:yosys',
+        type: 'tool',
+        name: 'yosys',
+        display_name: 'Yosys',
+        description: 'RTL synthesis',
+        category: 'synthesis',
+        status: 'installed',
+        installed_version: null,
+        available_versions: ['2026-05-13'],
+        active_version: null,
+        active: true,
+        path: '/tmp/oss-cad-suite',
+        managed_root: '/home/user/.local/share/ecos-studio/tools',
+        source: 'local',
+        actions: ['install', 'remove_reference'],
+        health: { managed: false },
+      }),
+      undefined,
+    )
+
+    expect(row.version).toBe('Local')
+    expect(row.statusText).toBe('Local')
+  })
+
   it('runs batch download for selected available PDKs and updateable tools', async () => {
     const installResource = vi.fn(async () => undefined)
     const updateResource = vi.fn(async () => undefined)
 
     const rows = [
-      resourceToRow(resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }), undefined),
+      resourceToRow(
+        resource({ id: 'pdk:ics55', status: 'available', actions: ['install'] }),
+        undefined,
+      ),
       resourceToRow(
         resource({
           id: 'tool:yosys',
@@ -346,11 +379,10 @@ describe('pluginToolsRows', () => {
     expect(updateResource).toHaveBeenCalledWith('tool:yosys')
   })
 
-  it('skips selected dependency rows when a selected parent installs them automatically', async () => {
+  it('skips selected dependency rows when a selected parent installs them', async () => {
     const installResource = vi.fn(async () => undefined)
     const updateResource = vi.fn(async () => undefined)
-
-    const eccFe = resourceToRow(
+    const parent = resourceToRow(
       resource({
         id: 'tool:ecc-fe',
         type: 'tool',
@@ -359,15 +391,13 @@ describe('pluginToolsRows', () => {
         description: 'Frontend flow runtime CLI.',
         category: 'frontend',
         status: 'available',
-        available_versions: ['0.1.0-alpha.0-ecos'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
         actions: ['install'],
         requires: ['tool:ecc-fe-soc-ysyx-am'],
         missing_requires: ['tool:ecc-fe-soc-ysyx-am'],
       }),
       undefined,
     )
-    const soc = resourceToRow(
+    const dependency = resourceToRow(
       resource({
         id: 'tool:ecc-fe-soc-ysyx-am',
         type: 'tool',
@@ -376,21 +406,75 @@ describe('pluginToolsRows', () => {
         description: 'Frontend SoC harness resource.',
         category: 'frontend',
         status: 'available',
-        available_versions: ['0.1.0-alpha.0-ecos'],
-        managed_root: '/home/user/.local/share/ecos-studio/tools',
         actions: ['install'],
       }),
       undefined,
     )
 
-    await runBatchDownload([eccFe, soc], {
+    await runBatchDownload([parent, dependency], {
       installResource,
       updateResource,
     })
 
+    expect(parent.flowTags).toContain('Frontend CLI')
+    expect(parent.dependencyLabel).toContain('ecc-fe-soc-ysyx-am')
     expect(installResource).toHaveBeenCalledTimes(1)
     expect(installResource).toHaveBeenCalledWith('tool:ecc-fe')
-    expect(updateResource).not.toHaveBeenCalled()
+  })
+
+  it('allows local import for tool and PDK rows that are not currently mutating', () => {
+    expect(
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'available',
+            actions: ['install'],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'pdk:ics55',
+            type: 'pdk',
+            status: 'available',
+            actions: ['install'],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'installing',
+            actions: [],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(false)
+    expect(
+      canImportLocalResource(
+        resourceToRow(
+          resource({
+            id: 'tool:yosys',
+            type: 'tool',
+            status: 'uninstalling',
+            actions: [],
+          }),
+          undefined,
+        ),
+      ),
+    ).toBe(false)
   })
 
   it('derives managed install location from downloadable resource types', () => {

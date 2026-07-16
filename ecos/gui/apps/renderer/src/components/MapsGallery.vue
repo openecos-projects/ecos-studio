@@ -1,43 +1,62 @@
 <template>
   <div class="maps-gallery w-full">
     <!-- 图片网格 -->
-    <div class="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-      <div v-for="(item, key) in mapsData" :key="key" @click="handleMapClick(key as string, item)" :class="[
-        'group relative rounded-lg overflow-hidden cursor-pointer',
-        'bg-(--bg-secondary) border border-(--border-color)/50',
-        'transition-all duration-200 ease-out',
-        'hover:border-(--accent-color)/50 hover:shadow-md hover:shadow-(--accent-color)/10',
-        'hover:-translate-y-0.5',
-        selectedKey === key ? 'ring-2 ring-(--accent-color) border-(--accent-color)' : ''
-      ]">
+    <div class="grid grid-cols-3 gap-2 lg:grid-cols-4 xl:grid-cols-5">
+      <div
+        v-for="(item, key) in mapsData"
+        :key="key"
+        @click="handleMapClick(key as string, item)"
+        :class="[
+          'group relative cursor-pointer overflow-hidden rounded-lg',
+          'border border-(--border-color)/50 bg-(--bg-secondary)',
+          'transition-all duration-200 ease-out',
+          'hover:border-(--accent-color)/50 hover:shadow-(--accent-color)/10 hover:shadow-md',
+          'hover:-translate-y-0.5',
+          selectedKey === key
+            ? 'border-(--accent-color) ring-2 ring-(--accent-color)'
+            : '',
+        ]"
+      >
         <!-- 图片容器 -->
         <div class="relative aspect-4/3 overflow-hidden bg-(--bg-tertiary)">
           <!-- 加载状态 -->
-          <div v-if="loadingImages[key as string]" class="absolute inset-0 flex items-center justify-center">
-            <i class="ri-loader-4-line text-lg text-(--accent-color) animate-spin"></i>
+          <div
+            v-if="loadingImages[key as string]"
+            class="absolute inset-0 flex items-center justify-center"
+          >
+            <i class="ri-loader-4-line animate-spin text-lg text-(--accent-color)"></i>
           </div>
 
           <!-- 图片 -->
-          <img v-if="getImageUrl(key as string)" v-show="!loadingImages[key as string]"
-            :src="getImageUrl(key as string)" :alt="key as string"
-            class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-            @load="handleImageLoad(key as string)" @error="handleImageError(key as string)" />
+          <img
+            v-if="getImageUrl(key as string)"
+            v-show="!loadingImages[key as string]"
+            :src="getImageUrl(key as string)"
+            :alt="key as string"
+            class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            @load="handleImageLoad(key as string)"
+            @error="handleImageError(key as string)"
+          />
 
           <!-- 加载失败占位 -->
-          <div v-if="errorImages[key as string]"
-            class="absolute inset-0 flex flex-col items-center justify-center text-(--text-secondary)/50">
+          <div
+            v-if="errorImages[key as string]"
+            class="absolute inset-0 flex flex-col items-center justify-center text-(--text-secondary)/50"
+          >
             <i class="ri-image-line text-lg"></i>
           </div>
 
           <!-- 悬浮遮罩 -->
           <div
-            class="absolute inset-0 bg-linear-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          </div>
+            class="absolute inset-0 bg-linear-to-t from-black/50 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+          ></div>
 
           <!-- 选中标记 -->
           <div v-if="selectedKey === key" class="absolute top-1 right-1">
-            <div class="w-4 h-4 rounded-full bg-(--accent-color) flex items-center justify-center">
-              <i class="ri-check-line text-white text-[10px]"></i>
+            <div
+              class="flex h-4 w-4 items-center justify-center rounded-full bg-(--accent-color)"
+            >
+              <i class="ri-check-line text-[10px] text-white"></i>
             </div>
           </div>
         </div>
@@ -45,7 +64,8 @@
         <!-- 标题 -->
         <div class="p-1.5">
           <h4
-            class="text-[10px] font-medium text-(--text-primary) truncate group-hover:text-(--accent-color) transition-colors">
+            class="truncate text-[10px] font-medium text-(--text-primary) transition-colors group-hover:text-(--accent-color)"
+          >
             {{ formatMapName(key as string) }}
           </h4>
         </div>
@@ -53,8 +73,11 @@
     </div>
 
     <!-- 空状态 -->
-    <div v-if="Object.keys(mapsData).length === 0" class="flex flex-col items-center justify-center py-8">
-      <i class="ri-image-line text-4xl text-(--text-secondary)/30 mb-2"></i>
+    <div
+      v-if="Object.keys(mapsData).length === 0"
+      class="flex flex-col items-center justify-center py-8"
+    >
+      <i class="ri-image-line mb-2 text-4xl text-(--text-secondary)/30"></i>
       <p class="text-xs text-(--text-secondary)">No data</p>
     </div>
   </div>
@@ -124,7 +147,8 @@ async function loadImage(key: string, path: string): Promise<void> {
   try {
     if (!isDesktopRuntimeAvailable) {
       // 开发模式下使用占位图
-      imageUrls.value[key] = `https://placehold.co/200x200/1a1a2e/16a085?text=${encodeURIComponent(key.slice(0, 10))}`
+      imageUrls.value[key] =
+        `https://placehold.co/200x200/1a1a2e/16a085?text=${encodeURIComponent(key.slice(0, 10))}`
       loadingImages.value[key] = false
       return
     }
@@ -156,17 +180,17 @@ watch(
     if (!newData) return
     // 并行加载所有图片
     const loadPromises = Object.entries(newData).map(([key, item]) =>
-      loadImage(key, item.path)
+      loadImage(key, item.path),
     )
     await Promise.allSettled(loadPromises)
   },
-  { immediate: true, deep: true }
+  { immediate: true, deep: true },
 )
 
 // 组件销毁时清理未被聊天引用的 blob URL
 onUnmounted(() => {
   const keep = blobUrlsStillUsedInChat()
-  Object.values(imageUrls.value).forEach(url => {
+  Object.values(imageUrls.value).forEach((url) => {
     if (url.startsWith('blob:') && !keep.has(url)) {
       workspaceLifecycle.revokeBlobUrl(url)
     }
@@ -178,7 +202,7 @@ function formatMapName(key: string): string {
   // 将 key 转换为更友好的显示名称
   return key
     .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
 

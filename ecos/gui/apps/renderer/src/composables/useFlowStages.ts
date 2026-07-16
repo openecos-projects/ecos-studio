@@ -5,7 +5,10 @@ import { convertRemoteToLocalPath } from './useHomeData'
 import { STEP_METADATA, getStepMetadata } from '@/api/type'
 import { readProjectTextFile, watchProjectFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
-import { readWorkspaceFlowResourceApi, readWorkspaceHomeResourceApi } from '@/api/workspaceResources'
+import {
+  readWorkspaceFlowResourceApi,
+  readWorkspaceHomeResourceApi,
+} from '@/api/workspaceResources'
 import { useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 import {
   consumePendingHomeRunArtifactReset,
@@ -62,6 +65,7 @@ const FIXED_SETUP_STAGES: FlowStage[] = Object.entries(STEP_METADATA)
  */
 function transformFlowData(flowData: FlowData): FlowStage[] {
   const stages: FlowStage[] = []
+  console.log('flowData.steps:', flowData.steps)
   for (const step of flowData.steps) {
     const metadata = getStepMetadata(step.name)
     stages.push({
@@ -81,12 +85,14 @@ function transformFlowData(flowData: FlowData): FlowStage[] {
  * 从工程读取 flow.json，返回全部 run 步骤的 path（用作路由 stepKey）。
  * 读取失败时回退为 STEP_METADATA 中 `group === 'run'` 的全集。
  */
-export async function loadFlowRunStepKeysFromProject(projectPath: string): Promise<string[]> {
+export async function loadFlowRunStepKeysFromProject(
+  projectPath: string,
+): Promise<string[]> {
   if (!isDesktopRuntime() || !projectPath) {
     return fallbackRunStepKeys()
   }
   try {
-    const flowData = await readWorkspaceFlowResourceApi() as FlowData | null
+    const flowData = (await readWorkspaceFlowResourceApi()) as FlowData | null
     if (!flowData) return fallbackRunStepKeys()
     const stages = transformFlowData(flowData)
     return stages.map((s) => s.path)
@@ -105,10 +111,12 @@ function fallbackRunStepKeys(): string[] {
 function flowDataHasStartedRun(flowData: FlowData): boolean {
   return flowData.steps.some((step) => {
     const state = (step.state ?? '').trim().toLowerCase()
-    return state === 'ongoing'
-      || state === 'running'
-      || state === 'unstart'
-      || state === 'pending'
+    return (
+      state === 'ongoing' ||
+      state === 'running' ||
+      state === 'unstart' ||
+      state === 'pending'
+    )
   })
 }
 
@@ -138,7 +146,9 @@ export function useFlowStages() {
     return [...FIXED_SETUP_STAGES, ...dynamicFlowStages.value]
   })
   const hasOngoingRunStage = computed(() =>
-    dynamicFlowStages.value.some((stage) => stage.state === 'Ongoing' || stage.state === 'running')
+    dynamicFlowStages.value.some(
+      (stage) => stage.state === 'Ongoing' || stage.state === 'running',
+    ),
   )
 
   /**
@@ -165,22 +175,24 @@ export function useFlowStages() {
 
     try {
       const localPath = convertToLocalPath(flowJsonPath)
-      const resolvedPath = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => resolveProjectPathAccess(localPath),
+      const resolvedPath = await workspaceLifecycle.runForSession(sessionId, () =>
+        resolveProjectPathAccess(localPath),
       )
       if (!isCurrent()) return
+      console.log('Loading flow.json from path:', resolvedPath ?? localPath)
       if (!resolvedPath) return
 
-      const fileContent = await workspaceLifecycle.runForSession(
-        sessionId,
-        () => readProjectTextFile(resolvedPath),
+      const fileContent = await workspaceLifecycle.runForSession(sessionId, () =>
+        readProjectTextFile(resolvedPath),
       )
       if (!isCurrent() || fileContent === undefined) return
       const flowData: FlowData = JSON.parse(fileContent)
       if (!shouldApplyFlowData(flowData)) return
 
+      console.log('Loaded flow data from path:', flowData)
+
       dynamicFlowStages.value = transformFlowData(flowData)
+      console.log('Flow stages loaded from path:', dynamicFlowStages.value)
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load flow.json from path:', flowJsonPath, err)
@@ -199,7 +211,9 @@ export function useFlowStages() {
    */
   async function loadFlowStages(): Promise<void> {
     if (!isDesktopRuntimeAvailable || !currentProject.value?.path) {
-      console.warn('Cannot load flow.json: desktop bridge unavailable or no project is open')
+      console.warn(
+        'Cannot load flow.json: desktop bridge unavailable or no project is open',
+      )
       dynamicFlowStages.value = []
       return
     }
@@ -222,7 +236,10 @@ export function useFlowStages() {
       }
       if (!shouldApplyFlowData(flowData)) return
 
+      console.log('Loaded flow data:', flowData)
+
       dynamicFlowStages.value = transformFlowData(flowData)
+      console.log('Flow stages loaded:', dynamicFlowStages.value)
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load flow stages:', err)
@@ -263,8 +280,9 @@ export function useFlowStages() {
     const projectPath = currentProject.value?.path
     if (!projectPath) return true
     const normalizedProjectPath = normalizeProjectPath(projectPath)
-    const resetPending = pendingRerunFlowStartProjectPath === normalizedProjectPath
-      || isHomeRunArtifactResetPending(projectPath)
+    const resetPending =
+      pendingRerunFlowStartProjectPath === normalizedProjectPath ||
+      isHomeRunArtifactResetPending(projectPath)
     if (!resetPending) return true
     if (!flowDataHasStartedRun(flowData)) return false
     pendingRerunFlowStartProjectPath = ''
@@ -279,7 +297,7 @@ export function useFlowStages() {
 
     const sid = ++watchSession
     try {
-      const homeData = await readWorkspaceHomeResourceApi() as { flow?: string } | null
+      const homeData = (await readWorkspaceHomeResourceApi()) as { flow?: string } | null
       if (sid !== watchSession || currentProject.value?.path !== projectPath) return
       const flowJsonPath = homeData?.flow
       if (!flowJsonPath) return
@@ -299,15 +317,18 @@ export function useFlowStages() {
       }
       if (!unwatch) return
       unwatchFlowJsonFile = unwatch
-      unregisterFlowJsonLifecycleCleanup = workspaceLifecycle.registerCleanup(() => {
-        if (unwatchFlowJsonFile === unwatch) {
-          unwatchFlowJsonFile = null
-        }
-        unwatch()
-      }, {
-        sessionId: workspaceLifecycle.currentSessionId.value,
-        label: 'flow.json watcher',
-      })
+      unregisterFlowJsonLifecycleCleanup = workspaceLifecycle.registerCleanup(
+        () => {
+          if (unwatchFlowJsonFile === unwatch) {
+            unwatchFlowJsonFile = null
+          }
+          unwatch()
+        },
+        {
+          sessionId: workspaceLifecycle.currentSessionId.value,
+          label: 'flow.json watcher',
+        },
+      )
     } catch (err) {
       console.warn('Failed to watch flow.json for stage updates:', err)
     }
@@ -318,13 +339,11 @@ export function useFlowStages() {
    * 在用户点击 Run RTL2GDS 时调用，立即反映运行状态
    */
   function setFirstRunStepOngoing(): void {
-    const idx = dynamicFlowStages.value.findIndex(
-      s => s.state !== 'Success'
-    )
+    const idx = dynamicFlowStages.value.findIndex((s) => s.state !== 'Success')
     if (idx !== -1) {
       dynamicFlowStages.value[idx] = {
         ...dynamicFlowStages.value[idx],
-        state: 'Ongoing'
+        state: 'Ongoing',
       }
     }
   }
@@ -336,9 +355,7 @@ export function useFlowStages() {
   function setRunStepOngoingByPath(stepPath: string): void {
     if (!stepPath) return
     const key = stepPath.toLowerCase()
-    const idx = dynamicFlowStages.value.findIndex(
-      (s) => s.path.toLowerCase() === key
-    )
+    const idx = dynamicFlowStages.value.findIndex((s) => s.path.toLowerCase() === key)
     if (idx !== -1) {
       dynamicFlowStages.value[idx] = {
         ...dynamicFlowStages.value[idx],
@@ -375,14 +392,11 @@ export function useFlowStages() {
         clearFlowStages()
       }
     },
-    { immediate: true }
+    { immediate: true },
   )
 
   watch(
-    () => [
-      resourceVersions.value.flow,
-      resourceVersions.value.all,
-    ],
+    () => [resourceVersions.value.flow, resourceVersions.value.all],
     async () => {
       if (!currentProject.value?.path) return
       await refreshFlowStages()
@@ -392,8 +406,8 @@ export function useFlowStages() {
   unregisterHomeRunArtifactReset = onHomeRunArtifactReset((projectPath) => {
     const currentProjectPath = currentProject.value?.path
     if (
-      !currentProjectPath
-      || normalizeProjectPath(projectPath) !== normalizeProjectPath(currentProjectPath)
+      !currentProjectPath ||
+      normalizeProjectPath(projectPath) !== normalizeProjectPath(currentProjectPath)
     ) {
       return
     }

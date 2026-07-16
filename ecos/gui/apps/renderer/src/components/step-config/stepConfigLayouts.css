@@ -426,6 +426,20 @@
   font-size: 11px;
 }
 
+.step-config-root .sc-pro-fixed-value {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-secondary) 75%, var(--bg-primary));
+  color: var(--text-primary);
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
 /* Label chips (CTS toggles) */
 .step-config-root .sc-pro-pill {
   display: inline-flex;
@@ -445,7 +459,8 @@
 /* Nested sub-panels (PL) */
 .step-config-root .sc-pro-subpanel {
   border-radius: 8px;
-  border: 1px dashed color-mix(in srgb, var(--border-color) 90%, var(--sc-accent, #f59e0b));
+  border: 1px dashed
+    color-mix(in srgb, var(--border-color) 90%, var(--sc-accent, #f59e0b));
   background: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-secondary));
   padding: 10px;
   margin-bottom: 10px;

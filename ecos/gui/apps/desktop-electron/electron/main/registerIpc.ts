@@ -6,6 +6,8 @@ import {
   type IpcMain,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { mkdir, stat } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import {
   desktopApiEventChannels,
   desktopApiIpcChannels,
@@ -14,8 +16,22 @@ import {
   type DesktopCliCommandResult,
   type DesktopProjectFileChangedEvent,
   type DesktopProjectLogTailEvent,
+  type DesktopProjectDirectoryEntry,
   type DesktopDirectoryDialogOptions,
+  type EccFlowRunRequest,
+  type EccFlowRunStepRequest,
+  type EccRuntimeEvent,
+  type EccWorkspaceCreateRequest,
+  type EccWorkspaceExportSignoffRequest,
+  type EccWorkspaceHandleRequest,
+  type EccWorkspaceInfoRequest,
+  type EccWorkspaceOpenRequest,
+  type EccWorkspaceSyncConfigRequest,
   type DesktopFileDialogOptions,
+  type DesktopMenuEventId,
+  type DesktopSaveFileDialogOptions,
+  type DesktopRtlSourceDialogOptions,
+  type PickedRtlSources,
   type DesktopProjectTextFileTail,
   type DesktopProjectTextFileUpdate,
   type DesktopSettingsValue,
@@ -26,6 +42,7 @@ import {
   type RemoteContentReadJsonFileRequest,
   type RemoteContentReadTextFileRequest,
   type ResourceImportPdkRequest,
+  type ResourceImportLocalRequest,
   type ResourceInstallRequest,
   type ResourceJob,
   type DesktopShellDataEvent,
@@ -33,7 +50,9 @@ import {
   type DesktopShellSession,
   type DesktopShellSessionOptions,
   type ScannedPdkDirectory,
+  type ScannedRtlDirectory,
   type VersionInfo,
+  type WorkspaceDirectoryReplacement,
   type WorkspaceResourceIndex,
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
@@ -47,6 +66,7 @@ import {
   toggleMaximizeWindow,
 } from '../services/windowService'
 import { electronLogger } from '../services/logger'
+import { setMenuActionEnabled } from '../services/menuService'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -67,7 +87,9 @@ export interface DesktopBridgeServices {
   }
   settingsStore: {
     delete(key: string): Promise<void>
-    get<T extends DesktopSettingsValue = DesktopSettingsValue>(key: string): Promise<T | null>
+    get<T extends DesktopSettingsValue = DesktopSettingsValue>(
+      key: string,
+    ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
   }
   remoteContentService: {
@@ -103,6 +125,24 @@ export interface DesktopBridgeServices {
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
+    scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    listDesignFiles(): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry[]>
+    addDesignFiles(
+      sourcePaths: string[],
+    ): Promise<import('@ecos-studio/shared').WorkspaceDesignFileAddResult>
+    removeDesignFile(
+      filelistEntry: string,
+    ): Promise<import('@ecos-studio/shared').WorkspaceDesignFileEntry | null>
+    removeProjectDirectory(path: string): Promise<void>
+    prepareProjectDirectoryReplacement(
+      path: string,
+    ): Promise<WorkspaceDirectoryReplacement | null>
+    restoreProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
+    finalizeProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
     unwatchProjectFile(subscriptionId: string): Promise<void>
     unsubscribeProjectLogTail(subscriptionId: string): Promise<void>
     watchProjectFile(
@@ -110,6 +150,7 @@ export interface DesktopBridgeServices {
       listener: (event: DesktopProjectFileChangedEvent) => void,
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
   }
   layoutViewerService: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
@@ -129,23 +170,47 @@ export interface DesktopBridgeServices {
       version?: string,
       listener?: (event: ResourceJob) => void,
     ): Promise<unknown>
-    updateResource(resourceId: string, listener?: (event: ResourceJob) => void): Promise<unknown>
+    updateResource(
+      resourceId: string,
+      listener?: (event: ResourceJob) => void,
+    ): Promise<unknown>
     cancelResource(resourceId: string): Promise<unknown>
     uninstallResource(resourceId: string): Promise<unknown>
     activatePdk(resourceId: string): Promise<unknown>
     validatePdk(resourceId: string): Promise<unknown>
     removePdkReference(resourceId: string): Promise<unknown>
     importPdkPath(path: string): Promise<unknown>
+    importLocalPath(resourceId: string, path: string): Promise<unknown>
     refreshRegistry(): Promise<unknown>
-    checkResourceUpdates(options?: { force?: boolean; refreshRegistry?: boolean }): Promise<unknown>
+    checkResourceUpdates(options?: {
+      force?: boolean
+      refreshRegistry?: boolean
+    }): Promise<unknown>
   }
-  desktopRuntimeManager: {
+  frontendRuntimeManager: {
     execute(
       request: DesktopCliCommandRequest,
       listener?: (event: DesktopCliCommandEvent) => void,
     ): Promise<DesktopCliCommandResult>
     cancel(jobId: string): Promise<DesktopCliCommandResult>
-    cancelAll?(message?: string): DesktopCliCommandResult[]
+  }
+  eccRuntimeService: {
+    closeWorkspace(request: EccWorkspaceHandleRequest): Promise<unknown>
+    createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
+    exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
+    inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
+    onEvent(listener: (event: EccRuntimeEvent) => void): () => void
+    openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
+    refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
+    resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
+    rpcHello(): Promise<unknown>
+    rpcPing(): Promise<unknown>
+    rpcShutdown(): Promise<unknown>
+    runFlow(request: EccFlowRunRequest): Promise<unknown>
+    runStep(request: EccFlowRunStepRequest): Promise<unknown>
+    syncConfig(request: EccWorkspaceSyncConfigRequest): Promise<unknown>
+    workspaceHome(request: EccWorkspaceHandleRequest): Promise<unknown>
+    workspaceInfo(request: EccWorkspaceInfoRequest): Promise<unknown>
   }
   shellService: {
     createSession(
@@ -170,19 +235,16 @@ function getEventWindow(event: IpcMainInvokeEvent): BrowserWindow {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function readErrorPath(error: unknown): string | null {
   if (
-    typeof error === 'object'
-    && error !== null
-    && 'path' in error
-    && typeof error.path === 'string'
+    typeof error === 'object' &&
+    error !== null &&
+    'path' in error &&
+    typeof error.path === 'string'
   ) {
     return error.path
   }
@@ -199,12 +261,17 @@ function summarizeProjectBinaryReadError(path: string, error: unknown): string {
   return `[workspace] Failed to read project binary file: ${path}`
 }
 
-function serializeError(error: unknown): { code?: string; message: string; name: string } {
+function serializeError(error: unknown): {
+  code?: string
+  message: string
+  name: string
+} {
   if (error instanceof Error) {
     return {
-      code: typeof (error as NodeJS.ErrnoException).code === 'string'
-        ? (error as NodeJS.ErrnoException).code
-        : undefined,
+      code:
+        typeof (error as NodeJS.ErrnoException).code === 'string'
+          ? (error as NodeJS.ErrnoException).code
+          : undefined,
       message: error.message,
       name: error.name,
     }
@@ -244,18 +311,27 @@ async function pickDirectory(
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
     title: options?.title,
+    buttonLabel: 'Select Folder',
   })
 
   if (result.canceled) {
     return null
   }
 
-  return result.filePaths[0] ?? null
+  const selectedPath = result.filePaths[0]
+  if (!selectedPath) {
+    return null
+  }
+
+  const info = await stat(selectedPath)
+  if (!info.isDirectory()) {
+    throw new Error('Please select a directory, not a file.')
+  }
+
+  return selectedPath
 }
 
-async function pickFiles(
-  options?: DesktopFileDialogOptions,
-): Promise<string[] | null> {
+async function pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null> {
   const result = await dialog.showOpenDialog({
     properties: options?.multiple ? ['openFile', 'multiSelections'] : ['openFile'],
     title: options?.title,
@@ -266,7 +342,83 @@ async function pickFiles(
     return null
   }
 
-  return result.filePaths
+  const filePaths: string[] = []
+  const directoryPaths: string[] = []
+  for (const selectedPath of result.filePaths) {
+    const info = await stat(selectedPath)
+    if (info.isFile()) {
+      filePaths.push(selectedPath)
+    } else if (info.isDirectory()) {
+      directoryPaths.push(selectedPath)
+    }
+  }
+
+  if (filePaths.length === 0 && directoryPaths.length > 0) {
+    throw new Error(
+      'Please select files, not folders. Use Browse Directory to add RTL files from a folder.',
+    )
+  }
+
+  return filePaths.length > 0 ? filePaths : null
+}
+
+async function saveFile(
+  event: IpcMainInvokeEvent,
+  options?: DesktopSaveFileDialogOptions,
+): Promise<string | null> {
+  const { ensureDirectory, ...dialogOptions } = options ?? {}
+  if (ensureDirectory && dialogOptions.defaultPath) {
+    await mkdir(dirname(dialogOptions.defaultPath), { recursive: true })
+  }
+
+  const result = await dialog.showSaveDialog(getEventWindow(event), dialogOptions)
+
+  return result.canceled ? null : (result.filePath ?? null)
+}
+
+async function classifyLocalPaths(paths: string[]): Promise<PickedRtlSources> {
+  const files: string[] = []
+  const directories: string[] = []
+
+  for (const selectedPath of paths) {
+    const info = await stat(selectedPath)
+    if (info.isFile()) {
+      files.push(selectedPath)
+    } else if (info.isDirectory()) {
+      directories.push(selectedPath)
+    }
+  }
+
+  return { files, directories }
+}
+
+async function pickRtlSources(
+  options?: DesktopRtlSourceDialogOptions,
+): Promise<PickedRtlSources | null> {
+  const result = await dialog.showOpenDialog({
+    properties:
+      options?.multiple === false ? ['openFile'] : ['openFile', 'multiSelections'],
+    title: options?.title,
+    filters: [
+      {
+        name: 'HDL Files',
+        extensions: ['v', 'sv', 'vhd', 'vhdl', 'gz'],
+      },
+    ],
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+
+  const picked = await classifyLocalPaths(result.filePaths)
+  if (picked.directories.length > 0) {
+    throw new Error(
+      'Please select RTL design files, not folders. Use Select design folder to scan a folder.',
+    )
+  }
+
+  return picked.files.length > 0 ? picked : null
 }
 
 export function registerIpc(
@@ -298,6 +450,21 @@ export function registerIpc(
       onDestroyed: () => void
     }
   >()
+  const workspaceHandleSubscriptions = new Map<
+    string,
+    {
+      sender: IpcMainInvokeEvent['sender']
+      onDestroyed: () => void
+    }
+  >()
+  const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
+
+  services.eccRuntimeService.onEvent((payload) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue
+      window.webContents.send(desktopApiEventChannels.eccEvent, payload)
+    }
+  })
 
   const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
     const subscription = projectFileWatchSubscriptions.get(subscriptionId)
@@ -341,6 +508,69 @@ export function registerIpc(
     await services.shellService.kill(sessionId)
   }
 
+  const closeTrackedWorkspaceHandle = async (
+    workspaceHandle: string,
+  ): Promise<unknown> => {
+    const existingClose = workspaceHandleClosePromises.get(workspaceHandle)
+    if (existingClose) {
+      return await existingClose
+    }
+
+    const subscription = workspaceHandleSubscriptions.get(workspaceHandle)
+    if (subscription) {
+      workspaceHandleSubscriptions.delete(workspaceHandle)
+      if (typeof subscription.sender.off === 'function') {
+        subscription.sender.off('destroyed', subscription.onDestroyed)
+      }
+    }
+
+    const closePromise = Promise.resolve().then(() =>
+      services.eccRuntimeService.closeWorkspace({ workspaceHandle }),
+    )
+    const trackedClosePromise = closePromise.finally(() => {
+      workspaceHandleClosePromises.delete(workspaceHandle)
+    })
+    workspaceHandleClosePromises.set(workspaceHandle, trackedClosePromise)
+    return await trackedClosePromise
+  }
+
+  const trackWorkspaceHandle = (
+    sender: IpcMainInvokeEvent['sender'],
+    workspaceHandle: string,
+  ): void => {
+    if (!workspaceHandle || workspaceHandleClosePromises.has(workspaceHandle)) {
+      return
+    }
+
+    const previous = workspaceHandleSubscriptions.get(workspaceHandle)
+    if (previous && typeof previous.sender.off === 'function') {
+      previous.sender.off('destroyed', previous.onDestroyed)
+    }
+
+    const onDestroyed = (): void => {
+      void closeTrackedWorkspaceHandle(workspaceHandle)
+    }
+    workspaceHandleSubscriptions.set(workspaceHandle, {
+      sender,
+      onDestroyed,
+    })
+    if (typeof sender.once === 'function') {
+      sender.once('destroyed', onDestroyed)
+    }
+
+    const isDestroyed =
+      typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
+    if (isDestroyed) {
+      onDestroyed()
+    }
+  }
+
+  const workspaceHandleFromResult = (result: unknown): string | null => {
+    if (typeof result !== 'object' || result === null) return null
+    if (!('workspaceHandle' in result)) return null
+    return typeof result.workspaceHandle === 'string' ? result.workspaceHandle : null
+  }
+
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
   })
@@ -369,82 +599,67 @@ export function registerIpc(
     return isWindowMaximized(getEventWindow(event))
   })
 
+  handle(desktopApiIpcChannels.menuSetActionEnabled, (_event, action, enabled) => {
+    setMenuActionEnabled(action as DesktopMenuEventId, enabled as boolean)
+  })
+
   handle(desktopApiIpcChannels.settingsGet, async (_event, key) => {
     return await services.settingsStore.get(key as string)
   })
 
-  handle(
-    desktopApiIpcChannels.settingsSet,
-    async (_event, key, value) => {
-      await services.settingsStore.set(key as string, value as DesktopSettingsValue)
-    },
-  )
+  handle(desktopApiIpcChannels.settingsSet, async (_event, key, value) => {
+    await services.settingsStore.set(key as string, value as DesktopSettingsValue)
+  })
 
   handle(desktopApiIpcChannels.settingsDelete, async (_event, key) => {
     await services.settingsStore.delete(key as string)
   })
 
-  handle(
-    desktopApiIpcChannels.remoteContentListFiles,
-    async (_event, request) => {
-      return await services.remoteContentService.listFiles(
-        request as RemoteContentListFilesRequest,
-      )
-    },
-  )
+  handle(desktopApiIpcChannels.remoteContentListFiles, async (_event, request) => {
+    return await services.remoteContentService.listFiles(
+      request as RemoteContentListFilesRequest,
+    )
+  })
 
-  handle(
-    desktopApiIpcChannels.remoteContentReadTextFile,
-    async (_event, request) => {
-      return await services.remoteContentService.readTextFile(
-        request as RemoteContentReadTextFileRequest,
-      )
-    },
-  )
+  handle(desktopApiIpcChannels.remoteContentReadTextFile, async (_event, request) => {
+    return await services.remoteContentService.readTextFile(
+      request as RemoteContentReadTextFileRequest,
+    )
+  })
 
-  handle(
-    desktopApiIpcChannels.remoteContentReadJsonFile,
-    async (_event, request) => {
-      return await services.remoteContentService.readJsonFile(
-        request as RemoteContentReadJsonFileRequest,
-      )
-    },
-  )
+  handle(desktopApiIpcChannels.remoteContentReadJsonFile, async (_event, request) => {
+    return await services.remoteContentService.readJsonFile(
+      request as RemoteContentReadJsonFileRequest,
+    )
+  })
 
-  handle(
-    desktopApiIpcChannels.dialogPickDirectory,
-    async (_event, options) => {
-      return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
-    },
-  )
+  handle(desktopApiIpcChannels.dialogPickDirectory, async (_event, options) => {
+    return await pickDirectory(options as DesktopDirectoryDialogOptions | undefined)
+  })
 
-  handle(
-    desktopApiIpcChannels.dialogPickFiles,
-    async (_event, options) => {
-      return await pickFiles(options as DesktopFileDialogOptions | undefined)
-    },
-  )
+  handle(desktopApiIpcChannels.dialogPickFiles, async (_event, options) => {
+    return await pickFiles(options as DesktopFileDialogOptions | undefined)
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceIsProjectDirectory,
-    async (_event, path) => {
-      return await services.workspaceService.isProjectDirectory(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.dialogPickRtlSources, async (_event, options) => {
+    return await pickRtlSources(options as DesktopRtlSourceDialogOptions | undefined)
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceRegisterProjectRoot,
-    async (_event, path) => {
-      return await services.workspaceService.registerProjectRoot(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.dialogSaveFile, async (event, options) => {
+    return await saveFile(event, options as DesktopSaveFileDialogOptions | undefined)
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceClearProjectRoot,
-    async () => {
-      await services.workspaceService.clearProjectRoot()
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceIsProjectDirectory, async (_event, path) => {
+    return await services.workspaceService.isProjectDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceRegisterProjectRoot, async (_event, path) => {
+    return await services.workspaceService.registerProjectRoot(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceClearProjectRoot, async () => {
+    await services.workspaceService.clearProjectRoot()
+  })
 
   handle(
     desktopApiIpcChannels.workspaceRequestProjectPathAccess,
@@ -453,12 +668,9 @@ export function registerIpc(
     },
   )
 
-  handle(
-    desktopApiIpcChannels.workspaceReadProjectTextFile,
-    async (_event, path) => {
-      return await services.workspaceService.readProjectTextFile(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceReadProjectTextFile, async (_event, path) => {
+    return await services.workspaceService.readProjectTextFile(path as string)
+  })
 
   handle(
     desktopApiIpcChannels.workspaceReadOptionalProjectTextFile,
@@ -540,58 +752,109 @@ export function registerIpc(
     },
   )
 
-  handle(
-    desktopApiIpcChannels.workspaceReadProjectBinaryFile,
-    async (_event, path) => {
-      return await services.workspaceService.readProjectBinaryFile(path as string)
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceReadProjectBinaryFile, async (_event, path) => {
+    return await services.workspaceService.readProjectBinaryFile(path as string)
+  })
 
   handle(
     desktopApiIpcChannels.workspaceWriteProjectTextFile,
     async (_event, path, content) => {
-      await services.workspaceService.writeProjectTextFile(path as string, content as string)
+      await services.workspaceService.writeProjectTextFile(
+        path as string,
+        content as string,
+      )
     },
   )
 
+  handle(desktopApiIpcChannels.workspaceListProjectDirectory, async (_event, path) => {
+    return await services.workspaceService.listProjectDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceRemoveProjectDirectory, async (_event, path) => {
+    await services.workspaceService.removeProjectDirectory(path as string)
+  })
+
   handle(
-    desktopApiIpcChannels.workspaceScanPdkDirectory,
+    desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
     async (_event, path) => {
-      return await services.workspaceService.scanPdkDirectory(path as string)
+      return await services.workspaceService.prepareProjectDirectoryReplacement(
+        path as string,
+      )
     },
   )
 
   handle(
-    desktopApiIpcChannels.workspaceWatchProjectFile,
-    async (event, path) => {
-      const sender = event.sender
-      let subscriptionId: string | null = null
-      const onDestroyed = (): void => {
-        if (!subscriptionId) return
-        void unwatchProjectFile(subscriptionId)
-      }
+    desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+    async (_event, replacement) => {
+      await services.workspaceService.restoreProjectDirectoryReplacement(
+        replacement as WorkspaceDirectoryReplacement,
+      )
+    },
+  )
 
-      subscriptionId = await services.workspaceService.watchProjectFile(path as string, (payload) => {
+  handle(
+    desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+    async (_event, replacement) => {
+      await services.workspaceService.finalizeProjectDirectoryReplacement(
+        replacement as WorkspaceDirectoryReplacement,
+      )
+    },
+  )
+
+  handle(desktopApiIpcChannels.workspaceScanPdkDirectory, async (_event, path) => {
+    return await services.workspaceService.scanPdkDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceScanRtlDirectory, async (_event, path) => {
+    return await services.workspaceService.scanRtlDirectory(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceListDesignFiles, async () => {
+    return await services.workspaceService.listDesignFiles()
+  })
+
+  handle(desktopApiIpcChannels.workspaceAddDesignFiles, async (_event, sourcePaths) => {
+    return await services.workspaceService.addDesignFiles(sourcePaths as string[])
+  })
+
+  handle(
+    desktopApiIpcChannels.workspaceRemoveDesignFile,
+    async (_event, filelistEntry) => {
+      return await services.workspaceService.removeDesignFile(filelistEntry as string)
+    },
+  )
+
+  handle(desktopApiIpcChannels.workspaceWatchProjectFile, async (event, path) => {
+    const sender = event.sender
+    let subscriptionId: string | null = null
+    const onDestroyed = (): void => {
+      if (!subscriptionId) return
+      void unwatchProjectFile(subscriptionId)
+    }
+
+    subscriptionId = await services.workspaceService.watchProjectFile(
+      path as string,
+      (payload) => {
         if (event.sender.isDestroyed()) return
         if (typeof event.sender.send === 'function') {
           event.sender.send(desktopApiEventChannels.workspaceFileChanged, payload)
         }
-      })
-      projectFileWatchSubscriptions.set(subscriptionId, {
-        sender,
-        onDestroyed,
-      })
-      if (typeof sender.once === 'function') {
-        sender.once('destroyed', onDestroyed)
-      }
+      },
+    )
+    projectFileWatchSubscriptions.set(subscriptionId, {
+      sender,
+      onDestroyed,
+    })
+    if (typeof sender.once === 'function') {
+      sender.once('destroyed', onDestroyed)
+    }
 
-      if (sender.isDestroyed()) {
-        onDestroyed()
-      }
+    if (sender.isDestroyed()) {
+      onDestroyed()
+    }
 
-      return subscriptionId
-    },
-  )
+    return subscriptionId
+  })
 
   handle(
     desktopApiIpcChannels.workspaceUnwatchProjectFile,
@@ -607,40 +870,25 @@ export function registerIpc(
     },
   )
 
-  handle(
-    desktopApiIpcChannels.layoutViewerOpen,
-    async (_event, request) => {
-      return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
-    },
-  )
+  handle(desktopApiIpcChannels.layoutViewerOpen, async (_event, request) => {
+    return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceResourcesGetIndex,
-    async () => {
-      return await services.workspaceResourceService.getIndex()
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceResourcesGetIndex, async () => {
+    return await services.workspaceResourceService.getIndex()
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceResourcesReadHome,
-    async () => {
-      return await services.workspaceResourceService.readHome()
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceResourcesReadHome, async () => {
+    return await services.workspaceResourceService.readHome()
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceResourcesReadFlow,
-    async () => {
-      return await services.workspaceResourceService.readFlow()
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceResourcesReadFlow, async () => {
+    return await services.workspaceResourceService.readFlow()
+  })
 
-  handle(
-    desktopApiIpcChannels.workspaceResourcesReadParameters,
-    async () => {
-      return await services.workspaceResourceService.readParameters()
-    },
-  )
+  handle(desktopApiIpcChannels.workspaceResourcesReadParameters, async () => {
+    return await services.workspaceResourceService.readParameters()
+  })
 
   handle(
     desktopApiIpcChannels.workspaceResourcesResolveStepInfo,
@@ -683,7 +931,10 @@ export function registerIpc(
         sender.send(desktopApiEventChannels.resourcesProgress, payload)
       }
     }
-    return await services.resourceManagerService.updateResource(resourceId as string, listener)
+    return await services.resourceManagerService.updateResource(
+      resourceId as string,
+      listener,
+    )
   })
 
   handle(desktopApiIpcChannels.resourcesCancel, async (_event, resourceId) => {
@@ -702,13 +953,26 @@ export function registerIpc(
     return await services.resourceManagerService.validatePdk(resourceId as string)
   })
 
-  handle(desktopApiIpcChannels.resourcesRemovePdkReference, async (_event, resourceId) => {
-    return await services.resourceManagerService.removePdkReference(resourceId as string)
-  })
+  handle(
+    desktopApiIpcChannels.resourcesRemovePdkReference,
+    async (_event, resourceId) => {
+      return await services.resourceManagerService.removePdkReference(
+        resourceId as string,
+      )
+    },
+  )
 
   handle(desktopApiIpcChannels.resourcesImportPdkPath, async (_event, request) => {
     return await services.resourceManagerService.importPdkPath(
       (request as ResourceImportPdkRequest).path,
+    )
+  })
+
+  handle(desktopApiIpcChannels.resourcesImportLocalPath, async (_event, request) => {
+    const importRequest = request as ResourceImportLocalRequest
+    return await services.resourceManagerService.importLocalPath(
+      importRequest.resourceId,
+      importRequest.path,
     )
   })
 
@@ -722,102 +986,173 @@ export function registerIpc(
     )
   })
 
-  handle(
-    desktopApiIpcChannels.cliExecute,
-    async (event, request) => {
-      const sender = event.sender
-      const isSenderDestroyed = (): boolean =>
-        typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
+  handle(desktopApiIpcChannels.cliExecute, async (event, request) => {
+    const sender = event.sender
+    const isSenderDestroyed = (): boolean =>
+      typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
 
-      return await services.desktopRuntimeManager.execute(
-        request as DesktopCliCommandRequest,
-        (payload) => {
-          if (isSenderDestroyed()) return
-          if (typeof sender.send === 'function') {
-            sender.send(desktopApiEventChannels.cliEvent, payload)
+    return await services.frontendRuntimeManager.execute(
+      request as DesktopCliCommandRequest,
+      (payload) => {
+        if (isSenderDestroyed()) return
+        if (typeof sender.send === 'function') {
+          sender.send(desktopApiEventChannels.cliEvent, payload)
+        }
+      },
+    )
+  })
+
+  handle(desktopApiIpcChannels.cliCancel, async (_event, jobId) => {
+    return await services.frontendRuntimeManager.cancel(String(jobId))
+  })
+
+  handle(desktopApiIpcChannels.eccRpcHello, async () => {
+    return await services.eccRuntimeService.rpcHello()
+  })
+
+  handle(desktopApiIpcChannels.eccRpcPing, async () => {
+    return await services.eccRuntimeService.rpcPing()
+  })
+
+  handle(desktopApiIpcChannels.eccRpcShutdown, async () => {
+    return await services.eccRuntimeService.rpcShutdown()
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceCreate, async (event, request) => {
+    const result = await services.eccRuntimeService.createWorkspace(
+      request as EccWorkspaceCreateRequest,
+    )
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(event.sender, workspaceHandle)
+    }
+    return result
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceOpen, async (event, request) => {
+    const result = await services.eccRuntimeService.openWorkspace(
+      request as EccWorkspaceOpenRequest,
+    )
+    const workspaceHandle = workspaceHandleFromResult(result)
+    if (workspaceHandle) {
+      trackWorkspaceHandle(event.sender, workspaceHandle)
+    }
+    return result
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceClose, async (_event, request) => {
+    const closeRequest = request as EccWorkspaceHandleRequest
+    return await closeTrackedWorkspaceHandle(closeRequest.workspaceHandle)
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceHome, async (_event, request) => {
+    return await services.eccRuntimeService.workspaceHome(
+      request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceInfo, async (_event, request) => {
+    return await services.eccRuntimeService.workspaceInfo(
+      request as EccWorkspaceInfoRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceRefreshConfig, async (_event, request) => {
+    return await services.eccRuntimeService.refreshConfig(
+      request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceSyncConfig, async (_event, request) => {
+    return await services.eccRuntimeService.syncConfig(
+      request as EccWorkspaceSyncConfigRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceResetFlow, async (_event, request) => {
+    return await services.eccRuntimeService.resetFlow(
+      request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceExportSignoff, async (_event, request) => {
+    return await services.eccRuntimeService.exportSignoff(
+      request as EccWorkspaceExportSignoffRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccWorkspaceInspectSignoff, async (_event, request) => {
+    return await services.eccRuntimeService.inspectSignoff(
+      request as EccWorkspaceHandleRequest,
+    )
+  })
+
+  handle(desktopApiIpcChannels.eccFlowRun, async (_event, request) => {
+    return await services.eccRuntimeService.runFlow(request as EccFlowRunRequest)
+  })
+
+  handle(desktopApiIpcChannels.eccFlowRunStep, async (_event, request) => {
+    return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
+  })
+
+  handle(desktopApiIpcChannels.shellCreateSession, async (event, options) => {
+    const sender = event.sender
+    const isSenderDestroyed = (): boolean =>
+      typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
+    let sessionId: string | null = null
+    const onDestroyed = (): void => {
+      if (!sessionId) return
+      void killShellSession(sessionId)
+    }
+
+    const session = await services.shellService.createSession(
+      options as DesktopShellSessionOptions,
+      (payload) => {
+        if (isSenderDestroyed()) return
+        if (typeof sender.send !== 'function') return
+
+        if ('data' in payload) {
+          sender.send(desktopApiEventChannels.shellData, payload)
+        } else {
+          shellSessions.delete(payload.sessionId)
+          if (typeof sender.off === 'function') {
+            sender.off('destroyed', onDestroyed)
           }
-        },
-      )
-    },
-  )
+          sender.send(desktopApiEventChannels.shellExit, payload)
+        }
+      },
+    )
+    sessionId = session.sessionId
+    shellSessions.set(session.sessionId, {
+      sender,
+      onDestroyed,
+    })
+    if (typeof sender.once === 'function') {
+      sender.once('destroyed', onDestroyed)
+    }
 
-  handle(
-    desktopApiIpcChannels.cliCancel,
-    async (_event, jobId) => {
-      return await services.desktopRuntimeManager.cancel(String(jobId))
-    },
-  )
+    if (isSenderDestroyed()) {
+      onDestroyed()
+    }
 
-  handle(
-    desktopApiIpcChannels.shellCreateSession,
-    async (event, options) => {
-      const sender = event.sender
-      const isSenderDestroyed = (): boolean =>
-        typeof sender.isDestroyed === 'function' ? sender.isDestroyed() : false
-      let sessionId: string | null = null
-      const onDestroyed = (): void => {
-        if (!sessionId) return
-        void killShellSession(sessionId)
-      }
+    return session
+  })
 
-      const session = await services.shellService.createSession(
-        options as DesktopShellSessionOptions,
-        (payload) => {
-          if (isSenderDestroyed()) return
-          if (typeof sender.send !== 'function') return
+  handle(desktopApiIpcChannels.shellWrite, async (_event, sessionId, data) => {
+    await services.shellService.write(sessionId as string, data as string)
+  })
 
-          if ('data' in payload) {
-            sender.send(desktopApiEventChannels.shellData, payload)
-          } else {
-            shellSessions.delete(payload.sessionId)
-            if (typeof sender.off === 'function') {
-              sender.off('destroyed', onDestroyed)
-            }
-            sender.send(desktopApiEventChannels.shellExit, payload)
-          }
-        },
-      )
-      sessionId = session.sessionId
-      shellSessions.set(session.sessionId, {
-        sender,
-        onDestroyed,
-      })
-      if (typeof sender.once === 'function') {
-        sender.once('destroyed', onDestroyed)
-      }
+  handle(desktopApiIpcChannels.shellResize, async (_event, sessionId, cols, rows) => {
+    await services.shellService.resize(
+      sessionId as string,
+      cols as number,
+      rows as number,
+    )
+  })
 
-      if (isSenderDestroyed()) {
-        onDestroyed()
-      }
-
-      return session
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.shellWrite,
-    async (_event, sessionId, data) => {
-      await services.shellService.write(sessionId as string, data as string)
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.shellResize,
-    async (_event, sessionId, cols, rows) => {
-      await services.shellService.resize(
-        sessionId as string,
-        cols as number,
-        rows as number,
-      )
-    },
-  )
-
-  handle(
-    desktopApiIpcChannels.shellKill,
-    async (_event, sessionId) => {
-      await killShellSession(sessionId as string)
-    },
-  )
+  handle(desktopApiIpcChannels.shellKill, async (_event, sessionId) => {
+    await killShellSession(sessionId as string)
+  })
 
   handle(desktopApiIpcChannels.systemOpenExternal, async (_event, url) => {
     await shell.openExternal(url as string)

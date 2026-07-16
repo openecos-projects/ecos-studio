@@ -1,6 +1,6 @@
 ## Summary
 
--
+
 
 ## Scope
 
@@ -9,13 +9,9 @@ Select the areas touched by this PR:
 - [ ] GUI - desktop UI/runtime changes in `ecos/gui`, including renderer, Electron, and shared packages.
 - [ ] ECC - ECC submodule updates or ECOS Studio integration with the ECC CLI/runtime.
 - [ ] Resource management - resource registry, downloads, installation, manifests, PDKs, or tool assets.
-- [ ] Build, packaging, Bazel, Nix, or release workflow - build inputs, AppImage packaging, or release metadata.
+- [ ] Build, packaging, Nix, or release workflow - build inputs, AppImage packaging, or release metadata.
 - [ ] CI - GitHub Actions workflows, reusable actions, triggers, path filters, or automated checks.
 - [ ] Documentation only - README, guides, templates, or docs with no runtime behavior change.
-
-## What Changed
-
--
 
 ## Validation
 

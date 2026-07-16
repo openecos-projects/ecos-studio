@@ -2,7 +2,10 @@ import { spawn as spawnChild } from 'node:child_process'
 import type { VersionInfo } from '@ecos-studio/shared'
 
 type SpawnLike = typeof spawnChild
-type EccComponentVersions = Pick<VersionInfo, 'runtime' | 'ecc' | 'dreamplace' | 'eccTools'>
+type EccComponentVersions = Pick<
+  VersionInfo,
+  'runtime' | 'ecc' | 'dreamplace' | 'eccTools'
+>
 
 export interface AppInfoServiceOptions {
   appVersionProvider: () => string
@@ -12,7 +15,7 @@ export interface AppInfoServiceOptions {
 }
 
 const UNKNOWN_VERSION = 'unknown'
-const DEFAULT_RUNTIME = 'ECC CLI'
+const DEFAULT_RUNTIME = 'ECC RPC'
 
 function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
@@ -88,7 +91,7 @@ export class AppInfoService {
       dreamplace: stringValue(payload.dreamplace, UNKNOWN_VERSION),
       ecc: stringValue(payload.ecc, UNKNOWN_VERSION),
       eccTools: stringValue(payload.ecc_tools, UNKNOWN_VERSION),
-      runtime: stringValue(payload.runtime, DEFAULT_RUNTIME),
+      runtime: DEFAULT_RUNTIME,
     }
   }
 

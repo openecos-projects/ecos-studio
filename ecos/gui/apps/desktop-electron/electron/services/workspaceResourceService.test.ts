@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceResourceService } from './workspaceResourceService'
 
 const tempDirectories: string[] = []
-type ProjectScopeProviderDouble = ConstructorParameters<typeof WorkspaceResourceService>[0]['projectScopeProvider']
+type ProjectScopeProviderDouble = ConstructorParameters<
+  typeof WorkspaceResourceService
+>[0]['projectScopeProvider']
 
 async function tempWorkspace(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ecos-resource-resolver-'))
@@ -26,7 +28,13 @@ async function writeJson(path: string, data: unknown): Promise<void> {
 
 async function writeWorkspace(
   root: string,
-  steps: Array<{ name: string, tool: string, state?: string, runtime?: string, info?: Record<string, unknown> }>,
+  steps: Array<{
+    name: string
+    tool: string
+    state?: string
+    runtime?: string
+    info?: Record<string, unknown>
+  }>,
 ): Promise<void> {
   await mkdir(join(root, 'home'), { recursive: true })
   await writeJson(join(root, 'home', 'parameters.json'), {
@@ -49,9 +57,9 @@ async function writeWorkspace(
 describe('WorkspaceResourceService', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -66,12 +74,20 @@ describe('WorkspaceResourceService', () => {
       PDK: 'ics55',
     })
     await writeJson(join(root, 'home', 'flow.json'), {
-      steps: [{ name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} }],
+      steps: [
+        { name: 'place', tool: 'ecc', state: 'Success', runtime: '00:00:01', info: {} },
+      ],
     })
-    await writeJson(join(root, 'home', 'home.json'), { flow: join(root, 'home', 'flow.json') })
+    await writeJson(join(root, 'home', 'home.json'), {
+      flow: join(root, 'home', 'flow.json'),
+    })
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.json'), '{}', 'utf8')
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.png'), 'png', 'utf8')
-    await writeFile(join(root, 'place_ecc', 'analysis', 'place_metrics.json'), '{}', 'utf8')
+    await writeFile(
+      join(root, 'place_ecc', 'analysis', 'place_metrics.json'),
+      '{}',
+      'utf8',
+    )
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const index = await service.getIndex()
@@ -91,6 +107,29 @@ describe('WorkspaceResourceService', () => {
       path: join(root, 'place_ecc', 'output', 'gcd_place.png'),
       exists: true,
       kind: 'layout-image',
+    })
+  })
+
+  it('uses the sizer workspace directory convention for steps with spaces', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [
+      { name: 'Timing optimization', tool: 'sizer', state: 'Incomplete' },
+    ])
+    await mkdir(join(root, 'timing_optimization_sizer', 'log'), { recursive: true })
+    await writeFile(
+      join(root, 'timing_optimization_sizer', 'log', 'Timing optimization.log'),
+      'sizer log',
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+
+    expect(index.flow.steps[0].directory).toBe(join(root, 'timing_optimization_sizer'))
+    expect(index.flow.steps[0].resources.log.file).toMatchObject({
+      path: join(root, 'timing_optimization_sizer', 'log', 'Timing optimization.log'),
+      exists: true,
+      kind: 'log',
     })
   })
 
@@ -260,16 +299,20 @@ describe('WorkspaceResourceService', () => {
         json: join(root, 'route_ecc', 'output', 'gcd_route.json'),
       },
     })
-    expect(result.missing).toEqual(expect.arrayContaining([
-      join(root, 'route_ecc', 'output', 'gcd_route.png'),
-      join(root, 'route_ecc', 'output', 'gcd_route.json'),
-    ]))
+    expect(result.missing).toEqual(
+      expect.arrayContaining([
+        join(root, 'route_ecc', 'output', 'gcd_route.png'),
+        join(root, 'route_ecc', 'output', 'gcd_route.json'),
+      ]),
+    )
   })
 
   it('returns the step view JSON package from resolveStepInfo(layout)', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'dreamplace' }])
-    await mkdir(join(root, 'place_dreamplace', 'output', 'gcd_place_view'), { recursive: true })
+    await mkdir(join(root, 'place_dreamplace', 'output', 'gcd_place_view'), {
+      recursive: true,
+    })
     await writeFile(
       join(root, 'place_dreamplace', 'output', 'gcd_place_view', 'manifest.json'),
       '{}',
@@ -287,8 +330,44 @@ describe('WorkspaceResourceService', () => {
         viewJson: join(root, 'place_dreamplace', 'output', 'gcd_place_view'),
       },
     })
-    expect(result.missing).toContain(join(root, 'place_dreamplace', 'output', 'gcd_place.json'))
-    expect(result.missing).not.toContain(join(root, 'place_dreamplace', 'output', 'gcd_place_view'))
+    expect(result.missing).toContain(
+      join(root, 'place_dreamplace', 'output', 'gcd_place.json'),
+    )
+    expect(result.missing).not.toContain(
+      join(root, 'place_dreamplace', 'output', 'gcd_place_view'),
+    )
+  })
+
+  it('resolves Harden preview and subflow resources from the ECC step directory', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'Harden', tool: 'ecc' }])
+    await mkdir(join(root, 'Harden_ecc', 'output'), { recursive: true })
+    await writeFile(join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'), 'png', 'utf8')
+    await writeJson(join(root, 'Harden_ecc', 'subflow.json'), {
+      path: join(root, 'Harden_ecc', 'subflow.json'),
+      steps: [{ name: 'run harden', state: 'Success' }],
+    })
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+
+    await expect(
+      service.resolveStepInfo({ step: 'harden', id: 'layout' }),
+    ).resolves.toMatchObject({
+      step: 'Harden',
+      response: 'missing',
+      info: {
+        image: join(root, 'Harden_ecc', 'output', 'gcd_Harden.png'),
+      },
+    })
+    await expect(
+      service.resolveStepInfo({ step: 'Harden', id: 'subflow' }),
+    ).resolves.toMatchObject({
+      step: 'Harden',
+      response: 'available',
+      info: {
+        path: join(root, 'Harden_ecc', 'subflow.json'),
+      },
+    })
   })
 
   it('maps yosys config to flow_config.json', async () => {
@@ -300,7 +379,9 @@ describe('WorkspaceResourceService', () => {
       PDK: 'ics55',
     })
     await writeJson(join(root, 'home', 'flow.json'), {
-      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} }],
+      steps: [
+        { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
+      ],
     })
     await writeJson(join(root, 'home', 'home.json'), {})
 
@@ -320,22 +401,30 @@ describe('WorkspaceResourceService', () => {
     ['Floorplan', 'fp_default_config.json'],
     ['optDrv', 'to_default_config_drv.json'],
     ['CTS', 'cts_default_config.json'],
-  ])('maps ECC %s config to the workspace config directory', async (stepName, configFile) => {
-    const root = await tempWorkspace()
-    await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
-    await mkdir(join(root, 'config'), { recursive: true })
-    await writeFile(join(root, 'config', configFile), '{}', 'utf8')
+  ])(
+    'maps ECC %s config to the workspace config directory',
+    async (stepName, configFile) => {
+      const root = await tempWorkspace()
+      await writeWorkspace(root, [{ name: stepName, tool: 'ecc' }])
+      await mkdir(join(root, 'config'), { recursive: true })
+      await writeFile(join(root, 'config', configFile), '{}', 'utf8')
 
-    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
-    const result = await service.resolveStepInfo({ step: stepName.toLowerCase(), id: 'config' })
+      const service = new WorkspaceResourceService({
+        projectScopeProvider: provider(root),
+      })
+      const result = await service.resolveStepInfo({
+        step: stepName.toLowerCase(),
+        id: 'config',
+      })
 
-    expect(result).toMatchObject({
-      step: stepName,
-      response: 'available',
-      info: { config: join(root, 'config', configFile) },
-      missing: [],
-    })
-  })
+      expect(result).toMatchObject({
+        step: stepName,
+        response: 'available',
+        info: { config: join(root, 'config', configFile) },
+        missing: [],
+      })
+    },
+  )
 
   it('returns available empty maps info when the density map directory does not exist', async () => {
     const root = await tempWorkspace()
@@ -359,7 +448,11 @@ describe('WorkspaceResourceService', () => {
     await mkdir(join(root, 'sim_verilator', 'log'), { recursive: true })
     await mkdir(join(root, 'sim_verilator', 'report'), { recursive: true })
     await writeFile(join(root, 'sim_verilator', 'log', 'log.txt'), 'sim log', 'utf8')
-    await writeFile(join(root, 'sim_verilator', 'report', 'sim.rpt'), 'sim report', 'utf8')
+    await writeFile(
+      join(root, 'sim_verilator', 'report', 'sim.rpt'),
+      'sim report',
+      'utf8',
+    )
     await writeFile(join(root, 'sim_verilator', 'subflow.json'), '{}', 'utf8')
     await writeJson(join(root, 'sim_verilator', 'report', 'cases.json'), {
       suite: 'cpu_tests',
@@ -399,9 +492,21 @@ describe('WorkspaceResourceService', () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])
     await mkdir(join(root, 'place_ecc', 'feature', 'density_map'), { recursive: true })
-    await writeFile(join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'), 'png', 'utf8')
-    await writeFile(join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'), 'png', 'utf8')
-    await writeFile(join(root, 'place_ecc', 'feature', 'density_map', 'notes.txt'), 'ignore', 'utf8')
+    await writeFile(
+      join(root, 'place_ecc', 'feature', 'density_map', 'cell_density.png'),
+      'png',
+      'utf8',
+    )
+    await writeFile(
+      join(root, 'place_ecc', 'feature', 'density_map', 'rudy-horizontal.png'),
+      'png',
+      'utf8',
+    )
+    await writeFile(
+      join(root, 'place_ecc', 'feature', 'density_map', 'notes.txt'),
+      'ignore',
+      'utf8',
+    )
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({ step: 'place', id: 'maps' })
@@ -438,11 +543,13 @@ describe('WorkspaceResourceService', () => {
       info: {},
       missing: [],
     })
-    expect(result.message).toEqual(expect.arrayContaining([
-      `Workspace step not found: place`,
-      `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
-      `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
-    ]))
+    expect(result.message).toEqual(
+      expect.arrayContaining([
+        `Workspace step not found: place`,
+        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
+      ]),
+    )
   })
 
   it('exposes planned yosys resource keys in the index', async () => {
@@ -454,7 +561,9 @@ describe('WorkspaceResourceService', () => {
       PDK: 'ics55',
     })
     await writeJson(join(root, 'home', 'flow.json'), {
-      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} }],
+      steps: [
+        { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
+      ],
     })
     await writeJson(join(root, 'home', 'home.json'), {})
 
@@ -486,13 +595,31 @@ describe('WorkspaceResourceService', () => {
       PDK: 'ics55',
     })
     await writeJson(join(root, 'home', 'flow.json'), {
-      steps: [{ name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} }],
+      steps: [
+        { name: 'Synthesis', tool: 'yosys', state: 'Success', runtime: '', info: {} },
+      ],
     })
     await writeJson(join(root, 'home', 'home.json'), {})
-    await writeFile(join(root, 'Synthesis_yosys', 'analysis', 'Synthesis_metrics.json'), '{}', 'utf8')
-    await writeFile(join(root, 'Synthesis_yosys', 'feature', 'Synthesis_stat.json'), '{}', 'utf8')
-    await writeFile(join(root, 'Synthesis_yosys', 'report', 'Synthesis_stat.json'), '{}', 'utf8')
-    await writeFile(join(root, 'Synthesis_yosys', 'report', 'Synthesis_check.rpt'), 'ok', 'utf8')
+    await writeFile(
+      join(root, 'Synthesis_yosys', 'analysis', 'Synthesis_metrics.json'),
+      '{}',
+      'utf8',
+    )
+    await writeFile(
+      join(root, 'Synthesis_yosys', 'feature', 'Synthesis_stat.json'),
+      '{}',
+      'utf8',
+    )
+    await writeFile(
+      join(root, 'Synthesis_yosys', 'report', 'Synthesis_stat.json'),
+      '{}',
+      'utf8',
+    )
+    await writeFile(
+      join(root, 'Synthesis_yosys', 'report', 'Synthesis_check.rpt'),
+      'ok',
+      'utf8',
+    )
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const result = await service.resolveStepInfo({ step: 'synthesis', id: 'analysis' })
@@ -526,10 +653,12 @@ describe('WorkspaceResourceService', () => {
     expect(index.status).toBe('missing')
     expect(index.parameters).toBeNull()
     expect(index.flow.steps).toEqual([])
-    expect(index.messages).toEqual(expect.arrayContaining([
-      `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
-      `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
-    ]))
+    expect(index.messages).toEqual(
+      expect.arrayContaining([
+        `Missing workspace parameters: ${join(root, 'home', 'parameters.json')}`,
+        `Missing workspace flow: ${join(root, 'home', 'flow.json')}`,
+      ]),
+    )
   })
 
   it('marks the index error when workspace JSON is malformed', async () => {

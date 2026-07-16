@@ -1,16 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const {
-  consoleError,
-  waitForDesktopApi,
-  mountedCallbacks,
-  unmountedCallbacks,
-} = vi.hoisted(() => ({
-  consoleError: vi.fn(),
-  waitForDesktopApi: vi.fn(),
-  mountedCallbacks: [] as Array<() => void | Promise<void>>,
-  unmountedCallbacks: [] as Array<() => void>,
-}))
+const { consoleError, waitForDesktopApi, mountedCallbacks, unmountedCallbacks } =
+  vi.hoisted(() => ({
+    consoleError: vi.fn(),
+    waitForDesktopApi: vi.fn(),
+    mountedCallbacks: [] as Array<() => void | Promise<void>>,
+    unmountedCallbacks: [] as Array<() => void>,
+  }))
 
 vi.mock('vue', () => ({
   onMounted: (callback: () => void | Promise<void>) => {

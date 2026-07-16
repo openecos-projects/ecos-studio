@@ -1,14 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { desktopApiEventChannels, desktopMenuEventIds } from '@ecos-studio/shared'
 
-const { buildFromTemplate, getAllWindows, getFocusedWindow, setApplicationMenu } = vi.hoisted(
-  () => ({
-    buildFromTemplate: vi.fn(),
-    getAllWindows: vi.fn(),
-    getFocusedWindow: vi.fn(),
-    setApplicationMenu: vi.fn(),
-  }),
-)
+const {
+  buildFromTemplate,
+  getAllWindows,
+  getApplicationMenu,
+  getFocusedWindow,
+  setApplicationMenu,
+} = vi.hoisted(() => ({
+  buildFromTemplate: vi.fn(),
+  getAllWindows: vi.fn(),
+  getApplicationMenu: vi.fn(),
+  getFocusedWindow: vi.fn(),
+  setApplicationMenu: vi.fn(),
+}))
 
 vi.mock('electron', () => ({
   app: {
@@ -20,15 +25,18 @@ vi.mock('electron', () => ({
   },
   Menu: {
     buildFromTemplate,
+    getApplicationMenu,
     setApplicationMenu,
   },
 }))
 
-import { registerApplicationMenu } from './menuService'
+import { registerApplicationMenu, setMenuActionEnabled } from './menuService'
 
 type MenuItem = {
   accelerator?: string
   click?: () => void
+  enabled?: boolean
+  id?: string
   label?: string
   submenu?: MenuItem[]
 }
@@ -37,6 +45,7 @@ describe('menuService', () => {
   beforeEach(() => {
     buildFromTemplate.mockReset()
     getAllWindows.mockReset()
+    getApplicationMenu.mockReset()
     getFocusedWindow.mockReset()
     setApplicationMenu.mockReset()
   })
@@ -60,15 +69,41 @@ describe('menuService', () => {
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
     const helpMenu = capturedTemplate.find((item) => item.label === 'Help')
     const newWorkspace = fileMenu?.submenu?.find((item) => item.label === 'New Workspace')
-    const documentation = helpMenu?.submenu?.find((item) => item.label === 'Documentation')
+    const reconfigureWorkspace = fileMenu?.submenu?.find(
+      (item) => item.label === 'Reconfigure Workspace...',
+    )
+    const exportSignoffPackage = fileMenu?.submenu?.find(
+      (item) => item.label === 'Export Signoff Package...',
+    )
+    const documentation = helpMenu?.submenu?.find(
+      (item) => item.label === 'Documentation',
+    )
     const about = helpMenu?.submenu?.find((item) => item.label === 'About')
 
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
     expect(newWorkspace?.accelerator).toBe('CmdOrCtrl+N')
+    expect(reconfigureWorkspace).toBeDefined()
+    expect(fileMenu?.submenu?.indexOf(exportSignoffPackage as MenuItem)).toBe(
+      (fileMenu?.submenu?.indexOf(reconfigureWorkspace as MenuItem) ?? -2) + 1,
+    )
+    expect(exportSignoffPackage).toMatchObject({
+      enabled: false,
+      id: desktopMenuEventIds.exportSignoffPackage,
+    })
     expect(documentation).toBeDefined()
     expect(about).toBeDefined()
 
+    for (const menu of capturedTemplate) {
+      for (const item of menu.submenu ?? []) {
+        if (item.click) {
+          expect(item.id).toBeTypeOf('string')
+        }
+      }
+    }
+
     newWorkspace?.click?.()
+    reconfigureWorkspace?.click?.()
+    exportSignoffPackage?.click?.()
     documentation?.click?.()
     about?.click?.()
 
@@ -80,13 +115,50 @@ describe('menuService', () => {
     expect(send).toHaveBeenNthCalledWith(
       2,
       desktopApiEventChannels.menuAction,
-      desktopMenuEventIds.documentation,
+      desktopMenuEventIds.reconfigureWorkspace,
     )
     expect(send).toHaveBeenNthCalledWith(
       3,
       desktopApiEventChannels.menuAction,
+      desktopMenuEventIds.exportSignoffPackage,
+    )
+    expect(send).toHaveBeenNthCalledWith(
+      4,
+      desktopApiEventChannels.menuAction,
+      desktopMenuEventIds.documentation,
+    )
+    expect(send).toHaveBeenNthCalledWith(
+      5,
+      desktopApiEventChannels.menuAction,
       desktopMenuEventIds.about,
     )
+  })
+
+  it('updates a registered action by stable menu item ID', () => {
+    const menuItem = { enabled: false }
+    const getMenuItemById = vi.fn(() => menuItem)
+    getApplicationMenu.mockReturnValue({ getMenuItemById })
+
+    setMenuActionEnabled(desktopMenuEventIds.exportSignoffPackage, true)
+
+    expect(getMenuItemById).toHaveBeenCalledWith(desktopMenuEventIds.exportSignoffPackage)
+    expect(menuItem.enabled).toBe(true)
+  })
+
+  it('safely ignores enabled-state updates when the menu or action is absent', () => {
+    getApplicationMenu.mockReturnValueOnce(null)
+
+    expect(() =>
+      setMenuActionEnabled(desktopMenuEventIds.exportSignoffPackage, true),
+    ).not.toThrow()
+
+    getApplicationMenu.mockReturnValueOnce({
+      getMenuItemById: vi.fn(() => undefined),
+    })
+
+    expect(() =>
+      setMenuActionEnabled(desktopMenuEventIds.exportSignoffPackage, true),
+    ).not.toThrow()
   })
 
   it('falls back to the first open window when no window is focused', () => {
@@ -109,7 +181,9 @@ describe('menuService', () => {
     registerApplicationMenu()
 
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
-    const openWorkspace = fileMenu?.submenu?.find((item) => item.label === 'Open Workspace')
+    const openWorkspace = fileMenu?.submenu?.find(
+      (item) => item.label === 'Open Workspace',
+    )
 
     openWorkspace?.click?.()
 

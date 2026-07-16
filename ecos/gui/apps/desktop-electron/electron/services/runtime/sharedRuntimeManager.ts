@@ -11,10 +11,7 @@ import {
   type RuntimeScope,
   workspaceRuntimeScope,
 } from './runtimeScopes'
-import {
-  RuntimeEventFanout,
-  type RuntimeEventListener,
-} from './runtimeEvents'
+import { RuntimeEventFanout, type RuntimeEventListener } from './runtimeEvents'
 
 export type { RuntimeScope } from './runtimeScopes'
 
@@ -29,10 +26,7 @@ export interface SharedRuntimeAdapter<
   TEvent,
   TContext = SharedRuntimeAdapterContext<TEvent>,
 > {
-  execute(
-    request: TRequest,
-    context: TContext,
-  ): Promise<TResult>
+  execute(request: TRequest, context: TContext): Promise<TResult>
 }
 
 export interface SharedRuntimeManagerOptions<
@@ -65,8 +59,18 @@ export interface SharedRuntimeManagerOptions<
     scope: RuntimeScope,
     result: TResult,
   ): TEvent
-  toFailedEvent(request: TRequest, jobId: string, scope: RuntimeScope, result: TResult): TEvent
-  withJobMetadata(event: TEvent, request: TRequest, jobId: string, scope: RuntimeScope): TEvent
+  toFailedEvent(
+    request: TRequest,
+    jobId: string,
+    scope: RuntimeScope,
+    result: TResult,
+  ): TEvent
+  withJobMetadata(
+    event: TEvent,
+    request: TRequest,
+    jobId: string,
+    scope: RuntimeScope,
+  ): TEvent
 }
 
 export class SharedRuntimeManager<
@@ -76,19 +80,27 @@ export class SharedRuntimeManager<
   TContext = SharedRuntimeAdapterContext<TEvent>,
 > {
   private readonly activeLongRunningJobsByScope = new Map<string, string>()
-  private readonly activeLongRunningJobsById = new Map<string, {
-    controller: AbortController
-    request: TRequest
-    scope: RuntimeScope
-  }>()
+  private readonly activeLongRunningJobsById = new Map<
+    string,
+    {
+      controller: AbortController
+      request: TRequest
+      scope: RuntimeScope
+    }
+  >()
   private readonly eventFanout = new RuntimeEventFanout<TEvent>()
-  private readonly options: SharedRuntimeManagerOptions<TRequest, TResult, TEvent, TContext>
+  private readonly options: SharedRuntimeManagerOptions<
+    TRequest,
+    TResult,
+    TEvent,
+    TContext
+  >
   private readonly runtimeLockRoot: string
 
   constructor(options: SharedRuntimeManagerOptions<TRequest, TResult, TEvent, TContext>) {
     this.options = options
-    this.runtimeLockRoot = options.runtimeLockRoot
-      ?? path.join(os.tmpdir(), 'ecos-studio-runtime-locks')
+    this.runtimeLockRoot =
+      options.runtimeLockRoot ?? path.join(os.tmpdir(), 'ecos-studio-runtime-locks')
   }
 
   onEvent(listener: RuntimeEventListener<TEvent>): () => void {
@@ -149,8 +161,9 @@ export class SharedRuntimeManager<
           this.emit(this.options.withJobMetadata(event, request, jobId, scope), listener)
         },
       }
-      const adapterContext = this.options.createAdapterContext?.(context, request, jobId, scope)
-        ?? (context as TContext)
+      const adapterContext =
+        this.options.createAdapterContext?.(context, request, jobId, scope) ??
+        (context as TContext)
 
       if (controller.signal.aborted) {
         const result = this.createCancelledResult(
@@ -162,9 +175,10 @@ export class SharedRuntimeManager<
       }
 
       const result = await this.options.adapter.execute(request, adapterContext)
-      const event = this.options.isFailedResult?.(result) === true
-        ? this.options.toFailedEvent(request, jobId, scope, result)
-        : this.options.toCompletedEvent(request, jobId, scope, result)
+      const event =
+        this.options.isFailedResult?.(result) === true
+          ? this.options.toFailedEvent(request, jobId, scope, result)
+          : this.options.toCompletedEvent(request, jobId, scope, result)
       this.emit(event, listener)
       return result
     } catch (error) {
@@ -210,8 +224,10 @@ export class SharedRuntimeManager<
   }
 
   private createCancelledResult(request: TRequest, message: string): TResult {
-    return this.options.createCancelledResult?.(request, message)
-      ?? this.options.createFailedResult(request, message)
+    return (
+      this.options.createCancelledResult?.(request, message) ??
+      this.options.createFailedResult(request, message)
+    )
   }
 
   private emit(event: TEvent, listener?: RuntimeEventListener<TEvent>): void {
@@ -227,8 +243,9 @@ export class SharedRuntimeManager<
     const message = scope.directory
       ? `Another ${this.options.getRequestLabel(request)} is already running for ${scope.directory}. Wait for it to finish before starting a new one.`
       : `Another ${this.options.getRequestLabel(request)} is already running. Wait for it to finish before starting a new one.`
-    const result = this.options.createBlockedResult?.(request, message)
-      ?? this.options.createFailedResult(request, message)
+    const result =
+      this.options.createBlockedResult?.(request, message) ??
+      this.options.createFailedResult(request, message)
     this.emit(this.options.toFailedEvent(request, jobId, scope, result), listener)
     return result
   }

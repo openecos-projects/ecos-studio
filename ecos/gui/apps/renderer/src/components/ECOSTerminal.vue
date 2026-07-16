@@ -58,7 +58,10 @@
           :aria-label="maximized ? 'Restore Panel' : 'Maximize Panel'"
           @click="$emit('toggleMaximize')"
         >
-          <i :class="maximized ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'" aria-hidden="true"></i>
+          <i
+            :class="maximized ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'"
+            aria-hidden="true"
+          ></i>
         </button>
         <button
           class="terminal-icon-button"
@@ -70,15 +73,25 @@
           <i class="ri-close-line" aria-hidden="true"></i>
         </button>
         <div v-if="showProfilesMenu" class="terminal-menu terminal-profile-menu">
-          <button type="button" class="terminal-menu-item" @click="createAndActivateTerminal">
+          <button
+            type="button"
+            class="terminal-menu-item"
+            @click="createAndActivateTerminal"
+          >
             Default shell
           </button>
         </div>
         <div v-if="showMoreMenu" class="terminal-menu terminal-more-menu">
-          <button type="button" class="terminal-menu-item" @click="toggleMaximizeFromMenu">
+          <button
+            type="button"
+            class="terminal-menu-item"
+            @click="toggleMaximizeFromMenu"
+          >
             {{ maximized ? 'Restore Panel' : 'Maximize Panel' }}
           </button>
-          <button type="button" class="terminal-menu-item" @click="closePanel">Close Panel</button>
+          <button type="button" class="terminal-menu-item" @click="closePanel">
+            Close Panel
+          </button>
         </div>
       </div>
     </div>
@@ -111,7 +124,9 @@
             v-for="record in terminalRecords"
             :key="record.localId"
             class="terminal-session-item"
-            :class="{ 'terminal-session-item--active': record.localId === activeTerminalId }"
+            :class="{
+              'terminal-session-item--active': record.localId === activeTerminalId,
+            }"
           >
             <button
               class="terminal-session-activate"
@@ -250,8 +265,10 @@ const activeTerminalId = ref<string | null>(null)
 const showProfilesMenu = ref(false)
 const showMoreMenu = ref(false)
 const terminalSessionListWidth = ref(DEFAULT_TERMINAL_SESSION_LIST_WIDTH)
-const activeTerminalRecord = computed(() =>
-  terminalRecords.value.find((record) => record.localId === activeTerminalId.value) ?? null,
+const activeTerminalRecord = computed(
+  () =>
+    terminalRecords.value.find((record) => record.localId === activeTerminalId.value) ??
+    null,
 )
 const terminalSessionListStyle = computed(() => ({
   width: `${terminalSessionListWidth.value}px`,
@@ -375,7 +392,11 @@ function resizeShellSession(record: TerminalRecord) {
   const desktopApi = getOptionalDesktopApi()
   if (!desktopApi?.shell) return
 
-  void desktopApi.shell.resize(record.sessionId, record.terminal.cols, record.terminal.rows)
+  void desktopApi.shell.resize(
+    record.sessionId,
+    record.terminal.cols,
+    record.terminal.rows,
+  )
 }
 
 function writeLine(record: TerminalRecord, value = '') {
@@ -476,7 +497,9 @@ async function createAndActivateTerminal() {
 }
 
 async function activateTerminal(localId: string) {
-  const record = terminalRecords.value.find((terminalRecord) => terminalRecord.localId === localId)
+  const record = terminalRecords.value.find(
+    (terminalRecord) => terminalRecord.localId === localId,
+  )
   if (!record) return
 
   activeTerminalId.value = record.localId
@@ -490,7 +513,9 @@ async function activateTerminal(localId: string) {
 
 async function deleteTerminal(localId: string) {
   closeTerminalMenus()
-  const recordIndex = terminalRecords.value.findIndex((record) => record.localId === localId)
+  const recordIndex = terminalRecords.value.findIndex(
+    (record) => record.localId === localId,
+  )
   if (recordIndex === -1) return
 
   const record = terminalRecords.value[recordIndex]
@@ -801,7 +826,7 @@ watch(
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
   font-size: 11px;
   font-weight: 500;
   text-overflow: ellipsis;

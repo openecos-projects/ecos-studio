@@ -12,7 +12,8 @@ import {
 const SOC_TEMPLATE_SOURCE = 'socTemplateCatalog' as const
 const SOC_TEMPLATE_MANIFEST_PATH = 'manifest.json'
 const SELECTED_CORE_SETTING_PREFIX = 'ecos.socTemplate.selectedCore.'
-const SOC_TEMPLATE_CATALOG_LOAD_FAILED_MESSAGE = 'SoC template catalog load failed. Check the network connection or retry.'
+const SOC_TEMPLATE_CATALOG_LOAD_FAILED_MESSAGE =
+  'SoC template catalog load failed. Check the network connection or retry.'
 const IMPORTED_SOC_STORAGE_KEY = 'ecos.imported_soc_templates_v1'
 const REMOVED_SOC_STORAGE_KEY = 'ecos.removed_soc_templates_v1'
 
@@ -58,10 +59,7 @@ function getLocalStorage(): Storage | null {
   }
 }
 
-function loadJsonArray<T>(
-  key: string,
-  isValid: (value: unknown) => value is T,
-): T[] {
+function loadJsonArray<T>(key: string, isValid: (value: unknown) => value is T): T[] {
   const storage = getLocalStorage()
   if (!storage) return []
 
@@ -88,11 +86,13 @@ function persistJsonValue(key: string, value: unknown): void {
 }
 
 function isImportedSocRecord(value: unknown): value is ImportedSocRecord {
-  return typeof value === 'object'
-    && value !== null
-    && typeof (value as ImportedSocRecord).id === 'string'
-    && typeof (value as ImportedSocRecord).sourceLabel === 'string'
-    && typeof (value as ImportedSocRecord).rawJson === 'string'
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ImportedSocRecord).id === 'string' &&
+    typeof (value as ImportedSocRecord).sourceLabel === 'string' &&
+    typeof (value as ImportedSocRecord).rawJson === 'string'
+  )
 }
 
 function loadImportedRecords(): ImportedSocRecord[] {
@@ -104,14 +104,21 @@ function persistImportedRecords(records: ImportedSocRecord[]): void {
 }
 
 function loadRemovedTemplateIds(): Set<string> {
-  return new Set(loadJsonArray(REMOVED_SOC_STORAGE_KEY, (value): value is string => typeof value === 'string'))
+  return new Set(
+    loadJsonArray(
+      REMOVED_SOC_STORAGE_KEY,
+      (value): value is string => typeof value === 'string',
+    ),
+  )
 }
 
 function persistRemovedTemplateIds(ids: Set<string>): void {
   persistJsonValue(REMOVED_SOC_STORAGE_KEY, Array.from(ids))
 }
 
-function thumbnailLayoutFromDetail(detail: SocTemplateDetail): SocTemplateThumbnailLayout | undefined {
+function thumbnailLayoutFromDetail(
+  detail: SocTemplateDetail,
+): SocTemplateThumbnailLayout | undefined {
   const { die, coreArea: c } = detail
   const dw = die.width
   const dh = die.height
@@ -122,7 +129,7 @@ function thumbnailLayoutFromDetail(detail: SocTemplateDetail): SocTemplateThumbn
     coreSlotTopPct: ((die.ury - c.ury) / dh) * 100,
     coreSlotWidthPct: (c.width / dw) * 100,
     coreSlotHeightPct: (c.height / dh) * 100,
-    cores: buildSocPreviewRects(detail).map(r => ({
+    cores: buildSocPreviewRects(detail).map((r) => ({
       leftPct: r.leftPct,
       topPct: r.topPct,
       widthPct: r.widthPct,
@@ -139,7 +146,10 @@ function catalogSummaryFromDetail(detail: SocTemplateDetail): SocTemplateSummary
 }
 
 function importedSummaryFromRecord(rec: ImportedSocRecord): SocTemplateSummary {
-  const detail = normalizeSocTemplateDetail(JSON.parse(rec.rawJson) as Record<string, unknown>, rec.sourceLabel)
+  const detail = normalizeSocTemplateDetail(
+    JSON.parse(rec.rawJson) as Record<string, unknown>,
+    rec.sourceLabel,
+  )
   return catalogSummaryFromDetail({ ...detail, id: rec.id })
 }
 
@@ -155,7 +165,7 @@ function applySelectedCoreOverride(
 
   return {
     ...detail,
-    cores: detail.cores.map(core => ({
+    cores: detail.cores.map((core) => ({
       ...core,
       selected: core.id === selectedCoreId ? 1 : 0,
     })),
@@ -169,7 +179,9 @@ function getErrorMessage(error: unknown): string {
 }
 
 function createCatalogLoadError(error: unknown): Error {
-  return new Error(`${SOC_TEMPLATE_CATALOG_LOAD_FAILED_MESSAGE} ${getErrorMessage(error)}`)
+  return new Error(
+    `${SOC_TEMPLATE_CATALOG_LOAD_FAILED_MESSAGE} ${getErrorMessage(error)}`,
+  )
 }
 
 async function loadRemoteSocTemplateIndexRaw(): Promise<RemoteSocTemplateIndexEntry[]> {
@@ -179,37 +191,43 @@ async function loadRemoteSocTemplateIndexRaw(): Promise<RemoteSocTemplateIndexEn
   })
 
   const variants = (manifest.templates ?? [])
-    .flatMap(template => template.variants ?? [])
-    .filter((variant): variant is SocTemplateManifestVariant & { id: string; metadata: string } =>
-      typeof variant.id === 'string'
-      && variant.id.length > 0
-      && typeof variant.metadata === 'string'
-      && variant.metadata.length > 0,
+    .flatMap((template) => template.variants ?? [])
+    .filter(
+      (
+        variant,
+      ): variant is SocTemplateManifestVariant & { id: string; metadata: string } =>
+        typeof variant.id === 'string' &&
+        variant.id.length > 0 &&
+        typeof variant.metadata === 'string' &&
+        variant.metadata.length > 0,
     )
 
-  const entries = await Promise.all(variants.map(async (variant) => {
-    const metadataPath = variant.metadata
-    const sourceLabel = `remote:${SOC_TEMPLATE_SOURCE}/${metadataPath}`
-    const raw = await readRemoteJsonFile<Record<string, unknown>>({
-      source: SOC_TEMPLATE_SOURCE,
-      path: metadataPath,
-    })
-    const detail = normalizeSocTemplateDetail(raw, sourceLabel)
-    const displayName = typeof variant.display_name === 'string' && variant.display_name.length > 0
-      ? variant.display_name
-      : detail.name
+  const entries = await Promise.all(
+    variants.map(async (variant) => {
+      const metadataPath = variant.metadata
+      const sourceLabel = `remote:${SOC_TEMPLATE_SOURCE}/${metadataPath}`
+      const raw = await readRemoteJsonFile<Record<string, unknown>>({
+        source: SOC_TEMPLATE_SOURCE,
+        path: metadataPath,
+      })
+      const detail = normalizeSocTemplateDetail(raw, sourceLabel)
+      const displayName =
+        typeof variant.display_name === 'string' && variant.display_name.length > 0
+          ? variant.display_name
+          : detail.name
 
-    return {
-      id: variant.id,
-      path: metadataPath,
-      sourceLabel,
-      detail: {
-        ...detail,
+      return {
         id: variant.id,
-        name: displayName,
-      },
-    }
-  }))
+        path: metadataPath,
+        sourceLabel,
+        detail: {
+          ...detail,
+          id: variant.id,
+          name: displayName,
+        },
+      }
+    }),
+  )
 
   const seen = new Set<string>()
   for (const entry of entries) {
@@ -244,7 +262,10 @@ export function clearSocTemplateCatalogCache(): void {
   cachedIndexPromise = null
 }
 
-export async function importSocTemplateFromJsonText(jsonText: string, sourceLabel: string): Promise<SocTemplateSummary> {
+export async function importSocTemplateFromJsonText(
+  jsonText: string,
+  sourceLabel: string,
+): Promise<SocTemplateSummary> {
   let parsed: unknown
   try {
     parsed = JSON.parse(jsonText)
@@ -252,13 +273,23 @@ export async function importSocTemplateFromJsonText(jsonText: string, sourceLabe
     throw new Error('File is not valid JSON.')
   }
 
-  const detail = normalizeSocTemplateDetail(parsed as Record<string, unknown>, sourceLabel)
-  const remoteEntries = await loadRemoteSocTemplateIndex().catch(() => [] as RemoteSocTemplateIndexEntry[])
+  const detail = normalizeSocTemplateDetail(
+    parsed as Record<string, unknown>,
+    sourceLabel,
+  )
+  const remoteEntries = await loadRemoteSocTemplateIndex().catch(
+    () => [] as RemoteSocTemplateIndexEntry[],
+  )
   const importedRecords = loadImportedRecords()
   const removedIds = loadRemovedTemplateIds()
 
-  if (remoteEntries.some(entry => entry.id === detail.id) || importedRecords.some(record => record.id === detail.id)) {
-    throw new Error(`A template named "${detail.id}" is already available. Remove it first or use a different design_name.`)
+  if (
+    remoteEntries.some((entry) => entry.id === detail.id) ||
+    importedRecords.some((record) => record.id === detail.id)
+  ) {
+    throw new Error(
+      `A template named "${detail.id}" is already available. Remove it first or use a different design_name.`,
+    )
   }
 
   importedRecords.push({
@@ -275,7 +306,9 @@ export async function importSocTemplateFromJsonText(jsonText: string, sourceLabe
 }
 
 export function removeImportedSocTemplate(templateId: string): void {
-  const importedRecords = loadImportedRecords().filter(record => record.id !== templateId)
+  const importedRecords = loadImportedRecords().filter(
+    (record) => record.id !== templateId,
+  )
   const removedIds = loadRemovedTemplateIds()
   removedIds.add(templateId)
   persistImportedRecords(importedRecords)
@@ -291,22 +324,24 @@ export async function loadSocTemplateCatalog(): Promise<SocTemplateSummary[]> {
   const removedIds = loadRemovedTemplateIds()
   const remoteEntries = await loadRemoteSocTemplateIndex()
   const remoteItems = remoteEntries
-    .filter(entry => !removedIds.has(entry.id))
-    .map(entry => catalogSummaryFromDetail(entry.detail))
+    .filter((entry) => !removedIds.has(entry.id))
+    .map((entry) => catalogSummaryFromDetail(entry.detail))
   const importedItems = loadImportedRecords()
-    .filter(record => !removedIds.has(record.id))
+    .filter((record) => !removedIds.has(record.id))
     .map(importedSummaryFromRecord)
 
   return [...remoteItems, ...importedItems]
 }
 
-export async function loadSocTemplateDetail(templateId: string): Promise<SocTemplateDetail> {
+export async function loadSocTemplateDetail(
+  templateId: string,
+): Promise<SocTemplateDetail> {
   const removedIds = loadRemovedTemplateIds()
   if (removedIds.has(templateId)) {
     throw new Error(`Unknown SoC template: ${templateId}`)
   }
 
-  const importedRecord = loadImportedRecords().find(record => record.id === templateId)
+  const importedRecord = loadImportedRecords().find((record) => record.id === templateId)
   if (importedRecord) {
     const detail = normalizeSocTemplateDetail(
       JSON.parse(importedRecord.rawJson) as Record<string, unknown>,
@@ -325,7 +360,9 @@ export async function loadSocTemplateDetail(templateId: string): Promise<SocTemp
   }
 
   const api = await waitForDesktopApi()
-  const selectedCoreId = await api.settings.get<number>(selectedCoreSettingKey(entry.sourceLabel))
+  const selectedCoreId = await api.settings.get<number>(
+    selectedCoreSettingKey(entry.sourceLabel),
+  )
   return applySelectedCoreOverride(entry.detail, selectedCoreId)
 }
 
@@ -338,7 +375,7 @@ export async function selectSocTemplateCore(
   if (!entry) {
     throw new Error(`Unknown SoC template: ${templateId}`)
   }
-  if (!entry.detail.cores.some(core => core.id === coreId)) {
+  if (!entry.detail.cores.some((core) => core.id === coreId)) {
     throw new Error(`Unknown SoC core: ${coreId}`)
   }
 

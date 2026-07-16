@@ -49,20 +49,24 @@ function handleFitToWorld(): void {
   props.preview?.fitToWorld()
 }
 
-watch(() => props.preview, (preview) => {
-  if (unlistenTransform) {
-    unlistenTransform()
-    unlistenTransform = null
-  }
+watch(
+  () => props.preview,
+  (preview) => {
+    if (unlistenTransform) {
+      unlistenTransform()
+      unlistenTransform = null
+    }
 
-  if (!preview) return
+    if (!preview) return
 
-  preview.setRulerEnabled(isRulerEnabled.value)
-  zoomPercentLabel.value = formatZoomPercentLabel(preview.getScale())
-  unlistenTransform = preview.onTransformChange((t) => {
-    zoomPercentLabel.value = formatZoomPercentLabel(t.scale)
-  })
-}, { immediate: true })
+    preview.setRulerEnabled(isRulerEnabled.value)
+    zoomPercentLabel.value = formatZoomPercentLabel(preview.getScale())
+    unlistenTransform = preview.onTransformChange((t) => {
+      zoomPercentLabel.value = formatZoomPercentLabel(t.scale)
+    })
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
   if (unlistenTransform) {
@@ -72,16 +76,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-10 shrink-0 border-b border-(--border-color) bg-(--bg-secondary) px-4 flex items-center gap-2">
+  <div
+    class="flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) bg-(--bg-secondary) px-4"
+  >
     <div class="flex items-center gap-1">
       <button
         v-if="showNativeLayoutViewer"
         type="button"
         :disabled="nativeLayoutViewerBusy"
-        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:opacity-50 disabled:text-(--text-secondary)"
-        :class="nativeLayoutViewerBusy
-          ? 'text-(--text-secondary)'
-          : 'text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--bg-hover)'"
+        class="flex h-9 w-9 shrink-0 items-center justify-center rounded text-base transition-all disabled:cursor-wait disabled:text-(--text-secondary) disabled:opacity-50"
+        :class="
+          nativeLayoutViewerBusy
+            ? 'text-(--text-secondary)'
+            : 'text-(--text-secondary) hover:bg-(--bg-hover) hover:text-(--text-primary)'
+        "
         title="打开 Native Layout Viewer"
         aria-label="打开 Native Layout Viewer"
         @click="emit('openNativeLayoutViewer')"
@@ -99,9 +107,9 @@ onUnmounted(() => {
       <button
         :class="[
           isRulerEnabled
-            ? 'text-(--accent-color) bg-(--accent-color)/20 border-(--accent-color)/50 shadow-sm shadow-(--accent-color)/20'
-            : 'text-(--text-secondary) border-(--border-color) hover:text-(--text-primary) hover:bg-(--bg-hover) hover:border-(--border-color)',
-          'h-8 px-2 flex items-center gap-1.5 rounded border transition-all',
+            ? 'border-(--accent-color)/50 bg-(--accent-color)/20 text-(--accent-color) shadow-(--accent-color)/20 shadow-sm'
+            : 'border-(--border-color) text-(--text-secondary) hover:border-(--border-color) hover:bg-(--bg-hover) hover:text-(--text-primary)',
+          'flex h-8 items-center gap-1.5 rounded border px-2 transition-all',
         ]"
         title="Show/Hide Ruler"
         @click="toggleRuler"
@@ -111,7 +119,9 @@ onUnmounted(() => {
 
       <div class="h-6 w-px bg-(--border-color)"></div>
 
-      <div class="flex items-center gap-2 rounded border border-(--border-color) bg-(--bg-primary) px-3 py-1.5">
+      <div
+        class="flex items-center gap-2 rounded border border-(--border-color) bg-(--bg-primary) px-3 py-1.5"
+      >
         <button
           class="text-(--text-secondary) transition-colors hover:text-(--text-primary)"
           title="Zoom Out"
@@ -119,7 +129,9 @@ onUnmounted(() => {
         >
           <i class="ri-subtract-line text-sm"></i>
         </button>
-        <span class="min-w-[52px] text-center text-[13px] font-medium text-(--text-primary) tabular-nums">
+        <span
+          class="min-w-[52px] text-center text-[13px] font-medium text-(--text-primary) tabular-nums"
+        >
           {{ zoomPercentLabel }}%
         </span>
         <button

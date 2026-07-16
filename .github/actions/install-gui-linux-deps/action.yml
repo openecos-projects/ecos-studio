@@ -19,11 +19,18 @@ runs:
           libdrm-dev
           libfuse2
           libgbm-dev
+          libgl1-mesa-dev
           libgtk-3-dev
           libayatana-appindicator3-dev
           libnotify-dev
           libnss3
           librsvg2-dev
+          libwayland-dev
+          libx11-dev
+          libxcursor-dev
+          libxi-dev
+          libxkbcommon-dev
+          libxrandr-dev
           libxss1
           libxtst-dev
         )

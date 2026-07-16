@@ -48,6 +48,7 @@ pub enum Pattern {
     Solid,
     Hollow,
     SparseDots,
+    DenseDots,
     DiagonalHatch,
     CrossHatch,
 }
@@ -410,13 +411,7 @@ fn core_style() -> LayerStyle {
 }
 
 fn instance_style() -> LayerStyle {
-    let mut style = layer_style(
-        Color::rgb(176, 155, 255),
-        34,
-        205,
-        220,
-        Pattern::DiagonalHatch,
-    );
+    let mut style = layer_style(Color::rgb(176, 155, 255), 34, 205, 220, Pattern::DenseDots);
     style.line_width_px = 1;
     style
 }
@@ -437,6 +432,46 @@ pub enum SourceSelector {
     ShapeKind(ShapeKind),
     CellFrame,
     SelectionOverlay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectVisibility {
+    pub instances: bool,
+    pub pdn: bool,
+    pub net: bool,
+    pub io_pin: bool,
+}
+
+impl Default for ObjectVisibility {
+    fn default() -> Self {
+        Self {
+            instances: true,
+            pdn: true,
+            net: true,
+            io_pin: true,
+        }
+    }
+}
+
+impl ObjectVisibility {
+    pub fn includes_shape_kind(self, kind: ShapeKind) -> bool {
+        match kind {
+            ShapeKind::Instance => self.instances,
+            ShapeKind::SpecialWire => self.pdn,
+            ShapeKind::RegularWire => self.net,
+            ShapeKind::IoPin => self.io_pin,
+            _ => true,
+        }
+    }
+
+    fn includes_source(self, source: SourceSelector) -> bool {
+        match source {
+            SourceSelector::ShapeKind(kind) => self.includes_shape_kind(kind),
+            SourceSelector::PhysicalLayer(_)
+            | SourceSelector::CellFrame
+            | SourceSelector::SelectionOverlay => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -486,6 +521,7 @@ pub struct ResolvedDisplayLayer {
     pub id: String,
     pub name: String,
     pub source: SourceSelector,
+    pub object_visibility: ObjectVisibility,
     pub draw_order: i32,
     pub style: LayerStyle,
     pub pickable: bool,
@@ -494,11 +530,15 @@ pub struct ResolvedDisplayLayer {
 #[derive(Debug, Clone, Default)]
 pub struct DisplayModel {
     layers: Vec<DisplayLayer>,
+    object_visibility: ObjectVisibility,
 }
 
 impl DisplayModel {
     pub fn new() -> Self {
-        Self { layers: Vec::new() }
+        Self {
+            layers: Vec::new(),
+            object_visibility: ObjectVisibility::default(),
+        }
     }
 
     pub fn from_layout_layers(layers: &[layoutdb::LayerInfo]) -> Self {
@@ -532,15 +572,24 @@ impl DisplayModel {
         &mut self.layers
     }
 
+    pub fn object_visibility(&self) -> ObjectVisibility {
+        self.object_visibility
+    }
+
+    pub fn object_visibility_mut(&mut self) -> &mut ObjectVisibility {
+        &mut self.object_visibility
+    }
+
     pub fn resolved_layers(&self) -> Vec<ResolvedDisplayLayer> {
         let mut layers = self
             .layers
             .iter()
-            .filter(|layer| layer.visible)
+            .filter(|layer| layer.visible && self.object_visibility.includes_source(layer.source))
             .map(|layer| ResolvedDisplayLayer {
                 id: layer.id.clone(),
                 name: layer.name.clone(),
                 source: layer.source,
+                object_visibility: self.object_visibility,
                 draw_order: layer.draw_order,
                 style: layer.style.clone(),
                 pickable: layer.pickable,
@@ -653,6 +702,10 @@ mod tests {
         let model = DisplayModel::from_layout_layers(&[LayerInfo::new(1, "M1")]);
         let layers = model.layers();
 
+        assert!(model.object_visibility().instances);
+        assert!(model.object_visibility().pdn);
+        assert!(model.object_visibility().net);
+        assert!(model.object_visibility().io_pin);
         assert!(layers.iter().any(|layer| layer.source
             == SourceSelector::ShapeKind(ShapeKind::Die)
             && !layer.visible
@@ -665,8 +718,28 @@ mod tests {
             == SourceSelector::ShapeKind(ShapeKind::Instance)
             && layer.visible
             && layer.name == "Instance"
-            && layer.style.fill_pattern != Pattern::Hollow
+            && layer.style.fill_pattern == Pattern::DenseDots
             && layer.style.fill_alpha > 0));
+    }
+
+    #[test]
+    fn resolved_layers_keep_physical_layers_when_object_visibility_changes() {
+        let mut model = DisplayModel::from_layout_layers(&[LayerInfo::new(1, "M1")]);
+        model.add_layer(DisplayLayer::shape_kind(
+            ShapeKind::RegularWire,
+            "Net",
+            LayerStyle::default_for_index(3),
+        ));
+        model.object_visibility_mut().net = false;
+
+        let resolved = model.resolved_layers();
+
+        assert!(resolved
+            .iter()
+            .any(|layer| layer.source == SourceSelector::PhysicalLayer(1)));
+        assert!(!resolved
+            .iter()
+            .any(|layer| layer.source == SourceSelector::ShapeKind(ShapeKind::RegularWire)));
     }
 
     #[test]

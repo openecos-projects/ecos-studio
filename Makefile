@@ -40,7 +40,9 @@ install-apt-deps:
 	    libglib2.0-dev libglib2.0-bin librsvg2-dev \
 	    libnss3 libnspr4 libatk-bridge2.0-0 libcups2 libdrm2 \
 	    libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-	    libxkbcommon0 libxss1 libxtst6 $$ASOUND_PACKAGE \
+	    libxkbcommon0 libxkbcommon-dev libx11-dev libxcursor-dev \
+	    libxi-dev libxrandr-dev libwayland-dev libgl1-mesa-dev \
+	    libxss1 libxtst6 $$ASOUND_PACKAGE \
 	    cmake ninja-build tcl-dev \
 	    libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev \
 	    flex libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison \
@@ -101,15 +103,12 @@ check-platform:
 	fi
 
 build: check-setup check-platform
-	bash .github/scripts/build-ecc.sh
-	rm -rf ecos/gui/apps/desktop-electron/resources
-	mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
-	cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
+	bash .github/scripts/build-binaries.sh
 	@cd ecos/gui && pnpm run --filter @ecos-studio/desktop-electron package
 	ln -sf ecos/gui/apps/desktop-electron/release build
 
 clean:
-	rm -rf build ecc/build ecc/dist
+	rm -rf build ecc/build ecc/dist $(LAYOUT_VIEWER_ROOT)/target
 	@rm -f .setup-done
 
 demo-gcd: check-setup

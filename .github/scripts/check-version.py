@@ -7,12 +7,29 @@ from pathlib import Path
 
 
 expected_tag = os.environ.get("EXPECTED_TAG", "").strip()
+expected_ref = (os.environ.get("EXPECTED_REF") or expected_tag).strip()
 
 
 def normalize_version(v: str) -> str:
     """Normalize semver prerelease tags (e.g. 0.1.0-alpha.3) to PEP 440 (e.g. 0.1.0a3)
     so they can be compared with uv.lock / packaging canonical forms."""
     return re.sub(r"-(alpha|beta|rc)\.?(\d+)", lambda m: m.group(1)[0] + m.group(2), v)
+
+
+def normalize_expected_version(ref: str) -> str:
+    if not ref:
+        return ""
+    if ref.startswith("refs/tags/v"):
+        return ref.removeprefix("refs/tags/v")
+    if ref.startswith("refs/heads/release/v"):
+        return ref.removeprefix("refs/heads/release/v")
+    if ref.startswith("release/v"):
+        return ref.removeprefix("release/v")
+    if ref.startswith("v"):
+        return ref.removeprefix("v")
+
+    print(f"ERROR: unsupported expected ref '{ref}'", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def read(path: str) -> str:
@@ -85,9 +102,10 @@ if mismatches:
     sys.exit(1)
 
 tag = f"v{gui_package}"
-if expected_tag and expected_tag != tag:
+expected_version = normalize_expected_version(expected_ref)
+if expected_version and expected_version != gui_package:
     print(
-        f"ERROR: tag mismatch. expected {tag} from version files, got {expected_tag}.",
+        f"ERROR: ref mismatch. ref='{expected_ref}' expected='{tag}'.",
         file=sys.stderr,
     )
     sys.exit(1)

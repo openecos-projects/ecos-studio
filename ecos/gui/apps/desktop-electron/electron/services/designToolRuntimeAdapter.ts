@@ -18,7 +18,7 @@ export interface DesignToolRuntimeAdapterOptions {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readString(value: unknown): string {
@@ -35,17 +35,21 @@ function normalizePath(value: string): string {
 function readDesignTool(data: Record<string, unknown>): string {
   const parameters = readRecord(data.parameters)
   return (
-    readString(data.designTool)
-    || readString(data.design_tool)
-    || readString(data.designToolType)
-    || readString(parameters['Design Tool'])
-    || readString(parameters.designTool)
-    || readString(parameters.design_tool)
-  ).trim().toLowerCase()
+    readString(data.designTool) ||
+    readString(data.design_tool) ||
+    readString(data.designToolType) ||
+    readString(parameters['Design Tool']) ||
+    readString(parameters.designTool) ||
+    readString(parameters.design_tool)
+  )
+    .trim()
+    .toLowerCase()
 }
 
 function isFrontendDesignTool(value: string): boolean {
-  return value === 'frontend' || value === 'fe' || value === 'fecompiler' || value === 'ecc-fe'
+  return (
+    value === 'frontend' || value === 'fe' || value === 'fecompiler' || value === 'ecc-fe'
+  )
 }
 
 function hasFrontendOnlyFields(data: Record<string, unknown>): boolean {
@@ -106,7 +110,9 @@ function hasFrontendOnlyFields(data: Record<string, unknown>): boolean {
   ].some((field) => field in data)
 }
 
-function defaultWorkspaceParameterReader(directory: string): Record<string, unknown> | null {
+function defaultWorkspaceParameterReader(
+  directory: string,
+): Record<string, unknown> | null {
   const normalized = normalizePath(directory)
   if (!normalized) return null
 
@@ -123,14 +129,17 @@ function defaultWorkspaceParameterReader(directory: string): Record<string, unkn
 export class DesignToolRuntimeAdapter implements DesktopRuntimeAdapter {
   private readonly backend: DesktopRuntimeAdapter
   private readonly frontend: DesktopRuntimeAdapter
-  private readonly workspaceParameterReader: (directory: string) => Record<string, unknown> | null
+  private readonly workspaceParameterReader: (
+    directory: string,
+  ) => Record<string, unknown> | null
   private activeRoute: DesignToolRoute = 'backend'
   private readonly frontendWorkspaces = new Set<string>()
 
   constructor(options: DesignToolRuntimeAdapterOptions) {
     this.backend = options.backend
     this.frontend = options.frontend
-    this.workspaceParameterReader = options.workspaceParameterReader ?? defaultWorkspaceParameterReader
+    this.workspaceParameterReader =
+      options.workspaceParameterReader ?? defaultWorkspaceParameterReader
   }
 
   async execute(
@@ -147,7 +156,8 @@ export class DesignToolRuntimeAdapter implements DesktopRuntimeAdapter {
   }
 
   private isFrontendRequest(request: DesktopCliCommandRequest): boolean {
-    if (request.cmd === 'catalog_list' || request.cmd === 'validate_frontend_config') return true
+    if (request.cmd === 'catalog_list' || request.cmd === 'validate_frontend_config')
+      return true
 
     const data = readRecord(request.data)
     if (isFrontendDesignTool(readDesignTool(data))) return true
@@ -168,8 +178,7 @@ export class DesignToolRuntimeAdapter implements DesktopRuntimeAdapter {
   ): void {
     const data = readRecord(request.data)
     const directory = normalizePath(
-      readString(result.data.directory)
-      || readString(data.directory),
+      readString(result.data.directory) || readString(data.directory),
     )
 
     if (route === 'frontend') {
@@ -181,8 +190,8 @@ export class DesignToolRuntimeAdapter implements DesktopRuntimeAdapter {
     }
 
     if (
-      result.response === 'success'
-      && (request.cmd === 'create_workspace' || request.cmd === 'load_workspace')
+      result.response === 'success' &&
+      (request.cmd === 'create_workspace' || request.cmd === 'load_workspace')
     ) {
       this.activeRoute = 'backend'
     }

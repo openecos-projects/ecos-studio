@@ -73,12 +73,22 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     await this.sendRequest('start', request)
   }
 
-  async startSession(request: DesktopAgentStartSessionRequest): Promise<DesktopAgentStartSessionResponse> {
-    return await this.sendRequest('startSession', request) as DesktopAgentStartSessionResponse
+  async startSession(
+    request: DesktopAgentStartSessionRequest,
+  ): Promise<DesktopAgentStartSessionResponse> {
+    return (await this.sendRequest(
+      'startSession',
+      request,
+    )) as DesktopAgentStartSessionResponse
   }
 
-  async sendMessage(request: DesktopAgentSendMessageRequest): Promise<DesktopAgentSendMessageResponse> {
-    return await this.sendRequest('sendMessage', request) as DesktopAgentSendMessageResponse
+  async sendMessage(
+    request: DesktopAgentSendMessageRequest,
+  ): Promise<DesktopAgentSendMessageResponse> {
+    return (await this.sendRequest(
+      'sendMessage',
+      request,
+    )) as DesktopAgentSendMessageResponse
   }
 
   async interrupt(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -86,19 +96,29 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   }
 
   async getStatus(request?: DesktopAgentProviderRequest): Promise<DesktopAgentStatus> {
-    return await this.sendRequest('getStatus', request) as DesktopAgentStatus
+    return (await this.sendRequest('getStatus', request)) as DesktopAgentStatus
   }
 
   async setMode(request: DesktopAgentSetModeRequest): Promise<DesktopAgentStatus> {
-    return await this.sendRequest('setMode', request) as DesktopAgentStatus
+    return (await this.sendRequest('setMode', request)) as DesktopAgentStatus
   }
 
-  async listSessions(request: DesktopAgentListSessionsRequest): Promise<DesktopAgentListSessionsResponse> {
-    return await this.sendRequest('listSessions', request) as DesktopAgentListSessionsResponse
+  async listSessions(
+    request: DesktopAgentListSessionsRequest,
+  ): Promise<DesktopAgentListSessionsResponse> {
+    return (await this.sendRequest(
+      'listSessions',
+      request,
+    )) as DesktopAgentListSessionsResponse
   }
 
-  async resumeSession(request: DesktopAgentResumeSessionRequest): Promise<DesktopAgentResumeSessionResponse> {
-    return await this.sendRequest('resumeSession', request) as DesktopAgentResumeSessionResponse
+  async resumeSession(
+    request: DesktopAgentResumeSessionRequest,
+  ): Promise<DesktopAgentResumeSessionResponse> {
+    return (await this.sendRequest(
+      'resumeSession',
+      request,
+    )) as DesktopAgentResumeSessionResponse
   }
 
   async stop(request?: DesktopAgentProviderRequest): Promise<void> {
@@ -113,7 +133,9 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     const child = this.ensureChild()
     const stdin = child.stdin
     if (!stdin || stdin.destroyed || stdin.writableEnded) {
-      return Promise.reject(new Error(`Agent provider ${this.manifest.providerId} stdin is closed`))
+      return Promise.reject(
+        new Error(`Agent provider ${this.manifest.providerId} stdin is closed`),
+      )
     }
     const id = randomUUID()
     const request: AgentProviderProtocolRequest = {
@@ -132,7 +154,10 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
           }
         })
       } catch (error) {
-        this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
+        this.handleChildFailure(
+          child,
+          error instanceof Error ? error : new Error(String(error)),
+        )
         child.kill()
       }
     })
@@ -142,15 +167,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     if (this.child) return this.child
 
     this.stdoutBuffer = ''
-    const child = this.spawnImpl(
-      this.manifest.command,
-      this.manifest.args ?? [],
-      {
-        cwd: this.manifest.pluginRoot,
-        env: this.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    )
+    const child = this.spawnImpl(this.manifest.command, this.manifest.args ?? [], {
+      cwd: this.manifest.pluginRoot,
+      env: this.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
     this.child = child
 
     child.stdout?.on('data', (data: unknown) => {
@@ -162,12 +183,18 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     })
     child.stdin?.once('error', (error) => {
       if (this.child !== child) return
-      this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
+      this.handleChildFailure(
+        child,
+        error instanceof Error ? error : new Error(String(error)),
+      )
       child.kill()
     })
     child.once('error', (error) => {
       if (this.child !== child) return
-      this.handleChildFailure(child, error instanceof Error ? error : new Error(String(error)))
+      this.handleChildFailure(
+        child,
+        error instanceof Error ? error : new Error(String(error)),
+      )
     })
     child.once('close', (code, signal) => {
       if (this.child !== child) return
@@ -211,11 +238,13 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     try {
       return readRecord(JSON.parse(line))
     } catch (error) {
-      this.rejectPending(new Error(
-        `Invalid JSON from agent provider ${this.manifest.providerId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      ))
+      this.rejectPending(
+        new Error(
+          `Invalid JSON from agent provider ${this.manifest.providerId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      )
       return null
     }
   }
@@ -265,9 +294,11 @@ function dataToString(data: unknown): string {
 }
 
 function errorMessage(error: string | { message?: string }): string {
-  return typeof error === 'string' ? error : error.message ?? 'Agent provider request failed'
+  return typeof error === 'string'
+    ? error
+    : (error.message ?? 'Agent provider request failed')
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }

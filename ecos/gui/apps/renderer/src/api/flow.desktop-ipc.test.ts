@@ -28,101 +28,122 @@ describe('flow API desktop bridge payloads', () => {
   })
 
   it('sends structured-cloneable requests when flow command data is reactive', async () => {
-    const execute = vi.fn(async (request: unknown) => {
+    const run = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return { rerun: true }
+    })
+    const runStep = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return { state: 'Success', step: StepEnum.PLACEMENT }
+    })
+    const info = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return { id: InfoEnum.layout, info: {}, step: StepEnum.ROUTING }
+    })
+    const refreshConfig = vi.fn(async (request: unknown) => {
+      expect(() => structuredClone(request)).not.toThrow()
+      return { directory: '/work/demo', refreshed: true }
+    })
+    const syncConfig = vi.fn(async (request: unknown) => {
       expect(() => structuredClone(request)).not.toThrow()
       return {
-        cmd: 'run_step',
-        data: {},
-        message: ['ok'],
-        ok: true,
-        response: 'success',
+        configPath: '/work/demo/config/rt_default_config.json',
+        directory: '/work/demo',
+        parametersChanged: true,
+        refreshed: true,
       }
     })
 
     setWindow({
       ecosDesktop: {
-        cli: {
-          cancel: vi.fn(),
-          execute,
+        ecc: {
+          flow: {
+            run,
+            runStep,
+          },
+          workspace: {
+            info,
+            refreshConfig,
+            syncConfig,
+          },
         },
       },
     })
 
-    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } = await import('./flow')
+    const { getInfoApi, refreshConfigApi, rtl2gdsApi, runStepApi, syncConfigApi } =
+      await import('./flow')
 
-    await runStepApi(reactive({
-      cmd: CMDEnum.run_step,
-      data: {
-        directory: '/work/demo',
-        rerun: false,
-        sim_test_suite: 'coremark',
-        step: StepEnum.PLACEMENT,
-      },
-    }))
-    await rtl2gdsApi(reactive({
-      cmd: CMDEnum.rtl2gds,
-      data: {
-        directory: '/work/demo',
-        rerun: true,
-      },
-    }))
-    await getInfoApi(reactive({
-      cmd: CMDEnum.get_info,
-      data: {
-        id: InfoEnum.layout,
-        step: StepEnum.ROUTING,
-      },
-    }))
-    await refreshConfigApi(reactive({
-      cmd: CMDEnum.refresh_config,
-      data: {
-        directory: '/work/demo',
-      },
-    }))
-    await syncConfigApi(reactive({
-      cmd: CMDEnum.sync_config,
-      data: {
-        config_path: '/work/demo/config/rt_default_config.json',
-        directory: '/work/demo',
-      },
-    }))
+    await runStepApi(
+      reactive({
+        cmd: CMDEnum.run_step,
+        data: {
+          directory: '/work/demo',
+          rerun: false,
+          step: StepEnum.PLACEMENT,
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    )
+    await rtl2gdsApi(
+      reactive({
+        cmd: CMDEnum.rtl2gds,
+        data: {
+          directory: '/work/demo',
+          rerun: true,
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    )
+    await getInfoApi(
+      reactive({
+        cmd: CMDEnum.get_info,
+        data: {
+          id: InfoEnum.layout,
+          step: StepEnum.ROUTING,
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    )
+    await refreshConfigApi(
+      reactive({
+        cmd: CMDEnum.refresh_config,
+        data: {
+          directory: '/work/demo',
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    )
+    await syncConfigApi(
+      reactive({
+        cmd: CMDEnum.sync_config,
+        data: {
+          config_path: '/work/demo/config/rt_default_config.json',
+          directory: '/work/demo',
+          workspaceHandle: 'workspace-handle-1',
+        },
+      }),
+    )
 
-    expect(execute).toHaveBeenCalledTimes(5)
-    expect(execute).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      cmd: 'run_step',
-      data: {
-        directory: '/work/demo',
-        rerun: false,
-        sim_test_suite: 'coremark',
-        step: StepEnum.PLACEMENT,
-      },
-    }))
-    expect(execute).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      cmd: 'rtl2gds',
-      data: {
-        directory: '/work/demo',
-        rerun: true,
-      },
-    }))
-    expect(execute).toHaveBeenNthCalledWith(3, expect.objectContaining({
-      cmd: 'get_info',
-      data: {
-        id: InfoEnum.layout,
-        step: StepEnum.ROUTING,
-      },
-    }))
-    expect(execute).toHaveBeenNthCalledWith(4, expect.objectContaining({
-      cmd: 'refresh_config',
-      data: {
-        directory: '/work/demo',
-      },
-    }))
-    expect(execute).toHaveBeenNthCalledWith(5, expect.objectContaining({
-      cmd: 'sync_config',
-      data: {
-        config_path: '/work/demo/config/rt_default_config.json',
-        directory: '/work/demo',
-      },
-    }))
+    expect(runStep).toHaveBeenCalledWith({
+      rerun: false,
+      step: StepEnum.PLACEMENT,
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(run).toHaveBeenCalledWith({
+      rerun: true,
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(info).toHaveBeenCalledWith({
+      id: InfoEnum.layout,
+      step: StepEnum.ROUTING,
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(refreshConfig).toHaveBeenCalledWith({
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(syncConfig).toHaveBeenCalledWith({
+      configPath: '/work/demo/config/rt_default_config.json',
+      workspaceHandle: 'workspace-handle-1',
+    })
   })
 })

@@ -42,10 +42,12 @@ describe('runtimeLocks', () => {
       const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
       expect(lock).not.toBeNull()
 
-      await expect(stat(lockDirectory).then((stats) => stats.isDirectory())).resolves.toBe(true)
-      await expect(readFile(path.join(lockDirectory, 'owner.json'), 'utf8')).resolves.toContain(
-        '"jobId": "job-1"',
-      )
+      await expect(
+        stat(lockDirectory).then((stats) => stats.isDirectory()),
+      ).resolves.toBe(true)
+      await expect(
+        readFile(path.join(lockDirectory, 'owner.json'), 'utf8'),
+      ).resolves.toContain('"jobId": "job-1"')
 
       await lock?.release()
     } finally {
@@ -58,20 +60,26 @@ describe('runtimeLocks', () => {
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'job-1',
-        pid: process.pid,
-        scope: '/work/demo',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'job-1',
+          pid: process.pid,
+          scope: '/work/demo',
+        }),
+      )
       await expect(readRuntimeLockOwner(lockDirectory)).resolves.toEqual({
         jobId: 'job-1',
         pid: process.pid,
         scope: '/work/demo',
       })
 
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'job-1',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'job-1',
+        }),
+      )
       await expect(readRuntimeLockOwner(lockDirectory)).resolves.toBeNull()
     } finally {
       await rm(root, { force: true, recursive: true })
@@ -83,11 +91,14 @@ describe('runtimeLocks', () => {
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stale-job',
-        pid: -1,
-        scope: '/work/demo',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'stale-job',
+          pid: -1,
+          scope: '/work/demo',
+        }),
+      )
 
       expect(isProcessAlive(-1)).toBe(false)
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
@@ -105,18 +116,23 @@ describe('runtimeLocks', () => {
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stale-job',
-        pid: -1,
-        scope: '/work/demo',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'stale-job',
+          pid: -1,
+          scope: '/work/demo',
+        }),
+      )
 
       const attempts = await Promise.all(
         Array.from({ length: 8 }, (_value, index) =>
           acquireRuntimeLock(root, '/work/demo', `job-${index}`),
         ),
       )
-      const locks = attempts.filter((lock): lock is NonNullable<typeof lock> => lock !== null)
+      const locks = attempts.filter(
+        (lock): lock is NonNullable<typeof lock> => lock !== null,
+      )
 
       expect(locks).toHaveLength(1)
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(true)
@@ -129,19 +145,28 @@ describe('runtimeLocks', () => {
   it('retries after clearing a stale reclaim lock', async () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
-    const reclaimLock = path.join(root, `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`)
+    const reclaimLock = path.join(
+      root,
+      `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`,
+    )
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stale-job',
-        pid: -1,
-        scope: '/work/demo',
-      }))
-      await writeFile(reclaimLock, JSON.stringify({
-        jobId: 'stale-reclaimer:reclaim',
-        pid: -1,
-        scope: '/work/demo:reclaim',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'stale-job',
+          pid: -1,
+          scope: '/work/demo',
+        }),
+      )
+      await writeFile(
+        reclaimLock,
+        JSON.stringify({
+          jobId: 'stale-reclaimer:reclaim',
+          pid: -1,
+          scope: '/work/demo:reclaim',
+        }),
+      )
 
       const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
 
@@ -155,19 +180,28 @@ describe('runtimeLocks', () => {
   it('waits for observer reclaim contention before reporting lock acquisition blocked', async () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     const lockDirectory = path.join(root, `${runtimeLockName('/work/demo')}.lock`)
-    const reclaimLock = path.join(root, `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`)
+    const reclaimLock = path.join(
+      root,
+      `${runtimeLockName('/work/demo:reclaim')}.reclaim.lock`,
+    )
     try {
       await mkdir(lockDirectory, { recursive: true })
-      await writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stale-job',
-        pid: -1,
-        scope: '/work/demo',
-      }))
-      await writeFile(reclaimLock, JSON.stringify({
-        jobId: `observer-${process.pid}:reclaim`,
-        pid: process.pid,
-        scope: '/work/demo:reclaim',
-      }))
+      await writeFile(
+        path.join(lockDirectory, 'owner.json'),
+        JSON.stringify({
+          jobId: 'stale-job',
+          pid: -1,
+          scope: '/work/demo',
+        }),
+      )
+      await writeFile(
+        reclaimLock,
+        JSON.stringify({
+          jobId: `observer-${process.pid}:reclaim`,
+          pid: process.pid,
+          scope: '/work/demo:reclaim',
+        }),
+      )
       const observerRelease = new Promise<void>((resolve, reject) => {
         setTimeout(() => {
           rm(reclaimLock, { force: true, recursive: true }).then(resolve, reject)
@@ -201,7 +235,7 @@ describe('runtimeLocks', () => {
     const root = path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`)
     try {
       await expect(isRuntimeScopeActive(root, '/work/demo')).resolves.toBe(false)
-      await expect(stat(root)).rejects.toThrow()
+      await expect(stat(root)).rejects.toThrow('ENOENT')
     } finally {
       await rm(root, { force: true, recursive: true })
     }
@@ -235,11 +269,16 @@ describe('runtimeLocks', () => {
       const lock = await acquireRuntimeLock(root, '/work/demo', 'job-1')
       expect(lock).not.toBeNull()
 
-      await expect(writeFile(path.join(lockDirectory, 'owner.json'), JSON.stringify({
-        jobId: 'stalled-job',
-        pid: process.pid,
-        scope: '/work/demo',
-      }))).rejects.toThrow()
+      await expect(
+        writeFile(
+          path.join(lockDirectory, 'owner.json'),
+          JSON.stringify({
+            jobId: 'stalled-job',
+            pid: process.pid,
+            scope: '/work/demo',
+          }),
+        ),
+      ).rejects.toThrow('EACCES')
       await expect(readRuntimeLockOwner(lockDirectory)).resolves.toMatchObject({
         jobId: 'job-1',
       })
@@ -264,7 +303,8 @@ describe('runtimeLocks', () => {
       let simulatedRace = false
       vi.resetModules()
       vi.doMock('node:fs/promises', async () => {
-        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        const actual =
+          await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
         return {
           ...actual,
           writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
@@ -273,7 +313,9 @@ describe('runtimeLocks', () => {
               simulatedRace = true
               await actual.rm(lockDirectory, { force: true, recursive: true })
               await actual.mkdir(lockDirectory, { recursive: true })
-              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), { mode: 0o444 })
+              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), {
+                mode: 0o444,
+              })
               await actual.chmod(ownerPath, 0o444)
               const error = new Error('permission denied') as NodeJS.ErrnoException
               error.code = 'EACCES'
@@ -285,8 +327,12 @@ describe('runtimeLocks', () => {
       })
       const locks = await import('./runtimeLocks')
 
-      await expect(locks.acquireRuntimeLock(root, scope, 'stalled-job')).resolves.toBeNull()
-      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(replacementOwner)
+      await expect(
+        locks.acquireRuntimeLock(root, scope, 'stalled-job'),
+      ).resolves.toBeNull()
+      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(
+        replacementOwner,
+      )
     } finally {
       vi.doUnmock('node:fs/promises')
       vi.resetModules()
@@ -308,18 +354,23 @@ describe('runtimeLocks', () => {
       let simulatedRace = false
       vi.resetModules()
       vi.doMock('node:fs/promises', async () => {
-        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        const actual =
+          await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
         return {
           ...actual,
           writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
             const [target] = args
             if (target === ownerPath && !simulatedRace) {
               simulatedRace = true
-              await actual.writeFile(ownerPath, JSON.stringify({
-                jobId: 'stalled-job',
-                pid: process.pid,
-                scope,
-              }), { flag: 'wx', mode: 0o444 })
+              await actual.writeFile(
+                ownerPath,
+                JSON.stringify({
+                  jobId: 'stalled-job',
+                  pid: process.pid,
+                  scope,
+                }),
+                { flag: 'wx', mode: 0o444 },
+              )
               await actual.chmod(ownerPath, 0o444)
             }
             return actual.writeFile(...args)
@@ -357,7 +408,8 @@ describe('runtimeLocks', () => {
       let simulatedRace = false
       vi.resetModules()
       vi.doMock('node:fs/promises', async () => {
-        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        const actual =
+          await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
         return {
           ...actual,
           mkdir: vi.fn(async (...args: Parameters<typeof actual.mkdir>) => {
@@ -367,7 +419,9 @@ describe('runtimeLocks', () => {
               simulatedRace = true
               await actual.rm(lockDirectory, { force: true, recursive: true })
               await actual.mkdir(lockDirectory, { recursive: true })
-              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), { mode: 0o444 })
+              await actual.writeFile(ownerPath, JSON.stringify(replacementOwner), {
+                mode: 0o444,
+              })
               await actual.chmod(ownerPath, 0o444)
             }
             return result
@@ -376,8 +430,12 @@ describe('runtimeLocks', () => {
       })
       const locks = await import('./runtimeLocks')
 
-      await expect(locks.acquireRuntimeLock(root, scope, 'stalled-job')).resolves.toBeNull()
-      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(replacementOwner)
+      await expect(
+        locks.acquireRuntimeLock(root, scope, 'stalled-job'),
+      ).resolves.toBeNull()
+      await expect(locks.readRuntimeLockOwner(lockDirectory)).resolves.toEqual(
+        replacementOwner,
+      )
     } finally {
       vi.doUnmock('node:fs/promises')
       vi.resetModules()
@@ -394,7 +452,8 @@ describe('runtimeLocks', () => {
     try {
       vi.resetModules()
       vi.doMock('node:fs/promises', async () => {
-        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        const actual =
+          await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
         return {
           ...actual,
           mkdir: vi.fn(async (...args: Parameters<typeof actual.mkdir>) => {
@@ -436,7 +495,8 @@ describe('runtimeLocks', () => {
     try {
       vi.resetModules()
       vi.doMock('node:fs/promises', async () => {
-        const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+        const actual =
+          await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
         return {
           ...actual,
           writeFile: vi.fn(async (...args: Parameters<typeof actual.writeFile>) => {
@@ -461,7 +521,7 @@ describe('runtimeLocks', () => {
         'permission denied',
       )
       expect(ownerWriteAttempts).toBe(1)
-      await expect(stat(lockDirectory)).rejects.toThrow()
+      await expect(stat(lockDirectory)).rejects.toThrow('ENOENT')
     } finally {
       vi.doUnmock('node:fs/promises')
       vi.resetModules()

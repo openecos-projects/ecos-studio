@@ -92,7 +92,9 @@ export function createRendererViteConfig({
     },
     esbuild: {
       drop: isProd ? ['console', 'debugger'] : [],
-      pure: isProd ? ['console.log', 'console.info', 'console.debug', 'console.trace'] : [],
+      pure: isProd
+        ? ['console.log', 'console.info', 'console.debug', 'console.trace']
+        : [],
       legalComments: 'none',
     },
     build: buildConfig,

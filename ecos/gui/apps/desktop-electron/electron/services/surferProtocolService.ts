@@ -117,7 +117,9 @@ export class SurferProtocolService {
     if (cached) return cached
 
     let text = (await this.readSurferAssetFrom(assetsPath, 'index.html')).toString('utf8')
-    const integrationScript = (await this.readSurferAssetFrom(assetsPath, 'integration.js')).toString('utf8')
+    const integrationScript = (
+      await this.readSurferAssetFrom(assetsPath, 'integration.js')
+    ).toString('utf8')
     const setupHooks = `
       (() => {
         const postHostMessage = (command, fields = {}) => {
@@ -298,13 +300,15 @@ export class SurferProtocolService {
 
   private async currentSurferAssetsPath(): Promise<string> {
     const resourcePath = (await this.surferAssetsPathProvider?.())?.trim()
-    if (resourcePath && await isSurferAssetsPathReady(resourcePath)) {
+    if (resourcePath && (await isSurferAssetsPathReady(resourcePath))) {
       return resourcePath
     }
     if (await isSurferAssetsPathReady(this.surferAssetsPath)) {
       return this.surferAssetsPath
     }
-    throw new Error('Surfer waveform viewer assets are not installed. Install the Surfer resource in Resource Manager.')
+    throw new Error(
+      'Surfer waveform viewer assets are not installed. Install the Surfer resource in Resource Manager.',
+    )
   }
 
   private async waveformResponse(request: Request, url: URL): Promise<Response> {
@@ -313,7 +317,10 @@ export class SurferProtocolService {
     const fileStats = await stat(canonicalPath)
     const headers = this.headers('application/octet-stream')
     headers.set('Content-Length', String(fileStats.size))
-    headers.set('Content-Disposition', `inline; filename="${basename(canonicalPath).replace(/"/g, '')}"`)
+    headers.set(
+      'Content-Disposition',
+      `inline; filename="${basename(canonicalPath).replace(/"/g, '')}"`,
+    )
 
     if (request.method.toUpperCase() === 'HEAD') {
       return new Response(null, { headers })
@@ -378,12 +385,14 @@ export function surferWaveformUrl(path: string): string {
   return `${SURFER_SCHEME}://viewer/waveform/${name}?path=${encodeURIComponent(path)}`
 }
 
-export function resolveSurferAssetsPath(options: {
-  appPath?: string
-  env?: NodeJS.ProcessEnv
-  isPackaged?: boolean
-  resourcesPath?: string
-} = {}): string {
+export function resolveSurferAssetsPath(
+  options: {
+    appPath?: string
+    env?: NodeJS.ProcessEnv
+    isPackaged?: boolean
+    resourcesPath?: string
+  } = {},
+): string {
   const resourceManagedPath = options.env?.ECOS_SURFER_ASSETS_PATH?.trim()
   if (resourceManagedPath) {
     return resourceManagedPath

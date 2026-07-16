@@ -14,7 +14,7 @@ type MenuEventHandler = () => void
 
 /**
  * 监听原生菜单事件
- * 
+ *
  * @example
  * ```ts
  * useMenuEvents({
@@ -50,7 +50,7 @@ export function useMenuEvents(handlers: Partial<Record<MenuEventId, MenuEventHan
 
 /**
  * 监听单个菜单事件
- * 
+ *
  * @example
  * ```ts
  * useMenuEvent('new_project', () => {

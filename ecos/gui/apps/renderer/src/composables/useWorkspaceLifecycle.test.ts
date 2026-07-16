@@ -68,22 +68,25 @@ describe('useWorkspaceLifecycle', () => {
     const writes: string[] = []
     let resolveOldRead: (() => void) | undefined
 
-    const oldWrite = lifecycle.runForSession(oldSession.sessionId, async () => {
-      await new Promise<void>((resolve) => {
-        resolveOldRead = resolve
+    const oldWrite = lifecycle
+      .runForSession(oldSession.sessionId, async () => {
+        await new Promise<void>((resolve) => {
+          resolveOldRead = resolve
+        })
+        return 'old'
       })
-      return 'old'
-    }).then((result) => {
-      if (result) writes.push(result)
-      return result
-    })
+      .then((result) => {
+        if (result) writes.push(result)
+        return result
+      })
 
     const newSession = lifecycle.beginSession({
       workspaceId: 'workspace-b',
       projectRoot: '/workspace/b',
     })
 
-    const newWrite = lifecycle.runForSession(newSession.sessionId, async () => 'new')
+    const newWrite = lifecycle
+      .runForSession(newSession.sessionId, async () => 'new')
       .then((result) => {
         if (result) writes.push(result)
         return result
@@ -119,7 +122,9 @@ describe('useWorkspaceLifecycle', () => {
   })
 
   it('revokes registered blob URLs during session cleanup', () => {
-    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    const revokeObjectURL = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => undefined)
     const lifecycle = useWorkspaceLifecycle()
     const session = lifecycle.beginSession({
       workspaceId: 'workspace-a',

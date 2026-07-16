@@ -1,0 +1,300 @@
+import {
+  desktopApiEventChannels,
+  desktopApiIpcChannels,
+  desktopMenuEventIds,
+} from '@ecos-studio/shared'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const { contextBridgeExposeInMainWorld, ipcRenderer } = vi.hoisted(() => ({
+  contextBridgeExposeInMainWorld: vi.fn(),
+  ipcRenderer: {
+    invoke: vi.fn(),
+    on: vi.fn(),
+    removeListener: vi.fn(),
+    send: vi.fn(),
+  },
+}))
+
+vi.mock('electron', () => ({
+  contextBridge: {
+    exposeInMainWorld: contextBridgeExposeInMainWorld,
+  },
+  ipcRenderer,
+}))
+
+async function loadDesktopBridge() {
+  vi.resetModules()
+  await import('./index')
+  expect(contextBridgeExposeInMainWorld).toHaveBeenCalledWith(
+    'ecosDesktop',
+    expect.any(Object),
+  )
+  return contextBridgeExposeInMainWorld.mock.calls.at(-1)?.[1] as {
+    app: {
+      getVersions(): Promise<unknown>
+    }
+    ecc: {
+      events: {
+        onEvent(listener: (event: unknown) => void): () => void
+      }
+      flow: {
+        runStep(request: unknown): Promise<unknown>
+      }
+      workspace: {
+        exportSignoff(request: unknown): Promise<unknown>
+        inspectSignoff(request: unknown): Promise<unknown>
+      }
+    }
+    dialog: {
+      saveFile(options: unknown): Promise<unknown>
+    }
+    menu: {
+      setActionEnabled(action: string, enabled: boolean): Promise<void>
+    }
+    workspace: {
+      readProjectTextFile(path: string): Promise<unknown>
+      listProjectDirectory(path: string): Promise<unknown>
+      removeProjectDirectory(path: string): Promise<unknown>
+      prepareProjectDirectoryReplacement(path: string): Promise<unknown>
+      restoreProjectDirectoryReplacement(replacement: unknown): Promise<unknown>
+      finalizeProjectDirectoryReplacement(replacement: unknown): Promise<unknown>
+    }
+  }
+}
+
+describe('preload desktop bridge contract', () => {
+  beforeEach(() => {
+    contextBridgeExposeInMainWorld.mockReset()
+    ipcRenderer.invoke.mockReset()
+    ipcRenderer.on.mockReset()
+    ipcRenderer.removeListener.mockReset()
+    ipcRenderer.send.mockReset()
+    delete process.env.ECOS_ELECTRON_SMOKE
+  })
+
+  it('exposes the Electron desktop bridge in the isolated renderer world', async () => {
+    const bridge = await loadDesktopBridge()
+
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        app: expect.objectContaining({
+          getVersions: expect.any(Function),
+        }),
+        ecc: expect.objectContaining({
+          events: expect.objectContaining({
+            onEvent: expect.any(Function),
+          }),
+          flow: expect.objectContaining({
+            runStep: expect.any(Function),
+          }),
+        }),
+        workspace: expect.objectContaining({
+          readProjectTextFile: expect.any(Function),
+        }),
+      }),
+    )
+  })
+
+  it('routes bridge calls through shared IPC channel constants', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({ gui: '0.1.0-test' })
+    ipcRenderer.invoke.mockResolvedValueOnce('module top; endmodule')
+    ipcRenderer.invoke.mockResolvedValueOnce([
+      { name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' },
+    ])
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup',
+    })
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(bridge.app.getVersions()).resolves.toEqual({ gui: '0.1.0-test' })
+    await expect(bridge.workspace.readProjectTextFile('rtl/top.sv')).resolves.toBe(
+      'module top; endmodule',
+    )
+    await expect(
+      bridge.workspace.listProjectDirectory('/work/demo/origin'),
+    ).resolves.toEqual([{ name: 'top.v', path: '/work/demo/origin/top.v', type: 'file' }])
+    await expect(
+      bridge.workspace.removeProjectDirectory('ws_0001'),
+    ).resolves.toBeUndefined()
+    const replacement = {
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup',
+    }
+    await expect(
+      bridge.workspace.prepareProjectDirectoryReplacement('/work/demo'),
+    ).resolves.toEqual(replacement)
+    await expect(
+      bridge.workspace.restoreProjectDirectoryReplacement(replacement),
+    ).resolves.toBeUndefined()
+    await expect(
+      bridge.workspace.finalizeProjectDirectoryReplacement(replacement),
+    ).resolves.toBeUndefined()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.appGetVersions,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.workspaceReadProjectTextFile,
+      'rtl/top.sv',
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.workspaceListProjectDirectory,
+      '/work/demo/origin',
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      4,
+      desktopApiIpcChannels.workspaceRemoveProjectDirectory,
+      'ws_0001',
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      5,
+      desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
+      '/work/demo',
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      6,
+      desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
+      replacement,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      7,
+      desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
+      replacement,
+    )
+  })
+
+  it('routes ECC flow calls through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      state: 'Success',
+      step: 'place',
+    })
+    const request = {
+      rerun: false,
+      step: 'place',
+      workspaceHandle: 'workspace-handle-1',
+    }
+
+    await expect(bridge.ecc.flow.runStep(request)).resolves.toMatchObject({
+      state: 'Success',
+      step: 'place',
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccFlowRunStep,
+      request,
+    )
+  })
+
+  it('routes ECC signoff export through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = {
+      outputPath: '/exports/custom package.tar.gz',
+      workspaceHandle: 'workspace-handle-1',
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      outputPath: request.outputPath,
+    })
+
+    await expect(bridge.ecc.workspace.exportSignoff(request)).resolves.toEqual({
+      outputPath: request.outputPath,
+    })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccWorkspaceExportSignoff,
+      request,
+    )
+  })
+
+  it('routes ECC signoff inspection through the shared IPC channel constant', async () => {
+    const bridge = await loadDesktopBridge()
+    const request = { workspaceHandle: 'workspace-handle-1' }
+    const result = { groups: [], risks: [], status: 'ready' }
+    ipcRenderer.invoke.mockResolvedValueOnce(result)
+
+    await expect(bridge.ecc.workspace.inspectSignoff(request)).resolves.toEqual(result)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.eccWorkspaceInspectSignoff,
+      request,
+    )
+  })
+
+  it('routes Save As and menu enabled-state calls through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const options = {
+      title: 'Export Signoff Package',
+      defaultPath: '/exports/gcd_signoff_package.tar.gz',
+      filters: [{ name: 'Tarball', extensions: ['tar.gz'] }],
+    }
+    ipcRenderer.invoke.mockResolvedValueOnce(options.defaultPath)
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+
+    await expect(bridge.dialog.saveFile(options)).resolves.toBe(options.defaultPath)
+    await expect(
+      bridge.menu.setActionEnabled(desktopMenuEventIds.exportSignoffPackage, true),
+    ).resolves.toBeUndefined()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.dialogSaveFile,
+      options,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.menuSetActionEnabled,
+      desktopMenuEventIds.exportSignoffPackage,
+      true,
+    )
+  })
+
+  it('subscribes and unsubscribes with shared event channel constants', async () => {
+    const bridge = await loadDesktopBridge()
+    const listener = vi.fn()
+
+    const unsubscribe = bridge.ecc.events.onEvent(listener)
+    const eventListener = ipcRenderer.on.mock.calls[0]?.[1]
+    eventListener?.({}, { type: 'runtime.ready' })
+    unsubscribe()
+
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccEvent,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledWith({ type: 'runtime.ready' })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.eccEvent,
+      eventListener,
+    )
+  })
+
+  it('only exposes the smoke-test bridge when smoke mode is enabled', async () => {
+    await loadDesktopBridge()
+
+    expect(contextBridgeExposeInMainWorld).not.toHaveBeenCalledWith(
+      'electronSmoke',
+      expect.any(Object),
+    )
+
+    contextBridgeExposeInMainWorld.mockReset()
+    vi.resetModules()
+    process.env.ECOS_ELECTRON_SMOKE = '1'
+
+    await import('./index')
+    const smokeBridge = contextBridgeExposeInMainWorld.mock.calls.find(
+      ([name]) => name === 'electronSmoke',
+    )?.[1] as {
+      complete(): void
+      failed(message: string): void
+    }
+    smokeBridge.complete()
+    smokeBridge.failed('missing bridge')
+
+    expect(ipcRenderer.send).toHaveBeenCalledWith('ecos-smoke:complete')
+    expect(ipcRenderer.send).toHaveBeenCalledWith('ecos-smoke:failed', 'missing bridge')
+  })
+})

@@ -28,7 +28,9 @@
           <div class="wave-title">
             <i class="ri-pulse-line"></i>
             <div>
-              <strong>{{ activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform' }}</strong>
+              <strong>{{
+                activeWaveform.caseName || fileName(activeWaveform.path) || 'Waveform'
+              }}</strong>
               <span :title="activeWaveform.path">{{ activeWaveform.path }}</span>
             </div>
           </div>
@@ -50,8 +52,16 @@
             :src="surferViewerUrl"
             @load="$emit('frame-load')"
           ></iframe>
-          <div v-if="waveStatusMessage" class="wave-status" :class="{ error: waveformError }">
-            <i :class="waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'"></i>
+          <div
+            v-if="waveStatusMessage"
+            class="wave-status"
+            :class="{ error: waveformError }"
+          >
+            <i
+              :class="
+                waveformError ? 'ri-error-warning-line' : 'ri-loader-4-line animate-spin'
+              "
+            ></i>
             <span>{{ waveStatusMessage }}</span>
           </div>
         </div>

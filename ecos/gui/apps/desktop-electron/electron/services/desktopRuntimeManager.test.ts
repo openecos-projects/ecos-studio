@@ -4,7 +4,10 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import type { DesktopCliCommandResult } from '@ecos-studio/shared'
-import { DesktopRuntimeManager, type DesktopRuntimeManagerOptions } from './desktopRuntimeManager'
+import {
+  DesktopRuntimeManager,
+  type DesktopRuntimeManagerOptions,
+} from './desktopRuntimeManager'
 import { runtimeLockName } from './runtime/runtimeLocks'
 
 function createManager(
@@ -14,11 +17,15 @@ function createManager(
 ): DesktopRuntimeManager {
   return new DesktopRuntimeManager({
     ...options,
-    runtimeLockRoot: options.runtimeLockRoot ?? path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`),
+    runtimeLockRoot:
+      options.runtimeLockRoot ??
+      path.join(tmpdir(), `ecos-runtime-lock-test-${randomUUID()}`),
   })
 }
 
-function result(overrides: Partial<DesktopCliCommandResult> = {}): DesktopCliCommandResult {
+function result(
+  overrides: Partial<DesktopCliCommandResult> = {},
+): DesktopCliCommandResult {
   return {
     cmd: 'run_step',
     data: {},
@@ -35,11 +42,13 @@ describe('DesktopRuntimeManager', () => {
       adapter: { execute: vi.fn() },
     })
 
-    await expect(manager.execute({
-      cmd: 'pwd',
-      data: {},
-      source: 'terminal',
-    } as never)).resolves.toMatchObject({
+    await expect(
+      manager.execute({
+        cmd: 'pwd',
+        data: {},
+        source: 'terminal',
+      } as never),
+    ).resolves.toMatchObject({
       cmd: 'pwd',
       ok: false,
       response: 'error',
@@ -50,43 +59,59 @@ describe('DesktopRuntimeManager', () => {
     const listener = vi.fn()
     const manager = createManager({
       adapter: {
-        execute: vi.fn(async () => result({
-          cmd: 'run_step',
-          data: { state: 'Success' },
-          message: ['ok'],
-        })),
+        execute: vi.fn(async () =>
+          result({
+            cmd: 'run_step',
+            data: { state: 'Success' },
+            message: ['ok'],
+          }),
+        ),
       },
     })
 
-    await expect(manager.execute({
-      cmd: 'run_step',
-      data: { step: 'place', rerun: false },
-      source: 'button',
-    }, listener)).resolves.toMatchObject({
+    await expect(
+      manager.execute(
+        {
+          cmd: 'run_step',
+          data: { step: 'place', rerun: false },
+          source: 'button',
+        },
+        listener,
+      ),
+    ).resolves.toMatchObject({
       cmd: 'run_step',
       ok: true,
       response: 'success',
     })
 
-    expect(listener).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      cmd: 'run_step',
-      jobId: expect.any(String),
-      stream: 'system',
-      type: 'queued',
-    }))
-    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      cmd: 'run_step',
-      jobId: expect.any(String),
-      stream: 'system',
-      type: 'started',
-    }))
-    expect(listener).toHaveBeenNthCalledWith(3, expect.objectContaining({
-      cmd: 'run_step',
-      jobId: expect.any(String),
-      result: expect.objectContaining({ ok: true }),
-      stream: 'system',
-      type: 'completed',
-    }))
+    expect(listener).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        cmd: 'run_step',
+        jobId: expect.any(String),
+        stream: 'system',
+        type: 'queued',
+      }),
+    )
+    expect(listener).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        cmd: 'run_step',
+        jobId: expect.any(String),
+        stream: 'system',
+        type: 'started',
+      }),
+    )
+    expect(listener).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        cmd: 'run_step',
+        jobId: expect.any(String),
+        result: expect.objectContaining({ ok: true }),
+        stream: 'system',
+        type: 'completed',
+      }),
+    )
 
     const jobIds = listener.mock.calls.map(([event]) => event.jobId)
     expect(new Set(jobIds).size).toBe(1)
@@ -96,30 +121,38 @@ describe('DesktopRuntimeManager', () => {
     const listener = vi.fn()
     const manager = createManager({
       adapter: {
-        execute: vi.fn(async () => result({
-          cmd: 'rtl2gds',
-          data: { rerun: true },
-          message: ['ok'],
-        })),
+        execute: vi.fn(async () =>
+          result({
+            cmd: 'rtl2gds',
+            data: { rerun: true },
+            message: ['ok'],
+          }),
+        ),
       },
     })
 
-    await manager.execute({
-      cmd: 'rtl2gds',
-      data: { directory: '/work/demo', rerun: true },
-      source: 'button',
-    }, listener)
+    await manager.execute(
+      {
+        cmd: 'rtl2gds',
+        data: { directory: '/work/demo', rerun: true },
+        source: 'button',
+      },
+      listener,
+    )
 
-    expect(listener).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      cmd: 'rtl2gds',
-      data: expect.objectContaining({
+    expect(listener).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        cmd: 'rtl2gds',
+        data: expect.objectContaining({
+          directory: '/work/demo',
+          rerun: true,
+        }),
         directory: '/work/demo',
-        rerun: true,
+        stream: 'system',
+        type: 'started',
       }),
-      directory: '/work/demo',
-      stream: 'system',
-      type: 'started',
-    }))
+    )
   })
 
   it('lets adapters emit normalized stdout and stderr events for the active job', async () => {
@@ -142,38 +175,52 @@ describe('DesktopRuntimeManager', () => {
       },
     })
 
-    await manager.execute({
-      cmd: 'run_step',
-      data: { step: 'synthesis', rerun: false },
-      source: 'test',
-    }, listener)
+    await manager.execute(
+      {
+        cmd: 'run_step',
+        data: { step: 'synthesis', rerun: false },
+        source: 'test',
+      },
+      listener,
+    )
 
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      jobId: expect.any(String),
-      stream: 'stdout',
-      text: 'running synthesis',
-      type: 'stdout',
-    }))
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      jobId: expect.any(String),
-      stream: 'stderr',
-      text: 'warning text',
-      type: 'stderr',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        jobId: expect.any(String),
+        stream: 'stdout',
+        text: 'running synthesis',
+        type: 'stdout',
+      }),
+    )
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        jobId: expect.any(String),
+        stream: 'stderr',
+        text: 'warning text',
+        type: 'stderr',
+      }),
+    )
   })
 
   it('allows overlapping long-running ECC commands for different workspace directories', async () => {
     const releases = new Map<string, () => void>()
-    const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
-      const directory = String(request.data.directory)
-      releases.set(directory, () => resolve(result({
-        cmd: request.cmd,
-        data: { directory },
-        message: [`done ${directory}`],
-      })))
-    }))
+    const adapterExecute = vi.fn(
+      (request) =>
+        new Promise<DesktopCliCommandResult>((resolve) => {
+          const directory = String(request.data.directory)
+          releases.set(directory, () =>
+            resolve(
+              result({
+                cmd: request.cmd,
+                data: { directory },
+                message: [`done ${directory}`],
+              }),
+            ),
+          )
+        }),
+    )
     const manager = createManager({
       adapter: {
         execute: adapterExecute,
@@ -213,41 +260,55 @@ describe('DesktopRuntimeManager', () => {
   it('blocks overlapping long-running ECC commands for the same workspace directory', async () => {
     let release!: () => void
     const listener = vi.fn()
-    const adapterExecute = vi.fn(() => new Promise<DesktopCliCommandResult>((resolve) => {
-      release = () => resolve(result({
-        cmd: 'rtl2gds',
-        message: ['done'],
-      }))
-    }))
+    const adapterExecute = vi.fn(
+      () =>
+        new Promise<DesktopCliCommandResult>((resolve) => {
+          release = () =>
+            resolve(
+              result({
+                cmd: 'rtl2gds',
+                message: ['done'],
+              }),
+            )
+        }),
+    )
     const manager = createManager({
       adapter: {
         execute: adapterExecute,
       },
     })
 
-    const first = manager.execute({
-      cmd: 'rtl2gds',
-      data: { directory: '/work/demo', rerun: false },
-      source: 'button',
-    }, listener)
-    const second = manager.execute({
-      cmd: 'run_step',
-      data: { directory: '/work/demo', step: 'place', rerun: false },
-      source: 'menu',
-    }, listener)
+    const first = manager.execute(
+      {
+        cmd: 'rtl2gds',
+        data: { directory: '/work/demo', rerun: false },
+        source: 'button',
+      },
+      listener,
+    )
+    const second = manager.execute(
+      {
+        cmd: 'run_step',
+        data: { directory: '/work/demo', step: 'place', rerun: false },
+        source: 'menu',
+      },
+      listener,
+    )
 
     await expect(second).resolves.toMatchObject({
       cmd: 'run_step',
       ok: false,
       response: 'warning',
     })
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      directory: '/work/demo',
-      result: expect.objectContaining({ response: 'warning' }),
-      stream: 'system',
-      type: 'failed',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        directory: '/work/demo',
+        result: expect.objectContaining({ response: 'warning' }),
+        stream: 'system',
+        type: 'failed',
+      }),
+    )
 
     await vi.waitFor(() => {
       expect(adapterExecute).toHaveBeenCalledTimes(1)
@@ -260,16 +321,24 @@ describe('DesktopRuntimeManager', () => {
     const runtimeLockRoot = await mkdtemp(path.join(tmpdir(), 'ecos-runtime-lock-test-'))
     try {
       let releaseFirst!: () => void
-      const firstAdapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
-        releaseFirst = () => resolve(result({
+      const firstAdapterExecute = vi.fn(
+        (request) =>
+          new Promise<DesktopCliCommandResult>((resolve) => {
+            releaseFirst = () =>
+              resolve(
+                result({
+                  cmd: request.cmd,
+                  message: ['first done'],
+                }),
+              )
+          }),
+      )
+      const secondAdapterExecute = vi.fn(async (request) =>
+        result({
           cmd: request.cmd,
-          message: ['first done'],
-        }))
-      }))
-      const secondAdapterExecute = vi.fn(async (request) => result({
-        cmd: request.cmd,
-        message: ['second done'],
-      }))
+          message: ['second done'],
+        }),
+      )
       const firstManager = createManager({
         adapter: { execute: firstAdapterExecute },
         runtimeLockRoot,
@@ -289,11 +358,13 @@ describe('DesktopRuntimeManager', () => {
         expect(firstAdapterExecute).toHaveBeenCalledTimes(1)
       })
 
-      await expect(secondManager.execute({
-        cmd: 'run_step',
-        data: { directory: '/work/shared', step: 'place', rerun: false },
-        source: 'button',
-      })).resolves.toMatchObject({
+      await expect(
+        secondManager.execute({
+          cmd: 'run_step',
+          data: { directory: '/work/shared', step: 'place', rerun: false },
+          source: 'button',
+        }),
+      ).resolves.toMatchObject({
         cmd: 'run_step',
         ok: false,
         response: 'warning',
@@ -311,20 +382,24 @@ describe('DesktopRuntimeManager', () => {
     const runtimeLockRoot = await mkdtemp(path.join(tmpdir(), 'ecos-runtime-lock-test-'))
     try {
       await mkdir(path.join(runtimeLockRoot, `${runtimeLockName('/work/demo')}.lock`))
-      const adapterExecute = vi.fn(async (request) => result({
-        cmd: request.cmd,
-        message: ['should not run'],
-      }))
+      const adapterExecute = vi.fn(async (request) =>
+        result({
+          cmd: request.cmd,
+          message: ['should not run'],
+        }),
+      )
       const manager = createManager({
         adapter: { execute: adapterExecute },
         runtimeLockRoot,
       })
 
-      await expect(manager.execute({
-        cmd: 'run_step',
-        data: { directory: '/work/demo', step: 'place', rerun: false },
-        source: 'button',
-      })).resolves.toMatchObject({
+      await expect(
+        manager.execute({
+          cmd: 'run_step',
+          data: { directory: '/work/demo', step: 'place', rerun: false },
+          source: 'button',
+        }),
+      ).resolves.toMatchObject({
         cmd: 'run_step',
         ok: false,
         response: 'warning',
@@ -339,12 +414,18 @@ describe('DesktopRuntimeManager', () => {
     const runtimeLockRoot = await mkdtemp(path.join(tmpdir(), 'ecos-runtime-lock-test-'))
     try {
       let release!: () => void
-      const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
-        release = () => resolve(result({
-          cmd: request.cmd,
-          message: ['done'],
-        }))
-      }))
+      const adapterExecute = vi.fn(
+        (request) =>
+          new Promise<DesktopCliCommandResult>((resolve) => {
+            release = () =>
+              resolve(
+                result({
+                  cmd: request.cmd,
+                  message: ['done'],
+                }),
+              )
+          }),
+      )
       const manager = createManager({
         adapter: { execute: adapterExecute },
         runtimeLockRoot,
@@ -377,12 +458,18 @@ describe('DesktopRuntimeManager', () => {
 
   it('blocks config refresh and sync while the same workspace runtime is active', async () => {
     let release!: () => void
-    const adapterExecute = vi.fn((request) => new Promise<DesktopCliCommandResult>((resolve) => {
-      release = () => resolve(result({
-        cmd: request.cmd,
-        message: ['done'],
-      }))
-    }))
+    const adapterExecute = vi.fn(
+      (request) =>
+        new Promise<DesktopCliCommandResult>((resolve) => {
+          release = () =>
+            resolve(
+              result({
+                cmd: request.cmd,
+                message: ['done'],
+              }),
+            )
+        }),
+    )
     const manager = createManager({
       adapter: {
         execute: adapterExecute,
@@ -399,23 +486,27 @@ describe('DesktopRuntimeManager', () => {
       expect(adapterExecute).toHaveBeenCalledTimes(1)
     })
 
-    await expect(manager.execute({
-      cmd: 'refresh_config',
-      data: { directory: '/work/demo' },
-      source: 'button',
-    })).resolves.toMatchObject({
+    await expect(
+      manager.execute({
+        cmd: 'refresh_config',
+        data: { directory: '/work/demo' },
+        source: 'button',
+      }),
+    ).resolves.toMatchObject({
       cmd: 'refresh_config',
       ok: false,
       response: 'warning',
     })
-    await expect(manager.execute({
-      cmd: 'sync_config',
-      data: {
-        config_path: '/work/demo/config/rt_default_config.json',
-        directory: '/work/demo',
-      },
-      source: 'button',
-    })).resolves.toMatchObject({
+    await expect(
+      manager.execute({
+        cmd: 'sync_config',
+        data: {
+          config_path: '/work/demo/config/rt_default_config.json',
+          directory: '/work/demo',
+        },
+        source: 'button',
+      }),
+    ).resolves.toMatchObject({
       cmd: 'sync_config',
       ok: false,
       response: 'warning',
@@ -445,62 +536,80 @@ describe('DesktopRuntimeManager', () => {
       },
     })
 
-    await manager.execute({
-      cmd: 'run_step',
-      data: { directory: '/work/demo', step: 'place', rerun: false },
-      source: 'button',
-    }, listener)
+    await manager.execute(
+      {
+        cmd: 'run_step',
+        data: { directory: '/work/demo', step: 'place', rerun: false },
+        source: 'button',
+      },
+      listener,
+    )
 
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      directory: '/work/demo',
-      workspaceId: '/work/demo',
-      type: 'queued',
-    }))
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      directory: '/work/demo',
-      workspaceId: '/work/demo',
-      text: 'running placement',
-      type: 'stdout',
-    }))
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'run_step',
-      directory: '/work/demo',
-      workspaceId: '/work/demo',
-      result: expect.objectContaining({ ok: true }),
-      type: 'completed',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        directory: '/work/demo',
+        workspaceId: '/work/demo',
+        type: 'queued',
+      }),
+    )
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        directory: '/work/demo',
+        workspaceId: '/work/demo',
+        text: 'running placement',
+        type: 'stdout',
+      }),
+    )
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'run_step',
+        directory: '/work/demo',
+        workspaceId: '/work/demo',
+        result: expect.objectContaining({ ok: true }),
+        type: 'completed',
+      }),
+    )
   })
 
   it('emits completed events for warning results returned by the adapter', async () => {
     const listener = vi.fn()
     const manager = createManager({
       adapter: {
-        execute: vi.fn(async () => result({
-          cmd: 'get_info',
-          message: ['no info available'],
-          ok: true,
-          response: 'warning',
-        })),
+        execute: vi.fn(async () =>
+          result({
+            cmd: 'get_info',
+            message: ['no info available'],
+            ok: true,
+            response: 'warning',
+          }),
+        ),
       },
     })
 
-    await expect(manager.execute({
-      cmd: 'get_info',
-      data: { id: 'layout', step: 'route' },
-      source: 'button',
-    }, listener)).resolves.toMatchObject({
+    await expect(
+      manager.execute(
+        {
+          cmd: 'get_info',
+          data: { id: 'layout', step: 'route' },
+          source: 'button',
+        },
+        listener,
+      ),
+    ).resolves.toMatchObject({
       cmd: 'get_info',
       ok: true,
       response: 'warning',
     })
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      cmd: 'get_info',
-      result: expect.objectContaining({ response: 'warning' }),
-      stream: 'system',
-      type: 'completed',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'get_info',
+        result: expect.objectContaining({ response: 'warning' }),
+        stream: 'system',
+        type: 'completed',
+      }),
+    )
   })
 
   it('clears the active long-running job after adapter errors', async () => {
@@ -509,27 +618,33 @@ describe('DesktopRuntimeManager', () => {
         execute: vi
           .fn()
           .mockRejectedValueOnce(new Error('adapter unavailable'))
-          .mockResolvedValueOnce(result({
-            cmd: 'run_step',
-            message: ['recovered'],
-          })),
+          .mockResolvedValueOnce(
+            result({
+              cmd: 'run_step',
+              message: ['recovered'],
+            }),
+          ),
       },
     })
 
-    await expect(manager.execute({
-      cmd: 'run_step',
-      data: { step: 'place', rerun: false },
-      source: 'button',
-    })).resolves.toMatchObject({
+    await expect(
+      manager.execute({
+        cmd: 'run_step',
+        data: { step: 'place', rerun: false },
+        source: 'button',
+      }),
+    ).resolves.toMatchObject({
       ok: false,
       response: 'error',
     })
 
-    await expect(manager.execute({
-      cmd: 'run_step',
-      data: { step: 'place', rerun: false },
-      source: 'button',
-    })).resolves.toMatchObject({
+    await expect(
+      manager.execute({
+        cmd: 'run_step',
+        data: { step: 'place', rerun: false },
+        source: 'button',
+      }),
+    ).resolves.toMatchObject({
       ok: true,
       response: 'success',
     })
@@ -540,27 +655,35 @@ describe('DesktopRuntimeManager', () => {
     const listener = vi.fn((event) => {
       if (event.type === 'started') capturedJobId = event.jobId
     })
-    const adapterExecute = vi.fn((_request, context) => new Promise<DesktopCliCommandResult>((resolve) => {
-      context.signal?.addEventListener('abort', () => {
-        resolve(result({
-          cmd: 'run_step',
-          message: ['cancelled by test'],
-          ok: false,
-          response: 'cancelled',
-        }))
-      })
-    }))
+    const adapterExecute = vi.fn(
+      (_request, context) =>
+        new Promise<DesktopCliCommandResult>((resolve) => {
+          context.signal?.addEventListener('abort', () => {
+            resolve(
+              result({
+                cmd: 'run_step',
+                message: ['cancelled by test'],
+                ok: false,
+                response: 'cancelled',
+              }),
+            )
+          })
+        }),
+    )
     const manager = createManager({
       adapter: {
         execute: adapterExecute,
       },
     })
 
-    const running = manager.execute({
-      cmd: 'run_step',
-      data: { directory: '/work/demo', step: 'sim', rerun: true },
-      source: 'button',
-    }, listener)
+    const running = manager.execute(
+      {
+        cmd: 'run_step',
+        data: { directory: '/work/demo', step: 'sim', rerun: true },
+        source: 'button',
+      },
+      listener,
+    )
 
     await vi.waitFor(() => {
       expect(capturedJobId).toMatch(/\S/)
@@ -574,9 +697,11 @@ describe('DesktopRuntimeManager', () => {
       cmd: 'run_step',
       response: 'cancelled',
     })
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      jobId: capturedJobId,
-      type: 'cancelled',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: capturedJobId,
+        type: 'cancelled',
+      }),
+    )
   })
 })

@@ -87,7 +87,7 @@ function escapeHtml(text: string): string {
 export function sanitizeClassList(value: string): string {
   return value
     .split(/\s+/)
-    .filter(token => /^[A-Za-z0-9:_-]+$/.test(token))
+    .filter((token) => /^[A-Za-z0-9:_-]+$/.test(token))
     .join(' ')
 }
 
@@ -95,6 +95,7 @@ export function sanitizeUrl(value: string, attr: 'href' | 'src'): string | null 
   const trimmed = value.trim()
   if (!trimmed) return null
 
+  // oxlint-disable-next-line no-control-regex -- URLs must strip ASCII control characters.
   const normalized = trimmed.replace(/[\u0000-\u001F\u007F\s]+/g, '').toLowerCase()
   if (
     normalized.startsWith('javascript:') ||
@@ -177,11 +178,7 @@ function sanitizeAttribute(
   return [name, value]
 }
 
-function sanitizeNode(
-  node: Node,
-  doc: Document,
-  parent: Node,
-): void {
+function sanitizeNode(node: Node, doc: Document, parent: Node): void {
   if (node.nodeType === Node.TEXT_NODE) {
     parent.appendChild(doc.createTextNode(node.textContent ?? ''))
     return

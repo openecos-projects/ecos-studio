@@ -114,7 +114,10 @@ function normalizeRect(value: unknown): SocTemplateRect {
   }
 }
 
-export function normalizeSocTemplateDetail(raw: any, sourceLabel: string): SocTemplateDetail {
+export function normalizeSocTemplateDetail(
+  raw: any,
+  sourceLabel: string,
+): SocTemplateDetail {
   const rawRecord = toRecord(raw)
   const rawCores = toRecord(rawRecord.cores)
   const coreList = Array.isArray(rawCores.list) ? rawCores.list : []
@@ -133,7 +136,12 @@ export function normalizeSocTemplateDetail(raw: any, sourceLabel: string): SocTe
       info: normalizeInfo(coreRecord.info),
       align: toText(coreRecord.io_align, FALLBACK_TEXT),
       orient: toText(coreRecord.orient, FALLBACK_TEXT),
-      selected: selectedCoreId === id ? 1 : hasSelectedCoreId ? 0 : normalizeSelected(coreRecord.selected),
+      selected:
+        selectedCoreId === id
+          ? 1
+          : hasSelectedCoreId
+            ? 0
+            : normalizeSelected(coreRecord.selected),
       boundingBox: normalizeRect(coreRecord.bounding_box),
     }
   })

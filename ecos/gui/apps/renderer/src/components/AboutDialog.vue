@@ -53,7 +53,9 @@ async function copyVersions(): Promise<void> {
   const text = buildAboutVersionText(versions.value)
   await navigator.clipboard.writeText(text)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
+  setTimeout(() => {
+    copied.value = false
+  }, 2000)
 }
 </script>
 
@@ -154,7 +156,9 @@ async function copyVersions(): Promise<void> {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
   align-self: flex-start;
 }
 

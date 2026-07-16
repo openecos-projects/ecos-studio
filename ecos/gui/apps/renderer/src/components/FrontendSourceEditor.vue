@@ -8,19 +8,42 @@
     <template v-else>
       <header class="source-toolbar">
         <div class="source-title">
-          <strong :title="source.path">{{ source.label || fileName(source.path) }}</strong>
+          <strong :title="source.path">{{
+            source.label || fileName(source.path)
+          }}</strong>
           <span :title="source.path">{{ source.path }}</span>
         </div>
         <div class="source-actions">
-          <span class="source-state" :class="{ dirty: isDirty, saving }">{{ sourceStateText }}</span>
-          <button type="button" class="icon-action" title="Reload" :disabled="busy" @click="void loadSource()">
+          <span class="source-state" :class="{ dirty: isDirty, saving }">{{
+            sourceStateText
+          }}</span>
+          <button
+            type="button"
+            class="icon-action"
+            title="Reload"
+            :disabled="busy"
+            @click="void loadSource()"
+          >
             <i :class="loading ? 'ri-loader-4-line spin' : 'ri-refresh-line'"></i>
           </button>
-          <button type="button" class="icon-action" title="Save" :disabled="!canSave" @click="void saveSource()">
+          <button
+            type="button"
+            class="icon-action"
+            title="Save"
+            :disabled="!canSave"
+            @click="void saveSource()"
+          >
             <i :class="saving ? 'ri-loader-4-line spin' : 'ri-save-3-line'"></i>
           </button>
-          <button type="button" class="text-action" :disabled="!canLint" @click="void runLint()">
-            <i :class="lintRunning ? 'ri-loader-4-line spin' : 'ri-shield-check-line'"></i>
+          <button
+            type="button"
+            class="text-action"
+            :disabled="!canLint"
+            @click="void runLint()"
+          >
+            <i
+              :class="lintRunning ? 'ri-loader-4-line spin' : 'ri-shield-check-line'"
+            ></i>
             <span>Lint</span>
           </button>
         </div>
@@ -65,7 +88,11 @@
             :class="diagnostic.severity"
             @click="jumpToDiagnostic(diagnostic)"
           >
-            <i :class="diagnostic.severity === 'error' ? 'ri-close-circle-line' : 'ri-alert-line'"></i>
+            <i
+              :class="
+                diagnostic.severity === 'error' ? 'ri-close-circle-line' : 'ri-alert-line'
+              "
+            ></i>
             <span>
               <strong>{{ diagnostic.code }}</strong>
               <small>{{ diagnosticLocation(diagnostic) }}</small>
@@ -84,20 +111,17 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Extension } from '@codemirror/state'
 import { Compartment, EditorState } from '@codemirror/state'
-import {
-  Decoration,
-  EditorView,
-  ViewPlugin,
-  keymap,
-  lineNumbers,
-} from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin, keymap, lineNumbers } from '@codemirror/view'
 import type { DecorationSet, ViewUpdate } from '@codemirror/view'
 import { search, searchKeymap } from '@codemirror/search'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useThemeStore } from '@/stores/themeStore'
-import { readOptionalProjectTextFileTail, writeProjectTextFile } from '@/utils/projectFiles'
+import {
+  readOptionalProjectTextFileTail,
+  writeProjectTextFile,
+} from '@/utils/projectFiles'
 import {
   countVerilatorDiagnostics,
   diagnosticMatchesPath,
@@ -159,9 +183,15 @@ let savedContent = ''
 let loadToken = 0
 const themeCompartment = new Compartment()
 
-const editorTheme = computed<'dark' | 'light'>(() => themeStore.themeName === 'dark' ? 'dark' : 'light')
+const editorTheme = computed<'dark' | 'light'>(() =>
+  themeStore.themeName === 'dark' ? 'dark' : 'light',
+)
 const busy = computed(() => loading.value || saving.value || lintRunning.value)
-const canSave = computed(() => Boolean(props.source?.path && view && isDirty.value && !busy.value && !sourceTruncated.value))
+const canSave = computed(() =>
+  Boolean(
+    props.source?.path && view && isDirty.value && !busy.value && !sourceTruncated.value,
+  ),
+)
 const canLint = computed(() => Boolean(props.source?.path && !busy.value))
 const sourceStateText = computed(() => {
   if (saving.value) return 'Saving'
@@ -194,14 +224,20 @@ onBeforeUnmount(() => {
   view = null
 })
 
-watch(() => props.source?.path, () => {
-  resetLint()
-  void loadSource()
-})
+watch(
+  () => props.source?.path,
+  () => {
+    resetLint()
+    void loadSource()
+  },
+)
 
-watch(() => props.focusTarget?.token, () => {
-  focusExternalTarget()
-})
+watch(
+  () => props.focusTarget?.token,
+  () => {
+    focusExternalTarget()
+  },
+)
 
 watch(editorTheme, (theme) => {
   view?.dispatch({ effects: themeCompartment.reconfigure(editorThemeExtension(theme)) })
@@ -278,7 +314,8 @@ async function loadSource(): Promise<void> {
 async function saveSource(): Promise<void> {
   if (!props.source?.path || !view) return
   if (sourceTruncated.value) {
-    error.value = 'This source file is displayed as a truncated tail and cannot be saved safely.'
+    error.value =
+      'This source file is displayed as a truncated tail and cannot be saved safely.'
     showToast({
       severity: 'warn',
       summary: 'Save Blocked',
@@ -362,7 +399,9 @@ async function loadLintDetail(): Promise<void> {
 
   const detail = response.data.info as FrontendStepDetail
   const logs = [...(detail.logs || []), ...(detail.reports || [])]
-  const logPath = logs.find((item) => /log/i.test(item.label) || /\.log(\.txt)?$/i.test(item.path))?.path
+  const logPath = logs.find(
+    (item) => /log/i.test(item.label) || /\.log(\.txt)?$/i.test(item.path),
+  )?.path
   if (!logPath) {
     lintLog.value = JSON.stringify(detail, null, 2)
     diagnostics.value = parseCurrentDiagnostics(lintLog.value)
@@ -378,8 +417,8 @@ async function loadLintDetail(): Promise<void> {
 
 function parseCurrentDiagnostics(text: string): VerilatorDiagnostic[] {
   const sourcePath = props.source?.path || ''
-  return parseVerilatorDiagnostics(text).filter((diagnostic) =>
-    !sourcePath || diagnosticMatchesPath(diagnostic.file, sourcePath),
+  return parseVerilatorDiagnostics(text).filter(
+    (diagnostic) => !sourcePath || diagnosticMatchesPath(diagnostic.file, sourcePath),
   )
 }
 
@@ -405,13 +444,20 @@ function jumpToDiagnostic(diagnostic: VerilatorDiagnostic): void {
 function focusExternalTarget(): void {
   const target = props.focusTarget
   if (!target?.line) return
-  if (target.path && props.source?.path && !diagnosticMatchesPath(target.path, props.source.path)) return
+  if (
+    target.path &&
+    props.source?.path &&
+    !diagnosticMatchesPath(target.path, props.source.path)
+  )
+    return
   jumpToPosition(target.line, target.column || 1)
 }
 
 function jumpToPosition(lineNumber: number, columnNumber = 1): void {
   if (!view) return
-  const line = view.state.doc.line(Math.min(Math.max(1, lineNumber), view.state.doc.lines))
+  const line = view.state.doc.line(
+    Math.min(Math.max(1, lineNumber), view.state.doc.lines),
+  )
   const pos = Math.min(line.to, line.from + Math.max(0, columnNumber - 1))
   view.dispatch({
     selection: { anchor: pos },
@@ -437,68 +483,74 @@ function resetLint(): void {
 
 function editorThemeExtension(theme: 'dark' | 'light'): Extension {
   const dark = theme === 'dark'
-  return EditorView.theme({
-    '&': {
-      height: '100%',
-      color: dark ? '#d4d4d4' : '#1f2937',
-      backgroundColor: dark ? '#1e1e1e' : '#ffffff',
-      fontSize: '12px',
+  return EditorView.theme(
+    {
+      '&': {
+        height: '100%',
+        color: dark ? '#d4d4d4' : '#1f2937',
+        backgroundColor: dark ? '#1e1e1e' : '#ffffff',
+        fontSize: '12px',
+      },
+      '.cm-scroller': {
+        fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
+        lineHeight: '1.55',
+      },
+      '.cm-content': {
+        caretColor: dark ? '#38bdf8' : '#2563eb',
+        padding: '12px 0 16px',
+      },
+      '.cm-line': {
+        padding: '0 12px',
+      },
+      '.cm-gutters': {
+        backgroundColor: dark ? '#252526' : '#f6f8fa',
+        color: dark ? '#858585' : '#64748b',
+        borderRight: `1px solid ${dark ? '#3c3c3c' : '#d9e2ec'}`,
+      },
+      '.cm-activeLine': {
+        backgroundColor: dark ? '#2a2d2e' : '#f1f5f9',
+      },
+      '.cm-activeLineGutter': {
+        backgroundColor: dark ? '#2a2d2e' : '#eef2ff',
+        color: dark ? '#cbd5e1' : '#1e40af',
+      },
+      '&.cm-focused': {
+        outline: 'none',
+      },
+      '.cm-selectionBackground': {
+        backgroundColor: `${dark ? '#2563eb88' : '#93c5fd80'} !important`,
+      },
+      '.cm-keyword': { color: dark ? '#569cd6' : '#1d4ed8', fontWeight: '700' },
+      '.cm-type': { color: dark ? '#4ec9b0' : '#0f766e' },
+      '.cm-number': { color: dark ? '#b5cea8' : '#a16207' },
+      '.cm-string': { color: dark ? '#ce9178' : '#047857' },
+      '.cm-comment': { color: dark ? '#6a9955' : '#64748b', fontStyle: 'italic' },
+      '.cm-directive': { color: dark ? '#c586c0' : '#9333ea', fontWeight: '700' },
+      '.cm-operator': { color: dark ? '#d4d4d4' : '#334155' },
     },
-    '.cm-scroller': {
-      fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, monospace",
-      lineHeight: '1.55',
-    },
-    '.cm-content': {
-      caretColor: dark ? '#38bdf8' : '#2563eb',
-      padding: '12px 0 16px',
-    },
-    '.cm-line': {
-      padding: '0 12px',
-    },
-    '.cm-gutters': {
-      backgroundColor: dark ? '#252526' : '#f6f8fa',
-      color: dark ? '#858585' : '#64748b',
-      borderRight: `1px solid ${dark ? '#3c3c3c' : '#d9e2ec'}`,
-    },
-    '.cm-activeLine': {
-      backgroundColor: dark ? '#2a2d2e' : '#f1f5f9',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: dark ? '#2a2d2e' : '#eef2ff',
-      color: dark ? '#cbd5e1' : '#1e40af',
-    },
-    '&.cm-focused': {
-      outline: 'none',
-    },
-    '.cm-selectionBackground': {
-      backgroundColor: `${dark ? '#2563eb88' : '#93c5fd80'} !important`,
-    },
-    '.cm-keyword': { color: dark ? '#569cd6' : '#1d4ed8', fontWeight: '700' },
-    '.cm-type': { color: dark ? '#4ec9b0' : '#0f766e' },
-    '.cm-number': { color: dark ? '#b5cea8' : '#a16207' },
-    '.cm-string': { color: dark ? '#ce9178' : '#047857' },
-    '.cm-comment': { color: dark ? '#6a9955' : '#64748b', fontStyle: 'italic' },
-    '.cm-directive': { color: dark ? '#c586c0' : '#9333ea', fontWeight: '700' },
-    '.cm-operator': { color: dark ? '#d4d4d4' : '#334155' },
-  }, { dark })
+    { dark },
+  )
 }
 
 function syntaxHighlighter(): Extension {
-  return ViewPlugin.fromClass(class {
-    decorations: DecorationSet
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
 
-    constructor(view: EditorView) {
-      this.decorations = buildSyntaxDecorations(view)
-    }
-
-    update(update: ViewUpdate): void {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = buildSyntaxDecorations(update.view)
+      constructor(view: EditorView) {
+        this.decorations = buildSyntaxDecorations(view)
       }
-    }
-  }, {
-    decorations: (plugin) => plugin.decorations,
-  })
+
+      update(update: ViewUpdate): void {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildSyntaxDecorations(update.view)
+        }
+      }
+    },
+    {
+      decorations: (plugin) => plugin.decorations,
+    },
+  )
 }
 
 function buildSyntaxDecorations(view: EditorView): DecorationSet {
@@ -562,7 +614,8 @@ const TYPES = new Set([
   'time',
   'wire',
 ])
-const TOKEN_RE = /`[A-Za-z_][\w$]*|\/\/.*|\/\*.*?\*\/|"([^"\\]|\\.)*"|\b\d+'[bhd][0-9a-fA-F_xzXZ]+\b|\b\d+\b|\b[A-Za-z_][\w$]*\b|[+\-*/%=<>!&|^~?:]+/g
+const TOKEN_RE =
+  /`[A-Za-z_][\w$]*|\/\/.*|\/\*.*?\*\/|"([^"\\]|\\.)*"|\b\d+'[bhd][0-9a-fA-F_xzXZ]+\b|\b\d+\b|\b[A-Za-z_][\w$]*\b|[+\-*/%=<>!&|^~?:]+/g
 
 function decorateLine(
   text: string,

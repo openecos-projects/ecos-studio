@@ -12,14 +12,17 @@ class FakePty {
   readonly resize = vi.fn()
   readonly kill = vi.fn()
   private dataListener: ((data: string) => void) | null = null
-  private exitListener: ((event: { exitCode: number; signal?: number }) => void) | null = null
+  private exitListener: ((event: { exitCode: number; signal?: number }) => void) | null =
+    null
 
   onData(listener: (data: string) => void): FakePtyEventDisposable {
     this.dataListener = listener
     return { dispose: vi.fn() }
   }
 
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): FakePtyEventDisposable {
+  onExit(
+    listener: (event: { exitCode: number; signal?: number }) => void,
+  ): FakePtyEventDisposable {
     this.exitListener = listener
     return { dispose: vi.fn() }
   }
@@ -58,17 +61,21 @@ describe('ShellPtyService', () => {
       sessionId: expect.any(String),
       shell: '/bin/zsh',
     })
-    expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
-      cols: 120,
-      cwd: '/home/ecos',
-      env: expect.objectContaining({
-        HOME: '/home/ecos',
-        SHELL: '/bin/zsh',
-        TERM: 'xterm-256color',
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        cols: 120,
+        cwd: '/home/ecos',
+        env: expect.objectContaining({
+          HOME: '/home/ecos',
+          SHELL: '/bin/zsh',
+          TERM: 'xterm-256color',
+        }),
+        name: 'xterm-256color',
+        rows: 32,
       }),
-      name: 'xterm-256color',
-      rows: 32,
-    }))
+    )
     expect(listener).toHaveBeenNthCalledWith(1, {
       data: 'hello\r\n',
       sessionId: session.sessionId,
@@ -119,11 +126,15 @@ describe('ShellPtyService', () => {
 
     await service.createSession({ cols: 80, rows: 24 }, vi.fn())
 
-    expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/bash', [], expect.objectContaining({
-      env: expect.objectContaining({
-        PROMPT_COMMAND: 'history -a',
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          PROMPT_COMMAND: 'history -a',
+        }),
       }),
-    }))
+    )
   })
 
   it('uses an explicit cwd instead of the HOME fallback', async () => {
@@ -142,23 +153,30 @@ describe('ShellPtyService', () => {
 
     await service.createSession({ cols: 80, cwd: '/workspace/demo', rows: 24 }, vi.fn())
 
-    expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
-      cwd: '/workspace/demo',
-    }))
-    expect(ptyBackend.spawn).not.toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
-      cwd: '/home/ecos',
-    }))
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        cwd: '/workspace/demo',
+      }),
+    )
+    expect(ptyBackend.spawn).not.toHaveBeenCalledWith(
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        cwd: '/home/ecos',
+      }),
+    )
   })
 
   it('resolves envProvider for each new session and uses it for shell, cwd, and spawn env', async () => {
     const firstPty = new FakePty()
     const secondPty = new FakePty()
     const ptyBackend = {
-      spawn: vi.fn()
-        .mockReturnValueOnce(firstPty)
-        .mockReturnValueOnce(secondPty),
+      spawn: vi.fn().mockReturnValueOnce(firstPty).mockReturnValueOnce(secondPty),
     }
-    const envProvider = vi.fn()
+    const envProvider = vi
+      .fn()
       .mockResolvedValueOnce({
         HOME: '/home/first',
         PATH: '/dynamic/first/bin',
@@ -186,22 +204,32 @@ describe('ShellPtyService', () => {
     expect(envProvider).toHaveBeenCalledTimes(2)
     expect(firstSession.shell).toBe('/bin/zsh')
     expect(secondSession.shell).toBe('/bin/fish')
-    expect(ptyBackend.spawn).toHaveBeenNthCalledWith(1, '/bin/zsh', [], expect.objectContaining({
-      cwd: '/home/first',
-      env: expect.objectContaining({
-        HOME: '/home/first',
-        PATH: '/dynamic/first/bin',
-        TERM: 'xterm-256color',
+    expect(ptyBackend.spawn).toHaveBeenNthCalledWith(
+      1,
+      '/bin/zsh',
+      [],
+      expect.objectContaining({
+        cwd: '/home/first',
+        env: expect.objectContaining({
+          HOME: '/home/first',
+          PATH: '/dynamic/first/bin',
+          TERM: 'xterm-256color',
+        }),
       }),
-    }))
-    expect(ptyBackend.spawn).toHaveBeenNthCalledWith(2, '/bin/fish', [], expect.objectContaining({
-      cwd: '/home/second',
-      env: expect.objectContaining({
-        HOME: '/home/second',
-        PATH: '/dynamic/second/bin',
-        TERM: 'xterm-256color',
+    )
+    expect(ptyBackend.spawn).toHaveBeenNthCalledWith(
+      2,
+      '/bin/fish',
+      [],
+      expect.objectContaining({
+        cwd: '/home/second',
+        env: expect.objectContaining({
+          HOME: '/home/second',
+          PATH: '/dynamic/second/bin',
+          TERM: 'xterm-256color',
+        }),
       }),
-    }))
+    )
   })
 
   it('falls back to static env when envProvider fails', async () => {
@@ -209,7 +237,9 @@ describe('ShellPtyService', () => {
     const ptyBackend = {
       spawn: vi.fn(() => fakePty),
     }
-    const loggerDebug = vi.spyOn(electronLogger, 'debug').mockImplementation(() => undefined)
+    const loggerDebug = vi
+      .spyOn(electronLogger, 'debug')
+      .mockImplementation(() => undefined)
     const service = new ShellPtyService({
       env: {
         HOME: '/home/static',
@@ -226,14 +256,18 @@ describe('ShellPtyService', () => {
     const session = await service.createSession({ cols: 80, rows: 24 }, vi.fn())
 
     expect(session.shell).toBe('/bin/bash')
-    expect(ptyBackend.spawn).toHaveBeenCalledWith('/bin/bash', [], expect.objectContaining({
-      cwd: '/home/static',
-      env: expect.objectContaining({
-        HOME: '/home/static',
-        PATH: '/static/bin',
-        TERM: 'xterm-256color',
+    expect(ptyBackend.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      [],
+      expect.objectContaining({
+        cwd: '/home/static',
+        env: expect.objectContaining({
+          HOME: '/home/static',
+          PATH: '/static/bin',
+          TERM: 'xterm-256color',
+        }),
       }),
-    }))
+    )
     expect(loggerDebug).toHaveBeenCalledWith(
       '[shell] env provider failed: %s',
       'manifest unavailable',
@@ -256,7 +290,9 @@ describe('ShellPtyService', () => {
 
     fakePty.emitExit({ exitCode: 0 })
 
-    expect(() => service.write(session.sessionId, 'pwd\r')).toThrow('Unknown shell session')
+    expect(() => service.write(session.sessionId, 'pwd\r')).toThrow(
+      'Unknown shell session',
+    )
     expect(() => service.resize('missing', 100, 28)).toThrow('Unknown shell session')
     expect(() => service.kill('missing')).toThrow('Unknown shell session')
   })

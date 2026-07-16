@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Tag to release (for example, v0.1.0-alpha.3)
+        description: Tag to release (for example, v0.1.0-alpha.6)
         required: true
 
 permissions:
@@ -58,6 +58,11 @@ jobs:
 
       - name: Setup Node.js
         uses: ./.github/actions/setup-node-pnpm
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust-cache
+        with:
+          workspaces: ecos/layout-viewer
 
       - name: Setup Python
         uses: actions/setup-python@v5

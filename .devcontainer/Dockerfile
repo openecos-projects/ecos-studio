@@ -61,14 +61,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust (for Tauri).
+# Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
-# Install Bazel
-RUN wget https://github.com/bazelbuild/bazel/releases/download/8.5.0/bazel-8.5.0-linux-x86_64 -O /usr/local/bin/bazel \
-    && chmod +x /usr/local/bin/bazel
-
-# Install uv (Python package manager used by ecos/server).
+# Install uv (Python package manager used by ecc).
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && ln -s /root/.local/bin/uv /usr/local/bin/uv
 
@@ -88,22 +84,22 @@ COPY . /workspace
 # Init submodules (ip/, eda/, pdk/)
 RUN git submodule update --init --recursive || true
 
-# Install ecos/server dependencies (includes ecc wheel)
+# Install ecc
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
-    cd ecos/server && rm -rf .venv \
+    cd ecc && rm -rf .venv \
     && uv sync --frozen --all-groups --python 3.11
 
 # Install GUI frontend dependencies
 RUN cd ecos/gui && pnpm install --frozen-lockfile
 
-ENV VIRTUAL_ENV="/workspace/ecos/server/.venv"
-ENV PATH="/workspace/ecos/server/.venv/bin:${PATH}"
+ENV VIRTUAL_ENV="/workspace/ecc/.venv"
+ENV PATH="/workspace/ecc/.venv/bin:${PATH}"
 ENV CHIPCOMPILER_OSS_CAD_DIR="/workspace/eda/oss-cad-suite"
 ENV CHIPCOMPILER_ICS55_PDK_ROOT="/workspace/pdk/icsprout55-pdk"
-RUN echo 'if [ -f /workspace/ecos/server/.venv/bin/activate ]; then source /workspace/ecos/server/.venv/bin/activate; fi' >> /root/.bashrc
+RUN echo 'if [ -f /workspace/ecc/.venv/bin/activate ]; then source /workspace/ecc/.venv/bin/activate; fi' >> /root/.bashrc
 
 
 # Build commands:

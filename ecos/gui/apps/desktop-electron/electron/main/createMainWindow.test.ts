@@ -43,11 +43,13 @@ describe('createMainWindow', () => {
     await createMainWindow()
 
     expect(browserWindowConstructor).toHaveBeenCalledTimes(1)
-    expect(browserWindowConstructor).toHaveBeenCalledWith(expect.objectContaining({
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    }))
+    expect(browserWindowConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frame: false,
+        transparent: true,
+        backgroundColor: '#00000000',
+      }),
+    )
   })
 
   it('opens DevTools when explicitly enabled for the current launch', async () => {

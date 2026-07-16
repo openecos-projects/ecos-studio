@@ -2,12 +2,10 @@
  * API module exports
  */
 
-export {
-  waitForRuntimeReady,
-  type WaitForRuntimeReadyOptions
-} from './client'
+export { waitForRuntimeReady, type WaitForRuntimeReadyOptions } from './client'
 
 export {
+  closeWorkspaceApi,
   loadWorkspaceApi,
   createWorkspaceApi,
   type ProjectInfo,
@@ -25,11 +23,6 @@ export {
   type FrontendValidationResult,
 } from './frontendCatalog'
 
-
-export {
-
-} from './flow'
-
 export {
   createRuntimeEventClient,
   type RuntimeEventClient,
@@ -38,13 +31,14 @@ export {
   type RuntimeEventHandler,
   type RuntimeEventClientConfig,
   type RuntimeEventClientState,
-  type RuntimeResponseType
+  type RuntimeResponseType,
 } from './runtimeEvents'
 
 export {
   activatePdkApi,
   checkResourceUpdatesApi,
   getToolStatusApi,
+  importLocalResourcePathApi,
   importPdkPathApi,
   installResourceApi,
   installToolApi,

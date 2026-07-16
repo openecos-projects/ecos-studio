@@ -17,5 +17,6 @@ viewjson-importer = { path = "../viewjson-importer" }
 sha2.workspace = true
 
 [dev-dependencies]
+filetime.workspace = true
 flate2.workspace = true
 tempfile.workspace = true

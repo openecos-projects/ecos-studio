@@ -1,10 +1,19 @@
 import { ref, getCurrentInstance } from 'vue'
-import type { DesktopSettingsValue } from '@ecos-studio/shared'
-import type { DesignTool, Project, ProjectStatus, WorkspaceConfig } from '../types'
+import type {
+  DesignTool,
+  DesktopSettingsValue,
+  WorkspaceDirectoryReplacement,
+} from '@ecos-studio/shared'
+import type { Project, ProjectStatus, WorkspaceConfig } from '../types'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { loadWorkspaceApi, createWorkspaceApi, waitForRuntimeReady } from '../api'
+import {
+  closeWorkspaceApi,
+  loadWorkspaceApi,
+  createWorkspaceApi,
+  waitForRuntimeReady,
+} from '../api'
 import * as runtimeEventApi from '../api/runtimeEvents'
 import type { RuntimeEventClient, RuntimeEventResponse } from '../api/runtimeEvents'
 import { setDesktopWindowTitle } from './windowTitle'
@@ -23,6 +32,12 @@ import {
   clearHomeRunArtifactResetAwaitingBackendStart,
   requestHomeRunArtifactReset,
 } from './homeRunArtifacts'
+import {
+  parseProjectManifest,
+  serializeProjectManifest,
+  type ProjectManifest,
+  type ProjectWorkspaceManifest,
+} from '@/utils/projectManagement'
 
 interface SerializedProject {
   id: string
@@ -46,6 +61,28 @@ interface SerializedProject {
 const currentProject = ref<Project | null>()
 const recentProjects = ref<Project[]>([])
 let openProjectRequestSequence = 0
+let activeCurrentProjectPathOwner: number | null = null
+let activeProjectRootOwner: number | null = null
+let currentProjectPathMutationQueue = Promise.resolve()
+let projectRootMutationQueue = Promise.resolve()
+
+function enqueueCurrentProjectPathMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const next = currentProjectPathMutationQueue.then(operation, operation)
+  currentProjectPathMutationQueue = next.then(
+    () => undefined,
+    () => undefined,
+  )
+  return next
+}
+
+function enqueueProjectRootMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const next = projectRootMutationQueue.then(operation, operation)
+  projectRootMutationQueue = next.then(
+    () => undefined,
+    () => undefined,
+  )
+  return next
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -59,6 +96,24 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function workspaceHandleFromResponseData(
+  data: { directory?: string; workspace_handle?: string; workspaceHandle?: string },
+  fallback?: string,
+): string {
+  return data.workspaceHandle || data.workspace_handle || data.directory || fallback || ''
+}
+
+function workspaceRuntimeIdFromResponseData(
+  data: { directory?: string; workspace_handle?: string; workspaceHandle?: string },
+  designTool: DesignTool,
+  fallback?: string,
+): string {
+  if (designTool === 'frontend') {
+    return data.directory || fallback || ''
+  }
+  return workspaceHandleFromResponseData(data, fallback)
+}
+
 // Runtime event connection（workspace 级别，跟随 workspace 生命周期）
 const runtimeEventClient = ref<RuntimeEventClient | null>(null)
 const runtimeEvents = ref<RuntimeEventResponse[]>([])
@@ -70,37 +125,15 @@ const workspaceLifecycle = useWorkspaceLifecycle()
 /** 准备工作区就绪时由 App 层显示全屏加载遮罩 */
 const runtimeBackendConnecting = ref(false)
 const runtimeBackendTitle = ref('Preparing your workspace')
-const runtimeBackendSubtitle = ref('First load or restoring your project may take a moment')
+const runtimeBackendSubtitle = ref(
+  'First load or restoring your project may take a moment',
+)
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
-const TOAST_DETAIL_MAX_LENGTH = 140
-const TOAST_LOG_DETAIL_HINT = 'Open Log for details.'
-const LOG_LIKE_DETAIL_PATTERNS = [
-  /\b(traceback|stack trace|calledprocesserror|command failed|stdout|stderr)\b/i,
-  /\b(info|debug|warning|warn|error|critical)\s*[:\[]/i,
-  /\b(bazel|verilator|make|pnpm|python|uv|cargo)\b.*\b(error|failed|warning|warn)\b/i,
-  /(^|\s)\/(?:[^/\s]+\/){3,}[^/\s]+/,
-]
 
 // 应用名称常量
 const APP_NAME = 'ECOS Studio'
-
-function compactToastDetail(detail?: string): string | undefined {
-  const raw = detail?.trim()
-  if (!raw) return undefined
-  if (isLogLikeToastDetail(raw)) return TOAST_LOG_DETAIL_HINT
-  const normalized = raw.replace(/\s+/g, ' ')
-  if (!normalized) return undefined
-  if (normalized.length <= TOAST_DETAIL_MAX_LENGTH) return normalized
-  return `${normalized.slice(0, TOAST_DETAIL_MAX_LENGTH - 1).trimEnd()}...`
-}
-
-function isLogLikeToastDetail(detail: string): boolean {
-  if (detail.includes('\n')) return true
-  if (detail.length > 600) return true
-  return LOG_LIKE_DETAIL_PATTERNS.some((pattern) => pattern.test(detail))
-}
 
 async function getSetting<T>(key: string): Promise<T | null> {
   const desktopApi = await waitForDesktopApi()
@@ -156,21 +189,38 @@ export function useWorkspace() {
       _toast.add({
         severity: options.severity ?? 'info',
         summary: options.summary,
-        detail: compactToastDetail(options.detail),
-        life: options.life ?? 4000
+        detail: options.detail,
+        life: options.life ?? 4000,
       })
     } else {
-      console.warn('[useWorkspace] Toast not initialized — called outside component context?')
+      console.warn(
+        '[useWorkspace] Toast not initialized — called outside component context?',
+      )
+    }
+  }
+
+  const releaseWorkspaceHandle = async (
+    workspaceHandle: string,
+    designTool: DesignTool = 'backend',
+  ): Promise<void> => {
+    if (!workspaceHandle || designTool === 'frontend') return
+    try {
+      await closeWorkspaceApi(workspaceHandle)
+    } catch (error) {
+      console.warn('Failed to close ECC workspace session:', error)
     }
   }
 
   /**
    * Wait until the desktop runtime bridge is available.
    */
-  const ensureApiReady = async (options: { keepLoading?: boolean } = {}): Promise<boolean> => {
+  const ensureApiReady = async (
+    options: { keepLoading?: boolean } = {},
+  ): Promise<boolean> => {
     runtimeBackendConnecting.value = true
     runtimeBackendTitle.value = 'Preparing your workspace'
-    runtimeBackendSubtitle.value = 'First load or restoring your project may take a moment'
+    runtimeBackendSubtitle.value =
+      'First load or restoring your project may take a moment'
     try {
       await waitForRuntimeReady({ timeoutMs: 180_000 })
       return true
@@ -180,7 +230,7 @@ export function useWorkspace() {
         summary: 'Desktop runtime unavailable',
         detail:
           'The desktop runtime bridge is not available. Restart the application and try again.',
-        life: 8000
+        life: 8000,
       })
       return false
     } finally {
@@ -203,6 +253,141 @@ export function useWorkspace() {
     return normalized
   }
 
+  const parentPath = (path: string): string => {
+    const normalized = normalizePath(path)
+    const parts = normalized.split('/').filter(Boolean)
+    if (parts.length <= 1) return normalized.startsWith('/') ? '/' : ''
+    const parent = parts.slice(0, -1).join('/')
+    return normalized.startsWith('/') ? `/${parent}` : parent
+  }
+
+  const pathLeaf = (path: string): string => {
+    return normalizePath(path).split('/').filter(Boolean).pop() || normalizePath(path)
+  }
+
+  const rewriteReplacementPath = (
+    value: string | undefined,
+    targetPath: string,
+    backupPath: string,
+  ): string | undefined => {
+    if (!value) return value
+    const normalizedValue = normalizePath(value)
+    const normalizedTarget = normalizePath(targetPath)
+    if (normalizedValue === normalizedTarget) return normalizePath(backupPath)
+    if (normalizedValue.startsWith(`${normalizedTarget}/`)) {
+      return `${normalizePath(backupPath)}/${normalizedValue.slice(normalizedTarget.length + 1)}`
+    }
+    return value
+  }
+
+  const rewriteReplacementPathList = (
+    values: string[] | undefined,
+    targetPath: string,
+    backupPath: string,
+  ): string[] | undefined => {
+    if (!values) return values
+    return values.map(
+      (value) => rewriteReplacementPath(value, targetPath, backupPath) ?? value,
+    )
+  }
+
+  const rewriteConfigPathsForReplacement = (
+    config: WorkspaceConfig,
+    targetPath: string,
+    backupPath: string,
+  ): WorkspaceConfig => {
+    return {
+      ...config,
+      origin_def: rewriteReplacementPath(config.origin_def, targetPath, backupPath) ?? '',
+      origin_verilog:
+        rewriteReplacementPath(config.origin_verilog, targetPath, backupPath) ?? '',
+      rtl_list: rewriteReplacementPathList(config.rtl_list, targetPath, backupPath) ?? [],
+      filelist: rewriteReplacementPath(config.filelist, targetPath, backupPath),
+      sdc: rewriteReplacementPath(config.sdc, targetPath, backupPath),
+      pdk_json: rewriteReplacementPath(config.pdk_json, targetPath, backupPath),
+    }
+  }
+
+  const recordReplacementBackupInProjectManifest = async (
+    replacement: WorkspaceDirectoryReplacement,
+    config: WorkspaceConfig,
+  ) => {
+    const projectRoot = normalizePath(
+      config.project_context?.project_root || parentPath(replacement.targetPath),
+    )
+    if (!projectRoot) return
+
+    try {
+      const desktopApi = await waitForDesktopApi()
+      const registeredProjectRoot = normalizePath(
+        await desktopApi.workspace.registerProjectRoot(projectRoot),
+      )
+      const manifestText = await desktopApi.workspace.readOptionalProjectTextFile(
+        `${registeredProjectRoot}/project.json`,
+      )
+      if (!manifestText) return
+
+      const manifest = parseProjectManifest(manifestText)
+      const now = new Date().toISOString()
+      const backupPath = normalizePath(replacement.backupPath)
+      const backupWorkspaceId = pathLeaf(backupPath)
+      const replacementWorkspaceId = pathLeaf(replacement.targetPath)
+      const existingBackup = manifest.workspaces.find(
+        (workspace) =>
+          workspace.workspace_id === backupWorkspaceId ||
+          normalizePath(workspace.workspace_path) === backupPath,
+      )
+      const replacedWorkspace = manifest.workspaces.find(
+        (workspace) =>
+          workspace.workspace_id === replacementWorkspaceId ||
+          normalizePath(workspace.workspace_path) ===
+            normalizePath(replacement.targetPath),
+      )
+      const backupWorkspace: ProjectWorkspaceManifest = {
+        workspace_id: backupWorkspaceId,
+        name: `${replacedWorkspace?.name || replacementWorkspaceId} backup`,
+        workspace_path: backupPath,
+        source_workspace_id: replacedWorkspace?.source_workspace_id ?? null,
+        branch_from: replacedWorkspace?.branch_from ?? null,
+        start_step:
+          replacedWorkspace?.start_step || config.flow_config?.start_step || 'Synth',
+        end_step: replacedWorkspace?.end_step || config.flow_config?.end_step || 'Harden',
+        status: 'archived',
+        created_at: existingBackup?.created_at ?? now,
+        updated_at: now,
+        parameter_patch: replacedWorkspace?.parameter_patch ?? {},
+        metrics_summary: replacedWorkspace?.metrics_summary ?? {},
+        step_metrics: replacedWorkspace?.step_metrics ?? {},
+      }
+
+      const updated: ProjectManifest = {
+        ...manifest,
+        updated_at: now,
+        workspaces: existingBackup
+          ? manifest.workspaces.map((workspace) =>
+              workspace.workspace_id === existingBackup.workspace_id
+                ? backupWorkspace
+                : workspace,
+            )
+          : [...manifest.workspaces, backupWorkspace],
+      }
+
+      await desktopApi.workspace.writeProjectTextFile(
+        `${registeredProjectRoot}/project.json`,
+        serializeProjectManifest(updated),
+      )
+    } catch (error) {
+      console.warn('Failed to record workspace replacement backup:', error)
+      showToast({
+        severity: 'warn',
+        summary: 'Backup manifest not updated',
+        detail:
+          'The original workspace backup was kept, but project.json could not be updated.',
+        life: 5000,
+      })
+    }
+  }
+
   /**
    * 序列化项目：将 Date 转换为 ISO 字符串
    */
@@ -210,7 +395,7 @@ export function useWorkspace() {
     return {
       ...project,
       path: normalizePath(project.path),
-      lastOpened: project.lastOpened.toISOString()
+      lastOpened: project.lastOpened.toISOString(),
     }
   }
 
@@ -220,7 +405,7 @@ export function useWorkspace() {
   const deserializeProject = (serialized: SerializedProject): Project => {
     return {
       ...serialized,
-      lastOpened: new Date(serialized.lastOpened)
+      lastOpened: new Date(serialized.lastOpened),
     }
   }
 
@@ -237,29 +422,84 @@ export function useWorkspace() {
     }
   }
 
-  const registerProjectRoot = async (path: string): Promise<string | null> => {
-    try {
-      const desktopApi = await waitForDesktopApi()
-      const canonicalPath = await desktopApi.workspace.registerProjectRoot(path)
-      return normalizePath(canonicalPath)
-    } catch (error) {
-      console.error('Failed to register project root permission:', error)
-      return null
-    }
-  }
+  const registerProjectRoot = (
+    path: string,
+    owner: number | null = null,
+  ): Promise<string | null> =>
+    enqueueProjectRootMutation(async () => {
+      try {
+        const desktopApi = await waitForDesktopApi()
+        const canonicalPath = await desktopApi.workspace.registerProjectRoot(path)
+        activeProjectRootOwner = owner
+        return normalizePath(canonicalPath)
+      } catch (error) {
+        console.error('Failed to register project root permission:', error)
+        return null
+      }
+    })
 
-  const clearProjectRoot = async (): Promise<void> => {
-    try {
-      const desktopApi = await waitForDesktopApi()
-      await desktopApi.workspace.clearProjectRoot()
-    } catch (error) {
-      console.error('Failed to clear project root permission:', error)
-    }
-  }
+  const clearProjectRoot = (): Promise<void> =>
+    enqueueProjectRootMutation(async () => {
+      try {
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.clearProjectRoot()
+        activeProjectRootOwner = null
+      } catch (error) {
+        console.error('Failed to clear project root permission:', error)
+      }
+    })
+
+  const persistCurrentProjectPath = (
+    path: string,
+    owner: number | null = null,
+  ): Promise<void> =>
+    enqueueCurrentProjectPathMutation(async () => {
+      await setSetting('current_project_path', normalizePath(path))
+      activeCurrentProjectPathOwner = owner
+    })
+
+  const clearCurrentProjectPath = (): Promise<void> =>
+    enqueueCurrentProjectPathMutation(async () => {
+      await deleteSetting('current_project_path')
+      activeCurrentProjectPathOwner = null
+    })
+
+  const rollbackProjectRoot = (owner: number): Promise<void> =>
+    enqueueProjectRootMutation(async () => {
+      if (activeProjectRootOwner !== owner) return
+      try {
+        const desktopApi = await waitForDesktopApi()
+        const committedPath = currentProject.value?.path
+        if (committedPath) {
+          await desktopApi.workspace.registerProjectRoot(committedPath)
+        } else {
+          await desktopApi.workspace.clearProjectRoot()
+        }
+        activeProjectRootOwner = null
+      } catch (error) {
+        console.error('Failed to restore project root permission:', error)
+      }
+    })
+
+  const rollbackCurrentProjectPath = (owner: number): Promise<void> =>
+    enqueueCurrentProjectPathMutation(async () => {
+      if (activeCurrentProjectPathOwner !== owner) return
+      try {
+        const committedPath = currentProject.value?.path
+        if (committedPath) {
+          await setSetting('current_project_path', normalizePath(committedPath))
+        } else {
+          await deleteSetting('current_project_path')
+        }
+        activeCurrentProjectPathOwner = null
+      } catch (error) {
+        console.error('Failed to restore current project path:', error)
+      }
+    })
 
   /**
    * loadRecentProjects 从本地加载最近项目，并异步标记 workspace 识别状态。
-   * 
+   *
    * 设计原则：
    * - **不自动删除**任何记录（避免因权限/网络等临时问题导致误删）
    * - 通过 `project.workspaceRecognized` 标记当前路径是否仍像一个 ECOS workspace，供 UI 做差异化展示
@@ -293,13 +533,15 @@ export function useWorkspace() {
         if (savedCurrentPath) {
           // 精确匹配上次打开的项目
           restored = projects.find(
-            p => normalizePath(p.path) === savedCurrentPath && p.workspaceRecognized !== false
+            (p) =>
+              normalizePath(p.path) === savedCurrentPath &&
+              p.workspaceRecognized !== false,
           )
         }
 
         // 如果精确匹配失败，回退到第一个有效项目
         if (!restored) {
-          restored = projects.find(p => p.workspaceRecognized !== false)
+          restored = projects.find((p) => p.workspaceRecognized !== false)
         }
 
         if (restored) {
@@ -307,17 +549,23 @@ export function useWorkspace() {
           await router.isReady()
 
           if (router.currentRoute.value.path.startsWith('/workspace')) {
-            // reload 后需要重新通过桌面 CLI 加载 workspace 状态并建立 runtime event 连接
+            // reload 后需要重新通过 ECC RPC 加载 workspace 状态并建立 runtime event 连接
             const session = workspaceLifecycle.beginSession({
               projectRoot: normalizePath(restored.path),
             })
             try {
               if (!(await ensureApiReady())) return
               workspaceLifecycle.setSessionLoading(session.sessionId)
-              const response = await loadWorkspaceApi(restored.path, restored.designTool)
+              const restoredDesignTool = restored.designTool ?? 'backend'
+              const response =
+                restoredDesignTool === 'frontend'
+                  ? await loadWorkspaceApi(restored.path, restoredDesignTool)
+                  : await loadWorkspaceApi(restored.path)
               if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
               if (response.response === 'success') {
-                const resolvedPath = normalizePath(response.data.directory || restored.path)
+                const resolvedPath = normalizePath(
+                  response.data.directory || restored.path,
+                )
                 const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
                 if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return
                 if (!canonicalProjectRoot) {
@@ -326,16 +574,21 @@ export function useWorkspace() {
                 }
                 currentProject.value = {
                   ...restored,
-                  path: canonicalProjectRoot
+                  path: canonicalProjectRoot,
+                  designTool: restoredDesignTool,
                 }
                 messageStore.clearMessages()
                 await updateWindowTitle(restored.name)
-                const workspaceId = response.data.workspace_id || response.data.directory
+                const workspaceId = workspaceRuntimeIdFromResponseData(
+                  response.data,
+                  restoredDesignTool,
+                  restored.path,
+                )
                 workspaceLifecycle.activateSession(session.sessionId, {
                   workspaceId,
                   projectRoot: canonicalProjectRoot,
                 })
-                connectRuntimeEvents(workspaceId, session.sessionId)
+                connectRuntimeEvents(workspaceId, restoredDesignTool, session.sessionId)
               } else {
                 workspaceLifecycle.failSession(session.sessionId)
               }
@@ -355,7 +608,7 @@ export function useWorkspace() {
    * 从最近项目列表中移除指定项目（用户主动操作）
    */
   const removeRecentProject = async (projectId: string) => {
-    recentProjects.value = recentProjects.value.filter(p => p.id !== projectId)
+    recentProjects.value = recentProjects.value.filter((p) => p.id !== projectId)
     const serialized = recentProjects.value.map(serializeProject)
     await setSetting('recent_projects', serialized)
   }
@@ -368,12 +621,12 @@ export function useWorkspace() {
       // 标准化路径
       const normalizedProject = {
         ...project,
-        path: normalizePath(project.path)
+        path: normalizePath(project.path),
       }
 
       // 去重：如果路径已存在，先删掉旧的
       const filtered = recentProjects.value.filter(
-        p => normalizePath(p.path) !== normalizedProject.path
+        (p) => normalizePath(p.path) !== normalizedProject.path,
       )
 
       // 置顶：把最新的放到第一位
@@ -389,9 +642,23 @@ export function useWorkspace() {
       return false
     }
   }
-  const openProject = async (project?: Project, options: { designTool?: DesignTool } = {}) => {
+  const openProject = async (
+    project?: Project,
+    options: { designTool?: DesignTool } = {},
+  ) => {
     const openProjectRequestId = ++openProjectRequestSequence
-    const isLatestOpenProjectRequest = () => openProjectRequestId === openProjectRequestSequence
+    const isLatestOpenProjectRequest = () =>
+      openProjectRequestId === openProjectRequestSequence
+    const previousWorkspaceHandle =
+      workspaceLifecycle.session.value.state === 'active'
+        ? workspaceLifecycle.session.value.workspaceId
+        : ''
+    const previousDesignTool = currentProject.value?.designTool ?? 'backend'
+    let candidateDesignTool: DesignTool = 'backend'
+    let candidateWorkspaceHandle = ''
+    let candidateWorkspaceCommitted = false
+    let candidateProjectPathPersisted = false
+    let candidateProjectRootRegistered = false
     let sessionId: string | null = null
     try {
       let selectedPath: string | null = null
@@ -410,22 +677,30 @@ export function useWorkspace() {
         showToast({
           severity: 'error',
           summary: 'Not an ECOS Workspace',
-          detail: 'Please select a directory created by ECOS Studio.'
+          detail: 'Please select a directory created by ECOS Studio.',
         })
         return false
       }
       if (!isLatestOpenProjectRequest()) return false
 
       const normalizedSelectedPath = normalizePath(selectedPath)
+      const knownProject =
+        project ??
+        recentProjects.value.find(
+          (candidate) => normalizePath(candidate.path) === normalizedSelectedPath,
+        )
+      const requestedDesignTool =
+        options.designTool ?? knownProject?.designTool ?? 'backend'
+      candidateDesignTool = requestedDesignTool
       if (
-        project
-        && currentProject.value
-        && normalizePath(currentProject.value.path) === normalizedSelectedPath
+        currentProject.value &&
+        normalizePath(currentProject.value.path) === normalizedSelectedPath &&
+        (currentProject.value.designTool ?? 'backend') === requestedDesignTool
       ) {
         return true
       }
 
-      const preserveExistingSession = Boolean(currentProject.value) && !project
+      const preserveExistingSession = Boolean(currentProject.value)
       let session: WorkspaceSession | null = null
       const ensureOpenSession = (projectRoot: string): WorkspaceSession => {
         if (session) return session
@@ -442,7 +717,8 @@ export function useWorkspace() {
       }
 
       runtimeBackendTitle.value = 'Loading your workspace'
-      runtimeBackendSubtitle.value = 'Opening project data and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Opening project data and preparing the workspace view'
       runtimeBackendConnecting.value = true
 
       if (!(await ensureApiReady({ keepLoading: true }))) {
@@ -453,7 +729,8 @@ export function useWorkspace() {
       if (!isLatestOpenProjectRequest()) return false
 
       runtimeBackendTitle.value = 'Loading your workspace'
-      runtimeBackendSubtitle.value = 'Opening project data and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Opening project data and preparing the workspace view'
       if (session) workspaceLifecycle.setSessionLoading(session.sessionId)
 
       if (currentProject.value) {
@@ -470,28 +747,43 @@ export function useWorkspace() {
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
       }
 
-      // 3. 通过桌面 CLI 加载项目状态
-      const requestedDesignTool = options.designTool ?? project?.designTool
-      const response = await loadWorkspaceApi(selectedPath, requestedDesignTool)
+      // 3. 根据项目类型通过 ECC RPC 或 Frontend CLI 加载项目状态。
+      const response =
+        requestedDesignTool === 'frontend'
+          ? await loadWorkspaceApi(selectedPath, requestedDesignTool)
+          : await loadWorkspaceApi(selectedPath)
+      if (response.response === 'success') {
+        candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
+          response.data,
+          requestedDesignTool,
+          selectedPath,
+        )
+      }
       if (!isLatestOpenProjectRequest()) return false
       if (session && !workspaceLifecycle.isCurrentSession(session.sessionId)) return false
       if (response.response === 'success') {
         const resolvedPath = normalizePath(response.data.directory || selectedPath)
-        const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
+        const canonicalProjectRoot = await registerProjectRoot(
+          resolvedPath,
+          openProjectRequestId,
+        )
+        candidateProjectRootRegistered = Boolean(canonicalProjectRoot)
         if (!isLatestOpenProjectRequest()) return false
-        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
         if (!canonicalProjectRoot) {
           if (session) workspaceLifecycle.failSession(session.sessionId)
           showToast({
             severity: 'error',
             summary: 'Permission Setup Failed',
-            detail: 'The project directory could not be registered for local file access.'
+            detail:
+              'The project directory could not be registered for local file access.',
           })
           return false
         }
 
         const existingProject = recentProjects.value.find(
-          p => normalizePath(p.path) === resolvedPath
+          (p) => normalizePath(p.path) === resolvedPath,
         )
         const fallbackName = resolvedPath.split('/').filter(Boolean).pop() || resolvedPath
         const resolvedName = project?.name || existingProject?.name || fallbackName
@@ -500,9 +792,16 @@ export function useWorkspace() {
           id: canonicalProjectRoot,
           name: resolvedName,
           path: canonicalProjectRoot,
-          ...(requestedDesignTool ? { designTool: requestedDesignTool } : {}),
-          lastOpened: new Date()
+          designTool: requestedDesignTool,
+          lastOpened: new Date(),
         }
+
+        // 持久化当前项目路径，以便 reload 后恢复
+        await persistCurrentProjectPath(loadedProject.path, openProjectRequestId)
+        candidateProjectPathPersisted = true
+        if (!isLatestOpenProjectRequest()) return false
+        if (session && !workspaceLifecycle.isCurrentSession(session.sessionId))
+          return false
 
         const activeSession = ensureOpenSession(canonicalProjectRoot)
         workspaceLifecycle.setSessionLoading(activeSession.sessionId)
@@ -510,16 +809,23 @@ export function useWorkspace() {
         currentProject.value = loadedProject
         messageStore.clearMessages()
 
-        // 持久化当前项目路径，以便 reload 后恢复
-        await setSetting('current_project_path', normalizePath(loadedProject.path))
-
         // 建立 runtime event 连接
-        const workspaceId = response.data.workspace_id || response.data.directory
+        const workspaceId =
+          candidateWorkspaceHandle ||
+          workspaceRuntimeIdFromResponseData(
+            response.data,
+            requestedDesignTool,
+            canonicalProjectRoot,
+          )
         workspaceLifecycle.activateSession(activeSession.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
         })
-        connectRuntimeEvents(workspaceId, activeSession.sessionId)
+        candidateWorkspaceCommitted = true
+        connectRuntimeEvents(workspaceId, requestedDesignTool, activeSession.sessionId)
+        if (previousWorkspaceHandle !== workspaceId) {
+          await releaseWorkspaceHandle(previousWorkspaceHandle, previousDesignTool)
+        }
 
         // 更新窗口标题
         await updateWindowTitle(loadedProject.name)
@@ -531,15 +837,34 @@ export function useWorkspace() {
       } else {
         if (session) workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to load project:', response.message)
-        showToast({ severity: 'error', summary: 'Failed to Open Project', detail: response.message?.join('; ') || 'Unknown error' })
+        showToast({
+          severity: 'error',
+          summary: 'Failed to Open Project',
+          detail: response.message?.join('; ') || 'Unknown error',
+        })
         return false
       }
     } catch (error) {
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('Open project error:', error)
-      showToast({ severity: 'error', summary: 'Failed to Open Project', detail: String(error) })
+      showToast({
+        severity: 'error',
+        summary: 'Failed to Open Project',
+        detail: String(error),
+      })
       return false
     } finally {
+      if (!candidateWorkspaceCommitted) {
+        if (candidateProjectRootRegistered) {
+          await rollbackProjectRoot(openProjectRequestId)
+        }
+        if (candidateProjectPathPersisted) {
+          await rollbackCurrentProjectPath(openProjectRequestId)
+        }
+        if (candidateWorkspaceHandle) {
+          await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
+        }
+      }
       if (isLatestOpenProjectRequest()) {
         runtimeBackendConnecting.value = false
       }
@@ -552,9 +877,32 @@ export function useWorkspace() {
    */
   const newProject = async (config?: WorkspaceConfig) => {
     let sessionId: string | null = null
+    let replacement: WorkspaceDirectoryReplacement | null = null
+    let committedReplacement = false
+    let candidateWorkspaceCommitted = false
+    let candidateWorkspaceHandle = ''
+    let candidateDesignTool: DesignTool = config?.designTool ?? 'backend'
+    const restoreReplacement = async () => {
+      if (!replacement || committedReplacement) return
+      const desktopApi = await waitForDesktopApi()
+      await desktopApi.workspace.restoreProjectDirectoryReplacement(replacement)
+      replacement = null
+    }
+    const finalizeReplacement = async () => {
+      if (!replacement) return
+      committedReplacement = true
+      try {
+        const desktopApi = await waitForDesktopApi()
+        await desktopApi.workspace.finalizeProjectDirectoryReplacement(replacement)
+      } catch (error) {
+        console.warn('Failed to remove workspace replacement backup:', error)
+      }
+      replacement = null
+    }
     try {
       runtimeBackendTitle.value = 'Creating your workspace'
-      runtimeBackendSubtitle.value = 'Writing project files and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Writing project files and preparing the workspace view'
       runtimeBackendConnecting.value = true
 
       if (currentProject.value) {
@@ -565,13 +913,40 @@ export function useWorkspace() {
 
       if (config) {
         // 使用向导提供的配置
-        selectedPath = config.directory
+        selectedPath = normalizePath(config.directory)
       } else {
         // 回退到旧的文件选择方式
         const result = await pickDirectory('Select New Project Save Location')
 
         if (!result) return false
         selectedPath = result
+      }
+
+      let creationConfig = config
+      if (config?.replaceExistingWorkspace) {
+        const desktopApi = await waitForDesktopApi()
+        const registeredParent = await desktopApi.workspace.registerProjectRoot(
+          parentPath(selectedPath),
+        )
+        replacement =
+          await desktopApi.workspace.prepareProjectDirectoryReplacement(selectedPath)
+        if (replacement) {
+          replacement = {
+            targetPath: normalizePath(replacement.targetPath),
+            backupPath: normalizePath(replacement.backupPath),
+          }
+          creationConfig = rewriteConfigPathsForReplacement(
+            config,
+            replacement.targetPath,
+            replacement.backupPath,
+          )
+          selectedPath = normalizePath(replacement.targetPath)
+        } else {
+          selectedPath = normalizePath(selectedPath)
+        }
+        if (!registeredParent) {
+          throw new Error('Failed to register workspace parent directory')
+        }
       }
 
       const session = workspaceLifecycle.beginSession({
@@ -581,21 +956,27 @@ export function useWorkspace() {
 
       if (!(await ensureApiReady({ keepLoading: true }))) {
         workspaceLifecycle.failSession(session.sessionId)
+        await restoreReplacement()
         return false
       }
 
       runtimeBackendTitle.value = 'Creating your workspace'
-      runtimeBackendSubtitle.value = 'Writing project files and preparing the workspace view'
+      runtimeBackendSubtitle.value =
+        'Writing project files and preparing the workspace view'
       workspaceLifecycle.setSessionLoading(session.sessionId)
 
-      const designTool = config?.designTool ?? 'backend'
-      const frontendParams = config?.parameters || {}
+      // 3. 根据项目类型通过 ECC RPC 或 Frontend CLI 创建工作区。
+      const designTool = creationConfig?.designTool ?? 'backend'
+      candidateDesignTool = designTool
+      const frontendParams = creationConfig?.parameters || {}
       const designName = String(
-        frontendParams.design
-        || frontendParams.Design
-        || selectedPath.split('/').filter(Boolean).pop()
-        || 'New_Chip_Design',
+        frontendParams.design ||
+          frontendParams.Design ||
+          selectedPath.split('/').filter(Boolean).pop() ||
+          'New_Chip_Design',
       )
+      const stringArray = (value: unknown): string[] =>
+        Array.isArray(value) ? (value as string[]) : []
       let response: Awaited<ReturnType<typeof createWorkspaceApi>>
       let createdProjectName = designName
 
@@ -604,28 +985,40 @@ export function useWorkspace() {
           ...frontendParams,
           Design: designName,
           'Design Tool': 'frontend',
-          'Top module': frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
+          'Top module':
+            frontendParams.top_module || frontendParams['Top module'] || 'ecos_sim_top',
           Clock: frontendParams.clock || frontendParams.Clock || 'clk',
-          'Frequency max [MHz]': frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
+          'Frequency max [MHz]':
+            frontendParams.frequency_max || frontendParams['Frequency max [MHz]'] || 100,
         }
 
         response = await createWorkspaceApi({
           cpu_filelist: String(frontendParams.cpu_filelist || ''),
-          cpu_rtl_files: config?.cpu_rtl_files || [],
+          cpu_rtl_files: creationConfig?.cpu_rtl_files || [],
           designTool: 'frontend',
           directory: selectedPath,
           parameters,
           sim_build_all_programs: Boolean(frontendParams.sim_build_all_programs),
           sim_build_test_script: String(frontendParams.sim_build_test_script || ''),
-          sim_cflags: Array.isArray(frontendParams.sim_cflags) ? frontendParams.sim_cflags as string[] : [],
-          sim_cpp_sources: Array.isArray(frontendParams.sim_cpp_sources) ? frontendParams.sim_cpp_sources as string[] : [],
-          sim_images: Array.isArray(frontendParams.sim_images) ? frontendParams.sim_images as string[] : [],
-          sim_ldflags: Array.isArray(frontendParams.sim_ldflags) ? frontendParams.sim_ldflags as string[] : [],
-          sim_program_names: Array.isArray(frontendParams.sim_program_names) ? frontendParams.sim_program_names as string[] : [],
-          sim_program_sources: Array.isArray(frontendParams.sim_program_sources) ? frontendParams.sim_program_sources as string[] : [],
+          sim_cflags: stringArray(frontendParams.sim_cflags),
+          sim_compile_extra_cflags: stringArray(frontendParams.sim_compile_extra_cflags),
+          sim_compile_mabi: String(frontendParams.sim_compile_mabi || ''),
+          sim_compile_march: String(frontendParams.sim_compile_march || ''),
+          sim_compile_opt_level: String(frontendParams.sim_compile_opt_level || ''),
+          sim_compile_preset: String(frontendParams.sim_compile_preset || ''),
+          sim_coremark_has_float: Boolean(frontendParams.sim_coremark_has_float),
+          sim_coremark_iterations: String(frontendParams.sim_coremark_iterations || ''),
+          sim_coremark_total_data_size: String(
+            frontendParams.sim_coremark_total_data_size || '',
+          ),
+          sim_cpp_sources: stringArray(frontendParams.sim_cpp_sources),
+          sim_images: stringArray(frontendParams.sim_images),
+          sim_ldflags: stringArray(frontendParams.sim_ldflags),
+          sim_program_names: stringArray(frontendParams.sim_program_names),
+          sim_program_sources: stringArray(frontendParams.sim_program_sources),
           sim_program_link_base: String(frontendParams.sim_program_link_base || ''),
           sim_programs_dir: String(frontendParams.sim_programs_dir || ''),
-          sim_run_args: Array.isArray(frontendParams.sim_run_args) ? frontendParams.sim_run_args as string[] : [],
+          sim_run_args: stringArray(frontendParams.sim_run_args),
           sim_soc_root: String(frontendParams.sim_soc_root || ''),
           sim_tests_dir: String(frontendParams.sim_tests_dir || ''),
           sim_tests_out_dir: String(frontendParams.sim_tests_out_dir || ''),
@@ -635,30 +1028,56 @@ export function useWorkspace() {
           testbench: String(frontendParams.testbench || ''),
           toolchain_id: String(frontendParams.toolchain_id || ''),
           test_suite_id: String(frontendParams.test_suite_id || ''),
-          core_id: String(frontendParams.frontend_core_id || frontendParams.core_id || ''),
+          core_id: String(
+            frontendParams.frontend_core_id || frontendParams.core_id || '',
+          ),
         })
       } else {
-        // 3. 通过桌面 CLI 创建项目（传递更多配置信息）
-        // 将前端参数映射为后端期望的格式 (参考 ics55_parameter.json)
-        const pdkName = config?.pdk || 'ics55'
+        const pdkName = creationConfig?.pdk || 'ics55'
+        const toNumber = (value: unknown, fallback: number) => {
+          const parsed = Number(value)
+          return Number.isFinite(parsed) ? parsed : fallback
+        }
+        const dieAreaMode =
+          frontendParams.die_area_mode === 'width_height'
+            ? 'width_height'
+            : 'utilitization_margin'
+        const dieArea =
+          dieAreaMode === 'width_height'
+            ? {
+                mode: dieAreaMode,
+                width: toNumber(frontendParams.die_width, 100),
+                height: toNumber(frontendParams.die_height, 100),
+              }
+            : {
+                mode: dieAreaMode,
+                utilitization: toNumber(
+                  frontendParams.utilitization ?? frontendParams.core_utilization,
+                  0.6,
+                ),
+                margin: toNumber(frontendParams.margin, 0),
+              }
         const backendParameters = {
-          // 基本设计信息 (必需)
-          'Design': frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
+          Design:
+            frontendParams.design || selectedPath.split('/').pop() || 'New_Chip_Design',
           'Top module': frontendParams.top_module || 'top',
-          'Clock': frontendParams.clock || 'clk',
-          'Frequency max [MHz]': frontendParams.frequency_max || 100,
-          // PDK 信息
-          'PDK': pdkName,
-          // 核心配置
-          'Core': {
-            'Utilitization': frontendParams.core_utilization || 0.5
+          Clock: frontendParams.clock || 'clk',
+          'Die Area': dieArea,
+          'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
+          'Max fanout': toNumber(frontendParams.max_fanout, 20),
+          PDK: pdkName,
+          Core: {
+            Utilitization:
+              dieAreaMode === 'utilitization_margin'
+                ? toNumber(
+                    frontendParams.utilitization ?? frontendParams.core_utilization,
+                    0.6,
+                  )
+                : toNumber(frontendParams.core_utilization, 0.5),
           },
-          // 布局参数
-          'Target density': frontendParams.target_density || 0.6,
-          'Max fanout': frontendParams.max_fanout || 20
         }
 
-        const resolvedPdkRoot = config?.pdk_root || ''
+        const resolvedPdkRoot = creationConfig?.pdk_root || ''
 
         response = await createWorkspaceApi({
           directory: selectedPath,
@@ -666,24 +1085,46 @@ export function useWorkspace() {
           pdk: pdkName,
           pdk_root: resolvedPdkRoot,
           parameters: backendParameters,
-          origin_def: config?.origin_def,
-          origin_verilog: config?.origin_verilog,
-          rtl_list: config?.rtl_list || []
+          origin_def: creationConfig?.origin_def,
+          origin_verilog: creationConfig?.origin_verilog,
+          rtl_list: creationConfig?.rtl_list || [],
+          filelist: creationConfig?.filelist,
+          design_input_mode: creationConfig?.design_input_mode,
+          sdc: creationConfig?.sdc,
+          flow_config: creationConfig?.flow_config,
+          pdk_config_mode: creationConfig?.pdk_config_mode,
+          pdk_config: creationConfig?.pdk_config,
+          pdk_json: creationConfig?.pdk_json,
+          project_context: creationConfig?.project_context,
         })
-        createdProjectName = backendParameters['Design'] as string
+        createdProjectName = backendParameters.Design as string
       }
-      console.log(response)
-      if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+      if (response.response === 'success') {
+        candidateWorkspaceHandle = workspaceRuntimeIdFromResponseData(
+          response.data,
+          designTool,
+          selectedPath,
+        )
+      }
+      if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
+        await restoreReplacement()
+        return false
+      }
       if (response.response === 'success') {
         const resolvedPath = normalizePath(response.data.directory)
         const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
-        if (!workspaceLifecycle.isCurrentSession(session.sessionId)) return false
+        if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
+          await restoreReplacement()
+          return false
+        }
         if (!canonicalProjectRoot) {
           workspaceLifecycle.failSession(session.sessionId)
+          await restoreReplacement()
           showToast({
             severity: 'error',
             summary: 'Permission Setup Failed',
-            detail: 'The project directory could not be registered for local file access.'
+            detail:
+              'The project directory could not be registered for local file access.',
           })
           return false
         }
@@ -692,22 +1133,31 @@ export function useWorkspace() {
           name: createdProjectName,
           path: canonicalProjectRoot,
           designTool,
-          lastOpened: new Date()
+          lastOpened: new Date(),
         }
 
         currentProject.value = createdProject
         messageStore.clearMessages()
 
         // 持久化当前项目路径，以便 reload 后恢复
-        await setSetting('current_project_path', normalizePath(createdProject.path))
+        await persistCurrentProjectPath(createdProject.path)
 
         // 建立 runtime event 连接
-        const workspaceId = response.data.workspace_id || response.data.directory
+        const workspaceId = workspaceRuntimeIdFromResponseData(
+          response.data,
+          designTool,
+          canonicalProjectRoot,
+        )
         workspaceLifecycle.activateSession(session.sessionId, {
           workspaceId,
           projectRoot: canonicalProjectRoot,
         })
-        connectRuntimeEvents(workspaceId, session.sessionId)
+        candidateWorkspaceCommitted = true
+        workspaceLifecycle.invalidate(['home', 'flow', 'parameters'], {
+          sessionId: session.sessionId,
+          reason: 'workspace-created',
+        })
+        connectRuntimeEvents(workspaceId, designTool, session.sessionId)
 
         // 更新窗口标题
         await updateWindowTitle(createdProject.name)
@@ -715,19 +1165,46 @@ export function useWorkspace() {
         // 添加到最近项目列表（包含路径标准化和持久化）
         await addToRecent(createdProject)
 
+        if (replacement && config?.keepReplacementBackup) {
+          committedReplacement = true
+          await recordReplacementBackupInProjectManifest(replacement, config)
+          replacement = null
+        } else {
+          await finalizeReplacement()
+        }
+
         return true
       } else {
+        await restoreReplacement()
         workspaceLifecycle.failSession(session.sessionId)
         console.error('Failed to create project:', response.message)
-        showToast({ severity: 'error', summary: 'Failed to Create Project', detail: response.message?.join('; ') || 'Unknown error' })
+        showToast({
+          severity: 'error',
+          summary: 'Failed to Create Project',
+          detail: response.message?.join('; ') || 'Unknown error',
+        })
         return false
       }
     } catch (error) {
+      if (replacement && !committedReplacement) {
+        try {
+          await restoreReplacement()
+        } catch (restoreError) {
+          console.error('Failed to restore workspace replacement backup:', restoreError)
+        }
+      }
       if (sessionId) workspaceLifecycle.failSession(sessionId)
       console.error('New project error:', error)
-      showToast({ severity: 'error', summary: 'Failed to Create Project', detail: String(error) })
+      showToast({
+        severity: 'error',
+        summary: 'Failed to Create Project',
+        detail: String(error),
+      })
       return false
     } finally {
+      if (!candidateWorkspaceCommitted && candidateWorkspaceHandle) {
+        await releaseWorkspaceHandle(candidateWorkspaceHandle, candidateDesignTool)
+      }
       runtimeBackendConnecting.value = false
     }
   }
@@ -740,12 +1217,14 @@ export function useWorkspace() {
   /**
    * 从磁盘读取 workspace 数据，生成项目摘要快照
    */
-  async function snapshotCurrentProject(isCurrent: () => boolean = () => true): Promise<void> {
+  async function snapshotCurrentProject(
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> {
     const project = currentProject.value
     if (!project) return
 
     const projectPath = normalizePath(project.path)
-    if (!recentProjects.value.some(p => normalizePath(p.path) === projectPath)) return
+    if (!recentProjects.value.some((p) => normalizePath(p.path) === projectPath)) return
 
     const snapshot: Partial<Project> = {}
 
@@ -755,17 +1234,24 @@ export function useWorkspace() {
       if (isRecord(flowData) && Array.isArray(flowData.steps)) {
         const steps = flowData.steps
         const hasMalformedStep = steps.some(
-          step => !isRecord(step) || asString(step.name) === undefined || asString(step.state) === undefined
+          (step) =>
+            !isRecord(step) ||
+            asString(step.name) === undefined ||
+            asString(step.state) === undefined,
         )
         if (hasMalformedStep) {
           throw new Error('Malformed flow steps in snapshot payload')
         }
 
-        const completedSteps = steps.filter(s => asString(s.state) === 'Success').length
+        const completedSteps = steps.filter((s) => asString(s.state) === 'Success').length
         const totalSteps = steps.length
-        const failedStep = steps.find(s => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid')
-        const ongoingStep = steps.find(s => asString(s.state) === 'Ongoing')
-        const firstPending = steps.find(s => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending')
+        const failedStep = steps.find(
+          (s) => asString(s.state) === 'Incomplete' || asString(s.state) === 'Invalid',
+        )
+        const ongoingStep = steps.find((s) => asString(s.state) === 'Ongoing')
+        const firstPending = steps.find(
+          (s) => asString(s.state) === 'Unstart' || asString(s.state) === 'Pending',
+        )
 
         let status: ProjectStatus = 'not_started'
         if (ongoingStep) status = 'running'
@@ -779,9 +1265,12 @@ export function useWorkspace() {
           const runtime = asString(step.runtime)
           if (runtime) {
             const parts = runtime.split(':')
-            const numericParts = parts.map(part => part.trim() === '' ? Number.NaN : Number(part))
+            const numericParts = parts.map((part) =>
+              part.trim() === '' ? Number.NaN : Number(part),
+            )
             if (numericParts.length === 3 && numericParts.every(Number.isFinite)) {
-              totalSeconds += numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
+              totalSeconds +=
+                numericParts[0] * 3600 + numericParts[1] * 60 + numericParts[2]
               hasValidRuntime = true
             }
           }
@@ -790,9 +1279,10 @@ export function useWorkspace() {
         const m = Math.floor((totalSeconds % 3600) / 60)
         const s = totalSeconds % 60
         const totalRuntime = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`
-        const currentStep = asString(ongoingStep?.name)
-          || asString(failedStep?.name)
-          || asString(firstPending?.name)
+        const currentStep =
+          asString(ongoingStep?.name) ||
+          asString(failedStep?.name) ||
+          asString(firstPending?.name)
 
         snapshot.status = status
         snapshot.totalSteps = totalSteps
@@ -843,15 +1333,23 @@ export function useWorkspace() {
       console.warn('Failed to read home.json for snapshot')
     }
 
-    const currentIdx = recentProjects.value.findIndex(p => normalizePath(p.path) === projectPath)
+    const currentIdx = recentProjects.value.findIndex(
+      (p) => normalizePath(p.path) === projectPath,
+    )
     if (currentIdx === -1) return
     if (!isCurrent()) return
 
     Object.assign(recentProjects.value[currentIdx], snapshot)
-    if (Object.prototype.hasOwnProperty.call(snapshot, 'currentStep') && snapshot.currentStep === undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(snapshot, 'currentStep') &&
+      snapshot.currentStep === undefined
+    ) {
       delete recentProjects.value[currentIdx].currentStep
     }
-    if (Object.prototype.hasOwnProperty.call(snapshot, 'totalRuntime') && snapshot.totalRuntime === undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(snapshot, 'totalRuntime') &&
+      snapshot.totalRuntime === undefined
+    ) {
       delete recentProjects.value[currentIdx].totalRuntime
     }
     if (!isCurrent()) return
@@ -865,31 +1363,54 @@ export function useWorkspace() {
   }
 
   const closeProject = async () => {
+    const closeProjectRequestId = ++openProjectRequestSequence
+    const isCurrentCloseRequest = () =>
+      closeProjectRequestId === openProjectRequestSequence
+    const closingWorkspaceHandle =
+      workspaceLifecycle.session.value.state === 'active'
+        ? workspaceLifecycle.session.value.workspaceId
+        : ''
+    const closingDesignTool = currentProject.value?.designTool ?? 'backend'
     if (currentProject.value) {
       try {
-        await snapshotCurrentProject()
+        await snapshotCurrentProject(isCurrentCloseRequest)
       } catch (err) {
         console.error('Failed to snapshot project data on close:', err)
       }
     }
+    if (!isCurrentCloseRequest()) return
 
     currentProject.value = null
     messageStore.clearMessages()
     disconnectRuntimeEvents()
     workspaceLifecycle.closeSession()
-    await clearProjectRoot()
-    await deleteSetting('current_project_path')
-    await updateWindowTitle()
+    runtimeBackendConnecting.value = false
+
+    // Queue both clears before yielding so a later open always writes after them.
+    const clearProjectRootPromise = clearProjectRoot()
+    const clearCurrentProjectPathPromise = clearCurrentProjectPath()
+    await releaseWorkspaceHandle(closingWorkspaceHandle, closingDesignTool)
+    await Promise.all([clearProjectRootPromise, clearCurrentProjectPathPromise])
+    if (isCurrentCloseRequest()) {
+      await updateWindowTitle()
+    }
   }
 
   /**
    * 建立 runtime event 连接，订阅 workspace 的运行生命周期通知
    */
-  function connectRuntimeEvents(workspaceId: string, sessionId = workspaceLifecycle.session.value.sessionId) {
+  function connectRuntimeEvents(
+    workspaceId: string,
+    designTool: DesignTool = 'backend',
+    sessionId = workspaceLifecycle.session.value.sessionId,
+  ) {
     // 如果已有连接，先关闭
     disconnectRuntimeEvents()
 
-    const client = runtimeEventApi.createRuntimeEventClient(workspaceId)
+    const client =
+      designTool === 'frontend'
+        ? runtimeEventApi.createRuntimeEventClient(workspaceId, { designTool })
+        : runtimeEventApi.createRuntimeEventClient(workspaceId)
 
     // 注册通用处理器，收集所有通知到 runtimeEvents
     client.onAll((response) => {
@@ -898,9 +1419,10 @@ export function useWorkspace() {
       if (response.data?.type !== 'heartbeat') {
         runtimeEvents.value.push(response)
         if (isRtl2gdsRerunStartEvent(response)) {
-          const resetProjectPath = asString(response.data.workspaceId)
-            ?? asString(response.data.directory)
-            ?? currentProject.value?.path
+          const resetProjectPath =
+            asString(response.data.directory) ??
+            currentProject.value?.path ??
+            asString(response.data.workspaceId)
           if (resetProjectPath) {
             clearHomeRunArtifactResetAwaitingBackendStart(resetProjectPath)
             requestHomeRunArtifactReset(resetProjectPath)
@@ -912,15 +1434,18 @@ export function useWorkspace() {
 
     client.connect()
     runtimeEventClient.value = client
-    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(() => {
-      if (runtimeEventClient.value === client) {
-        runtimeEventClient.value = null
-      }
-      client.close()
-    }, {
-      sessionId,
-      label: 'runtime event client',
-    })
+    unregisterRuntimeEventCleanup = workspaceLifecycle.registerCleanup(
+      () => {
+        if (runtimeEventClient.value === client) {
+          runtimeEventClient.value = null
+        }
+        client.close()
+      },
+      {
+        sessionId,
+        label: 'runtime event client',
+      },
+    )
     console.log(`Runtime events connected for workspace: ${workspaceId}`)
   }
 
@@ -938,10 +1463,15 @@ export function useWorkspace() {
     handledRefreshRuntimeEvents.clear()
   }
 
-  function runtimeEventInvalidationScopes(response: RuntimeEventResponse): WorkspaceInvalidationScope[] | null {
+  function runtimeEventInvalidationScopes(
+    response: RuntimeEventResponse,
+  ): WorkspaceInvalidationScope[] | null {
     const event = response.data
     const eventType = event?.type as string | undefined
-    if (!eventType || !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)) {
+    if (
+      !eventType ||
+      !['step_complete', 'task_complete', 'error', 'cancelled'].includes(eventType)
+    ) {
       return null
     }
 
@@ -950,12 +1480,7 @@ export function useWorkspace() {
       return null
     }
 
-    const refreshKey = [
-      event.jobId,
-      eventType,
-      event.step,
-      cmd,
-    ]
+    const refreshKey = [event.jobId, eventType, event.step, cmd]
       .filter((part): part is string => typeof part === 'string' && part.length > 0)
       .join('|')
 
@@ -964,9 +1489,7 @@ export function useWorkspace() {
     }
 
     const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds'
-        ? ['all']
-        : ['flow', 'step', 'maps', 'logs'],
+      cmd === 'rtl2gds' ? ['all'] : ['flow', 'step', 'maps', 'logs'],
     )
 
     const info = event.info
@@ -977,7 +1500,10 @@ export function useWorkspace() {
         scopes.add('parameters')
       }
       if (typeof payload.log_file === 'string') scopes.add('logs')
-      if (typeof payload.subflow_path === 'string' || typeof payload.step_path === 'string') {
+      if (
+        typeof payload.subflow_path === 'string' ||
+        typeof payload.step_path === 'string'
+      ) {
         scopes.add('step')
         scopes.add('maps')
       }
@@ -1002,12 +1528,13 @@ export function useWorkspace() {
 
   function isRtl2gdsRerunStartEvent(response: RuntimeEventResponse): boolean {
     const event = response.data
-    return event?.cmd === 'rtl2gds'
-      && event.type === 'message'
-      && event.rerun === true
+    return event?.cmd === 'rtl2gds' && event.type === 'message' && event.rerun === true
   }
 
-  function invalidateResourcesForRuntimeEvent(response: RuntimeEventResponse, sessionId: string): void {
+  function invalidateResourcesForRuntimeEvent(
+    response: RuntimeEventResponse,
+    sessionId: string,
+  ): void {
     const scopes = runtimeEventInvalidationScopes(response)
     if (!scopes) return
     workspaceLifecycle.invalidate(scopes, {

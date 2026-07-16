@@ -54,11 +54,7 @@ function createSpawnHarness() {
   }
 }
 
-function complete(
-  child: FakeChild,
-  payload: unknown,
-  exitCode = 0,
-): void {
+function complete(child: FakeChild, payload: unknown, exitCode = 0): void {
   child.stdout.emit('data', `${JSON.stringify(payload)}\n`)
   child.emit('close', exitCode, null)
 }
@@ -89,7 +85,10 @@ describe('FrontendCliAdapter', () => {
   function createFrontendCliEnv(tempDir: string): NodeJS.ProcessEnv {
     const binDir = join(tempDir, 'bin')
     mkdirSync(binDir, { recursive: true })
-    writeFileSync(join(binDir, process.platform === 'win32' ? 'ecc-fe.cmd' : 'ecc-fe'), '')
+    writeFileSync(
+      join(binDir, process.platform === 'win32' ? 'ecc-fe.cmd' : 'ecc-fe'),
+      '',
+    )
     return { PATH: binDir }
   }
 
@@ -103,20 +102,23 @@ describe('FrontendCliAdapter', () => {
       tempDir,
     })
 
-    const createPromise = adapter.execute(request('create_workspace', {
-      core_id: 'custom-filelist',
-      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
-      directory: '/work/test06221',
-      parameters: {
-        Design: 'test06221',
+    const createPromise = adapter.execute(
+      request('create_workspace', {
+        core_id: 'custom-filelist',
+        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+        directory: '/work/test06221',
+        parameters: {
+          Design: 'test06221',
+          soc_harness_id: 'ysyx-am-soc',
+          soc_variant: 'soc1',
+        },
         soc_harness_id: 'ysyx-am-soc',
         soc_variant: 'soc1',
-      },
-      soc_harness_id: 'ysyx-am-soc',
-      soc_variant: 'soc1',
-      test_suite_id: 'cpu-tests',
-      toolchain_id: 'riscv32-unknown-elf',
-    }), { emit: vi.fn() })
+        test_suite_id: 'cpu-tests',
+        toolchain_id: 'riscv32-unknown-elf',
+      }),
+      { emit: vi.fn() },
+    )
 
     const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
     expect(harness.calls[0].command).toBe('ecc-fe')
@@ -153,13 +155,16 @@ describe('FrontendCliAdapter', () => {
       tempDir,
     })
 
-    const validatePromise = adapter.execute(request('validate_frontend_config', {
-      core_id: 'custom-filelist',
-      cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
-      soc_harness_id: 'ysyx-am-soc',
-      test_suite_id: 'cpu-tests',
-      toolchain_id: 'riscv32-unknown-elf',
-    }), { emit: vi.fn() })
+    const validatePromise = adapter.execute(
+      request('validate_frontend_config', {
+        core_id: 'custom-filelist',
+        cpu_rtl_files: ['/rtl/cpu_top.sv', '/rtl/alu.v'],
+        soc_harness_id: 'ysyx-am-soc',
+        test_suite_id: 'cpu-tests',
+        toolchain_id: 'riscv32-unknown-elf',
+      }),
+      { emit: vi.fn() },
+    )
 
     const input = JSON.parse(readFileSync(inputJsonPath(harness.calls[0].args), 'utf8'))
     expect(input.cpu_filelist).toBe('')
@@ -187,20 +192,23 @@ describe('FrontendCliAdapter', () => {
       spawn: harness.spawn,
     })
 
-    const runPromise = adapter.execute(request('run_step', {
-      directory: '/work/test0623a',
-      rerun: true,
-      sim_compile_extra_cflags: ['-funroll-loops', '-DMEM_METHOD=MEM_STACK'],
-      sim_compile_mabi: 'ilp32',
-      sim_compile_march: 'rv32im_zicsr',
-      sim_compile_opt_level: '-O3',
-      sim_compile_preset: 'speed',
-      sim_coremark_has_float: 'true',
-      sim_coremark_iterations: '32',
-      sim_coremark_total_data_size: '2000',
-      sim_test_suite: 'coremark',
-      step: 'sim',
-    }), { emit: vi.fn() })
+    const runPromise = adapter.execute(
+      request('run_step', {
+        directory: '/work/test0623a',
+        rerun: true,
+        sim_compile_extra_cflags: ['-funroll-loops', '-DMEM_METHOD=MEM_STACK'],
+        sim_compile_mabi: 'ilp32',
+        sim_compile_march: 'rv32im_zicsr',
+        sim_compile_opt_level: '-O3',
+        sim_compile_preset: 'speed',
+        sim_coremark_has_float: 'true',
+        sim_coremark_iterations: '32',
+        sim_coremark_total_data_size: '2000',
+        sim_test_suite: 'coremark',
+        step: 'sim',
+      }),
+      { emit: vi.fn() },
+    )
 
     expect(harness.calls[0].command).toBe('ecc-fe')
     expect(harness.calls[0].args).toEqual([
@@ -250,13 +258,7 @@ describe('FrontendCliAdapter', () => {
     const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
 
     expect(harness.calls[0]).toEqual({
-      args: [
-        '-m',
-        'fecompiler.cli.main',
-        'workspace',
-        'catalog-list',
-        '--json',
-      ],
+      args: ['-m', 'fecompiler.cli.main', 'workspace', 'catalog-list', '--json'],
       command: '/usr/bin/python3',
     })
 
@@ -324,13 +326,7 @@ describe('FrontendCliAdapter', () => {
     const listPromise = adapter.execute(request('catalog_list'), { emit: vi.fn() })
 
     expect(harness.calls[0]).toEqual({
-      args: [
-        '-m',
-        'fecompiler.cli.main',
-        'workspace',
-        'catalog-list',
-        '--json',
-      ],
+      args: ['-m', 'fecompiler.cli.main', 'workspace', 'catalog-list', '--json'],
       command: '/usr/bin/python3',
     })
 

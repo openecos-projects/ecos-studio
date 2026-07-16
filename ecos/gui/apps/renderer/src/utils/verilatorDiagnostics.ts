@@ -13,7 +13,8 @@ export interface VerilatorDiagnosticCounts {
   warnings: number
 }
 
-const DIAGNOSTIC_RE = /^%(Error|Warning)(?:-([A-Za-z0-9_]+))?:\s+(.+?):(\d+):(?:(\d+):)?\s*(.*)$/
+const DIAGNOSTIC_RE =
+  /^%(Error|Warning)(?:-([A-Za-z0-9_]+))?:\s+(.+?):(\d+):(?:(\d+):)?\s*(.*)$/
 
 export function parseVerilatorDiagnostics(text: string): VerilatorDiagnostic[] {
   const diagnostics: VerilatorDiagnostic[] = []
@@ -50,7 +51,9 @@ export function parseVerilatorDiagnostics(text: string): VerilatorDiagnostic[] {
   return diagnostics
 }
 
-export function countVerilatorDiagnostics(diagnostics: VerilatorDiagnostic[]): VerilatorDiagnosticCounts {
+export function countVerilatorDiagnostics(
+  diagnostics: VerilatorDiagnostic[],
+): VerilatorDiagnosticCounts {
   return diagnostics.reduce(
     (counts, diagnostic) => {
       if (diagnostic.severity === 'error') counts.errors += 1
@@ -61,7 +64,10 @@ export function countVerilatorDiagnostics(diagnostics: VerilatorDiagnostic[]): V
   )
 }
 
-export function diagnosticMatchesPath(diagnosticPath: string, sourcePath: string): boolean {
+export function diagnosticMatchesPath(
+  diagnosticPath: string,
+  sourcePath: string,
+): boolean {
   const diagnostic = normalizePath(diagnosticPath)
   const source = normalizePath(sourcePath)
   if (!diagnostic || !source) return false

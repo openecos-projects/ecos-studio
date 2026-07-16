@@ -47,7 +47,9 @@ export function clearFlowExecutionActiveForWorkspace(path: string): void {
   refreshGlobalFlowExecutionActive()
 }
 
-export function isFlowExecutionActiveForWorkspace(path: string | undefined | null): boolean {
+export function isFlowExecutionActiveForWorkspace(
+  path: string | undefined | null,
+): boolean {
   return Boolean(path && activeFlowWorkspaces.has(normalizeWorkspacePath(path)))
 }
 
@@ -70,9 +72,9 @@ function clearTransientInteractionLocks() {
 /**
  * 流程运行器 Hook
  * 负责处理流程的运行、停止、重置等操作
- * 
+ *
  * Runtime lifecycle events 由 useWorkspace 管理（workspace 级别订阅），
- * 本 Hook 只负责调用 CLI-backed runtime command 并等待结果。
+ * 本 Hook 只负责调用 ECC RPC runtime command 并等待结果。
  */
 export function useFlowRunner() {
   const { ensureDesktopRuntime } = useDesktopRuntime()
@@ -87,7 +89,9 @@ export function useFlowRunner() {
   const route = useRoute()
 
   // 状态：当前 workspace 的运行态。flowExecutionActive 仍保留为全局兼容信号。
-  const isRunning = computed(() => isFlowExecutionActiveForWorkspace(currentProject.value?.path))
+  const isRunning = computed(() =>
+    isFlowExecutionActiveForWorkspace(currentProject.value?.path),
+  )
   const state = ref<StateEnum>(StateEnum.Invalid)
   const error = ref<string | null>(null)
   const lastRunResult = ref<RunStepResponse | null>(null)
@@ -117,9 +121,26 @@ export function useFlowRunner() {
     return path ? normalizeWorkspacePath(path) : null
   }
 
-  function currentDesignToolData(): { designTool?: DesignTool } {
-    const designTool = currentProject.value?.designTool
-    return designTool ? { designTool } : {}
+  function getCurrentWorkspaceHandle(): string | null {
+    return workspaceSession.value.workspaceId || null
+  }
+
+  function getCurrentDesignTool(): DesignTool {
+    return currentProject.value?.designTool ?? 'backend'
+  }
+
+  function runtimeRequestScope(
+    directory: string,
+  ):
+    | { designTool: 'frontend'; directory: string }
+    | { directory: string; workspaceHandle: string }
+    | null {
+    const designTool = getCurrentDesignTool()
+    if (designTool === 'frontend') {
+      return { designTool, directory }
+    }
+    const workspaceHandle = getCurrentWorkspaceHandle()
+    return workspaceHandle ? { directory, workspaceHandle } : null
   }
 
   /**
@@ -136,28 +157,31 @@ export function useFlowRunner() {
 
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
-      console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
+      console.warn(
+        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
+      )
       showDesktopRequiredToast()
-      return { step, state: StateEnum.Invalid }
+      return { step: step as StepEnum, state: StateEnum.Invalid }
     }
 
     if (!(await ensureApiReady())) {
-      return { step, state: StateEnum.Invalid }
+      return { step: step as StepEnum, state: StateEnum.Invalid }
     }
 
     const directory = getCurrentWorkspacePath()
-    if (!directory) {
+    const requestScope = directory ? runtimeRequestScope(directory) : null
+    if (!directory || !requestScope) {
       showToast({
         severity: 'error',
         summary: 'No Workspace Open',
         detail: 'Open a workspace before running a flow step.',
         life: 5000,
       })
-      return { step, state: StateEnum.Invalid }
+      return { step: step as StepEnum, state: StateEnum.Invalid }
     }
 
     if (isRunning.value) {
-      return { step, state: StateEnum.Ongoing }
+      return { step: step as StepEnum, state: StateEnum.Ongoing }
     }
 
     clearTransientInteractionLocks()
@@ -165,38 +189,42 @@ export function useFlowRunner() {
     state.value = StateEnum.Ongoing
     error.value = null
     try {
+      console.log('handleRunFlow', step)
       const versionsBeforeRunStep = { ...resourceVersions.value }
       const runSessionId = workspaceSession.value.sessionId
 
       const result = await runStepApi({
         cmd: CMDEnum.run_step,
         data: {
-          ...currentDesignToolData(),
-          directory,
+          ...requestScope,
           step: step as StepEnum,
-          rerun: Boolean(options.rerun)
-        }
+          rerun: Boolean(options.rerun),
+        },
       })
+      console.log('run step result', result)
+
       const homeAndParametersAlreadyInvalidated = RUN_STEP_FALLBACK_SCOPES.every(
         (key) => resourceVersions.value[key] !== versionsBeforeRunStep[key],
       )
       if (!homeAndParametersAlreadyInvalidated) {
-        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, { sessionId: runSessionId })
+        invalidateWorkspaceResources(RUN_STEP_FALLBACK_SCOPES, {
+          sessionId: runSessionId,
+        })
       }
 
       if (result.data?.state === StateEnum.Success) {
         showToast({
           severity: 'success',
           summary: 'Step Completed',
-          detail: `${step} ${options.rerun ? 'reran' : 'finished'} successfully`,
-          life: 4000
+          detail: `${step} finished successfully`,
+          life: 4000,
         })
       } else {
         showToast({
           severity: 'error',
           summary: 'Step Failed',
           detail: `${step} did not complete successfully`,
-          life: 6000
+          life: 6000,
         })
       }
 
@@ -207,7 +235,7 @@ export function useFlowRunner() {
         severity: 'error',
         summary: 'Step Error',
         detail: err instanceof Error ? err.message : String(err),
-        life: 6000
+        life: 6000,
       })
     } finally {
       clearTransientInteractionLocks()
@@ -218,15 +246,17 @@ export function useFlowRunner() {
 
   /**
    * 运行所有步骤
-   * 
-   * 调用 rtl2gds runtime command（同步等待 CLI 执行完成）。
-   * 执行过程中，Electron runtime 转发 CLI lifecycle events，
+   *
+   * 调用 rtl2gds runtime command（同步等待 ECC RPC 执行完成）。
+   * 执行过程中，Electron runtime 转发 lifecycle events，
    * 前端通过 useWorkspace 中已建立的 runtime event 连接实时接收。
    */
   async function runAllFlow(options: FlowRunOptions = {}): Promise<any | null> {
     // 检查是否在 desktop runtime 环境中
     if (!ensureDesktopRuntime()) {
-      console.warn('Not running in desktop runtime environment, cannot execute ECC CLI flow command')
+      console.warn(
+        'Not running in desktop runtime environment, cannot execute ECC RPC flow command',
+      )
       showDesktopRequiredToast()
       return null
     }
@@ -236,7 +266,8 @@ export function useFlowRunner() {
     }
 
     const directory = getCurrentWorkspacePath()
-    if (!directory) {
+    const requestScope = directory ? runtimeRequestScope(directory) : null
+    if (!directory || !requestScope) {
       showToast({
         severity: 'error',
         summary: 'No Workspace Open',
@@ -259,23 +290,25 @@ export function useFlowRunner() {
     error.value = null
 
     try {
-      const isFrontendProject = currentProject.value?.designTool === 'frontend'
-      const flowLabel = isFrontendProject ? 'Frontend Flow' : 'RTL2GDS'
+      const flowLabel =
+        getCurrentDesignTool() === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'
+
       const result = await rtl2gdsApi({
         cmd: CMDEnum.rtl2gds,
         data: {
-          ...currentDesignToolData(),
-          directory,
-          rerun: Boolean(options.rerun)
-        }
+          ...requestScope,
+          rerun: Boolean(options.rerun),
+        },
       })
+      console.log('rtl2gds result:', result)
+
       if (result.response === 'success') {
         state.value = StateEnum.Success
         showToast({
           severity: 'success',
           summary: `${flowLabel} Completed`,
           detail: 'All flow steps finished successfully',
-          life: 5000
+          life: 5000,
         })
       } else {
         state.value = StateEnum.Imcomplete
@@ -284,7 +317,7 @@ export function useFlowRunner() {
           severity: 'error',
           summary: `${flowLabel} Failed`,
           detail: error.value ?? 'Unknown error',
-          life: 8000
+          life: 8000,
         })
       }
 
@@ -295,9 +328,9 @@ export function useFlowRunner() {
       state.value = StateEnum.Imcomplete
       showToast({
         severity: 'error',
-        summary: `${currentProject.value?.designTool === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
+        summary: `${getCurrentDesignTool() === 'frontend' ? 'Frontend Flow' : 'RTL2GDS'} Error`,
         detail: error.value ?? 'Unknown error',
-        life: 8000
+        life: 8000,
       })
     } finally {
       clearTransientInteractionLocks()
@@ -316,6 +349,6 @@ export function useFlowRunner() {
 
     // 方法
     runFlow,
-    runAllFlow
+    runAllFlow,
   }
 }

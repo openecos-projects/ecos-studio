@@ -75,11 +75,15 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     return await this.providerForRequest(request).start(request)
   }
 
-  async startSession(request: DesktopAgentStartSessionRequest): Promise<DesktopAgentStartSessionResponse> {
+  async startSession(
+    request: DesktopAgentStartSessionRequest,
+  ): Promise<DesktopAgentStartSessionResponse> {
     return await this.providerForRequest(request).startSession(request)
   }
 
-  async sendMessage(request: DesktopAgentSendMessageRequest): Promise<DesktopAgentSendMessageResponse> {
+  async sendMessage(
+    request: DesktopAgentSendMessageRequest,
+  ): Promise<DesktopAgentSendMessageResponse> {
     return await this.providerForRequest(request).sendMessage(request)
   }
 
@@ -95,11 +99,15 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     return await this.providerForRequest(request).setMode(request)
   }
 
-  async listSessions(request: DesktopAgentListSessionsRequest): Promise<DesktopAgentListSessionsResponse> {
+  async listSessions(
+    request: DesktopAgentListSessionsRequest,
+  ): Promise<DesktopAgentListSessionsResponse> {
     return await this.providerForRequest(request).listSessions(request)
   }
 
-  async resumeSession(request: DesktopAgentResumeSessionRequest): Promise<DesktopAgentResumeSessionResponse> {
+  async resumeSession(
+    request: DesktopAgentResumeSessionRequest,
+  ): Promise<DesktopAgentResumeSessionResponse> {
     return await this.providerForRequest(request).resumeSession(request)
   }
 
@@ -111,7 +119,9 @@ export class AgentRuntimeManager implements AgentProviderRuntime {
     return this.eventFanout.onEvent(listener)
   }
 
-  private providerForRequest(request?: DesktopAgentProviderRequest): AgentProviderRuntime {
+  private providerForRequest(
+    request?: DesktopAgentProviderRequest,
+  ): AgentProviderRuntime {
     const providerId = request?.providerId ?? this.defaultProviderId
     const provider = this.providers.get(providerId)
     if (!provider) {

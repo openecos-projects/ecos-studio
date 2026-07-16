@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const {
-  mountedCallbacks,
-  unmountedCallbacks,
-  waitForDesktopApi,
-} = vi.hoisted(() => ({
+const { mountedCallbacks, unmountedCallbacks, waitForDesktopApi } = vi.hoisted(() => ({
   waitForDesktopApi: vi.fn(),
   mountedCallbacks: [] as Array<() => void | Promise<void>>,
   unmountedCallbacks: [] as Array<() => void>,
@@ -74,7 +70,9 @@ describe('useMenuEvents', () => {
   })
 
   it('stays inert when the desktop bridge is unavailable', async () => {
-    waitForDesktopApi.mockRejectedValue(new Error('ECOS desktop bridge is not available.'))
+    waitForDesktopApi.mockRejectedValue(
+      new Error('ECOS desktop bridge is not available.'),
+    )
 
     useMenuEvents({
       new_project: vi.fn(),

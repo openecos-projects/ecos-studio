@@ -2,35 +2,56 @@
   <div class="flex h-full">
     <!-- 第一栏：流程步骤导航  -->
     <div
-      class="w-[64px] shrink-0 bg-(--bg-sidebar) border-r border-(--border-color) flex flex-col justify-between py-3 overflow-y-auto">
+      class="flex w-[64px] shrink-0 flex-col justify-between overflow-y-auto border-r border-(--border-color) bg-(--bg-sidebar) py-3"
+    >
       <div class="overflow-y-auto">
-        <router-link v-for="stage in sidebarStages" :key="stage.path" :to="'/workspace/' + stage.path"
-          class="flex flex-col items-center justify-center py-4 transition-all group relative mb-1" :class="[
-            currentStage === stage.path ? 'text-(--accent-color)' : 'text-(--text-secondary)',
-          ]">
+        <router-link
+          v-for="stage in sidebarStages"
+          :key="stage.path"
+          :to="workspaceStageLink(stage.path)"
+          class="group relative mb-1 flex flex-col items-center justify-center py-4 transition-all"
+          :class="[
+            currentStage === stage.path
+              ? 'text-(--accent-color)'
+              : 'text-(--text-secondary)',
+          ]"
+        >
           <!-- 选中状态的指示条 -->
-          <div v-if="currentStage === stage.path"
-            class="absolute left-0 top-2 bottom-2 w-1 bg-(--accent-color) rounded-r-full shadow-[0_0_10px_var(--accent-color)]">
-          </div>
+          <div
+            v-if="currentStage === stage.path"
+            class="absolute top-2 bottom-2 left-0 w-1 rounded-r-full bg-(--accent-color) shadow-[0_0_10px_var(--accent-color)]"
+          ></div>
 
           <!-- 图标容器 -->
           <div class="relative transition-transform group-hover:-translate-y-0.5">
-            <i :class="stage.icon" class="text-xl mb-1.5 inline-block"></i>
+            <i :class="stage.icon" class="mb-1.5 inline-block text-xl"></i>
 
             <!-- 状态指示点 -->
-            <i v-if="!stage.virtual && stage.state === 'Success'"
-              class="ri-checkbox-circle-fill absolute -top-1 -right-1 text-[10px] text-green-500 bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="!stage.virtual && stage.state === 'Ongoing'"
-              class="ri-loader-4-line absolute -top-1 -right-1 text-[10px] text-blue-400 bg-(--bg-sidebar) rounded-full animate-spin"></i>
-            <i v-else-if="!stage.virtual && stage.state === 'Pending'"
-              class="ri-time-line absolute -top-1 -right-1 text-[10px] text-(--text-secondary) bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="!stage.virtual && stage.state === 'Invalid'"
-              class="ri-error-warning-fill absolute -top-1 -right-1 text-[10px] text-red-500 bg-(--bg-sidebar) rounded-full"></i>
-            <i v-else-if="!stage.virtual && stage.state === 'Incomplete'"
-              class="ri-indeterminate-circle-fill absolute -top-1 -right-1 text-[10px] text-amber-500 bg-(--bg-sidebar) rounded-full"></i>
+            <i
+              v-if="!stage.virtual && stage.state === 'Success'"
+              class="ri-checkbox-circle-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-green-500"
+            ></i>
+            <i
+              v-else-if="!stage.virtual && stage.state === 'Ongoing'"
+              class="ri-loader-4-line absolute -top-1 -right-1 animate-spin rounded-full bg-(--bg-sidebar) text-[10px] text-blue-400"
+            ></i>
+            <i
+              v-else-if="!stage.virtual && stage.state === 'Pending'"
+              class="ri-time-line absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-(--text-secondary)"
+            ></i>
+            <i
+              v-else-if="!stage.virtual && stage.state === 'Invalid'"
+              class="ri-error-warning-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-red-500"
+            ></i>
+            <i
+              v-else-if="!stage.virtual && stage.state === 'Incomplete'"
+              class="ri-indeterminate-circle-fill absolute -top-1 -right-1 rounded-full bg-(--bg-sidebar) text-[10px] text-amber-500"
+            ></i>
           </div>
 
-          <span class="text-[9px] font-bold text-center leading-tight uppercase tracking-tighter scale-90">
+          <span
+            class="scale-90 text-center text-[9px] leading-tight font-bold tracking-tighter uppercase"
+          >
             {{ stage.label }}
           </span>
         </router-link>
@@ -38,161 +59,211 @@
     </div>
 
     <!-- 第二栏：流程进度面板 (Configure 页面不显示) -->
-    <div v-if="shouldShowProgressPanel"
-      class="w-[240px] min-w-[200px] max-w-[300px] bg-(--bg-primary) border-r border-(--border-color) flex flex-col overflow-hidden shrink-0">
-
+    <div
+      v-if="showProgressPanel"
+      class="flex w-[240px] max-w-[300px] min-w-[200px] shrink-0 flex-col overflow-hidden border-r border-(--border-color) bg-(--bg-primary)"
+    >
       <!-- ========== Home 概览面板 ========== -->
       <template v-if="showOverviewPanel">
         <!-- 顶部标题栏 -->
-        <div class="px-4 py-4 border-b border-(--border-color)">
+        <div class="border-b border-(--border-color) px-4 py-4">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center">
-              <i class="ri-flow-chart text-(--text-secondary) text-xl"></i>
+              <i class="ri-flow-chart text-xl text-(--text-secondary)"></i>
             </div>
             <div>
-              <h3 class="text-[14px] font-semibold text-(--text-primary) tracking-wide">
+              <h3 class="text-[14px] font-semibold tracking-wide text-(--text-primary)">
                 {{ isFrontendProject ? 'Frontend Workspace' : 'Flow Overview' }}
               </h3>
-              <p class="text-[11px] text-(--text-secondary) mt-0.5">{{ flowSubtitle }}</p>
+              <p class="mt-0.5 text-[11px] text-(--text-secondary)">
+                {{
+                  isFrontendProject ? 'Frontend Verification Flow' : 'RTL to GDS Pipeline'
+                }}
+              </p>
             </div>
           </div>
         </div>
 
         <!-- 状态统计卡片 -->
-        <div class="px-4 py-3 border-b border-(--border-color) bg-(--bg-secondary)/30">
+        <div class="border-b border-(--border-color) bg-(--bg-secondary)/30 px-4 py-3">
           <div class="grid grid-cols-4 gap-2">
             <!-- 成功 -->
             <div
-              class="flex flex-col items-center p-2 rounded-lg bg-green-500/10 cursor-pointer hover:bg-green-500/20 transition-colors">
-              <span class="text-[14px] font-bold text-green-500">{{ flowStats.success }}</span>
-              <span class="text-[8px] text-green-500/80 uppercase tracking-wider">Done</span>
+              class="flex cursor-pointer flex-col items-center rounded-lg bg-green-500/10 p-2 transition-colors hover:bg-green-500/20"
+            >
+              <span class="text-[14px] font-bold text-green-500">{{
+                flowStats.success
+              }}</span>
+              <span class="text-[8px] tracking-wider text-green-500/80 uppercase"
+                >Done</span
+              >
             </div>
             <!-- 进行中 -->
             <div
-              class="flex flex-col items-center p-2 rounded-lg bg-blue-500/10 cursor-pointer hover:bg-blue-500/20 transition-colors">
-              <span class="text-[14px] font-bold text-blue-400">{{ flowStats.ongoing }}</span>
-              <span class="text-[8px] text-blue-400/80 uppercase tracking-wider">Run</span>
+              class="flex cursor-pointer flex-col items-center rounded-lg bg-blue-500/10 p-2 transition-colors hover:bg-blue-500/20"
+            >
+              <span class="text-[14px] font-bold text-blue-400">{{
+                flowStats.ongoing
+              }}</span>
+              <span class="text-[8px] tracking-wider text-blue-400/80 uppercase"
+                >Run</span
+              >
             </div>
             <!-- 失败 -->
             <div
-              class="flex flex-col items-center p-2 rounded-lg bg-red-500/10 cursor-pointer hover:bg-red-500/20 transition-colors">
-              <span class="text-[14px] font-bold text-red-500">{{ flowStats.failed }}</span>
-              <span class="text-[8px] text-red-500/80 uppercase tracking-wider">Fail</span>
+              class="flex cursor-pointer flex-col items-center rounded-lg bg-red-500/10 p-2 transition-colors hover:bg-red-500/20"
+            >
+              <span class="text-[14px] font-bold text-red-500">{{
+                flowStats.failed
+              }}</span>
+              <span class="text-[8px] tracking-wider text-red-500/80 uppercase"
+                >Fail</span
+              >
             </div>
             <!-- 待处理 -->
             <div
-              class="flex flex-col items-center p-2 rounded-lg bg-(--bg-secondary) cursor-pointer hover:bg-(--border-color)/50 transition-colors">
-              <span class="text-[14px] font-bold text-(--text-secondary)">{{ flowStats.pending }}</span>
-              <span class="text-[8px] text-(--text-secondary)/80 uppercase tracking-wider">Wait</span>
+              class="flex cursor-pointer flex-col items-center rounded-lg bg-(--bg-secondary) p-2 transition-colors hover:bg-(--border-color)/50"
+            >
+              <span class="text-[14px] font-bold text-(--text-secondary)">{{
+                flowStats.pending
+              }}</span>
+              <span class="text-[8px] tracking-wider text-(--text-secondary)/80 uppercase"
+                >Wait</span
+              >
             </div>
           </div>
 
           <!-- 总进度条 -->
           <div class="mt-3">
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] text-(--text-secondary) uppercase tracking-wider">Total Progress</span>
-              <span class="text-[11px] font-bold text-(--accent-color)">{{ flowStats.success }}/{{ flowStats.total
-                }}</span>
+            <div class="mb-1.5 flex items-center justify-between">
+              <span class="text-[10px] tracking-wider text-(--text-secondary) uppercase"
+                >Total Progress</span
+              >
+              <span class="text-[11px] font-bold text-(--accent-color)"
+                >{{ flowStats.success }}/{{ flowStats.total }}</span
+              >
             </div>
-            <div class="h-1.5 bg-(--bg-secondary) rounded-full overflow-hidden">
-              <div class="h-full bg-(--accent-color) rounded-full transition-all duration-500"
-                :style="{ width: `${flowProgressPercent}%` }"></div>
+            <div class="h-1.5 overflow-hidden rounded-full bg-(--bg-secondary)">
+              <div
+                class="h-full rounded-full bg-(--accent-color) transition-all duration-500"
+                :style="{ width: `${flowProgressPercent}%` }"
+              ></div>
             </div>
           </div>
         </div>
 
-        <!-- Home 摘要 -->
+        <!-- 步骤列表 -->
         <div class="flex-1 overflow-y-auto">
-          <div v-if="runStages.length === 0" class="flex items-center justify-center h-full">
-            <div class="text-center px-4">
-              <i class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"></i>
-              <p class="text-[11px] text-(--text-secondary) mt-2">No flow data available</p>
-              <p class="text-[10px] text-(--text-secondary) opacity-70 mt-1">Load a project to see the flow</p>
+          <div
+            v-if="runStages.length === 0"
+            class="flex h-full items-center justify-center"
+          >
+            <div class="px-4 text-center">
+              <i
+                class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"
+              ></i>
+              <p class="mt-2 text-[11px] text-(--text-secondary)">
+                No flow data available
+              </p>
+              <p class="mt-1 text-[10px] text-(--text-secondary) opacity-70">
+                Load a project to see the flow
+              </p>
             </div>
           </div>
 
-          <div v-else-if="isFrontendProject" class="p-3">
-            <div class="frontend-overview-card">
-              <div class="frontend-overview-row">
-                <span>Workspace</span>
-                <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Flow' }}</strong>
-              </div>
-              <div class="frontend-overview-row">
-                <span>Flow Steps</span>
-                <strong>{{ runStages.length }}</strong>
-              </div>
-              <div class="frontend-overview-row">
-                <span>Next Step</span>
-                <strong>{{ nextFrontendStage?.label || 'Complete' }}</strong>
-              </div>
-              <div class="frontend-overview-row">
-                <span>Running</span>
-                <strong>{{ flowStats.ongoing > 0 ? 'Yes' : 'No' }}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div v-else class="p-3 space-y-1">
-            <router-link v-for="(stage, index) in runStages" :key="stage.path" :to="'/workspace/' + stage.path"
-              class="group relative flex items-center gap-3 p-2 rounded-lg transition-all hover:bg-(--bg-secondary)/50 cursor-pointer"
-              :class="{ 'bg-(--bg-secondary)/30': stage.state === 'Ongoing' }">
+          <div v-else class="space-y-1 p-3">
+            <router-link
+              v-for="(stage, index) in runStages"
+              :key="stage.path"
+              :to="workspaceStageLink(stage.path)"
+              class="group relative flex cursor-pointer items-center gap-3 rounded-lg p-2 transition-all hover:bg-(--bg-secondary)/50"
+              :class="{ 'bg-(--bg-secondary)/30': stage.state === 'Ongoing' }"
+            >
               <!-- 连接线 -->
-              <div v-if="index < runStages.length - 1" class="absolute left-[22px] top-[42px] w-0.5 h-[calc(100%-34px)]"
+              <div
+                v-if="index < runStages.length - 1"
+                class="absolute top-[42px] left-[22px] h-[calc(100%-34px)] w-0.5"
                 :class="[
-                  stage.state === 'Success' ? 'bg-green-500/50' :
-                    stage.state === 'Ongoing' ? 'bg-linear-to-b from-blue-400/50 to-(--border-color)' :
-                      'bg-(--border-color)'
-                ]"></div>
+                  stage.state === 'Success'
+                    ? 'bg-green-500/50'
+                    : stage.state === 'Ongoing'
+                      ? 'bg-linear-to-b from-blue-400/50 to-(--border-color)'
+                      : 'bg-(--border-color)',
+                ]"
+              ></div>
 
               <!-- 状态图标 -->
               <div class="relative shrink-0">
                 <!-- 成功 -->
-                <div v-if="stage.state === 'Success'"
-                  class="w-[30px] h-[30px] rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center">
-                  <i class="ri-check-line text-green-500 text-sm"></i>
+                <div
+                  v-if="stage.state === 'Success'"
+                  class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-green-500 bg-green-500/20"
+                >
+                  <i class="ri-check-line text-sm text-green-500"></i>
                 </div>
                 <!-- 进行中 -->
-                <div v-else-if="stage.state === 'Ongoing'"
-                  class="w-[30px] h-[30px] rounded-full bg-blue-500/20 border-2 border-blue-400 flex items-center justify-center">
-                  <i class="ri-loader-4-line text-blue-400 text-sm animate-spin"></i>
+                <div
+                  v-else-if="stage.state === 'Ongoing'"
+                  class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-blue-400 bg-blue-500/20"
+                >
+                  <i class="ri-loader-4-line animate-spin text-sm text-blue-400"></i>
                 </div>
                 <!-- 失败/无效 -->
-                <div v-else-if="stage.state === 'Invalid'"
-                  class="w-[30px] h-[30px] rounded-full bg-red-500/20 border-2 border-red-500 flex items-center justify-center">
-                  <i class="ri-close-line text-red-500 text-sm"></i>
+                <div
+                  v-else-if="stage.state === 'Invalid'"
+                  class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-red-500 bg-red-500/20"
+                >
+                  <i class="ri-close-line text-sm text-red-500"></i>
                 </div>
                 <!-- 未完成 -->
-                <div v-else-if="stage.state === 'Incomplete'"
-                  class="w-[30px] h-[30px] rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center">
-                  <i class="ri-indeterminate-circle-fill text-amber-500 text-sm"></i>
+                <div
+                  v-else-if="stage.state === 'Incomplete'"
+                  class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-amber-500 bg-amber-500/20"
+                >
+                  <i class="ri-indeterminate-circle-fill text-sm text-amber-500"></i>
                 </div>
                 <!-- 待处理 -->
-                <div v-else
-                  class="w-[30px] h-[30px] rounded-full bg-(--bg-secondary) border-2 border-(--border-color) flex items-center justify-center">
+                <div
+                  v-else
+                  class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-(--border-color) bg-(--bg-secondary)"
+                >
                   <i :class="stage.icon" class="text-[10px] text-(--text-secondary)"></i>
                 </div>
               </div>
 
               <!-- 步骤信息 -->
-              <div class="flex-1 min-w-0 h-full flex flex-col justify-center gap-0.5">
+              <div class="flex h-full min-w-0 flex-1 flex-col justify-center gap-0.5">
                 <div class="flex items-center gap-2">
-                  <span class="text-[12px] font-semibold truncate" :class="[
-                    stage.state === 'Success' ? 'text-green-500' :
-                      stage.state === 'Ongoing' ? 'text-blue-400' :
-                        stage.state === 'Invalid' ? 'text-red-500' :
-                          stage.state === 'Incomplete' ? 'text-amber-500' :
-                            'text-(--text-primary)'
-                  ]">
+                  <span
+                    class="truncate text-[12px] font-semibold"
+                    :class="[
+                      stage.state === 'Success'
+                        ? 'text-green-500'
+                        : stage.state === 'Ongoing'
+                          ? 'text-blue-400'
+                          : stage.state === 'Invalid'
+                            ? 'text-red-500'
+                            : stage.state === 'Incomplete'
+                              ? 'text-amber-500'
+                              : 'text-(--text-primary)',
+                    ]"
+                  >
                     {{ stage.label }}
                   </span>
                   <!-- 运行中的脉冲动画 -->
-                  <span v-if="stage.state === 'Ongoing'"
-                    class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                  <span
+                    v-if="stage.state === 'Ongoing'"
+                    class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400"
+                  ></span>
                 </div>
                 <!-- 运行时信息：内存 & 耗时 -->
                 <div
-                  v-if="stage.state === 'Success' && (stage.runtime || stage['peak memory (mb)'])"
-                  class="flex items-center gap-3 text-[10px] text-(--text-secondary) leading-tight">
+                  v-if="
+                    stage.state === 'Success' &&
+                    (stage.runtime || stage['peak memory (mb)'])
+                  "
+                  class="flex items-center gap-3 text-[10px] leading-tight text-(--text-secondary)"
+                >
                   <span v-if="stage['peak memory (mb)']" class="flex items-center gap-1">
                     <i class="ri-ram-line text-[10px]"></i>
                     {{ stage['peak memory (mb)'].toFixed(1) }} MB
@@ -206,13 +277,17 @@
 
               <!-- 箭头 -->
               <i
-                class="ri-arrow-right-s-line text-(--text-secondary) opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-sm"></i>
+                class="ri-arrow-right-s-line shrink-0 text-sm text-(--text-secondary) opacity-0 transition-opacity group-hover:opacity-100"
+              ></i>
             </router-link>
           </div>
         </div>
 
         <!-- 底部操作栏 -->
-        <div class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
+        <div
+          v-if="!isFrontendProject"
+          class="space-y-2 border-t border-(--border-color) bg-(--bg-secondary)/30 p-3"
+        >
           <!-- Runtime event message display area -->
           <!-- <div v-if="runtimeEvents.length > 0"
             class="max-h-32 overflow-y-auto bg-(--bg-secondary) rounded p-2 text-[10px] space-y-1">
@@ -238,76 +313,130 @@
             </div>
           </div> -->
 
-          <!-- Flow 控制区 -->
+          <!-- RTL2GDS 控制区 -->
           <div class="rtl2gds-control">
             <!-- 状态指示灯 -->
             <div class="rtl2gds-status-dots">
-              <span class="status-dot"
-                :class="flowResult === 'success' ? 'dot-success-active' : 'dot-success-dim'"></span>
-              <span class="status-dot" :class="flowResult === 'failed' ? 'dot-failed-active' : 'dot-failed-dim'"></span>
+              <span
+                class="status-dot"
+                :class="
+                  flowResult === 'success' ? 'dot-success-active' : 'dot-success-dim'
+                "
+              ></span>
+              <span
+                class="status-dot"
+                :class="flowResult === 'failed' ? 'dot-failed-active' : 'dot-failed-dim'"
+              ></span>
             </div>
 
             <!-- 模式选择器（Cursor 风格下拉） -->
             <div class="mode-selector" @click.stop>
               <!-- 当前模式显示 + 触发器 -->
-              <button class="mode-trigger" @click="showModeMenu = !showModeMenu" :disabled="flowRunControlBusy">
+              <button
+                class="mode-trigger"
+                @click="showModeMenu = !showModeMenu"
+                :disabled="flowRunControlBusy"
+              >
                 <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
                 <span>{{ runModes[activeRunMode].label }}</span>
-                <i class="ri-arrow-down-s-line mode-chevron" :class="{ open: showModeMenu }"></i>
+                <i
+                  class="ri-arrow-down-s-line mode-chevron"
+                  :class="{ open: showModeMenu }"
+                ></i>
               </button>
 
               <!-- 下拉菜单 -->
               <Transition name="mode-menu">
                 <div v-if="showModeMenu" class="mode-menu">
-                  <button v-for="(mode, key) in runModes" :key="key" class="mode-menu-item"
-                    :class="{ active: activeRunMode === key }" @click="selectRunMode(key); showModeMenu = false">
+                  <button
+                    v-for="(mode, key) in runModes"
+                    :key="key"
+                    class="mode-menu-item"
+                    :class="{ active: activeRunMode === key }"
+                    @click="handleRunModeSelect(key)"
+                  >
                     <i :class="mode.icon" class="mode-item-icon"></i>
                     <span class="mode-item-label">{{ mode.label }}</span>
-                    <span v-if="mode.shortcut" class="mode-item-shortcut">{{ mode.shortcut }}</span>
+                    <span v-if="mode.shortcut" class="mode-item-shortcut">{{
+                      mode.shortcut
+                    }}</span>
                   </button>
                 </div>
               </Transition>
             </div>
 
             <!-- 执行按钮 -->
-            <button @click="handleRunFlow" :disabled="flowRunControlBusy" class="run-go-btn" :class="{ running: flowRunControlBusy }">
-              <i :class="flowRunControlBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-fill'"></i>
+            <button
+              @click="handleRunFlow"
+              :disabled="flowRunControlBusy"
+              class="run-go-btn"
+              :class="{ running: flowRunControlBusy }"
+            >
+              <i
+                :class="
+                  flowRunControlBusy ? 'ri-loader-4-line animate-spin' : 'ri-play-fill'
+                "
+              ></i>
             </button>
           </div>
         </div>
       </template>
 
       <!-- ========== 子流程面板 ========== -->
-      <template v-else-if="showSubflowPanel && hasSubflowContent">
+      <template v-else-if="showSubflowPanel">
         <!-- 顶部标题栏 -->
-        <div class="px-4 py-4 border-b border-(--border-color)">
+        <div class="border-b border-(--border-color) px-4 py-4">
           <div class="flex items-center gap-3">
             <div class="flex items-center justify-center">
-              <i class="ri-focus-2-line text-(--text-secondary) text-xl"></i>
+              <i class="ri-focus-2-line text-xl text-(--text-secondary)"></i>
             </div>
             <div>
-              <h3 class="text-[14px] font-semibold text-(--text-primary) tracking-wide">{{ currentStepTitle }}</h3>
-              <p class="text-[11px] text-(--text-secondary) mt-0.5">{{ currentStepEngine }}</p>
+              <h3 class="text-[14px] font-semibold tracking-wide text-(--text-primary)">
+                {{ currentStepTitle }}
+              </h3>
+              <p class="mt-0.5 text-[11px] text-(--text-secondary)">
+                {{ currentStepEngine }}
+              </p>
             </div>
           </div>
         </div>
 
         <!-- 进度统计 -->
-        <div class="px-4 py-3 border-b border-(--border-color) bg-(--bg-secondary)/30">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[10px] text-(--text-secondary) uppercase tracking-wider">Progress</span>
-            <span class="text-[11px] font-bold text-(--accent-color)">{{ completedSteps }}/{{ totalSteps || 0
-              }}</span>
+        <div class="border-b border-(--border-color) bg-(--bg-secondary)/30 px-4 py-3">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-[10px] tracking-wider text-(--text-secondary) uppercase"
+              >Progress</span
+            >
+            <span class="text-[11px] font-bold text-(--accent-color)"
+              >{{ completedSteps }}/{{ totalSteps || 0 }}</span
+            >
           </div>
-          <div class="h-1.5 bg-(--bg-secondary) rounded-full overflow-hidden">
-            <div class="h-full bg-(--accent-color) rounded-full transition-all duration-500"
-              :style="{ width: `${progressPercent}%` }"></div>
+          <div class="h-1.5 overflow-hidden rounded-full bg-(--bg-secondary)">
+            <div
+              class="h-full rounded-full bg-(--accent-color) transition-all duration-500"
+              :style="{ width: `${progressPercent}%` }"
+            ></div>
           </div>
-          <div class="flex items-center justify-between mt-2 text-[9px] text-(--text-secondary)">
+          <div
+            class="mt-2 flex items-center justify-between text-[9px] text-(--text-secondary)"
+          >
             <span>Total: {{ totalTime }}</span>
             <span
-              :class="overallStatus === 'completed' ? 'text-green-500' : overallStatus === 'running' ? 'text-blue-400' : 'text-(--text-secondary)'">
-              {{ overallStatus === 'completed' ? 'Completed' : overallStatus === 'running' ? 'Running...' : 'Ready' }}
+              :class="
+                overallStatus === 'completed'
+                  ? 'text-green-500'
+                  : overallStatus === 'running'
+                    ? 'text-blue-400'
+                    : 'text-(--text-secondary)'
+              "
+            >
+              {{
+                overallStatus === 'completed'
+                  ? 'Completed'
+                  : overallStatus === 'running'
+                    ? 'Running...'
+                    : 'Ready'
+              }}
             </span>
           </div>
         </div>
@@ -315,74 +444,136 @@
         <!-- 步骤列表 -->
         <div class="flex-1 overflow-y-auto">
           <!-- 加载状态 -->
-          <div v-if="isLoadingSubflow" class="flex items-center justify-center h-full">
+          <div v-if="isLoadingSubflow" class="flex h-full items-center justify-center">
             <div class="text-center">
-              <i class="ri-loader-4-line text-2xl text-(--accent-color) animate-spin"></i>
-              <p class="text-[11px] text-(--text-secondary) mt-2">Loading subflow...</p>
+              <i class="ri-loader-4-line animate-spin text-2xl text-(--accent-color)"></i>
+              <p class="mt-2 text-[11px] text-(--text-secondary)">Loading subflow...</p>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div
+            v-else-if="subflowSteps.length === 0"
+            class="flex h-full items-center justify-center"
+          >
+            <div class="px-4 text-center">
+              <i
+                class="ri-file-list-3-line text-3xl text-(--text-secondary) opacity-50"
+              ></i>
+              <p class="mt-2 text-[11px] text-(--text-secondary)">
+                No subflow data available
+              </p>
+              <p class="mt-1 text-[10px] text-(--text-secondary) opacity-70">
+                Run the step to generate subflow
+              </p>
             </div>
           </div>
 
           <!-- 步骤列表 -->
-          <div v-else class="p-3 space-y-1">
-            <div v-for="(step, index) in subflowSteps" :key="step.id" class="group relative"
-              :class="{ 'opacity-50': step.status === 'pending' && index > 0 && subflowSteps[index - 1].status === 'pending' }">
+          <div v-else class="space-y-1 p-3">
+            <div
+              v-for="(step, index) in subflowSteps"
+              :key="step.id"
+              class="group relative"
+              :class="{
+                'opacity-50':
+                  step.status === 'pending' &&
+                  index > 0 &&
+                  subflowSteps[index - 1].status === 'pending',
+              }"
+            >
               <!-- 连接线：从圆形底部到下一个圆形顶部 -->
-              <div v-if="index < subflowSteps.length - 1"
-                class="absolute left-[22px] top-[42px] w-0.5 h-[calc(100%-34px)]" :class="[
-                  step.status === 'completed' ? 'bg-green-500/50' :
-                    step.status === 'running' ? 'bg-linear-to-b from-blue-400/50 to-(--border-color)' :
-                      'bg-(--border-color)'
-                ]"></div>
+              <div
+                v-if="index < subflowSteps.length - 1"
+                class="absolute top-[42px] left-[22px] h-[calc(100%-34px)] w-0.5"
+                :class="[
+                  step.status === 'completed'
+                    ? 'bg-green-500/50'
+                    : step.status === 'running'
+                      ? 'bg-linear-to-b from-blue-400/50 to-(--border-color)'
+                      : 'bg-(--border-color)',
+                ]"
+              ></div>
 
               <!-- 步骤项 -->
               <div
-                class="flex items-start gap-3 p-2 rounded-lg transition-all hover:bg-(--bg-secondary)/50 cursor-pointer"
-                :class="{ 'bg-(--bg-secondary)/30': step.status === 'running' }">
+                class="flex cursor-pointer items-start gap-3 rounded-lg p-2 transition-all hover:bg-(--bg-secondary)/50"
+                :class="{ 'bg-(--bg-secondary)/30': step.status === 'running' }"
+              >
                 <!-- 状态图标 -->
-                <div class="relative shrink-0 mt-0.5">
+                <div class="relative mt-0.5 shrink-0">
                   <!-- 完成状态 -->
-                  <div v-if="step.status === 'completed'"
-                    class="w-[30px] h-[30px] rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center">
-                    <i class="ri-check-line text-green-500 text-sm"></i>
+                  <div
+                    v-if="step.status === 'completed'"
+                    class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-green-500 bg-green-500/20"
+                  >
+                    <i class="ri-check-line text-sm text-green-500"></i>
                   </div>
                   <!-- 运行状态 -->
-                  <div v-else-if="step.status === 'running'"
-                    class="w-[30px] h-[30px] rounded-full bg-blue-500/20 border-2 border-blue-400 flex items-center justify-center">
-                    <i class="ri-loader-4-line text-blue-400 text-sm animate-spin"></i>
+                  <div
+                    v-else-if="step.status === 'running'"
+                    class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-blue-400 bg-blue-500/20"
+                  >
+                    <i class="ri-loader-4-line animate-spin text-sm text-blue-400"></i>
                   </div>
                   <!-- 失败状态 -->
-                  <div v-else-if="step.status === 'failed'"
-                    class="w-[30px] h-[30px] rounded-full bg-red-500/20 border-2 border-red-500 flex items-center justify-center">
-                    <i class="ri-close-line text-red-500 text-sm"></i>
+                  <div
+                    v-else-if="step.status === 'failed'"
+                    class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-red-500 bg-red-500/20"
+                  >
+                    <i class="ri-close-line text-sm text-red-500"></i>
                   </div>
                   <!-- 等待状态 -->
-                  <div v-else
-                    class="w-[30px] h-[30px] rounded-full bg-(--bg-secondary) border-2 border-(--border-color) flex items-center justify-center">
-                    <span class="text-[10px] font-bold text-(--text-secondary)">{{ index + 1 }}</span>
+                  <div
+                    v-else
+                    class="flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-(--border-color) bg-(--bg-secondary)"
+                  >
+                    <span class="text-[10px] font-bold text-(--text-secondary)">{{
+                      index + 1
+                    }}</span>
                   </div>
                 </div>
 
                 <!-- 步骤信息 -->
-                <div class="flex-1 min-w-0">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
-                    <span class="text-[12px] font-semibold truncate" :class="[
-                      step.status === 'completed' ? 'text-green-500' :
-                        step.status === 'running' ? 'text-blue-400' :
-                          step.status === 'failed' ? 'text-red-500' :
-                            'text-(--text-primary)'
-                    ]">
+                    <span
+                      class="truncate text-[12px] font-semibold"
+                      :class="[
+                        step.status === 'completed'
+                          ? 'text-green-500'
+                          : step.status === 'running'
+                            ? 'text-blue-400'
+                            : step.status === 'failed'
+                              ? 'text-red-500'
+                              : 'text-(--text-primary)',
+                      ]"
+                    >
                       {{ step.name }}
                     </span>
                     <!-- 运行中的脉冲动画 -->
-                    <span v-if="step.status === 'running'"
-                      class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                    <span
+                      v-if="step.status === 'running'"
+                      class="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400"
+                    ></span>
                   </div>
-                  <p class="text-[10px] text-(--text-secondary) mt-0.5 truncate">{{ step.description }}</p>
+                  <p class="mt-0.5 truncate text-[10px] text-(--text-secondary)">
+                    {{ step.description }}
+                  </p>
                   <!-- 耗时显示 -->
-                  <div v-if="step.duration || step.status === 'running'" class="flex items-center gap-2 mt-1">
+                  <div
+                    v-if="step.duration || step.status === 'running'"
+                    class="mt-1 flex items-center gap-2"
+                  >
                     <i class="ri-time-line text-[10px] text-(--text-secondary)"></i>
-                    <span class="text-[10px]"
-                      :class="step.status === 'running' ? 'text-blue-400' : 'text-(--text-secondary)'">
+                    <span
+                      class="text-[10px]"
+                      :class="
+                        step.status === 'running'
+                          ? 'text-blue-400'
+                          : 'text-(--text-secondary)'
+                      "
+                    >
                       {{ step.duration || 'calculating...' }}
                     </span>
                   </div>
@@ -390,38 +581,65 @@
 
                 <!-- 展开箭头 -->
                 <i
-                  class="ri-arrow-right-s-line text-(--text-secondary) opacity-0 group-hover:opacity-100 transition-opacity shrink-0"></i>
+                  class="ri-arrow-right-s-line shrink-0 text-(--text-secondary) opacity-0 transition-opacity group-hover:opacity-100"
+                ></i>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 底部操作栏 -->
-        <div v-if="!isFrontendProject" class="p-3 border-t border-(--border-color) bg-(--bg-secondary)/30 space-y-2">
+        <div
+          class="space-y-2 border-t border-(--border-color) bg-(--bg-secondary)/30 p-3"
+        >
           <!-- 操作按钮组 -->
           <div class="step-run-control">
             <div class="mode-selector" @click.stop>
-              <button class="mode-trigger" @click="showModeMenu = !showModeMenu" :disabled="flowRunControlBusy">
+              <button
+                class="mode-trigger"
+                @click="showModeMenu = !showModeMenu"
+                :disabled="flowRunControlBusy"
+              >
                 <i :class="runModes[activeRunMode].icon" class="mode-trigger-icon"></i>
                 <span>{{ runModes[activeRunMode].label }}</span>
-                <i class="ri-arrow-down-s-line mode-chevron" :class="{ open: showModeMenu }"></i>
+                <i
+                  class="ri-arrow-down-s-line mode-chevron"
+                  :class="{ open: showModeMenu }"
+                ></i>
               </button>
 
               <Transition name="mode-menu">
                 <div v-if="showModeMenu" class="mode-menu">
-                  <button v-for="(mode, key) in runModes" :key="key" class="mode-menu-item"
-                    :class="{ active: activeRunMode === key }" @click="selectRunMode(key); showModeMenu = false">
+                  <button
+                    v-for="(mode, key) in runModes"
+                    :key="key"
+                    class="mode-menu-item"
+                    :class="{ active: activeRunMode === key }"
+                    @click="handleRunModeSelect(key)"
+                  >
                     <i :class="mode.icon" class="mode-item-icon"></i>
                     <span class="mode-item-label">{{ mode.label }}</span>
-                    <span v-if="mode.shortcut" class="mode-item-shortcut">{{ mode.shortcut }}</span>
+                    <span v-if="mode.shortcut" class="mode-item-shortcut">{{
+                      mode.shortcut
+                    }}</span>
                   </button>
                 </div>
               </Transition>
             </div>
 
-            <button @click="handleRunFlow" :disabled="flowRunControlBusy" class="run-go-btn"
-              :class="{ running: flowRunControlBusy }">
-              <i :class="flowRunControlBusy ? 'ri-loader-4-line animate-spin' : runModes[activeRunMode].icon"></i>
+            <button
+              @click="handleRunFlow"
+              :disabled="flowRunControlBusy"
+              class="run-go-btn"
+              :class="{ running: flowRunControlBusy }"
+            >
+              <i
+                :class="
+                  flowRunControlBusy
+                    ? 'ri-loader-4-line animate-spin'
+                    : runModes[activeRunMode].icon
+                "
+              ></i>
             </button>
           </div>
         </div>
@@ -432,6 +650,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
 import { useFlowRunner } from '@/composables/useFlowRunner'
@@ -440,7 +659,6 @@ import { useCurrentStage } from '@/composables/useCurrentStage'
 import { useWorkspace } from '@/composables/useWorkspace'
 
 // ============ Composables ============
-
 
 // 流程阶段管理
 const {
@@ -466,33 +684,30 @@ const {
 } = useSubflow()
 
 // 流程运行器
-const {
-  isRunning,
-  runFlow,
-  runAllFlow,
-} = useFlowRunner()
+const { isRunning, runFlow, runAllFlow } = useFlowRunner()
 
 // Workspace runtime events
 // const { runtimeEvents } = useWorkspace()
 
 // 当前阶段
-const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } = useCurrentStage()
+const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
+  useCurrentStage()
 
-const {
-  activeRunMode,
-  isRerun,
-  runModes,
-  selectRunMode,
-} = useFlowRunMode(currentStage, {
-  fullFlowLabel: computed(() => isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS'),
+const { ensureApiReady, currentProject } = useWorkspace()
+const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
+const { activeRunMode, isRerun, runModes, selectRunMode } = useFlowRunMode(currentStage, {
+  fullFlowLabel: computed(() => (isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS')),
 })
+const route = useRoute()
 
 // ============ Flow 概览计算 ============
 // 只统计 run 组的步骤
-const runStages = computed(() => flowStages.value.filter(s => s.group === 'run'))
+const runStages = computed(() => flowStages.value.filter((s) => s.group === 'run'))
 const sidebarStages = computed(() => {
   if (!isFrontendProject.value) return flowStages.value
-  const stages = flowStages.value.filter((stage) => stage.path !== 'configure' && stage.path !== 'tech')
+  const stages = flowStages.value.filter(
+    (stage) => stage.path !== 'configure' && stage.path !== 'tech',
+  )
   const srcStage = {
     label: 'Src',
     path: 'src',
@@ -522,21 +737,20 @@ const sidebarStages = computed(() => {
   ]
   const simIndex = withSrc.findIndex((stage) => stage.path.toLowerCase() === 'sim')
   if (simIndex < 0) return [...withSrc, waveStage]
-  return [
-    ...withSrc.slice(0, simIndex + 1),
-    waveStage,
-    ...withSrc.slice(simIndex + 1),
-  ]
+  return [...withSrc.slice(0, simIndex + 1), waveStage, ...withSrc.slice(simIndex + 1)]
 })
 
 const flowStats = computed(() => {
   const stages = runStages.value
   return {
     total: stages.length,
-    success: stages.filter(s => s.state === 'Success').length,
-    ongoing: stages.filter(s => s.state === 'Ongoing').length,
-    failed: stages.filter(s => s.state === 'Invalid' || s.state === 'Incomplete').length,
-    pending: stages.filter(s => s.state === 'Pending' || s.state === 'Unstart' || !s.state).length
+    success: stages.filter((s) => s.state === 'Success').length,
+    ongoing: stages.filter((s) => s.state === 'Ongoing').length,
+    failed: stages.filter((s) => s.state === 'Invalid' || s.state === 'Incomplete')
+      .length,
+    pending: stages.filter(
+      (s) => s.state === 'Pending' || s.state === 'Unstart' || !s.state,
+    ).length,
   }
 })
 
@@ -556,23 +770,26 @@ const flowResult = computed(() => {
 
 const flowRunControlBusy = computed(() => isRunning.value || hasOngoingRunStage.value)
 
-
 // ============ 运行模式 ============
 const showModeMenu = ref(false)
 
-const { ensureApiReady, currentProject } = useWorkspace()
-const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
-const flowSubtitle = computed(() => isFrontendProject.value ? 'Frontend Verification Flow' : 'RTL to GDS Pipeline')
-const nextFrontendStage = computed(() =>
-  runStages.value.find((stage) => stage.state !== 'Success') ?? null,
-)
-const hasSubflowContent = computed(() => isLoadingSubflow.value || subflowSteps.value.length > 0)
-const shouldShowProgressPanel = computed(() =>
-  showProgressPanel.value && (showOverviewPanel.value || !showSubflowPanel.value || hasSubflowContent.value),
-)
+function workspaceStageLink(stagePath: string) {
+  return {
+    path: `/workspace/${stagePath}`,
+    query: route.query,
+  }
+}
 
 // 点击外部关闭菜单
-const closeMenu = () => { showModeMenu.value = false }
+const closeMenu = () => {
+  showModeMenu.value = false
+}
+
+const handleRunModeSelect = (mode: string) => {
+  selectRunMode(mode)
+  closeMenu()
+}
+
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 
@@ -593,10 +810,7 @@ const handleRunFlow = async () => {
   } else {
     setRunStepOngoingByPath(currentStage.value)
     await runFlow({ rerun: isRerun.value })
-    await Promise.all([
-      refreshCurrentSubflow(),
-      refreshFlowStages()
-    ])
+    await Promise.all([refreshCurrentSubflow(), refreshFlowStages()])
   }
 }
 </script>
@@ -646,7 +860,11 @@ const handleRunFlow = async () => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .dot-success-active {
@@ -691,7 +909,10 @@ const handleRunFlow = async () => {
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .mode-trigger:hover:not(:disabled) {
@@ -780,60 +1001,17 @@ const handleRunFlow = async () => {
   color: rgba(255, 255, 255, 0.6);
 }
 
-.frontend-overview-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-}
-
-.frontend-overview-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent);
-  font-size: 11px;
-}
-
-.frontend-overview-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.frontend-overview-row:first-child {
-  padding-top: 0;
-}
-
-.frontend-overview-row span {
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
-}
-
-.frontend-overview-row strong {
-  min-width: 0;
-  max-width: 132px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
 /* 菜单动画 */
 .mode-menu-enter-active {
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
 }
 
 .mode-menu-leave-active {
-  transition: opacity 0.1s ease-in, transform 0.1s ease-in;
+  transition:
+    opacity 0.1s ease-in,
+    transform 0.1s ease-in;
 }
 
 .mode-menu-enter-from {
@@ -859,7 +1037,10 @@ const handleRunFlow = async () => {
   border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
-  transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease,
+    transform 0.15s ease;
   flex-shrink: 0;
 }
 
@@ -881,7 +1062,6 @@ const handleRunFlow = async () => {
 }
 
 @keyframes pulse-btn {
-
   0%,
   100% {
     opacity: 0.5;

@@ -13,17 +13,17 @@ describe('resolveProjectFileAbsolutePath', () => {
   })
 
   it('repairs bare Users/ absolute paths from persisted layout locations', () => {
-    expect(resolveProjectFileAbsolutePath('/tmp/project', 'Users/alice/layout.json')).toBe(
-      '/Users/alice/layout.json',
-    )
+    expect(
+      resolveProjectFileAbsolutePath('/tmp/project', 'Users/alice/layout.json'),
+    ).toBe('/Users/alice/layout.json')
   })
 })
 
 describe('resolveContainedLocalPath', () => {
   it('resolves project resource paths inside the allowed root', () => {
-    expect(
-      resolveContainedLocalPath('/tmp/project', 'output/preview.bin'),
-    ).toBe('/tmp/project/output/preview.bin')
+    expect(resolveContainedLocalPath('/tmp/project', 'output/preview.bin')).toBe(
+      '/tmp/project/output/preview.bin',
+    )
   })
 
   it('rejects escape attempts outside the allowed root', () => {

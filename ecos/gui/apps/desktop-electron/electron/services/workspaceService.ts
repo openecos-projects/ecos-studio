@@ -1,14 +1,28 @@
-import { open, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import type {
   DesktopProjectFileChangedEvent,
   DesktopProjectFileChangeEventType,
+  DesktopProjectDirectoryEntry,
   DesktopProjectTextFileTail,
   DesktopProjectTextFileUpdate,
   ScannedPdkDirectory,
+  ScannedRtlDirectory,
+  WorkspaceDirectoryReplacement,
 } from '@ecos-studio/shared'
 import { LogTailService } from './logTailService'
+import { scanRtlDirectory as scanRtlDirectoryFiles } from './rtlDirectoryScanner'
+import {
+  addWorkspaceDesignFiles,
+  getWorkspaceFilelistPath,
+  listWorkspaceDesignFiles,
+  removeWorkspaceDesignFile,
+} from './designFileService'
+import type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+} from '@ecos-studio/shared'
 
 export interface ProjectScopeProvider {
   clearProjectRoot(): Promise<void>
@@ -38,16 +52,15 @@ function boundedTextCharCount(maxChars: number): number {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = relative(rootPath, candidatePath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function isSamePath(path: string, otherPath: string): boolean {
@@ -56,7 +69,9 @@ function isSamePath(path: string, otherPath: string): boolean {
 
 function isSameOrAncestorPath(path: string, descendantPath: string): boolean {
   const relativePath = relative(path, descendantPath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
@@ -67,11 +82,14 @@ function normalizeRelativePathForMatch(path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-function isRuntimeProtectedProjectPath(canonicalPath: string, projectRoot: string): boolean {
+function isRuntimeProtectedProjectPath(
+  canonicalPath: string,
+  projectRoot: string,
+): boolean {
   const relativePath = normalizeRelativePathForMatch(relative(projectRoot, canonicalPath))
   return (
-    relativePath === 'home/parameters.json'
-    || (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
+    relativePath === 'home/parameters.json' ||
+    (relativePath.startsWith('config/') && relativePath.endsWith('.json'))
   )
 }
 
@@ -95,6 +113,33 @@ async function findProjectFileWatchDirectory(
   }
 
   return rootPath
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) return false
+    throw error
+  }
+}
+
+async function createUniqueReplacementBackupPath(targetPath: string): Promise<string> {
+  const targetParent = dirname(targetPath)
+  const targetName = basename(targetPath)
+  const timestamp = Date.now()
+
+  for (let index = 0; index < 100; index += 1) {
+    const suffix = index === 0 ? '' : `-${index}`
+    const candidate = join(
+      targetParent,
+      `.${targetName}.replace-backup-${timestamp}${suffix}`,
+    )
+    if (!(await pathExists(candidate))) return candidate
+  }
+
+  throw new Error(`Unable to allocate a replacement backup path for ${targetPath}`)
 }
 
 type ChokidarProjectFileEvent = 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir'
@@ -121,14 +166,13 @@ function getRawEventPath(
 ): string {
   if (isAbsolute(rawPath)) return rawPath
 
-  const watchedPath = (
-    typeof details === 'object'
-    && details !== null
-    && 'watchedPath' in details
-    && typeof details.watchedPath === 'string'
-  )
-    ? details.watchedPath
-    : watchDirectory
+  const watchedPath =
+    typeof details === 'object' &&
+    details !== null &&
+    'watchedPath' in details &&
+    typeof details.watchedPath === 'string'
+      ? details.watchedPath
+      : watchDirectory
 
   if (isSamePath(watchedPath, targetPath)) return targetPath
   return join(watchedPath, rawPath)
@@ -260,14 +304,14 @@ export class WorkspaceService {
       const fileWasTruncated = normalizedOffset > fileStats.size
       const unreadBytes = Math.max(0, fileStats.size - normalizedOffset)
       const tooMuchUnread = unreadBytes > readBytes
-      const start = fileWasTruncated || tooMuchUnread
-        ? Math.max(0, fileStats.size - readBytes)
-        : normalizedOffset
+      const start =
+        fileWasTruncated || tooMuchUnread
+          ? Math.max(0, fileStats.size - readBytes)
+          : normalizedOffset
       const length = fileStats.size - start
       const buffer = Buffer.alloc(length)
-      const result = length > 0
-        ? await handle.read(buffer, 0, length, start)
-        : { bytesRead: 0 }
+      const result =
+        length > 0 ? await handle.read(buffer, 0, length, start) : { bytesRead: 0 }
       const raw = buffer.subarray(0, result.bytesRead).toString('utf8')
       const decodedTooLong = raw.length > boundedMaxChars
       const truncated = fileWasTruncated || tooMuchUnread || decodedTooLong
@@ -318,6 +362,119 @@ export class WorkspaceService {
     await writeFile(canonicalPath, content, 'utf8')
   }
 
+  async listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    try {
+      const entries = await readdir(canonicalPath, { withFileTypes: true })
+      return entries
+        .filter((entry) => entry.isFile() || entry.isDirectory())
+        .map((entry) => ({
+          name: entry.name,
+          path: join(canonicalPath, entry.name),
+          type: entry.isDirectory() ? ('directory' as const) : ('file' as const),
+        }))
+        .sort((entry, otherEntry) => {
+          if (entry.type !== otherEntry.type) {
+            return entry.type === 'directory' ? -1 : 1
+          }
+          return entry.name.localeCompare(otherEntry.name)
+        })
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return []
+      }
+
+      throw error
+    }
+  }
+
+  async removeProjectDirectory(path: string): Promise<void> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (isSamePath(canonicalPath, projectRoot)) {
+      throw new Error('Refusing to remove the project root as a workspace directory')
+    }
+
+    try {
+      const pathStats = await stat(canonicalPath)
+      if (!pathStats.isDirectory()) {
+        throw new Error(`${canonicalPath} is not a directory`)
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) {
+        return
+      }
+
+      throw error
+    }
+
+    await rm(canonicalPath, { force: true, recursive: true })
+  }
+
+  async prepareProjectDirectoryReplacement(
+    path: string,
+  ): Promise<WorkspaceDirectoryReplacement | null> {
+    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    if (isSamePath(canonicalPath, projectRoot)) {
+      throw new Error('Refusing to replace the registered project root directly')
+    }
+
+    try {
+      const pathStats = await stat(canonicalPath)
+      if (!pathStats.isDirectory()) {
+        throw new Error(`${canonicalPath} is not a directory`)
+      }
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return null
+      throw error
+    }
+
+    const backupPath = await createUniqueReplacementBackupPath(canonicalPath)
+    await rename(canonicalPath, backupPath)
+    return {
+      targetPath: canonicalPath,
+      backupPath,
+    }
+  }
+
+  async restoreProjectDirectoryReplacement(
+    replacement: WorkspaceDirectoryReplacement,
+  ): Promise<void> {
+    const canonicalTarget = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.targetPath,
+    )
+    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.backupPath,
+    )
+
+    if (!(await pathExists(canonicalBackup))) {
+      throw new Error(
+        `Workspace replacement backup is missing: ${canonicalBackup}. Refusing to delete ${canonicalTarget}.`,
+      )
+    }
+
+    await rm(canonicalTarget, { force: true, recursive: true })
+
+    try {
+      await rename(canonicalBackup, canonicalTarget)
+    } catch (error) {
+      throw new Error(
+        `Failed to restore workspace replacement backup from ${canonicalBackup} to ${canonicalTarget}.`,
+        { cause: error },
+      )
+    }
+  }
+
+  async finalizeProjectDirectoryReplacement(
+    replacement: WorkspaceDirectoryReplacement,
+  ): Promise<void> {
+    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
+      replacement.backupPath,
+    )
+    await rm(canonicalBackup, { force: true, recursive: true })
+  }
+
   async watchProjectFile(
     path: string,
     listener: (event: DesktopProjectFileChangedEvent) => void,
@@ -362,11 +519,11 @@ export class WorkspaceService {
 
     watcher.on('all', (eventType, changedPath) => {
       if (
-        eventType !== 'add'
-        && eventType !== 'addDir'
-        && eventType !== 'change'
-        && eventType !== 'unlink'
-        && eventType !== 'unlinkDir'
+        eventType !== 'add' &&
+        eventType !== 'addDir' &&
+        eventType !== 'change' &&
+        eventType !== 'unlink' &&
+        eventType !== 'unlinkDir'
       ) {
         return
       }
@@ -413,6 +570,35 @@ export class WorkspaceService {
 
   async scanPdkDirectory(path: string): Promise<ScannedPdkDirectory> {
     return await this.projectScopeProvider.scanPdkDirectory(path)
+  }
+
+  async scanRtlDirectory(path: string): Promise<ScannedRtlDirectory> {
+    return await scanRtlDirectoryFiles(path)
+  }
+
+  async listDesignFiles(): Promise<WorkspaceDesignFileEntry[]> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    return await listWorkspaceDesignFiles(projectRoot)
+  }
+
+  async addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
+      getWorkspaceFilelistPath(projectRoot),
+    )
+    await this.assertCanWriteProjectTextFile(canonicalFilelist)
+    return await addWorkspaceDesignFiles(projectRoot, sourcePaths)
+  }
+
+  async removeDesignFile(
+    filelistEntry: string,
+  ): Promise<WorkspaceDesignFileEntry | null> {
+    const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    const canonicalFilelist = await this.projectScopeProvider.requestProjectPathAccess(
+      getWorkspaceFilelistPath(projectRoot),
+    )
+    await this.assertCanWriteProjectTextFile(canonicalFilelist)
+    return await removeWorkspaceDesignFile(projectRoot, filelistEntry)
   }
 
   private async closeAllProjectFileWatchers(): Promise<void> {

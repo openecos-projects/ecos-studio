@@ -22,7 +22,6 @@ docs/superpowers/
 /dev_log.md
 
 # Resource Manager runtime cache and manifests
-ecos/server/ecos_server/resource/data/
 *.json.bak
 resource-registry.json
 resource-manifest.json

@@ -1,6 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
-import { access, copyFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  access,
+  copyFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -14,15 +25,24 @@ import type {
   ResourceStatus,
 } from '@ecos-studio/shared'
 
-const DEFAULT_REGISTRY_URL = 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/tool-registry.json'
+const DEFAULT_REGISTRY_URL = 'https://emin017.github.io/ecos-registry/tool-registry.json'
 const ALL_PLATFORM = 'all-platform'
-const TOP_LEVEL_ENTRY_LIMIT = 20
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
-const SURFER_RELEASE_ASSET_URL = 'https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip'
+const SURFER_RELEASE_ASSET_URL =
+  'https://github.com/openecos-projects/ecos-resource-assets/releases/download/v0.7.0-ecos/surfer-web-assets-0.7.0-ecos.zip'
+const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 
 type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry
-type ArchiveExtractor = (archivePath: string, destination: string, stripPrefix?: string | null) => Promise<void>
-type CommandRunner = (command: string, args: string[], options?: CommandRunnerOptions) => Promise<void>
+type ArchiveExtractor = (
+  archivePath: string,
+  destination: string,
+  stripPrefix?: string | null,
+) => Promise<void>
+type CommandRunner = (
+  command: string,
+  args: string[],
+  options?: CommandRunnerOptions,
+) => Promise<void>
 type DownloadProgressListener = (progress: DownloadProgress) => void
 type Sha256Verifier = (filePath: string, expected: string) => Promise<boolean>
 
@@ -81,7 +101,9 @@ interface ToolHealthStatus {
 
 type ToolHealthByResourceId = Record<string, ToolHealthStatus>
 
-type CachedResourceUpdateCheckItem = ResourceUpdateCheckItem & { update_url: string | null }
+type CachedResourceUpdateCheckItem = ResourceUpdateCheckItem & {
+  update_url: string | null
+}
 
 interface ResourceUpdateCheckResult {
   status: string
@@ -248,12 +270,14 @@ export class ResourceManagerService {
   private resourceOperationPromises = new Map<string, Promise<ResourceOperationResult>>()
 
   constructor(options: ResourceManagerServiceOptions = {}) {
-    this.resourcesDir = options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
+    this.resourcesDir =
+      options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
     this.toolsDir = options.toolsDir ?? join(xdgDataHome(), 'ecos-studio', 'tools')
     this.pdksDir = options.pdksDir ?? join(xdgDataHome(), 'ecos-studio', 'pdks')
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
-    this.registryUrl = options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
+    this.registryUrl =
+      options.registryUrl ?? process.env.ECOS_REGISTRY_URL ?? DEFAULT_REGISTRY_URL
     this.commandRunner = options.commandRunner ?? runCommand
     this.fetchImpl = options.fetchImpl ?? fetch
     this.archiveExtractor = options.archiveExtractor ?? extractArchive
@@ -271,19 +295,40 @@ export class ResourceManagerService {
     const registry = state.registry
 
     for (const tool of registry?.tools ?? []) {
-      resources.push(this.registryToolToResource(tool, registry, installedTools, manifest, updateChecks, toolHealth))
+      resources.push(
+        this.registryToolToResource(
+          tool,
+          registry,
+          installedTools,
+          manifest,
+          updateChecks,
+          toolHealth,
+        ),
+      )
     }
     for (const pdk of registry?.pdks ?? []) {
       const local = installedPdks[pdk.id]
-      if (!local) resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
+      if (!local)
+        resources.push(this.registryPdkToResource(pdk, registry, manifest, toolHealth))
     }
     for (const [name, entry] of Object.entries(installedTools)) {
       if (!resources.some((resource) => resource.id === `tool:${name}`)) {
-        resources.push(this.installedToolToResource(name, entry, toolHealth[`tool:${name}`]))
+        resources.push(
+          this.installedToolToResource(name, entry, toolHealth[`tool:${name}`]),
+        )
       }
     }
     for (const [id, entry] of Object.entries(installedPdks)) {
-      resources.push(this.pdkEntryToResource(entry, this.findRegistryPdk(registry, id), registry, manifest, updateChecks, toolHealth))
+      resources.push(
+        this.pdkEntryToResource(
+          entry,
+          this.findRegistryPdk(registry, id),
+          registry,
+          manifest,
+          updateChecks,
+          toolHealth,
+        ),
+      )
     }
 
     return {
@@ -293,7 +338,9 @@ export class ResourceManagerService {
   }
 
   async getResource(resourceId: string): Promise<ResourceInfo> {
-    const resource = (await this.listResources()).resources.find((item) => item.id === resourceId)
+    const resource = (await this.listResources()).resources.find(
+      (item) => item.id === resourceId,
+    )
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`)
     }
@@ -349,7 +396,11 @@ export class ResourceManagerService {
 
       const pathExecutable = await resolveRuntimeExecutable(entry, options.platform)
       const capabilities = detectToolCapabilities(entry)
-      const runtimeTools = await resolveRuntimeTools(entry, capabilities, options.platform)
+      const runtimeTools = await resolveRuntimeTools(
+        entry,
+        capabilities,
+        options.platform,
+      )
       if (!pathExecutable && runtimeTools.size === 0) {
         electronLogger.debug(
           '[resources] Skipping runtime tool %s: no usable executable found under %s',
@@ -417,7 +468,7 @@ export class ResourceManagerService {
 
     for (const entry of Object.values(manifest.installed)) {
       if (!isPdkEntry(entry) || !entry.active || entry.health !== 'ok') continue
-      if (!await isExistingDirectory(entry.canonical_path)) {
+      if (!(await isExistingDirectory(entry.canonical_path))) {
         electronLogger.debug(
           '[resources] Skipping runtime PDK %s: canonical path is missing at %s',
           entry.id,
@@ -441,7 +492,13 @@ export class ResourceManagerService {
     version?: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
-    return await this.installResourceWithDependencies(resourceId, version, 'install', listener, new Set())
+    return await this.installResourceWithDependencies(
+      resourceId,
+      version,
+      'install',
+      listener,
+      new Set(),
+    )
   }
 
   private async installResourceWithDependencies(
@@ -467,7 +524,13 @@ export class ResourceManagerService {
       return await existingOperation
     }
 
-    const operation = this.runInstallResourceWithDependencies(resourceId, version, action, listener, visiting)
+    const operation = this.runInstallResourceWithDependencies(
+      resourceId,
+      version,
+      action,
+      listener,
+      visiting,
+    )
     this.resourceOperationPromises.set(resourceId, operation)
     try {
       return await operation
@@ -490,9 +553,18 @@ export class ResourceManagerService {
       const state = await this.fetchRegistry()
       const manifest = await this.readManifest()
       const toolHealth = await checkInstalledToolHealth(getInstalledTools(manifest))
-      const dependencies = this.registryRequiresForResource(state.registry, resourceId, version)
+      const dependencies = this.registryRequiresForResource(
+        state.registry,
+        resourceId,
+        version,
+      )
       const unsatisfiedDependencies = dependencies.filter((dependencyId) => {
-        return !resourceMatchesRegistryLock(state.registry, manifest, dependencyId, toolHealth)
+        return !resourceMatchesRegistryLock(
+          state.registry,
+          manifest,
+          dependencyId,
+          toolHealth,
+        )
       })
 
       if (unsatisfiedDependencies.length > 0) {
@@ -507,26 +579,56 @@ export class ResourceManagerService {
 
       for (const [index, dependencyId] of unsatisfiedDependencies.entries()) {
         const latestManifest = await this.readManifest()
-        const latestToolHealth = await checkInstalledToolHealth(getInstalledTools(latestManifest))
-        if (resourceMatchesRegistryLock(state.registry, latestManifest, dependencyId, latestToolHealth)) {
+        const latestToolHealth = await checkInstalledToolHealth(
+          getInstalledTools(latestManifest),
+        )
+        if (
+          resourceMatchesRegistryLock(
+            state.registry,
+            latestManifest,
+            dependencyId,
+            latestToolHealth,
+          )
+        ) {
           continue
         }
-        const dependencyAction: ResourceAction = latestManifest.installed[dependencyId] ? 'update' : 'install'
+        const dependencyAction: ResourceAction = latestManifest.installed[dependencyId]
+          ? 'update'
+          : 'install'
         this.publish(listener, {
           resource_id: resourceId,
           action,
           phase: 'installing_dependency',
-          progress: Math.min(0.2, (index / Math.max(unsatisfiedDependencies.length, 1)) * 0.2),
+          progress: Math.min(
+            0.2,
+            (index / Math.max(unsatisfiedDependencies.length, 1)) * 0.2,
+          ),
           message: `${dependencyAction === 'update' ? 'Updating' : 'Installing'} required resource ${index + 1}/${unsatisfiedDependencies.length}: ${resourceNameFromAnyId(dependencyId)}`,
         })
-        await this.installResourceWithDependencies(dependencyId, undefined, dependencyAction, listener, visiting)
+        await this.installResourceWithDependencies(
+          dependencyId,
+          undefined,
+          dependencyAction,
+          listener,
+          visiting,
+        )
       }
 
       if (resourceId.startsWith('tool:')) {
-        return await this.installTool(resourceId.slice('tool:'.length), version, action, listener)
+        return await this.installTool(
+          resourceId.slice('tool:'.length),
+          version,
+          action,
+          listener,
+        )
       }
       if (resourceId.startsWith('pdk:')) {
-        return await this.installPdk(resourceId.slice('pdk:'.length), version, action, listener)
+        return await this.installPdk(
+          resourceId.slice('pdk:'.length),
+          version,
+          action,
+          listener,
+        )
       }
       throw new Error(`Install is not implemented for ${resourceId}`)
     } finally {
@@ -538,7 +640,13 @@ export class ResourceManagerService {
     resourceId: string,
     listener?: (event: ResourceJob) => void,
   ): Promise<ResourceOperationResult> {
-    return await this.installResourceWithDependencies(resourceId, undefined, 'update', listener, new Set())
+    return await this.installResourceWithDependencies(
+      resourceId,
+      undefined,
+      'update',
+      listener,
+      new Set(),
+    )
   }
 
   private registryRequiresForResource(
@@ -610,7 +718,9 @@ export class ResourceManagerService {
     return { status: 'activated', resource_id: `pdk:${pdkId}` }
   }
 
-  async validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }> {
+  async validatePdk(
+    resourceId: string,
+  ): Promise<{ resource_id: string; health: { status: string } }> {
     const pdkId = resourceNameFromId(resourceId, 'pdk')
     let health = 'ok'
     await this.mutateManifest(async (manifest) => {
@@ -637,7 +747,9 @@ export class ResourceManagerService {
         throw new Error(`PDK '${pdkId}' not found`)
       }
       if (isPdkEntry(entry) && entry.managed) {
-        throw new Error(`PDK '${pdkId}' is managed and cannot remove reference; use uninstall`)
+        throw new Error(
+          `PDK '${pdkId}' is managed and cannot remove reference; use uninstall`,
+        )
       }
       delete manifest.installed[`pdk:${pdkId}`]
     })
@@ -649,7 +761,9 @@ export class ResourceManagerService {
     const resourceId = `pdk:${scanned.pdkId}`
     let importedEntry!: PdkInventoryEntry
     await this.mutateManifest((manifest) => {
-      const activePdk = Object.values(manifest.installed).find((entry) => isPdkEntry(entry) && entry.active)
+      const activePdk = Object.values(manifest.installed).find(
+        (entry) => isPdkEntry(entry) && entry.active,
+      )
       importedEntry = {
         type: 'pdk',
         id: scanned.pdkId,
@@ -661,7 +775,10 @@ export class ResourceManagerService {
         source_url: '',
         canonical_path: scanned.canonicalPath,
         path: scanned.canonicalPath,
-        detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+        detected_files: [
+          ...scanned.detectedFiles.directories,
+          ...scanned.detectedFiles.files,
+        ],
         detected_file_groups: scanned.detectedFiles,
         imported_at: utcNowIso(),
         active: activePdk == null,
@@ -673,6 +790,19 @@ export class ResourceManagerService {
     return this.pdkEntryToResource(importedEntry)
   }
 
+  async importLocalPath(resourceId: string, path: string): Promise<ResourceInfo> {
+    if (resourceId.startsWith('tool:')) {
+      return await this.importToolPath(resourceNameFromId(resourceId, 'tool'), path)
+    }
+    if (resourceId.startsWith('pdk:')) {
+      return await this.importPdkPathForResource(
+        resourceNameFromId(resourceId, 'pdk'),
+        path,
+      )
+    }
+    throw new Error(`Unsupported resource id: ${resourceId}`)
+  }
+
   async refreshRegistry(): Promise<{ status: string; tools_count: number }> {
     const state = await this.fetchRegistry(true)
     return {
@@ -681,7 +811,9 @@ export class ResourceManagerService {
     }
   }
 
-  async checkResourceUpdates(options: ResourceUpdateCheckOptions = {}): Promise<ResourceUpdateCheckResult> {
+  async checkResourceUpdates(
+    options: ResourceUpdateCheckOptions = {},
+  ): Promise<ResourceUpdateCheckResult> {
     if (this.updateCheckPromise && !options.force) {
       return await this.updateCheckPromise
     }
@@ -697,7 +829,9 @@ export class ResourceManagerService {
     }
   }
 
-  private async runResourceUpdateCheck(options: ResourceUpdateCheckOptions): Promise<ResourceUpdateCheckResult> {
+  private async runResourceUpdateCheck(
+    options: ResourceUpdateCheckOptions,
+  ): Promise<ResourceUpdateCheckResult> {
     const state = await this.fetchRegistry(options.refreshRegistry === true)
     const diagnostics = [...state.diagnostics]
     if (!state.registry) {
@@ -776,6 +910,102 @@ export class ResourceManagerService {
     }
   }
 
+  private async importToolPath(name: string, path: string): Promise<ResourceInfo> {
+    const canonicalPath = resolve(path)
+    const pathStats = await stat(canonicalPath)
+    if (!pathStats.isDirectory()) {
+      throw new Error(`Not a directory: ${path}`)
+    }
+
+    const expectedExecutable = `bin/${name}`
+    const expectedPath = join(canonicalPath, ...expectedExecutable.split('/'))
+    if (!(await pathExists(expectedPath))) {
+      throw new Error(`Expected executable not found for ${name}`)
+    }
+    const expectedStats = await stat(expectedPath)
+    if (!expectedStats.isFile()) {
+      throw new Error(`Expected executable is not a file for ${name}`)
+    }
+    if (!(await isUsableExecutable(expectedPath, process.platform))) {
+      throw new Error(`Expected executable is not executable for ${name}`)
+    }
+
+    const resourceId = `tool:${name}`
+    await this.mutateManifest((manifest) => {
+      manifest.installed[resourceId] = {
+        type: 'tool',
+        name,
+        version: '',
+        path: canonicalPath,
+        installed_at: utcNowIso(),
+        sha256: '',
+        detected_executables: [expectedExecutable],
+        executable: expectedExecutable,
+        active: true,
+        managed: false,
+      }
+    })
+    return await this.getResource(resourceId)
+  }
+
+  private async importPdkPathForResource(
+    pdkId: string,
+    path: string,
+  ): Promise<ResourceInfo> {
+    const scanned = await scanPdkDirectory(path)
+    if (scanned.pdkId !== pdkId) {
+      throw new Error(
+        `Selected directory contains PDK '${scanned.pdkId}', expected '${pdkId}'`,
+      )
+    }
+
+    const resourceId = `pdk:${pdkId}`
+    let importedEntry!: PdkInventoryEntry
+    await this.mutateManifest((manifest) => {
+      const previous = manifest.installed[resourceId]
+      const hasOtherActivePdk = Object.entries(manifest.installed).some(
+        ([id, entry]) => id !== resourceId && isPdkEntry(entry) && entry.active,
+      )
+      const active = isPdkEntry(previous)
+        ? previous.active || !hasOtherActivePdk
+        : !hasOtherActivePdk
+      if (active) {
+        for (const [id, entry] of Object.entries(manifest.installed)) {
+          if (id !== resourceId && isPdkEntry(entry)) {
+            entry.active = false
+          }
+        }
+      }
+
+      importedEntry = {
+        type: 'pdk',
+        id: pdkId,
+        name: scanned.name,
+        pdk_id: pdkId,
+        version: '',
+        sha256: '',
+        source: 'local',
+        source_url: '',
+        canonical_path: scanned.canonicalPath,
+        path: scanned.canonicalPath,
+        detected_files: [
+          ...scanned.detectedFiles.directories,
+          ...scanned.detectedFiles.files,
+        ],
+        detected_file_groups: scanned.detectedFiles,
+        imported_at: utcNowIso(),
+        active,
+        managed: false,
+        health: 'ok',
+      }
+      manifest.installed[resourceId] = importedEntry
+    })
+    return this.pdkEntryToResource(
+      importedEntry,
+      this.findRegistryPdk(this.registryMemory, pdkId),
+    )
+  }
+
   private async installTool(
     name: string,
     requestedVersion: string | undefined,
@@ -804,7 +1034,11 @@ export class ResourceManagerService {
       const resolvedAsset = await this.resolvePlatformAsset(asset)
       const version = versionEntry.version
       const destination = join(this.toolsDir, name, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`)
+      tempArchive = join(
+        this.resourcesDir,
+        'downloads',
+        `${name}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`,
+      )
       tempExtract = join(this.toolsDir, name, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -822,27 +1056,51 @@ export class ResourceManagerService {
         tempArchive,
         resolvedAsset.size,
       )
-      this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${name} v${version}...` })
-      await downloadAsset(resolvedAsset.url, tempArchive, this.fetchImpl, resolvedAsset.size, (progress) => {
-        const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
-        this.publish(listener, {
-          resource_id: resourceId,
-          action,
-          phase: 'downloading',
-          progress: progress.progress,
-          message: `Downloading ${name} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
-        })
-        electronLogger.debug(
-          '[resources] Download progress for %s: %d/%s bytes (%d%%)',
-          resourceId,
-          progress.downloadedBytes,
-          progress.totalBytes ?? '?',
-          Math.round(progress.progress * 100),
-        )
-      }, controller.signal)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'downloading',
+        progress: 0,
+        message: `Downloading ${name} v${version}...`,
+      })
+      await downloadAsset(
+        resolvedAsset.url,
+        tempArchive,
+        this.fetchImpl,
+        resolvedAsset.size,
+        (progress) => {
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'downloading',
+            progress: progress.progress,
+            message: `Downloading ${name} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+          })
+          electronLogger.debug(
+            '[resources] Download progress for %s: %d/%s bytes (%d%%)',
+            resourceId,
+            progress.downloadedBytes,
+            progress.totalBytes ?? '?',
+            Math.round(progress.progress * 100),
+          )
+        },
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
-      this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'verifying',
+        progress: 0,
+        message: 'Verifying SHA256...',
+      })
+      electronLogger.debug(
+        '[resources] Verifying %s with SHA256 %s',
+        resourceId,
+        resolvedAsset.sha256 || '(not provided)',
+      )
       if (!resolvedAsset.sha256) {
         throw new Error(`Missing SHA256 checksum for ${name}`)
       }
@@ -887,7 +1145,12 @@ export class ResourceManagerService {
         progress: 1,
         message: `${name} v${version} installed successfully`,
       })
-      electronLogger.info('[resources] Installed %s v%s at %s', resourceId, version, destination)
+      electronLogger.info(
+        '[resources] Installed %s v%s at %s',
+        resourceId,
+        version,
+        destination,
+      )
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -917,7 +1180,8 @@ export class ResourceManagerService {
     } finally {
       this.activeJobs.delete(resourceId)
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
-      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
+      if (tempExtract)
+        await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -950,7 +1214,11 @@ export class ResourceManagerService {
       const version = versionEntry.version
       const displayName = pdk.display_name || pdkId
       const destination = join(this.pdksDir, pdkId, version)
-      tempArchive = join(this.resourcesDir, 'downloads', `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`)
+      tempArchive = join(
+        this.resourcesDir,
+        'downloads',
+        `${pdkId}-${version}-${randomUUID()}${archiveExtensionFromUrl(resolvedAsset.url)}`,
+      )
       tempExtract = join(this.pdksDir, pdkId, `.extract-${version}-${randomUUID()}`)
 
       await mkdir(dirname(tempArchive), { recursive: true })
@@ -968,27 +1236,51 @@ export class ResourceManagerService {
         tempArchive,
         resolvedAsset.size,
       )
-      this.publish(listener, { resource_id: resourceId, action, phase: 'downloading', progress: 0, message: `Downloading ${displayName} v${version}...` })
-      await downloadAsset(resolvedAsset.url, tempArchive, this.fetchImpl, resolvedAsset.size, (progress) => {
-        const totalLabel = progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
-        this.publish(listener, {
-          resource_id: resourceId,
-          action,
-          phase: 'downloading',
-          progress: progress.progress,
-          message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
-        })
-        electronLogger.debug(
-          '[resources] Download progress for %s: %d/%s bytes (%d%%)',
-          resourceId,
-          progress.downloadedBytes,
-          progress.totalBytes ?? '?',
-          Math.round(progress.progress * 100),
-        )
-      }, controller.signal)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'downloading',
+        progress: 0,
+        message: `Downloading ${displayName} v${version}...`,
+      })
+      await downloadAsset(
+        resolvedAsset.url,
+        tempArchive,
+        this.fetchImpl,
+        resolvedAsset.size,
+        (progress) => {
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'downloading',
+            progress: progress.progress,
+            message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+          })
+          electronLogger.debug(
+            '[resources] Download progress for %s: %d/%s bytes (%d%%)',
+            resourceId,
+            progress.downloadedBytes,
+            progress.totalBytes ?? '?',
+            Math.round(progress.progress * 100),
+          )
+        },
+        controller.signal,
+      )
       throwIfAborted(controller.signal)
-      this.publish(listener, { resource_id: resourceId, action, phase: 'verifying', progress: 0, message: 'Verifying SHA256...' })
-      electronLogger.debug('[resources] Verifying %s with SHA256 %s', resourceId, resolvedAsset.sha256 || '(not provided)')
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'verifying',
+        progress: 0,
+        message: 'Verifying SHA256...',
+      })
+      electronLogger.debug(
+        '[resources] Verifying %s with SHA256 %s',
+        resourceId,
+        resolvedAsset.sha256 || '(not provided)',
+      )
       if (!resolvedAsset.sha256) {
         throw new Error(`Missing SHA256 checksum for ${pdkId}`)
       }
@@ -999,9 +1291,19 @@ export class ResourceManagerService {
       throwIfAborted(controller.signal)
       electronLogger.debug('[resources] Extracting %s into %s', resourceId, destination)
       await rm(tempExtract, { force: true, recursive: true })
-      await this.withExtractProgress(resourceId, action, displayName, listener, async () => {
-        await this.archiveExtractor(tempArchive, tempExtract, resolvedAsset.strip_prefix)
-      })
+      await this.withExtractProgress(
+        resourceId,
+        action,
+        displayName,
+        listener,
+        async () => {
+          await this.archiveExtractor(
+            tempArchive,
+            tempExtract,
+            resolvedAsset.strip_prefix,
+          )
+        },
+      )
       throwIfAborted(controller.signal)
       await this.downloadSupplementalAssets(
         resourceId,
@@ -1013,17 +1315,39 @@ export class ResourceManagerService {
         controller.signal,
       )
       throwIfAborted(controller.signal)
-      await this.runPostInstallSteps(resourceId, action, displayName, tempExtract, resolvedAsset.post_install, listener)
+      await this.preDownloadPdkReleaseAssets(
+        resourceId,
+        action,
+        displayName,
+        tempExtract,
+        version,
+        resolvedAsset,
+        listener,
+        controller.signal,
+      )
+      throwIfAborted(controller.signal)
+      await this.runPostInstallSteps(
+        resourceId,
+        action,
+        displayName,
+        tempExtract,
+        resolvedAsset.post_install,
+        listener,
+      )
       throwIfAborted(controller.signal)
 
       const scanned = await scanPdkDirectory(tempExtract)
       await replaceDirectoryWithRollback(tempExtract, destination, async () => {
         await this.mutateManifest((manifest) => {
           const previous = manifest.installed[resourceId]
-          const hasOtherActivePdk = Object.entries(manifest.installed).some(([id, entry]) => {
-            return id !== resourceId && isPdkEntry(entry) && entry.active
-          })
-          const active = isPdkEntry(previous) ? previous.active || !hasOtherActivePdk : !hasOtherActivePdk
+          const hasOtherActivePdk = Object.entries(manifest.installed).some(
+            ([id, entry]) => {
+              return id !== resourceId && isPdkEntry(entry) && entry.active
+            },
+          )
+          const active = isPdkEntry(previous)
+            ? previous.active || !hasOtherActivePdk
+            : !hasOtherActivePdk
           if (active) {
             for (const [id, entry] of Object.entries(manifest.installed)) {
               if (id !== resourceId && isPdkEntry(entry)) {
@@ -1042,7 +1366,10 @@ export class ResourceManagerService {
             source_url: resolvedAsset.url,
             canonical_path: destination,
             path: destination,
-            detected_files: [...scanned.detectedFiles.directories, ...scanned.detectedFiles.files],
+            detected_files: [
+              ...scanned.detectedFiles.directories,
+              ...scanned.detectedFiles.files,
+            ],
             detected_file_groups: scanned.detectedFiles,
             imported_at: utcNowIso(),
             active,
@@ -1062,7 +1389,12 @@ export class ResourceManagerService {
         progress: 1,
         message: `${displayName} v${version} installed successfully`,
       })
-      electronLogger.info('[resources] Installed %s v%s at %s', resourceId, version, destination)
+      electronLogger.info(
+        '[resources] Installed %s v%s at %s',
+        resourceId,
+        version,
+        destination,
+      )
       return { status: 'started', resource_id: resourceId, version }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -1092,7 +1424,8 @@ export class ResourceManagerService {
     } finally {
       this.activeJobs.delete(resourceId)
       if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
-      if (tempExtract) await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
+      if (tempExtract)
+        await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
     }
   }
 
@@ -1119,6 +1452,43 @@ export class ResourceManagerService {
     }
   }
 
+  private async preDownloadPdkReleaseAssets(
+    resourceId: string,
+    action: ResourceAction,
+    name: string,
+    destination: string,
+    version: string,
+    asset: PlatformAsset,
+    listener?: (event: ResourceJob) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (asset.post_install.length === 0) return
+    const assetNames = await readPdkReleaseAssetNames(destination)
+    const baseUrl = releaseDownloadBaseUrl(asset.url, version)
+    if (!baseUrl || assetNames.length === 0) return
+
+    for (const [index, assetName] of assetNames.entries()) {
+      const targetPath = join(destination, assetName)
+      if (await pathExists(targetPath)) continue
+      const downloadUrl = `${baseUrl}/${encodeURIComponent(assetName)}`
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'post_install',
+        progress: 0.98,
+        message: `Downloading ${name} post-install asset ${index + 1}/${assetNames.length}: ${assetName}`,
+      })
+      await downloadAsset(
+        downloadUrl,
+        targetPath,
+        this.fetchImpl,
+        null,
+        undefined,
+        signal,
+      )
+    }
+  }
+
   private async downloadSupplementalAssets(
     resourceId: string,
     action: ResourceAction,
@@ -1141,7 +1511,10 @@ export class ResourceManagerService {
     for (const [index, asset] of assets.entries()) {
       const targetPath = targets[index]
       await mkdir(dirname(targetPath), { recursive: true })
-      const temporaryPath = join(dirname(targetPath), `.${basename(targetPath)}.download-${randomUUID()}`)
+      const temporaryPath = join(
+        dirname(targetPath),
+        `.${basename(targetPath)}.download-${randomUUID()}`,
+      )
       this.publish(listener, {
         resource_id: resourceId,
         action,
@@ -1150,7 +1523,14 @@ export class ResourceManagerService {
         message: `Downloading ${name} supplemental asset ${index + 1}/${assets.length}: ${asset.path}`,
       })
       try {
-        await downloadAsset(asset.url, temporaryPath, this.fetchImpl, asset.size, undefined, signal)
+        await downloadAsset(
+          asset.url,
+          temporaryPath,
+          this.fetchImpl,
+          asset.size,
+          undefined,
+          signal,
+        )
         const actualSize = await stat(temporaryPath).then((value) => value.size)
         if (actualSize !== asset.size) {
           throw new Error(
@@ -1159,7 +1539,9 @@ export class ResourceManagerService {
         }
         const verified = await this.sha256Verifier(temporaryPath, asset.sha256)
         if (!verified) {
-          throw new Error(`SHA256 verification failed for supplemental asset ${asset.path}`)
+          throw new Error(
+            `SHA256 verification failed for supplemental asset ${asset.path}`,
+          )
         }
         throwIfAborted(signal)
         await rename(temporaryPath, targetPath)
@@ -1261,7 +1643,9 @@ export class ResourceManagerService {
       return this.updateCheckMemory
     }
     try {
-      const cache = parseUpdateCheckCache(JSON.parse(await readFile(this.updateCheckCachePath(), 'utf8')))
+      const cache = parseUpdateCheckCache(
+        JSON.parse(await readFile(this.updateCheckCachePath(), 'utf8')),
+      )
       this.updateCheckMemory = cache
       return cache
     } catch {
@@ -1278,7 +1662,12 @@ export class ResourceManagerService {
 
   private async readManifest(): Promise<ResourceManifest> {
     try {
-      return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
+      return parseManifest(
+        JSON.parse(await readFile(this.manifestPath, 'utf8')),
+        this.resourcesDir,
+        this.toolsDir,
+        this.pdksDir,
+      )
     } catch (error) {
       if (isFileNotFoundError(error)) return this.emptyManifest()
       throw new Error(
@@ -1290,7 +1679,12 @@ export class ResourceManagerService {
 
   private async readRuntimeManifest(): Promise<ResourceManifest> {
     try {
-      return parseManifest(JSON.parse(await readFile(this.manifestPath, 'utf8')), this.resourcesDir, this.toolsDir, this.pdksDir)
+      return parseManifest(
+        JSON.parse(await readFile(this.manifestPath, 'utf8')),
+        this.resourcesDir,
+        this.toolsDir,
+        this.pdksDir,
+      )
     } catch (error) {
       if (!isFileNotFoundError(error)) {
         electronLogger.debug(
@@ -1302,7 +1696,9 @@ export class ResourceManagerService {
     }
   }
 
-  private async mutateManifest(mutator: (manifest: ResourceManifest) => void | Promise<void>): Promise<void> {
+  private async mutateManifest(
+    mutator: (manifest: ResourceManifest) => void | Promise<void>,
+  ): Promise<void> {
     await this.withManifestLock(async () => {
       const manifest = await this.readManifest()
       await mutator(manifest)
@@ -1358,12 +1754,21 @@ export class ResourceManagerService {
   ): ResourceInfo {
     const versions = tool.versions.map((version) => version.version)
     const latest = tool.versions[0]
-    const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
+    const { platform, asset } = latest
+      ? selectPlatformAsset(latest)
+      : { platform: currentPlatform(), asset: null }
     const local = installed[tool.name]
     const resourceId = `tool:${tool.name}`
-    const localHealth = local ? toolHealth[resourceId] ?? unknownToolHealth(local) : null
+    const localHealth = local
+      ? (toolHealth[resourceId] ?? unknownToolHealth(local))
+      : null
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, registry, manifest, toolHealth)
+    const requirementState = dependencyStateFor(
+      requirements,
+      registry,
+      manifest,
+      toolHealth,
+    )
     let status: ResourceStatus = 'available'
     let actions: ResourceAction[] = ['install']
 
@@ -1375,8 +1780,19 @@ export class ResourceManagerService {
         status = localHealth?.status ?? 'invalid'
         actions = local.managed ? ['update', 'uninstall'] : []
       } else {
-        status = toolHasUpdate(local, versions[0], asset, getUpdateCheck(updateChecks, resourceId)) ? 'update_available' : 'installed'
-        actions = local.managed ? (status === 'update_available' ? ['update', 'uninstall'] : ['uninstall']) : []
+        status = toolHasUpdate(
+          local,
+          versions[0],
+          asset,
+          getUpdateCheck(updateChecks, resourceId),
+        )
+          ? 'update_available'
+          : 'installed'
+        actions = local.managed
+          ? status === 'update_available'
+            ? ['update', 'uninstall']
+            : ['uninstall']
+          : []
       }
     }
 
@@ -1390,7 +1806,8 @@ export class ResourceManagerService {
       status,
       installed_version: local?.version ?? null,
       available_versions: versions,
-      active_version: local?.active && localHealth?.status === 'ok' ? local.version : null,
+      active_version:
+        local?.active && localHealth?.status === 'ok' ? local.version : null,
       active: Boolean(local?.active && localHealth?.status === 'ok'),
       path: local?.path ?? null,
       managed_root: this.toolsDir,
@@ -1399,8 +1816,14 @@ export class ResourceManagerService {
       source: 'registry',
       homepage: tool.homepage,
       actions,
-      health: local ? withUpdateCheckHealth(toolHealthInfo(local, localHealth), getUpdateCheck(updateChecks, resourceId)) : {},
-      error: localHealth && localHealth.status !== 'ok' ? toolHealthError(localHealth) : null,
+      health: local
+        ? withUpdateCheckHealth(
+            toolHealthInfo(local, localHealth),
+            getUpdateCheck(updateChecks, resourceId),
+          )
+        : {},
+      error:
+        localHealth && localHealth.status !== 'ok' ? toolHealthError(localHealth) : null,
       requires: requirements,
       installed_requires: requirementState.installed,
       missing_requires: requirementState.missing,
@@ -1409,7 +1832,9 @@ export class ResourceManagerService {
 
   private resolvePlatformAsset(asset: PlatformAsset): ResolvedPlatformAsset
   private resolvePlatformAsset(asset: null): null
-  private resolvePlatformAsset(asset: PlatformAsset | null): ResolvedPlatformAsset | null {
+  private resolvePlatformAsset(
+    asset: PlatformAsset | null,
+  ): ResolvedPlatformAsset | null {
     if (asset === null) return null
     return {
       ...asset,
@@ -1418,12 +1843,18 @@ export class ResourceManagerService {
     }
   }
 
-  private async fetchAssetMetadata(asset: PlatformAsset): Promise<ReleaseMetadata | null> {
+  private async fetchAssetMetadata(
+    asset: PlatformAsset,
+  ): Promise<ReleaseMetadata | null> {
     if (!asset.metadata_url) return null
     try {
       const response = await this.fetchImpl(asset.metadata_url)
       if (!response.ok) {
-        electronLogger.debug('[resources] Metadata request failed with %d: %s', response.status, asset.metadata_url)
+        electronLogger.debug(
+          '[resources] Metadata request failed with %d: %s',
+          response.status,
+          asset.metadata_url,
+        )
         return null
       }
       return parseReleaseMetadata(await response.json())
@@ -1442,7 +1873,11 @@ export class ResourceManagerService {
     try {
       const response = await this.fetchImpl(asset.sha256_url)
       if (!response.ok) {
-        electronLogger.debug('[resources] SHA256 request failed with %d: %s', response.status, asset.sha256_url)
+        electronLogger.debug(
+          '[resources] SHA256 request failed with %d: %s',
+          response.status,
+          asset.sha256_url,
+        )
         return null
       }
       return parseSha256Text(await response.text())
@@ -1508,11 +1943,18 @@ export class ResourceManagerService {
     toolHealth: ToolHealthByResourceId = {},
   ): ResourceInfo {
     const latest = pdk.versions[0]
-    const { platform, asset } = latest ? selectPlatformAsset(latest) : { platform: currentPlatform(), asset: null }
+    const { platform, asset } = latest
+      ? selectPlatformAsset(latest)
+      : { platform: currentPlatform(), asset: null }
     const resourceId = `pdk:${pdk.id}`
     const isActive = this.activeJobs.has(resourceId)
     const requirements = latest?.requires ?? []
-    const requirementState = dependencyStateFor(requirements, registry, manifest, toolHealth)
+    const requirementState = dependencyStateFor(
+      requirements,
+      registry,
+      manifest,
+      toolHealth,
+    )
     return {
       id: resourceId,
       type: 'pdk',
@@ -1549,28 +1991,37 @@ export class ResourceManagerService {
     toolHealth: ToolHealthByResourceId = {},
   ): ResourceInfo {
     const resourceId = `pdk:${entry.id}`
-    const registryVersion = selectRegistryVersion(registryPdk?.versions, entry.version) ?? registryPdk?.versions[0]
+    const registryVersion =
+      selectRegistryVersion(registryPdk?.versions, entry.version) ??
+      registryPdk?.versions[0]
     const { platform, asset } = registryVersion
       ? selectPlatformAsset(registryVersion)
       : { platform: null, asset: null }
     const requirements = registryVersion?.requires ?? []
-    const requirementState = manifest && registry
-      ? dependencyStateFor(requirements, registry, manifest, toolHealth)
-      : { installed: [], missing: [] }
-    const hasUpdate = entry.managed
-      && entry.health === 'ok'
-      && Boolean(entry.version)
-      && Boolean(registryPdk?.versions[0]?.version)
-      && pdkHasUpdate(entry, registryPdk?.versions[0]?.version, asset, getUpdateCheck(updateChecks ?? null, resourceId))
+    const requirementState =
+      manifest && registry
+        ? dependencyStateFor(requirements, registry, manifest, toolHealth)
+        : { installed: [], missing: [] }
+    const hasUpdate =
+      entry.managed &&
+      entry.health === 'ok' &&
+      Boolean(entry.version) &&
+      Boolean(registryPdk?.versions[0]?.version) &&
+      pdkHasUpdate(
+        entry,
+        registryPdk?.versions[0]?.version,
+        asset,
+        getUpdateCheck(updateChecks ?? null, resourceId),
+      )
     const status: ResourceStatus = this.activeJobs.has(resourceId)
       ? 'installing'
       : entry.health === 'missing'
-      ? 'missing'
-      : entry.health === 'invalid'
-        ? 'invalid'
-        : hasUpdate
-          ? 'update_available'
-          : 'installed'
+        ? 'missing'
+        : entry.health === 'invalid'
+          ? 'invalid'
+          : hasUpdate
+            ? 'update_available'
+            : 'installed'
     const actions: ResourceAction[] = []
     if (status !== 'installing') {
       if (!entry.active) actions.push('activate')
@@ -1594,11 +2045,14 @@ export class ResourceManagerService {
       path: entry.canonical_path,
       managed_root: entry.managed ? this.pdksDir : null,
       platform,
-      size: entry.size && entry.size > 0 ? entry.size : asset?.size ?? null,
+      size: entry.size && entry.size > 0 ? entry.size : (asset?.size ?? null),
       source: entry.source || 'local',
       homepage: registryPdk?.homepage ?? '',
       actions,
-      health: withUpdateCheckHealth(pdkHealth(entry), getUpdateCheck(updateChecks ?? null, resourceId)),
+      health: withUpdateCheckHealth(
+        pdkHealth(entry),
+        getUpdateCheck(updateChecks ?? null, resourceId),
+      ),
       error: null,
       requires: requirements,
       installed_requires: requirementState.installed,
@@ -1606,7 +2060,10 @@ export class ResourceManagerService {
     }
   }
 
-  private findRegistryPdk(registry: ResourceRegistry | null, pdkId: string): RegistryPdk | undefined {
+  private findRegistryPdk(
+    registry: ResourceRegistry | null,
+    pdkId: string,
+  ): RegistryPdk | undefined {
     return registry?.pdks.find((pdk) => pdk.id === pdkId)
   }
 
@@ -1694,7 +2151,7 @@ function selectPlatformAsset(version: RegistryToolVersion | RegistryPdkVersion):
   const platform = currentPlatform()
   const asset = version.platforms[platform] ?? version.platforms[ALL_PLATFORM] ?? null
   return {
-    platform: version.platforms[platform] ? platform : (asset ? ALL_PLATFORM : platform),
+    platform: version.platforms[platform] ? platform : asset ? ALL_PLATFORM : platform,
     asset,
   }
 }
@@ -1705,7 +2162,9 @@ function selectRegistryVersion<T extends { version: string }>(
 ): T | undefined {
   if (!versions || versions.length === 0) return undefined
   if (!requestedVersion) return versions[0]
-  return versions.find((candidate) => candidate.version === requestedVersion) ?? versions[0]
+  return (
+    versions.find((candidate) => candidate.version === requestedVersion) ?? versions[0]
+  )
 }
 
 function dependencyStateFor(
@@ -1717,7 +2176,8 @@ function dependencyStateFor(
   const installed: string[] = []
   const missing: string[] = []
   for (const dependencyId of dependencies) {
-    if (resourceMatchesRegistryLock(registry, manifest, dependencyId, toolHealth)) installed.push(dependencyId)
+    if (resourceMatchesRegistryLock(registry, manifest, dependencyId, toolHealth))
+      installed.push(dependencyId)
     else missing.push(dependencyId)
   }
   return { installed, missing }
@@ -1733,7 +2193,10 @@ function resourceMatchesRegistryLock(
   const lock = registryLockForResource(registry, resourceId)
   const entry = manifest.installed[resourceId]
   if (!lock || !entry || !lock.sha256) return false
-  return entry.version === lock.version && entry.sha256.toLowerCase() === lock.sha256.toLowerCase()
+  return (
+    entry.version === lock.version &&
+    entry.sha256.toLowerCase() === lock.sha256.toLowerCase()
+  )
 }
 
 function registryLockForResource(
@@ -1763,10 +2226,14 @@ function isInstalledResource(
   const entry = manifest.installed[resourceId]
   if (isToolEntry(entry)) {
     const health = toolHealth[resourceId]
-    return entry.active !== false && Boolean(entry.path) && (!health || health.status === 'ok')
+    return (
+      entry.active !== false && Boolean(entry.path) && (!health || health.status === 'ok')
+    )
   }
   if (isPdkEntry(entry)) {
-    return entry.active === true && entry.health !== 'missing' && entry.health !== 'invalid'
+    return (
+      entry.active === true && entry.health !== 'missing' && entry.health !== 'invalid'
+    )
   }
   return false
 }
@@ -1778,7 +2245,9 @@ function resourceNameFromAnyId(resourceId: string): string {
 function parseRegistry(value: unknown): ResourceRegistry {
   const record = readRecord(value)
   if (record.schema_version !== 2) {
-    throw new Error(`Unsupported registry schema version: ${String(record.schema_version)}`)
+    throw new Error(
+      `Unsupported registry schema version: ${String(record.schema_version)}`,
+    )
   }
   return {
     schema_version: 2,
@@ -1795,7 +2264,9 @@ function parseRegistryTool(value: unknown): RegistryTool {
     description: readString(record.description),
     category: readString(record.category),
     homepage: readString(record.homepage),
-    versions: Array.isArray(record.versions) ? record.versions.map(parseRegistryToolVersion) : [],
+    versions: Array.isArray(record.versions)
+      ? record.versions.map(parseRegistryToolVersion)
+      : [],
   }
 }
 
@@ -1816,7 +2287,9 @@ function parseRegistryPdk(value: unknown): RegistryPdk {
     description: readString(record.description),
     category: readString(record.category) || 'pdk',
     homepage: readString(record.homepage),
-    versions: Array.isArray(record.versions) ? record.versions.map(parseRegistryPdkVersion) : [],
+    versions: Array.isArray(record.versions)
+      ? record.versions.map(parseRegistryPdkVersion)
+      : [],
   }
 }
 
@@ -1833,7 +2306,7 @@ function parseResourceDependencyIds(value: unknown): string[] {
   return readStringArray(value)
     .map((item) => item.trim())
     .filter(Boolean)
-    .map((item) => item.includes(':') ? item : `tool:${item}`)
+    .map((item) => (item.includes(':') ? item : `tool:${item}`))
 }
 
 function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
@@ -1869,8 +2342,10 @@ function parseSupplementalAssets(value: unknown): RegistrySupplementalAsset[] {
 
 function normalizeRegistryAssetUrl(url: string): string {
   if (
-    url === 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/assets/surfer-web-assets-0.7.0-ecos.zip'
-    || url === 'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/master/assets/surfer-web-assets-0.7.0-ecos.zip'
+    url ===
+      'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/main/assets/surfer-web-assets-0.7.0-ecos.zip' ||
+    url ===
+      'https://raw.githubusercontent.com/Luyoung0001/ecos-registry/master/assets/surfer-web-assets-0.7.0-ecos.zip'
   ) {
     return SURFER_RELEASE_ASSET_URL
   }
@@ -1959,7 +2434,7 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
 function readString(value: unknown): string {
@@ -1971,7 +2446,9 @@ function readNumber(value: unknown): number {
 }
 
 function readOptionalPositiveNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : undefined
 }
 
 function readOptionalString(value: unknown): string | null {
@@ -1983,10 +2460,12 @@ function readStringArray(value: unknown): string[] {
 }
 
 function isFileNotFoundError(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && (error as { code?: unknown }).code === 'ENOENT'
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  )
 }
 
 function pathKeyForRuntimeEnv(env: NodeJS.ProcessEnv): string {
@@ -2007,9 +2486,10 @@ function mergeRuntimePath(
   platform: NodeJS.Platform,
 ): string {
   const baseEntries = splitRuntimePath(basePath, platform)
-  const packagedBin = baseEntries[0] && basename(baseEntries[0]).toLowerCase() === 'binaries'
-    ? baseEntries[0]
-    : null
+  const packagedBin =
+    baseEntries[0] && basename(baseEntries[0]).toLowerCase() === 'binaries'
+      ? baseEntries[0]
+      : null
   const orderedEntries = [
     ...(packagedBin ? [packagedBin] : []),
     ...resourceManagerDirs,
@@ -2031,10 +2511,7 @@ function mergePathList(
   platform: NodeJS.Platform,
 ): string {
   const seen = new Set<string>()
-  return [
-    ...entries,
-    ...splitRuntimePath(basePath, platform),
-  ]
+  return [...entries, ...splitRuntimePath(basePath, platform)]
     .filter((entry) => {
       if (seen.has(entry)) return false
       seen.add(entry)
@@ -2043,7 +2520,10 @@ function mergePathList(
     .join(runtimePathSeparator(platform))
 }
 
-async function isUsableExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
+async function isUsableExecutable(
+  path: string,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
   try {
     await access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
     return true
@@ -2061,13 +2541,18 @@ async function isExistingDirectory(path: string): Promise<boolean> {
 }
 
 async function isSurferAssetsRoot(path: string): Promise<boolean> {
-  return await pathExists(join(path, 'index.html'))
-    && await pathExists(join(path, 'integration.js'))
-    && await pathExists(join(path, 'surfer.js'))
-    && await pathExists(join(path, 'surfer_bg.wasm'))
+  return (
+    (await pathExists(join(path, 'index.html'))) &&
+    (await pathExists(join(path, 'integration.js'))) &&
+    (await pathExists(join(path, 'surfer.js'))) &&
+    (await pathExists(join(path, 'surfer_bg.wasm')))
+  )
 }
 
-async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promise<ResourceRegistry> {
+async function readRegistryFromUrl(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<ResourceRegistry> {
   if (url.startsWith('file://')) {
     return parseRegistry(JSON.parse(await readFile(new URL(url), 'utf8')))
   }
@@ -2078,7 +2563,9 @@ async function readRegistryFromUrl(url: string, fetchImpl: typeof fetch): Promis
   return parseRegistry(await response.json())
 }
 
-function getInstalledTools(manifest: ResourceManifest): Record<string, ToolInventoryEntry> {
+function getInstalledTools(
+  manifest: ResourceManifest,
+): Record<string, ToolInventoryEntry> {
   const entries: Record<string, ToolInventoryEntry> = {}
   for (const [resourceId, entry] of Object.entries(manifest.installed)) {
     if (isToolEntry(entry)) entries[resourceId.replace(/^tool:/, '')] = entry
@@ -2105,15 +2592,20 @@ function isPdkEntry(entry: unknown): entry is PdkInventoryEntry {
 function parseUpdateCheckCache(value: unknown): ResourceUpdateCheckCache {
   const record = readRecord(value)
   if (record.schema_version !== 1) {
-    throw new Error(`Unsupported update check cache schema: ${String(record.schema_version)}`)
+    throw new Error(
+      `Unsupported update check cache schema: ${String(record.schema_version)}`,
+    )
   }
   const resources: ResourceUpdateCheckCache['resources'] = {}
   for (const [resourceId, itemValue] of Object.entries(readRecord(record.resources))) {
     const item = readRecord(itemValue)
     const status = readString(item.status)
-    const updateUrl = readOptionalString(item.update_url) ?? readOptionalString(item.sha256_url)
+    const updateUrl =
+      readOptionalString(item.update_url) ?? readOptionalString(item.sha256_url)
     const normalizedStatus: ResourceUpdateCheckItem['status'] =
-      status === 'checked' || status === 'skipped' || status === 'error' ? status : 'error'
+      status === 'checked' || status === 'skipped' || status === 'error'
+        ? status
+        : 'error'
     resources[resourceId] = {
       resource_id: readString(item.resource_id) || resourceId,
       checked_at: readOptionalString(item.checked_at),
@@ -2155,7 +2647,12 @@ function collectUpdateCheckCandidates(
   for (const tool of registry.tools) {
     const latest = tool.versions[0]
     const entry = manifest.installed[`tool:${tool.name}`]
-    if (!latest || !isToolEntry(entry) || !entry.managed || latest.version !== entry.version) {
+    if (
+      !latest ||
+      !isToolEntry(entry) ||
+      !entry.managed ||
+      latest.version !== entry.version
+    ) {
       continue
     }
     const { asset } = selectPlatformAsset(latest)
@@ -2172,7 +2669,12 @@ function collectUpdateCheckCandidates(
   for (const pdk of registry.pdks) {
     const latest = pdk.versions[0]
     const entry = manifest.installed[`pdk:${pdk.id}`]
-    if (!latest || !isPdkEntry(entry) || !entry.managed || latest.version !== entry.version) {
+    if (
+      !latest ||
+      !isPdkEntry(entry) ||
+      !entry.managed ||
+      latest.version !== entry.version
+    ) {
       continue
     }
     const { asset } = selectPlatformAsset(latest)
@@ -2233,7 +2735,8 @@ function toolHasUpdate(
   if (latestVersion !== entry.version) return true
   const updateSource = getAssetUpdateSource(latestAsset)
   if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
-    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url) return false
+    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
+      return false
     return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
   }
   return false
@@ -2249,14 +2752,18 @@ function pdkHasUpdate(
   if (latestVersion !== entry.version) return true
   const updateSource = getAssetUpdateSource(latestAsset)
   if (latestVersion === 'latest' && updateSource && updateCheck?.status === 'checked') {
-    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url) return false
+    if (updateCheck.update_url && updateCheck.update_url !== updateSource.url)
+      return false
     return Boolean(updateCheck.sha256) && updateCheck.sha256 !== entry.sha256
   }
   return false
 }
 
 function normalizeToolName(name: string): string {
-  return name.trim().toLowerCase().replace(/[_\s]+/g, '-')
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
 }
 
 function selectToolExecutable(name: string, detected: string[]): string {
@@ -2266,7 +2773,9 @@ function selectToolExecutable(name: string, detected: string[]): string {
   }
   const preferred = preferredExecutableNames(normalized)
   for (const candidate of preferred) {
-    const match = detected.find((entry) => entry === candidate || entry.endsWith(`/${candidate}`))
+    const match = detected.find(
+      (entry) => entry === candidate || entry.endsWith(`/${candidate}`),
+    )
     if (match) return match
   }
   return detected[0] ?? ''
@@ -2313,11 +2822,13 @@ async function resolveRuntimeTools(
 }
 
 function isFrontendResourceTool(normalizedName: string): boolean {
-  return normalizedName.startsWith('ecc-fe-soc-')
-    || normalizedName === 'ecc-fe-examples'
-    || normalizedName.startsWith('ecc-fe-cpu-')
-    || normalizedName.startsWith('ecc-fe-test-')
-    || normalizedName === 'ecc-fe-difftest-ref'
+  return (
+    normalizedName.startsWith('ecc-fe-soc-') ||
+    normalizedName === 'ecc-fe-examples' ||
+    normalizedName.startsWith('ecc-fe-cpu-') ||
+    normalizedName.startsWith('ecc-fe-test-') ||
+    normalizedName === 'ecc-fe-difftest-ref'
+  )
 }
 
 async function checkInstalledToolHealth(
@@ -2350,13 +2861,14 @@ async function assertStagedToolHealth(
     managed: true,
   })
   if (health.status === 'ok') return
-  const missing = health.missing_markers.length > 0
-    ? `: ${health.missing_markers.join(', ')}`
-    : ''
+  const missing =
+    health.missing_markers.length > 0 ? `: ${health.missing_markers.join(', ')}` : ''
   throw new Error(`Extracted ${name} archive failed health validation${missing}`)
 }
 
-async function checkToolEntryHealth(entry: ToolInventoryEntry): Promise<ToolHealthStatus> {
+async function checkToolEntryHealth(
+  entry: ToolInventoryEntry,
+): Promise<ToolHealthStatus> {
   const requiredMarkers = requiredToolMarkers(normalizeToolName(entry.name))
   const rootExists = await isExistingDirectory(entry.path)
   if (!rootExists) {
@@ -2370,7 +2882,7 @@ async function checkToolEntryHealth(entry: ToolInventoryEntry): Promise<ToolHeal
 
   const missingMarkers: string[] = []
   for (const marker of requiredMarkers) {
-    if (!await pathExists(join(entry.path, marker))) {
+    if (!(await pathExists(join(entry.path, marker)))) {
       missingMarkers.push(marker)
     }
   }
@@ -2384,7 +2896,10 @@ async function checkToolEntryHealth(entry: ToolInventoryEntry): Promise<ToolHeal
     }
   }
 
-  if (requiredMarkers.length === 0 && !await resolveRuntimeExecutable(entry, process.platform)) {
+  if (
+    requiredMarkers.length === 0 &&
+    !(await resolveRuntimeExecutable(entry, process.platform))
+  ) {
     return {
       status: 'invalid',
       path_exists: true,
@@ -2448,7 +2963,9 @@ function executableHealthMarkers(entry: ToolInventoryEntry): string[] {
     entry.executable,
     ...entry.detected_executables,
     ...preferredExecutableNames(normalized),
-  ].map((item) => item.trim()).filter(Boolean)
+  ]
+    .map((item) => item.trim())
+    .filter(Boolean)
   return [...new Set(markers)]
 }
 
@@ -2474,7 +2991,11 @@ async function resolveRuntimeExecutable(
         ...entry.detected_executables.filter((executable) => {
           const name = basename(executable)
           return preferred.some((candidate) => {
-            return executable === candidate || executable.endsWith(`/${candidate}`) || name === basename(candidate)
+            return (
+              executable === candidate ||
+              executable.endsWith(`/${candidate}`) ||
+              name === basename(candidate)
+            )
           })
         }),
       ].filter(Boolean)
@@ -2536,8 +3057,9 @@ function detectRiscvPrefix(detected: string[], executable: string): string {
   const candidates = [executable, ...detected]
   for (const candidate of candidates) {
     const basenameOnly = basename(candidate)
-    const match = /^(riscv(?:32|64)?-[^-]+-[^-]+-)gcc$/.exec(basenameOnly)
-      ?? /^(riscv(?:32|64)?-[^-]+-)gcc$/.exec(basenameOnly)
+    const match =
+      /^(riscv(?:32|64)?-[^-]+-[^-]+-)gcc$/.exec(basenameOnly) ??
+      /^(riscv(?:32|64)?-[^-]+-)gcc$/.exec(basenameOnly)
     if (match?.[1]) return match[1]
   }
   return ''
@@ -2626,10 +3148,12 @@ async function scanPdkDirectory(path: string): Promise<{
   if (!pathStats.isDirectory()) {
     throw new Error(`Not a directory: ${path}`)
   }
-  const entries = await readdir(canonicalPath, { withFileTypes: true })
-  const directories = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort().slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  let name = canonicalPath.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || 'Unknown PDK'
+  const { directories, files } = await scanPdkResourceEntries(canonicalPath)
+  let name =
+    canonicalPath
+      .replace(/[/\\]+$/, '')
+      .split(/[/\\]/)
+      .pop() || 'Unknown PDK'
   let description = ''
   let techNode = ''
   let pdkId = name.toLowerCase().replace(/[^a-z0-9]+/g, '_')
@@ -2644,7 +3168,7 @@ async function scanPdkDirectory(path: string): Promise<{
     description = 'SkyWater 130nm open-source PDK (auto-detected)'
     techNode = '130nm'
     pdkId = 'sky130'
-  } else if (files.some((file) => file.endsWith('.lef') || file.endsWith('.lib'))) {
+  } else if (files.some((file) => isPdkResourceFile(file))) {
     description = 'Process library files detected'
   }
 
@@ -2656,6 +3180,44 @@ async function scanPdkDirectory(path: string): Promise<{
     pdkId,
     detectedFiles: { directories, files },
   }
+}
+
+async function scanPdkResourceEntries(
+  rootPath: string,
+): Promise<{ directories: string[]; files: string[] }> {
+  const directories: string[] = []
+  const files: string[] = []
+
+  async function walk(currentPath: string, relativeDirectory = ''): Promise<void> {
+    const entries = await readdir(currentPath, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${entry.name}`
+        : entry.name
+      const entryPath = join(currentPath, entry.name)
+      if (entry.isDirectory()) {
+        directories.push(relativePath)
+        await walk(entryPath, relativePath)
+        continue
+      }
+      if (entry.isFile() && isPdkResourceFile(entry.name)) {
+        files.push(relativePath)
+      }
+    }
+  }
+
+  await walk(rootPath)
+  return {
+    directories: directories.sort((left, right) => left.localeCompare(right)),
+    files: files.sort((left, right) => left.localeCompare(right)),
+  }
+}
+
+function isPdkResourceFile(path: string): boolean {
+  const lower = path.toLowerCase()
+  return PDK_RESOURCE_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))
 }
 
 function readContentLength(value: string | null): number | null {
@@ -2689,7 +3251,9 @@ async function downloadAsset(
   if (url.startsWith('file://')) {
     const fileUrl = new URL(url)
     await copyFile(fileUrl, destination)
-    const size = await stat(fileUrl).then((value) => value.size).catch(() => 0)
+    const size = await stat(fileUrl)
+      .then((value) => value.size)
+      .catch(() => 0)
     onProgress?.({
       downloadedBytes: size,
       progress: 1,
@@ -2702,14 +3266,17 @@ async function downloadAsset(
     response = await fetchImpl(url, { signal })
   } catch (error) {
     if (isAbortError(error) || signal?.aborted) throw error
-    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, { cause: error })
+    throw new Error(`Failed to download ${url}: ${formatDownloadError(error)}`, {
+      cause: error,
+    })
   }
   if (!response.ok) {
     throw new Error(`Download failed with ${response.status}: ${url}`)
   }
 
-  const totalBytes = readContentLength(response.headers.get('content-length'))
-    ?? (expectedSize && expectedSize > 0 ? expectedSize : null)
+  const totalBytes =
+    readContentLength(response.headers.get('content-length')) ??
+    (expectedSize && expectedSize > 0 ? expectedSize : null)
   if (!response.body) {
     const data = Buffer.from(await response.arrayBuffer())
     await writeFile(destination, data)
@@ -2728,15 +3295,14 @@ async function downloadAsset(
   let lastPublishedProgress = 0
 
   const publishProgress = (force = false): void => {
-    const progress = totalBytes === null
-      ? 0
-      : Math.min(downloadedBytes / totalBytes, 1)
-    const shouldPublishKnownTotal = totalBytes !== null
-      && (progress - lastPublishedProgress >= 0.01 || progress >= 1)
-    const shouldPublishUnknownTotal = totalBytes === null
-      && downloadedBytes - lastPublishedBytes >= 1024 * 1024
+    const progress = totalBytes === null ? 0 : Math.min(downloadedBytes / totalBytes, 1)
+    const shouldPublishKnownTotal =
+      totalBytes !== null && (progress - lastPublishedProgress >= 0.01 || progress >= 1)
+    const shouldPublishUnknownTotal =
+      totalBytes === null && downloadedBytes - lastPublishedBytes >= 1024 * 1024
     if (!force && !shouldPublishKnownTotal && !shouldPublishUnknownTotal) return
-    if (downloadedBytes === lastPublishedBytes && progress === lastPublishedProgress) return
+    if (downloadedBytes === lastPublishedBytes && progress === lastPublishedProgress)
+      return
     lastPublishedBytes = downloadedBytes
     lastPublishedProgress = progress
     onProgress?.({
@@ -2768,9 +3334,10 @@ function formatDownloadError(error: unknown): string {
 
   const cause = error.cause
   if (cause instanceof Error) {
-    const code = typeof (cause as NodeJS.ErrnoException).code === 'string'
-      ? `${(cause as NodeJS.ErrnoException).code}: `
-      : ''
+    const code =
+      typeof (cause as NodeJS.ErrnoException).code === 'string'
+        ? `${(cause as NodeJS.ErrnoException).code}: `
+        : ''
     return `${error.message} (${code}${cause.message})`
   }
 
@@ -2778,8 +3345,10 @@ function formatDownloadError(error: unknown): string {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-    || error instanceof Error && error.name === 'AbortError'
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  )
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -2796,12 +3365,96 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function readPdkReleaseAssetNames(destination: string): Promise<string[]> {
+  const makefilePath = join(destination, 'Makefile')
+  const makefile = await readFile(makefilePath, 'utf8').catch(() => '')
+  if (!makefile) return []
+  return parseMakefileReleaseAssetNames(makefile)
+}
+
+function parseMakefileReleaseAssetNames(makefile: string): string[] {
+  const variables = new Map<string, string[]>()
+  const assignmentPattern = /^([A-Za-z0-9_]+)\s*(?::=|=)\s*(.*)$/
+  const lines = makefile.split(/\r?\n/)
+
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index].replace(/#.*$/, '').trimEnd()
+    if (!assignmentPattern.test(line.trimStart())) continue
+    while (line.endsWith('\\') && index + 1 < lines.length) {
+      line = `${line.slice(0, -1)} ${lines[index + 1].replace(/#.*$/, '').trim()}`
+      index += 1
+    }
+    const match = line.trim().match(assignmentPattern)
+    if (!match) continue
+    const [, name, rawValue] = match
+    variables.set(name, expandMakefileWords(rawValue, variables))
+  }
+
+  const releaseFiles =
+    variables.get('RELEASE_FILE') ??
+    Array.from(variables.entries())
+      .filter(([name]) => name.startsWith('RELEASE_FILE'))
+      .flatMap(([, value]) => value)
+  return Array.from(new Set(releaseFiles.filter(isDownloadableReleaseAssetName)))
+}
+
+function expandMakefileWords(
+  rawValue: string,
+  variables: Map<string, string[]>,
+): string[] {
+  const words: string[] = []
+  for (const token of rawValue.split(/\s+/).filter(Boolean)) {
+    const variableMatch = token.match(/^\$\(([^)]+)\)$/)
+    if (variableMatch) {
+      words.push(...(variables.get(variableMatch[1]) ?? []))
+      continue
+    }
+    words.push(token)
+  }
+  return words
+}
+
+function isDownloadableReleaseAssetName(name: string): boolean {
+  return /^[A-Za-z0-9._+-]+\.tar\.bz2$/.test(name)
+}
+
+function releaseDownloadBaseUrl(sourceUrl: string, version: string): string | null {
+  const parsed = parseGithubArchiveUrl(sourceUrl)
+  if (!parsed) return null
+  return `https://github.com/${parsed.owner}/${parsed.repo}/releases/download/${parsed.tag || `v${version}`}`
+}
+
+function parseGithubArchiveUrl(
+  sourceUrl: string,
+): { owner: string; repo: string; tag: string | null } | null {
+  let url: URL
+  try {
+    url = new URL(sourceUrl)
+  } catch {
+    return null
+  }
+  if (url.hostname !== 'github.com') return null
+  const parts = url.pathname.split('/').filter(Boolean)
+  if (parts.length < 2) return null
+  const [owner, repo] = parts
+  const refsIndex = parts.findIndex(
+    (part, index) => part === 'refs' && parts[index + 1] === 'tags',
+  )
+  const tag =
+    refsIndex >= 0
+      ? (parts[refsIndex + 2]?.replace(/\.tar\.gz$|\.zip$/, '') ?? null)
+      : null
+  return { owner, repo, tag }
+}
+
 function validateSupplementalAsset(asset: RegistrySupplementalAsset): void {
   if (!asset.url) {
     throw new Error(`Missing URL for supplemental asset ${asset.path || '(unknown)'}`)
   }
   if (!/^[0-9a-f]{64}$/.test(asset.sha256)) {
-    throw new Error(`Invalid SHA256 checksum for supplemental asset ${asset.path || '(unknown)'}`)
+    throw new Error(
+      `Invalid SHA256 checksum for supplemental asset ${asset.path || '(unknown)'}`,
+    )
   }
   if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
     throw new Error(`Invalid size for supplemental asset ${asset.path || '(unknown)'}`)
@@ -2812,16 +3465,21 @@ function resolveSupplementalAssetTarget(root: string, assetPath: string): string
   const normalized = assetPath.trim()
   const parts = normalized.split('/')
   if (
-    !normalized
-    || normalized.includes('\\')
-    || normalized.startsWith('/')
-    || /^[A-Za-z]:/.test(normalized)
-    || parts.some((part) => {
-      return !part
-        || part === '.'
-        || part === '..'
-        || part.includes(':')
-        || [...part].some((char) => /\s/.test(char) || char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+    !normalized ||
+    normalized.includes('\\') ||
+    normalized.startsWith('/') ||
+    /^[A-Za-z]:/.test(normalized) ||
+    parts.some((part) => {
+      return (
+        !part ||
+        part === '.' ||
+        part === '..' ||
+        part.includes(':') ||
+        [...part].some(
+          (char) =>
+            /\s/.test(char) || char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+        )
+      )
     })
   ) {
     throw new Error(`Invalid supplemental asset path: ${assetPath || '(empty)'}`)
@@ -2896,7 +3554,10 @@ async function replaceDirectoryWithRollback(
   destination: string,
   commit: () => Promise<void>,
 ): Promise<void> {
-  const backupPath = join(dirname(destination), `.backup-${basename(destination)}-${randomUUID()}`)
+  const backupPath = join(
+    dirname(destination),
+    `.backup-${basename(destination)}-${randomUUID()}`,
+  )
   const hadPrevious = await pathExists(destination)
   await mkdir(dirname(destination), { recursive: true })
   await rm(backupPath, { force: true, recursive: true })
@@ -2915,7 +3576,7 @@ async function replaceDirectoryWithRollback(
       if (stagedInstalled) {
         await rm(destination, { force: true, recursive: true })
       }
-      if (hadPrevious && await pathExists(backupPath)) {
+      if (hadPrevious && (await pathExists(backupPath))) {
         await rename(backupPath, destination)
       }
     } catch (rollbackError) {
@@ -2939,7 +3600,11 @@ async function replaceDirectoryWithRollback(
   }
 }
 
-async function moveStrippedPrefix(sourceRoot: string, destination: string, stripPrefix: string): Promise<void> {
+async function moveStrippedPrefix(
+  sourceRoot: string,
+  destination: string,
+  stripPrefix: string,
+): Promise<void> {
   const source = resolveInside(sourceRoot, stripPrefix)
   const sourceStats = await stat(source)
   if (!sourceStats.isDirectory()) {
@@ -2959,7 +3624,11 @@ function resolveInside(root: string, child: string): string {
   return resolved
 }
 
-async function runCommand(command: string, args: string[], options?: CommandRunnerOptions): Promise<void> {
+async function runCommand(
+  command: string,
+  args: string[],
+  options?: CommandRunnerOptions,
+): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(command, args, { cwd: options?.cwd, stdio: 'pipe' })
     let stderr = ''
@@ -2978,7 +3647,11 @@ async function runCommand(command: string, args: string[], options?: CommandRunn
         resolvePromise()
       } else {
         const details = stderr.trim()
-        reject(new Error(`${command} failed with exit code ${code}${details ? `: ${details}` : ''}`))
+        reject(
+          new Error(
+            `${command} failed with exit code ${code}${details ? `: ${details}` : ''}`,
+          ),
+        )
       }
     })
   })
@@ -2990,7 +3663,11 @@ async function detectExecutables(root: string): Promise<string[]> {
   return results.sort()
 }
 
-async function collectExecutableFiles(root: string, directory: string, results: string[]): Promise<void> {
+async function collectExecutableFiles(
+  root: string,
+  directory: string,
+  results: string[],
+): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => null)
   if (!entries) return
 

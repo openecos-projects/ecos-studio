@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ImagePreviewContainer, type ImagePreviewController } from '@/applications/image-preview'
+import {
+  ImagePreviewContainer,
+  type ImagePreviewController,
+} from '@/applications/image-preview'
 import DrawingToolbar from './DrawingToolbar.vue'
 import { InfoEnum, StepEnum } from '@/api/type'
 import { resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
@@ -29,14 +32,15 @@ const currentStepKey = computed(() => {
   return pathParts[pathParts.length - 1] || 'home'
 })
 
-const isPreparingNativeLayoutViewer = computed(() =>
-  nativeLayoutViewerBusy.value && loadingState.value === 'loading',
+const isPreparingNativeLayoutViewer = computed(
+  () => nativeLayoutViewerBusy.value && loadingState.value === 'loading',
 )
 
-const showNativeLayoutViewer = computed(() =>
-  isDesktopRuntime()
-  && currentProject.value?.path != null
-  && currentViewJsonPackageRoot.value != null,
+const showNativeLayoutViewer = computed(
+  () =>
+    isDesktopRuntime() &&
+    currentProject.value?.path != null &&
+    currentViewJsonPackageRoot.value != null,
 )
 
 const stepEnumValues = Object.values(StepEnum)
@@ -53,15 +57,15 @@ function createDrawingAsyncGuard(expectedStep = currentStepKey.value): DrawingAs
 
   return {
     isCurrent: () =>
-      preview.value === expectedPreview
-      && currentProject.value?.path === expectedProjectPath
-      && workspaceSession.value.sessionId === expectedSessionId
-      && currentStepKey.value === expectedStep,
+      preview.value === expectedPreview &&
+      currentProject.value?.path === expectedProjectPath &&
+      workspaceSession.value.sessionId === expectedSessionId &&
+      currentStepKey.value === expectedStep,
   }
 }
 
 function getStepEnumFromPath(path: string): StepEnum | undefined {
-  return stepEnumValues.find(step => step.toLowerCase() === path.toLowerCase())
+  return stepEnumValues.find((step) => step.toLowerCase() === path.toLowerCase())
 }
 
 function pickViewJsonPackageRoot(info: Record<string, unknown>): string | null {
@@ -114,8 +118,9 @@ async function loadStepImagePreview(
   const controller = preview.value
   if (!controller || !guard.isCurrent()) return
 
-  const imageUrl = previewImageUrl.value
-    ?? await getResourceUrl(imagePath, currentProject.value?.path || '')
+  const imageUrl =
+    previewImageUrl.value ??
+    (await getResourceUrl(imagePath, currentProject.value?.path || ''))
   if (!guard.isCurrent() || preview.value !== controller) return
 
   previewImageUrl.value = imageUrl
@@ -152,8 +157,8 @@ async function onOpenNativeLayoutViewer(): Promise<void> {
   } finally {
     nativeLayoutViewerBusy.value = false
     if (
-      loadingState.value === 'loading'
-      && loadingMessage.value === NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
+      loadingState.value === 'loading' &&
+      loadingMessage.value === NATIVE_LAYOUT_VIEWER_LOADING_MESSAGE
     ) {
       resetLoadingState()
     }
@@ -179,9 +184,13 @@ const handleStageChange = async (stage: string) => {
     })
     if (!guard.isCurrent()) return
 
-    if (layoutResponse.response === 'available' || layoutResponse.response === 'missing') {
+    if (
+      layoutResponse.response === 'available' ||
+      layoutResponse.response === 'missing'
+    ) {
       const info = layoutResponse.info
-      const imagePath = typeof info.image === 'string' && info.image.length > 0 ? info.image : null
+      const imagePath =
+        typeof info.image === 'string' && info.image.length > 0 ? info.image : null
       const viewJsonPackageRoot = pickViewJsonPackageRoot(info)
 
       currentViewJsonPackageRoot.value = viewJsonPackageRoot
@@ -238,17 +247,17 @@ watch(
   { immediate: true },
 )
 
-watch(() => route.path, (newPath) => {
-  const pathParts = newPath.split('/')
-  const stage = pathParts[pathParts.length - 1] || 'home'
-  handleStageChange(stage)
-})
+watch(
+  () => route.path,
+  (newPath) => {
+    const pathParts = newPath.split('/')
+    const stage = pathParts[pathParts.length - 1] || 'home'
+    handleStageChange(stage)
+  },
+)
 
 watch(
-  () => [
-    resourceVersions.value.step,
-    resourceVersions.value.all,
-  ],
+  () => [resourceVersions.value.step, resourceVersions.value.all],
   () => {
     const pathParts = route.path.split('/')
     const stage = pathParts[pathParts.length - 1] || 'home'
@@ -262,7 +271,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden">
+  <div class="flex h-full flex-col overflow-hidden">
     <DrawingToolbar
       :preview="preview"
       :show-native-layout-viewer="showNativeLayoutViewer"
@@ -275,7 +284,9 @@ onUnmounted(() => {
 
       <div
         v-if="loadingState === 'loading'"
-        :data-testid="isPreparingNativeLayoutViewer ? 'native-layout-viewer-loading' : undefined"
+        :data-testid="
+          isPreparingNativeLayoutViewer ? 'native-layout-viewer-loading' : undefined
+        "
         class="absolute inset-0 z-10 flex items-center justify-center bg-black/40 transition-opacity duration-200"
       >
         <div
@@ -304,13 +315,17 @@ onUnmounted(() => {
         Load error: {{ loadingMessage }}
       </div>
 
-      <div class="absolute right-2 top-2 z-20 flex flex-col items-end gap-1 pointer-events-none">
+      <div
+        class="pointer-events-none absolute top-2 right-2 z-20 flex flex-col items-end gap-1"
+      >
         <div
           v-if="cursorEda"
           class="rounded border border-(--border-color) bg-(--bg-primary)/90 px-2 py-1 font-mono text-[11px] text-(--text-primary) tabular-nums shadow-sm"
         >
-          <span class="text-(--text-secondary)">X</span> {{ formatCursorCoord(cursorEda.x) }}
-          <span class="ml-2 text-(--text-secondary)">Y</span> {{ formatCursorCoord(cursorEda.y) }}
+          <span class="text-(--text-secondary)">X</span>
+          {{ formatCursorCoord(cursorEda.x) }}
+          <span class="ml-2 text-(--text-secondary)">Y</span>
+          {{ formatCursorCoord(cursorEda.y) }}
         </div>
       </div>
     </div>

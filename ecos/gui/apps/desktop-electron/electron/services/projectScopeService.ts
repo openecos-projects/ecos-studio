@@ -3,16 +3,13 @@ import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
-const TOP_LEVEL_ENTRY_LIMIT = 20
+const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 const FRONTEND_EXTRA_ROOT_PATH_FIELDS = [
   'sim_soc_root',
   'sim_programs_dir',
   'sim_tests_dir',
 ]
-const FRONTEND_FILELIST_FIELDS = [
-  'cpu_filelist',
-  'soc_filelist',
-]
+const FRONTEND_FILELIST_FIELDS = ['cpu_filelist', 'soc_filelist']
 
 async function canonicalizeExistingPath(path: string): Promise<string> {
   return await realpath(path)
@@ -31,16 +28,15 @@ async function canonicalizeExistingDirectory(path: string): Promise<string> {
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return (
-    typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === code
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code
   )
 }
 
 function isWithinRoot(candidatePath: string, rootPath: string): boolean {
   const relativePath = relative(rootPath, candidatePath)
-  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
+  )
 }
 
 async function canonicalizePotentialPathWithinRoot(
@@ -81,22 +77,42 @@ async function canonicalizePotentialPathWithinRoot(
 }
 
 async function scanTopLevelEntries(path: string): Promise<PdkDetectedFiles> {
-  const entries = await readdir(path, { withFileTypes: true })
-  const directories = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
-  const files = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .sort()
-    .slice(0, TOP_LEVEL_ENTRY_LIMIT)
+  const directories: string[] = []
+  const files: string[] = []
+
+  async function walk(currentPath: string, relativeDirectory = ''): Promise<void> {
+    const entries = await readdir(currentPath, { withFileTypes: true })
+    entries.sort((left, right) => left.name.localeCompare(right.name))
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${entry.name}`
+        : entry.name
+      const entryPath = join(currentPath, entry.name)
+
+      if (entry.isDirectory()) {
+        directories.push(relativePath)
+        await walk(entryPath, relativePath)
+        continue
+      }
+
+      if (entry.isFile() && isPdkResourceFile(entry.name)) {
+        files.push(relativePath)
+      }
+    }
+  }
+
+  await walk(path)
 
   return {
-    directories,
-    files,
+    directories: directories.sort((left, right) => left.localeCompare(right)),
+    files: files.sort((left, right) => left.localeCompare(right)),
   }
+}
+
+function isPdkResourceFile(path: string): boolean {
+  const lower = path.toLowerCase()
+  return PDK_RESOURCE_FILE_EXTENSIONS.some((extension) => lower.endsWith(extension))
 }
 
 async function isProjectDirectoryCandidate(path: string): Promise<boolean> {
@@ -171,10 +187,12 @@ export class ProjectScopeService {
           return canonicalPath
         }
       } catch (error) {
-        if (error instanceof Error && error.message.startsWith('Refusing to grant access outside')) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith('Refusing to grant access outside')
+        ) {
           continue
         }
-
         throw error
       }
     }
@@ -210,7 +228,9 @@ export class ProjectScopeService {
       description = 'ICSPROUT 55nm process library (auto-detected)'
       techNode = '55nm'
       pdkId = 'ics55'
-    } else if (detectedFiles.directories.some((directory) => directory.startsWith('sky130'))) {
+    } else if (
+      detectedFiles.directories.some((directory) => directory.startsWith('sky130'))
+    ) {
       name = 'SkyWater SKY130 PDK'
       description = 'SkyWater 130nm open-source PDK (auto-detected)'
       techNode = '130nm'
@@ -237,28 +257,31 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
   const parametersPath = join(projectRoot, 'home', 'parameters.json')
   let parameters: Record<string, unknown>
   try {
-    parameters = JSON.parse(await readFile(parametersPath, 'utf8')) as Record<string, unknown>
+    parameters = JSON.parse(await readFile(parametersPath, 'utf8')) as Record<
+      string,
+      unknown
+    >
   } catch {
     return []
   }
 
-  if (parameters['Design Tool'] !== 'frontend') {
-    return []
-  }
+  if (parameters['Design Tool'] !== 'frontend') return []
 
   const roots = new Set<string>()
   await Promise.all(
     FRONTEND_EXTRA_ROOT_PATH_FIELDS.map(async (field) => {
       const value = parameters[field]
       if (typeof value !== 'string' || !value.trim()) return
-
       try {
         const path = resolve(value)
         const pathStats = await stat(path)
-        const root = pathStats.isDirectory() ? path : dirname(path)
-        roots.add(await canonicalizeExistingDirectory(root))
+        roots.add(
+          await canonicalizeExistingDirectory(
+            pathStats.isDirectory() ? path : dirname(path),
+          ),
+        )
       } catch {
-        // Missing optional frontend inputs should not block opening the workspace.
+        // Optional frontend inputs may be stale; ecc-fe reports required inputs.
       }
     }),
   )
@@ -266,15 +289,17 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
     FRONTEND_FILELIST_FIELDS.map(async (field) => {
       const value = parameters[field]
       if (typeof value !== 'string' || !value.trim()) return
-
       try {
         const filelistPath = resolve(value)
         const filelistRoot = dirname(await canonicalizeExistingPath(filelistPath))
-        for (const sourceRoot of await readFrontendFilelistSourceRoots(filelistPath, filelistRoot)) {
+        for (const sourceRoot of await readFrontendFilelistSourceRoots(
+          filelistPath,
+          filelistRoot,
+        )) {
           roots.add(sourceRoot)
         }
       } catch {
-        // Missing optional frontend filelists should not block opening the workspace.
+        // Optional frontend filelists may be stale; ecc-fe reports required inputs.
       }
     }),
   )
@@ -283,10 +308,15 @@ async function detectFrontendExtraRoots(projectRoot: string): Promise<string[]> 
   return [...roots].filter((root) => !isWithinRoot(root, projectRoot))
 }
 
-async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoot: string): Promise<string[]> {
+async function readFrontendFilelistSourceRoots(
+  filelistPath: string,
+  filelistRoot: string,
+): Promise<string[]> {
   const raw = await readFile(filelistPath, 'utf8')
   const roots = new Set<string>()
-  const pending: Array<{ path: string; root: string }> = [{ path: filelistPath, root: filelistRoot }]
+  const pending: Array<{ path: string; root: string }> = [
+    { path: filelistPath, root: filelistRoot },
+  ]
   const visited = new Set<string>()
 
   while (pending.length) {
@@ -303,7 +333,8 @@ async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoo
 
     let content: string
     try {
-      content = current.path === filelistPath ? raw : await readFile(canonicalFilelist, 'utf8')
+      content =
+        current.path === filelistPath ? raw : await readFile(canonicalFilelist, 'utf8')
     } catch {
       continue
     }
@@ -316,7 +347,7 @@ async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoo
           try {
             roots.add(await canonicalizeExistingDirectory(resolve(current.root, incdir)))
           } catch {
-            // Ignore stale include directories; the CLI will report required missing inputs.
+            // Ignore stale include directories.
           }
         }
         continue
@@ -325,7 +356,10 @@ async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoo
         const includePath = token.slice(2).trim()
         if (includePath) {
           const resolvedInclude = resolve(current.root, includePath)
-          pending.push({ path: resolvedInclude, root: dirname(resolvedInclude) })
+          pending.push({
+            path: resolvedInclude,
+            root: dirname(resolvedInclude),
+          })
         }
         continue
       }
@@ -338,7 +372,7 @@ async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoo
       try {
         roots.add(dirname(await canonicalizeExistingPath(resolvedPath)))
       } catch {
-        // Ignore stale filelist entries; the CLI will surface missing required inputs.
+        // Ignore stale entries; ecc-fe reports required missing inputs.
       }
     }
   }
@@ -348,11 +382,10 @@ async function readFrontendFilelistSourceRoots(filelistPath: string, filelistRoo
 
 function normalizeFrontendFilelistToken(line: string): string {
   const withoutComment = line.replace(/\/\/.*$/, '').trim()
-  if (!withoutComment) return ''
-  if (withoutComment.startsWith('+define+')) return ''
+  if (!withoutComment || withoutComment.startsWith('+define+')) return ''
   const parts = withoutComment.split(/\s+/)
   const first = parts[0] ?? ''
   const second = parts[1] ?? ''
   if (first === '-f' && second) return `-f${second}`
-  return first
+  return first.replace(/^['"]|['"]$/g, '')
 }

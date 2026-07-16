@@ -27,8 +27,12 @@ describe('ImagePreviewController', () => {
 describe('rulerDrawing', () => {
   it('anchors the horizontal ruler to the bottom edge of the canvas', () => {
     expect(rulerSource).toContain('const rulerTop = screenHeight - thickness')
-    expect(rulerSource).toContain('ctx.fillRect(thickness, rulerTop, screenWidth - thickness, thickness)')
-    expect(rulerSource).not.toMatch(/fillRect\(thickness,\s*0,\s*screenWidth - thickness,\s*thickness\)/)
+    expect(rulerSource).toContain(
+      'ctx.fillRect(thickness, rulerTop, screenWidth - thickness, thickness)',
+    )
+    expect(rulerSource).not.toMatch(
+      /fillRect\(thickness,\s*0,\s*screenWidth - thickness,\s*thickness\)/,
+    )
   })
 })
 

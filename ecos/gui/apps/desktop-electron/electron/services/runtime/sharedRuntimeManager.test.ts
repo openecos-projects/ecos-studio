@@ -33,7 +33,9 @@ interface RuntimeAdapterContext extends SharedRuntimeAdapterContext<RuntimeEvent
   providerId: string
 }
 
-function createManager(adapter: SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>) {
+function createManager(
+  adapter: SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>,
+) {
   return new SharedRuntimeManager<RuntimeRequest, RuntimeResult, RuntimeEvent>({
     adapter,
     createFailedResult: (_request, message) => ({
@@ -84,16 +86,26 @@ function createManager(adapter: SharedRuntimeAdapter<RuntimeRequest, RuntimeResu
 
 describe('SharedRuntimeManager', () => {
   it('keeps request, result, event, and adapter context types connected', () => {
-    expectTypeOf<Parameters<SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>['execute']>[0]>()
-      .toEqualTypeOf<RuntimeRequest>()
-    expectTypeOf<Parameters<SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>['execute']>[1]>()
-      .toEqualTypeOf<SharedRuntimeAdapterContext<RuntimeEvent>>()
-    expectTypeOf<Parameters<SharedRuntimeAdapter<
-      RuntimeRequest,
-      RuntimeResult,
-      RuntimeEvent,
-      RuntimeAdapterContext
-    >['execute']>[1]>().toEqualTypeOf<RuntimeAdapterContext>()
+    expectTypeOf<
+      Parameters<
+        SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>['execute']
+      >[0]
+    >().toEqualTypeOf<RuntimeRequest>()
+    expectTypeOf<
+      Parameters<
+        SharedRuntimeAdapter<RuntimeRequest, RuntimeResult, RuntimeEvent>['execute']
+      >[1]
+    >().toEqualTypeOf<SharedRuntimeAdapterContext<RuntimeEvent>>()
+    expectTypeOf<
+      Parameters<
+        SharedRuntimeAdapter<
+          RuntimeRequest,
+          RuntimeResult,
+          RuntimeEvent,
+          RuntimeAdapterContext
+        >['execute']
+      >[1]
+    >().toEqualTypeOf<RuntimeAdapterContext>()
   })
 
   it('fans out queued, adapter, and completed events with the same job metadata', async () => {
@@ -114,36 +126,53 @@ describe('SharedRuntimeManager', () => {
     })
 
     manager.onEvent(registeredListener)
-    await expect(manager.execute({
-      label: 'build',
-      scopeDirectory: '/work/demo',
-    }, directListener)).resolves.toEqual({
+    await expect(
+      manager.execute(
+        {
+          label: 'build',
+          scopeDirectory: '/work/demo',
+        },
+        directListener,
+      ),
+    ).resolves.toEqual({
       messages: ['done'],
       ok: true,
     })
 
     expect(directListener).toHaveBeenCalledTimes(4)
     expect(registeredListener).toHaveBeenCalledTimes(4)
-    expect(directListener).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      label: 'build',
-      scopeId: '/work/demo',
-      type: 'queued',
-    }))
-    expect(directListener).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      label: 'build',
-      scopeId: '/work/demo',
-      type: 'started',
-    }))
-    expect(directListener).toHaveBeenNthCalledWith(3, expect.objectContaining({
-      jobId: expect.any(String),
-      scopeId: '/work/demo',
-      text: 'halfway',
-      type: 'progress',
-    }))
-    expect(directListener).toHaveBeenNthCalledWith(4, expect.objectContaining({
-      result: { messages: ['done'], ok: true },
-      type: 'completed',
-    }))
+    expect(directListener).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        label: 'build',
+        scopeId: '/work/demo',
+        type: 'queued',
+      }),
+    )
+    expect(directListener).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        label: 'build',
+        scopeId: '/work/demo',
+        type: 'started',
+      }),
+    )
+    expect(directListener).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        jobId: expect.any(String),
+        scopeId: '/work/demo',
+        text: 'halfway',
+        type: 'progress',
+      }),
+    )
+    expect(directListener).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        result: { messages: ['done'], ok: true },
+        type: 'completed',
+      }),
+    )
 
     const jobIds = directListener.mock.calls.map(([event]) => event.jobId)
     expect(new Set(jobIds).size).toBe(1)
@@ -151,12 +180,16 @@ describe('SharedRuntimeManager', () => {
 
   it('tracks active long-running scopes and clears them after execution', async () => {
     let release!: () => void
-    const adapterExecute = vi.fn(() => new Promise<RuntimeResult>((resolve) => {
-      release = () => resolve({
-        messages: ['done'],
-        ok: true,
-      })
-    }))
+    const adapterExecute = vi.fn(
+      () =>
+        new Promise<RuntimeResult>((resolve) => {
+          release = () =>
+            resolve({
+              messages: ['done'],
+              ok: true,
+            })
+        }),
+    )
     const manager = createManager({
       execute: adapterExecute,
     })
@@ -182,12 +215,16 @@ describe('SharedRuntimeManager', () => {
 
   it('fails overlapping long-running requests for the same scope', async () => {
     let release!: () => void
-    const adapterExecute = vi.fn(() => new Promise<RuntimeResult>((resolve) => {
-      release = () => resolve({
-        messages: ['done'],
-        ok: true,
-      })
-    }))
+    const adapterExecute = vi.fn(
+      () =>
+        new Promise<RuntimeResult>((resolve) => {
+          release = () =>
+            resolve({
+              messages: ['done'],
+              ok: true,
+            })
+        }),
+    )
     const listener = vi.fn()
     const manager = createManager({
       execute: adapterExecute,
@@ -202,19 +239,28 @@ describe('SharedRuntimeManager', () => {
       expect(adapterExecute).toHaveBeenCalledTimes(1)
     })
 
-    await expect(manager.execute({
-      label: 'flow',
-      longRunning: true,
-      scopeDirectory: '/work/demo',
-    }, listener)).resolves.toEqual({
-      messages: ['Another flow is already running for /work/demo. Wait for it to finish before starting a new one.'],
+    await expect(
+      manager.execute(
+        {
+          label: 'flow',
+          longRunning: true,
+          scopeDirectory: '/work/demo',
+        },
+        listener,
+      ),
+    ).resolves.toEqual({
+      messages: [
+        'Another flow is already running for /work/demo. Wait for it to finish before starting a new one.',
+      ],
       ok: false,
     })
     expect(adapterExecute).toHaveBeenCalledTimes(1)
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      result: expect.objectContaining({ ok: false }),
-      type: 'failed',
-    }))
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ ok: false }),
+        type: 'failed',
+      }),
+    )
 
     release()
     await first
@@ -227,11 +273,13 @@ describe('SharedRuntimeManager', () => {
       }),
     })
 
-    await expect(manager.execute({
-      label: 'flow',
-      longRunning: true,
-      scopeDirectory: '/work/demo',
-    })).resolves.toEqual({
+    await expect(
+      manager.execute({
+        label: 'flow',
+        longRunning: true,
+        scopeDirectory: '/work/demo',
+      }),
+    ).resolves.toEqual({
       messages: ['adapter unavailable'],
       ok: false,
     })
@@ -252,11 +300,16 @@ describe('SharedRuntimeManager', () => {
       execute: adapterExecute,
     })
 
-    await expect(manager.execute({
-      label: 'flow',
-      longRunning: true,
-      scopeDirectory: '/work/demo',
-    }, listener)).resolves.toEqual({
+    await expect(
+      manager.execute(
+        {
+          label: 'flow',
+          longRunning: true,
+          scopeDirectory: '/work/demo',
+        },
+        listener,
+      ),
+    ).resolves.toEqual({
       messages: ['listener unavailable'],
       ok: false,
     })

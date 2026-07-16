@@ -26,7 +26,7 @@ body:
     attributes:
       label: ECOS Studio version
       description: Use the About dialog, AppImage filename, release tag, or source commit. If unknown, write "unknown" and describe how you installed it.
-      placeholder: "v0.1.0-alpha.5, AppImage filename, or git commit"
+      placeholder: "v0.1.0-alpha.6, AppImage filename, or git commit"
     validations:
       required: true
 
@@ -40,7 +40,7 @@ body:
         - GUI
         - ECC
         - Resource management
-        - Build, packaging, Bazel, Nix, or release workflow
+        - Build, packaging, Nix, or release workflow
         - CI
         - Documentation only
         - Not sure

@@ -17,6 +17,6 @@ describe('frontend workspace creation lifecycle', () => {
     expect(viewSource).toContain('if (wizardCreating.value) return')
     expect(wizardSource).toContain('const isCreating = computed(() => props.creating)')
     expect(wizardSource).toContain('if (isCreating.value || !validationOk.value')
-    expect(wizardSource).toContain('if (!isCreating.value) emit(\'close\')')
+    expect(wizardSource).toContain("if (!isCreating.value) emit('close')")
   })
 })

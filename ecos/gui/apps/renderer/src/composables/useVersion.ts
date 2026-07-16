@@ -10,7 +10,7 @@ async function loadVersions(): Promise<void> {
   loading.value = true
   try {
     const desktopApi =
-      getOptionalDesktopApi() ?? await waitForDesktopApi({ timeoutMs: 5000 })
+      getOptionalDesktopApi() ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
     versions.value = await desktopApi.app.getVersions()
   } catch (err) {
     console.warn('[version] failed to get versions:', err)

@@ -3,22 +3,7 @@ export {
   desktopApiIpcChannels,
   type DesktopApiEventChannel,
   type DesktopApiIpcChannel,
-} from './constants/ipcChannels.ts';
-export type {
-  DesktopApi,
-  DesktopDirectoryDialogOptions,
-  DesktopFileDialogFilter,
-  DesktopFileDialogOptions,
-  DesktopProjectLogTailSubscriptionOptions,
-  DesktopProjectTextFileTail,
-  DesktopProjectTextFileUpdate,
-  DesktopSettingsValue,
-  LayoutViewerOpenRequest,
-  LayoutViewerOpenResult,
-  PdkDetectedFiles,
-  ScannedPdkDirectory,
-  VersionInfo,
-} from './contracts/desktopApi.ts';
+} from './constants/ipcChannels.ts'
 export type {
   DesktopCliCommandEvent,
   DesktopCliCommandEventType,
@@ -27,9 +12,64 @@ export type {
   DesktopCliCommandResponse,
   DesktopCliCommandResult,
   DesktopCliCommandSource,
-} from './contracts/desktopCli.ts';
+} from './contracts/desktopCli.ts'
+export type {
+  DesktopApi,
+  DesktopDirectoryDialogOptions,
+  DesktopFileDialogFilter,
+  DesktopFileDialogOptions,
+  DesktopSaveFileDialogOptions,
+  DesktopRtlSourceDialogOptions,
+  PickedRtlSources,
+  DesktopProjectLogTailSubscriptionOptions,
+  DesktopProjectDirectoryEntry,
+  DesktopProjectTextFileTail,
+  DesktopProjectTextFileUpdate,
+  DesktopSettingsValue,
+  LayoutViewerOpenRequest,
+  LayoutViewerOpenResult,
+  PdkDetectedFiles,
+  ScannedPdkDirectory,
+  ScannedRtlDirectory,
+  VersionInfo,
+  WorkspaceDirectoryReplacement,
+} from './contracts/desktopApi.ts'
+export type {
+  EccFlowRunRequest,
+  EccFlowRunResult,
+  EccFlowRunStepRequest,
+  EccFlowRunStepResult,
+  EccRpcHelloResult,
+  EccRpcPingResult,
+  EccRpcShutdownResult,
+  EccRuntimeApi,
+  EccRuntimeError,
+  EccRuntimeEvent,
+  EccSignoffReviewDetail,
+  EccSignoffReviewDetailKind,
+  EccSignoffReviewGroup,
+  EccSignoffReviewRisk,
+  EccSignoffReviewStatus,
+  EccWorkspaceCloseResult,
+  EccWorkspaceCreateRequest,
+  EccWorkspaceCreateResult,
+  EccWorkspaceExportSignoffRequest,
+  EccWorkspaceExportSignoffResult,
+  EccWorkspaceHandleRequest,
+  EccWorkspaceHomeResult,
+  EccWorkspaceInspectSignoffResult,
+  EccWorkspaceInfoRequest,
+  EccWorkspaceInfoResult,
+  EccWorkspaceOpenRequest,
+  EccWorkspaceOpenResult,
+  EccWorkspaceRefreshConfigResult,
+  EccWorkspaceResetFlowResult,
+  EccWorkspaceSyncConfigRequest,
+  EccWorkspaceSyncConfigResult,
+} from './contracts/eccRuntime.ts'
 export type {
   ResourceAction,
+  ResourceImportLocalRequest,
   ResourceImportPdkRequest,
   ResourceInfo,
   ResourceInstallRequest,
@@ -40,7 +80,7 @@ export type {
   ResourceType,
   ResourceUpdateCheckItem,
   ResourceUpdateCheckResult,
-} from './contracts/resources.ts';
+} from './contracts/resources.ts'
 export type {
   RemoteContentApi,
   RemoteContentFile,
@@ -48,13 +88,13 @@ export type {
   RemoteContentReadJsonFileRequest,
   RemoteContentReadTextFileRequest,
   RemoteContentSourceId,
-} from './contracts/remoteContent.ts';
+} from './contracts/remoteContent.ts'
 export type {
   DesktopShellDataEvent,
   DesktopShellExitEvent,
   DesktopShellSession,
   DesktopShellSessionOptions,
-} from './contracts/desktopShell.ts';
+} from './contracts/desktopShell.ts'
 export type {
   DesktopAgentEvent,
   DesktopAgentEventType,
@@ -72,7 +112,7 @@ export type {
   DesktopAgentStartSessionResponse,
   DesktopAgentStatus,
   DesktopAgentStatusState,
-} from './contracts/desktopAgent.ts';
+} from './contracts/desktopAgent.ts'
 export {
   appMenuActionIds,
   desktopMenuEventIds,
@@ -83,16 +123,26 @@ export {
   type AppMenuAction,
   type DesktopEventUnsubscribe,
   type DesktopMenuEventId,
-} from './contracts/desktopEvents.ts';
-export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts';
-export type { DesktopFailure, DesktopResult, DesktopSuccess, VoidDesktopResult } from './types/desktop.ts';
+} from './contracts/desktopEvents.ts'
+export type { DesktopErrorCode, DesktopErrorShape } from './contracts/errors.ts'
+export type {
+  DesktopFailure,
+  DesktopResult,
+  DesktopSuccess,
+  VoidDesktopResult,
+} from './types/desktop.ts'
 export type {
   DesignTool,
   WorkspaceConfig,
   WorkspaceParameters,
   WorkspaceStatus,
   WorkspaceSummary,
-} from './types/workspace.ts';
+} from './types/workspace.ts'
+export type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+  WorkspaceDesignFileSkip,
+} from './types/designFiles.ts'
 export type {
   WorkspaceResourceFile,
   WorkspaceResourceIndex,
@@ -101,7 +151,7 @@ export type {
   WorkspaceStepInfoResult,
   WorkspaceStepResource,
   WorkspaceTechResources,
-} from './types/workspaceResources.ts';
+} from './types/workspaceResources.ts'
 export {
   isAbsoluteLocalPath,
   isWindowsDrivePath,
@@ -110,4 +160,5 @@ export {
   normalizeLocalPath,
   resolveContainedLocalPath,
   resolveProjectFileAbsolutePath,
-} from './utils/localPath.ts';
+} from './utils/localPath.ts'
+export { isHdlFilePath } from './utils/hdlPath.ts'

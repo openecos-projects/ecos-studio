@@ -62,7 +62,10 @@ export function joinLocalPath(basePath: string, relativePath: string): string {
   )
 }
 
-export function resolveProjectFileAbsolutePath(projectPath: string, inputPath: string): string {
+export function resolveProjectFileAbsolutePath(
+  projectPath: string,
+  inputPath: string,
+): string {
   const trimmed = inputPath.trim()
   if (!trimmed) {
     throw new Error('布局 JSON 路径为空')
@@ -86,7 +89,10 @@ export class LocalPathOutsideRootError extends Error {
   }
 }
 
-export function resolveContainedLocalPath(rootPath: string, relativePath: string): string {
+export function resolveContainedLocalPath(
+  rootPath: string,
+  relativePath: string,
+): string {
   const trimmed = relativePath.trim()
   if (!trimmed) {
     throw new LocalPathOutsideRootError(rootPath, relativePath)
@@ -97,9 +103,10 @@ export function resolveContainedLocalPath(rootPath: string, relativePath: string
   }
 
   const normalizedRootPath = normalizeLocalPath(rootPath).replace(/[\\/]+$/, '')
-  const separator = isWindowsDrivePath(normalizedRootPath) || normalizedRootPath.includes('\\')
-    ? '\\'
-    : '/'
+  const separator =
+    isWindowsDrivePath(normalizedRootPath) || normalizedRootPath.includes('\\')
+      ? '\\'
+      : '/'
   const resolvedPath = joinLocalPath(normalizedRootPath, trimmed)
   const rootPrefix = `${normalizedRootPath}${separator}`
 

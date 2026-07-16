@@ -18,7 +18,8 @@ vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: vi.fn(),
 }))
 
-const { listRemoteContentFiles, readRemoteJsonFile } = await import('@/services/remoteContentClient')
+const { listRemoteContentFiles, readRemoteJsonFile } =
+  await import('@/services/remoteContentClient')
 const { waitForDesktopApi } = await import('@/platform/desktop')
 const originalLocalStorage = globalThis.localStorage
 
@@ -32,8 +33,38 @@ const remoteJson = {
     selected_core_id: 2,
     number: 2,
     list: [
-      { core_id: 2, name: 'core2', info: '', io_align: 'left', orient: 'N', bounding_box: { llx: 10, lly: 10, urx: 30, ury: 30, width: 20, height: 20, area: 400 } },
-      { core_id: 3, name: 'core3', info: '', io_align: 'right', orient: 'N', bounding_box: { llx: 40, lly: 40, urx: 60, ury: 60, width: 20, height: 20, area: 400 } },
+      {
+        core_id: 2,
+        name: 'core2',
+        info: '',
+        io_align: 'left',
+        orient: 'N',
+        bounding_box: {
+          llx: 10,
+          lly: 10,
+          urx: 30,
+          ury: 30,
+          width: 20,
+          height: 20,
+          area: 400,
+        },
+      },
+      {
+        core_id: 3,
+        name: 'core3',
+        info: '',
+        io_align: 'right',
+        orient: 'N',
+        bounding_box: {
+          llx: 40,
+          lly: 40,
+          urx: 60,
+          ury: 60,
+          width: 20,
+          height: 20,
+          area: 400,
+        },
+      },
     ],
   },
 }
@@ -141,7 +172,8 @@ describe('socTemplateCatalog remote source', () => {
     expect(items[0]).toMatchObject({
       id: 'ysyxSoCASIC',
       name: 'ysyxSoCASIC',
-      sourceLabel: 'remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json',
+      sourceLabel:
+        'remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json',
     })
     expect(items[0]?.thumbnail).toBeDefined()
   })
@@ -150,11 +182,16 @@ describe('socTemplateCatalog remote source', () => {
     vi.mocked(readRemoteJsonFile)
       .mockResolvedValueOnce(manifestJson)
       .mockResolvedValueOnce(remoteJson)
-    settings.set('ecos.socTemplate.selectedCore.remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json', 3)
+    settings.set(
+      'ecos.socTemplate.selectedCore.remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json',
+      3,
+    )
 
     const detail = await loadSocTemplateDetail('ysyxSoCASIC')
 
-    expect(detail.cores.map(core => ({ id: core.id, selected: core.selected }))).toEqual([
+    expect(
+      detail.cores.map((core) => ({ id: core.id, selected: core.selected })),
+    ).toEqual([
       { id: 2, selected: 0 },
       { id: 3, selected: 1 },
     ])
@@ -167,8 +204,12 @@ describe('socTemplateCatalog remote source', () => {
 
     const detail = await selectSocTemplateCore('ysyxSoCASIC', 3)
 
-    expect(settings.get('ecos.socTemplate.selectedCore.remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json')).toBe(3)
-    expect(detail.cores.find(core => core.id === 3)?.selected).toBe(1)
+    expect(
+      settings.get(
+        'ecos.socTemplate.selectedCore.remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json',
+      ),
+    ).toBe(3)
+    expect(detail.cores.find((core) => core.id === 3)?.selected).toBe(1)
   })
 
   it('rejects unknown template ids from the remote index', async () => {
@@ -176,11 +217,15 @@ describe('socTemplateCatalog remote source', () => {
       .mockResolvedValueOnce(manifestJson)
       .mockResolvedValueOnce(remoteJson)
 
-    await expect(loadSocTemplateDetail('missing-id')).rejects.toThrow('Unknown SoC template: missing-id')
+    await expect(loadSocTemplateDetail('missing-id')).rejects.toThrow(
+      'Unknown SoC template: missing-id',
+    )
   })
 
   it('reports catalog load failures with a user-facing prompt', async () => {
-    vi.mocked(readRemoteJsonFile).mockRejectedValueOnce(new Error('GitHub request failed with 404'))
+    vi.mocked(readRemoteJsonFile).mockRejectedValueOnce(
+      new Error('GitHub request failed with 404'),
+    )
 
     await expect(loadSocTemplateCatalog()).rejects.toThrow(
       'SoC template catalog load failed. Check the network connection or retry. GitHub request failed with 404',
@@ -212,7 +257,9 @@ describe('socTemplateCatalog remote source', () => {
     const items = await reloadSocTemplateCatalog()
 
     expect(readRemoteJsonFile).toHaveBeenCalledTimes(4)
-    expect(items[0]?.sourceLabel).toBe('remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json')
+    expect(items[0]?.sourceLabel).toBe(
+      'remote:socTemplateCatalog/templates/ysyxSoC/metadata/ysyxSoCASIC.json',
+    )
   })
 
   it('includes imported templates in the catalog and removes them when requested', async () => {
@@ -220,17 +267,20 @@ describe('socTemplateCatalog remote source', () => {
       .mockResolvedValueOnce(manifestJson)
       .mockResolvedValueOnce(remoteJson)
 
-    await importSocTemplateFromJsonText(JSON.stringify({
-      ...remoteJson,
-      design_name: 'imported-demo',
-    }), 'imported-demo')
+    await importSocTemplateFromJsonText(
+      JSON.stringify({
+        ...remoteJson,
+        design_name: 'imported-demo',
+      }),
+      'imported-demo',
+    )
 
     let items = await loadSocTemplateCatalog()
-    expect(items.map(item => item.id)).toContain('imported-demo')
+    expect(items.map((item) => item.id)).toContain('imported-demo')
 
     removeImportedSocTemplate('imported-demo')
     items = await loadSocTemplateCatalog()
-    expect(items.map(item => item.id)).not.toContain('imported-demo')
+    expect(items.map((item) => item.id)).not.toContain('imported-demo')
   })
 
   it('hides remote templates after removal', async () => {
@@ -239,10 +289,10 @@ describe('socTemplateCatalog remote source', () => {
       .mockResolvedValueOnce(remoteJson)
 
     let items = await loadSocTemplateCatalog()
-    expect(items.map(item => item.id)).toContain('ysyxSoCASIC')
+    expect(items.map((item) => item.id)).toContain('ysyxSoCASIC')
 
     removeImportedSocTemplate('ysyxSoCASIC')
     items = await loadSocTemplateCatalog()
-    expect(items.map(item => item.id)).not.toContain('ysyxSoCASIC')
+    expect(items.map((item) => item.id)).not.toContain('ysyxSoCASIC')
   })
 })

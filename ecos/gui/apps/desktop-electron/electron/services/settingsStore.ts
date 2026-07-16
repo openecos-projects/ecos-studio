@@ -21,7 +21,9 @@ export class SettingsStore {
     this.filePath = options.filePath ?? join(process.cwd(), 'settings.json')
   }
 
-  async get<T extends DesktopSettingsValue = DesktopSettingsValue>(key: string): Promise<T | null> {
+  async get<T extends DesktopSettingsValue = DesktopSettingsValue>(
+    key: string,
+  ): Promise<T | null> {
     await this.writeChain
 
     const settings = await this.readAll()

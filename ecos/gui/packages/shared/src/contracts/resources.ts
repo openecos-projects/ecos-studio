@@ -88,6 +88,11 @@ export interface ResourceImportPdkRequest {
   path: string
 }
 
+export interface ResourceImportLocalRequest {
+  resourceId: string
+  path: string
+}
+
 export interface ResourceInstallRequest {
   resourceId: string
   version?: string

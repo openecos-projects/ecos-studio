@@ -40,16 +40,13 @@ const TECH_LAYER_COLORS: Record<string, number> = {
 }
 
 const FALLBACK_COLORS = [
-  0x4444ff,
-  0xff4444,
-  0x44cc88,
-  0xff8844,
-  0x44cccc,
-  0xffff44,
-  0xff44ff,
+  0x4444ff, 0xff4444, 0x44cc88, 0xff8844, 0x44cccc, 0xffff44, 0xff44ff,
 ]
 
-export function colorForTechLayer(layer: TechLayer | undefined, fallbackIndex: number): number {
+export function colorForTechLayer(
+  layer: TechLayer | undefined,
+  fallbackIndex: number,
+): number {
   const layerName = layer?.name.toUpperCase()
   if (layerName && TECH_LAYER_COLORS[layerName] !== undefined) {
     return TECH_LAYER_COLORS[layerName]
@@ -57,7 +54,11 @@ export function colorForTechLayer(layer: TechLayer | undefined, fallbackIndex: n
   return FALLBACK_COLORS[fallbackIndex % FALLBACK_COLORS.length]
 }
 
-function styleForRect(rect: TechPreviewRect, layer: TechLayer | undefined, fallbackIndex: number): TechPreviewStyle {
+function styleForRect(
+  rect: TechPreviewRect,
+  layer: TechLayer | undefined,
+  fallbackIndex: number,
+): TechPreviewStyle {
   if (rect.kind === 'obs') {
     return { color: 0x64748b, fillAlpha: 0.26, strokeAlpha: 0.82 }
   }
@@ -74,11 +75,16 @@ function uniqueSorted(values: number[]): number[] {
     .sort((a, b) => a - b)
 }
 
-function rectContains(rect: PreviewWorldRect, x: number, y: number, w: number, h: number): boolean {
-  return rect.x <= x &&
-    rect.y <= y &&
-    rect.x + rect.w >= x + w &&
-    rect.y + rect.h >= y + h
+function rectContains(
+  rect: PreviewWorldRect,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): boolean {
+  return (
+    rect.x <= x && rect.y <= y && rect.x + rect.w >= x + w && rect.y + rect.h >= y + h
+  )
 }
 
 function mergeHorizontal(cells: PreviewWorldRect[]): PreviewWorldRect[] {
@@ -91,8 +97,9 @@ function mergeHorizontal(cells: PreviewWorldRect[]): PreviewWorldRect[] {
   }
 
   const merged: PreviewWorldRect[] = []
-  const sortedBands = [...byBand.values()]
-    .sort((a, b) => a[0].y - b[0].y || a[0].h - b[0].h)
+  const sortedBands = [...byBand.values()].sort(
+    (a, b) => a[0].y - b[0].y || a[0].h - b[0].h,
+  )
   for (const band of sortedBands) {
     const sorted = [...band].sort((a, b) => a.x - b.x)
     let current: PreviewWorldRect | null = null

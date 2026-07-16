@@ -1,75 +1,136 @@
 <template>
-  <div :class="[
-    'flex w-full min-w-0',
-    message.role === 'user' ? 'justify-end' : 'justify-start'
-  ]">
+  <div
+    :class="[
+      'flex w-full min-w-0',
+      message.role === 'user' ? 'justify-end' : 'justify-start',
+    ]"
+  >
     <!-- Map 消息 - 热力图/密度图展示 -->
-    <div v-if="message.type === 'map' && message.mapData"
-      class="map-message-container w-full max-w-full min-w-0 rounded-xl text-sm bg-(--bg-secondary) text-(--text-primary) border border-(--border-color) overflow-hidden shadow-sm">
+    <div
+      v-if="message.type === 'map' && message.mapData"
+      class="map-message-container w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-(--border-color) bg-(--bg-secondary) text-sm text-(--text-primary) shadow-sm"
+    >
       <!-- 标题栏 -->
       <div
-        class="flex items-center gap-2 px-4 py-3 bg-linear-to-r from-(--accent-color)/10 to-transparent border-b border-(--border-color)">
-        <div class="w-8 h-8 rounded-lg bg-(--accent-color)/20 flex items-center justify-center shrink-0">
-          <i class="ri-map-2-line text-(--accent-color) text-base"></i>
+        class="flex items-center gap-2 border-b border-(--border-color) bg-linear-to-r from-(--accent-color)/10 to-transparent px-4 py-3"
+      >
+        <div
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--accent-color)/20"
+        >
+          <i class="ri-map-2-line text-base text-(--accent-color)"></i>
         </div>
-        <div class="flex-1 min-w-0 overflow-hidden">
-          <h3 class="font-semibold text-xs text-(--text-primary) truncate">{{ message.mapData.title }}</h3>
-          <span class="text-[10px] text-(--text-secondary)">{{ message.mapData.step }}</span>
+        <div class="min-w-0 flex-1 overflow-hidden">
+          <h3 class="truncate text-xs font-semibold text-(--text-primary)">
+            {{ message.mapData.title }}
+          </h3>
+          <span class="text-[10px] text-(--text-secondary)">{{
+            message.mapData.step
+          }}</span>
         </div>
-        <span v-if="message.mapData.category"
-          class="text-[10px] text-(--accent-color) bg-(--accent-color)/10 px-2 py-0.5 rounded-full shrink-0">
+        <span
+          v-if="message.mapData.category"
+          class="shrink-0 rounded-full bg-(--accent-color)/10 px-2 py-0.5 text-[10px] text-(--accent-color)"
+        >
           {{ message.mapData.category }}
         </span>
-        <button type="button" class="info-report-header-fs-btn info-report-header-fs-btn--sm shrink-0" title="查阅"
-          aria-label="查阅" @click.stop="openImageLightbox(message.mapData.title, message.mapData.imageUrl)">
+        <button
+          type="button"
+          class="info-report-header-fs-btn info-report-header-fs-btn--sm shrink-0"
+          title="查阅"
+          aria-label="查阅"
+          @click.stop="openImageLightbox(message.mapData.title, message.mapData.imageUrl)"
+        >
           <i class="ri-fullscreen-fill"></i>
         </button>
-        <button type="button" class="info-report-header-close-btn info-report-header-close-btn--sm shrink-0"
-          title="关闭" aria-label="关闭" @click.stop="emit('close')">
+        <button
+          type="button"
+          class="info-report-header-close-btn info-report-header-close-btn--sm shrink-0"
+          title="关闭"
+          aria-label="关闭"
+          @click.stop="emit('close')"
+        >
           <i class="ri-close-line"></i>
         </button>
       </div>
 
       <!-- 统计信息 -->
-      <div v-if="message.mapData.info && message.mapData.info.length > 0 && message.mapData.info[0] !== ''"
-        class="px-4 py-3 border-b border-(--border-color)/50 overflow-hidden">
-        <div class="flex items-center gap-2 mb-2">
-          <i class="ri-bar-chart-2-line text-(--accent-color) text-xs shrink-0"></i>
-          <span class="text-[10px] font-medium text-(--text-secondary) uppercase tracking-wide">Statistics</span>
+      <div
+        v-if="
+          message.mapData.info &&
+          message.mapData.info.length > 0 &&
+          message.mapData.info[0] !== ''
+        "
+        class="overflow-hidden border-b border-(--border-color)/50 px-4 py-3"
+      >
+        <div class="mb-2 flex items-center gap-2">
+          <i class="ri-bar-chart-2-line shrink-0 text-xs text-(--accent-color)"></i>
+          <span
+            class="text-[10px] font-medium tracking-wide text-(--text-secondary) uppercase"
+            >Statistics</span
+          >
         </div>
         <div class="grid grid-cols-1 gap-1.5">
-          <div v-for="(infoLine, idx) in message.mapData.info.filter(l => l)" :key="idx"
-            class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-(--bg-primary)/50 min-w-0 overflow-hidden">
-            <span class="text-[11px] text-(--text-secondary) truncate mr-2">{{ parseInfoKey(infoLine) }}</span>
-            <span class="text-[11px] font-mono font-medium text-(--accent-color) shrink-0">{{ parseInfoValue(infoLine)
+          <div
+            v-for="(infoLine, idx) in message.mapData.info.filter((l) => l)"
+            :key="idx"
+            class="flex min-w-0 items-center justify-between overflow-hidden rounded-lg bg-(--bg-primary)/50 px-3 py-1.5"
+          >
+            <span class="mr-2 truncate text-[11px] text-(--text-secondary)">{{
+              parseInfoKey(infoLine)
             }}</span>
+            <span
+              class="shrink-0 font-mono text-[11px] font-medium text-(--accent-color)"
+              >{{ parseInfoValue(infoLine) }}</span
+            >
           </div>
         </div>
       </div>
 
       <!-- 图片展示 -->
-      <div class="p-3 overflow-hidden">
-        <div class="relative rounded-xl overflow-hidden bg-(--bg-tertiary) border border-(--border-color)/30">
+      <div class="overflow-hidden p-3">
+        <div
+          class="relative overflow-hidden rounded-xl border border-(--border-color)/30 bg-(--bg-tertiary)"
+        >
           <!-- 加载状态 -->
-          <div v-if="mapImageLoading"
-            class="absolute inset-0 flex items-center justify-center z-10 bg-(--bg-secondary)/80">
+          <div
+            v-if="mapImageLoading"
+            class="absolute inset-0 z-10 flex items-center justify-center bg-(--bg-secondary)/80"
+          >
             <div class="text-center">
-              <i class="ri-loader-4-line text-2xl text-(--accent-color) animate-spin"></i>
-              <p class="text-[10px] text-(--text-secondary) mt-2">Loading...</p>
+              <i class="ri-loader-4-line animate-spin text-2xl text-(--accent-color)"></i>
+              <p class="mt-2 text-[10px] text-(--text-secondary)">Loading...</p>
             </div>
           </div>
 
           <!-- 图片 -->
-          <img :src="message.mapData.imageUrl" :alt="message.mapData.title"
-            class="map-image w-full min-w-0 h-auto max-h-[400px] max-w-full object-contain block" @load="handleMapImageLoad"
-            @error="handleMapImageError" />
+          <img
+            :src="message.mapData.imageUrl"
+            :alt="message.mapData.title"
+            class="map-image block h-auto max-h-[400px] w-full max-w-full min-w-0 object-contain"
+            @load="handleMapImageLoad"
+            @error="handleMapImageError"
+          />
 
           <!-- 颜色条图例 -->
           <div
-            class="absolute bottom-3 right-3 flex flex-col items-end gap-1 bg-(--bg-secondary)/90 rounded-lg p-2 border border-(--border-color)/50">
-            <div class="w-4 h-24 rounded overflow-hidden"
-              style="background: linear-gradient(to bottom, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff);"></div>
-            <div class="flex flex-col justify-between h-24 text-[8px] text-(--text-secondary) font-mono">
+            class="absolute right-3 bottom-3 flex flex-col items-end gap-1 rounded-lg border border-(--border-color)/50 bg-(--bg-secondary)/90 p-2"
+          >
+            <div
+              class="h-24 w-4 overflow-hidden rounded"
+              style="
+                background: linear-gradient(
+                  to bottom,
+                  #ffff00,
+                  #00ff00,
+                  #00ffff,
+                  #0000ff,
+                  #ff00ff
+                );
+              "
+            ></div>
+            <div
+              class="flex h-24 flex-col justify-between font-mono text-[8px] text-(--text-secondary)"
+            >
               <span>1.0</span>
               <span>0.8</span>
               <span>0.6</span>
@@ -80,7 +141,9 @@
         </div>
 
         <!-- 文件路径 -->
-        <div class="mt-2 flex items-center gap-1.5 text-[9px] text-(--text-secondary)/60 min-w-0 overflow-hidden">
+        <div
+          class="mt-2 flex min-w-0 items-center gap-1.5 overflow-hidden text-[9px] text-(--text-secondary)/60"
+        >
           <i class="ri-folder-line shrink-0"></i>
           <span class="truncate">{{ message.mapData.localPath }}</span>
         </div>
@@ -88,65 +151,104 @@
     </div>
 
     <!-- Info 消息 -->
-    <div v-else-if="message.type === 'info' && message.infoData"
-      class="w-full min-w-0 p-2 rounded-lg text-sm bg-(--bg-secondary) text-(--text-primary) border border-(--border-color) overflow-hidden">
+    <div
+      v-else-if="message.type === 'info' && message.infoData"
+      class="w-full min-w-0 overflow-hidden rounded-lg border border-(--border-color) bg-(--bg-secondary) p-2 text-sm text-(--text-primary)"
+    >
       <!-- 标题栏（全屏查阅在右上角） -->
-      <div class="flex items-center gap-2 px-3 py-2 border-b border-(--border-color)">
-        <div class="flex items-center gap-2 min-w-0 flex-1">
-          <i class="ri-file-list-3-line text-(--accent-color) shrink-0"></i>
-          <span class="font-semibold text-xs truncate">{{ message.infoData.title }}</span>
-          <span class="text-[10px] text-(--text-secondary) bg-(--bg-primary) px-2 py-0.5 rounded shrink-0">
+      <div class="flex items-center gap-2 border-b border-(--border-color) px-3 py-2">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <i class="ri-file-list-3-line shrink-0 text-(--accent-color)"></i>
+          <span class="truncate text-xs font-semibold">{{ message.infoData.title }}</span>
+          <span
+            class="shrink-0 rounded bg-(--bg-primary) px-2 py-0.5 text-[10px] text-(--text-secondary)"
+          >
             {{ message.infoData.step }}
           </span>
         </div>
-        <button v-if="showFullscreenReportButton" type="button" class="info-report-header-fs-btn" title="查阅"
-          aria-label="查阅" @click.stop="openHeaderReportLightbox">
+        <button
+          v-if="showFullscreenReportButton"
+          type="button"
+          class="info-report-header-fs-btn"
+          title="查阅"
+          aria-label="查阅"
+          @click.stop="openHeaderReportLightbox"
+        >
           <i class="ri-fullscreen-fill"></i>
         </button>
-        <button type="button" class="info-report-header-close-btn" title="关闭" aria-label="关闭"
-          @click.stop="emit('close')">
+        <button
+          type="button"
+          class="info-report-header-close-btn"
+          title="关闭"
+          aria-label="关闭"
+          @click.stop="emit('close')"
+        >
           <i class="ri-close-line"></i>
         </button>
       </div>
 
       <!-- 数据内容 - 直接显示表格 -->
-      <div v-for="(item, index) in message.infoData.items" :key="index" class="info-content overflow-hidden">
+      <div
+        v-for="(item, index) in message.infoData.items"
+        :key="index"
+        class="info-content overflow-hidden"
+      >
         <!-- JSON 格式 - 简单对象渲染为表格 -->
-        <div v-if="item.format === 'json' && isSimpleObject(item.content)" class="overflow-auto">
+        <div
+          v-if="item.format === 'json' && isSimpleObject(item.content)"
+          class="overflow-auto"
+        >
           <table class="w-full text-xs">
             <tbody>
-              <tr v-for="(value, key) in item.content" :key="key"
-                class="border-b border-(--border-color)/30 hover:bg-(--bg-primary)/30">
-                <td class="py-2 px-3 font-medium text-(--text-secondary) whitespace-nowrap w-[40%]">{{ key }}</td>
-                <td class="py-2 px-3 text-(--text-primary)">{{ formatValue(value) }}</td>
+              <tr
+                v-for="(value, key) in item.content"
+                :key="key"
+                class="border-b border-(--border-color)/30 hover:bg-(--bg-primary)/30"
+              >
+                <td
+                  class="w-[40%] px-3 py-2 font-medium whitespace-nowrap text-(--text-secondary)"
+                >
+                  {{ key }}
+                </td>
+                <td class="px-3 py-2 text-(--text-primary)">{{ formatValue(value) }}</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <!-- JSON 格式 - 复杂对象 -->
-        <div v-else-if="item.format === 'json'" class="p-3 overflow-hidden">
+        <div v-else-if="item.format === 'json'" class="overflow-hidden p-3">
           <pre
-            class="nested-report-scroll text-[11px] bg-(--bg-primary) p-3 rounded whitespace-pre overflow-auto max-h-[400px] font-mono text-content-pre"
-            @wheel="onNestedReportWheel"><code>{{ JSON.stringify(item.content, null, 2) }}</code></pre>
+            class="nested-report-scroll text-content-pre max-h-[400px] overflow-auto rounded bg-(--bg-primary) p-3 font-mono text-[11px] whitespace-pre"
+            @wheel="onNestedReportWheel"
+          ><code>{{ JSON.stringify(item.content, null, 2) }}</code></pre>
         </div>
 
         <!-- CSV 格式 - 表格显示 -->
-        <div v-else-if="item.format === 'csv'" class="nested-report-scroll overflow-auto max-h-[400px]"
-          @wheel="onNestedReportWheel">
-          <table class="w-full text-xs border-collapse">
+        <div
+          v-else-if="item.format === 'csv'"
+          class="nested-report-scroll max-h-[400px] overflow-auto"
+          @wheel="onNestedReportWheel"
+        >
+          <table class="w-full border-collapse text-xs">
             <thead v-if="csvHeaders(item.content).length > 0" class="sticky top-0">
               <tr class="bg-(--bg-primary)">
-                <th v-for="header in csvHeaders(item.content)" :key="header"
-                  class="py-2 px-3 text-left font-medium text-(--text-secondary) border-b border-(--border-color)">
+                <th
+                  v-for="header in csvHeaders(item.content)"
+                  :key="header"
+                  class="border-b border-(--border-color) px-3 py-2 text-left font-medium text-(--text-secondary)"
+                >
                   {{ header }}
                 </th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, rowIndex) in csvRows(item.content)" :key="rowIndex"
-                class="border-b border-(--border-color)/30 hover:bg-(--bg-primary)/30">
-                <td v-for="(cell, cellIndex) in row" :key="cellIndex" class="py-2 px-3">
+              <tr
+                v-for="(row, rowIndex) in csvRows(item.content)"
+                :key="rowIndex"
+                class="border-b border-(--border-color)/30 hover:bg-(--bg-primary)/30"
+              >
+                <td v-for="(cell, cellIndex) in row" :key="cellIndex" class="px-3 py-2">
                   {{ cell }}
                 </td>
               </tr>
@@ -155,52 +257,87 @@
         </div>
 
         <!-- HTML 报告：嵌入区缩小字号；全屏查阅见标题栏按钮 -->
-        <div v-else-if="item.format === 'html'" class="p-3 overflow-hidden">
-          <div class="rounded-lg overflow-hidden bg-(--bg-primary) border border-(--border-color)/30 max-h-[350px]">
-            <div class="nested-report-scroll info-html-embed markdown-body info-html-embed--compact overflow-auto max-h-[350px] p-3"
+        <div v-else-if="item.format === 'html'" class="overflow-hidden p-3">
+          <div
+            class="max-h-[350px] overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)"
+          >
+            <div
+              class="nested-report-scroll info-html-embed markdown-body info-html-embed--compact max-h-[350px] overflow-auto p-3"
               @wheel="onNestedReportWheel"
-              v-html="coerceHtmlString(item.content)"></div>
+              v-html="coerceHtmlString(item.content)"
+            ></div>
           </div>
         </div>
 
         <!-- 文本格式：嵌入区缩小字号；全屏查阅见标题栏按钮 -->
-        <div v-else class="p-3 overflow-hidden">
-          <div class="rounded-lg overflow-hidden bg-(--bg-primary) border border-(--border-color)/30 max-h-[350px]">
+        <div v-else class="overflow-hidden p-3">
+          <div
+            class="max-h-[350px] overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)"
+          >
             <pre
-              class="nested-report-scroll info-text-embed-compact bg-(--bg-primary) p-3 rounded-none whitespace-pre overflow-auto max-h-[350px] font-mono text-content-pre"
-              @wheel="onNestedReportWheel"><code>{{ item.content }}</code></pre>
+              class="nested-report-scroll info-text-embed-compact text-content-pre max-h-[350px] overflow-auto rounded-none bg-(--bg-primary) p-3 font-mono whitespace-pre"
+              @wheel="onNestedReportWheel"
+            ><code>{{ item.content }}</code></pre>
           </div>
         </div>
       </div>
     </div>
 
     <!-- 其他消息类型 -->
-    <div v-else :class="[
-      'message-bubble group relative max-w-[85%] rounded-lg text-sm',
-      message.role === 'user'
-        ? 'bg-(--accent-color) text-(--accent-text)'
-        : 'bg-(--bg-secondary) text-(--text-primary) border border-(--border-color)'
-    ]">
-      <button type="button" class="message-close-btn" title="删除" aria-label="删除"
-        @click.stop="emit('close')">
+    <div
+      v-else
+      :class="[
+        'message-bubble group relative max-w-[85%] rounded-lg text-sm',
+        message.role === 'user'
+          ? 'bg-(--accent-color) text-(--accent-text)'
+          : 'border border-(--border-color) bg-(--bg-secondary) text-(--text-primary)',
+      ]"
+    >
+      <button
+        type="button"
+        class="message-close-btn"
+        title="删除"
+        aria-label="删除"
+        @click.stop="emit('close')"
+      >
         <i class="ri-close-line"></i>
       </button>
 
       <!-- 图片消息 -->
       <div v-if="message.type === 'image' && message.image" class="p-2">
         <p class="text-xs opacity-90">{{ message.image.label }}:</p>
-        <p v-if="message.image.description" class="text-xs opacity-90 whitespace-pre-line mb-2">{{
-          message.image.description }}</p>
-        <div class="relative rounded-lg overflow-hidden mb-2 min-w-0 max-w-full group">
-          <img :src="message.image.url" :alt="message.image.label"
-            class="w-full min-w-0 max-w-full h-auto object-contain max-h-[400px]" loading="lazy"
-            @load="handleImageLoad" />
-          <button type="button" class="image-fs-overlay-btn" title="查阅" aria-label="查阅"
-            @click.stop="openImageLightbox(message.image.label || 'Image', message.image.url)">
+        <p
+          v-if="message.image.description"
+          class="mb-2 text-xs whitespace-pre-line opacity-90"
+        >
+          {{ message.image.description }}
+        </p>
+        <div class="group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-lg">
+          <img
+            :src="message.image.url"
+            :alt="message.image.label"
+            class="h-auto max-h-[400px] w-full max-w-full min-w-0 object-contain"
+            loading="lazy"
+            @load="handleImageLoad"
+          />
+          <button
+            type="button"
+            class="image-fs-overlay-btn"
+            title="查阅"
+            aria-label="查阅"
+            @click.stop="
+              openImageLightbox(message.image.label || 'Image', message.image.url)
+            "
+          >
             <i class="ri-fullscreen-fill"></i>
           </button>
-          <button type="button" class="image-close-overlay-btn" title="关闭" aria-label="关闭"
-            @click.stop="emit('close')">
+          <button
+            type="button"
+            class="image-close-overlay-btn"
+            title="关闭"
+            aria-label="关闭"
+            @click.stop="emit('close')"
+          >
             <i class="ri-close-line"></i>
           </button>
         </div>
@@ -209,17 +346,32 @@
       <!-- 文本消息 -->
       <div v-else class="px-4 py-2 pr-8">
         <!-- 加载状态 -->
-        <div v-if="message.status === 'loading' && !message.content" class="flex items-center gap-2">
+        <div
+          v-if="message.status === 'loading' && !message.content"
+          class="flex items-center gap-2"
+        >
           <div class="loading-dots flex gap-1">
-            <span class="w-2 h-2 bg-current rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
-            <span class="w-2 h-2 bg-current rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
-            <span class="w-2 h-2 bg-current rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
+            <span
+              class="h-2 w-2 animate-bounce rounded-full bg-current"
+              style="animation-delay: 0ms"
+            ></span>
+            <span
+              class="h-2 w-2 animate-bounce rounded-full bg-current"
+              style="animation-delay: 150ms"
+            ></span>
+            <span
+              class="h-2 w-2 animate-bounce rounded-full bg-current"
+              style="animation-delay: 300ms"
+            ></span>
           </div>
           <span class="text-xs opacity-70">Thinking...</span>
         </div>
 
         <!-- 错误状态 -->
-        <div v-else-if="message.status === 'error'" class="flex items-center gap-2 text-red-500">
+        <div
+          v-else-if="message.status === 'error'"
+          class="flex items-center gap-2 text-red-500"
+        >
           <i class="ri-error-warning-line"></i>
           <span>{{ message.content || 'Failed to send message' }}</span>
         </div>
@@ -228,31 +380,59 @@
         <div v-else class="markdown-body" v-html="renderedContent"></div>
 
         <!-- 流式加载时显示光标 -->
-        <span v-if="message.status === 'loading' && message.content"
-          class="inline-block w-2 h-4 bg-current animate-pulse ml-0.5"></span>
+        <span
+          v-if="message.status === 'loading' && message.content"
+          class="ml-0.5 inline-block h-4 w-2 animate-pulse bg-current"
+        ></span>
       </div>
     </div>
 
     <!-- 全屏查阅 Lightbox：HTML / JSON / 纯文本 / 图片（对所有消息类型通用） -->
     <Teleport to="body">
       <Transition name="lightbox">
-        <div v-if="reportLightbox.visible" class="info-html-lightbox-overlay" tabindex="-1"
-          @click="closeReportLightbox">
+        <div
+          v-if="reportLightbox.visible"
+          class="info-html-lightbox-overlay"
+          tabindex="-1"
+          @click="closeReportLightbox"
+        >
           <div class="info-html-lightbox-content" @click.stop>
             <div class="info-html-lightbox-header">
               <span class="info-html-lightbox-title">{{ reportLightbox.title }}</span>
-              <button type="button" class="info-html-lightbox-close" aria-label="关闭" @click="closeReportLightbox">
+              <button
+                type="button"
+                class="info-html-lightbox-close"
+                aria-label="关闭"
+                @click="closeReportLightbox"
+              >
                 <i class="ri-close-line"></i>
               </button>
             </div>
-            <div class="info-html-lightbox-body"
-              :class="{ 'info-html-lightbox-body--image': reportLightbox.mode === 'image' }">
-              <div v-if="reportLightbox.mode === 'image'" class="info-image-lightbox-wrapper">
-                <img :src="reportLightbox.body" :alt="reportLightbox.title" class="info-image-lightbox-img" />
+            <div
+              class="info-html-lightbox-body"
+              :class="{
+                'info-html-lightbox-body--image': reportLightbox.mode === 'image',
+              }"
+            >
+              <div
+                v-if="reportLightbox.mode === 'image'"
+                class="info-image-lightbox-wrapper"
+              >
+                <img
+                  :src="reportLightbox.body"
+                  :alt="reportLightbox.title"
+                  class="info-image-lightbox-img"
+                />
               </div>
-              <div v-else-if="reportLightbox.mode === 'html'" class="info-html-lightbox-inner markdown-body"
-                v-html="reportLightbox.body"></div>
-              <pre v-else class="info-report-lightbox-pre"><code>{{ reportLightbox.body }}</code></pre>
+              <div
+                v-else-if="reportLightbox.mode === 'html'"
+                class="info-html-lightbox-inner markdown-body"
+                v-html="reportLightbox.body"
+              ></div>
+              <pre
+                v-else
+                class="info-report-lightbox-pre"
+              ><code>{{ reportLightbox.body }}</code></pre>
             </div>
           </div>
         </div>
@@ -279,7 +459,7 @@ const emit = defineEmits<{
 const md = new MarkdownIt({
   html: false,
   linkify: true,
-  typographer: true
+  typographer: true,
 })
 
 const defaultLinkOpen =
@@ -328,8 +508,13 @@ function formatJsonForLightbox(content: unknown): string {
   }
 }
 
-function openReportLightbox(title: string, content: unknown, mode: 'html' | 'text' | 'json') {
-  const rawBody = mode === 'json' ? formatJsonForLightbox(content) : coerceReportBody(content)
+function openReportLightbox(
+  title: string,
+  content: unknown,
+  mode: 'html' | 'text' | 'json',
+) {
+  const rawBody =
+    mode === 'json' ? formatJsonForLightbox(content) : coerceReportBody(content)
   const body = mode === 'html' ? sanitizeHtml(rawBody) : rawBody
   reportLightbox.value = {
     visible: true,
@@ -346,6 +531,8 @@ function closeReportLightbox() {
 function onDocumentKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && reportLightbox.value.visible) {
     closeReportLightbox()
+    e.preventDefault()
+    e.stopPropagation()
   }
 }
 
@@ -390,9 +577,10 @@ function coerceHtmlString(content: unknown): string {
 
 /** 标题栏全屏按钮：存在 HTML / JSON / 纯文本等可全屏内容时显示 */
 const showFullscreenReportButton = computed(() => {
-  if (props.message.type !== 'info' || !props.message.infoData?.items?.length) return false
+  if (props.message.type !== 'info' || !props.message.infoData?.items?.length)
+    return false
   return props.message.infoData.items.some(
-    i => i.format === 'html' || i.format === 'text' || i.format === 'json'
+    (i) => i.format === 'html' || i.format === 'text' || i.format === 'json',
   )
 })
 
@@ -400,17 +588,17 @@ const showFullscreenReportButton = computed(() => {
 function openHeaderReportLightbox() {
   const items = props.message.infoData?.items
   if (!items?.length) return
-  const htmlItem = items.find(i => i.format === 'html')
+  const htmlItem = items.find((i) => i.format === 'html')
   if (htmlItem) {
     openReportLightbox(htmlItem.label, htmlItem.content, 'html')
     return
   }
-  const jsonItem = items.find(i => i.format === 'json')
+  const jsonItem = items.find((i) => i.format === 'json')
   if (jsonItem) {
     openReportLightbox(jsonItem.label, jsonItem.content, 'json')
     return
   }
-  const textItem = items.find(i => i.format === 'text')
+  const textItem = items.find((i) => i.format === 'text')
   if (textItem) {
     openReportLightbox(textItem.label, textItem.content, 'text')
   }
@@ -455,9 +643,7 @@ function isSimpleObject(obj: any): boolean {
   if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
     return false
   }
-  return Object.values(obj).every(v =>
-    typeof v !== 'object' || v === null
-  )
+  return Object.values(obj).every((v) => typeof v !== 'object' || v === null)
 }
 
 // 格式化值显示
@@ -480,7 +666,7 @@ function csvHeaders(content: string): string[] {
   if (typeof content !== 'string') return []
   const lines = content.trim().split('\n')
   if (lines.length === 0) return []
-  return lines[0].split(',').map(h => h.trim())
+  return lines[0].split(',').map((h) => h.trim())
 }
 
 // 解析 CSV 获取数据行
@@ -488,9 +674,7 @@ function csvRows(content: string): string[][] {
   if (typeof content !== 'string') return []
   const lines = content.trim().split('\n')
   if (lines.length <= 1) return []
-  return lines.slice(1).map(line =>
-    line.split(',').map(cell => cell.trim())
-  )
+  return lines.slice(1).map((line) => line.split(',').map((cell) => cell.trim()))
 }
 </script>
 
@@ -647,7 +831,10 @@ function csvRows(content: string): string[][] {
   font-size: 12px;
   opacity: 0;
   transform: translateY(-2px);
-  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .message-bubble:hover .message-close-btn,
@@ -667,7 +854,6 @@ function csvRows(content: string): string[][] {
 }
 
 @keyframes bounce {
-
   0%,
   80%,
   100% {
@@ -699,7 +885,8 @@ function csvRows(content: string): string[][] {
   white-space: pre;
   word-break: normal;
   overflow-wrap: normal;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
   color: var(--text-primary);
 }
 
@@ -793,7 +980,10 @@ function csvRows(content: string): string[][] {
   font-size: 14px;
   opacity: 0;
   transform: translateY(-2px);
-  transition: opacity 0.15s ease, transform 0.15s ease, background-color 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background-color 0.15s ease;
 }
 
 .image-close-overlay-btn {

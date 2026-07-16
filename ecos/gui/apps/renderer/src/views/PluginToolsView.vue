@@ -20,7 +20,12 @@
     <div class="manager-scrim" aria-hidden="true"></div>
 
     <section class="manager-dialog" aria-labelledby="resource-manager-title">
-      <button type="button" class="manager-close" aria-label="Close resource manager" @click="goHome">
+      <button
+        type="button"
+        class="manager-close"
+        aria-label="Close resource manager"
+        @click="goHome"
+      >
         <i class="ri-close-line" aria-hidden="true"></i>
       </button>
 
@@ -74,7 +79,11 @@
               />
             </label>
 
-            <div class="resource-tabs" role="tablist" aria-label="Resource status filters">
+            <div
+              class="resource-tabs"
+              role="tablist"
+              aria-label="Resource status filters"
+            >
               <button
                 v-for="tab in tabItems"
                 :key="tab.id"
@@ -94,22 +103,13 @@
             <div class="manager-table-actions">
               <button
                 type="button"
-                :disabled="pluginStore.loading || importingPdk"
-                @click="handleImportPdk"
-              >
-                <i
-                  :class="importingPdk ? 'ri-loader-4-line spin' : 'ri-folder-add-line'"
-                  aria-hidden="true"
-                ></i>
-                Import PDK
-              </button>
-              <button
-                type="button"
-                :disabled="pluginStore.refreshing || pluginStore.updateChecking"
+                :disabled="pluginStore.refreshing"
                 @click="pluginStore.refresh()"
               >
                 <i
-                  :class="pluginStore.refreshing || pluginStore.updateChecking ? 'ri-loader-4-line spin' : 'ri-refresh-line'"
+                  :class="
+                    pluginStore.refreshing ? 'ri-loader-4-line spin' : 'ri-refresh-line'
+                  "
                   aria-hidden="true"
                 ></i>
                 Refresh
@@ -120,8 +120,15 @@
           <section class="frontend-flow-strip" aria-label="Frontend flow tool readiness">
             <div class="frontend-flow-summary">
               <strong>Frontend Flow</strong>
-              <span>{{ frontendInstalledCount }}/{{ frontendToolRows.length }} installed</span>
-              <em v-if="frontendAvailableCount">{{ frontendAvailableCount }} ready to install</em>
+              <span
+                >{{ frontendInstalledCount }}/{{
+                  frontendToolRows.length
+                }}
+                installed</span
+              >
+              <em v-if="frontendAvailableCount">
+                {{ frontendAvailableCount }} ready to install
+              </em>
             </div>
             <div class="frontend-flow-steps">
               <button
@@ -138,8 +145,12 @@
             </div>
           </section>
 
-          <div v-if="pluginStore.error" class="resource-error">
-            {{ pluginStore.error }}
+          <div
+            v-if="managerErrorText"
+            class="resource-error"
+            :title="pluginStore.error ?? undefined"
+          >
+            {{ managerErrorText }}
           </div>
 
           <div class="resource-table-scroll">
@@ -175,16 +186,24 @@
                     :class="{ checked: isSelected(row.id) }"
                     @click.stop="toggleResource(row.id)"
                   >
-                    <i v-if="isSelected(row.id)" class="ri-check-line" aria-hidden="true"></i>
+                    <i
+                      v-if="isSelected(row.id)"
+                      class="ri-check-line"
+                      aria-hidden="true"
+                    ></i>
                   </span>
 
                   <span class="resource-name-cell">
                     <span class="resource-avatar">{{ row.icon }}</span>
                     <span class="resource-copy">
                       <strong>{{ row.name }}</strong>
-                      <small>{{ row.description }}</small>
+                      <small :title="row.descriptionTitle || undefined">{{
+                        row.description
+                      }}</small>
                       <span v-if="row.flowTags.length" class="resource-flow-tags">
-                        <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{ tag }}</b>
+                        <b v-for="tag in row.flowTags.slice(0, 4)" :key="tag">{{
+                          tag
+                        }}</b>
                       </span>
                       <span v-if="row.dependencyLabel" class="resource-dependency">
                         <i class="ri-node-tree" aria-hidden="true"></i>
@@ -195,8 +214,14 @@
 
                   <span class="resource-muted">{{ row.version }}</span>
                   <span class="resource-muted">{{ row.sizeLabel }}</span>
-                  <span>
-                    <b class="status-pill" :class="row.statusKind">{{ row.statusText }}</b>
+                  <span class="resource-status-cell">
+                    <b
+                      class="status-pill"
+                      :class="row.statusKind"
+                      :title="row.statusTitle || undefined"
+                    >
+                      <span>{{ row.statusText }}</span>
+                    </b>
                     <span
                       v-if="row.progressPercent !== null"
                       class="mini-progress"
@@ -209,21 +234,41 @@
                     >
                       <span></span>
                     </span>
-                    <span v-if="rowError(row)" class="row-error-msg">{{ rowError(row) }}</span>
                   </span>
 
                   <span class="row-actions">
                     <template
                       v-if="
                         rowActionForStatus(row.resource) !== 'none' ||
-                        (
-                          row.statusKind !== 'installing' &&
-                          (row.actions.includes('activate') || row.actions.includes('validate'))
-                        )
+                        removalActionForRow(row) !== null ||
+                        canImportLocalResource(row) ||
+                        (row.statusKind !== 'installing' &&
+                          (row.actions.includes('activate') ||
+                            row.actions.includes('validate')))
                       "
                     >
                       <button
-                        v-if="rowActionForStatus(row.resource) === 'install' && row.statusKind !== 'error'"
+                        v-if="canImportLocalResource(row)"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Import Local"
+                        :disabled="importingResourceIds.has(row.id)"
+                        @click.stop="handleLocalImport(row)"
+                      >
+                        <i
+                          :class="
+                            importingResourceIds.has(row.id)
+                              ? 'ri-loader-4-line spin'
+                              : 'ri-folder-add-line'
+                          "
+                          aria-hidden="true"
+                        ></i>
+                      </button>
+                      <button
+                        v-if="
+                          rowActionForStatus(row.resource) === 'install' &&
+                          row.statusKind !== 'error'
+                        "
                         type="button"
                         class="row-action-btn icon-only primary"
                         data-title="Install"
@@ -232,13 +277,25 @@
                         <i class="ri-download-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="rowActionForStatus(row.resource) === 'update' && row.statusKind !== 'error'"
+                        v-else-if="
+                          rowActionForStatus(row.resource) === 'update' &&
+                          row.statusKind !== 'error'
+                        "
                         type="button"
                         class="row-action-btn icon-only info"
                         data-title="Update"
                         @click.stop="handleRowInstall(row)"
                       >
                         <i class="ri-refresh-line" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        v-else-if="rowActionForStatus(row.resource) === 'replace'"
+                        type="button"
+                        class="row-action-btn icon-only info"
+                        data-title="Replace"
+                        @click.stop="handleRowInstall(row)"
+                      >
+                        <i class="ri-loop-left-line" aria-hidden="true"></i>
                       </button>
                       <button
                         v-else-if="rowActionForStatus(row.resource) === 'cancel'"
@@ -259,7 +316,10 @@
                         <i class="ri-restart-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('activate')"
+                        v-else-if="
+                          row.statusKind !== 'installing' &&
+                          row.actions.includes('activate')
+                        "
                         type="button"
                         class="row-action-btn icon-only primary"
                         data-title="Activate"
@@ -268,7 +328,10 @@
                         <i class="ri-check-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-else-if="row.statusKind !== 'installing' && row.actions.includes('validate')"
+                        v-else-if="
+                          row.statusKind !== 'installing' &&
+                          row.actions.includes('validate')
+                        "
                         type="button"
                         class="row-action-btn icon-only info"
                         data-title="Validate"
@@ -277,14 +340,22 @@
                         <i class="ri-shield-check-line" aria-hidden="true"></i>
                       </button>
                       <button
-                        v-if="['uninstall', 'remove_reference'].includes(rowActionForStatus(row.resource))"
+                        v-if="removalActionForRow(row) !== null"
                         type="button"
                         class="row-action-btn icon-only danger-outlined"
-                        :data-title="rowActionForStatus(row.resource) === 'remove_reference' ? 'Remove' : 'Uninstall'"
-                        @click.stop="handleRowUninstall(row)"
+                        :data-title="
+                          removalActionForRow(row) === 'remove_reference'
+                            ? 'Remove'
+                            : 'Uninstall'
+                        "
+                        @click.stop="handleRowRemove(row)"
                       >
                         <i
-                          :class="rowActionForStatus(row.resource) === 'remove_reference' ? 'ri-link-unlink' : 'ri-delete-bin-line'"
+                          :class="
+                            removalActionForRow(row) === 'remove_reference'
+                              ? 'ri-link-unlink'
+                              : 'ri-delete-bin-line'
+                          "
                           aria-hidden="true"
                         ></i>
                       </button>
@@ -293,7 +364,10 @@
                 </div>
               </template>
 
-              <div v-if="!pluginStore.loading && filteredRows.length === 0" class="resource-empty">
+              <div
+                v-if="!pluginStore.loading && filteredRows.length === 0"
+                class="resource-empty"
+              >
                 <i class="ri-search-2-line" aria-hidden="true"></i>
                 <strong>No resources found</strong>
                 <p>Try adjusting your search or filters.</p>
@@ -307,13 +381,17 @@
         </main>
 
         <aside class="selected-panel" aria-label="Selected resources">
-          <h2>Selected Resources <span>({{ selectedResources.length }})</span></h2>
+          <h2>
+            Selected Resources <span>({{ selectedResources.length }})</span>
+          </h2>
 
           <div class="selected-list">
             <div v-if="selectedResources.length === 0" class="selected-empty">
               <i class="ri-checkbox-multiple-line" aria-hidden="true"></i>
               <span>No resources selected</span>
-              <small>Click rows in the table to select resources for batch operations.</small>
+              <small
+                >Click rows in the table to select resources for batch operations.</small
+              >
             </div>
 
             <div
@@ -326,19 +404,24 @@
               <span class="selected-item-body">
                 <strong>{{ row.name }}</strong>
                 <small class="selected-item-meta" :title="resolveInstallPath(row)">
-                  <b v-if="row.statusKind === 'update'">Update</b>
-                  <span v-else-if="row.statusKind === 'installing'">{{ row.statusText }}</span>
-                  <span v-else>{{ row.version }}</span>
+                  <span>{{ selectedResourceMetaText(row) }}</span>
                 </small>
                 <span v-if="row.flowTags.length" class="selected-flow-tags">
-                  {{ row.flowTags.slice(0, 3).join(' · ') }}
+                  {{ row.flowTags.slice(0, 3).join(' / ') }}
                 </span>
-                <span v-if="row.missingRequires.length" class="selected-flow-tags dependency">
+                <span
+                  v-if="row.missingRequires.length"
+                  class="selected-flow-tags dependency"
+                >
                   +{{ row.missingRequires.length }} required
                 </span>
               </span>
               <em>{{ row.sizeLabel }}</em>
-              <button type="button" aria-label="Remove selected resource" @click.stop="removeSelected(row.id)">
+              <button
+                type="button"
+                aria-label="Remove selected resource"
+                @click.stop="removeSelected(row.id)"
+              >
                 <i class="ri-close-line" aria-hidden="true"></i>
               </button>
             </div>
@@ -351,7 +434,8 @@
 
           <p class="manager-note">
             <i class="ri-information-line" aria-hidden="true"></i>
-            Updates will replace the existing installed versions.
+            Updates apply to managed installs. Replace switches a local tool to the
+            registry-managed version without deleting the original local directory.
           </p>
 
           <div class="selected-actions">
@@ -380,15 +464,22 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePluginStore } from '@/stores/pluginStore'
 import { usePdkManager } from '@/composables/usePdkManager'
-import { getOptionalDesktopApi, hasDesktopApi, waitForDesktopApi } from '@/platform/desktop'
 import {
-  formatResourceSizeMb,
+  getOptionalDesktopApi,
+  hasDesktopApi,
+  waitForDesktopApi,
+} from '@/platform/desktop'
+import {
+  canImportLocalResource,
+  compactResourceMessage,
+  isEdaToolRow,
   primaryActionForRow,
   resourceToRow,
+  removalActionForRow,
   resolveRowInstallPath,
   rowActionForStatus,
+  selectedResourceMetaText,
   runBatchDownload,
-  isEdaToolRow,
   runPrimaryAction,
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
@@ -398,7 +489,7 @@ type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
 const pluginStore = usePluginStore()
-const { importPdk } = usePdkManager()
+const { importPdkForResource } = usePdkManager()
 
 const searchQuery = ref('')
 const searchInput = ref('')
@@ -414,12 +505,18 @@ watch(searchInput, (val) => {
 const categoryFilter = ref<CategoryFilter>('all')
 const statusFilter = ref<StatusFilter>('all')
 const selectedResourceIds = ref<Set<string>>(new Set())
-const importingPdk = ref(false)
+const importingResourceIds = ref<Set<string>>(new Set())
 
 const resourceRows = computed<ResourceRow[]>(() => {
   return pluginStore.resources.map((resource) => {
     return resourceToRow(resource, pluginStore.resourceProgress[resource.id])
   })
+})
+
+const managerErrorText = computed(() => {
+  return pluginStore.error
+    ? compactResourceMessage(pluginStore.error, 'Resource manager error')
+    : null
 })
 
 const filteredRows = computed(() => {
@@ -436,7 +533,9 @@ const filteredRows = computed(() => {
     if (statusFilter.value === 'updates' && row.statusKind !== 'update') return false
 
     if (!q) return true
-    return `${row.name} ${row.description} ${row.version} ${row.requires.join(' ')}`.toLowerCase().includes(q)
+    return `${row.name} ${row.description} ${row.version} ${row.requires.join(' ')}`
+      .toLowerCase()
+      .includes(q)
   })
 })
 
@@ -455,21 +554,27 @@ const totalSizeMb = computed(() => {
 
 const totalSizeText = computed(() => formatSize(totalSizeMb.value))
 
-const updatesCount = computed(() => resourceRows.value.filter((row) => row.statusKind === 'update').length)
+const updatesCount = computed(
+  () => resourceRows.value.filter((row) => row.statusKind === 'update').length,
+)
 const installedCount = computed(() => resourceRows.value.filter(isInstalledLike).length)
-const frontendToolRows = computed(() => resourceRows.value.filter((row) => row.isFrontendTool))
+const frontendToolRows = computed(() =>
+  resourceRows.value.filter((row) => row.isFrontendTool),
+)
 const edaToolRows = computed(() => resourceRows.value.filter(isEdaToolRow))
-const frontendInstalledCount = computed(() => frontendToolRows.value.filter(isInstalledLike).length)
-const frontendAvailableCount = computed(() => frontendToolRows.value.filter((row) => row.statusKind === 'available').length)
-const frontendFlowItems = computed(() => {
-  return [
-    frontendFlowItem('Review', ['Yosys']),
-    frontendFlowItem('Elab', ['Elab']),
-    frontendFlowItem('Lint', ['Lint']),
-    frontendFlowItem('Sim', ['Sim', 'CPU Tests', 'CoreMark']),
-    frontendFlowItem('Wave', ['Wave']),
-  ]
-})
+const frontendInstalledCount = computed(
+  () => frontendToolRows.value.filter(isInstalledLike).length,
+)
+const frontendAvailableCount = computed(
+  () => frontendToolRows.value.filter((row) => row.statusKind === 'available').length,
+)
+const frontendFlowItems = computed(() => [
+  frontendFlowItem('Review', ['Yosys']),
+  frontendFlowItem('Elab', ['Elab']),
+  frontendFlowItem('Lint', ['Lint']),
+  frontendFlowItem('Sim', ['Sim']),
+  frontendFlowItem('Wave', ['Wave']),
+])
 
 const sidebarItems = computed(() => [
   {
@@ -512,15 +617,27 @@ const tabItems = computed(() => [
     icon: 'ri-download-line',
     badge: resourceRows.value.filter((row) => row.statusKind === 'available').length,
   },
-  { id: 'installed' as const, label: 'Installed', icon: 'ri-check-line', badge: installedCount.value },
-  { id: 'updates' as const, label: 'Updates', icon: 'ri-arrow-up-circle-line', badge: updatesCount.value },
+  {
+    id: 'installed' as const,
+    label: 'Installed',
+    icon: 'ri-check-line',
+    badge: installedCount.value,
+  },
+  {
+    id: 'updates' as const,
+    label: 'Updates',
+    icon: 'ri-arrow-up-circle-line',
+    badge: updatesCount.value,
+  },
 ])
 
 watch(
   resourceRows,
   (rows) => {
     const rowIds = new Set(rows.map((row) => row.id))
-    const nextSelected = new Set([...selectedResourceIds.value].filter((id) => rowIds.has(id)))
+    const nextSelected = new Set(
+      [...selectedResourceIds.value].filter((id) => rowIds.has(id)),
+    )
 
     if (nextSelected.size === 0) {
       const defaults = rows
@@ -546,8 +663,13 @@ function isInstalledLike(row: ResourceRow): boolean {
   return row.statusKind === 'installed' || row.statusKind === 'update'
 }
 
-function frontendFlowItem(label: string, tags: string[]): { label: string; installed: number; total: number; status: string } {
-  const rows = frontendToolRows.value.filter((row) => tags.some((tag) => row.flowTags.includes(tag)))
+function frontendFlowItem(
+  label: string,
+  tags: string[],
+): { label: string; installed: number; total: number; status: string } {
+  const rows = frontendToolRows.value.filter((row) =>
+    tags.some((tag) => row.flowTags.includes(tag)),
+  )
   const installed = rows.filter(isInstalledLike).length
   return {
     label,
@@ -580,10 +702,6 @@ function clearFilters(): void {
   statusFilter.value = 'all'
 }
 
-function rowError(row: ResourceRow): string | undefined {
-  return pluginStore.resourceErrors[row.id] || row.resource.error || undefined
-}
-
 async function handleRowInstall(row: ResourceRow): Promise<void> {
   await runPrimaryAction(row, pluginStore)
 }
@@ -592,19 +710,32 @@ async function handleRowCancel(row: ResourceRow): Promise<void> {
   await pluginStore.cancelResource(row.id)
 }
 
-async function handleImportPdk(): Promise<void> {
-  if (importingPdk.value) {
+async function handleLocalImport(row: ResourceRow): Promise<void> {
+  if (importingResourceIds.value.has(row.id)) {
     return
   }
 
-  importingPdk.value = true
+  const next = new Set(importingResourceIds.value)
+  next.add(row.id)
+  importingResourceIds.value = next
   try {
-    const imported = await importPdk()
-    if (imported) {
-      await pluginStore.fetchTools({ silent: true })
+    const desktopApi = await waitForDesktopApi()
+    const path = await desktopApi.dialog.pickDirectory({
+      title: `Select Local ${row.name} Directory`,
+    })
+    if (!path) {
+      return
     }
+
+    await pluginStore.importLocalResource(
+      row.id,
+      path,
+      row.type === 'pdk' ? importPdkForResource : undefined,
+    )
   } finally {
-    importingPdk.value = false
+    const done = new Set(importingResourceIds.value)
+    done.delete(row.id)
+    importingResourceIds.value = done
   }
 }
 
@@ -620,8 +751,9 @@ async function handlePdkValidate(row: ResourceRow): Promise<void> {
   }
 }
 
-async function handleRowUninstall(row: ResourceRow): Promise<void> {
-  const action = rowActionForStatus(row.resource)
+async function handleRowRemove(row: ResourceRow): Promise<void> {
+  const action = removalActionForRow(row)
+  if (!action) return
   const isDestructive = action === 'uninstall'
   const confirmMsg = isDestructive
     ? `Are you sure you want to uninstall "${row.name}"? This action cannot be undone.`
@@ -629,7 +761,11 @@ async function handleRowUninstall(row: ResourceRow): Promise<void> {
   if (!confirm(confirmMsg)) return
 
   if (action === 'remove_reference') {
-    await pluginStore.removePdkReference(row.id)
+    if (row.type === 'pdk') {
+      await pluginStore.removePdkReference(row.id)
+      return
+    }
+    await pluginStore.uninstallResource(row.id)
     return
   }
   await pluginStore.uninstallResource(row.id)
@@ -644,7 +780,9 @@ function resolveInstallPath(row: ResourceRow): string {
 }
 
 function formatSize(sizeMb: number): string {
-  return formatResourceSizeMb(sizeMb)
+  if (sizeMb <= 0) return '0 MB'
+  if (sizeMb >= 1024) return `${(sizeMb / 1024).toFixed(2)} GB`
+  return `${Math.round(sizeMb)} MB`
 }
 
 function goHome(): void {
@@ -652,10 +790,11 @@ function goHome(): void {
 }
 
 async function openDocs(): Promise<void> {
-  const docsUrl = 'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
+  const docsUrl =
+    'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
   try {
     if (hasDesktopApi()) {
-      const desktopApi = getOptionalDesktopApi() ?? await waitForDesktopApi()
+      const desktopApi = getOptionalDesktopApi() ?? (await waitForDesktopApi())
       await desktopApi.system.openExternal(docsUrl)
       return
     }
@@ -699,11 +838,26 @@ async function openDocs(): Promise<void> {
   transform: translateZ(0) scale(1.006);
   transform-origin: center;
   background:
-    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 12%, transparent), transparent 28%),
-    linear-gradient(color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 50%, transparent) 1px, transparent 1px),
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent-color) 12%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 50%, transparent) 1px,
+      transparent 1px
+    ),
     var(--bg-secondary);
-  background-size: auto, 52px 52px, 52px 52px, auto;
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
 }
 
 .blurred-brand {
@@ -806,7 +960,9 @@ async function openDocs(): Promise<void> {
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .manager-close:hover {
@@ -882,7 +1038,9 @@ async function openDocs(): Promise<void> {
   cursor: pointer;
   font-size: 13px;
   text-align: left;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .resource-nav-item i {
@@ -1042,7 +1200,7 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-tabs button + button::before {
-  content: "";
+  content: '';
   position: absolute;
   left: -1px;
   width: 1px;
@@ -1200,15 +1358,22 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-table {
+  --resource-table-columns: 32px minmax(150px, 2fr) minmax(96px, 0.6fr)
+    minmax(68px, 0.5fr) minmax(112px, 0.7fr) 116px;
   width: 100%;
 }
 
 .resource-table-head,
 .resource-row {
   display: grid;
-  grid-template-columns: 32px minmax(150px, 2fr) minmax(68px, 0.6fr) minmax(58px, 0.5fr) minmax(88px, 0.7fr) minmax(70px, auto);
+  grid-template-columns: var(--resource-table-columns);
   align-items: center;
   gap: 0;
+}
+
+.resource-table-head > *,
+.resource-row > * {
+  min-width: 0;
 }
 
 .resource-table-head {
@@ -1223,14 +1388,16 @@ async function openDocs(): Promise<void> {
 }
 
 .resource-row {
+  --resource-row-primary-line: 22px;
   width: 100%;
-  min-height: 64px;
+  min-height: 56px;
   padding: 8px 12px;
   border: 0;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
+  align-items: start;
   text-align: left;
   transition: background 0.15s ease;
 }
@@ -1252,6 +1419,7 @@ async function openDocs(): Promise<void> {
   display: grid;
   width: 18px;
   height: 18px;
+  margin-top: 7px;
   place-items: center;
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -1267,7 +1435,7 @@ async function openDocs(): Promise<void> {
 
 .resource-name-cell {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   min-width: 0;
 }
 
@@ -1279,9 +1447,14 @@ async function openDocs(): Promise<void> {
   place-items: center;
   border-radius: 8px;
   color: #fff;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--row-accent) 92%, white), color-mix(in srgb, var(--row-accent) 76%, black));
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35), 0 6px 14px rgba(15, 23, 42, 0.12);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--row-accent) 92%, white),
+    color-mix(in srgb, var(--row-accent) 76%, black)
+  );
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.35),
+    0 6px 14px rgba(15, 23, 42, 0.12);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
@@ -1303,6 +1476,7 @@ async function openDocs(): Promise<void> {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 750;
+  line-height: var(--resource-row-primary-line);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1311,9 +1485,9 @@ async function openDocs(): Promise<void> {
   display: block;
   overflow: hidden;
   max-width: min(260px, 100%);
-  margin-top: 2px;
   color: var(--text-secondary);
   font-size: 11px;
+  line-height: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1363,20 +1537,37 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
 }
 
+.resource-row > .resource-muted,
+.resource-status-cell,
+.row-actions {
+  align-self: start;
+}
+
 .resource-muted {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--resource-row-primary-line);
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.2;
 }
 
 /* ---- Pills ---- */
 .status-pill {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   min-height: 22px;
   padding: 0 8px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-pill span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-pill.installed {
@@ -1395,9 +1586,11 @@ async function openDocs(): Promise<void> {
 }
 
 .status-pill.installing {
-  color: var(--text-secondary);
-  background: transparent;
-  padding: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 7px;
+  color: var(--info-color);
+  background: var(--info-bg);
 }
 
 .status-pill.error {
@@ -1435,19 +1628,11 @@ async function openDocs(): Promise<void> {
   will-change: transform;
 }
 
-.row-error-msg {
-  display: block;
-  margin-top: 4px;
-  color: var(--danger-color);
-  font-size: 11px;
-  line-height: 1.3;
-}
-
 /* ---- Row actions ---- */
 .row-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -1465,7 +1650,9 @@ async function openDocs(): Promise<void> {
   font-weight: 650;
   cursor: pointer;
   white-space: nowrap;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
 
 .row-action-btn.icon-only {
@@ -1495,7 +1682,9 @@ async function openDocs(): Promise<void> {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   z-index: 10;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -1513,7 +1702,9 @@ async function openDocs(): Promise<void> {
   border-top: 4px solid var(--border-color);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
   z-index: 10;
 }
 
@@ -1559,6 +1750,11 @@ async function openDocs(): Promise<void> {
 .row-action-btn.warn:disabled {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.row-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .row-action-btn.danger {
@@ -1841,7 +2037,11 @@ async function openDocs(): Promise<void> {
   justify-content: center;
   border: 0;
   color: var(--accent-text);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 85%, white), var(--accent-color));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-color) 85%, white),
+    var(--accent-color)
+  );
 }
 
 .download-button:disabled {
@@ -1911,11 +2111,26 @@ async function openDocs(): Promise<void> {
 
 :global(.dark) .blurred-home {
   background:
-    radial-gradient(circle at 50% 16%, color-mix(in srgb, var(--accent-color) 14%, transparent), transparent 28%),
-    linear-gradient(color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-color) 40%, transparent) 1px, transparent 1px),
+    radial-gradient(
+      circle at 50% 16%,
+      color-mix(in srgb, var(--accent-color) 14%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      color-mix(in srgb, var(--border-color) 40%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border-color) 40%, transparent) 1px,
+      transparent 1px
+    ),
     var(--bg-primary);
-  background-size: auto, 52px 52px, 52px 52px, auto;
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
 }
 
 :global(.dark) .blurred-brand {
@@ -2047,7 +2262,7 @@ async function openDocs(): Promise<void> {
 
   .resource-table-head,
   .resource-row {
-    grid-template-columns: 28px minmax(130px, 1fr) minmax(74px, auto) minmax(68px, auto);
+    --resource-table-columns: 28px minmax(88px, 1fr) minmax(96px, auto) minmax(68px, auto);
   }
 
   .resource-table-head span:nth-child(3),

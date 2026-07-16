@@ -56,11 +56,13 @@ describe('AgentRuntimeManager', () => {
     })
     expect(provider.startSession).toHaveBeenCalledWith(startRequest)
 
-    await expect(manager.sendMessage({
-      message: 'route this design',
-      providerId: 'codex',
-      sessionId: 'session-1',
-    })).resolves.toEqual({
+    await expect(
+      manager.sendMessage({
+        message: 'route this design',
+        providerId: 'codex',
+        sessionId: 'session-1',
+      }),
+    ).resolves.toEqual({
       messageId: 'message-1',
       sessionId: 'session-1',
     })
@@ -208,9 +210,7 @@ describe('AgentRuntimeManager', () => {
     }
     const manager = new AgentRuntimeManager({
       defaultProviderId: 'local',
-      providers: [
-        { providerId: 'local', runtime: localProvider },
-      ],
+      providers: [{ providerId: 'local', runtime: localProvider }],
     })
     const listener = vi.fn()
     manager.onEvent(listener)
@@ -230,9 +230,7 @@ describe('AgentRuntimeManager', () => {
 
   it('rejects calls for unknown agent providers', async () => {
     const manager = new AgentRuntimeManager({
-      providers: [
-        { providerId: 'codex', runtime: createProvider('codex') },
-      ],
+      providers: [{ providerId: 'codex', runtime: createProvider('codex') }],
     })
 
     await expect(manager.getStatus({ providerId: 'missing' })).rejects.toThrow(

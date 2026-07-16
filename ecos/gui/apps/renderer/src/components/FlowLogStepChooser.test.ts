@@ -159,7 +159,9 @@ class FakeElement extends FakeNode {
         this.className = [...new Set([...read(), ...tokens])].join(' ')
       },
       remove: (...tokens: string[]) => {
-        this.className = read().filter((token) => !tokens.includes(token)).join(' ')
+        this.className = read()
+          .filter((token) => !tokens.includes(token))
+          .join(' ')
       },
     }
   }
@@ -398,7 +400,9 @@ async function mountChooser(props: {
 }) {
   ensureDom()
   const vue = await loadVueRuntime()
-  const container = (globalThis.document as unknown as { createElement: (tagName: string) => FakeElement }).createElement('div')
+  const container = (
+    globalThis.document as unknown as { createElement: (tagName: string) => FakeElement }
+  ).createElement('div')
   ;(globalThis.document as unknown as { body: FakeElement }).body.appendChild(container)
 
   const FlowLogStepChooser = loadChooserComponent(vue)
@@ -442,7 +446,9 @@ describe('FlowLogStepChooser', () => {
   it('shows jump to live only when it differs from the selected item and emits it on click', async () => {
     const onJumpLive = vi.fn()
     const { app: firstApp, container: firstContainer } = await mountChooser({
-      items: [{ key: 'alpha', stepName: 'Alpha', state: 'done', failed: false, live: true }],
+      items: [
+        { key: 'alpha', stepName: 'Alpha', state: 'done', failed: false, live: true },
+      ],
       selectedKey: 'alpha',
       liveKey: 'alpha',
       onJumpLive,

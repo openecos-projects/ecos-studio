@@ -22,7 +22,7 @@ export function useFlowRunMode(
   const isFullFlowContext = computed(() => isHomeStage(currentStage.value))
 
   const activeRunMode = computed({
-    get: () => isFullFlowContext.value ? fullFlowRunMode.value : stepRunMode.value,
+    get: () => (isFullFlowContext.value ? fullFlowRunMode.value : stepRunMode.value),
     set: (mode: FlowRunModeKey) => {
       if (isFullFlowContext.value) {
         fullFlowRunMode.value = mode
@@ -34,7 +34,7 @@ export function useFlowRunMode(
 
   const runModes = computed<Record<FlowRunModeKey, FlowRunModeOption>>(() => {
     const target = isFullFlowContext.value
-      ? options.fullFlowLabel?.value ?? 'RTL2GDS'
+      ? (options.fullFlowLabel?.value ?? 'RTL2GDS')
       : 'Step'
 
     return {

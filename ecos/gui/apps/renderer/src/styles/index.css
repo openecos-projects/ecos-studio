@@ -1,9 +1,10 @@
 /* Tailwind CSS v4 with PrimeVue CSS Layer Integration */
-@import "tailwindcss";
-
+@import 'tailwindcss';
 
 :root {
-  font-family: "Inter Variable", Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family:
+    'Inter Variable', Inter, 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui,
+    Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -31,7 +32,7 @@
   --warn-bg: rgba(217, 119, 6, 0.12);
 
   color-scheme: light dark;
-  
+
   /* 禁用浏览器的自动缩放 */
   -webkit-text-size-adjust: 100%;
   -moz-text-size-adjust: 100%;
@@ -50,7 +51,7 @@
 /* 允许输入类元素和代码块中的文字选择 */
 input,
 textarea,
-[contenteditable="true"],
+[contenteditable='true'],
 pre,
 code,
 .selectable {
@@ -81,7 +82,8 @@ code,
   --warn-bg: rgba(251, 191, 36, 0.12);
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   min-width: 320px;

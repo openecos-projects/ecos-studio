@@ -1,15 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import homeViewSource from './HomeView.vue?raw'
 
-function loadFlowLogChooserController() {
-  const helperScript = homeViewSource.match(/<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/)
-
-  expect(helperScript?.[1]).toBeTruthy()
-
-  const normalizedScript = helperScript![1]
+function normalizeHomeViewHelperScript(script: string) {
+  return script
     .replace(/export interface[\s\S]*?\n}\n/g, '')
     .replace(
-      /export function createFlowLogChooserController\(initialSelectedKey: string \| null = null\): FlowLogChooserController/,
+      /export function createFlowLogChooserController\(\s*initialSelectedKey: string \| null = null,?\s*\): FlowLogChooserController/,
       'function createFlowLogChooserController(initialSelectedKey = null)',
     )
     .replace(
@@ -17,17 +13,32 @@ function loadFlowLogChooserController() {
       'function computeFlowLogChooserAnchorStyle(triggerRect, viewport, chooserSize)',
     )
     .replace(/const controller: FlowLogChooserController =/, 'const controller =')
-    .replace(/toggleFlowLogStepChooser\(this: FlowLogChooserController\)/, 'toggleFlowLogStepChooser()')
-    .replace(/closeFlowLogStepChooser\(this: FlowLogChooserController\)/, 'closeFlowLogStepChooser()')
-    .replace(/onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
-    .replace(/onSelectFlowLogStep\(key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): string \| null,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): string,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(
+      /(\w+)\(\s*this: FlowLogChooserController,\s*(\w+): FlowLogChooserEscapeEvent,?\s*\)/g,
+      '$1($2)',
+    )
+    .replace(/(\w+)\(\s*this: FlowLogChooserController,?\s*\)/g, '$1()')
+}
+
+function loadFlowLogChooserController() {
+  const helperScript = homeViewSource.match(
+    /<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/,
+  )
+
+  expect(helperScript?.[1]).toBeTruthy()
+
+  const normalizedScript = normalizeHomeViewHelperScript(helperScript![1])
 
   return new Function(`${normalizedScript}\nreturn createFlowLogChooserController`)() as (
-    initialSelectedKey?: string | null
+    initialSelectedKey?: string | null,
   ) => {
     isFlowLogStepChooserOpen: boolean
     toggleFlowLogStepChooser: () => void
@@ -36,32 +47,25 @@ function loadFlowLogChooserController() {
 }
 
 function loadFlowLogChooserAnchorHelper() {
-  const helperScript = homeViewSource.match(/<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/)
+  const helperScript = homeViewSource.match(
+    /<script lang="ts">\s*([\s\S]*?)<\/script>\s*<script setup lang="ts">/,
+  )
 
   expect(helperScript?.[1]).toBeTruthy()
 
-  const normalizedScript = helperScript![1]
-    .replace(/export interface[\s\S]*?\n}\n/g, '')
-    .replace(
-      /export function createFlowLogChooserController\(initialSelectedKey: string \| null = null\): FlowLogChooserController/,
-      'function createFlowLogChooserController(initialSelectedKey = null)',
-    )
-    .replace(
-      /export function computeFlowLogChooserAnchorStyle\(\s*triggerRect: FlowLogChooserRect,\s*viewport: FlowLogChooserViewport,\s*chooserSize: FlowLogChooserSize,\s*\): FlowLogChooserAnchorStyle/,
-      'function computeFlowLogChooserAnchorStyle(triggerRect, viewport, chooserSize)',
-    )
-    .replace(/const controller: FlowLogChooserController =/, 'const controller =')
-    .replace(/toggleFlowLogStepChooser\(this: FlowLogChooserController\)/, 'toggleFlowLogStepChooser()')
-    .replace(/closeFlowLogStepChooser\(this: FlowLogChooserController\)/, 'closeFlowLogStepChooser()')
-    .replace(/onSelectFlowLogStep\(this: FlowLogChooserController, key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(this: FlowLogChooserController, liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(this: FlowLogChooserController, event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
-    .replace(/onSelectFlowLogStep\(key: string\)/, 'onSelectFlowLogStep(key)')
-    .replace(/jumpToLiveStep\(liveKey: string \| null\)/, 'jumpToLiveStep(liveKey)')
-    .replace(/onFlowLogChooserEscape\(event: FlowLogChooserEscapeEvent\)/, 'onFlowLogChooserEscape(event)')
+  const normalizedScript = normalizeHomeViewHelperScript(helperScript![1])
 
-  return new Function(`${normalizedScript}\nreturn computeFlowLogChooserAnchorStyle`)() as (
-    triggerRect: { top: number; left: number; right: number; bottom: number; width: number; height: number },
+  return new Function(
+    `${normalizedScript}\nreturn computeFlowLogChooserAnchorStyle`,
+  )() as (
+    triggerRect: {
+      top: number
+      left: number
+      right: number
+      bottom: number
+      width: number
+      height: number
+    },
     viewport: { width: number; height: number },
     chooserSize: { width: number; height: number },
   ) => {
@@ -84,6 +88,15 @@ describe('HomeView current-step log viewer state', () => {
     expect(homeViewSource).toContain('flow-log-viewer-actions')
     expect(homeViewSource).toContain('flow-log-viewer-summary-row')
     expect(homeViewSource).not.toContain('flow-log-viewer-meta-row')
+  })
+
+  it('adds a fullscreen control to the flow step log panel header', () => {
+    expect(homeViewSource).toContain('flow-log-fullscreen-toggle')
+    expect(homeViewSource).toContain('isFlowLogFullscreen')
+    expect(homeViewSource).toContain('toggleFlowLogFullscreen')
+    expect(homeViewSource).toContain('closeFlowLogFullscreen')
+    expect(homeViewSource).toContain('flow-log-fullscreen-card')
+    expect(homeViewSource).toContain('flow-log-fullscreen-active')
   })
 
   it('lets the live watcher wait for a missing log instead of repeatedly reading on selection', () => {

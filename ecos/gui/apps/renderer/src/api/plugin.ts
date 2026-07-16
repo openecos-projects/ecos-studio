@@ -138,6 +138,10 @@ export function importPdkPathApi(path: string) {
   return getDesktopApi().resources.importPdkPath({ path })
 }
 
+export function importLocalResourcePathApi(resourceId: string, path: string) {
+  return getDesktopApi().resources.importLocalPath({ resourceId, path })
+}
+
 export function installResourceApi(resourceId: string, version?: string) {
   return getDesktopApi().resources.install({ resourceId, version })
 }
@@ -170,7 +174,10 @@ export function refreshRegistryApi() {
   return getDesktopApi().resources.refreshRegistry()
 }
 
-export function checkResourceUpdatesApi(options?: { force?: boolean; refreshRegistry?: boolean }) {
+export function checkResourceUpdatesApi(options?: {
+  force?: boolean
+  refreshRegistry?: boolean
+}) {
   return getDesktopApi().resources.checkUpdates(options)
 }
 

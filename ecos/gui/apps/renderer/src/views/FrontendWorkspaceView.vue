@@ -31,7 +31,9 @@
   <div v-show="!isGlobalSrcView && !isGlobalWaveView" class="frontend-workspace">
     <div class="frontend-header">
       <div>
-        <p class="frontend-kicker">{{ isHomeView ? 'Frontend Workspace' : 'Frontend Flow' }}</p>
+        <p class="frontend-kicker">
+          {{ isHomeView ? 'Frontend Workspace' : 'Frontend Flow' }}
+        </p>
         <h1>{{ stepTitle }}</h1>
       </div>
       <div v-if="!isHomeView" class="header-actions">
@@ -59,8 +61,22 @@
     <div v-else class="frontend-grid">
       <section class="panel detail-panel detail-panel-full">
         <div class="panel-header">
-          <h2>{{ isHomeView ? 'Workspace Summary' : isGlobalSrcView ? 'Source Workspace' : 'Step Detail' }}</h2>
-          <span>{{ isHomeView ? 'frontend' : isGlobalSrcView ? 'CPU RTL' : currentStep?.tool || '--' }}</span>
+          <h2>
+            {{
+              isHomeView
+                ? 'Workspace Summary'
+                : isGlobalSrcView
+                  ? 'Source Workspace'
+                  : 'Step Detail'
+            }}
+          </h2>
+          <span>{{
+            isHomeView
+              ? 'frontend'
+              : isGlobalSrcView
+                ? 'CPU RTL'
+                : currentStep?.tool || '--'
+          }}</span>
         </div>
 
         <div v-if="isHomeView" class="detail-content home-detail-content">
@@ -69,7 +85,9 @@
               <section class="summary-grid home-summary-grid">
                 <div class="summary-tile">
                   <span>Workspace</span>
-                  <strong :title="currentProject?.name || ''">{{ currentProject?.name || 'Frontend Workspace' }}</strong>
+                  <strong :title="currentProject?.name || ''">{{
+                    currentProject?.name || 'Frontend Workspace'
+                  }}</strong>
                 </div>
                 <div class="summary-tile">
                   <span>Flow Steps</span>
@@ -79,9 +97,14 @@
                   <span>Completed</span>
                   <strong>{{ completedCount }}/{{ steps.length }}</strong>
                 </div>
-                <div class="summary-tile" :class="nextPendingStep ? stateClass(nextPendingStep.state) : ''">
+                <div
+                  class="summary-tile"
+                  :class="nextPendingStep ? stateClass(nextPendingStep.state) : ''"
+                >
                   <span>Next Step</span>
-                  <strong>{{ nextPendingStep ? labelForStep(nextPendingStep.name) : 'Complete' }}</strong>
+                  <strong>{{
+                    nextPendingStep ? labelForStep(nextPendingStep.name) : 'Complete'
+                  }}</strong>
                 </div>
               </section>
             </SplitterPanel>
@@ -119,7 +142,10 @@
                 <section class="workspace-home-card home-fill-card">
                   <div class="workspace-home-card__head">
                     <strong>Workspace Home</strong>
-                    <span>Choose a step from the left sidebar to inspect logs, reports, source, and waveforms.</span>
+                    <span
+                      >Choose a step from the left sidebar to inspect logs, reports,
+                      source, and waveforms.</span
+                    >
                   </div>
                   <div class="workspace-home-card__body">
                     <div class="workspace-home-metric">
@@ -155,7 +181,10 @@
           </Splitter>
         </div>
 
-        <div v-else-if="!currentStep && !isGlobalSrcView && !isGlobalWaveView" class="state-panel">
+        <div
+          v-else-if="!currentStep && !isGlobalSrcView && !isGlobalWaveView"
+          class="state-panel"
+        >
           <i class="ri-file-list-3-line"></i>
           <span>No flow step selected.</span>
         </div>
@@ -164,7 +193,9 @@
           <section v-if="!isGlobalSrcView && !isGlobalWaveView" class="step-compact-meta">
             <div>
               <span>Status</span>
-              <strong :class="stateClass(currentStepDisplayState)">{{ currentStepDisplayState }}</strong>
+              <strong :class="stateClass(currentStepDisplayState)">{{
+                currentStepDisplayState
+              }}</strong>
             </div>
             <div>
               <span>Runtime</span>
@@ -219,12 +250,12 @@
                     @click="cpuCasePickerOpen = !cpuCasePickerOpen"
                   >
                     <span>{{ cpuCaseSelectionLabel }}</span>
-                    <i class="ri-arrow-down-s-line" :class="{ open: cpuCasePickerOpen }"></i>
+                    <i
+                      class="ri-arrow-down-s-line"
+                      :class="{ open: cpuCasePickerOpen }"
+                    ></i>
                   </button>
-                  <div
-                    v-if="cpuCasePickerOpen"
-                    class="case-picker dropdown"
-                  >
+                  <div v-if="cpuCasePickerOpen" class="case-picker dropdown">
                     <button
                       v-for="name in availableCpuTests"
                       :key="name"
@@ -235,7 +266,9 @@
                     >
                       {{ name }}
                     </button>
-                    <span v-if="!availableCpuTests.length" class="case-picker-empty">Run Prepare to load CPU tests.</span>
+                    <span v-if="!availableCpuTests.length" class="case-picker-empty"
+                      >Run Prepare to load CPU tests.</span
+                    >
                   </div>
                 </div>
               </div>
@@ -247,9 +280,13 @@
               >
                 <i :class="runBusy ? 'ri-stop-circle-line' : 'ri-play-circle-line'"></i>
                 <span class="sim-run-action-label">
-                  {{ runBusy ? `Cancel ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}` }}
+                  {{
+                    runBusy ? `Cancel ${runningSimSuiteLabel}` : `Run ${simSuiteLabel}`
+                  }}
                 </span>
-                <span v-if="runBusy" class="run-timer-badge">{{ runElapsedSecondsLabel }}</span>
+                <span v-if="runBusy" class="run-timer-badge">{{
+                  runElapsedSecondsLabel
+                }}</span>
               </button>
             </div>
             <div v-if="simSuite === 'coremark'" class="coremark-compile-panel">
@@ -257,15 +294,26 @@
                 <label class="sim-select-field">
                   <span>Preset</span>
                   <select v-model="coremarkCompilePreset" :disabled="runBusy">
-                    <option v-for="preset in coremarkCompilePresets" :key="preset.id" :value="preset.id">
+                    <option
+                      v-for="preset in coremarkCompilePresets"
+                      :key="preset.id"
+                      :value="preset.id"
+                    >
                       {{ preset.label }}
                     </option>
                   </select>
                 </label>
                 <label class="sim-select-field compact">
                   <span>Opt</span>
-                  <select v-model="coremarkOptLevel" :disabled="runBusy || coremarkCompilePreset !== 'custom'">
-                    <option v-for="level in coremarkOptLevels" :key="level" :value="level">
+                  <select
+                    v-model="coremarkOptLevel"
+                    :disabled="runBusy || coremarkCompilePreset !== 'custom'"
+                  >
+                    <option
+                      v-for="level in coremarkOptLevels"
+                      :key="level"
+                      :value="level"
+                    >
                       {{ level }}
                     </option>
                   </select>
@@ -273,7 +321,11 @@
                 <label class="sim-select-field">
                   <span>ISA</span>
                   <select v-model="coremarkMarch" :disabled="runBusy">
-                    <option v-for="march in coremarkMarchOptions" :key="march" :value="march">
+                    <option
+                      v-for="march in coremarkMarchOptions"
+                      :key="march"
+                      :value="march"
+                    >
                       {{ march }}
                     </option>
                   </select>
@@ -288,11 +340,23 @@
                 </label>
                 <label class="sim-select-field compact">
                   <span>Iterations</span>
-                  <input v-model.number="coremarkIterations" type="number" min="1" step="1" :disabled="runBusy">
+                  <input
+                    v-model.number="coremarkIterations"
+                    type="number"
+                    min="1"
+                    step="1"
+                    :disabled="runBusy"
+                  />
                 </label>
                 <label class="sim-select-field compact">
                   <span>Data</span>
-                  <input v-model.number="coremarkTotalDataSize" type="number" min="1" step="1" :disabled="runBusy">
+                  <input
+                    v-model.number="coremarkTotalDataSize"
+                    type="number"
+                    min="1"
+                    step="1"
+                    :disabled="runBusy"
+                  />
                 </label>
               </div>
               <label class="coremark-extra-flags">
@@ -302,10 +366,10 @@
                   type="text"
                   :disabled="runBusy"
                   placeholder="-funroll-loops -fno-inline"
-                >
+                />
               </label>
               <label class="coremark-float-toggle">
-                <input v-model="coremarkHasFloat" type="checkbox" :disabled="runBusy">
+                <input v-model="coremarkHasFloat" type="checkbox" :disabled="runBusy" />
                 <span>Enable float reporting</span>
               </label>
               <div class="coremark-compile-summary">{{ coremarkCompileSummary }}</div>
@@ -317,7 +381,11 @@
               </div>
               <div>
                 <span>Displayed Result</span>
-                <strong>{{ resultSimRunContext ? simContextLabel(resultSimRunContext) : 'No result yet' }}</strong>
+                <strong>{{
+                  resultSimRunContext
+                    ? simContextLabel(resultSimRunContext)
+                    : 'No result yet'
+                }}</strong>
               </div>
               <div>
                 <span>Result State</span>
@@ -380,13 +448,31 @@
                   <div class="summary-card prepare-card">
                     <header>
                       <span>Inputs</span>
-                      <strong>{{ numberLabel(prepareInputs.total_rtl_files) }} RTL</strong>
+                      <strong
+                        >{{ numberLabel(prepareInputs.total_rtl_files) }} RTL</strong
+                      >
                     </header>
                     <div class="summary-metrics prepare-metrics">
-                      <span>CPU RTL <strong>{{ numberLabel(prepareInputs.cpu_rtl_files) }}</strong></span>
-                      <span>Total RTL <strong>{{ numberLabel(prepareInputs.total_rtl_files) }}</strong></span>
-                      <span>Includes <strong>{{ numberLabel(prepareInputs.incdirs) }}</strong></span>
-                      <span>Defines <strong>{{ numberLabel(prepareInputs.defines) }}</strong></span>
+                      <span
+                        >CPU RTL
+                        <strong>{{
+                          numberLabel(prepareInputs.cpu_rtl_files)
+                        }}</strong></span
+                      >
+                      <span
+                        >Total RTL
+                        <strong>{{
+                          numberLabel(prepareInputs.total_rtl_files)
+                        }}</strong></span
+                      >
+                      <span
+                        >Includes
+                        <strong>{{ numberLabel(prepareInputs.incdirs) }}</strong></span
+                      >
+                      <span
+                        >Defines
+                        <strong>{{ numberLabel(prepareInputs.defines) }}</strong></span
+                      >
                     </div>
                     <div v-if="prepareOwnershipRows.length" class="ownership-strip">
                       <span v-for="item in prepareOwnershipRows" :key="item.ownership">
@@ -401,7 +487,9 @@
                       >
                         <span>
                           <strong>{{ source.label }}</strong>
-                          <small>{{ source.path ? shortPath(source.path) : source.skipped }}</small>
+                          <small>{{
+                            source.path ? shortPath(source.path) : source.skipped
+                          }}</small>
                         </span>
                         <em>{{ numberLabel(source.rtl_files) }} files</em>
                       </div>
@@ -416,14 +504,26 @@
                       <div
                         v-if="prepareCpuTopContract.module"
                         class="prepare-contract-row"
-                        :class="prepareStatusTone(String(prepareCpuTopContract.status || 'pending'))"
+                        :class="
+                          prepareStatusTone(
+                            String(prepareCpuTopContract.status || 'pending'),
+                          )
+                        "
                       >
-                        <i :class="prepareStatusIcon(String(prepareCpuTopContract.status || 'pending'))"></i>
+                        <i
+                          :class="
+                            prepareStatusIcon(
+                              String(prepareCpuTopContract.status || 'pending'),
+                            )
+                          "
+                        ></i>
                         <span>
                           <strong>{{ prepareCpuTopContract.module }}</strong>
                           <small>{{ prepareCpuTopContractDetail }}</small>
                         </span>
-                        <em>{{ titleCase(String(prepareCpuTopContract.status || 'pending')) }}</em>
+                        <em>{{
+                          titleCase(String(prepareCpuTopContract.status || 'pending'))
+                        }}</em>
                       </div>
                       <div
                         v-for="contract in prepareContracts"
@@ -443,7 +543,9 @@
                   <div class="summary-card prepare-card">
                     <header>
                       <span>Runtime Plan</span>
-                      <strong>{{ prepareReadiness.message ? 'Ready Check' : 'Pending' }}</strong>
+                      <strong>{{
+                        prepareReadiness.message ? 'Ready Check' : 'Pending'
+                      }}</strong>
                     </header>
                     <p>{{ prepareReadiness.message || humanSummaryText }}</p>
                     <div class="prepare-kv-list">
@@ -476,16 +578,34 @@
                   <div class="summary-card">
                     <header>
                       <span>Review Delta</span>
-                      <strong>{{ reviewDelta.baseline === 'previous_run' ? 'Previous Run' : 'No Baseline' }}</strong>
+                      <strong>{{
+                        reviewDelta.baseline === 'previous_run'
+                          ? 'Previous Run'
+                          : 'No Baseline'
+                      }}</strong>
                     </header>
                     <div class="summary-metrics">
-                      <span>New <strong>{{ numberLabel(reviewDelta.new) }}</strong></span>
-                      <span>Existing <strong>{{ numberLabel(reviewDelta.existing) }}</strong></span>
-                      <span>Resolved <strong>{{ numberLabel(reviewResolvedIssues.length) }}</strong></span>
-                      <span>Waived <strong>{{ numberLabel(reviewWaivers.applied) }}</strong></span>
+                      <span
+                        >New <strong>{{ numberLabel(reviewDelta.new) }}</strong></span
+                      >
+                      <span
+                        >Existing
+                        <strong>{{ numberLabel(reviewDelta.existing) }}</strong></span
+                      >
+                      <span
+                        >Resolved
+                        <strong>{{
+                          numberLabel(reviewResolvedIssues.length)
+                        }}</strong></span
+                      >
+                      <span
+                        >Waived
+                        <strong>{{ numberLabel(reviewWaivers.applied) }}</strong></span
+                      >
                     </div>
                     <p v-if="numberValue(reviewWaivers.invalid?.length)">
-                      {{ numberLabel(reviewWaivers.invalid?.length) }} invalid waiver record(s)
+                      {{ numberLabel(reviewWaivers.invalid?.length) }} invalid waiver
+                      record(s)
                     </p>
                   </div>
                   <div class="summary-card">
@@ -495,10 +615,30 @@
                     </header>
                     <p>{{ reviewStructuralReason || reviewStructuralQualityLabel }}</p>
                     <div class="summary-metrics">
-                      <span>Cells <strong>{{ numberLabel(reviewStructuralMetrics.cells) }}</strong></span>
-                      <span>Fanout <strong>{{ numberLabel(reviewStructuralMetrics.max_fanout) }}</strong></span>
-                      <span>Fanin <strong>{{ numberLabel(reviewStructuralMetrics.max_fanin) }}</strong></span>
-                      <span>Depth <strong>{{ numberLabel(reviewStructuralMetrics.max_comb_depth) }}</strong></span>
+                      <span
+                        >Cells
+                        <strong>{{
+                          numberLabel(reviewStructuralMetrics.cells)
+                        }}</strong></span
+                      >
+                      <span
+                        >Fanout
+                        <strong>{{
+                          numberLabel(reviewStructuralMetrics.max_fanout)
+                        }}</strong></span
+                      >
+                      <span
+                        >Fanin
+                        <strong>{{
+                          numberLabel(reviewStructuralMetrics.max_fanin)
+                        }}</strong></span
+                      >
+                      <span
+                        >Depth
+                        <strong>{{
+                          numberLabel(reviewStructuralMetrics.max_comb_depth)
+                        }}</strong></span
+                      >
                     </div>
                   </div>
                   <div class="summary-card">
@@ -507,7 +647,14 @@
                       <strong>{{ reviewNextAction.title }}</strong>
                     </header>
                     <p>{{ reviewNextAction.detail }}</p>
-                    <button type="button" class="text-action" @click="reviewMode = reviewNextAction.mode; activeTab = 'review'">
+                    <button
+                      type="button"
+                      class="text-action"
+                      @click="
+                        reviewMode = reviewNextAction.mode
+                        activeTab = 'review'
+                      "
+                    >
                       <i class="ri-arrow-right-line"></i>
                       Open {{ reviewNextAction.label }}
                     </button>
@@ -536,9 +683,15 @@
                           <span>{{ reviewIssueMeta(issue) }}</span>
                         </div>
                         <p>{{ issue.detail }}</p>
-                        <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
-                        <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
-                        <em v-else-if="reviewEvidenceLabel(issue)">{{ reviewEvidenceLabel(issue) }}</em>
+                        <small v-if="issue.recommendation">{{
+                          issue.recommendation
+                        }}</small>
+                        <em v-if="reviewIssueSource(issue)">{{
+                          reviewIssueLocationLabel(issue)
+                        }}</em>
+                        <em v-else-if="reviewEvidenceLabel(issue)">{{
+                          reviewEvidenceLabel(issue)
+                        }}</em>
                       </div>
                     </button>
                     <div v-if="reviewTopIssues.length === 0" class="empty-panel compact">
@@ -568,19 +721,40 @@
                     </header>
                     <p>{{ elabReadiness.message || humanSummaryText }}</p>
                     <div class="summary-metrics elab-readiness-metrics">
-                      <span>Top <strong>{{ elabTopModuleName }}</strong></span>
-                      <span>Top Found <strong>{{ elabTopFound ? 'Yes' : 'No' }}</strong></span>
-                      <span>Errors <strong>{{ numberLabel(elabReadiness.errors || elabSummary.errors) }}</strong></span>
-                      <span>Warnings <strong>{{ numberLabel(elabReadiness.warnings || elabSummary.warnings) }}</strong></span>
+                      <span
+                        >Top <strong>{{ elabTopModuleName }}</strong></span
+                      >
+                      <span
+                        >Top Found
+                        <strong>{{ elabTopFound ? 'Yes' : 'No' }}</strong></span
+                      >
+                      <span
+                        >Errors
+                        <strong>{{
+                          numberLabel(elabReadiness.errors || elabSummary.errors)
+                        }}</strong></span
+                      >
+                      <span
+                        >Warnings
+                        <strong>{{
+                          numberLabel(elabReadiness.warnings || elabSummary.warnings)
+                        }}</strong></span
+                      >
                     </div>
                   </div>
                   <div class="summary-card">
                     <header>
                       <span>Hierarchy Inventory</span>
-                      <strong>{{ numberLabel(elabReadiness.modules || elabSummary.modules) }} modules</strong>
+                      <strong
+                        >{{
+                          numberLabel(elabReadiness.modules || elabSummary.modules)
+                        }}
+                        modules</strong
+                      >
                     </header>
                     <p>
-                      {{ numberLabel(elabTopChildren.length) }} direct child module type(s) are referenced by {{ elabTopModuleName }}.
+                      {{ numberLabel(elabTopChildren.length) }} direct child module
+                      type(s) are referenced by {{ elabTopModuleName }}.
                     </p>
                     <div class="elab-chip-list">
                       <span
@@ -590,33 +764,71 @@
                       >
                         {{ child }}
                       </span>
-                      <span v-if="elabTopChildren.length === 0" class="elab-chip muted">No direct child detected</span>
+                      <span v-if="elabTopChildren.length === 0" class="elab-chip muted"
+                        >No direct child detected</span
+                      >
                     </div>
                   </div>
                   <div class="summary-card">
                     <header>
                       <span>Compiler Result</span>
-                      <strong>{{ numberLabel(elabDiagnostics.length + elabUnresolvedModules.length) }}</strong>
+                      <strong>{{
+                        numberLabel(elabDiagnostics.length + elabUnresolvedModules.length)
+                      }}</strong>
                     </header>
                     <p v-if="elabDiagnostics.length || elabUnresolvedModules.length">
-                      {{ elabAuthorityLabel }} reported diagnostics or unresolved module references.
+                      {{ elabAuthorityLabel }} reported diagnostics or unresolved module
+                      references.
                     </p>
                     <p v-else>
                       {{ elabAuthorityLabel }} reported no blocking diagnostics.
                     </p>
                     <div class="summary-metrics">
-                      <span>Slang <strong>{{ numberLabel(elabDiagnostics.length) }}</strong></span>
-                      <span>Compiler Missing <strong>{{ numberLabel(elabUnresolvedModules.length) }}</strong></span>
-                      <span>Heuristic <strong>{{ numberLabel(elabHeuristicCandidates.length) }}</strong></span>
-                      <span>Refs <strong>{{ numberLabel(elabReadiness.referenced_modules || elabSummary.referenced_modules) }}</strong></span>
+                      <span
+                        >Slang
+                        <strong>{{ numberLabel(elabDiagnostics.length) }}</strong></span
+                      >
+                      <span
+                        >Compiler Missing
+                        <strong>{{
+                          numberLabel(elabUnresolvedModules.length)
+                        }}</strong></span
+                      >
+                      <span
+                        >Heuristic
+                        <strong>{{
+                          numberLabel(elabHeuristicCandidates.length)
+                        }}</strong></span
+                      >
+                      <span
+                        >Refs
+                        <strong>{{
+                          numberLabel(
+                            elabReadiness.referenced_modules ||
+                              elabSummary.referenced_modules,
+                          )
+                        }}</strong></span
+                      >
                     </div>
                   </div>
                   <div class="summary-card">
                     <header>
                       <span>Next Action</span>
-                      <strong>{{ elabNextAction.title || (elabDiagnostics.length || elabUnresolvedModules.length ? 'Fix Elab' : 'Continue') }}</strong>
+                      <strong>{{
+                        elabNextAction.title ||
+                        (elabDiagnostics.length || elabUnresolvedModules.length
+                          ? 'Fix Elab'
+                          : 'Continue')
+                      }}</strong>
                     </header>
-                    <p>{{ elabNextAction.detail || (elabDiagnostics.length ? 'Open diagnostics and jump to source.' : 'Inspect modules or continue to RTL Review.') }}</p>
+                    <p>
+                      {{
+                        elabNextAction.detail ||
+                        (elabDiagnostics.length
+                          ? 'Open diagnostics and jump to source.'
+                          : 'Inspect modules or continue to RTL Review.')
+                      }}
+                    </p>
                     <button type="button" class="text-action" @click="activeTab = 'elab'">
                       <i class="ri-arrow-right-line"></i>
                       Open Elab
@@ -639,9 +851,17 @@
                     >
                       <span>
                         <strong>{{ moduleItem.module }}</strong>
-                        <small>{{ shortPath(moduleItem.path || '') }}:{{ moduleItem.line || 1 }}</small>
+                        <small
+                          >{{ shortPath(moduleItem.path || '') }}:{{
+                            moduleItem.line || 1
+                          }}</small
+                        >
                       </span>
-                      <em>{{ moduleItem.module === elabTopModuleName ? 'TOP' : `${numberLabel(moduleItem.instances)} inst` }}</em>
+                      <em>{{
+                        moduleItem.module === elabTopModuleName
+                          ? 'TOP'
+                          : `${numberLabel(moduleItem.instances)} inst`
+                      }}</em>
                     </button>
                   </div>
                 </section>
@@ -666,10 +886,7 @@
                     </header>
                     <p>{{ humanSummaryText }}</p>
                     <div class="summary-metrics">
-                      <span
-                        v-for="metric in humanSummaryMetrics"
-                        :key="metric.label"
-                      >
+                      <span v-for="metric in humanSummaryMetrics" :key="metric.label">
                         {{ metric.label }}
                         <strong>{{ metric.value }}</strong>
                       </span>
@@ -685,7 +902,9 @@
                       v-if="humanNextAction.tab"
                       type="button"
                       class="text-action"
-                      :disabled="!visibleTabs.some((tab) => tab.id === humanNextAction.tab)"
+                      :disabled="
+                        !visibleTabs.some((tab) => tab.id === humanNextAction.tab)
+                      "
                       @click="activeTab = humanNextAction.tab"
                     >
                       <i class="ri-arrow-right-line"></i>
@@ -732,7 +951,11 @@
                         </span>
                       </button>
                     </div>
-                    <div v-if="reviewStructuralProbe" class="review-structural" :class="reviewStructuralTone">
+                    <div
+                      v-if="reviewStructuralProbe"
+                      class="review-structural"
+                      :class="reviewStructuralTone"
+                    >
                       <div>
                         <span>Yosys Precheck</span>
                         <strong>{{ reviewStructuralStatus }}</strong>
@@ -740,12 +963,42 @@
                       <p v-if="reviewStructuralReason">{{ reviewStructuralReason }}</p>
                       <p v-else>{{ reviewStructuralQualityLabel }}</p>
                       <div class="review-structural-grid">
-                        <span>Cells <strong>{{ numberLabel(reviewStructuralMetrics.cells) }}</strong></span>
-                        <span>Wires <strong>{{ numberLabel(reviewStructuralMetrics.wires) }}</strong></span>
-                        <span>Diag <strong>{{ numberLabel(reviewStructuralDiagnostics) }}</strong></span>
-                        <span>Fanout <strong>{{ numberLabel(reviewStructuralMetrics.max_fanout) }}</strong></span>
-                        <span>Fanin <strong>{{ numberLabel(reviewStructuralMetrics.max_fanin) }}</strong></span>
-                        <span>Depth <strong>{{ numberLabel(reviewStructuralMetrics.max_comb_depth) }}</strong></span>
+                        <span
+                          >Cells
+                          <strong>{{
+                            numberLabel(reviewStructuralMetrics.cells)
+                          }}</strong></span
+                        >
+                        <span
+                          >Wires
+                          <strong>{{
+                            numberLabel(reviewStructuralMetrics.wires)
+                          }}</strong></span
+                        >
+                        <span
+                          >Diag
+                          <strong>{{
+                            numberLabel(reviewStructuralDiagnostics)
+                          }}</strong></span
+                        >
+                        <span
+                          >Fanout
+                          <strong>{{
+                            numberLabel(reviewStructuralMetrics.max_fanout)
+                          }}</strong></span
+                        >
+                        <span
+                          >Fanin
+                          <strong>{{
+                            numberLabel(reviewStructuralMetrics.max_fanin)
+                          }}</strong></span
+                        >
+                        <span
+                          >Depth
+                          <strong>{{
+                            numberLabel(reviewStructuralMetrics.max_comb_depth)
+                          }}</strong></span
+                        >
                       </div>
                     </div>
                     <div v-if="reviewMode === 'source'" class="review-metrics">
@@ -755,7 +1008,10 @@
                       </div>
                     </div>
                     <div v-else class="review-metrics">
-                      <div v-for="metric in reviewStructuralMetricRows" :key="metric.label">
+                      <div
+                        v-for="metric in reviewStructuralMetricRows"
+                        :key="metric.label"
+                      >
                         <span>{{ metric.label }}</span>
                         <strong>{{ metric.value }}</strong>
                       </div>
@@ -789,8 +1045,12 @@
                               <span>{{ reviewIssueMeta(issue) }}</span>
                             </div>
                             <p>{{ issue.detail }}</p>
-                            <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
-                            <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
+                            <small v-if="issue.recommendation">{{
+                              issue.recommendation
+                            }}</small>
+                            <em v-if="reviewIssueSource(issue)">{{
+                              reviewIssueLocationLabel(issue)
+                            }}</em>
                           </div>
                         </button>
                         <div v-if="sourceScanIssues.length === 0" class="empty-panel">
@@ -806,13 +1066,19 @@
                           <span>Yosys Precheck</span>
                           <strong>Diagnostics and structural timing candidates</strong>
                         </div>
-                        <em>{{ reviewYosysDiagnostics.length + reviewYosysIssues.length + reviewStructuralHotspots.length }}</em>
+                        <em>{{
+                          reviewYosysDiagnostics.length +
+                          reviewYosysIssues.length +
+                          reviewStructuralHotspots.length
+                        }}</em>
                       </header>
                       <div class="review-yosys-grid">
                         <div class="review-yosys-column">
                           <div class="review-column-head">
                             <span>Diagnostics</span>
-                            <strong>{{ reviewYosysDiagnostics.length + reviewYosysIssues.length }}</strong>
+                            <strong>{{
+                              reviewYosysDiagnostics.length + reviewYosysIssues.length
+                            }}</strong>
                           </div>
                           <div class="review-yosys-list">
                             <button
@@ -832,9 +1098,15 @@
                                   <span>{{ reviewIssueMeta(issue) }}</span>
                                 </div>
                                 <p>{{ issue.detail }}</p>
-                                <small v-if="issue.recommendation">{{ issue.recommendation }}</small>
-                                <em v-if="reviewIssueSource(issue)">{{ reviewIssueLocationLabel(issue) }}</em>
-                                <em v-if="reviewEvidenceLabel(issue)">{{ reviewEvidenceLabel(issue) }}</em>
+                                <small v-if="issue.recommendation">{{
+                                  issue.recommendation
+                                }}</small>
+                                <em v-if="reviewIssueSource(issue)">{{
+                                  reviewIssueLocationLabel(issue)
+                                }}</em>
+                                <em v-if="reviewEvidenceLabel(issue)">{{
+                                  reviewEvidenceLabel(issue)
+                                }}</em>
                               </div>
                             </button>
                             <button
@@ -846,18 +1118,30 @@
                               @click="openYosysDiagnostic(diagnostic)"
                             >
                               <div class="review-issue-icon">
-                                <i :class="problemIcon(diagnostic.severity || 'info')"></i>
+                                <i
+                                  :class="problemIcon(diagnostic.severity || 'info')"
+                                ></i>
                               </div>
                               <div class="review-issue-body">
                                 <div class="review-issue-title">
-                                  <strong>{{ titleCase(String(diagnostic.category || 'diagnostic')) }}</strong>
+                                  <strong>{{
+                                    titleCase(String(diagnostic.category || 'diagnostic'))
+                                  }}</strong>
                                   <span>Yosys</span>
                                 </div>
                                 <p>{{ diagnostic.message || 'Yosys diagnostic' }}</p>
-                                <em v-if="yosysDiagnosticSource(diagnostic)">{{ yosysDiagnosticLocationLabel(diagnostic) }}</em>
+                                <em v-if="yosysDiagnosticSource(diagnostic)">{{
+                                  yosysDiagnosticLocationLabel(diagnostic)
+                                }}</em>
                               </div>
                             </button>
-                            <div v-if="reviewYosysDiagnostics.length === 0 && reviewYosysIssues.length === 0" class="empty-panel compact">
+                            <div
+                              v-if="
+                                reviewYosysDiagnostics.length === 0 &&
+                                reviewYosysIssues.length === 0
+                              "
+                              class="empty-panel compact"
+                            >
                               <i class="ri-checkbox-circle-line"></i>
                               <span>No Yosys diagnostics.</span>
                             </div>
@@ -885,9 +1169,14 @@
                             </div>
                             <p>{{ hotspot.detail }}</p>
                           </div>
-                          <div v-if="reviewStructuralHotspots.length === 0" class="empty-panel compact">
+                          <div
+                            v-if="reviewStructuralHotspots.length === 0"
+                            class="empty-panel compact"
+                          >
                             <i class="ri-checkbox-circle-line"></i>
-                            <span>No fanout, fanin, or depth hotspot above threshold.</span>
+                            <span
+                              >No fanout, fanin, or depth hotspot above threshold.</span
+                            >
                           </div>
                         </div>
                       </div>
@@ -915,17 +1204,50 @@
                           </div>
                           <p>{{ moduleRiskReason(module) }}</p>
                           <div class="review-module-metrics">
-                            <span>Cells <strong>{{ numberLabel(module.cells) }}</strong></span>
-                            <span>Mux <strong>{{ numberLabel(module.mux_cells) }}</strong></span>
-                            <span>Arith <strong>{{ numberLabel(module.arithmetic_cells) }}</strong></span>
-                            <span>Mem <strong>{{ numberLabel(module.memory_cells) }}</strong></span>
-                            <span>Fanout <strong>{{ numberLabel(module.max_fanout) }}</strong></span>
-                            <span>Fanin <strong>{{ numberLabel(module.max_fanin) }}</strong></span>
-                            <span>Depth <strong>{{ numberLabel(module.max_comb_depth) }}</strong></span>
-                            <span>Score <strong>{{ numberLabel(module.score) }}</strong></span>
+                            <span
+                              >Cells
+                              <strong>{{ numberLabel(module.cells) }}</strong></span
+                            >
+                            <span
+                              >Mux
+                              <strong>{{ numberLabel(module.mux_cells) }}</strong></span
+                            >
+                            <span
+                              >Arith
+                              <strong>{{
+                                numberLabel(module.arithmetic_cells)
+                              }}</strong></span
+                            >
+                            <span
+                              >Mem
+                              <strong>{{
+                                numberLabel(module.memory_cells)
+                              }}</strong></span
+                            >
+                            <span
+                              >Fanout
+                              <strong>{{ numberLabel(module.max_fanout) }}</strong></span
+                            >
+                            <span
+                              >Fanin
+                              <strong>{{ numberLabel(module.max_fanin) }}</strong></span
+                            >
+                            <span
+                              >Depth
+                              <strong>{{
+                                numberLabel(module.max_comb_depth)
+                              }}</strong></span
+                            >
+                            <span
+                              >Score
+                              <strong>{{ numberLabel(module.score) }}</strong></span
+                            >
                           </div>
                         </button>
-                        <div v-if="reviewRiskyModules.length === 0" class="empty-panel compact">
+                        <div
+                          v-if="reviewRiskyModules.length === 0"
+                          class="empty-panel compact"
+                        >
                           <i class="ri-checkbox-circle-line"></i>
                           <span>No risky modules reported.</span>
                         </div>
@@ -977,11 +1299,15 @@
                         </div>
                         <div class="review-issue-body">
                           <div class="review-issue-title">
-                            <strong>{{ titleCase(diagnostic.severity || 'info') }}</strong>
+                            <strong>{{
+                              titleCase(diagnostic.severity || 'info')
+                            }}</strong>
                             <span>Slang</span>
                           </div>
                           <p>{{ diagnostic.message || 'Slang diagnostic' }}</p>
-                          <em v-if="diagnostic.source">{{ elabDiagnosticLocationLabel(diagnostic) }}</em>
+                          <em v-if="diagnostic.source">{{
+                            elabDiagnosticLocationLabel(diagnostic)
+                          }}</em>
                         </div>
                       </button>
                       <div
@@ -1006,7 +1332,14 @@
                           <small>Source-scan candidate; excluded from readiness.</small>
                         </span>
                       </div>
-                      <div v-if="elabDiagnostics.length === 0 && elabUnresolvedModules.length === 0 && elabHeuristicCandidates.length === 0" class="empty-panel compact">
+                      <div
+                        v-if="
+                          elabDiagnostics.length === 0 &&
+                          elabUnresolvedModules.length === 0 &&
+                          elabHeuristicCandidates.length === 0
+                        "
+                        class="empty-panel compact"
+                      >
                         <i class="ri-checkbox-circle-line"></i>
                         <span>No elaboration diagnostics or source-scan candidates.</span>
                       </div>
@@ -1032,13 +1365,34 @@
                       >
                         <span>
                           <strong>{{ moduleItem.module }}</strong>
-                          <small>{{ shortPath(moduleItem.path || '') }}:{{ moduleItem.line || 1 }}</small>
+                          <small
+                            >{{ shortPath(moduleItem.path || '') }}:{{
+                              moduleItem.line || 1
+                            }}</small
+                          >
                         </span>
-                        <em>{{ moduleItem.module === elabTopModuleName ? 'TOP' : `${numberLabel(moduleItem.instances)} inst` }}</em>
+                        <em>{{
+                          moduleItem.module === elabTopModuleName
+                            ? 'TOP'
+                            : `${numberLabel(moduleItem.instances)} inst`
+                        }}</em>
                         <div class="elab-module-meta">
-                          <span>Ports <strong>{{ numberLabel(moduleItem.ports) }}</strong></span>
-                          <span>Params <strong>{{ numberLabel(moduleItem.parameters) }}</strong></span>
-                          <span>Refs <strong>{{ numberLabel(moduleItem.instantiates?.length) }}</strong></span>
+                          <span
+                            >Ports
+                            <strong>{{ numberLabel(moduleItem.ports) }}</strong></span
+                          >
+                          <span
+                            >Params
+                            <strong>{{
+                              numberLabel(moduleItem.parameters)
+                            }}</strong></span
+                          >
+                          <span
+                            >Refs
+                            <strong>{{
+                              numberLabel(moduleItem.instantiates?.length)
+                            }}</strong></span
+                          >
                         </div>
                       </button>
                       <div v-if="elabModules.length === 0" class="empty-panel compact">
@@ -1047,7 +1401,6 @@
                       </div>
                     </div>
                   </div>
-
                 </section>
               </template>
             </section>
@@ -1069,7 +1422,10 @@
                     <strong>{{ tile.value }}</strong>
                   </div>
                 </section>
-                <div v-if="lintOwnershipRows.length" class="ownership-strip lint-ownership-strip">
+                <div
+                  v-if="lintOwnershipRows.length"
+                  class="ownership-strip lint-ownership-strip"
+                >
                   <span v-for="item in lintOwnershipRows" :key="String(item.ownership)">
                     {{ titleCase(String(item.ownership || 'unknown')) }}
                     <strong>{{ numberLabel(item.total) }}</strong>
@@ -1081,13 +1437,25 @@
                     <header class="review-layer-head">
                       <div>
                         <span>Diagnostics</span>
-                        <strong>{{ lintScope === 'actionable' ? 'CPU and tool diagnostics' : 'All Verilator diagnostics' }}</strong>
+                        <strong>{{
+                          lintScope === 'actionable'
+                            ? 'CPU and tool diagnostics'
+                            : 'All Verilator diagnostics'
+                        }}</strong>
                       </div>
                       <div class="lint-scope-control">
-                        <button type="button" :class="{ active: lintScope === 'actionable' }" @click="lintScope = 'actionable'">
+                        <button
+                          type="button"
+                          :class="{ active: lintScope === 'actionable' }"
+                          @click="lintScope = 'actionable'"
+                        >
                           CPU {{ lintActionableDiagnostics.length }}
                         </button>
-                        <button type="button" :class="{ active: lintScope === 'all' }" @click="lintScope = 'all'">
+                        <button
+                          type="button"
+                          :class="{ active: lintScope === 'all' }"
+                          @click="lintScope = 'all'"
+                        >
                           All {{ lintDiagnostics.length }}
                         </button>
                       </div>
@@ -1106,16 +1474,30 @@
                         </div>
                         <div class="review-issue-body">
                           <div class="review-issue-title">
-                            <strong>{{ diagnostic.code || titleCase(diagnostic.category || 'lint') }}</strong>
-                            <span>{{ titleCase(diagnostic.ownership || 'unknown') }} · {{ titleCase(diagnostic.category || 'lint') }}</span>
+                            <strong>{{
+                              diagnostic.code || titleCase(diagnostic.category || 'lint')
+                            }}</strong>
+                            <span
+                              >{{ titleCase(diagnostic.ownership || 'unknown') }} ·
+                              {{ titleCase(diagnostic.category || 'lint') }}</span
+                            >
                           </div>
                           <p>{{ diagnostic.message || 'Verilator lint diagnostic' }}</p>
-                          <em v-if="diagnostic.source">{{ lintDiagnosticLocationLabel(diagnostic) }}</em>
+                          <em v-if="diagnostic.source">{{
+                            lintDiagnosticLocationLabel(diagnostic)
+                          }}</em>
                         </div>
                       </button>
-                      <div v-if="lintVisibleDiagnostics.length === 0" class="empty-panel compact">
+                      <div
+                        v-if="lintVisibleDiagnostics.length === 0"
+                        class="empty-panel compact"
+                      >
                         <i class="ri-checkbox-circle-line"></i>
-                        <span>{{ lintScope === 'actionable' ? 'No CPU or tool lint diagnostics.' : 'No Verilator lint diagnostics.' }}</span>
+                        <span>{{
+                          lintScope === 'actionable'
+                            ? 'No CPU or tool lint diagnostics.'
+                            : 'No Verilator lint diagnostics.'
+                        }}</span>
                       </div>
                     </div>
                   </div>
@@ -1139,7 +1521,10 @@
                           <strong>{{ rule.code }}</strong>
                           <span>{{ titleCase(String(rule.category || 'lint')) }}</span>
                         </div>
-                        <em>{{ numberLabel(rule.errors) }}E / {{ numberLabel(rule.warnings) }}W</em>
+                        <em
+                          >{{ numberLabel(rule.errors) }}E /
+                          {{ numberLabel(rule.warnings) }}W</em
+                        >
                         <small v-if="rule.example">{{ rule.example }}</small>
                       </div>
                       <div v-if="lintRules.length === 0" class="empty-panel compact">
@@ -1165,10 +1550,18 @@
                         @click="openSourceAt(String(file.path || ''), 1, 1)"
                       >
                         <span>
-                          <strong>{{ file.label || fileName(String(file.path || '')) }}</strong>
-                          <small>{{ titleCase(String(file.ownership || 'unknown')) }} · {{ shortPath(String(file.path || '')) }}</small>
+                          <strong>{{
+                            file.label || fileName(String(file.path || ''))
+                          }}</strong>
+                          <small
+                            >{{ titleCase(String(file.ownership || 'unknown')) }} ·
+                            {{ shortPath(String(file.path || '')) }}</small
+                          >
                         </span>
-                        <em>{{ numberLabel(file.errors) }}E / {{ numberLabel(file.warnings) }}W</em>
+                        <em
+                          >{{ numberLabel(file.errors) }}E /
+                          {{ numberLabel(file.warnings) }}W</em
+                        >
                       </button>
                       <div v-if="lintFiles.length === 0" class="empty-panel compact">
                         <i class="ri-file-search-line"></i>
@@ -1188,7 +1581,11 @@
                     <strong>{{ simRegression.baseline_run_id || 'No baseline' }}</strong>
                   </header>
                   <div class="sim-regression-grid">
-                    <div v-for="tile in simRegressionTiles" :key="tile.label" :class="tile.tone">
+                    <div
+                      v-for="tile in simRegressionTiles"
+                      :key="tile.label"
+                      :class="tile.tone"
+                    >
                       <span>{{ tile.label }}</span>
                       <strong>{{ tile.value }}</strong>
                     </div>
@@ -1209,12 +1606,23 @@
                   </header>
                   <div class="sim-history-list">
                     <div v-for="run in simHistory.slice(0, 5)" :key="String(run.run_id)">
-                      <i :class="run.ok ? 'ri-checkbox-circle-line ok' : 'ri-close-circle-line failed'"></i>
+                      <i
+                        :class="
+                          run.ok
+                            ? 'ri-checkbox-circle-line ok'
+                            : 'ri-close-circle-line failed'
+                        "
+                      ></i>
                       <span>
                         <strong>{{ run.run_id }}</strong>
-                        <small>{{ titleCase(String(run.suite || 'simulation')) }} · {{ numberLabel(run.cases) }} cases</small>
+                        <small
+                          >{{ titleCase(String(run.suite || 'simulation')) }} ·
+                          {{ numberLabel(run.cases) }} cases</small
+                        >
                       </span>
-                      <em>{{ run.ok ? 'PASS' : `${run.failed_cases?.length || 0} FAIL` }}</em>
+                      <em>{{
+                        run.ok ? 'PASS' : `${run.failed_cases?.length || 0} FAIL`
+                      }}</em>
                     </div>
                     <div v-if="!simHistory.length" class="empty-panel compact">
                       <span>No prior run.</span>
@@ -1222,11 +1630,18 @@
                   </div>
                 </div>
               </section>
-              <Splitter v-if="shouldShowSimTerminal" layout="vertical" class="sim-cases-splitter frontend-resizable-splitter">
+              <Splitter
+                v-if="shouldShowSimTerminal"
+                layout="vertical"
+                class="sim-cases-splitter frontend-resizable-splitter"
+              >
                 <SplitterPanel :size="58" :minSize="18" class="sim-cases-pane">
                   <div v-if="simResultIsStale" class="sim-stale-banner">
                     <i class="ri-time-line"></i>
-                    <span>{{ simResultFreshness.message }} Run again to refresh these case results.</span>
+                    <span
+                      >{{ simResultFreshness.message }} Run again to refresh these case
+                      results.</span
+                    >
                   </div>
                   <div v-if="cases.length === 0" class="empty-panel">
                     <i class="ri-file-list-3-line"></i>
@@ -1250,28 +1665,49 @@
                         <tr
                           v-for="testCase in cases"
                           :key="testCase.name"
-                          :class="{ selected: selectedCase?.name === testCase.name, failed: !testCase.ok }"
+                          :class="{
+                            selected: selectedCase?.name === testCase.name,
+                            failed: !testCase.ok,
+                          }"
                           @click="selectCase(testCase)"
                         >
                           <td>
                             <div class="case-name">
-                              <i :class="testCase.ok ? 'ri-checkbox-circle-line' : 'ri-close-circle-line'"></i>
+                              <i
+                                :class="
+                                  testCase.ok
+                                    ? 'ri-checkbox-circle-line'
+                                    : 'ri-close-circle-line'
+                                "
+                              ></i>
                               <span>
                                 <strong>{{ testCase.name }}</strong>
-                                <small v-if="caseIssue(testCase)" :title="caseIssue(testCase)">
+                                <small
+                                  v-if="caseIssue(testCase)"
+                                  :title="caseIssue(testCase)"
+                                >
                                   {{ caseIssue(testCase) }}
                                 </small>
                               </span>
                             </div>
                           </td>
                           <td>
-                            <span class="case-status" :class="testCase.ok ? 'ok' : 'failed'">
+                            <span
+                              class="case-status"
+                              :class="testCase.ok ? 'ok' : 'failed'"
+                            >
                               {{ testCase.ok ? 'PASS' : 'FAIL' }}
                             </span>
                           </td>
                           <td>{{ caseCycles(testCase) }}</td>
-                          <td><span class="path-pill">{{ caseTermination(testCase) }}</span></td>
-                          <td><span class="path-pill">{{ caseDifftestStatus(testCase) }}</span></td>
+                          <td>
+                            <span class="path-pill">{{ caseTermination(testCase) }}</span>
+                          </td>
+                          <td>
+                            <span class="path-pill">{{
+                              caseDifftestStatus(testCase)
+                            }}</span>
+                          </td>
                           <td>{{ testCase.returncode ?? '-' }}</td>
                           <td>
                             <button
@@ -1310,7 +1746,11 @@
                           class="log-select compact"
                           @change="loadSelectedLog"
                         >
-                          <option v-for="log in simTerminalLogs" :key="log.path" :value="log.path">
+                          <option
+                            v-for="log in simTerminalLogs"
+                            :key="log.path"
+                            :value="log.path"
+                          >
                             {{ log.label }}
                           </option>
                         </select>
@@ -1320,13 +1760,24 @@
                           :disabled="logLoading || !selectedLogPath"
                           @click="loadSelectedLog"
                         >
-                          <i :class="logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
+                          <i
+                            :class="
+                              logLoading
+                                ? 'ri-loader-4-line animate-spin'
+                                : 'ri-refresh-line'
+                            "
+                          ></i>
                         </button>
                       </div>
                     </header>
                     <div v-if="selectedCase?.failure" class="sim-failure-summary">
-                      <strong>{{ selectedCase.failure.message || titleCase(selectedCase.failure.kind || 'simulation failure') }}</strong>
-                      <span v-if="selectedCase.failure.first_error">{{ selectedCase.failure.first_error }}</span>
+                      <strong>{{
+                        selectedCase.failure.message ||
+                        titleCase(selectedCase.failure.kind || 'simulation failure')
+                      }}</strong>
+                      <span v-if="selectedCase.failure.first_error">{{
+                        selectedCase.failure.first_error
+                      }}</span>
                     </div>
                     <pre class="sim-terminal-output">{{ simTerminalContent }}</pre>
                   </section>
@@ -1335,7 +1786,10 @@
               <template v-else>
                 <div v-if="simResultIsStale" class="sim-stale-banner">
                   <i class="ri-time-line"></i>
-                  <span>{{ simResultFreshness.message }} Run again to refresh these case results.</span>
+                  <span
+                    >{{ simResultFreshness.message }} Run again to refresh these case
+                    results.</span
+                  >
                 </div>
                 <div v-if="cases.length === 0" class="empty-panel">
                   <i class="ri-file-list-3-line"></i>
@@ -1359,28 +1813,49 @@
                       <tr
                         v-for="testCase in cases"
                         :key="testCase.name"
-                        :class="{ selected: selectedCase?.name === testCase.name, failed: !testCase.ok }"
+                        :class="{
+                          selected: selectedCase?.name === testCase.name,
+                          failed: !testCase.ok,
+                        }"
                         @click="selectCase(testCase)"
                       >
                         <td>
                           <div class="case-name">
-                            <i :class="testCase.ok ? 'ri-checkbox-circle-line' : 'ri-close-circle-line'"></i>
+                            <i
+                              :class="
+                                testCase.ok
+                                  ? 'ri-checkbox-circle-line'
+                                  : 'ri-close-circle-line'
+                              "
+                            ></i>
                             <span>
                               <strong>{{ testCase.name }}</strong>
-                              <small v-if="caseIssue(testCase)" :title="caseIssue(testCase)">
+                              <small
+                                v-if="caseIssue(testCase)"
+                                :title="caseIssue(testCase)"
+                              >
                                 {{ caseIssue(testCase) }}
                               </small>
                             </span>
                           </div>
                         </td>
                         <td>
-                          <span class="case-status" :class="testCase.ok ? 'ok' : 'failed'">
+                          <span
+                            class="case-status"
+                            :class="testCase.ok ? 'ok' : 'failed'"
+                          >
                             {{ testCase.ok ? 'PASS' : 'FAIL' }}
                           </span>
                         </td>
                         <td>{{ caseCycles(testCase) }}</td>
-                        <td><span class="path-pill">{{ caseTermination(testCase) }}</span></td>
-                        <td><span class="path-pill">{{ caseDifftestStatus(testCase) }}</span></td>
+                        <td>
+                          <span class="path-pill">{{ caseTermination(testCase) }}</span>
+                        </td>
+                        <td>
+                          <span class="path-pill">{{
+                            caseDifftestStatus(testCase)
+                          }}</span>
+                        </td>
                         <td>{{ testCase.returncode ?? '-' }}</td>
                         <td>
                           <button
@@ -1405,12 +1880,15 @@
                   </table>
                 </div>
               </template>
-
             </section>
-
           </main>
 
-          <section v-if="shouldShowStepConsole" class="frontend-console" :class="{ collapsed: consoleCollapsed, resizing: consoleResizing }" :style="consoleStyle">
+          <section
+            v-if="shouldShowStepConsole"
+            class="frontend-console"
+            :class="{ collapsed: consoleCollapsed, resizing: consoleResizing }"
+            :style="consoleStyle"
+          >
             <div
               v-if="!consoleCollapsed"
               class="console-resizer"
@@ -1426,7 +1904,10 @@
                   type="button"
                   class="console-tab"
                   :class="{ active: consoleTab === 'problems' }"
-                  @click="consoleTab = 'problems'; consoleCollapsed = false"
+                  @click="
+                    consoleTab = 'problems'
+                    consoleCollapsed = false
+                  "
                 >
                   <i class="ri-error-warning-line"></i>
                   <span>Problems</span>
@@ -1436,7 +1917,10 @@
                   type="button"
                   class="console-tab"
                   :class="{ active: consoleTab === 'log' }"
-                  @click="consoleTab = 'log'; consoleCollapsed = false"
+                  @click="
+                    consoleTab = 'log'
+                    consoleCollapsed = false
+                  "
                 >
                   <i class="ri-terminal-box-line"></i>
                   <span>Log</span>
@@ -1450,7 +1934,11 @@
                   :title="consoleCollapsed ? 'Expand console' : 'Collapse console'"
                   @click="consoleCollapsed = !consoleCollapsed"
                 >
-                  <i :class="consoleCollapsed ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'"></i>
+                  <i
+                    :class="
+                      consoleCollapsed ? 'ri-arrow-up-s-line' : 'ri-arrow-down-s-line'
+                    "
+                  ></i>
                 </button>
               </div>
             </header>
@@ -1483,13 +1971,30 @@
 
               <section v-else class="console-log-panel">
                 <div class="console-log-tools">
-                  <select v-model="selectedLogPath" class="log-select compact" @change="loadSelectedLog">
-                    <option v-for="log in textViewFiles" :key="log.path" :value="log.path">
+                  <select
+                    v-model="selectedLogPath"
+                    class="log-select compact"
+                    @change="loadSelectedLog"
+                  >
+                    <option
+                      v-for="log in textViewFiles"
+                      :key="log.path"
+                      :value="log.path"
+                    >
                       {{ log.label }}
                     </option>
                   </select>
-                  <button type="button" class="icon-action compact" :disabled="logLoading || !selectedLogPath" @click="loadSelectedLog">
-                    <i :class="logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'"></i>
+                  <button
+                    type="button"
+                    class="icon-action compact"
+                    :disabled="logLoading || !selectedLogPath"
+                    @click="loadSelectedLog"
+                  >
+                    <i
+                      :class="
+                        logLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'
+                      "
+                    ></i>
                   </button>
                 </div>
                 <pre class="console-log">{{ logContent || 'No log content.' }}</pre>
@@ -1506,7 +2011,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { DesktopCliCommandEvent, WorkspaceStepResource } from '@ecos-studio/shared'
-import { getWorkspaceResourceIndexApi, resolveWorkspaceStepInfoApi } from '@/api/workspaceResources'
+import {
+  getWorkspaceResourceIndexApi,
+  resolveWorkspaceStepInfoApi,
+} from '@/api/workspaceResources'
 import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { getInfoApi, runStepApi } from '@/api/flow'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -1946,12 +2454,8 @@ interface ReviewHotspot {
 
 const route = useRoute()
 const router = useRouter()
-const {
-  currentProject,
-  resourceVersions,
-  showToast,
-  invalidateWorkspaceResources,
-} = useWorkspace()
+const { currentProject, resourceVersions, showToast, invalidateWorkspaceResources } =
+  useWorkspace()
 const { config } = useParameters()
 const CONSOLE_MIN_HEIGHT = 128
 const CONSOLE_DEFAULT_HEIGHT = 178
@@ -1980,14 +2484,23 @@ const consoleResizing = ref(false)
 const consoleTab = ref<ConsoleTabId>('problems')
 const reviewMode = ref<ReviewMode>('source')
 const lintScope = ref<'actionable' | 'all'>('actionable')
-const sourceFocusTarget = ref<{ path?: string; line?: number; column?: number; token: number } | null>(null)
+const sourceFocusTarget = ref<{
+  path?: string
+  line?: number
+  column?: number
+  token: number
+} | null>(null)
 let sourceFocusToken = 0
 const simSuites: Array<{ id: SimSuite; label: string; icon: string }> = [
   { id: 'cpu_tests', label: 'CPU Tests', icon: 'ri-cpu-line' },
   { id: 'rtthread', label: 'RT-Thread', icon: 'ri-terminal-box-line' },
   { id: 'coremark', label: 'CoreMark', icon: 'ri-speed-up-line' },
 ]
-const coremarkCompilePresets: Array<{ id: CoremarkCompilePreset; label: string; opt: string }> = [
+const coremarkCompilePresets: Array<{
+  id: CoremarkCompilePreset
+  label: string
+  opt: string
+}> = [
   { id: 'balanced', label: 'Balanced', opt: '-O2' },
   { id: 'speed', label: 'Speed', opt: '-O3' },
   { id: 'size', label: 'Size', opt: '-Os' },
@@ -2023,14 +2536,23 @@ let splitterResizing = false
 let runClockTimer: number | null = null
 
 const isHomeView = computed(() => route.path.endsWith('/home'))
-const isGlobalSrcView = computed(() => String(route.params.step || '').toLowerCase() === 'src')
-const isGlobalWaveView = computed(() => String(route.params.step || '').toLowerCase() === 'wave')
+const isGlobalSrcView = computed(
+  () => String(route.params.step || '').toLowerCase() === 'src',
+)
+const isGlobalWaveView = computed(
+  () => String(route.params.step || '').toLowerCase() === 'wave',
+)
 const currentStepName = computed(() => {
   const param = String(route.params.step || '')
-  return param && param !== 'home' && !['src', 'wave'].includes(param.toLowerCase()) ? param : ''
+  return param && param !== 'home' && !['src', 'wave'].includes(param.toLowerCase())
+    ? param
+    : ''
 })
-const currentStep = computed(() =>
-  steps.value.find((step) => step.name.toLowerCase() === currentStepName.value.toLowerCase()) ?? null,
+const currentStep = computed(
+  () =>
+    steps.value.find(
+      (step) => step.name.toLowerCase() === currentStepName.value.toLowerCase(),
+    ) ?? null,
 )
 const isSimStep = computed(() => currentStepName.value.toLowerCase() === 'sim')
 const isPrepareStep = computed(() => currentStepName.value.toLowerCase() === 'prepare')
@@ -2042,9 +2564,11 @@ const detailRequestStepName = computed(() => {
   if (isGlobalWaveView.value) return 'sim'
   return currentStepName.value
 })
-const completedCount = computed(() => steps.value.filter((step) => step.state === 'Success').length)
-const nextPendingStep = computed(() =>
-  steps.value.find((step) => step.state !== 'Success') ?? null,
+const completedCount = computed(
+  () => steps.value.filter((step) => step.state === 'Success').length,
+)
+const nextPendingStep = computed(
+  () => steps.value.find((step) => step.state !== 'Success') ?? null,
 )
 const stepTitle = computed(() => {
   if (isHomeView.value) {
@@ -2056,8 +2580,10 @@ const stepTitle = computed(() => {
 })
 const currentOverallState = computed(() => {
   if (steps.value.some((step) => step.state === 'Ongoing')) return 'Running'
-  if (steps.value.some((step) => step.state === 'Invalid' || step.state === 'Incomplete')) return 'Attention Needed'
-  if (steps.value.length > 0 && steps.value.every((step) => step.state === 'Success')) return 'Complete'
+  if (steps.value.some((step) => step.state === 'Invalid' || step.state === 'Incomplete'))
+    return 'Attention Needed'
+  if (steps.value.length > 0 && steps.value.every((step) => step.state === 'Success'))
+    return 'Complete'
   return 'Ready'
 })
 const latestActiveTool = computed(() => {
@@ -2069,10 +2595,14 @@ const simStepState = computed(() => {
   return simStep?.state || 'Unstart'
 })
 const currentStepDisplayState = computed(() =>
-  runBusy.value && currentStep.value ? runPhaseDisplayLabel(runPhase.value) : detail.value?.state || currentStep.value?.state || 'Unstart',
+  runBusy.value && currentStep.value
+    ? runPhaseDisplayLabel(runPhase.value)
+    : detail.value?.state || currentStep.value?.state || 'Unstart',
 )
 const currentStepRuntime = computed(() =>
-  runBusy.value ? runElapsedLabel() : detail.value?.runtime || currentStep.value?.runtime || '--',
+  runBusy.value
+    ? runElapsedLabel()
+    : detail.value?.runtime || currentStep.value?.runtime || '--',
 )
 const runElapsedSecondsLabel = computed(() => {
   void runClockTick.value
@@ -2081,7 +2611,9 @@ const runElapsedSecondsLabel = computed(() => {
   return `${String(seconds).padStart(4, '0')}s`
 })
 const simSuiteLabel = computed(() => simSuiteLabelFor(simSuite.value))
-const runningSimSuiteLabel = computed(() => simSuiteLabelFor(runningSimSuite.value || simSuite.value))
+const runningSimSuiteLabel = computed(() =>
+  simSuiteLabelFor(runningSimSuite.value || simSuite.value),
+)
 const cases = computed(() => detail.value?.cases || [])
 const totalCases = computed(() => cases.value.length)
 const passedCases = computed(() => cases.value.filter((testCase) => testCase.ok).length)
@@ -2091,7 +2623,9 @@ const simHistory = computed<SimHistoryRun[]>(() =>
   Array.isArray(simReport.value.history) ? simReport.value.history.slice(0, 8) : [],
 )
 const simCycleChanges = computed(() =>
-  Array.isArray(simRegression.value.cycle_changes) ? simRegression.value.cycle_changes.slice(0, 4) : [],
+  Array.isArray(simRegression.value.cycle_changes)
+    ? simRegression.value.cycle_changes.slice(0, 4)
+    : [],
 )
 const simRegressionTiles = computed(() => [
   {
@@ -2116,46 +2650,46 @@ const simRegressionTiles = computed(() => [
   },
 ])
 const stepStaleReason = computed(() =>
-  detail.value?.info?.stale === true ? String(detail.value.info.stale_reason || 'Step inputs changed.') : '',
+  detail.value?.info?.stale === true
+    ? String(detail.value.info.stale_reason || 'Step inputs changed.')
+    : '',
 )
 const detailWaveItems = computed<WaveSelection[]>(() =>
-  uniqueWaveItems(
-    [
-      ...cases.value
-        .filter((testCase) => Boolean(testCase.wave))
-        .map((testCase) => ({
-          path: String(testCase.wave || ''),
-          caseName: testCase.name,
-        })),
-      ...(detail.value?.artifacts || [])
-        .filter((artifact) => isWaveformPath(artifact.path))
-        .map((artifact) => ({
-          path: artifact.path,
-          caseName: caseNameForWaveArtifact(artifact),
-        })),
-    ],
-  ),
+  uniqueWaveItems([
+    ...cases.value
+      .filter((testCase) => Boolean(testCase.wave))
+      .map((testCase) => ({
+        path: String(testCase.wave || ''),
+        caseName: testCase.name,
+      })),
+    ...(detail.value?.artifacts || [])
+      .filter((artifact) => isWaveformPath(artifact.path))
+      .map((artifact) => ({
+        path: artifact.path,
+        caseName: caseNameForWaveArtifact(artifact),
+      })),
+  ]),
 )
 const fallbackWaveItems = computed<WaveSelection[]>(() =>
-  uniqueWaveItems(
-    [
-      ...cachedWaveItems.value,
-      ...(detail.value?.artifacts || [])
-        .filter((artifact) => isWaveformPath(artifact.path))
-        .map((artifact) => ({
-          path: artifact.path,
-          caseName: caseNameForWaveArtifact(artifact),
-        })),
-      ...cases.value
-        .filter((testCase) => Boolean(testCase.wave))
-        .map((testCase) => ({
-          path: String(testCase.wave || ''),
-          caseName: testCase.name,
-        })),
-    ],
-  ),
+  uniqueWaveItems([
+    ...cachedWaveItems.value,
+    ...(detail.value?.artifacts || [])
+      .filter((artifact) => isWaveformPath(artifact.path))
+      .map((artifact) => ({
+        path: artifact.path,
+        caseName: caseNameForWaveArtifact(artifact),
+      })),
+    ...cases.value
+      .filter((testCase) => Boolean(testCase.wave))
+      .map((testCase) => ({
+        path: String(testCase.wave || ''),
+        caseName: testCase.name,
+      })),
+  ]),
 )
-const detailIsSimStep = computed(() => String(detail.value?.step || '').toLowerCase() === 'sim')
+const detailIsSimStep = computed(
+  () => String(detail.value?.step || '').toLowerCase() === 'sim',
+)
 const waveItems = computed<WaveSelection[]>(() =>
   detailIsSimStep.value ? detailWaveItems.value : fallbackWaveItems.value,
 )
@@ -2179,21 +2713,28 @@ const currentSimRunContext = computed<SimRunContext>(() => ({
   mode: simSuite.value === 'cpu_tests' ? simCpuMode.value : 'selected',
   cases: simCasesForSuite(simSuite.value),
 }))
-const resultSimRunContext = computed<SimRunContext | null>(() => resultContextFromDetail())
+const resultSimRunContext = computed<SimRunContext | null>(() =>
+  resultContextFromDetail(),
+)
 const simResultFreshness = computed(() => simResultFreshnessText())
-const simResultIsStale = computed(() => isSimStep.value && simResultFreshness.value.state === 'stale')
+const simResultIsStale = computed(
+  () => isSimStep.value && simResultFreshness.value.state === 'stale',
+)
 const simRunSubtitle = computed(() => {
   if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
   if (!cases.value.length) return 'No simulation result yet'
   return simResultFreshness.value.message
 })
-const shouldShowSimTerminal = computed(() =>
-  isSimStep.value && (runBusy.value || cases.value.length > 0 || textViewFiles.value.length > 0),
+const shouldShowSimTerminal = computed(
+  () =>
+    isSimStep.value &&
+    (runBusy.value || cases.value.length > 0 || textViewFiles.value.length > 0),
 )
 const simTerminalLogs = computed(() => textViewFiles.value)
 const simTerminalTitle = computed(() => {
   if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
-  if (selectedCase.value?.name) return `${selectedCase.value.name} · ${selectedCase.value.ok ? 'PASS' : 'FAIL'}`
+  if (selectedCase.value?.name)
+    return `${selectedCase.value.name} · ${selectedCase.value.ok ? 'PASS' : 'FAIL'}`
   if (resultSimRunContext.value) return simContextLabel(resultSimRunContext.value)
   return simSuiteLabel.value
 })
@@ -2209,15 +2750,23 @@ const simTerminalContent = computed(() => {
   return 'No simulation output yet.'
 })
 const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
-  { label: 'Design', value: config.design || currentProject.value?.name || '--', highlight: true },
+  {
+    label: 'Design',
+    value: config.design || currentProject.value?.name || '--',
+    highlight: true,
+  },
   { label: 'Top Module', value: config.topModule || '--', mono: true },
   {
     label: 'CPU Source',
-    value: displayCatalogId(config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : '')),
+    value: displayCatalogId(
+      config.frontend.coreId || (config.frontend.cpuFilelist ? 'custom-filelist' : ''),
+    ),
   },
   {
     label: 'CPU Wrapper',
-    value: displayCatalogId(config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || ''),
+    value: displayCatalogId(
+      config.frontend.cpuWrapperTop || config.frontend.cpuWrapperContract || '',
+    ),
     mono: true,
   },
   {
@@ -2227,12 +2776,17 @@ const frontendConfigItems = computed<FrontendConfigItem[]>(() => [
   },
   {
     label: 'SoC Harness',
-    value: displayCatalogId(config.frontend.socHarnessId || config.frontend.socVariant || ''),
+    value: displayCatalogId(
+      config.frontend.socHarnessId || config.frontend.socVariant || '',
+    ),
   },
   { label: 'Toolchain', value: displayCatalogId(config.frontend.toolchainId || '') },
   { label: 'Test Suite', value: displayCatalogId(config.frontend.testSuiteId || '') },
   { label: 'Clock', value: config.clock || '--' },
-  { label: 'Target Frequency', value: config.frequencyMax ? `${config.frequencyMax} MHz` : '--' },
+  {
+    label: 'Target Frequency',
+    value: config.frequencyMax ? `${config.frequencyMax} MHz` : '--',
+  },
   {
     label: 'CPU Filelist',
     value: config.frontend.cpuFilelist || config.frontend.inputFilelist || '--',
@@ -2279,7 +2833,8 @@ const reports = computed(() => detail.value?.reports || [])
 const prepareReport = computed<PrepareReport | null>(() => {
   const prepare = detail.value?.prepare
   if (!prepare) return null
-  if (prepare.readiness || prepare.configuration?.length || prepare.contracts?.length) return prepare
+  if (prepare.readiness || prepare.configuration?.length || prepare.contracts?.length)
+    return prepare
   return null
 })
 const prepareReadiness = computed(() => prepareReport.value?.readiness || {})
@@ -2302,31 +2857,65 @@ const prepareCpuTopContractDetail = computed(() => {
 const prepareContracts = computed(() => prepareReport.value?.contracts || [])
 const prepareContractStatuses = computed(() => [
   ...prepareContracts.value.map((item) => item.status),
-  ...(prepareCpuTopContract.value.module ? [String(prepareCpuTopContract.value.status || 'pending')] : []),
+  ...(prepareCpuTopContract.value.module
+    ? [String(prepareCpuTopContract.value.status || 'pending')]
+    : []),
 ])
 const prepareRuntimePlan = computed(() => prepareReport.value?.runtime || [])
-const prepareSummaryTone = computed(() => prepareStatusTone(String(prepareReadiness.value.status || currentStepDisplayState.value)))
+const prepareSummaryTone = computed(() =>
+  prepareStatusTone(
+    String(prepareReadiness.value.status || currentStepDisplayState.value),
+  ),
+)
 const prepareSummaryTiles = computed(() => [
-  { label: 'Readiness', value: String(prepareReadiness.value.status || currentStepDisplayState.value || 'Pending'), tone: prepareSummaryTone.value },
-  { label: 'CPU RTL', value: numberLabel(prepareInputs.value.cpu_rtl_files), tone: 'neutral' },
-  { label: 'Total RTL', value: numberLabel(prepareInputs.value.total_rtl_files), tone: 'neutral' },
-  { label: 'Contracts', value: prepareContractSummary.value, tone: prepareContractStatuses.value.some((status) => prepareStatusTone(status) === 'error') ? 'error' : 'ok' },
+  {
+    label: 'Readiness',
+    value: String(
+      prepareReadiness.value.status || currentStepDisplayState.value || 'Pending',
+    ),
+    tone: prepareSummaryTone.value,
+  },
+  {
+    label: 'CPU RTL',
+    value: numberLabel(prepareInputs.value.cpu_rtl_files),
+    tone: 'neutral',
+  },
+  {
+    label: 'Total RTL',
+    value: numberLabel(prepareInputs.value.total_rtl_files),
+    tone: 'neutral',
+  },
+  {
+    label: 'Contracts',
+    value: prepareContractSummary.value,
+    tone: prepareContractStatuses.value.some(
+      (status) => prepareStatusTone(status) === 'error',
+    )
+      ? 'error'
+      : 'ok',
+  },
   { label: 'Includes', value: numberLabel(prepareInputs.value.incdirs), tone: 'neutral' },
   { label: 'Defines', value: numberLabel(prepareInputs.value.defines), tone: 'neutral' },
 ])
 const prepareContractSummary = computed(() => {
-  const failed = prepareContractStatuses.value.filter((status) => prepareStatusTone(status) === 'error').length
-  const warnings = prepareContractStatuses.value.filter((status) => prepareStatusTone(status) === 'warning').length
+  const failed = prepareContractStatuses.value.filter(
+    (status) => prepareStatusTone(status) === 'error',
+  ).length
+  const warnings = prepareContractStatuses.value.filter(
+    (status) => prepareStatusTone(status) === 'warning',
+  ).length
   if (failed) return `${failed} failed`
   if (warnings) return `${warnings} warning`
   return `${prepareContractStatuses.value.length} OK`
 })
 const allArtifacts = computed(() => {
-  const fromCases = cases.value.flatMap((testCase) => [
-    testCase.wave ? { label: `${testCase.name} wave`, path: testCase.wave } : null,
-    testCase.image ? { label: `${testCase.name} image`, path: testCase.image } : null,
-    testCase.log ? { label: `${testCase.name} log`, path: testCase.log } : null,
-  ]).filter(Boolean) as PathItem[]
+  const fromCases = cases.value
+    .flatMap((testCase) => [
+      testCase.wave ? { label: `${testCase.name} wave`, path: testCase.wave } : null,
+      testCase.image ? { label: `${testCase.name} image`, path: testCase.image } : null,
+      testCase.log ? { label: `${testCase.name} log`, path: testCase.log } : null,
+    ])
+    .filter(Boolean) as PathItem[]
   return uniquePathItems([...(detail.value?.artifacts || []), ...fromCases])
 })
 const reviewSourceArtifacts = computed<PathItem[]>(() => {
@@ -2341,7 +2930,8 @@ const reviewSourceArtifacts = computed<PathItem[]>(() => {
 const elabReport = computed<ElabReport | null>(() => {
   const elab = detail.value?.elab
   if (!elab) return null
-  if (elab.path || elab.summary || elab.modules?.length || elab.diagnostics?.length) return elab
+  if (elab.path || elab.summary || elab.modules?.length || elab.diagnostics?.length)
+    return elab
   return null
 })
 const elabSourceArtifacts = computed<PathItem[]>(() => {
@@ -2353,7 +2943,14 @@ const elabSourceArtifacts = computed<PathItem[]>(() => {
 const lintReport = computed<LintReport | null>(() => {
   const lint = detail.value?.lint
   if (!lint) return null
-  if (lint.path || lint.summary || lint.diagnostics?.length || lint.rules?.length || lint.files?.length) return lint
+  if (
+    lint.path ||
+    lint.summary ||
+    lint.diagnostics?.length ||
+    lint.rules?.length ||
+    lint.files?.length
+  )
+    return lint
   return null
 })
 const lintSourceArtifacts = computed<PathItem[]>(() => {
@@ -2362,12 +2959,14 @@ const lintSourceArtifacts = computed<PathItem[]>(() => {
     .map((path) => ({ label: fileName(path), path }))
     .filter((item) => item.path)
 })
-const sourceArtifacts = computed(() => uniquePathItems([
-  ...allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)),
-  ...reviewSourceArtifacts.value,
-  ...elabSourceArtifacts.value,
-  ...lintSourceArtifacts.value,
-]))
+const sourceArtifacts = computed(() =>
+  uniquePathItems([
+    ...allArtifacts.value.filter((item) => isSourceArtifactPath(item.path)),
+    ...reviewSourceArtifacts.value,
+    ...elabSourceArtifacts.value,
+    ...lintSourceArtifacts.value,
+  ]),
+)
 const logDiagnostics = computed(() => parseVerilatorDiagnostics(logContent.value))
 const sourceDiagnosticCounts = computed(() => {
   const counts = new Map<string, DiagnosticCount>()
@@ -2401,42 +3000,74 @@ const availableLogs = computed(() => {
   if (!selected) return logs
   const caseLogs = [
     selected.log ? { label: `${selected.name} log`, path: selected.log } : null,
-    selected.report_log ? { label: `${selected.name} report log`, path: selected.report_log } : null,
-    selected.run_log ? { label: `${selected.name} run log`, path: selected.run_log } : null,
+    selected.report_log
+      ? { label: `${selected.name} report log`, path: selected.report_log }
+      : null,
+    selected.run_log
+      ? { label: `${selected.name} run log`, path: selected.run_log }
+      : null,
   ].filter(Boolean) as PathItem[]
   return uniquePathItems([...caseLogs, ...logs])
 })
 const readableReports = computed(() =>
   reports.value.filter((item) => isReadableReportPath(item.path)),
 )
-const textViewFiles = computed(() => uniquePathItems([...availableLogs.value, ...readableReports.value]))
+const textViewFiles = computed(() =>
+  uniquePathItems([...availableLogs.value, ...readableReports.value]),
+)
 const hasStepLogs = computed(() => textViewFiles.value.length > 0)
 const shouldShowStepTabs = computed(() => visibleTabs.value.length > 1)
-const shouldShowStepConsole = computed(() =>
-  consoleProblemCount.value > 0 || (!consoleCollapsed.value && hasStepLogs.value),
+const shouldShowStepConsole = computed(
+  () => consoleProblemCount.value > 0 || (!consoleCollapsed.value && hasStepLogs.value),
 )
 const humanStepTitle = computed(() => labelForStep(currentStepName.value || 'Step'))
 const humanSummaryStateTone = computed(() => {
   const state = currentStepDisplayState.value
   if (state === StateEnum.Success || state === 'Success') return 'ok'
-  if (state === StateEnum.Imcomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') return 'error'
-  if (state === StateEnum.Ongoing || state === 'Ongoing' || runBusy.value) return 'warning'
+  if (
+    state === StateEnum.Imcomplete ||
+    state === StateEnum.Invalid ||
+    state === 'Incomplete' ||
+    state === 'Invalid'
+  )
+    return 'error'
+  if (state === StateEnum.Ongoing || state === 'Ongoing' || runBusy.value)
+    return 'warning'
   return 'neutral'
 })
 const humanSummaryTiles = computed(() => [
   { label: 'Step', value: humanStepTitle.value, tone: 'neutral' },
-  { label: 'Status', value: currentStepDisplayState.value || '--', tone: humanSummaryStateTone.value },
+  {
+    label: 'Status',
+    value: currentStepDisplayState.value || '--',
+    tone: humanSummaryStateTone.value,
+  },
   { label: 'Runtime', value: currentStepRuntime.value || '--', tone: 'neutral' },
-  { label: 'Tool', value: detail.value?.tool || currentStep.value?.tool || '--', tone: 'neutral' },
-  { label: 'Problems', value: numberLabel(consoleProblemCount.value), tone: consoleProblemCount.value ? 'warning' : 'ok' },
-  { label: 'Logs', value: numberLabel(availableLogs.value.length), tone: availableLogs.value.length ? 'neutral' : 'ok' },
+  {
+    label: 'Tool',
+    value: detail.value?.tool || currentStep.value?.tool || '--',
+    tone: 'neutral',
+  },
+  {
+    label: 'Problems',
+    value: numberLabel(consoleProblemCount.value),
+    tone: consoleProblemCount.value ? 'warning' : 'ok',
+  },
+  {
+    label: 'Logs',
+    value: numberLabel(availableLogs.value.length),
+    tone: availableLogs.value.length ? 'neutral' : 'ok',
+  },
 ])
 const humanSummaryMetrics = computed(() => {
   if (isSimStep.value) {
     return [
       { label: 'Cases', value: numberLabel(totalCases.value) },
       { label: 'Passed', value: numberLabel(passedCases.value) },
-      { label: 'Failed', value: numberLabel(Math.max(0, totalCases.value - passedCases.value)) },
+      {
+        label: 'Failed',
+        value: numberLabel(Math.max(0, totalCases.value - passedCases.value)),
+      },
       { label: 'Suite', value: simSuiteLabel.value },
     ]
   }
@@ -2482,40 +3113,60 @@ const humanSummaryText = computed(() => {
   const state = currentStepDisplayState.value
   if (isSimStep.value) return simRunSubtitle.value
   if (isElabStep.value && elabReport.value) {
-    if (elabDiagnostics.value.length) return 'ELAB reported diagnostics. Open Elab or Problems to jump to the source line.'
-    if (elabUnresolvedModules.value.length) return 'Slang elaboration reported unresolved module references.'
-    if (elabHeuristicCandidates.value.length) return 'Elaboration passed; source scan also reported informational module-name candidates.'
+    if (elabDiagnostics.value.length)
+      return 'ELAB reported diagnostics. Open Elab or Problems to jump to the source line.'
+    if (elabUnresolvedModules.value.length)
+      return 'Slang elaboration reported unresolved module references.'
+    if (elabHeuristicCandidates.value.length)
+      return 'Elaboration passed; source scan also reported informational module-name candidates.'
     return 'ELAB completed the configured design universe check and generated a module inventory.'
   }
   if (isLintStep.value && lintReport.value) {
-    if (lintActionableDiagnostics.value.length) return 'Lint found CPU or tool diagnostics. Open Lint to inspect source locations.'
-    if (lintHiddenDiagnostics.value) return 'CPU lint is clean; infrastructure diagnostics remain available in the All view.'
+    if (lintActionableDiagnostics.value.length)
+      return 'Lint found CPU or tool diagnostics. Open Lint to inspect source locations.'
+    if (lintHiddenDiagnostics.value)
+      return 'CPU lint is clean; infrastructure diagnostics remain available in the All view.'
     return 'Lint completed without Verilator diagnostics.'
   }
   if (isPrepareStep.value && prepareReport.value) {
-    return String(prepareReadiness.value.message || 'Prepare normalized the project inputs and generated the runtime plan.')
+    return String(
+      prepareReadiness.value.message ||
+        'Prepare normalized the project inputs and generated the runtime plan.',
+    )
   }
   if (isReviewStep.value && reviewReport.value) return reviewNextAction.value.detail
   if (state === StateEnum.Success || state === 'Success') {
     return `${humanStepTitle.value} completed. Keep going unless Problems reports something actionable.`
   }
-  if (state === StateEnum.Imcomplete || state === StateEnum.Invalid || state === 'Incomplete' || state === 'Invalid') {
+  if (
+    state === StateEnum.Imcomplete ||
+    state === StateEnum.Invalid ||
+    state === 'Incomplete' ||
+    state === 'Invalid'
+  ) {
     return `${humanStepTitle.value} needs attention. Start from Problems; source diagnostics jump to SRC when a location is available.`
   }
   return `${humanStepTitle.value} has not produced a specialized result view yet. Run the step to generate a readable result.`
 })
-const humanNextAction = computed<{ title: string; detail: string; label: string; tab?: TabId }>(() => {
+const humanNextAction = computed<{
+  title: string
+  detail: string
+  label: string
+  tab?: TabId
+}>(() => {
   if (consoleProblemCount.value) {
     return {
       title: 'Inspect Problems',
-      detail: 'Start from the bottom Problems console; clickable diagnostics will open source when a location is available.',
+      detail:
+        'Start from the bottom Problems console; clickable diagnostics will open source when a location is available.',
       label: 'Problems',
     }
   }
   if (isElabStep.value && elabReport.value) {
     return {
       title: 'Inspect Elab',
-      detail: 'Review the module inventory and unresolved module candidates before moving to RTL Review.',
+      detail:
+        'Review the module inventory and unresolved module candidates before moving to RTL Review.',
       label: 'Elab',
       tab: 'elab',
     }
@@ -2533,7 +3184,8 @@ const humanNextAction = computed<{ title: string; detail: string; label: string;
   if (isSimStep.value) {
     return {
       title: 'Inspect Cases',
-      detail: 'Open case results to check pass/fail status, logs, and waveforms when available.',
+      detail:
+        'Open case results to check pass/fail status, logs, and waveforms when available.',
       label: 'Cases',
       tab: 'cases',
     }
@@ -2557,29 +3209,47 @@ const reviewReport = computed<RtlReviewReport | null>(() => {
   if (review.path || review.issues?.length || review.source_files?.length) return review
   return null
 })
-const reviewIssues = computed(() => normalizeReviewIssues(reviewReport.value?.issues || []))
+const reviewIssues = computed(() =>
+  normalizeReviewIssues(reviewReport.value?.issues || []),
+)
 const reviewActionableIssues = computed(() =>
-  reviewIssues.value.filter((issue) => !issue.waived && (issue.ownership === 'cpu' || !issue.ownership)),
+  reviewIssues.value.filter(
+    (issue) => !issue.waived && (issue.ownership === 'cpu' || !issue.ownership),
+  ),
 )
 const reviewDelta = computed(() => reviewReport.value?.delta || {})
 const reviewWaivers = computed(() => reviewReport.value?.waivers || {})
-const reviewResolvedIssues = computed(() => normalizeReviewIssues(reviewReport.value?.resolved_issues || []))
-const sourceScanIssues = computed(() => reviewIssues.value.filter((issue) => !isYosysIssue(issue)))
-const reviewYosysIssues = computed(() => reviewIssues.value.filter((issue) => isYosysIssue(issue)))
+const reviewResolvedIssues = computed(() =>
+  normalizeReviewIssues(reviewReport.value?.resolved_issues || []),
+)
+const sourceScanIssues = computed(() =>
+  reviewIssues.value.filter((issue) => !isYosysIssue(issue)),
+)
+const reviewYosysIssues = computed(() =>
+  reviewIssues.value.filter((issue) => isYosysIssue(issue)),
+)
 const reviewStructuralProbe = computed(() => {
   const probe = reviewReport.value?.yosys_precheck || reviewReport.value?.structural_probe
   return probe && Object.keys(probe).length ? probe : null
 })
 const reviewStructuralMetrics = computed(() => {
   const metrics = reviewStructuralProbe.value?.metrics
-  return metrics && typeof metrics === 'object' ? metrics as Record<string, unknown> : {}
+  return metrics && typeof metrics === 'object'
+    ? (metrics as Record<string, unknown>)
+    : {}
 })
 const reviewStructuralQuality = computed(() => {
   const quality = reviewStructuralProbe.value?.quality
-  return quality && typeof quality === 'object' ? quality as Record<string, unknown> : {}
+  return quality && typeof quality === 'object'
+    ? (quality as Record<string, unknown>)
+    : {}
 })
-const reviewStructuralStatus = computed(() => titleCase(String(reviewStructuralProbe.value?.status || 'not run')))
-const reviewStructuralReason = computed(() => String(reviewStructuralProbe.value?.reason || '').trim())
+const reviewStructuralStatus = computed(() =>
+  titleCase(String(reviewStructuralProbe.value?.status || 'not run')),
+)
+const reviewStructuralReason = computed(() =>
+  String(reviewStructuralProbe.value?.reason || '').trim(),
+)
 const reviewStructuralDiagnostics = computed(() => {
   const diagnostics = reviewStructuralProbe.value?.diagnostics
   return Array.isArray(diagnostics) ? diagnostics.length : 0
@@ -2587,13 +3257,17 @@ const reviewStructuralDiagnostics = computed(() => {
 const reviewYosysDiagnostics = computed<YosysDiagnostic[]>(() => {
   const diagnostics = reviewStructuralProbe.value?.diagnostics
   return Array.isArray(diagnostics)
-    ? diagnostics.filter((item): item is YosysDiagnostic => Boolean(item && typeof item === 'object'))
+    ? diagnostics.filter((item): item is YosysDiagnostic =>
+        Boolean(item && typeof item === 'object'),
+      )
     : []
 })
 const reviewRiskyModules = computed<ModuleRisk[]>(() => {
   const risks = reviewStructuralProbe.value?.module_risks
   return Array.isArray(risks)
-    ? risks.filter((item): item is ModuleRisk => Boolean(item && typeof item === 'object')).slice(0, 8)
+    ? risks
+        .filter((item): item is ModuleRisk => Boolean(item && typeof item === 'object'))
+        .slice(0, 8)
     : []
 })
 const reviewStructuralHotspots = computed<ReviewHotspot[]>(() => {
@@ -2632,7 +3306,9 @@ const reviewStructuralHotspots = computed<ReviewHotspot[]>(() => {
       column: numberValue(item.column) || 1,
     })
   }
-  const cycles = Array.isArray(metrics.comb_cycle_modules) ? metrics.comb_cycle_modules.map(String).filter(Boolean) : []
+  const cycles = Array.isArray(metrics.comb_cycle_modules)
+    ? metrics.comb_cycle_modules.map(String).filter(Boolean)
+    : []
   for (const moduleName of cycles.slice(0, 4)) {
     hotspots.push({
       title: `Comb cycle · ${moduleName}`,
@@ -2654,7 +3330,10 @@ const reviewModeItems = computed(() => [
     id: 'yosys' as const,
     label: 'Yosys',
     icon: 'ri-cpu-line',
-    count: reviewYosysDiagnostics.value.length + reviewYosysIssues.value.length + reviewStructuralHotspots.value.length,
+    count:
+      reviewYosysDiagnostics.value.length +
+      reviewYosysIssues.value.length +
+      reviewStructuralHotspots.value.length,
   },
   {
     id: 'modules' as const,
@@ -2665,14 +3344,28 @@ const reviewModeItems = computed(() => [
 ])
 const reviewTopIssues = computed(() =>
   [...reviewIssues.value]
-    .sort((a, b) => Number(Boolean(a.waived)) - Number(Boolean(b.waived)) || Number(b.status === 'new') - Number(a.status === 'new'))
+    .sort(
+      (a, b) =>
+        Number(Boolean(a.waived)) - Number(Boolean(b.waived)) ||
+        Number(b.status === 'new') - Number(a.status === 'new'),
+    )
     .slice(0, 6),
 )
-const reviewNextAction = computed<{ title: string; detail: string; label: string; mode: ReviewMode }>(() => {
-  if (reviewYosysIssues.value.some((issue) => !issue.waived) || reviewYosysDiagnostics.value.length || reviewStructuralHotspots.value.length) {
+const reviewNextAction = computed<{
+  title: string
+  detail: string
+  label: string
+  mode: ReviewMode
+}>(() => {
+  if (
+    reviewYosysIssues.value.some((issue) => !issue.waived) ||
+    reviewYosysDiagnostics.value.length ||
+    reviewStructuralHotspots.value.length
+  ) {
     return {
       title: 'Inspect Yosys',
-      detail: 'Open Yosys diagnostics and hotspots first. These issues usually block or distort structural quality analysis.',
+      detail:
+        'Open Yosys diagnostics and hotspots first. These issues usually block or distort structural quality analysis.',
       label: 'Yosys',
       mode: 'yosys',
     }
@@ -2680,7 +3373,8 @@ const reviewNextAction = computed<{ title: string; detail: string; label: string
   if (sourceScanIssues.value.some((issue) => !issue.waived)) {
     return {
       title: 'Fix Source',
-      detail: 'Open source scan issues and clean the RTL coding/style risks before running simulation again.',
+      detail:
+        'Open source scan issues and clean the RTL coding/style risks before running simulation again.',
       label: 'Source Scan',
       mode: 'source',
     }
@@ -2688,14 +3382,16 @@ const reviewNextAction = computed<{ title: string; detail: string; label: string
   if (reviewRiskyModules.value.length) {
     return {
       title: 'Review Modules',
-      detail: 'Open module ranking to inspect large mux, arithmetic, memory, fanout, fanin, and depth hotspots.',
+      detail:
+        'Open module ranking to inspect large mux, arithmetic, memory, fanout, fanin, and depth hotspots.',
       label: 'Modules',
       mode: 'modules',
     }
   }
   return {
     title: 'Looks Clean',
-    detail: 'No Review issue is currently reported. Continue with simulation or inspect source files.',
+    detail:
+      'No Review issue is currently reported. Continue with simulation or inspect source files.',
     label: 'Source Scan',
     mode: 'source',
   }
@@ -2716,12 +3412,38 @@ const reviewStructuralTone = computed(() => {
 const reviewSummaryTiles = computed(() => {
   const summary = reviewReport.value?.summary || {}
   return [
-    { label: 'Status', value: titleCase(String(summary.status || 'pending')), tone: reviewActionableIssues.value.length ? 'warning' : 'ok' },
-    { label: 'Actionable', value: numberLabel(summary.actionable_issues ?? reviewActionableIssues.value.length), tone: reviewActionableIssues.value.length ? 'warning' : 'ok' },
-    { label: 'New', value: numberLabel(reviewDelta.value.new), tone: numberValue(reviewDelta.value.new) ? 'warning' : 'ok' },
-    { label: 'Existing', value: numberLabel(reviewDelta.value.existing), tone: 'neutral' },
-    { label: 'Resolved', value: numberLabel(reviewDelta.value.resolved), tone: numberValue(reviewDelta.value.resolved) ? 'ok' : 'neutral' },
-    { label: 'Waived', value: numberLabel(reviewWaivers.value.applied), tone: numberValue(reviewWaivers.value.applied) ? 'neutral' : 'ok' },
+    {
+      label: 'Status',
+      value: titleCase(String(summary.status || 'pending')),
+      tone: reviewActionableIssues.value.length ? 'warning' : 'ok',
+    },
+    {
+      label: 'Actionable',
+      value: numberLabel(
+        summary.actionable_issues ?? reviewActionableIssues.value.length,
+      ),
+      tone: reviewActionableIssues.value.length ? 'warning' : 'ok',
+    },
+    {
+      label: 'New',
+      value: numberLabel(reviewDelta.value.new),
+      tone: numberValue(reviewDelta.value.new) ? 'warning' : 'ok',
+    },
+    {
+      label: 'Existing',
+      value: numberLabel(reviewDelta.value.existing),
+      tone: 'neutral',
+    },
+    {
+      label: 'Resolved',
+      value: numberLabel(reviewDelta.value.resolved),
+      tone: numberValue(reviewDelta.value.resolved) ? 'ok' : 'neutral',
+    },
+    {
+      label: 'Waived',
+      value: numberLabel(reviewWaivers.value.applied),
+      tone: numberValue(reviewWaivers.value.applied) ? 'neutral' : 'ok',
+    },
   ]
 })
 const elabSummary = computed(() => elabReport.value?.summary || {})
@@ -2734,7 +3456,8 @@ const elabDiagnostics = computed<ElabDiagnostic[]>(() => {
   return diagnostics
     .filter((item): item is ElabDiagnostic => Boolean(item && typeof item === 'object'))
     .map((item) => ({
-      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      severity:
+        item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
       message: String(item.message || 'Slang diagnostic'),
       source: String(item.source || ''),
       line: numberValue(item.line),
@@ -2755,13 +3478,18 @@ const elabModules = computed<ElabModule[]>(() => {
       ports: numberValue(item.ports),
       parameters: numberValue(item.parameters),
       instances: numberValue(item.instances),
-      instantiates: Array.isArray(item.instantiates) ? item.instantiates.map(String).filter(Boolean) : [],
+      instantiates: Array.isArray(item.instantiates)
+        ? item.instantiates.map(String).filter(Boolean)
+        : [],
       ownership: String(item.ownership || 'unknown'),
     }))
     .sort((a, b) => {
       if (a.module === top) return -1
       if (b.module === top) return 1
-      return numberValue(b.instances) - numberValue(a.instances) || String(a.module).localeCompare(String(b.module))
+      return (
+        numberValue(b.instances) - numberValue(a.instances) ||
+        String(a.module).localeCompare(String(b.module))
+      )
     })
 })
 const elabUnresolvedModules = computed(() =>
@@ -2774,11 +3502,15 @@ const elabUnresolvedModules = computed(() =>
 const elabHeuristicCandidates = computed(() => {
   const hierarchyCandidates = elabHierarchy.value.heuristic_unresolved_candidates
   const reportCandidates = elabReport.value?.heuristic_unresolved_candidates
-  const candidates = Array.isArray(hierarchyCandidates) ? hierarchyCandidates : reportCandidates
+  const candidates = Array.isArray(hierarchyCandidates)
+    ? hierarchyCandidates
+    : reportCandidates
   return Array.isArray(candidates) ? candidates.map(String).filter(Boolean) : []
 })
 const elabAuthorityLabel = computed(() =>
-  elabReport.value?.compiler?.authoritative === false ? 'Non-authoritative' : 'Slang authoritative',
+  elabReport.value?.compiler?.authoritative === false
+    ? 'Non-authoritative'
+    : 'Slang authoritative',
 )
 const elabTopChildren = computed(() =>
   Array.isArray(elabHierarchy.value.top_children)
@@ -2786,12 +3518,27 @@ const elabTopChildren = computed(() =>
     : [],
 )
 const elabTopModuleName = computed(() =>
-  String(elabReadiness.value.top_module || elabHierarchy.value.top_module || elabSummary.value.top_module || elabReport.value?.top_module || '--'),
+  String(
+    elabReadiness.value.top_module ||
+      elabHierarchy.value.top_module ||
+      elabSummary.value.top_module ||
+      elabReport.value?.top_module ||
+      '--',
+  ),
 )
 const elabStatusLabel = computed(() =>
-  titleCase(String(elabReadiness.value.status || elabSummary.value.status || elabReport.value?.status || 'not run')),
+  titleCase(
+    String(
+      elabReadiness.value.status ||
+        elabSummary.value.status ||
+        elabReport.value?.status ||
+        'not run',
+    ),
+  ),
 )
-const elabTopFound = computed(() => Boolean(elabReadiness.value.top_found ?? elabSummary.value.top_found))
+const elabTopFound = computed(() =>
+  Boolean(elabReadiness.value.top_found ?? elabSummary.value.top_found),
+)
 const elabLargestModules = computed<ElabModule[]>(() => {
   const modules = elabHierarchy.value.largest_modules
   if (!Array.isArray(modules)) return elabModules.value.slice(0, 6)
@@ -2810,10 +3557,30 @@ const elabSummaryTiles = computed(() => [
     value: elabTopModuleName.value,
     tone: elabTopFound.value ? 'ok' : 'warning',
   },
-  { label: 'RTL Files', value: numberLabel(elabReadiness.value.rtl_files || elabSummary.value.rtl_files || elabReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
-  { label: 'Modules', value: numberLabel(elabReadiness.value.modules || elabSummary.value.modules), tone: 'neutral' },
-  { label: 'Diagnostics', value: numberLabel(elabDiagnostics.value.length), tone: elabDiagnostics.value.length ? 'warning' : 'ok' },
-  { label: 'Compiler Missing', value: numberLabel(elabUnresolvedModules.value.length), tone: elabUnresolvedModules.value.length ? 'warning' : 'ok' },
+  {
+    label: 'RTL Files',
+    value: numberLabel(
+      elabReadiness.value.rtl_files ||
+        elabSummary.value.rtl_files ||
+        elabReport.value?.inputs?.rtl_file_count,
+    ),
+    tone: 'neutral',
+  },
+  {
+    label: 'Modules',
+    value: numberLabel(elabReadiness.value.modules || elabSummary.value.modules),
+    tone: 'neutral',
+  },
+  {
+    label: 'Diagnostics',
+    value: numberLabel(elabDiagnostics.value.length),
+    tone: elabDiagnostics.value.length ? 'warning' : 'ok',
+  },
+  {
+    label: 'Compiler Missing',
+    value: numberLabel(elabUnresolvedModules.value.length),
+    tone: elabUnresolvedModules.value.length ? 'warning' : 'ok',
+  },
 ])
 const lintSummary = computed(() => lintReport.value?.summary || {})
 const lintDiagnostics = computed<LintDiagnostic[]>(() => {
@@ -2822,7 +3589,8 @@ const lintDiagnostics = computed<LintDiagnostic[]>(() => {
   return diagnostics
     .filter((item): item is LintDiagnostic => Boolean(item && typeof item === 'object'))
     .map((item) => ({
-      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      severity:
+        item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
       code: String(item.code || item.severity || 'LINT'),
       category: String(item.category || 'lint'),
       message: String(item.message || item.raw || 'Verilator lint diagnostic'),
@@ -2835,12 +3603,16 @@ const lintDiagnostics = computed<LintDiagnostic[]>(() => {
     }))
 })
 const lintActionableDiagnostics = computed(() =>
-  lintDiagnostics.value.filter((item) => item.ownership === 'cpu' || item.ownership === 'tool' || item.actionable),
+  lintDiagnostics.value.filter(
+    (item) => item.ownership === 'cpu' || item.ownership === 'tool' || item.actionable,
+  ),
 )
 const lintVisibleDiagnostics = computed(() =>
   lintScope.value === 'all' ? lintDiagnostics.value : lintActionableDiagnostics.value,
 )
-const lintHiddenDiagnostics = computed(() => Math.max(0, lintDiagnostics.value.length - lintActionableDiagnostics.value.length))
+const lintHiddenDiagnostics = computed(() =>
+  Math.max(0, lintDiagnostics.value.length - lintActionableDiagnostics.value.length),
+)
 const lintOwnershipRows = computed<LintOwnership[]>(() =>
   Array.isArray(lintReport.value?.ownership)
     ? lintReport.value.ownership.filter((item) => numberValue(item.total) > 0)
@@ -2859,7 +3631,11 @@ const lintRules = computed<LintRule[]>(() => {
       total: numberValue(item.total),
       example: String(item.example || ''),
     }))
-    .sort((a, b) => numberValue(b.errors) - numberValue(a.errors) || numberValue(b.warnings) - numberValue(a.warnings))
+    .sort(
+      (a, b) =>
+        numberValue(b.errors) - numberValue(a.errors) ||
+        numberValue(b.warnings) - numberValue(a.warnings),
+    )
 })
 const lintFiles = computed<LintFile[]>(() => {
   const files = lintReport.value?.files
@@ -2887,11 +3663,33 @@ const lintSummaryTiles = computed(() => [
     value: lintStatusLabel.value,
     tone: String(lintStatusLabel.value).toLowerCase() === 'pass' ? 'ok' : 'error',
   },
-  { label: 'CPU Errors', value: numberLabel(lintSummary.value.cpu_errors), tone: numberValue(lintSummary.value.cpu_errors) ? 'error' : 'ok' },
-  { label: 'CPU Warnings', value: numberLabel(lintSummary.value.cpu_warnings), tone: numberValue(lintSummary.value.cpu_warnings) ? 'warning' : 'ok' },
-  { label: 'Actionable', value: numberLabel(lintSummary.value.actionable_diagnostics), tone: lintActionableDiagnostics.value.length ? 'warning' : 'ok' },
-  { label: 'Infrastructure', value: numberLabel(lintHiddenDiagnostics.value), tone: lintHiddenDiagnostics.value ? 'neutral' : 'ok' },
-  { label: 'RTL Files', value: numberLabel(lintSummary.value.rtl_files || lintReport.value?.inputs?.rtl_file_count), tone: 'neutral' },
+  {
+    label: 'CPU Errors',
+    value: numberLabel(lintSummary.value.cpu_errors),
+    tone: numberValue(lintSummary.value.cpu_errors) ? 'error' : 'ok',
+  },
+  {
+    label: 'CPU Warnings',
+    value: numberLabel(lintSummary.value.cpu_warnings),
+    tone: numberValue(lintSummary.value.cpu_warnings) ? 'warning' : 'ok',
+  },
+  {
+    label: 'Actionable',
+    value: numberLabel(lintSummary.value.actionable_diagnostics),
+    tone: lintActionableDiagnostics.value.length ? 'warning' : 'ok',
+  },
+  {
+    label: 'Infrastructure',
+    value: numberLabel(lintHiddenDiagnostics.value),
+    tone: lintHiddenDiagnostics.value ? 'neutral' : 'ok',
+  },
+  {
+    label: 'RTL Files',
+    value: numberLabel(
+      lintSummary.value.rtl_files || lintReport.value?.inputs?.rtl_file_count,
+    ),
+    tone: 'neutral',
+  },
 ])
 const reviewMetricRows = computed(() => {
   const metrics = reviewReport.value?.metrics || {}
@@ -2925,7 +3723,8 @@ const consoleStyle = computed(() => ({
 const consoleContext = computed(() => {
   if (isGlobalSrcView.value) return 'Source Workspace'
   if (isGlobalWaveView.value) return 'Waveform Workspace'
-  if (selectedCase.value) return `${labelForStep(currentStepName.value)} · ${selectedCase.value.name}`
+  if (selectedCase.value)
+    return `${labelForStep(currentStepName.value)} · ${selectedCase.value.name}`
   return labelForStep(currentStepName.value || 'Workspace')
 })
 const consoleProblems = computed<ConsoleProblem[]>(() => {
@@ -2963,7 +3762,8 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
     problems.push({
       severity: 'warning',
       title: `ELAB · unresolved ${moduleName}`,
-      detail: 'This module is referenced by the RTL inventory but was not found in the current file universe.',
+      detail:
+        'This module is referenced by the RTL inventory but was not found in the current file universe.',
     })
   }
   for (const testCase of cases.value.filter((item) => !item.ok)) {
@@ -2988,8 +3788,8 @@ const consoleProblems = computed<ConsoleProblem[]>(() => {
   }
   return uniqueProblems(problems).slice(0, 40)
 })
-const consoleProblemCount = computed(() =>
-  consoleProblems.value.filter((problem) => problem.severity !== 'info').length,
+const consoleProblemCount = computed(
+  () => consoleProblems.value.filter((problem) => problem.severity !== 'info').length,
 )
 const visibleTabs = computed(() => {
   if (isGlobalSrcView.value) {
@@ -2999,10 +3799,13 @@ const visibleTabs = computed(() => {
     return [{ id: 'summary' as TabId, label: 'Wave', icon: 'ri-pulse-line' }]
   }
   const tabs: Array<{ id: TabId; label: string; icon: string }> = []
-  if (isReviewStep.value) tabs.push({ id: 'review', label: 'Review', icon: 'ri-search-eye-line' })
-  else if (isElabStep.value) tabs.push({ id: 'elab', label: 'Elab', icon: 'ri-node-tree' })
+  if (isReviewStep.value)
+    tabs.push({ id: 'review', label: 'Review', icon: 'ri-search-eye-line' })
+  else if (isElabStep.value)
+    tabs.push({ id: 'elab', label: 'Elab', icon: 'ri-node-tree' })
   else if (isLintStep.value) tabs.push({ id: 'lint', label: 'Lint', icon: 'ri-bug-line' })
-  else if (isSimStep.value) tabs.push({ id: 'cases', label: 'Cases', icon: 'ri-list-check-3' })
+  else if (isSimStep.value)
+    tabs.push({ id: 'cases', label: 'Cases', icon: 'ri-list-check-3' })
   else tabs.push({ id: 'summary', label: 'Summary', icon: 'ri-dashboard-3-line' })
   return tabs
 })
@@ -3010,7 +3813,8 @@ const surferViewerUrl = 'ecos-surfer://viewer/'
 const waveStatusMessage = computed(() => {
   if (waveformError.value) return waveformError.value
   if (!activeWaveform.value) return ''
-  if (!surferReady.value || waveformLoading.value) return 'Loading Surfer waveform viewer...'
+  if (!surferReady.value || waveformLoading.value)
+    return 'Loading Surfer waveform viewer...'
   return ''
 })
 
@@ -3052,7 +3856,8 @@ async function loadDetail(): Promise<void> {
     detail.value = response.data.info as FrontendStepDetail
     await hydrateWaveCasesFromWorkspaceResources()
     const previousCaseName = selectedCase.value?.name || ''
-    selectedCase.value = cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
+    selectedCase.value =
+      cases.value.find((item) => item.name === previousCaseName) || cases.value[0] || null
     syncWaveSelectionFromRoute()
     if (isGlobalSrcView.value) {
       activeTab.value = 'src'
@@ -3090,9 +3895,13 @@ async function loadSelectedLog(): Promise<void> {
   if (!selectedLogPath.value) return
   logLoading.value = true
   try {
-    const content = await readOptionalProjectTextFileTail(selectedLogPath.value, 300_000, {
-      projectPath: currentProject.value?.path,
-    })
+    const content = await readOptionalProjectTextFileTail(
+      selectedLogPath.value,
+      300_000,
+      {
+        projectPath: currentProject.value?.path,
+      },
+    )
     logContent.value = content?.content || 'No readable log content.'
   } catch (err) {
     logContent.value = err instanceof Error ? err.message : String(err)
@@ -3111,7 +3920,7 @@ async function hydrateWaveCasesFromWorkspaceResources(): Promise<void> {
     })
     if (response.response !== 'available') return
     const fallbackCases = Array.isArray(response.info?.cases)
-      ? response.info.cases as SimCase[]
+      ? (response.info.cases as SimCase[])
       : []
     if (!fallbackCases.some((testCase) => Boolean(testCase.wave)) || !detail.value) return
     detail.value = {
@@ -3148,17 +3957,20 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
     await refresh()
     showToast({
       severity: response.data?.state === StateEnum.Success ? 'success' : 'error',
-      summary: response.data?.state === StateEnum.Success ? 'Step Completed' : 'Step Failed',
-      detail: response.data?.state === StateEnum.Success
-        ? currentStepName.value
-        : runFailureDetail(response.message, currentStepName.value),
+      summary:
+        response.data?.state === StateEnum.Success ? 'Step Completed' : 'Step Failed',
+      detail:
+        response.data?.state === StateEnum.Success
+          ? currentStepName.value
+          : runFailureDetail(response.message, currentStepName.value),
       life: 4000,
     })
   } catch (err) {
     showToast({
       severity: 'error',
       summary: 'Run Failed',
-      detail: err instanceof Error ? err.message : runFailureDetail([], currentStepName.value),
+      detail:
+        err instanceof Error ? err.message : runFailureDetail([], currentStepName.value),
       life: 6000,
     })
   } finally {
@@ -3206,7 +4018,11 @@ async function cancelCurrentRun(): Promise<void> {
 
 function handleCliEvent(event: DesktopCliCommandEvent): void {
   const projectPath = currentProject.value?.path
-  if (!projectPath || !event.directory || normalizeWorkspacePath(event.directory) !== normalizeWorkspacePath(projectPath)) {
+  if (
+    !projectPath ||
+    !event.directory ||
+    normalizeWorkspacePath(event.directory) !== normalizeWorkspacePath(projectPath)
+  ) {
     return
   }
   if (event.cmd !== 'run_step' && event.cmd !== 'rtl2gds') return
@@ -3218,7 +4034,8 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
     runPhase.value = 'queued'
     runStartedAt.value = runStartedAt.value || Date.now()
     startRunClock()
-    runningSimSuite.value = runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
+    runningSimSuite.value =
+      runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
     return
   }
 
@@ -3228,11 +4045,16 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
     runPhase.value = 'running'
     runStartedAt.value = runStartedAt.value || Date.now()
     startRunClock()
-    runningSimSuite.value = runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
+    runningSimSuite.value =
+      runningSimSuite.value || (isSimStep.value ? simSuite.value : null)
     return
   }
 
-  if (event.type === 'completed' || event.type === 'failed' || event.type === 'cancelled') {
+  if (
+    event.type === 'completed' ||
+    event.type === 'failed' ||
+    event.type === 'cancelled'
+  ) {
     runBusy.value = false
     runPhase.value = 'idle'
     runStartedAt.value = 0
@@ -3246,7 +4068,9 @@ function handleCliEvent(event: DesktopCliCommandEvent): void {
 
 function normalizeWorkspacePath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/')
-  return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized
+  return normalized.length > 1 && normalized.endsWith('/')
+    ? normalized.slice(0, -1)
+    : normalized
 }
 
 function simRunPayload(suiteOverride?: SimSuite) {
@@ -3263,8 +4087,12 @@ function simRunPayload(suiteOverride?: SimSuite) {
       sim_compile_march: coremarkMarch.value,
       sim_compile_mabi: coremarkMabi.value,
       sim_compile_extra_cflags: splitCompileFlags(coremarkExtraCflags.value),
-      sim_coremark_iterations: String(Math.max(1, Number(coremarkIterations.value) || 128)),
-      sim_coremark_total_data_size: String(Math.max(1, Number(coremarkTotalDataSize.value) || 2000)),
+      sim_coremark_iterations: String(
+        Math.max(1, Number(coremarkIterations.value) || 128),
+      ),
+      sim_coremark_total_data_size: String(
+        Math.max(1, Number(coremarkTotalDataSize.value) || 2000),
+      ),
       sim_coremark_has_float: coremarkHasFloat.value ? 'true' : 'false',
     }
   }
@@ -3284,20 +4112,28 @@ function cpuRunCasesForSelection(): string[] {
 
 function resultContextFromDetail(): SimRunContext | null {
   if (!isSimStep.value || !cases.value.length) return null
-  const resultSuite = String(detail.value?.summary?.suite_id || detail.value?.summary?.test_suite || '')
+  const resultSuite = String(
+    detail.value?.summary?.suite_id || detail.value?.summary?.test_suite || '',
+  )
   const caseNames = resultCaseNames()
-  const suite: SimRunContext['suite'] = resultSuite === 'rtthread' || resultSuite === 'RT-Thread' || caseNames.includes('rtthread.soc')
-    ? 'rtthread'
-    : resultSuite === 'coremark' || resultSuite === 'CoreMark' || caseNames.includes('coremark.soc')
-      ? 'coremark'
-      : 'cpu_tests'
+  const suite: SimRunContext['suite'] =
+    resultSuite === 'rtthread' ||
+    resultSuite === 'RT-Thread' ||
+    caseNames.includes('rtthread.soc')
+      ? 'rtthread'
+      : resultSuite === 'coremark' ||
+          resultSuite === 'CoreMark' ||
+          caseNames.includes('coremark.soc')
+        ? 'coremark'
+        : 'cpu_tests'
   if (suite === 'rtthread') {
     return { suite, mode: 'selected', cases: ['rtthread.soc'] }
   }
   if (suite === 'coremark') {
     return { suite, mode: 'selected', cases: ['coremark.soc'] }
   }
-  const mode = String(detail.value?.summary?.cpu_test_mode || '') === 'all' ? 'all' : 'selected'
+  const mode =
+    String(detail.value?.summary?.cpu_test_mode || '') === 'all' ? 'all' : 'selected'
   return {
     suite,
     mode,
@@ -3305,9 +4141,13 @@ function resultContextFromDetail(): SimRunContext | null {
   }
 }
 
-function simResultFreshnessText(): { state: 'empty' | 'fresh' | 'stale' | 'running'; message: string } {
+function simResultFreshnessText(): {
+  state: 'empty' | 'fresh' | 'stale' | 'running'
+  message: string
+} {
   if (!isSimStep.value) return { state: 'empty', message: 'No simulation context' }
-  if (runBusy.value) return { state: 'running', message: `Running ${runningSimSuiteLabel.value}` }
+  if (runBusy.value)
+    return { state: 'running', message: `Running ${runningSimSuiteLabel.value}` }
   const result = resultSimRunContext.value
   if (!result) return { state: 'empty', message: 'No result yet' }
   if (simContextsEqual(currentSimRunContext.value, result)) {
@@ -3342,7 +4182,9 @@ function simCasesForSuite(suite: SimSuite): string[] {
 
 function syncDefaultCpuSelection(): void {
   if (!isSimStep.value || selectedCpuCases.value.length) return
-  const defaults = defaultCpuTests.value.length ? defaultCpuTests.value : availableCpuTests.value.slice(0, 1)
+  const defaults = defaultCpuTests.value.length
+    ? defaultCpuTests.value
+    : availableCpuTests.value.slice(0, 1)
   selectedCpuCases.value = defaults
 }
 
@@ -3351,16 +4193,27 @@ function syncWaveSelectionFromRoute(): void {
   const requestedPath = firstQueryValue(route.query.path).trim()
   const requestedCase = firstQueryValue(route.query.case).trim()
   const matched = requestedPath
-    ? waveItems.value.find((item) => normalizeWorkspacePath(item.path) === normalizeWorkspacePath(requestedPath))
+    ? waveItems.value.find(
+        (item) =>
+          normalizeWorkspacePath(item.path) === normalizeWorkspacePath(requestedPath),
+      )
     : null
-  const next = matched
-    || (requestedPath ? { path: requestedPath, caseName: requestedCase || fileName(requestedPath) } : null)
-    || activeWaveform.value
-    || waveItems.value[0]
-    || null
+  const next =
+    matched ||
+    (requestedPath
+      ? { path: requestedPath, caseName: requestedCase || fileName(requestedPath) }
+      : null) ||
+    activeWaveform.value ||
+    waveItems.value[0] ||
+    null
   const previousPath = activeWaveform.value?.path || ''
   activeWaveform.value = next ? { path: next.path, caseName: next.caseName } : null
-  if (previousPath && activeWaveform.value?.path && normalizeWorkspacePath(previousPath) !== normalizeWorkspacePath(activeWaveform.value.path)) {
+  if (
+    previousPath &&
+    activeWaveform.value?.path &&
+    normalizeWorkspacePath(previousPath) !==
+      normalizeWorkspacePath(activeWaveform.value.path)
+  ) {
     loadedWaveformKey = ''
   }
   waveformError.value = ''
@@ -3414,14 +4267,17 @@ function displayCatalogId(value: string): string {
   return value
     .split('-')
     .filter(Boolean)
-    .map((part) => part.toUpperCase() === part ? part : part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part) =>
+      part.toUpperCase() === part ? part : part.charAt(0).toUpperCase() + part.slice(1),
+    )
     .join(' ')
 }
 
 function preferredLogPath(): string {
   if (isSimStep.value && detail.value?.state !== StateEnum.Success) {
-    const preferred = textViewFiles.value.find((log) => log.label === 'Build programs log')
-      || textViewFiles.value.find((log) => log.label === 'Tool log')
+    const preferred =
+      textViewFiles.value.find((log) => log.label === 'Build programs log') ||
+      textViewFiles.value.find((log) => log.label === 'Tool log')
     if (preferred) return preferred.path
   }
   return textViewFiles.value[0]?.path || ''
@@ -3458,7 +4314,9 @@ function caseTermination(testCase: SimCase): string {
 }
 
 function caseDifftestStatus(testCase: SimCase): string {
-  return titleCase(String(testCase.metrics?.difftest?.status || 'disabled').replace(/_/g, ' '))
+  return titleCase(
+    String(testCase.metrics?.difftest?.status || 'disabled').replace(/_/g, ' '),
+  )
 }
 
 function signedNumber(value: unknown): string {
@@ -3468,7 +4326,12 @@ function signedNumber(value: unknown): string {
 
 function selectCase(testCase: SimCase): void {
   selectedCase.value = testCase
-  selectedLogPath.value = testCase.log || testCase.report_log || testCase.run_log || availableLogs.value[0]?.path || ''
+  selectedLogPath.value =
+    testCase.log ||
+    testCase.report_log ||
+    testCase.run_log ||
+    availableLogs.value[0]?.path ||
+    ''
   void loadSelectedLog()
 }
 
@@ -3504,7 +4367,10 @@ function toSourceSelection(item: PathItem): FrontendSourceSelection {
 }
 
 async function openWaveform(path: string, caseName?: string): Promise<void> {
-  if (normalizeWorkspacePath(activeWaveform.value?.path || '') !== normalizeWorkspacePath(path)) {
+  if (
+    normalizeWorkspacePath(activeWaveform.value?.path || '') !==
+    normalizeWorkspacePath(path)
+  ) {
     loadedWaveformKey = ''
   }
   activeWaveform.value = { path, caseName }
@@ -3513,7 +4379,10 @@ async function openWaveform(path: string, caseName?: string): Promise<void> {
 }
 
 async function selectWaveform(item: WaveSelection): Promise<void> {
-  if (normalizeWorkspacePath(activeWaveform.value?.path || '') !== normalizeWorkspacePath(item.path)) {
+  if (
+    normalizeWorkspacePath(activeWaveform.value?.path || '') !==
+    normalizeWorkspacePath(item.path)
+  ) {
     loadedWaveformKey = ''
   }
   activeWaveform.value = { path: item.path, caseName: item.caseName }
@@ -3636,7 +4505,8 @@ async function loadCurrentWaveform(): Promise<void> {
     window.setTimeout(() => {
       if (token === waveformLoadToken && !surferReady.value) {
         waveformLoading.value = false
-        waveformError.value = 'Surfer viewer is not ready. Install the Surfer resource in Resource Manager and reload Wave.'
+        waveformError.value =
+          'Surfer viewer is not ready. Install the Surfer resource in Resource Manager and reload Wave.'
       }
     }, 12000)
     return
@@ -3649,13 +4519,16 @@ async function loadCurrentWaveform(): Promise<void> {
     if (!response.ok) {
       throw new Error(`Cannot load waveform: ${response.status} ${response.statusText}`)
     }
-    frame.contentWindow.postMessage({
-      command: 'LoadUrl',
-      initialScope: 'ecos_sim_top',
-      loadId: waveKey,
-      name: fileName(wave.path),
-      url: waveformUrl,
-    }, '*')
+    frame.contentWindow.postMessage(
+      {
+        command: 'LoadUrl',
+        initialScope: 'ecos_sim_top',
+        loadId: waveKey,
+        name: fileName(wave.path),
+        url: waveformUrl,
+      },
+      '*',
+    )
   } catch (err) {
     if (token === waveformLoadToken) {
       loadedWaveformKey = ''
@@ -3680,7 +4553,13 @@ function labelForStep(step: string): string {
 
 function stateClass(state: string): string {
   if (state === 'Success') return 'success'
-  if (state === 'Ongoing' || state === 'Queued' || state === 'Running' || state === 'Refreshing') return 'running'
+  if (
+    state === 'Ongoing' ||
+    state === 'Queued' ||
+    state === 'Running' ||
+    state === 'Refreshing'
+  )
+    return 'running'
   if (state === 'Incomplete' || state === 'Invalid') return 'failed'
   return 'pending'
 }
@@ -3736,7 +4615,8 @@ function fileIcon(path: string): string {
   if (ext === 'json') return 'ri-braces-line'
   if (ext === 'vcd' || ext === 'fst' || ext === 'ghw') return 'ri-pulse-line'
   if (ext === 'bin' || ext === 'elf') return 'ri-cpu-line'
-  if (ext === 'v' || ext === 'sv' || ext === 'vh' || ext === 'svh') return 'ri-code-s-slash-line'
+  if (ext === 'v' || ext === 'sv' || ext === 'vh' || ext === 'svh')
+    return 'ri-code-s-slash-line'
   if (ext === 'f' || ext === 'fl' || ext === 'filelist') return 'ri-file-list-3-line'
   if (ext === 'rpt') return 'ri-file-chart-line'
   return 'ri-file-text-line'
@@ -3747,7 +4627,8 @@ function isSourceArtifactPath(path: string): boolean {
 }
 
 function problemLinesFromLog(content: string): string[] {
-  const pattern = /(%Error|%Warning|fatal error|error:|warning:|failed|failure|timeout|bad trap|not found|missing image|cannot load)/i
+  const pattern =
+    /(%Error|%Warning|fatal error|error:|warning:|failed|failure|timeout|bad trap|not found|missing image|cannot load)/i
   return content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -3813,7 +4694,8 @@ function normalizeReviewIssues(items: RtlReviewIssue[]): RtlReviewIssue[] {
   return items
     .filter((item) => item && item.title)
     .map((item) => ({
-      severity: item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
+      severity:
+        item.severity === 'error' || item.severity === 'warning' ? item.severity : 'info',
       category: String(item.category || 'review'),
       title: String(item.title || 'RTL review issue'),
       detail: String(item.detail || ''),
@@ -3838,7 +4720,9 @@ function reviewIssueMeta(issue: RtlReviewIssue): string {
     issue.confidence ? `${titleCase(issue.confidence)} confidence` : '',
     issue.status ? titleCase(issue.status) : '',
     issue.waived ? 'Waived' : '',
-  ].filter(Boolean).join(' · ')
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
@@ -3856,20 +4740,25 @@ function reviewIssueToProblem(issue: RtlReviewIssue): ConsoleProblem {
 function isYosysIssue(issue: RtlReviewIssue): boolean {
   const category = String(issue.category || '').toLowerCase()
   const text = `${issue.title} ${issue.detail}`
-  return /yosys|precheck|high fanout net candidate|wide fanin cell candidate|deep combinational path candidate|combinational cycle candidate/i.test(text)
-    || category === 'syntax'
-    || category === 'hierarchy'
-    || category === 'fanout'
-    || category === 'fanin'
-    || (category === 'timing' && /fanout|fanin|yosys|structural/i.test(text))
-    || (category === 'combinational' && /yosys|structural graph|cycle/i.test(text))
-    || (category === 'structural' && !issue.source)
+  return (
+    /yosys|precheck|high fanout net candidate|wide fanin cell candidate|deep combinational path candidate|combinational cycle candidate/i.test(
+      text,
+    ) ||
+    category === 'syntax' ||
+    category === 'hierarchy' ||
+    category === 'fanout' ||
+    category === 'fanin' ||
+    (category === 'timing' && /fanout|fanin|yosys|structural/i.test(text)) ||
+    (category === 'combinational' && /yosys|structural graph|cycle/i.test(text)) ||
+    (category === 'structural' && !issue.source)
+  )
 }
 
 function yosysDiagnosticToProblem(diagnostic: YosysDiagnostic): ConsoleProblem {
-  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
-    ? diagnostic.severity
-    : 'info'
+  const severity =
+    diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+      ? diagnostic.severity
+      : 'info'
   const message = String(diagnostic.message || 'Yosys diagnostic')
   const resolvedSource = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
   return {
@@ -3883,9 +4772,10 @@ function yosysDiagnosticToProblem(diagnostic: YosysDiagnostic): ConsoleProblem {
 }
 
 function elabDiagnosticToProblem(diagnostic: ElabDiagnostic): ConsoleProblem {
-  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
-    ? diagnostic.severity
-    : 'info'
+  const severity =
+    diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+      ? diagnostic.severity
+      : 'info'
   const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
   return {
     severity,
@@ -3898,9 +4788,10 @@ function elabDiagnosticToProblem(diagnostic: ElabDiagnostic): ConsoleProblem {
 }
 
 function lintDiagnosticToProblem(diagnostic: LintDiagnostic): ConsoleProblem {
-  const severity = diagnostic.severity === 'error' || diagnostic.severity === 'warning'
-    ? diagnostic.severity
-    : 'info'
+  const severity =
+    diagnostic.severity === 'error' || diagnostic.severity === 'warning'
+      ? diagnostic.severity
+      : 'info'
   const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
   return {
     severity,
@@ -3915,7 +4806,11 @@ function lintDiagnosticToProblem(diagnostic: LintDiagnostic): ConsoleProblem {
 function openYosysDiagnostic(diagnostic: YosysDiagnostic): void {
   const source = resolveDiagnosticSourcePath(yosysDiagnosticSource(diagnostic))
   if (source) {
-    openSourceAt(source, yosysDiagnosticLine(diagnostic), yosysDiagnosticColumn(diagnostic))
+    openSourceAt(
+      source,
+      yosysDiagnosticLine(diagnostic),
+      yosysDiagnosticColumn(diagnostic),
+    )
     return
   }
   consoleTab.value = 'problems'
@@ -3987,7 +4882,13 @@ function reviewEvidenceLabel(issue: RtlReviewIssue): string {
 }
 
 function hotspotKey(hotspot: ReviewHotspot): string {
-  return [hotspot.title, hotspot.value, hotspot.detail, hotspot.source || '', hotspot.line || ''].join(':')
+  return [
+    hotspot.title,
+    hotspot.value,
+    hotspot.detail,
+    hotspot.source || '',
+    hotspot.line || '',
+  ].join(':')
 }
 
 function openReviewHotspot(hotspot: ReviewHotspot): void {
@@ -4001,11 +4902,13 @@ function openReviewHotspot(hotspot: ReviewHotspot): void {
 }
 
 function titleCase(value: string): string {
-  return value
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || '--'
+  return (
+    value
+      .split(/[_\s-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ') || '--'
+  )
 }
 
 function openReviewIssue(issue: RtlReviewIssue): void {
@@ -4045,7 +4948,11 @@ function lintDiagnosticLocationLabel(diagnostic: LintDiagnostic): string {
 function openElabDiagnostic(diagnostic: ElabDiagnostic): void {
   const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
   if (source) {
-    openSourceAt(source, numberValue(diagnostic.line) || 1, numberValue(diagnostic.column) || 1)
+    openSourceAt(
+      source,
+      numberValue(diagnostic.line) || 1,
+      numberValue(diagnostic.column) || 1,
+    )
     return
   }
   consoleTab.value = 'problems'
@@ -4064,7 +4971,11 @@ function openElabModule(moduleItem: ElabModule): void {
 function openLintDiagnostic(diagnostic: LintDiagnostic): void {
   const source = resolveDiagnosticSourcePath(String(diagnostic.source || ''))
   if (source) {
-    openSourceAt(source, numberValue(diagnostic.line) || 1, numberValue(diagnostic.column) || 1)
+    openSourceAt(
+      source,
+      numberValue(diagnostic.line) || 1,
+      numberValue(diagnostic.column) || 1,
+    )
     return
   }
   consoleTab.value = 'problems'
@@ -4085,12 +4996,26 @@ function reviewIssueSource(issue: Partial<RtlReviewIssue>): string {
 
 function reviewIssueLine(issue: Partial<RtlReviewIssue>): number {
   const evidence = issue.evidence || {}
-  return firstPositiveNumber(issue.line, evidence.line, lineFromText(issue.detail), lineFromText(issue.recommendation)) || 1
+  return (
+    firstPositiveNumber(
+      issue.line,
+      evidence.line,
+      lineFromText(issue.detail),
+      lineFromText(issue.recommendation),
+    ) || 1
+  )
 }
 
 function reviewIssueColumn(issue: Partial<RtlReviewIssue>): number {
   const evidence = issue.evidence || {}
-  return firstPositiveNumber(issue.column, evidence.column, columnFromText(issue.detail), columnFromText(issue.recommendation)) || 1
+  return (
+    firstPositiveNumber(
+      issue.column,
+      evidence.column,
+      columnFromText(issue.detail),
+      columnFromText(issue.recommendation),
+    ) || 1
+  )
 }
 
 function yosysDiagnosticSource(diagnostic: YosysDiagnostic): string {
@@ -4133,10 +5058,16 @@ function columnFromText(text: unknown): number {
   return parseSourceLocation(text).column
 }
 
-function parseSourceLocation(text: unknown): { source: string; line: number; column: number } {
+function parseSourceLocation(text: unknown): {
+  source: string
+  line: number
+  column: number
+} {
   const value = String(text || '')
   if (!value) return { source: '', line: 0, column: 0 }
-  const match = value.match(/(?<source>(?:\/|\.{1,2}\/)?[^\s:'"]+?\.(?:sv|svh|v|vh)):(?<line>\d+)(?::(?<column>\d+)|\.(?<dotColumn>\d+))?/i)
+  const match = value.match(
+    /(?<source>(?:\/|\.{1,2}\/)?[^\s:'"]+?\.(?:sv|svh|v|vh)):(?<line>\d+)(?::(?<column>\d+)|\.(?<dotColumn>\d+))?/i,
+  )
   if (!match?.groups) return { source: '', line: 0, column: 0 }
   return {
     source: match.groups.source || '',
@@ -4156,7 +5087,8 @@ function numberLabel(value: unknown): string {
 
 function prepareStatusTone(status: unknown): 'ok' | 'warning' | 'error' | 'neutral' {
   const value = String(status || '').toLowerCase()
-  if (['ready', 'success', 'ok', 'enabled', 'pass', 'module_only'].includes(value)) return 'ok'
+  if (['ready', 'success', 'ok', 'enabled', 'pass', 'module_only'].includes(value))
+    return 'ok'
   if (['failed', 'error', 'missing', 'invalid'].includes(value)) return 'error'
   if (['warning', 'stub', 'disabled', 'pending'].includes(value)) return 'warning'
   return 'neutral'
@@ -4172,11 +5104,16 @@ function prepareStatusIcon(status: unknown): string {
 
 function readRecordList(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    ? value.filter((item): item is Record<string, unknown> =>
+        Boolean(item && typeof item === 'object'),
+      )
     : []
 }
 
-function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string): ConsoleProblem {
+function problemFromDiagnostic(
+  diagnostic: VerilatorDiagnostic,
+  logPath: string,
+): ConsoleProblem {
   return {
     severity: diagnostic.severity,
     title: `${diagnostic.code} · ${diagnosticFileName(diagnostic.file)}:${diagnostic.line}`,
@@ -4190,12 +5127,17 @@ function problemFromDiagnostic(diagnostic: VerilatorDiagnostic, logPath: string)
 
 function openSourceAt(path: string, line: number, column: number): void {
   const targetPath = resolveDiagnosticSourcePath(path)
-  const source = sourceArtifacts.value.find((item) => diagnosticMatchesPath(targetPath, item.path))
-    || sourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
-    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(targetPath, item.path))
-    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
+  const source =
+    sourceArtifacts.value.find((item) => diagnosticMatchesPath(targetPath, item.path)) ||
+    sourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path)) ||
+    reviewSourceArtifacts.value.find((item) =>
+      diagnosticMatchesPath(targetPath, item.path),
+    ) ||
+    reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(path, item.path))
   const resolvedTarget = normalizeWorkspacePath(source?.path || targetPath)
-  activeSource.value = source ? toSourceSelection(source) : { label: fileName(resolvedTarget), path: resolvedTarget }
+  activeSource.value = source
+    ? toSourceSelection(source)
+    : { label: fileName(resolvedTarget), path: resolvedTarget }
   sourceFocusTarget.value = {
     path: resolvedTarget,
     line,
@@ -4220,10 +5162,14 @@ function ensureActiveTabVisible(): void {
 function defaultTabForCurrentStep(): TabId {
   if (isGlobalSrcView.value) return 'src'
   if (isGlobalWaveView.value) return 'summary'
-  if (isSimStep.value && visibleTabs.value.some((tab) => tab.id === 'cases')) return 'cases'
-  if (isReviewStep.value && visibleTabs.value.some((tab) => tab.id === 'review')) return 'review'
-  if (isElabStep.value && visibleTabs.value.some((tab) => tab.id === 'elab')) return 'elab'
-  if (isLintStep.value && visibleTabs.value.some((tab) => tab.id === 'lint')) return 'lint'
+  if (isSimStep.value && visibleTabs.value.some((tab) => tab.id === 'cases'))
+    return 'cases'
+  if (isReviewStep.value && visibleTabs.value.some((tab) => tab.id === 'review'))
+    return 'review'
+  if (isElabStep.value && visibleTabs.value.some((tab) => tab.id === 'elab'))
+    return 'elab'
+  if (isLintStep.value && visibleTabs.value.some((tab) => tab.id === 'lint'))
+    return 'lint'
   return 'summary'
 }
 
@@ -4234,16 +5180,26 @@ function resolveDiagnosticSourcePath(path: string): string {
   const projectPath = currentProject.value?.path
   if (normalized.startsWith('/')) return normalized
 
-  const directMatch = sourceArtifacts.value.find((item) => diagnosticMatchesPath(normalized, item.path))
-    || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(normalized, item.path))
+  const directMatch =
+    sourceArtifacts.value.find((item) => diagnosticMatchesPath(normalized, item.path)) ||
+    reviewSourceArtifacts.value.find((item) =>
+      diagnosticMatchesPath(normalized, item.path),
+    )
   if (directMatch) return normalizeWorkspacePath(directMatch.path)
 
-  const cpuFilelist = normalizeWorkspacePath(config.frontend.cpuFilelist || config.frontend.inputFilelist || '')
+  const cpuFilelist = normalizeWorkspacePath(
+    config.frontend.cpuFilelist || config.frontend.inputFilelist || '',
+  )
   if (cpuFilelist.includes('/')) {
     const cpuRoot = cpuFilelist.slice(0, cpuFilelist.lastIndexOf('/'))
     const fromCpuRoot = `${cpuRoot}/${normalized}`.replace(/\/+/g, '/')
-    const cpuRootMatch = sourceArtifacts.value.find((item) => diagnosticMatchesPath(fromCpuRoot, item.path))
-      || reviewSourceArtifacts.value.find((item) => diagnosticMatchesPath(fromCpuRoot, item.path))
+    const cpuRootMatch =
+      sourceArtifacts.value.find((item) =>
+        diagnosticMatchesPath(fromCpuRoot, item.path),
+      ) ||
+      reviewSourceArtifacts.value.find((item) =>
+        diagnosticMatchesPath(fromCpuRoot, item.path),
+      )
     if (cpuRootMatch) return normalizeWorkspacePath(cpuRootMatch.path)
   }
 
@@ -4368,27 +5324,33 @@ watch(
   },
 )
 
-watch(() => currentProject.value?.path || '', () => {
-  activeWaveform.value = null
-  cachedWaveItems.value = []
-  waveformError.value = ''
-  waveformLoading.value = false
-  loadedWaveformKey = ''
-})
+watch(
+  () => currentProject.value?.path || '',
+  () => {
+    activeWaveform.value = null
+    cachedWaveItems.value = []
+    waveformError.value = ''
+    waveformLoading.value = false
+    loadedWaveformKey = ''
+  },
+)
 
-watch(() => String(route.params.step || ''), () => {
-  detail.value = null
-  logContent.value = ''
-  selectedCase.value = null
-  selectedLogPath.value = ''
-  activeTab.value = defaultTabForCurrentStep()
-  if (!isGlobalSrcView.value) {
-    activeSource.value = null
-  }
-  if (!isHomeView.value) {
-    void loadDetail()
-  }
-})
+watch(
+  () => String(route.params.step || ''),
+  () => {
+    detail.value = null
+    logContent.value = ''
+    selectedCase.value = null
+    selectedLogPath.value = ''
+    activeTab.value = defaultTabForCurrentStep()
+    if (!isGlobalSrcView.value) {
+      activeSource.value = null
+    }
+    if (!isHomeView.value) {
+      void loadDetail()
+    }
+  },
+)
 
 watch(
   () => [route.query.path, route.query.case, waveItems.value.length],
@@ -4399,10 +5361,14 @@ watch(
   },
 )
 
-watch(detailWaveItems, (items) => {
-  if (String(detail.value?.step || '').toLowerCase() !== 'sim') return
-  cachedWaveItems.value = uniqueWaveItems(items)
-}, { immediate: true })
+watch(
+  detailWaveItems,
+  (items) => {
+    if (String(detail.value?.step || '').toLowerCase() !== 'sim') return
+    cachedWaveItems.value = uniqueWaveItems(items)
+  },
+  { immediate: true },
+)
 
 watch(coremarkCompilePreset, (preset) => {
   if (preset === 'custom') return
@@ -4697,11 +5663,14 @@ button:disabled {
   border-radius: 999px;
   background: var(--border-color);
   content: '';
-  transition: background 0.14s ease, opacity 0.14s ease;
+  transition:
+    background 0.14s ease,
+    opacity 0.14s ease;
 }
 
 .frontend-resizable-splitter :deep(.p-splitter-gutter:hover)::after,
-.frontend-resizable-splitter :deep(.p-splitter-gutter[data-p-gutter-resizing='true'])::after {
+.frontend-resizable-splitter
+  :deep(.p-splitter-gutter[data-p-gutter-resizing='true'])::after {
   background: var(--accent-color);
   opacity: 0.9;
 }
@@ -7286,7 +8255,9 @@ button:disabled {
   content: '';
   transform: translateX(-50%);
   opacity: 0;
-  transition: opacity 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease;
 }
 
 .console-resizer:hover::after,
@@ -7564,7 +8535,6 @@ button:disabled {
   .sim-run-action {
     width: 100%;
   }
-
 }
 
 @media (max-width: 720px) {
@@ -7610,6 +8580,5 @@ button:disabled {
   .home-summary-grid {
     gap: 8px;
   }
-
 }
 </style>

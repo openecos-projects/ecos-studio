@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/v*'
   pull_request:
   workflow_dispatch:
 
@@ -43,6 +45,8 @@ jobs:
             gui:
               - 'ecos/gui/apps/**'
               - 'ecos/gui/packages/**'
+              - 'ecos/gui/.oxfmtrc.json'
+              - 'ecos/gui/.oxlintrc.json'
               - 'ecos/gui/package.json'
               - 'ecos/gui/pnpm-lock.yaml'
               - 'ecos/gui/pnpm-workspace.yaml'
@@ -53,7 +57,7 @@ jobs:
               - 'Makefile'
               - 'ecos/scripts/**'
             ci:
-              - '.github/**'
+              - '.github/workflows/**'
             docs_only:
               - 'README.md'
               - 'docs/**'
@@ -64,16 +68,26 @@ jobs:
     name: Check Version Consistency
     runs-on: ubuntu-22.04
     needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.version == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: >-
+      ${{
+        startsWith(github.ref, 'refs/heads/release/v') ||
+        startsWith(github.base_ref, 'release/v') ||
+        needs.changes.outputs.gui == 'true' ||
+        needs.changes.outputs.version == 'true' ||
+        needs.changes.outputs.build == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Check version
         uses: ./.github/actions/check-version
+        with:
+          expected_ref: ${{ startsWith(github.ref, 'refs/heads/release/v') && github.ref || startsWith(github.base_ref, 'release/v') && github.base_ref || '' }}
 
-  vue-tsc:
-    name: Vue Typecheck
+  gui-checks:
+    name: GUI Checks
     runs-on: ubuntu-22.04
     needs: changes
     if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
@@ -90,26 +104,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck Vue
+      - name: Run GUI typecheck
         run: pnpm run typecheck
 
-  gui-tests:
-    name: GUI Tests
-    runs-on: ubuntu-22.04
-    needs: changes
-    if: ${{ needs.changes.outputs.gui == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.ci == 'true' }}
-    defaults:
-      run:
-        working-directory: ecos/gui
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Run GUI lint
+        run: pnpm run lint
 
-      - name: Setup Node.js
-        uses: ./.github/actions/setup-node-pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Check GUI formatting
+        run: pnpm run fmt:check
 
       - name: Run GUI tests
         run: pnpm run test
@@ -139,7 +141,7 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, vue-tsc, gui-tests, layout-viewer-rust]
+    needs: [changes, check-version, gui-checks, layout-viewer-rust]
     if: >-
       ${{
         always() &&
@@ -149,8 +151,7 @@ jobs:
          needs.changes.outputs.build == 'true' ||
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
-        needs.vue-tsc.result != 'failure' &&
-        needs.gui-tests.result != 'failure' &&
+        needs.gui-checks.result != 'failure' &&
         needs.layout-viewer-rust.result != 'failure'
       }}
     runs-on: ubuntu-22.04

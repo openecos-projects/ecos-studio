@@ -15,9 +15,9 @@ async function createTempDir(prefix: string): Promise<string> {
 describe('ProjectScopeService', () => {
   afterEach(async () => {
     await Promise.all(
-      tempDirectories.splice(0).map((directory) =>
-        rm(directory, { force: true, recursive: true }),
-      ),
+      tempDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { force: true, recursive: true })),
     )
   })
 
@@ -70,7 +70,9 @@ describe('ProjectScopeService', () => {
     await service.registerProjectRoot(root)
 
     await expect(
-      service.requestProjectPathAccess(join(root, 'Synthesis_yosys', 'log', 'Synthesis.log')),
+      service.requestProjectPathAccess(
+        join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'),
+      ),
     ).resolves.toBe(join(root, 'Synthesis_yosys', 'log', 'Synthesis.log'))
   })
 
@@ -85,10 +87,13 @@ describe('ProjectScopeService', () => {
     await writeFile(sourceFile, 'module cpu; endmodule')
     await writeFile(outsideFile, 'module other; endmodule')
     await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'rtl/cpu.sv')
-    await writeFile(join(root, 'home', 'parameters.json'), JSON.stringify({
-      'Design Tool': 'frontend',
-      cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
-    }))
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+      }),
+    )
 
     const service = new ProjectScopeService()
     await service.registerProjectRoot(root)
@@ -112,10 +117,13 @@ describe('ProjectScopeService', () => {
     await writeFile(sourceFile, 'module cpu; endmodule')
     await writeFile(siblingFile, 'do not expose whole source root')
     await writeFile(join(sourceRoot, 'filelist.cpu.f'), 'rtl/cpu.sv')
-    await writeFile(join(root, 'home', 'parameters.json'), JSON.stringify({
-      'Design Tool': 'frontend',
-      cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
-    }))
+    await writeFile(
+      join(root, 'home', 'parameters.json'),
+      JSON.stringify({
+        'Design Tool': 'frontend',
+        cpu_filelist: join(sourceRoot, 'filelist.cpu.f'),
+      }),
+    )
 
     const service = new ProjectScopeService()
     await service.registerProjectRoot(root)

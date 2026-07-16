@@ -1,10 +1,20 @@
 import type {
+  DesktopCliCommandEvent,
+  DesktopCliCommandRequest,
+  DesktopCliCommandResult,
+} from './desktopCli.ts'
+import type {
   WorkspaceResourceIndex,
   WorkspaceStepInfoRequest,
   WorkspaceStepInfoResult,
 } from '../types/workspaceResources.ts'
 import type {
+  WorkspaceDesignFileAddResult,
+  WorkspaceDesignFileEntry,
+} from '../types/designFiles.ts'
+import type {
   ResourceImportPdkRequest,
+  ResourceImportLocalRequest,
   ResourceInfo,
   ResourceInstallRequest,
   ResourceJob,
@@ -13,11 +23,7 @@ import type {
   ResourceUpdateCheckResult,
 } from './resources.ts'
 import type { RemoteContentApi } from './remoteContent.ts'
-import type {
-  DesktopCliCommandEvent,
-  DesktopCliCommandRequest,
-  DesktopCliCommandResult,
-} from './desktopCli.ts'
+import type { EccRuntimeApi } from './eccRuntime.ts'
 import type {
   DesktopEventUnsubscribe,
   DesktopMenuEventId,
@@ -56,6 +62,23 @@ export interface DesktopFileDialogOptions {
   filters?: DesktopFileDialogFilter[]
 }
 
+export interface DesktopSaveFileDialogOptions {
+  title?: string
+  defaultPath?: string
+  filters?: DesktopFileDialogFilter[]
+  ensureDirectory?: boolean
+}
+
+export interface DesktopRtlSourceDialogOptions {
+  title?: string
+  multiple?: boolean
+}
+
+export interface PickedRtlSources {
+  files: string[]
+  directories: string[]
+}
+
 export interface PdkDetectedFiles {
   directories: string[]
   files: string[]
@@ -68,6 +91,11 @@ export interface ScannedPdkDirectory {
   techNode: string
   pdkId: string
   detectedFiles: PdkDetectedFiles
+}
+
+export interface ScannedRtlDirectory {
+  rootPath: string
+  files: string[]
 }
 
 export interface VersionInfo {
@@ -99,6 +127,12 @@ export interface DesktopProjectLogTailSubscriptionOptions {
   pollIntervalMs?: number
 }
 
+export interface DesktopProjectDirectoryEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+}
+
 export interface LayoutViewerOpenRequest {
   projectPath: string
   viewJsonPackageRoot: string
@@ -109,6 +143,11 @@ export interface LayoutViewerOpenResult {
   packageRoot: string
   layoutPackagePath: string
   spawned: boolean
+}
+
+export interface WorkspaceDirectoryReplacement {
+  targetPath: string
+  backupPath: string
 }
 
 export interface DesktopApi {
@@ -128,12 +167,15 @@ export interface DesktopApi {
   }
   menu: {
     onAction(listener: (eventId: DesktopMenuEventId) => void): DesktopEventUnsubscribe
+    setActionEnabled(action: DesktopMenuEventId, enabled: boolean): Promise<void>
   }
   system: {
     openExternal(url: string): Promise<void>
   }
   settings: {
-    get<T extends DesktopSettingsValue = DesktopSettingsValue>(key: string): Promise<T | null>
+    get<T extends DesktopSettingsValue = DesktopSettingsValue>(
+      key: string,
+    ): Promise<T | null>
     set(key: string, value: DesktopSettingsValue): Promise<void>
     delete(key: string): Promise<void>
   }
@@ -141,6 +183,10 @@ export interface DesktopApi {
   dialog: {
     pickDirectory(options?: DesktopDirectoryDialogOptions): Promise<string | null>
     pickFiles(options?: DesktopFileDialogOptions): Promise<string[] | null>
+    saveFile(options?: DesktopSaveFileDialogOptions): Promise<string | null>
+    pickRtlSources(
+      options?: DesktopRtlSourceDialogOptions,
+    ): Promise<PickedRtlSources | null>
   }
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
@@ -166,7 +212,22 @@ export interface DesktopApi {
     ): Promise<DesktopEventUnsubscribe>
     readProjectBinaryFile(path: string): Promise<Uint8Array>
     writeProjectTextFile(path: string, content: string): Promise<void>
+    listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
+    removeProjectDirectory(path: string): Promise<void>
+    prepareProjectDirectoryReplacement(
+      path: string,
+    ): Promise<WorkspaceDirectoryReplacement | null>
+    restoreProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
+    finalizeProjectDirectoryReplacement(
+      replacement: WorkspaceDirectoryReplacement,
+    ): Promise<void>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
+    scanRtlDirectory(path: string): Promise<ScannedRtlDirectory>
+    listDesignFiles(): Promise<WorkspaceDesignFileEntry[]>
+    addDesignFiles(sourcePaths: string[]): Promise<WorkspaceDesignFileAddResult>
+    removeDesignFile(filelistEntry: string): Promise<WorkspaceDesignFileEntry | null>
     watchProjectFile(
       path: string,
       listener: (event: DesktopProjectFileChangedEvent) => void,
@@ -190,11 +251,17 @@ export interface DesktopApi {
     cancel(resourceId: string): Promise<ResourceOperationResult>
     uninstall(resourceId: string): Promise<ResourceOperationResult>
     activatePdk(resourceId: string): Promise<ResourceOperationResult>
-    validatePdk(resourceId: string): Promise<{ resource_id: string; health: { status: string } }>
+    validatePdk(
+      resourceId: string,
+    ): Promise<{ resource_id: string; health: { status: string } }>
     removePdkReference(resourceId: string): Promise<ResourceOperationResult>
     importPdkPath(request: ResourceImportPdkRequest): Promise<ResourceInfo>
+    importLocalPath(request: ResourceImportLocalRequest): Promise<ResourceInfo>
     refreshRegistry(): Promise<{ status: string; tools_count: number }>
-    checkUpdates(options?: { force?: boolean; refreshRegistry?: boolean }): Promise<ResourceUpdateCheckResult>
+    checkUpdates(options?: {
+      force?: boolean
+      refreshRegistry?: boolean
+    }): Promise<ResourceUpdateCheckResult>
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
   cli: {
@@ -202,6 +269,7 @@ export interface DesktopApi {
     cancel(jobId: string): Promise<DesktopCliCommandResult>
     onEvent(listener: (event: DesktopCliCommandEvent) => void): DesktopEventUnsubscribe
   }
+  ecc: EccRuntimeApi
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>
     write(sessionId: string, data: string): Promise<void>

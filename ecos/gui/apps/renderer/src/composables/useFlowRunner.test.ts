@@ -34,6 +34,7 @@ const {
   workspaceSession: {
     value: {
       sessionId: 'session-1',
+      workspaceId: 'workspace-demo',
     },
   },
   runStepApi: vi.fn(),
@@ -108,6 +109,7 @@ describe('useFlowRunner desktop-only guard', () => {
     }
     workspaceSession.value = {
       sessionId: 'session-1',
+      workspaceId: 'workspace-demo',
     }
     runStepApi.mockReset()
     rtl2gdsApi.mockReset()
@@ -172,6 +174,7 @@ describe('useFlowRunner desktop-only guard', () => {
       data: {
         directory: '/work/demo',
         rerun: false,
+        workspaceHandle: 'workspace-demo',
       },
     })
     expect(requestHomeRunArtifactReset).not.toHaveBeenCalled()
@@ -195,6 +198,7 @@ describe('useFlowRunner desktop-only guard', () => {
       data: {
         directory: '/work/demo',
         rerun: true,
+        workspaceHandle: 'workspace-demo',
       },
     })
   })
@@ -231,6 +235,7 @@ describe('useFlowRunner desktop-only guard', () => {
         directory: '/work/demo',
         rerun: false,
         step: StepEnum.FLOORPLAN,
+        workspaceHandle: 'workspace-demo',
       },
     })
   })
@@ -255,6 +260,7 @@ describe('useFlowRunner desktop-only guard', () => {
         directory: '/work/demo',
         rerun: true,
         step: StepEnum.FLOORPLAN,
+        workspaceHandle: 'workspace-demo',
       },
     })
   })
@@ -310,10 +316,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-1' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-1',
+    })
   })
 
   it('still invalidates Home and parameters when runtime events only updated flow resources', async () => {
@@ -335,10 +340,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runFlow()
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-1' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-1',
+    })
   })
 
   it('does not duplicate fallback invalidations when runtime events already updated Home and parameters', async () => {
@@ -368,16 +372,21 @@ describe('useFlowRunner desktop-only guard', () => {
     ensureDesktopRuntime.mockReturnValue(true)
     workspaceSession.value = {
       sessionId: 'session-a',
+      workspaceId: 'workspace-a',
     }
     currentProject.value = { path: '/work/a' }
-    let resolveRunStep: ((value: {
-      data: { state: StateEnum; step: StepEnum }
-      message: string[]
-      response: string
-    }) => void) | undefined
-    runStepApi.mockReturnValue(new Promise((resolve) => {
-      resolveRunStep = resolve
-    }))
+    let resolveRunStep:
+      | ((value: {
+          data: { state: StateEnum; step: StepEnum }
+          message: string[]
+          response: string
+        }) => void)
+      | undefined
+    runStepApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRunStep = resolve
+      }),
+    )
 
     const { runFlow } = useFlowRunner()
     const runPromise = runFlow()
@@ -387,6 +396,7 @@ describe('useFlowRunner desktop-only guard', () => {
 
     workspaceSession.value = {
       sessionId: 'session-b',
+      workspaceId: 'workspace-b',
     }
     currentProject.value = { path: '/work/b' }
     resolveRunStep?.({
@@ -397,10 +407,9 @@ describe('useFlowRunner desktop-only guard', () => {
 
     await runPromise
 
-    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(
-      ['home', 'parameters'],
-      { sessionId: 'session-a' },
-    )
+    expect(invalidateWorkspaceResources).toHaveBeenCalledWith(['home', 'parameters'], {
+      sessionId: 'session-a',
+    })
   })
 
   it('tracks running flow state per workspace', () => {

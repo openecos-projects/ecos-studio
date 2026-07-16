@@ -28,7 +28,10 @@ describe('configureGpuMode', () => {
     })
 
     expect(appDouble.disableHardwareAcceleration).toHaveBeenCalledTimes(1)
-    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith('use-angle', 'swiftshader')
+    expect(appDouble.commandLine.appendSwitch).toHaveBeenCalledWith(
+      'use-angle',
+      'swiftshader',
+    )
     expect(env.LIBGL_ALWAYS_SOFTWARE).toBe('1')
   })
 

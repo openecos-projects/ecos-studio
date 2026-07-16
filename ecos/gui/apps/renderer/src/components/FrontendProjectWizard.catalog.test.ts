@@ -22,16 +22,24 @@ describe('FrontendProjectWizard catalog ownership', () => {
   it('keeps the custom cpu_top contract discoverable from the CPU choice', () => {
     expect(wizardSource).toContain("CUSTOM_FILELIST_ID = 'custom-filelist'")
     expect(wizardSource).toContain('selectedCoreId === CUSTOM_FILELIST_ID')
-    expect(wizardSource).toContain("LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'")
+    expect(wizardSource).toContain(
+      "LEGACY_STANDARD_CPU_FILELIST_ID = 'standard-cpu-filelist'",
+    )
     expect(wizardSource).toContain('core.id !== LEGACY_STANDARD_CPU_FILELIST_ID')
     expect(wizardSource).toContain("name: 'My CPU Top'")
     expect(wizardSource).toContain('id="cpu-top-io-contract"')
     expect(wizardSource).toContain('scrollToCpuTopContract()')
     expect(wizardSource).toContain('cpuTopContractScrollPending = true')
     expect(wizardSource).toContain('watch(showCpuTopContract')
-    expect(wizardSource).toContain("target.scrollIntoView({ behavior: 'smooth', block: 'center'")
-    expect(wizardSource).toContain('requestAnimationFrame(() => requestAnimationFrame(() => resolve()))')
-    expect(wizardSource).toContain('container.scrollTop + targetRect.top - containerRect.top - 12')
+    expect(wizardSource).toContain(
+      "target.scrollIntoView({ behavior: 'smooth', block: 'center'",
+    )
+    expect(wizardSource).toContain(
+      'requestAnimationFrame(() => requestAnimationFrame(() => resolve()))',
+    )
+    expect(wizardSource).toContain(
+      'container.scrollTop + targetRect.top - containerRect.top - 12',
+    )
     expect(wizardSource).toContain('fixed ECOS SoC instantiates it directly')
   })
 

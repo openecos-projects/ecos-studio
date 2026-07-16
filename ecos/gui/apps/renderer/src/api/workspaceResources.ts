@@ -17,7 +17,10 @@ export function readWorkspaceFlowResourceApi(): Promise<Record<string, unknown> 
   return getDesktopApi().workspaceResources.readFlow()
 }
 
-export function readWorkspaceParametersResourceApi(): Promise<Record<string, unknown> | null> {
+export function readWorkspaceParametersResourceApi(): Promise<Record<
+  string,
+  unknown
+> | null> {
   return getDesktopApi().workspaceResources.readParameters()
 }
 

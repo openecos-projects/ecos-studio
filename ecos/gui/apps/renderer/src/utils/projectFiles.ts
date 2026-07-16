@@ -58,7 +58,9 @@ function isGzipFilePath(path: string): boolean {
 }
 
 async function gunzipToText(bytes: Uint8Array): Promise<string> {
-  const stream = new Blob([bytes.slice()]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const stream = new Blob([bytes.slice()])
+    .stream()
+    .pipeThrough(new DecompressionStream('gzip'))
   const buffer = await new Response(stream).arrayBuffer()
   return new TextDecoder().decode(buffer)
 }
@@ -91,11 +93,11 @@ export async function readOptionalProjectTextFile(
     return await workspace.readProjectTextFile(resolvedPath)
   } catch (error) {
     if (
-      typeof error === 'object'
-      && error !== null
-      && 'message' in error
-      && typeof error.message === 'string'
-      && error.message.includes('ENOENT')
+      typeof error === 'object' &&
+      error !== null &&
+      'message' in error &&
+      typeof error.message === 'string' &&
+      error.message.includes('ENOENT')
     ) {
       return null
     }
@@ -197,6 +199,14 @@ export async function writeProjectTextFile(
 ): Promise<void> {
   const resolvedPath = resolveProjectFilePath(path, options.projectPath)
   await getDesktopApi().workspace.writeProjectTextFile(resolvedPath, content)
+}
+
+export async function removeProjectDirectory(
+  path: string,
+  options: ProjectFilePathOptions = {},
+): Promise<void> {
+  const resolvedPath = resolveProjectFilePath(path, options.projectPath)
+  await getDesktopApi().workspace.removeProjectDirectory(resolvedPath)
 }
 
 export async function watchProjectFile(

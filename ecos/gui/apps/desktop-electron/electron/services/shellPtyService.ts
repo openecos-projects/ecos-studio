@@ -20,7 +20,9 @@ interface PtyProcessLike {
   pid: number
   kill(): void
   onData(listener: (data: string) => void): PtyEventDisposable
-  onExit(listener: (event: { exitCode: number; signal?: number }) => void): PtyEventDisposable
+  onExit(
+    listener: (event: { exitCode: number; signal?: number }) => void,
+  ): PtyEventDisposable
   resize(cols: number, rows: number): void
   write(data: string): void
 }

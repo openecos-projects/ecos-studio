@@ -43,7 +43,9 @@ export function isHomeRunArtifactResetPending(projectPath: string): boolean {
   return pendingResetProjectPaths.has(normalizedProjectPath)
 }
 
-export function onHomeRunArtifactReset(listener: HomeRunArtifactResetListener): () => void {
+export function onHomeRunArtifactReset(
+  listener: HomeRunArtifactResetListener,
+): () => void {
   resetListeners.add(listener)
   return () => {
     resetListeners.delete(listener)
