@@ -12,7 +12,10 @@ import {
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
-import { createFrontendRpcLaunchResolver } from '../services/frontendRpcRuntime'
+import {
+  createFrontendRpcLaunchResolver,
+  frontendRuntimeEventFromNotification,
+} from '../services/frontendRpcRuntime'
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
@@ -140,6 +143,10 @@ function getDesktopServices() {
           return directory ? join(directory, 'log') : null
         },
         onEvent,
+        onNotification: (method, params) => {
+          const event = frontendRuntimeEventFromNotification(method, params)
+          if (event) onEvent(event)
+        },
         resolveLaunch: createFrontendRpcLaunchResolver({
           env: runtimeEnv,
           frontendRootSearchRoots: app.isPackaged

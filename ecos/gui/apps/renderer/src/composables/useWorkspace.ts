@@ -1486,7 +1486,9 @@ export function useWorkspace() {
     }
 
     const scopes = new Set<WorkspaceInvalidationScope>(
-      cmd === 'rtl2gds' ? ['all'] : ['flow', 'step', 'maps', 'logs'],
+      cmd === 'rtl2gds' && eventType === 'task_complete'
+        ? ['all']
+        : ['flow', 'step', 'maps', 'logs'],
     )
 
     const info = event.info

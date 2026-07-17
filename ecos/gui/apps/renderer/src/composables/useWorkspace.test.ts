@@ -2078,6 +2078,33 @@ describe('useWorkspace openProject', () => {
     expect(workspace.resourceVersions.value.all).toBe(before.all)
   })
 
+  it('refreshes a completed rtl2gds step before the full flow completes', async () => {
+    const workspace = await openWorkspaceAndConnectRuntimeEvents()
+    const before = { ...workspace.resourceVersions.value }
+
+    onRuntimeEvent?.({
+      cmd: 'notify',
+      data: {
+        type: 'step_complete',
+        jobId: 'job-rtl2gds',
+        cmd: 'rtl2gds',
+        home_page: '/work/demo/home/home.json',
+        log_file: '/work/demo/prepare/log.txt',
+        state: 'Success',
+        step: 'prepare',
+        subflow_path: '/work/demo/prepare/subflow.json',
+      },
+    })
+
+    expect(workspace.resourceVersions.value.home).toBe(before.home + 1)
+    expect(workspace.resourceVersions.value.parameters).toBe(before.parameters + 1)
+    expect(workspace.resourceVersions.value.flow).toBe(before.flow + 1)
+    expect(workspace.resourceVersions.value.step).toBe(before.step + 1)
+    expect(workspace.resourceVersions.value.maps).toBe(before.maps + 1)
+    expect(workspace.resourceVersions.value.logs).toBe(before.logs + 1)
+    expect(workspace.resourceVersions.value.all).toBe(before.all)
+  })
+
   it('invalidates all workspace resources when rtl2gds completes', async () => {
     const workspace = await openWorkspaceAndConnectRuntimeEvents()
     const before = { ...workspace.resourceVersions.value }

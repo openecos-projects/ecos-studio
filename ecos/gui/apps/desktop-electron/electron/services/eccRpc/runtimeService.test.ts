@@ -432,6 +432,52 @@ describe('EccRpcRuntimeService', () => {
     )
   })
 
+  it('binds sidecar progress events to the active GUI operation and workspace', async () => {
+    const { client, events, service, sidecarEvent } = createService()
+    const flowResult = deferred<{ rerun: boolean }>()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      flowResult.promise,
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    const running = service.runFlow({
+      rerun: false,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    await waitForQueuedOperation()
+
+    const started = events.find(
+      (event): event is Extract<EccRuntimeEvent, { type: 'operation.started' }> =>
+        event.type === 'operation.started' && event.method === 'flow.run',
+    )
+    expect(started).toBeDefined()
+
+    sidecarEvent({
+      data: { state: 'Success', step: 'prepare' },
+      method: 'flow.run',
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/demo',
+    })
+
+    expect(events).toContainEqual({
+      data: { state: 'Success', step: 'prepare' },
+      method: 'flow.run',
+      operationId: started?.operationId,
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: workspace.workspaceHandle,
+    })
+
+    flowResult.resolve({ rerun: false })
+    await expect(running).resolves.toEqual({ rerun: false })
+  })
+
   it('cleans runtime activity tracking when an operation-started listener throws', async () => {
     const { client, service } = createService()
     client.responses.push(

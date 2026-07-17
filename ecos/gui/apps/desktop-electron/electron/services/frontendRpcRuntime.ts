@@ -1,11 +1,55 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { EccRuntimeEvent } from '@ecos-studio/shared'
 import type { EccRpcSidecarLaunch } from './eccRpc/sidecarProcess'
 import { resolveFrontendDevelopmentRoot } from './frontendDevelopmentRoot'
 
 export interface FrontendRpcLaunchResolverOptions {
   env?: NodeJS.ProcessEnv
   frontendRootSearchRoots?: string[]
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function firstMessage(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value
+  if (!Array.isArray(value)) return undefined
+  const message = value.find((item) => typeof item === 'string' && item.trim())
+  return typeof message === 'string' ? message : undefined
+}
+
+function frontendCommandMethod(command: unknown): string | null {
+  if (command === 'rtl2gds') return 'flow.run'
+  if (command === 'run_step') return 'flow.run_step'
+  return null
+}
+
+export function frontendRuntimeEventFromNotification(
+  notificationMethod: string,
+  params: unknown,
+): EccRuntimeEvent | null {
+  if (notificationMethod !== 'runtime.event') return null
+  const payload = asRecord(params)
+  if (!payload || payload.type !== 'event') return null
+
+  const data = asRecord(payload.data) ?? {}
+  const method = frontendCommandMethod(payload.cmd)
+  const phase = typeof payload.phase === 'string' ? payload.phase : ''
+  if (!method || !phase) return null
+
+  return {
+    data,
+    message: firstMessage(payload.message),
+    method,
+    phase,
+    step: typeof data.step === 'string' ? data.step : undefined,
+    type: 'operation.progress',
+    workspaceDirectory: typeof data.directory === 'string' ? data.directory : undefined,
+  }
 }
 
 function commandBasename(command: string): string {

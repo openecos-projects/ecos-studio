@@ -422,6 +422,12 @@ export class WorkspaceResourceService {
   private async buildFrontendDetailInfo(
     step: WorkspaceStepResource,
   ): Promise<StepInfoBuildResult> {
+    const detailPath = nestedResource(step.resources.report, 'frontend_detail')?.path
+    if (detailPath) {
+      const detail = await this.readJsonOrNull(detailPath)
+      if (detail) return stepInfo(detail)
+    }
+
     const cases = await this.readFrontendCases(
       nestedResource(step.resources.report, 'cases')?.path,
     )
@@ -514,12 +520,15 @@ export class WorkspaceResourceService {
         return []
       case 'sta':
         return resourceRecordValues(step.resources.report.sta)
-      case 'frontend_detail':
+      case 'frontend_detail': {
+        const snapshot = nestedResource(step.resources.report, 'frontend_detail')
+        if (snapshot?.exists) return [snapshot]
         return existingResourceRefs([
           step.resources.log.file,
           nestedResource(step.resources.report, 'step'),
           step.resources.subflow.path,
         ])
+      }
     }
   }
 }
@@ -858,6 +867,10 @@ function addFrontendResources(
   )
   resources.report.log = createFile(join(directory, 'report', 'log.txt'), 'log')
   resources.report.cases = createFile(join(directory, 'report', 'cases.json'), 'report')
+  resources.report.frontend_detail = createFile(
+    join(directory, 'report', 'frontend_detail.json'),
+    'report',
+  )
   resources.report.build_programs = createFile(
     join(directory, 'report', 'build_programs.log.txt'),
     'log',

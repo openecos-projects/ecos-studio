@@ -581,6 +581,20 @@ export class EccRpcRuntimeService {
   }
 
   private handleSidecarEvent(event: EccRuntimeEvent): void {
+    if (event.type === 'operation.progress') {
+      const inFlight = this.inFlightOperation
+      if (!inFlight) return
+      this.emit({
+        ...event,
+        operationId: inFlight.operationId,
+        workspaceDirectory:
+          event.workspaceDirectory ??
+          this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ??
+          undefined,
+        workspaceHandle: inFlight.workspaceHandle,
+      })
+      return
+    }
     if (event.type === 'runtime.exited') {
       this.client = null
       this.ready = false

@@ -488,6 +488,37 @@ describe('WorkspaceResourceService', () => {
     })
   })
 
+  it('returns a completed frontend detail snapshot without runtime RPC', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'review', tool: 'fe', state: 'Ongoing' }])
+    await mkdir(join(root, 'review_fe', 'report'), { recursive: true })
+    const snapshot = {
+      artifacts: [],
+      logs: [],
+      reports: [],
+      review: {
+        path: join(root, 'review_fe', 'report', 'rtl_review.json'),
+        summary: { status: 'needs_attention', warnings: 2 },
+      },
+      state: 'Success',
+      step: 'review',
+      summary: { status: 'Success' },
+      tool: 'fe',
+    }
+    await writeJson(join(root, 'review_fe', 'report', 'frontend_detail.json'), snapshot)
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const result = await service.resolveStepInfo({
+      step: 'review',
+      id: 'frontend_detail',
+    })
+
+    expect(result).toMatchObject({
+      response: 'available',
+      info: snapshot,
+    })
+  })
+
   it('returns density map PNGs in the renderer map gallery shape', async () => {
     const root = await tempWorkspace()
     await writeWorkspace(root, [{ name: 'place', tool: 'ecc' }])

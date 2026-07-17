@@ -61,6 +61,18 @@ function notifyTypeFromEvent(event: DesignRuntimeEvent): RuntimeNotifyType | nul
   if (event.type === 'runtime.exited') {
     return event.reason === 'unexpected' ? 'error' : null
   }
+  if (event.type === 'operation.progress') {
+    if (!isFlowMethod(event.method)) return null
+    const state = event.data?.state
+    if (
+      event.phase === 'completed' ||
+      event.phase === 'failed' ||
+      typeof state === 'string'
+    ) {
+      return event.step ? 'step_complete' : 'message'
+    }
+    return event.step ? 'step_start' : 'message'
+  }
   if (event.type === 'operation.failed')
     return isFlowMethod(event.method) ? 'error' : null
   if (event.type === 'operation.cancelled')
@@ -80,6 +92,15 @@ function responseFromEvent(event: DesignRuntimeEvent): RuntimeResponseType {
   if (event.type === 'operation.failed' || event.type === 'runtime.exited') {
     return 'error'
   }
+  if (event.type === 'operation.progress') {
+    const state = event.data?.state
+    if (
+      event.phase === 'failed' ||
+      (typeof state === 'string' && state.toLowerCase() !== 'success')
+    ) {
+      return 'failed'
+    }
+  }
   if (event.type === 'operation.cancelled') return 'cancelled'
   return 'success'
 }
@@ -94,12 +115,15 @@ function responseFromRuntimeEvent(
   const command = methodToCommand(method)
   const message =
     'message' in event && typeof event.message === 'string' ? [event.message] : []
+  const progressData = event.type === 'operation.progress' ? event.data : undefined
   const data: RuntimeEventResponse['data'] = {
+    ...progressData,
     cmd: command,
     directory: 'workspaceDirectory' in event ? event.workspaceDirectory : undefined,
     jobId: 'operationId' in event ? event.operationId : undefined,
     logFile: 'logFile' in event ? event.logFile : undefined,
     method,
+    phase: event.type === 'operation.progress' ? event.phase : undefined,
     rerun: 'rerun' in event ? event.rerun : undefined,
     step: 'step' in event ? event.step : undefined,
     timestamp: Date.now(),

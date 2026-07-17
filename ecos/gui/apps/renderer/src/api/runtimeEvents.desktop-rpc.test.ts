@@ -158,6 +158,52 @@ describe('createRuntimeEventClient desktop design runtime events', () => {
     )
   })
 
+  it('maps frontend flow progress into an incremental step completion', async () => {
+    const bridge = installRuntimeEventBridge()
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1', {
+      designTool: 'frontend',
+    })
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    bridge.emit({
+      data: {
+        home_page: '/work/demo/home/home.json',
+        log_file: '/work/demo/prepare/log.txt',
+        state: 'Success',
+        subflow_path: '/work/demo/prepare/subflow.json',
+      },
+      designTool: 'frontend',
+      message: 'frontend step prepare Success',
+      method: 'flow.run',
+      operationId: 'operation-flow',
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/demo',
+      workspaceHandle: 'workspace-handle-1',
+    })
+
+    expect(allHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          home_page: '/work/demo/home/home.json',
+          jobId: 'operation-flow',
+          log_file: '/work/demo/prepare/log.txt',
+          state: 'Success',
+          step: 'prepare',
+          subflow_path: '/work/demo/prepare/subflow.json',
+          type: 'step_complete',
+        }),
+        message: ['frontend step prepare Success'],
+        response: 'success',
+      }),
+    )
+  })
+
   it('maps failures and cancellation to terminal notifications', async () => {
     const bridge = installRuntimeEventBridge()
     const { createRuntimeEventClient } = await import('./runtimeEvents')

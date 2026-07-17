@@ -2006,9 +2006,11 @@ import {
   getWorkspaceResourceIndexApi,
   resolveWorkspaceStepInfoApi,
 } from '@/api/workspaceResources'
-import { CMDEnum, InfoEnum, ResponseEnum, StateEnum, getStepMetadata } from '@/api/type'
-import { getInfoApi, runStepApi } from '@/api/flow'
+import { CMDEnum, InfoEnum, StateEnum, getStepMetadata } from '@/api/type'
+import { runStepApi } from '@/api/flow'
+import { loadFrontendStepDetailApi } from '@/api/frontendDetail'
 import { useWorkspace } from '@/composables/useWorkspace'
+import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
 import { simContextsEqual, type SimRunContext } from '@/utils/simRunContext'
@@ -3837,20 +3839,19 @@ async function refresh(): Promise<void> {
 async function loadDetail(): Promise<void> {
   if (!detailRequestStepName.value) return
   try {
-    const response = await getInfoApi({
-      cmd: CMDEnum.get_info,
-      data: {
-        designTool: 'frontend',
-        directory: currentProject.value?.path,
-        workspaceHandle: workspaceSession.value.workspaceId,
-        step: detailRequestStepName.value,
-        id: InfoEnum.frontend_detail,
-      },
+    const directory = currentProject.value?.path || ''
+    const info = await loadFrontendStepDetailApi({
+      allowRpcFallback: !isFlowExecutionActiveForWorkspace(directory),
+      designTool: 'frontend',
+      directory,
+      workspaceHandle: workspaceSession.value.workspaceId,
+      step: detailRequestStepName.value,
     })
-    if (response.response !== ResponseEnum.success) {
-      throw new Error(response.message?.join(', ') || 'Failed to load frontend detail')
+    if (!info) {
+      detail.value = null
+      return
     }
-    detail.value = response.data.info as FrontendStepDetail
+    detail.value = info as unknown as FrontendStepDetail
     await hydrateWaveCasesFromWorkspaceResources()
     const previousCaseName = selectedCase.value?.name || ''
     selectedCase.value =

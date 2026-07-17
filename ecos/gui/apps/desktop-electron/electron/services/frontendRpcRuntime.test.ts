@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createFrontendRpcLaunchResolver } from './frontendRpcRuntime'
+import {
+  createFrontendRpcLaunchResolver,
+  frontendRuntimeEventFromNotification,
+} from './frontendRpcRuntime'
 
 const roots: string[] = []
 
@@ -65,5 +68,45 @@ describe('createFrontendRpcLaunchResolver', () => {
     expect(launch.args).toEqual(['-m', 'fecompiler.cli.main', 'rpc', 'serve', '--stdio'])
     expect(launch.env?.PYTHONPATH).toContain(root)
     expect(launch.env?.PYTHONPATH).toContain('/existing')
+  })
+})
+
+describe('frontendRuntimeEventFromNotification', () => {
+  it('preserves completed step report metadata from ecc-fe notifications', () => {
+    expect(
+      frontendRuntimeEventFromNotification('runtime.event', {
+        cmd: 'rtl2gds',
+        data: {
+          directory: '/work/frontend',
+          home_page: '/work/frontend/home/home.json',
+          log_file: '/work/frontend/prepare/log.txt',
+          state: 'Success',
+          step: 'prepare',
+          subflow_path: '/work/frontend/prepare/subflow.json',
+        },
+        message: ['frontend step prepare Success'],
+        phase: 'stdout',
+        type: 'event',
+      }),
+    ).toEqual({
+      data: {
+        directory: '/work/frontend',
+        home_page: '/work/frontend/home/home.json',
+        log_file: '/work/frontend/prepare/log.txt',
+        state: 'Success',
+        step: 'prepare',
+        subflow_path: '/work/frontend/prepare/subflow.json',
+      },
+      message: 'frontend step prepare Success',
+      method: 'flow.run',
+      phase: 'stdout',
+      step: 'prepare',
+      type: 'operation.progress',
+      workspaceDirectory: '/work/frontend',
+    })
+  })
+
+  it('ignores unrelated JSON-RPC notifications', () => {
+    expect(frontendRuntimeEventFromNotification('rpc.log', {})).toBeNull()
   })
 })
