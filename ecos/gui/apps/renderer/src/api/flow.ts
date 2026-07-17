@@ -11,7 +11,11 @@ import { getDesktopApi } from '@/platform/desktop'
 import type { DesignTool } from '@ecos-studio/shared'
 
 function workspaceHandleFromData(data: Record<string, unknown>): string {
-  return String(data.workspaceHandle ?? data.workspace_handle ?? data.directory ?? '')
+  const workspaceHandle = data.workspaceHandle ?? data.workspace_handle
+  if (typeof workspaceHandle !== 'string' || !workspaceHandle.trim()) {
+    throw new Error('Workspace session handle is required for runtime operations.')
+  }
+  return workspaceHandle
 }
 
 function designToolFromData(data: Record<string, unknown>): DesignTool {

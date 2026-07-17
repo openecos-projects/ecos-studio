@@ -496,6 +496,9 @@ async function handleClearRunResults() {
     const result = await resetFlowApi({
       cmd: CMDEnum.reset_flow,
       data: {
+        ...(currentProject.value?.designTool === 'frontend'
+          ? { designTool: 'frontend' as const }
+          : {}),
         directory: projectPath,
         workspaceHandle: workspaceSession.value.workspaceId,
       },

@@ -723,9 +723,7 @@ export function useParameters() {
               ? { designTool: 'frontend' as const }
               : {}),
             directory: saveProjectPath,
-            ...(currentProject.value?.designTool === 'frontend'
-              ? {}
-              : { workspaceHandle: workspaceLifecycle.session.value.workspaceId }),
+            workspaceHandle: workspaceLifecycle.session.value.workspaceId,
           },
         }),
       )

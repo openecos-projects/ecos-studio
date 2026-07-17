@@ -164,7 +164,8 @@ const emit = defineEmits<{
 const SOURCE_CHAR_LIMIT = 4_000_000
 const LINT_LOG_CHAR_LIMIT = 300_000
 
-const { currentProject, showToast, invalidateWorkspaceResources } = useWorkspace()
+const { currentProject, showToast, invalidateWorkspaceResources, workspaceSession } =
+  useWorkspace()
 const themeStore = useThemeStore()
 const editorHost = ref<HTMLElement | null>(null)
 const loading = ref(false)
@@ -366,6 +367,7 @@ async function runLint(): Promise<void> {
       data: {
         designTool: 'frontend',
         directory,
+        workspaceHandle: workspaceSession.value.workspaceId,
         step: 'lint',
         rerun: true,
       },
@@ -388,6 +390,7 @@ async function loadLintDetail(): Promise<void> {
     data: {
       designTool: 'frontend',
       directory: currentProject.value?.path,
+      workspaceHandle: workspaceSession.value.workspaceId,
       step: 'lint',
       id: InfoEnum.frontend_detail,
     },

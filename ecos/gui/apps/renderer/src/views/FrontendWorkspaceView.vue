@@ -3842,6 +3842,7 @@ async function loadDetail(): Promise<void> {
       data: {
         designTool: 'frontend',
         directory: currentProject.value?.path,
+        workspaceHandle: workspaceSession.value.workspaceId,
         step: detailRequestStepName.value,
         id: InfoEnum.frontend_detail,
       },
@@ -3943,6 +3944,7 @@ async function runCurrentStep(suiteOverride?: SimSuite): Promise<void> {
       data: {
         designTool: 'frontend',
         directory: currentProject.value.path,
+        workspaceHandle: workspaceSession.value.workspaceId,
         step: currentStepName.value,
         rerun: true,
         ...payload,

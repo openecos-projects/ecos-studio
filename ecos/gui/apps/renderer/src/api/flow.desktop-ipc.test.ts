@@ -152,4 +152,28 @@ describe('flow API desktop bridge payloads', () => {
       workspaceHandle: 'workspace-handle-1',
     })
   })
+
+  it('rejects runtime requests that only provide a workspace directory', async () => {
+    const run = vi.fn()
+    setWindow({
+      ecosDesktop: {
+        runtime: {
+          flow: { run },
+        },
+      },
+    })
+    const { rtl2gdsApi } = await import('./flow')
+
+    expect(() =>
+      rtl2gdsApi({
+        cmd: CMDEnum.rtl2gds,
+        data: {
+          designTool: 'frontend',
+          directory: '/work/frontend-demo',
+          rerun: false,
+        },
+      }),
+    ).toThrow('Workspace session handle is required')
+    expect(run).not.toHaveBeenCalled()
+  })
 })

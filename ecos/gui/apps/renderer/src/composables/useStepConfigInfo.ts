@@ -448,9 +448,7 @@ export function useStepConfigInfo() {
                 ? { designTool: 'frontend' as const }
                 : {}),
               directory: projectPath,
-              ...(currentProject.value?.designTool === 'frontend'
-                ? {}
-                : { workspaceHandle: workspaceLifecycle.session.value.workspaceId }),
+              workspaceHandle: workspaceLifecycle.session.value.workspaceId,
             },
           }),
         )

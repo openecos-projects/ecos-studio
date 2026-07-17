@@ -132,15 +132,16 @@ export function useFlowRunner() {
   function runtimeRequestScope(
     directory: string,
   ):
-    | { designTool: 'frontend'; directory: string }
+    | { designTool: 'frontend'; directory: string; workspaceHandle: string }
     | { directory: string; workspaceHandle: string }
     | null {
     const designTool = getCurrentDesignTool()
-    if (designTool === 'frontend') {
-      return { designTool, directory }
-    }
     const workspaceHandle = getCurrentWorkspaceHandle()
-    return workspaceHandle ? { directory, workspaceHandle } : null
+    if (!workspaceHandle) return null
+    if (designTool === 'frontend') {
+      return { designTool, directory, workspaceHandle }
+    }
+    return { directory, workspaceHandle }
   }
 
   /**

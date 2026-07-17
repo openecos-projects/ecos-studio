@@ -290,6 +290,7 @@ describe('useFlowRunner desktop-only guard', () => {
         designTool: 'frontend',
         directory: '/work/frontend-demo',
         rerun: false,
+        workspaceHandle: 'workspace-demo',
       },
     })
     expect(runStepApi).toHaveBeenCalledWith({
@@ -299,7 +300,28 @@ describe('useFlowRunner desktop-only guard', () => {
         directory: '/work/frontend-demo',
         rerun: true,
         step: StepEnum.FLOORPLAN,
+        workspaceHandle: 'workspace-demo',
       },
+    })
+  })
+
+  it('does not run a frontend flow without an active workspace handle', async () => {
+    ensureDesktopRuntime.mockReturnValue(true)
+    workspaceSession.value = {
+      sessionId: 'session-frontend',
+      workspaceId: '',
+    }
+    currentProject.value = { path: '/work/frontend-demo', designTool: 'frontend' }
+
+    const { runAllFlow } = useFlowRunner()
+
+    await expect(runAllFlow()).resolves.toBeNull()
+    expect(rtl2gdsApi).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith({
+      severity: 'error',
+      summary: 'No Workspace Open',
+      detail: 'Open a workspace before running the flow.',
+      life: 5000,
     })
   })
 
