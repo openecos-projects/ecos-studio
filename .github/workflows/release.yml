@@ -62,7 +62,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust-cache
         with:
-          workspaces: ecos/layout-viewer
+          workspaces: ecos/chip-viewer
 
       - name: Setup Python
         uses: actions/setup-python@v5

@@ -167,7 +167,9 @@ describe('createEccRuntimeEnv', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const binariesPath = join(resourcesPath, 'binaries')
-    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), { recursive: true })
+    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), {
+      recursive: true,
+    })
     writeFileSync(join(binariesPath, 'ecc'), '#!/usr/bin/env bash\n')
 
     const env = createEccRuntimeEnv({
@@ -192,7 +194,9 @@ describe('createEccRuntimeEnv', () => {
     const fixture = createRepoFixture()
     const resourcesPath = join(fixture.repoRoot, 'packaged-resources')
     const binariesPath = join(resourcesPath, 'binaries')
-    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), { recursive: true })
+    mkdirSync(join(binariesPath, '_internal', 'ecc_tools_bin', 'lib'), {
+      recursive: true,
+    })
 
     const env = createEccRuntimeEnv({
       appPath: fixture.appPath,

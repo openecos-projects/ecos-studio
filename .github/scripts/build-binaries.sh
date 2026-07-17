@@ -46,14 +46,6 @@ build_ecc() {
   uv run pyinstaller ecc.spec --clean --noconfirm
 }
 
-build_layout_viewer() {
-  cd "$REPO_ROOT/ecos/layout-viewer"
-
-  cargo build --release \
-    -p layout-viewer-native \
-    -p ecos-layout-packer
-}
-
 build_chip_viewer() {
   cd "$REPO_ROOT/ecos/chip-viewer"
 
@@ -112,7 +104,6 @@ validate_packaged_binaries() {
 }
 
 build_ecc
-build_layout_viewer
 build_chip_viewer
 build_geometry_snapshot
 
@@ -120,8 +111,6 @@ cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
-cp ecos/layout-viewer/target/release/ecos-layout-packer ecos/gui/apps/desktop-electron/resources/binaries
-cp ecos/layout-viewer/target/release/layout-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
 cp "$(resolve_geometry_snapshot_binary)" ecos/gui/apps/desktop-electron/resources/binaries
 validate_packaged_binaries

@@ -135,6 +135,7 @@ fn main() -> Result<()> {
     println!("via_count={}", stats.via_count);
     println!("grid_count={}", stats.grid_count);
     println!("connectivity_count={}", stats.connectivity_count);
+    println!("net_count={}", stats.net_count);
     println!("bus_count={}", stats.bus_count);
     println!("group_count={}", stats.group_count);
     let layer_summaries = db.layer_summaries();
@@ -834,6 +835,7 @@ fn print_memory_stats(stats: &ChipViewMemoryStats) {
     println!("index_bytes.shape={}", stats.index_bytes.shape_index_bytes);
     println!("index_bytes.view={}", stats.index_bytes.view_index_bytes);
     println!("index_bytes.name={}", stats.index_bytes.name_index_bytes);
+    println!("index_bytes.net={}", stats.index_bytes.net_index_bytes);
     println!(
         "index_bytes.connectivity={}",
         stats.index_bytes.connectivity_index_bytes
@@ -880,6 +882,7 @@ fn memory_stats_json(stats: &ChipViewMemoryStats) -> Value {
             "shape": stats.index_bytes.shape_index_bytes,
             "view": stats.index_bytes.view_index_bytes,
             "name": stats.index_bytes.name_index_bytes,
+            "net": stats.index_bytes.net_index_bytes,
             "connectivity": stats.index_bytes.connectivity_index_bytes,
         },
         "mapped_plus_index_bytes": stats.mapped_plus_index_bytes,
@@ -1129,6 +1132,7 @@ fn print_json(
         "via_count": stats.via_count,
         "grid_count": stats.grid_count,
         "connectivity_count": stats.connectivity_count,
+        "net_count": stats.net_count,
         "bus_count": stats.bus_count,
         "group_count": stats.group_count,
         "memory": memory_stats_json(&db.memory_stats()),
@@ -1440,6 +1444,7 @@ mod tests {
                 shape_index_bytes: 20,
                 view_index_bytes: 30,
                 name_index_bytes: 40,
+                net_index_bytes: 0,
                 connectivity_index_bytes: 50,
                 total_bytes: 150,
             },
@@ -1451,6 +1456,7 @@ mod tests {
         assert_eq!(value["mmap_bytes"]["view"], 9);
         assert_eq!(value["index_bytes"]["total"], 150);
         assert_eq!(value["index_bytes"]["name"], 40);
+        assert_eq!(value["index_bytes"]["net"], 0);
         assert_eq!(value["index_bytes"]["connectivity"], 50);
         assert_eq!(value["mapped_plus_index_bytes"], 195);
     }

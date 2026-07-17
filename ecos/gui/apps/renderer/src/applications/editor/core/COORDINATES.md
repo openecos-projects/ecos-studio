@@ -44,4 +44,4 @@
 
 ## 6. 当前职责边界
 
-GUI 内的 `DrawingArea` 只负责加载步骤图片预览并提供标尺/坐标显示（Canvas 2D，无 WebGL 依赖）。真实数据版图查看在 Native Layout Viewer；GUI 仅把 `viewJsonPackageRoot` 传给桌面端打开独立查看器。
+GUI 内的 `DrawingArea` 只负责加载步骤图片预览并提供标尺/坐标显示（Canvas 2D，无 WebGL 依赖）。真实数据版图查看在 Chip Viewer；GUI 通过 `desktopApi.chipViewer.open` 把 workspace step 交给桌面端生成/打开 geometry snapshot。

@@ -36,8 +36,6 @@ import {
   type DesktopSettingsValue,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
-  type LayoutViewerOpenRequest,
-  type LayoutViewerOpenResult,
   type RemoteContentFile,
   type RemoteContentListFilesRequest,
   type RemoteContentReadJsonFileRequest,
@@ -165,9 +163,6 @@ export interface DesktopBridgeServices {
     ): Promise<string>
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
-  }
-  layoutViewerService: {
-    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
   chipViewerService: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>
@@ -1115,10 +1110,6 @@ export function registerIpc(
       await unsubscribeProjectLogTail(subscriptionId as string)
     },
   )
-
-  handle(desktopApiIpcChannels.layoutViewerOpen, async (_event, request) => {
-    return await services.layoutViewerService.open(request as LayoutViewerOpenRequest)
-  })
 
   handle(desktopApiIpcChannels.chipViewerOpen, async (_event, request) => {
     return await services.chipViewerService.open(request as ChipViewerOpenRequest)

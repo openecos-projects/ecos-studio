@@ -24,7 +24,7 @@ jobs:
     outputs:
       version: ${{ steps.filter.outputs.version }}
       gui: ${{ steps.filter.outputs.gui }}
-      layout_viewer: ${{ steps.filter.outputs.layout_viewer }}
+      chip_viewer: ${{ steps.filter.outputs.chip_viewer }}
       build: ${{ steps.filter.outputs.build }}
       ci: ${{ steps.filter.outputs.ci }}
       docs_only: ${{ steps.filter.outputs.docs_only }}
@@ -51,8 +51,8 @@ jobs:
               - 'ecos/gui/pnpm-lock.yaml'
               - 'ecos/gui/pnpm-workspace.yaml'
               - 'ecos/gui/tailwind.config.ts'
-            layout_viewer:
-              - 'ecos/layout-viewer/**'
+            chip_viewer:
+              - 'ecos/chip-viewer/**'
             build:
               - 'Makefile'
               - 'ecos/scripts/**'
@@ -116,14 +116,14 @@ jobs:
       - name: Run GUI tests
         run: pnpm run test
 
-  layout-viewer-rust:
-    name: Layout Viewer Rust Checks
+  chip-viewer-rust:
+    name: Chip Viewer Rust Checks
     runs-on: ubuntu-22.04
     needs: changes
-    if: ${{ needs.changes.outputs.layout_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
+    if: ${{ needs.changes.outputs.chip_viewer == 'true' || needs.changes.outputs.ci == 'true' }}
     defaults:
       run:
-        working-directory: ecos/layout-viewer
+        working-directory: ecos/chip-viewer
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust-cache
         with:
-          workspaces: ecos/layout-viewer
+          workspaces: ecos/chip-viewer
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -141,18 +141,18 @@ jobs:
 
   build-appimage:
     name: Build AppImage
-    needs: [changes, check-version, gui-checks, layout-viewer-rust]
+    needs: [changes, check-version, gui-checks, chip-viewer-rust]
     if: >-
       ${{
         always() &&
         (needs.changes.outputs.gui == 'true' ||
-         needs.changes.outputs.layout_viewer == 'true' ||
+         needs.changes.outputs.chip_viewer == 'true' ||
          needs.changes.outputs.version == 'true' ||
          needs.changes.outputs.build == 'true' ||
          needs.changes.outputs.ci == 'true') &&
         needs.check-version.result != 'failure' &&
         needs.gui-checks.result != 'failure' &&
-        needs.layout-viewer-rust.result != 'failure'
+        needs.chip-viewer-rust.result != 'failure'
       }}
     runs-on: ubuntu-22.04
     steps:
@@ -180,7 +180,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust-cache
         with:
-          workspaces: ecos/layout-viewer
+          workspaces: ecos/chip-viewer
 
       - name: Setup Python
         uses: actions/setup-python@v5

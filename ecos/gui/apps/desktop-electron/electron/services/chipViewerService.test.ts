@@ -1,7 +1,8 @@
+import { EventEmitter } from 'node:events'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkspaceStepInfoResult } from '@ecos-studio/shared'
-import { ChipViewerService } from './chipViewerService'
+import { ChipViewerService, type ChipViewerServiceOptions } from './chipViewerService'
 
 interface ExecFileResult {
   stdout: string
@@ -43,8 +44,19 @@ function devChipViewerPaths() {
   }
 }
 
+function createSpawnedViewerProcess() {
+  const child = new EventEmitter() as EventEmitter & {
+    pid: number
+    unref: () => void
+  }
+  child.pid = 123
+  child.unref = vi.fn(() => undefined)
+  return child
+}
+
 function createService(options: {
   appPath?: string
+  closeLogFile?: (fd: number) => void
   cwd?: string
   env?: NodeJS.ProcessEnv
   execFile?: (file: string, args: string[]) => Promise<ExecFileResult>
@@ -55,8 +67,12 @@ function createService(options: {
   includeDefaultGeometryInputPaths?: boolean
   isPackaged?: boolean
   modifiedTimes?: Record<string, number>
+  openLogFile?: (path: string, flags: string) => number
   resourcesPath?: string
+  spawnProcess?: ChipViewerServiceOptions['spawnProcess']
   stepInfoResult?: WorkspaceStepInfoResult
+  viewerLogDirectory?: string
+  viewerStartupCheckMs?: number
 }) {
   const files = new Map(Object.entries(options.files ?? {}))
   const devPaths = devChipViewerPaths()
@@ -81,9 +97,18 @@ function createService(options: {
         stdout: '',
       }
     })
-  const unref = vi.fn()
-  const spawnProcess = vi.fn(() => ({ unref }))
+  const spawnedProcess = createSpawnedViewerProcess()
+  const unref = spawnedProcess.unref
+  const spawnProcess = options.spawnProcess ?? vi.fn(() => spawnedProcess)
   const ensureDirectory = vi.fn(async () => undefined)
+  let nextLogFd = 10
+  const openLogFile =
+    options.openLogFile ??
+    vi.fn(() => {
+      nextLogFd += 1
+      return nextLogFd
+    })
+  const closeLogFile = options.closeLogFile ?? vi.fn()
   const watchDirectory = vi.fn(
     (_path: string, _listener: (fileName: string) => void) => ({
       close: vi.fn(),
@@ -111,8 +136,9 @@ function createService(options: {
   }
   const service = new ChipViewerService({
     appPath: options.appPath ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
+    closeLogFile,
     cwd: options.cwd ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
-    env: options.env ?? {},
+    env: options.env ?? { DISPLAY: ':99' },
     ensureDirectory,
     execFile,
     fileExists: (path) => existingPaths.has(path),
@@ -124,6 +150,7 @@ function createService(options: {
         return existingPaths.has(path) ? 100 : null
       }),
     isPackaged: options.isPackaged ?? false,
+    openLogFile,
     platform: 'linux',
     readTextFile: async (path) => {
       const text = files.get(path)
@@ -135,16 +162,21 @@ function createService(options: {
     renameFile,
     resourcesPath: options.resourcesPath,
     spawnProcess,
+    viewerLogDirectory: options.viewerLogDirectory ?? '/viewer-logs',
+    viewerStartupCheckMs: options.viewerStartupCheckMs ?? 0,
     watchDirectory,
     writeTextFile,
     workspaceResourceService,
   })
 
   return {
+    closeLogFile,
     ensureDirectory,
     execFile,
+    openLogFile,
     service,
     spawnProcess,
+    spawnedProcess,
     unref,
     renameFile,
     watchDirectory,
@@ -237,7 +269,7 @@ describe('ChipViewerService', () => {
       ],
       expect.objectContaining({
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
     )
     expect(ensureDirectory).toHaveBeenCalledWith(EDIT_COMMAND_DIR)
@@ -251,6 +283,114 @@ describe('ChipViewerService', () => {
       spawned: true,
       workspaceStepDirectory: STEP_DIRECTORY,
     })
+  })
+
+  it('launches the native viewer with sanitized environment and diagnostic logs', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { closeLogFile, openLogFile, service, spawnProcess } = createService({
+      env: {
+        DISPLAY: ':44',
+        ELECTRON_NO_ATTACH_CONSOLE: '1',
+        ELECTRON_RUN_AS_NODE: '1',
+        NODE_OPTIONS: '--require /tmp/node-hook.js',
+        PATH: '/usr/bin',
+      },
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    const launchOptions = vi.mocked(spawnProcess).mock.calls[0]?.[2]
+    expect(launchOptions?.env.DISPLAY).toBe(':44')
+    expect(launchOptions?.env.PATH).toBe('/usr/bin')
+    expect(launchOptions?.env.ELECTRON_NO_ATTACH_CONSOLE).toBeUndefined()
+    expect(launchOptions?.env.ELECTRON_RUN_AS_NODE).toBeUndefined()
+    expect(launchOptions?.env.NODE_OPTIONS).toBeUndefined()
+    expect(launchOptions?.stdio).toEqual(['ignore', 11, 12])
+    expect(openLogFile).toHaveBeenCalledTimes(2)
+    expect(closeLogFile).toHaveBeenCalledWith(11)
+    expect(closeLogFile).toHaveBeenCalledWith(12)
+  })
+
+  it('reports native viewer startup exits with the viewer log paths', async () => {
+    const devBinaries = devChipViewerPaths()
+    const child = createSpawnedViewerProcess()
+    const spawnProcess = vi.fn(() => {
+      setTimeout(() => {
+        child.emit('exit', 1, null)
+      }, 0)
+      return child
+    })
+    const { service } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      spawnProcess,
+      viewerStartupCheckMs: 50,
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected viewer startup to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      'Chip viewer failed to launch: native viewer exited during startup',
+    )
+    expect(message).toContain(`Viewer binary: ${devBinaries.viewer}`)
+    expect(message).toContain(`Manifest: ${GEOMETRY_MANIFEST}`)
+    expect(message).toContain('stdout log: /viewer-logs/')
+    expect(message).toContain('stderr log: /viewer-logs/')
+    expect(child.unref).not.toHaveBeenCalled()
+  })
+
+  it('reports a missing Linux display environment before spawning the viewer', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      env: {
+        PATH: '/usr/bin',
+      },
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow('no Linux display environment is available')
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('reuses an existing geometry manifest unless rebuild is requested', async () => {
@@ -818,7 +958,7 @@ describe('ChipViewerService', () => {
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.objectContaining({
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
     )
   })

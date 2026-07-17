@@ -10,7 +10,7 @@ use chipgeom_format::{
 };
 pub use chipgeom_reader::{
     BusMetadata, ConnectivityMetadata, GeometryManifest, GeometryMappedBytes, GridMetadata,
-    GroupMetadata, MasterMetadata, SiteMetadata, ViaMetadata,
+    GroupMetadata, MasterMetadata, NetMetadata, SiteMetadata, ViaMetadata,
 };
 use chipgeom_reader::{GeometrySnapshot, LayerMetadata};
 use rstar::{RTree, RTreeObject, AABB};
@@ -19,6 +19,8 @@ pub struct ChipViewDb {
     connectivity_index: ConnectivityIndex,
     layer_index: LayerShapeIndex,
     name_index: OwnerNameIndex,
+    net_guides: Vec<UnroutedNetGuide>,
+    net_index: NetMetadataIndex,
     shape_index: ShapeIdIndex,
     snapshot: GeometrySnapshot,
     view_index: ViewTileIndex,
@@ -34,6 +36,7 @@ pub struct SnapshotStats {
     pub via_count: usize,
     pub grid_count: usize,
     pub connectivity_count: usize,
+    pub net_count: usize,
     pub bus_count: usize,
     pub group_count: usize,
     pub bbox: Option<Rect32>,
@@ -46,6 +49,7 @@ pub struct ChipViewIndexMemoryStats {
     pub shape_index_bytes: usize,
     pub view_index_bytes: usize,
     pub name_index_bytes: usize,
+    pub net_index_bytes: usize,
     pub connectivity_index_bytes: usize,
     pub total_bytes: usize,
 }
@@ -91,6 +95,15 @@ pub struct LayerSummary {
     pub enclosure_below: String,
     pub enclosure_above: String,
     pub lef58_rule_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnroutedNetGuide {
+    pub net_name: String,
+    pub net_kind: String,
+    pub hub: Point32,
+    pub pin_centers: Vec<Point32>,
+    pub bbox: Rect32,
 }
 
 #[derive(Clone, Debug)]
@@ -168,11 +181,24 @@ pub struct OwnerNameIndex {
 }
 
 #[derive(Clone, Debug, Default)]
+struct NetMetadataIndex {
+    kind_by_name: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Default)]
 struct ConnectivityIndex {
     by_instance_name: BTreeMap<String, Vec<usize>>,
     by_net_name: BTreeMap<String, Vec<usize>>,
     by_pin_name: BTreeMap<String, Vec<usize>>,
     by_qualified_pin_name: BTreeMap<String, Vec<usize>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct EndpointPinLookup {
+    instance_paths_by_name: BTreeMap<String, BTreeSet<u32>>,
+    instance_pin_bboxes_by_path: BTreeMap<u32, BTreeMap<String, Rect32>>,
+    instance_pin_bboxes_by_name: BTreeMap<String, Rect32>,
+    io_pin_bboxes_by_name: BTreeMap<String, Rect32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -563,6 +589,36 @@ impl OwnerNameIndex {
     }
 }
 
+impl NetMetadataIndex {
+    fn from_nets(nets: &[NetMetadata]) -> Self {
+        let mut kind_by_name = BTreeMap::<String, String>::new();
+        for net in nets {
+            if net.name.is_empty() {
+                continue;
+            }
+            kind_by_name
+                .entry(net.name.clone())
+                .or_insert_with(|| net.kind.clone());
+        }
+        Self { kind_by_name }
+    }
+
+    fn kind_for_name(&self, name: &str) -> Option<&str> {
+        self.kind_by_name.get(name).map(String::as_str)
+    }
+
+    fn estimated_heap_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self
+                .kind_by_name
+                .iter()
+                .map(|(name, kind)| {
+                    size_of::<(String, String)>() + name.capacity() + kind.capacity()
+                })
+                .sum::<usize>()
+    }
+}
+
 impl ConnectivityIndex {
     fn from_endpoints(endpoints: &[ConnectivityMetadata]) -> Self {
         let mut index = Self::default();
@@ -635,6 +691,139 @@ impl ConnectivityIndex {
     }
 }
 
+impl EndpointPinLookup {
+    fn from_parts(
+        shapes: &[ShapeRecord],
+        owners: &[OwnerRef],
+        name_index: &OwnerNameIndex,
+    ) -> Self {
+        let mut lookup = Self::default();
+        for shape in shapes {
+            if shape.state != ShapeState::Alive as u8 {
+                continue;
+            }
+            let Some(owner) = owners.get(shape.owner_index as usize) else {
+                continue;
+            };
+            let Some(owner_name) = name_index.name_for_owner(owner.owner_type, owner.owner_id)
+            else {
+                continue;
+            };
+
+            match OwnerType::from_raw(owner.owner_type) {
+                Some(OwnerType::InstanceBBox | OwnerType::InstanceHalo) => {
+                    for name in lookup_name_variants(owner_name) {
+                        lookup
+                            .instance_paths_by_name
+                            .entry(name.to_string())
+                            .or_default()
+                            .insert(owner.path0);
+                    }
+                }
+                Some(OwnerType::InstancePinPortShape) => {
+                    for name in lookup_name_variants(owner_name) {
+                        merge_named_rect(&mut lookup.instance_pin_bboxes_by_name, name, shape.bbox);
+                        lookup
+                            .instance_pin_bboxes_by_path
+                            .entry(owner.path0)
+                            .or_default()
+                            .entry(name.to_string())
+                            .and_modify(|current| *current = union_rect(*current, shape.bbox))
+                            .or_insert(shape.bbox);
+                    }
+                }
+                Some(OwnerType::IoPinPortShape) => {
+                    for name in lookup_name_variants(owner_name) {
+                        merge_named_rect(&mut lookup.io_pin_bboxes_by_name, name, shape.bbox);
+                    }
+                }
+                Some(OwnerType::PinPortShape) if owner.path0 == 0 => {
+                    for name in lookup_name_variants(owner_name) {
+                        merge_named_rect(&mut lookup.io_pin_bboxes_by_name, name, shape.bbox);
+                    }
+                }
+                _ => {}
+            }
+        }
+        lookup
+    }
+
+    fn instance_pin_bbox(&self, endpoint: &ConnectivityMetadata) -> Option<Rect32> {
+        let mut bbox = None;
+        let mut matched_instance = false;
+        for instance_name in lookup_name_variants(&endpoint.instance_name) {
+            let Some(paths) = self.instance_paths_by_name.get(instance_name) else {
+                continue;
+            };
+            matched_instance = true;
+            for path in paths {
+                let Some(pin_bboxes) = self.instance_pin_bboxes_by_path.get(path) else {
+                    continue;
+                };
+                for pin_name in lookup_name_variants(&endpoint.pin_name) {
+                    if let Some(pin_bbox) = pin_bboxes.get(pin_name) {
+                        bbox = Some(match bbox {
+                            Some(current) => union_rect(current, *pin_bbox),
+                            None => *pin_bbox,
+                        });
+                    }
+                }
+            }
+        }
+
+        if bbox.is_none() && !matched_instance {
+            bbox = self.any_instance_pin_bbox(&endpoint.pin_name);
+        }
+        bbox
+    }
+
+    fn io_pin_bbox(&self, endpoint: &ConnectivityMetadata) -> Option<Rect32> {
+        let mut bbox = None;
+        for pin_name in lookup_name_variants(&endpoint.pin_name) {
+            if let Some(pin_bbox) = self.io_pin_bboxes_by_name.get(pin_name) {
+                bbox = Some(match bbox {
+                    Some(current) => union_rect(current, *pin_bbox),
+                    None => *pin_bbox,
+                });
+            }
+        }
+        bbox
+    }
+
+    fn any_instance_pin_bbox(&self, pin_name: &str) -> Option<Rect32> {
+        let mut bbox = None;
+        for name in lookup_name_variants(pin_name) {
+            if let Some(pin_bbox) = self.instance_pin_bboxes_by_name.get(name) {
+                bbox = Some(match bbox {
+                    Some(current) => union_rect(current, *pin_bbox),
+                    None => *pin_bbox,
+                });
+            }
+        }
+        bbox
+    }
+}
+
+fn lookup_name_variants(name: &str) -> Vec<&str> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Vec::new();
+    }
+    if let Some((_, local_name)) = name.rsplit_once('/') {
+        let local_name = local_name.trim();
+        if !local_name.is_empty() && local_name != name {
+            return vec![name, local_name];
+        }
+    }
+    vec![name]
+}
+
+fn merge_named_rect(map: &mut BTreeMap<String, Rect32>, name: &str, bbox: Rect32) {
+    map.entry(name.to_string())
+        .and_modify(|current| *current = union_rect(*current, bbox))
+        .or_insert(bbox);
+}
+
 fn push_connectivity_index(
     map: &mut BTreeMap<String, Vec<usize>>,
     name: &str,
@@ -665,23 +854,27 @@ impl ChipViewIndexMemoryStats {
         shape_index: &ShapeIdIndex,
         view_index: &ViewTileIndex,
         name_index: &OwnerNameIndex,
+        net_index: &NetMetadataIndex,
         connectivity_index: &ConnectivityIndex,
     ) -> Self {
         let layer_index_bytes = layer_index.estimated_heap_bytes();
         let shape_index_bytes = shape_index.estimated_heap_bytes();
         let view_index_bytes = view_index.estimated_heap_bytes();
         let name_index_bytes = name_index.estimated_heap_bytes();
+        let net_index_bytes = net_index.estimated_heap_bytes();
         let connectivity_index_bytes = connectivity_index.estimated_heap_bytes();
         Self {
             layer_index_bytes,
             shape_index_bytes,
             view_index_bytes,
             name_index_bytes,
+            net_index_bytes,
             connectivity_index_bytes,
             total_bytes: layer_index_bytes
                 + shape_index_bytes
                 + view_index_bytes
                 + name_index_bytes
+                + net_index_bytes
                 + connectivity_index_bytes,
         }
     }
@@ -954,6 +1147,185 @@ fn collect_named_shape_ids(
     shape_ids.extend(name_index.query(name));
 }
 
+fn unrouted_net_guides_from_parts(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    name_index: &OwnerNameIndex,
+    net_index: &NetMetadataIndex,
+    endpoints: &[ConnectivityMetadata],
+) -> Vec<UnroutedNetGuide> {
+    let routed_nets = routed_net_names(shapes, owners, name_index);
+    let mut endpoints_by_net = BTreeMap::<String, Vec<&ConnectivityMetadata>>::new();
+    for endpoint in endpoints {
+        if endpoint.net_name.is_empty() {
+            continue;
+        }
+        endpoints_by_net
+            .entry(endpoint.net_name.clone())
+            .or_default()
+            .push(endpoint);
+    }
+
+    let mut endpoint_lookup = None::<EndpointPinLookup>;
+    let mut guides = Vec::new();
+    for (net_name, net_endpoints) in endpoints_by_net {
+        if routed_nets.contains(&net_name) {
+            continue;
+        }
+
+        let lookup = endpoint_lookup
+            .get_or_insert_with(|| EndpointPinLookup::from_parts(shapes, owners, name_index));
+        let mut pin_bboxes = BTreeMap::<(i32, i32, i32, i32), Rect32>::new();
+        for endpoint in &net_endpoints {
+            if let Some(bbox) = endpoint_pin_bbox(lookup, endpoint) {
+                let normalized = normalize_rect(bbox);
+                pin_bboxes.insert(
+                    (normalized.lx, normalized.ly, normalized.hx, normalized.hy),
+                    normalized,
+                );
+            }
+        }
+        if pin_bboxes.len() < 2 {
+            continue;
+        }
+
+        let pin_centers = pin_bboxes
+            .values()
+            .map(|bbox| rect_center(*bbox))
+            .collect::<Vec<_>>();
+        let hub = point_centroid(&pin_centers);
+        let bbox = guide_bbox(pin_bboxes.values().copied(), hub);
+        let net_kind = net_index
+            .kind_for_name(&net_name)
+            .or_else(|| {
+                net_endpoints
+                    .iter()
+                    .map(|endpoint| endpoint.net_kind.trim())
+                    .find(|kind| !kind.is_empty())
+            })
+            .unwrap_or("other")
+            .to_string();
+
+        guides.push(UnroutedNetGuide {
+            net_name,
+            net_kind,
+            hub,
+            pin_centers,
+            bbox,
+        });
+    }
+    guides
+}
+
+fn routed_net_names(
+    shapes: &[ShapeRecord],
+    owners: &[OwnerRef],
+    name_index: &OwnerNameIndex,
+) -> BTreeSet<String> {
+    let mut routed = BTreeSet::new();
+    for shape in shapes {
+        let Some(owner) = owners.get(shape.owner_index as usize) else {
+            continue;
+        };
+        if owner.owner_type != OwnerType::NetWireSegment as u8 {
+            continue;
+        }
+        if let Some(name) = name_index.name_for_owner(owner.owner_type, owner.owner_id) {
+            routed.insert(name.to_string());
+        }
+    }
+    routed
+}
+
+fn endpoint_pin_bbox(
+    lookup: &EndpointPinLookup,
+    endpoint: &ConnectivityMetadata,
+) -> Option<Rect32> {
+    match endpoint.endpoint_type.trim().to_ascii_lowercase().as_str() {
+        "instance" => endpoint_instance_pin_bbox(lookup, endpoint),
+        "io" => endpoint_io_pin_bbox(lookup, endpoint),
+        _ => endpoint_any_pin_bbox(lookup, endpoint),
+    }
+}
+
+fn endpoint_instance_pin_bbox(
+    lookup: &EndpointPinLookup,
+    endpoint: &ConnectivityMetadata,
+) -> Option<Rect32> {
+    lookup.instance_pin_bbox(endpoint)
+}
+
+fn endpoint_io_pin_bbox(
+    lookup: &EndpointPinLookup,
+    endpoint: &ConnectivityMetadata,
+) -> Option<Rect32> {
+    lookup.io_pin_bbox(endpoint)
+}
+
+fn endpoint_any_pin_bbox(
+    lookup: &EndpointPinLookup,
+    endpoint: &ConnectivityMetadata,
+) -> Option<Rect32> {
+    endpoint_instance_pin_bbox(lookup, endpoint).or_else(|| endpoint_io_pin_bbox(lookup, endpoint))
+}
+
+fn rect_center(rect: Rect32) -> Point32 {
+    let rect = normalize_rect(rect);
+    Point32 {
+        x: midpoint_i32(rect.lx, rect.hx),
+        y: midpoint_i32(rect.ly, rect.hy),
+    }
+}
+
+fn point_centroid(points: &[Point32]) -> Point32 {
+    let count = points.len().max(1) as i64;
+    let sum_x = points.iter().map(|point| i64::from(point.x)).sum::<i64>();
+    let sum_y = points.iter().map(|point| i64::from(point.y)).sum::<i64>();
+    Point32 {
+        x: saturating_i64_to_i32(sum_x / count),
+        y: saturating_i64_to_i32(sum_y / count),
+    }
+}
+
+fn guide_bbox(pin_bboxes: impl IntoIterator<Item = Rect32>, hub: Point32) -> Rect32 {
+    let mut bbox = Rect32 {
+        lx: hub.x,
+        ly: hub.y,
+        hx: hub.x,
+        hy: hub.y,
+    };
+    for pin_bbox in pin_bboxes {
+        bbox = union_rect(bbox, pin_bbox);
+    }
+    bbox
+}
+
+fn midpoint_i32(lhs: i32, rhs: i32) -> i32 {
+    saturating_i64_to_i32((i64::from(lhs) + i64::from(rhs)) / 2)
+}
+
+fn saturating_i64_to_i32(value: i64) -> i32 {
+    value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+fn normalize_rect(rect: Rect32) -> Rect32 {
+    Rect32 {
+        lx: rect.lx.min(rect.hx),
+        ly: rect.ly.min(rect.hy),
+        hx: rect.lx.max(rect.hx),
+        hy: rect.ly.max(rect.hy),
+    }
+}
+
+fn union_rect(lhs: Rect32, rhs: Rect32) -> Rect32 {
+    Rect32 {
+        lx: lhs.lx.min(rhs.lx),
+        ly: lhs.ly.min(rhs.ly),
+        hx: lhs.hx.max(rhs.hx),
+        hy: lhs.hy.max(rhs.hy),
+    }
+}
+
 #[cfg(test)]
 fn filter_shape_ids_by_owner_types(
     shape_ids: Vec<ShapeId>,
@@ -980,12 +1352,22 @@ impl ChipViewDb {
             ConnectivityIndex::from_endpoints(snapshot.connectivity_metadata());
         let layer_index = LayerShapeIndex::from_shapes(snapshot.shapes());
         let name_index = OwnerNameIndex::from_snapshot(&snapshot);
+        let net_index = NetMetadataIndex::from_nets(snapshot.net_metadata());
+        let net_guides = unrouted_net_guides_from_parts(
+            snapshot.shapes(),
+            snapshot.owners(),
+            &name_index,
+            &net_index,
+            snapshot.connectivity_metadata(),
+        );
         let shape_index = ShapeIdIndex::from_shapes(snapshot.shapes());
         let view_index = ViewTileIndex::from_tiles(snapshot.view_tile_records());
         Ok(Self {
             connectivity_index,
             layer_index,
             name_index,
+            net_guides,
+            net_index,
             shape_index,
             snapshot,
             view_index,
@@ -1006,6 +1388,7 @@ impl ChipViewDb {
             via_count: self.snapshot.via_metadata().len(),
             grid_count: self.snapshot.grid_metadata().len(),
             connectivity_count: self.snapshot.connectivity_metadata().len(),
+            net_count: self.snapshot.net_metadata().len(),
             bus_count: self.snapshot.bus_metadata().len(),
             group_count: self.snapshot.group_metadata().len(),
             ..SnapshotStats::default()
@@ -1077,6 +1460,18 @@ impl ChipViewDb {
 
     pub fn connectivity_metadata(&self) -> &[ConnectivityMetadata] {
         self.snapshot.connectivity_metadata()
+    }
+
+    pub fn net_metadata(&self) -> &[NetMetadata] {
+        self.snapshot.net_metadata()
+    }
+
+    pub fn net_kind_for_name(&self, net_name: &str) -> Option<&str> {
+        self.net_index.kind_for_name(net_name)
+    }
+
+    pub fn unrouted_net_guides(&self) -> &[UnroutedNetGuide] {
+        &self.net_guides
     }
 
     pub fn bus_metadata(&self) -> &[BusMetadata] {
@@ -1216,6 +1611,7 @@ impl ChipViewDb {
             &self.shape_index,
             &self.view_index,
             &self.name_index,
+            &self.net_index,
             &self.connectivity_index,
         );
         ChipViewMemoryStats {
@@ -2315,6 +2711,321 @@ mod tests {
     }
 
     #[test]
+    fn unrouted_net_guides_connect_pin_centers_when_net_has_no_wire_shapes() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 21,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 22,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 100,
+                    hy: 100,
+                },
+                ..shape(1, 0)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                bbox: Rect32 {
+                    lx: 10,
+                    ly: 10,
+                    hx: 20,
+                    hy: 20,
+                },
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                bbox: Rect32 {
+                    lx: 50,
+                    ly: 30,
+                    hx: 70,
+                    hy: 50,
+                },
+                ..shape(3, 1)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstancePinPortShape as u8, 21, "A".to_string()),
+                (OwnerType::IoPinPortShape as u8, 22, "CLK".to_string()),
+            ],
+        );
+        let net_index = NetMetadataIndex::from_nets(&[NetMetadata {
+            name: "clk".to_string(),
+            kind: "clock".to_string(),
+        }]);
+        let endpoints = [
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                net_kind: "clock".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: "u0".to_string(),
+                pin_name: "A".to_string(),
+                master_name: "INVX1".to_string(),
+            },
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                net_kind: "clock".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+        ];
+
+        let guides =
+            unrouted_net_guides_from_parts(&shapes, &owners, &name_index, &net_index, &endpoints);
+
+        assert_eq!(
+            guides,
+            vec![UnroutedNetGuide {
+                net_name: "clk".to_string(),
+                net_kind: "clock".to_string(),
+                hub: Point32 { x: 37, y: 27 },
+                pin_centers: vec![Point32 { x: 15, y: 15 }, Point32 { x: 60, y: 40 }],
+                bbox: Rect32 {
+                    lx: 10,
+                    ly: 10,
+                    hx: 70,
+                    hy: 50,
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn unrouted_net_guides_disambiguate_duplicate_instance_pin_names_by_instance_path() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 20,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstanceBBox as u8,
+                owner_id: 21,
+                path0: 4,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 22,
+                path0: 3,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::InstancePinPortShape as u8,
+                owner_id: 23,
+                path0: 4,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 24,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 0)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                ..shape(2, 0)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                bbox: Rect32 {
+                    lx: 10,
+                    ly: 10,
+                    hx: 20,
+                    hy: 20,
+                },
+                ..shape(3, 1)
+            },
+            ShapeRecord {
+                owner_index: 3,
+                bbox: Rect32 {
+                    lx: 1000,
+                    ly: 1000,
+                    hx: 1010,
+                    hy: 1010,
+                },
+                ..shape(4, 1)
+            },
+            ShapeRecord {
+                owner_index: 4,
+                bbox: Rect32 {
+                    lx: 50,
+                    ly: 30,
+                    hx: 70,
+                    hy: 50,
+                },
+                ..shape(5, 1)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::InstanceBBox as u8, 20, "u0".to_string()),
+                (OwnerType::InstanceBBox as u8, 21, "u1".to_string()),
+                (
+                    OwnerType::InstancePinPortShape as u8,
+                    22,
+                    "u0/A".to_string(),
+                ),
+                (
+                    OwnerType::InstancePinPortShape as u8,
+                    23,
+                    "u1/A".to_string(),
+                ),
+                (OwnerType::IoPinPortShape as u8, 24, "CLK".to_string()),
+            ],
+        );
+        let endpoints = [
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "instance".to_string(),
+                instance_name: "u0".to_string(),
+                pin_name: "A".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+        ];
+
+        let guides = unrouted_net_guides_from_parts(
+            &shapes,
+            &owners,
+            &name_index,
+            &NetMetadataIndex::default(),
+            &endpoints,
+        );
+
+        assert_eq!(guides.len(), 1);
+        assert_eq!(
+            guides[0].pin_centers,
+            vec![Point32 { x: 15, y: 15 }, Point32 { x: 60, y: 40 }]
+        );
+        assert_eq!(
+            guides[0].bbox,
+            Rect32 {
+                lx: 10,
+                ly: 10,
+                hx: 70,
+                hy: 50,
+            }
+        );
+    }
+
+    #[test]
+    fn unrouted_net_guides_skip_nets_with_real_wire_shapes() {
+        let owners = [
+            OwnerRef {
+                owner_type: OwnerType::NetWireSegment as u8,
+                owner_id: 10,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 22,
+                ..OwnerRef::default()
+            },
+            OwnerRef {
+                owner_type: OwnerType::IoPinPortShape as u8,
+                owner_id: 23,
+                ..OwnerRef::default()
+            },
+        ];
+        let shapes = [
+            ShapeRecord {
+                owner_index: 0,
+                ..shape(1, 1)
+            },
+            ShapeRecord {
+                owner_index: 1,
+                bbox: Rect32 {
+                    lx: 0,
+                    ly: 0,
+                    hx: 10,
+                    hy: 10,
+                },
+                ..shape(2, 1)
+            },
+            ShapeRecord {
+                owner_index: 2,
+                bbox: Rect32 {
+                    lx: 100,
+                    ly: 100,
+                    hx: 110,
+                    hy: 110,
+                },
+                ..shape(3, 1)
+            },
+        ];
+        let name_index = OwnerNameIndex::from_shapes_and_names(
+            &shapes,
+            &owners,
+            [
+                (OwnerType::NetWireSegment as u8, 10, "clk".to_string()),
+                (OwnerType::IoPinPortShape as u8, 22, "CLK0".to_string()),
+                (OwnerType::IoPinPortShape as u8, 23, "CLK1".to_string()),
+            ],
+        );
+        let endpoints = [
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK0".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+            ConnectivityMetadata {
+                net_name: "clk".to_string(),
+                endpoint_type: "io".to_string(),
+                pin_name: "CLK1".to_string(),
+                ..ConnectivityMetadata::default()
+            },
+        ];
+
+        assert!(unrouted_net_guides_from_parts(
+            &shapes,
+            &owners,
+            &name_index,
+            &NetMetadataIndex::default(),
+            &endpoints,
+        )
+        .is_empty());
+    }
+
+    #[test]
     fn connectivity_index_queries_endpoints_by_net_instance_and_pin() {
         let endpoints = [
             ConnectivityMetadata {
@@ -2377,6 +3088,24 @@ mod tests {
     }
 
     #[test]
+    fn net_metadata_index_queries_kind_by_net_name() {
+        let index = NetMetadataIndex::from_nets(&[
+            NetMetadata {
+                name: "clk".to_string(),
+                kind: "clock".to_string(),
+            },
+            NetMetadata {
+                name: "data".to_string(),
+                kind: "signal".to_string(),
+            },
+        ]);
+
+        assert_eq!(index.kind_for_name("clk"), Some("clock"));
+        assert_eq!(index.kind_for_name("data"), Some("signal"));
+        assert_eq!(index.kind_for_name("missing"), None);
+    }
+
+    #[test]
     fn index_memory_estimates_include_heap_backing_storage() {
         let shapes = [
             shape(40, 7),
@@ -2433,6 +3162,10 @@ mod tests {
                 "synthetic_clk".to_string(),
             )],
         );
+        let net_index = NetMetadataIndex::from_nets(&[NetMetadata {
+            name: "synthetic_clk".to_string(),
+            kind: "clock".to_string(),
+        }]);
         let connectivity_index = ConnectivityIndex::from_endpoints(&[ConnectivityMetadata {
             net_name: "synthetic_clk".to_string(),
             endpoint_type: "instance".to_string(),
@@ -2446,6 +3179,7 @@ mod tests {
             &shape_index,
             &view_index,
             &name_index,
+            &net_index,
             &connectivity_index,
         );
 
@@ -2453,6 +3187,7 @@ mod tests {
         assert!(stats.shape_index_bytes >= 3 * core::mem::size_of::<(ShapeId, usize)>());
         assert!(stats.view_index_bytes >= 2 * core::mem::size_of::<usize>());
         assert!(stats.name_index_bytes >= "synthetic_clk".len());
+        assert!(stats.net_index_bytes >= "synthetic_clk".len());
         assert!(stats.connectivity_index_bytes >= "synthetic_clk".len());
         assert_eq!(
             stats.total_bytes,
@@ -2460,6 +3195,7 @@ mod tests {
                 + stats.shape_index_bytes
                 + stats.view_index_bytes
                 + stats.name_index_bytes
+                + stats.net_index_bytes
                 + stats.connectivity_index_bytes
         );
     }

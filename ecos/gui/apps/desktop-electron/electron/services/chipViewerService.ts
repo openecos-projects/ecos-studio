@@ -2,9 +2,15 @@ import {
   execFile as execFileCallback,
   spawn as spawnProcessCallback,
 } from 'node:child_process'
-import { existsSync, type FSWatcher, watch as watchFsDirectoryCallback } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  type FSWatcher,
+  watch as watchFsDirectoryCallback,
+} from 'node:fs'
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import {
   normalizeLocalPath,
   type ChipViewerOpenRequest,
@@ -15,6 +21,7 @@ import {
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build ecc-geometry-snapshot in ecc/chipcompiler/thirdparty/ecc-tools and the ECC CLI package.'
 const DB_CONFIG_RELATIVE_PATH = 'config/db_default_config.json'
+const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
 
 type FileExists = (path: string) => boolean
 type EnsureDirectory = (path: string) => Promise<void>
@@ -27,20 +34,36 @@ type GetFileModifiedTime = (path: string) => Promise<number | null>
 type ReadTextFile = (path: string) => Promise<string>
 type RenameFile = (from: string, to: string) => Promise<void>
 type WriteTextFile = (path: string, content: string) => Promise<void>
+type OpenLogFile = (path: string, flags: string) => number
+type CloseLogFile = (fd: number) => void
 type DirectoryWatcher = Pick<FSWatcher, 'close'>
 type WatchDirectory = (
   path: string,
   listener: (fileName: string) => void,
 ) => DirectoryWatcher
+interface SpawnedViewerProcess {
+  pid?: number
+  unref(): void
+  once(event: 'error', listener: (error: Error) => void): this
+  once(
+    event: 'exit',
+    listener: (code: number | null, signal: string | null) => void,
+  ): this
+  off(event: 'error', listener: (error: Error) => void): this
+  off(event: 'exit', listener: (code: number | null, signal: string | null) => void): this
+}
 type SpawnProcess = (
   file: string,
   args: string[],
   options: {
     detached: boolean
     env: NodeJS.ProcessEnv
-    stdio: 'ignore'
+    stdio: ['ignore', number, number]
   },
-) => { unref(): void }
+) => SpawnedViewerProcess
+
+const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
+  spawnProcessCallback(file, args, options)
 
 interface ChipViewerBinaries {
   eccPath: string
@@ -62,11 +85,15 @@ export interface ChipViewerServiceOptions {
   fileExists?: FileExists
   getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
+  openLogFile?: OpenLogFile
   platform?: NodeJS.Platform
   readTextFile?: ReadTextFile
   renameFile?: RenameFile
   resourcesPath?: string
   spawnProcess?: SpawnProcess
+  closeLogFile?: CloseLogFile
+  viewerLogDirectory?: string
+  viewerStartupCheckMs?: number
   watchDirectory?: WatchDirectory
   writeTextFile?: WriteTextFile
   workspaceResourceService: {
@@ -99,6 +126,19 @@ type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 interface SnapshotSourcePath {
   label: string
   path: string
+}
+
+interface ViewerLogPaths {
+  stderr: string
+  stdout: string
+}
+
+interface ViewerLaunchContext {
+  args: string[]
+  manifestPath: string
+  stderrLogPath: string
+  stdoutLogPath: string
+  viewerPath: string
 }
 
 type SnapshotBuildReason =
@@ -314,20 +354,66 @@ function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
   throw new Error(`Unsupported chip viewer mode: ${String(mode)}`)
 }
 
+function sanitizeLogSegment(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '')
+  return sanitized || 'step'
+}
+
+function createViewerLogPaths(logDirectory: string, step: string): ViewerLogPaths {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const baseName = `${timestamp}-${sanitizeLogSegment(step)}-${process.pid}`
+  return {
+    stderr: join(logDirectory, `${baseName}.stderr.log`),
+    stdout: join(logDirectory, `${baseName}.stdout.log`),
+  }
+}
+
+function createChipViewerProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const {
+    ELECTRON_NO_ATTACH_CONSOLE: _electronNoAttachConsole,
+    ELECTRON_RUN_AS_NODE: _electronRunAsNode,
+    NODE_OPTIONS: _nodeOptions,
+    ...viewerEnv
+  } = env
+  return viewerEnv
+}
+
+function hasLinuxDisplayEnvironment(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env.DISPLAY || env.WAYLAND_DISPLAY || env.WAYLAND_SOCKET)
+}
+
+function viewerLaunchFailureMessage(
+  summary: string,
+  context: ViewerLaunchContext,
+): string {
+  return [
+    summary,
+    `Viewer binary: ${context.viewerPath}`,
+    `Arguments: ${context.args.join(' ')}`,
+    `Manifest: ${context.manifestPath}`,
+    `stdout log: ${context.stdoutLogPath}`,
+    `stderr log: ${context.stderrLogPath}`,
+  ].join('\n')
+}
+
 export class ChipViewerService {
   private readonly appPath: string
   private readonly cwd: string
   private readonly env: NodeJS.ProcessEnv
+  private readonly closeLogFile: CloseLogFile
   private readonly ensureDirectory: EnsureDirectory
   private readonly execFile: ExecFileRunner
   private readonly fileExists: FileExists
   private readonly getFileModifiedTime: GetFileModifiedTime
   private readonly isPackaged: boolean
+  private readonly openLogFile: OpenLogFile
   private readonly platform: NodeJS.Platform
   private readonly readTextFile: ReadTextFile
   private readonly renameFile: RenameFile
   private readonly resourcesPath?: string
   private readonly spawnProcess: SpawnProcess
+  private readonly viewerLogDirectory: string
+  private readonly viewerStartupCheckMs: number
   private readonly watchDirectory: WatchDirectory
   private readonly writeTextFile: WriteTextFile
   private readonly workspaceResourceService: ChipViewerServiceOptions['workspaceResourceService']
@@ -338,16 +424,22 @@ export class ChipViewerService {
     this.appPath = options.appPath
     this.cwd = options.cwd
     this.env = options.env ?? process.env
+    this.closeLogFile = options.closeLogFile ?? closeSync
     this.ensureDirectory = options.ensureDirectory ?? defaultEnsureDirectory
     this.execFile = options.execFile ?? defaultExecFile
     this.fileExists = options.fileExists ?? existsSync
     this.getFileModifiedTime = options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged
+    this.openLogFile = options.openLogFile ?? openSync
     this.platform = options.platform ?? process.platform
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
     this.renameFile = options.renameFile ?? rename
     this.resourcesPath = options.resourcesPath
-    this.spawnProcess = options.spawnProcess ?? spawnProcessCallback
+    this.spawnProcess = options.spawnProcess ?? defaultSpawnProcess
+    this.viewerLogDirectory =
+      options.viewerLogDirectory ?? join(this.cwd, 'chip-viewer-logs')
+    this.viewerStartupCheckMs =
+      options.viewerStartupCheckMs ?? VIEWER_STARTUP_HEALTH_CHECK_MS
     this.watchDirectory = options.watchDirectory ?? defaultWatchDirectory
     this.writeTextFile = options.writeTextFile ?? defaultWriteTextFile
     this.workspaceResourceService = options.workspaceResourceService
@@ -419,12 +511,7 @@ export class ChipViewerService {
       editResultDirectory = snapshotInputs.editResultDirectory
     }
 
-    const child = this.spawnProcess(binaries.viewerPath, viewerArgs, {
-      detached: true,
-      env: this.env,
-      stdio: 'ignore',
-    })
-    child.unref()
+    await this.launchViewer(binaries.viewerPath, viewerArgs, snapshotInputs)
 
     return {
       editCommandDirectory,
@@ -507,6 +594,117 @@ export class ChipViewerService {
       manifestPath: join(geometryDir, 'geometry.manifest'),
       workspaceStepDirectory,
     }
+  }
+
+  private async launchViewer(
+    viewerPath: string,
+    viewerArgs: string[],
+    snapshotInputs: SnapshotInputs,
+  ): Promise<void> {
+    const viewerEnv = createChipViewerProcessEnv(this.env)
+    if (this.platform === 'linux' && !hasLinuxDisplayEnvironment(viewerEnv)) {
+      throw new Error(
+        [
+          'Chip viewer cannot start because no Linux display environment is available.',
+          'Set DISPLAY, WAYLAND_DISPLAY, or WAYLAND_SOCKET before launching ECOS Studio.',
+          `Manifest: ${snapshotInputs.manifestPath}`,
+        ].join('\n'),
+      )
+    }
+
+    await this.ensureDirectory(this.viewerLogDirectory)
+    const logPaths = createViewerLogPaths(
+      this.viewerLogDirectory,
+      basename(snapshotInputs.workspaceStepDirectory),
+    )
+    const launchContext: ViewerLaunchContext = {
+      args: viewerArgs,
+      manifestPath: snapshotInputs.manifestPath,
+      stderrLogPath: logPaths.stderr,
+      stdoutLogPath: logPaths.stdout,
+      viewerPath,
+    }
+
+    let stdoutFd: number | null = null
+    let stderrFd: number | null = null
+    try {
+      stdoutFd = this.openLogFile(logPaths.stdout, 'a')
+      stderrFd = this.openLogFile(logPaths.stderr, 'a')
+      const child = this.spawnProcess(viewerPath, viewerArgs, {
+        detached: true,
+        env: viewerEnv,
+        stdio: ['ignore', stdoutFd, stderrFd],
+      })
+      this.closeOpenLogFile(stdoutFd)
+      stdoutFd = null
+      this.closeOpenLogFile(stderrFd)
+      stderrFd = null
+
+      await this.waitForViewerStartup(child)
+      child.unref()
+    } catch (error) {
+      this.closeOpenLogFile(stdoutFd)
+      this.closeOpenLogFile(stderrFd)
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        viewerLaunchFailureMessage(
+          `Chip viewer failed to launch: ${detail}`,
+          launchContext,
+        ),
+      )
+    }
+  }
+
+  private closeOpenLogFile(fd: number | null): void {
+    if (fd === null) {
+      return
+    }
+    try {
+      this.closeLogFile(fd)
+    } catch {
+      // Launch diagnostics must not fail because the parent copy of a log fd
+      // could not be closed after spawning the viewer.
+    }
+  }
+
+  private waitForViewerStartup(child: SpawnedViewerProcess): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false
+      let timer: ReturnType<typeof setTimeout>
+      const cleanup = () => {
+        clearTimeout(timer)
+        child.off('error', onError)
+        child.off('exit', onExit)
+      }
+      const resolveOnce = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve()
+      }
+      const rejectOnce = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(error)
+      }
+      const onError = (error: Error) => {
+        rejectOnce(new Error(error.message || String(error)))
+      }
+      const onExit = (code: number | null, signal: string | null) => {
+        const codeText = code === null ? 'none' : String(code)
+        const signalText = signal ? `, signal: ${signal}` : ''
+        rejectOnce(
+          new Error(
+            `native viewer exited during startup (exit code: ${codeText}${signalText})`,
+          ),
+        )
+      }
+
+      child.once('error', onError)
+      child.once('exit', onExit)
+      timer = setTimeout(resolveOnce, Math.max(0, this.viewerStartupCheckMs))
+    })
   }
 
   private snapshotArgs(

@@ -172,9 +172,6 @@ function registerHandlers() {
     chipViewerService: {
       open: vi.fn(),
     },
-    layoutViewerService: {
-      open: vi.fn(),
-    },
   }
 
   registerIpc(
@@ -963,30 +960,6 @@ describe('registerIpc', () => {
       }),
       ok: false,
     })
-  })
-
-  it('delegates native layout viewer launches to the layout viewer service', async () => {
-    const { handlers, services } = registerHandlers()
-    const event = { sender: { id: 'web-contents' } }
-    const request = {
-      projectPath: '/tmp/project/home.json',
-      viewJsonPackageRoot: 'output/gcd_route_view',
-    }
-    services.layoutViewerService.open.mockResolvedValue({
-      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
-      packageRoot: '/tmp/project/output/gcd_route_view',
-      spawned: true,
-    })
-
-    await expect(
-      handlers.get(desktopApiIpcChannels.layoutViewerOpen)?.(event, request),
-    ).resolves.toEqual({
-      layoutPackagePath: '/tmp/project/output/gcd_route_view/.layoutpkg',
-      packageRoot: '/tmp/project/output/gcd_route_view',
-      spawned: true,
-    })
-
-    expect(services.layoutViewerService.open).toHaveBeenCalledWith(request)
   })
 
   it('delegates chip viewer launches to the chip viewer service', async () => {

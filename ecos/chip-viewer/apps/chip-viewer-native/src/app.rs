@@ -2,13 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use chip_display::{FillPattern, LayerRole, LayerStyle};
 use chip_render::{RenderCacheStats, RenderPlanCache, ViewTilePlaneCache};
 use chip_view_db::{
     ChipViewDb, ChipViewMemoryStats, ConnectivityMetadata, DeltaStats, GridMetadata, NearestShape,
-    OwnerLocalInfo, ShapeGeometry, SnapshotStats,
+    OwnerLocalInfo, ShapeGeometry, SnapshotStats, UnroutedNetGuide,
 };
 use chipgeom_format::{
     GeometryEditCommand, GeometryEditOp, GeometryEditResult, GeometryEditStatus, LayerId, OwnerRef,
@@ -28,11 +30,22 @@ const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
 pub struct ChipViewerApp {
     state: ViewerState,
     theme_initialized: bool,
+    startup_focus_requested: bool,
+}
+
+struct LoadingViewer {
+    manifest: PathBuf,
+    started_at: Instant,
+    receiver: Receiver<Result<ChipViewDb, String>>,
+    edit_enabled: bool,
+    edit_command_dir: Option<PathBuf>,
+    edit_result_dir: Option<PathBuf>,
 }
 
 struct LoadedViewer {
     db: ChipViewDb,
     stats: SnapshotStats,
+    drawing_category_counts: BTreeMap<DrawingCategory, usize>,
     layers: Vec<LayerUiState>,
     edit_enabled: bool,
     edit_command_dir: Option<PathBuf>,
@@ -105,12 +118,6 @@ struct PendingFocus {
     select_shape_id: Option<ShapeId>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct EndpointFocusTarget {
-    mode: SearchMode,
-    name: String,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 struct ShapeIdLookupAction {
     pending_focus: Option<PendingFocus>,
@@ -180,7 +187,9 @@ enum CoordinateUnit {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ObjectVisibility {
     instances: bool,
-    net: bool,
+    net_signal: bool,
+    net_clock: bool,
+    net_other: bool,
     pdn: bool,
     vias: bool,
     io_pin: bool,
@@ -197,25 +206,29 @@ impl Default for ObjectVisibility {
     fn default() -> Self {
         Self {
             instances: true,
-            net: true,
-            pdn: true,
-            vias: true,
-            io_pin: true,
+            net_signal: false,
+            net_clock: false,
+            net_other: false,
+            pdn: false,
+            vias: false,
+            io_pin: false,
             placement: true,
-            tracks: true,
-            gcells: true,
-            obstructions: true,
+            tracks: false,
+            gcells: false,
+            obstructions: false,
             boundaries: true,
-            fill: true,
-            regions: true,
+            fill: false,
+            regions: false,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum DrawingCategory {
     Instances,
-    Net,
+    NetSignal,
+    NetClock,
+    NetOther,
     Pdn,
     Vias,
     IoPins,
@@ -229,9 +242,11 @@ enum DrawingCategory {
 }
 
 impl DrawingCategory {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 14] = [
         Self::Instances,
-        Self::Net,
+        Self::NetSignal,
+        Self::NetClock,
+        Self::NetOther,
         Self::Pdn,
         Self::Vias,
         Self::IoPins,
@@ -247,7 +262,9 @@ impl DrawingCategory {
     fn label(self) -> &'static str {
         match self {
             Self::Instances => "Instances",
-            Self::Net => "Net",
+            Self::NetSignal => "Signal Nets",
+            Self::NetClock => "Clock Nets",
+            Self::NetOther => "Other Nets",
             Self::Pdn => "PDN",
             Self::Vias => "Vias",
             Self::IoPins => "IO Pins",
@@ -263,6 +280,9 @@ impl DrawingCategory {
 
     fn tooltip(self) -> &'static str {
         match self {
+            Self::NetSignal => "Regular signal net wire segments.",
+            Self::NetClock => "Clock net wire segments from DEF net connect type.",
+            Self::NetOther => "Non-signal and non-clock regular net wire segments.",
             Self::Vias => "Via owners are drawn on their assigned physical layer.",
             Self::Placement | Self::Tracks | Self::GCells | Self::Obstructions => {
                 "Context geometry is shown after zooming in to keep the fitted route view readable."
@@ -277,7 +297,9 @@ impl DrawingCategory {
                 owner_type,
                 OwnerType::InstanceBBox | OwnerType::InstanceHalo
             ),
-            Self::Net => owner_type == OwnerType::NetWireSegment,
+            Self::NetSignal | Self::NetClock | Self::NetOther => {
+                owner_type == OwnerType::NetWireSegment
+            }
             Self::Pdn => owner_type == OwnerType::SpecialWireSegment,
             Self::Vias => owner_type == OwnerType::Via,
             Self::IoPins => matches!(
@@ -299,6 +321,9 @@ impl DrawingCategory {
 
 impl ObjectVisibility {
     fn includes_owner_type(self, owner_type: u8) -> bool {
+        if OwnerType::from_raw(owner_type) == Some(OwnerType::NetWireSegment) {
+            return self.net_signal || self.net_clock || self.net_other;
+        }
         OwnerType::from_raw(owner_type)
             .and_then(|owner_type| {
                 DrawingCategory::ALL
@@ -317,7 +342,9 @@ impl ObjectVisibility {
     fn is_category_visible(self, category: DrawingCategory) -> bool {
         match category {
             DrawingCategory::Instances => self.instances,
-            DrawingCategory::Net => self.net,
+            DrawingCategory::NetSignal => self.net_signal,
+            DrawingCategory::NetClock => self.net_clock,
+            DrawingCategory::NetOther => self.net_other,
             DrawingCategory::Pdn => self.pdn,
             DrawingCategory::Vias => self.vias,
             DrawingCategory::IoPins => self.io_pin,
@@ -334,7 +361,9 @@ impl ObjectVisibility {
     fn set_category_visible(&mut self, category: DrawingCategory, visible: bool) {
         match category {
             DrawingCategory::Instances => self.instances = visible,
-            DrawingCategory::Net => self.net = visible,
+            DrawingCategory::NetSignal => self.net_signal = visible,
+            DrawingCategory::NetClock => self.net_clock = visible,
+            DrawingCategory::NetOther => self.net_other = visible,
             DrawingCategory::Pdn => self.pdn = visible,
             DrawingCategory::Vias => self.vias = visible,
             DrawingCategory::IoPins => self.io_pin = visible,
@@ -352,6 +381,58 @@ impl ObjectVisibility {
         for category in DrawingCategory::ALL {
             self.set_category_visible(category, visible);
         }
+    }
+}
+
+fn drawing_category_counts(db: &ChipViewDb) -> BTreeMap<DrawingCategory, usize> {
+    let mut counts = BTreeMap::<DrawingCategory, usize>::new();
+    for shape in db.snapshot().shapes() {
+        if let Some(category) = drawing_category_for_shape(db, shape) {
+            *counts.entry(category).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn drawing_category_for_shape(db: &ChipViewDb, shape: &ShapeRecord) -> Option<DrawingCategory> {
+    db.owner_for_shape(shape)
+        .and_then(|owner| drawing_category_for_owner(db, owner))
+}
+
+fn drawing_category_for_owner(db: &ChipViewDb, owner: &OwnerRef) -> Option<DrawingCategory> {
+    let owner_type = OwnerType::from_raw(owner.owner_type)?;
+    Some(match owner_type {
+        OwnerType::InstanceBBox | OwnerType::InstanceHalo => DrawingCategory::Instances,
+        OwnerType::NetWireSegment => net_kind_drawing_category(
+            db.owner_name(owner)
+                .and_then(|net_name| db.net_kind_for_name(net_name)),
+        ),
+        OwnerType::SpecialWireSegment => DrawingCategory::Pdn,
+        OwnerType::Via => DrawingCategory::Vias,
+        OwnerType::PinPortShape | OwnerType::InstancePinPortShape | OwnerType::IoPinPortShape => {
+            DrawingCategory::IoPins
+        }
+        OwnerType::Row => DrawingCategory::Placement,
+        OwnerType::TrackGrid => DrawingCategory::Tracks,
+        OwnerType::GCellGrid => DrawingCategory::GCells,
+        OwnerType::Blockage | OwnerType::Obs => DrawingCategory::Obstructions,
+        OwnerType::Die | OwnerType::Core => DrawingCategory::Boundaries,
+        OwnerType::Fill => DrawingCategory::Fill,
+        OwnerType::Region | OwnerType::Slot => DrawingCategory::Regions,
+        _ => return None,
+    })
+}
+
+fn net_kind_drawing_category(kind: Option<&str>) -> DrawingCategory {
+    match kind
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("signal") => DrawingCategory::NetSignal,
+        Some("clock") => DrawingCategory::NetClock,
+        _ => DrawingCategory::NetOther,
     }
 }
 
@@ -445,6 +526,7 @@ impl EditTool {
 }
 
 enum ViewerState {
+    Loading(LoadingViewer),
     Loaded(LoadedViewer),
     Error(String),
 }
@@ -457,23 +539,52 @@ impl ChipViewerApp {
         edit_result_dir: Option<PathBuf>,
     ) -> Self {
         let edit_enabled = mode == "edit";
-        let state = match ChipViewDb::open(&manifest) {
-            Ok(db) => ViewerState::Loaded(LoadedViewer::new(
-                db,
+        let (sender, receiver) = mpsc::channel();
+        let load_manifest = manifest.clone();
+        thread::spawn(move || {
+            let result = ChipViewDb::open(&load_manifest).map_err(|err| err.to_string());
+            let _ = sender.send(result);
+        });
+        Self {
+            state: ViewerState::Loading(LoadingViewer {
+                manifest,
+                started_at: Instant::now(),
+                receiver,
                 edit_enabled,
                 edit_command_dir,
                 edit_result_dir,
-            )),
-            Err(err) => ViewerState::Error(err.to_string()),
-        };
-        Self {
-            state,
+            }),
             theme_initialized: false,
+            startup_focus_requested: false,
         }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         match &mut self.state {
+            ViewerState::Loading(loading) => {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new("CHIP VIEWER")
+                        .small()
+                        .strong()
+                        .color(ecos_accent()),
+                );
+                ui.heading("Loading geometry");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!(
+                        "opening snapshot... {:.1}s",
+                        loading.started_at.elapsed().as_secs_f32()
+                    ));
+                });
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(loading.manifest.display().to_string())
+                        .small()
+                        .color(ecos_text_secondary()),
+                );
+            }
             ViewerState::Loaded(loaded) => loaded.sidebar(ui),
             ViewerState::Error(err) => {
                 ui.add_space(8.0);
@@ -492,11 +603,34 @@ impl ChipViewerApp {
     fn canvas(&mut self, ui: &mut egui::Ui) {
         match &mut self.state {
             ViewerState::Loaded(loaded) => loaded.canvas(ui),
+            ViewerState::Loading(loading) => loading_canvas(ui, loading),
             ViewerState::Error(_) => {
                 ui.centered_and_justified(|ui| {
                     ui.label("No geometry loaded");
                 });
             }
+        }
+    }
+
+    fn poll_loading(&mut self) {
+        let next_state = match &mut self.state {
+            ViewerState::Loading(loading) => match loading.receiver.try_recv() {
+                Ok(Ok(db)) => Some(ViewerState::Loaded(LoadedViewer::new(
+                    db,
+                    loading.edit_enabled,
+                    loading.edit_command_dir.clone(),
+                    loading.edit_result_dir.clone(),
+                ))),
+                Ok(Err(err)) => Some(ViewerState::Error(err)),
+                Err(mpsc::TryRecvError::Disconnected) => Some(ViewerState::Error(
+                    "geometry loader stopped before returning a result".to_string(),
+                )),
+                Err(mpsc::TryRecvError::Empty) => None,
+            },
+            _ => None,
+        };
+        if let Some(state) = next_state {
+            self.state = state;
         }
     }
 }
@@ -510,10 +644,12 @@ impl LoadedViewer {
     ) -> Self {
         let stats = db.stats();
         let snapshot_signature = snapshot_signature_for_db(&db);
+        let drawing_category_counts = drawing_category_counts(&db);
         let layers = layer_ui_states(&db, &BTreeMap::new());
         Self {
             db,
             stats,
+            drawing_category_counts,
             layers,
             edit_enabled,
             edit_command_dir,
@@ -939,93 +1075,32 @@ impl LoadedViewer {
     fn selection_panel(&mut self, ui: &mut egui::Ui) {
         section_heading(ui, "SELECTION");
         let Some(shape_id) = self.selected else {
-            ui.label(
-                egui::RichText::new("No shape selected")
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, "No shape selected");
             return;
         };
         let Some(shape) = self.db.find_shape(shape_id) else {
-            ui.label(
-                egui::RichText::new("Selected shape is no longer available")
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, "Selected shape is no longer available");
             return;
         };
         let owner = self.db.owner_for_shape(shape);
         let owner_name = owner.and_then(|owner| self.db.owner_name(owner));
         let owner_local_name = owner.and_then(|owner| self.db.owner_local_name(owner));
         for line in selection_detail_lines(shape, owner, owner_name, owner_local_name) {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, line);
         }
         for line in edit_capability_lines(shape, owner, self.edit_enabled) {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, line);
         }
         let endpoints = selection_connectivity_endpoints(&self.db, owner, owner_name);
-        let endpoint_header_lines = selection_connectivity_header_lines(&endpoints);
-        let endpoint_rows = endpoints
-            .iter()
-            .take(MAX_SELECTION_ENDPOINT_LINES)
-            .map(|endpoint| {
-                (
-                    selection_connectivity_endpoint_line(endpoint),
-                    endpoint_focus_targets(endpoint),
-                )
-            })
-            .collect::<Vec<_>>();
-        let endpoint_omitted_line = selection_connectivity_omitted_line(&endpoints);
-        for line in endpoint_header_lines {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
-        }
-        for (line, targets) in endpoint_rows {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(line)
-                        .small()
-                        .color(ecos_text_secondary()),
-                );
-                for target in targets {
-                    if ui
-                        .small_button(target.mode.label())
-                        .on_hover_text(target.name.as_str())
-                        .clicked()
-                    {
-                        self.focus_endpoint_target(target);
-                    }
-                }
-            });
-        }
-        if let Some(line) = endpoint_omitted_line {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+        for line in selection_connectivity_lines(&endpoints) {
+            info_panel_label(ui, line);
         }
     }
 
     fn diagnostics_panel(&mut self, ui: &mut egui::Ui) {
         section_heading(ui, "DIAGNOSTICS");
         for line in design_metadata_lines(self.db.snapshot().manifest()) {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, line);
         }
         for line in semantic_metadata_lines(
             self.db.site_metadata().len(),
@@ -1033,14 +1108,11 @@ impl LoadedViewer {
             self.db.via_metadata().len(),
             self.db.grid_metadata().len(),
             self.db.connectivity_metadata().len(),
+            self.db.net_metadata().len(),
             self.db.bus_metadata().len(),
             self.db.group_metadata().len(),
         ) {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, line);
         }
         for line in diagnostics_lines(
             &self.db.memory_stats(),
@@ -1049,11 +1121,7 @@ impl LoadedViewer {
             self.render_cache.stats(),
             self.view_tile_cache.stats(),
         ) {
-            ui.label(
-                egui::RichText::new(line)
-                    .small()
-                    .color(ecos_text_secondary()),
-            );
+            info_panel_label(ui, line);
         }
     }
 
@@ -1258,6 +1326,16 @@ impl LoadedViewer {
             &painter,
             self.db.grid_metadata(),
             &self.layers,
+            self.object_visibility,
+            viewport,
+            world,
+            canvas,
+            self.zoom,
+            self.pan,
+        );
+        drawn += paint_unrouted_net_guides(
+            &painter,
+            self.db.unrouted_net_guides(),
             self.object_visibility,
             viewport,
             world,
@@ -1614,6 +1692,7 @@ impl LoadedViewer {
             .map(|layer| (layer.layer_id, layer.visible))
             .collect();
         self.stats = db.stats();
+        self.drawing_category_counts = drawing_category_counts(&db);
         self.layers = layer_ui_states(&db, &visibility);
         self.db = db;
         self.render_cache.clear();
@@ -1663,15 +1742,6 @@ impl LoadedViewer {
         });
     }
 
-    fn focus_endpoint_target(&mut self, target: EndpointFocusTarget) {
-        self.search_mode = target.mode;
-        self.search_text = target.name;
-        self.refresh_highlight();
-        self.pending_focus = focus_target_for_shape_ids(&self.highlighted, |shape_id| {
-            self.db.find_shape(shape_id).map(|shape| shape.bbox)
-        });
-    }
-
     fn select_shape_id_from_input(&mut self) {
         let action = shape_id_lookup_action(&self.shape_id_text, |shape_id| {
             self.db
@@ -1684,23 +1754,17 @@ impl LoadedViewer {
     }
 
     fn drawing_category_shape_count(&self, category: DrawingCategory) -> usize {
-        self.stats
-            .owner_type_counts
-            .iter()
-            .filter(|(owner_type, _)| {
-                OwnerType::from_raw(**owner_type)
-                    .is_some_and(|owner_type| category.includes_owner_type(owner_type))
-            })
-            .map(|(_, shape_count)| *shape_count)
-            .sum()
+        self.drawing_category_counts
+            .get(&category)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn visible_object_shape_count(&self) -> usize {
-        self.stats
-            .owner_type_counts
-            .iter()
-            .filter(|(owner_type, _)| self.object_visibility.includes_owner_type(**owner_type))
-            .map(|(_, shape_count)| *shape_count)
+        DrawingCategory::ALL
+            .into_iter()
+            .filter(|category| self.object_visibility.is_category_visible(*category))
+            .map(|category| self.drawing_category_shape_count(category))
             .sum()
     }
 
@@ -1726,7 +1790,8 @@ impl LoadedViewer {
         let owner_visible = self
             .db
             .owner_for_shape(shape)
-            .is_none_or(|owner| self.object_visibility.includes_owner_type(owner.owner_type));
+            .and_then(|owner| drawing_category_for_owner(&self.db, owner))
+            .is_none_or(|category| self.object_visibility.is_category_visible(category));
         layer_visible && owner_visible
     }
 
@@ -1799,6 +1864,11 @@ impl eframe::App for ChipViewerApp {
             apply_ecos_theme(ctx);
             self.theme_initialized = true;
         }
+        if !self.startup_focus_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.startup_focus_requested = true;
+        }
+        self.poll_loading();
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.poll_edit_result();
             loaded.poll_external_snapshot_refresh();
@@ -1807,6 +1877,8 @@ impl eframe::App for ChipViewerApp {
             } else {
                 ctx.request_repaint_after(SNAPSHOT_REFRESH_CHECK_INTERVAL);
             }
+        } else if matches!(self.state, ViewerState::Loading(_)) {
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
         egui::SidePanel::right("chip_viewer_operations")
             .resizable(true)
@@ -1818,6 +1890,29 @@ impl eframe::App for ChipViewerApp {
             self.canvas(ui);
         });
     }
+}
+
+fn loading_canvas(ui: &mut egui::Ui, loading: &LoadingViewer) {
+    let available = ui.available_size();
+    let (rect, _) = ui.allocate_exact_size(available, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, ecos_canvas());
+
+    let center = rect.center();
+    painter.text(
+        center + egui::vec2(0.0, -18.0),
+        egui::Align2::CENTER_CENTER,
+        "Loading geometry snapshot",
+        egui::FontId::proportional(18.0),
+        ecos_text_primary(),
+    );
+    painter.text(
+        center + egui::vec2(0.0, 12.0),
+        egui::Align2::CENTER_CENTER,
+        format!("{:.1}s", loading.started_at.elapsed().as_secs_f32()),
+        egui::FontId::proportional(13.0),
+        ecos_text_secondary(),
+    );
 }
 
 fn color32(rgba: [u8; 4]) -> egui::Color32 {
@@ -1842,6 +1937,10 @@ fn ecos_text_primary() -> egui::Color32 {
 
 fn ecos_text_secondary() -> egui::Color32 {
     egui::Color32::from_rgb(161, 161, 170)
+}
+
+fn ecos_info_text() -> egui::Color32 {
+    egui::Color32::from_rgb(216, 216, 224)
 }
 
 fn ecos_accent() -> egui::Color32 {
@@ -1886,6 +1985,10 @@ fn section_heading(ui: &mut egui::Ui, label: &str) {
             .strong()
             .color(ecos_accent()),
     );
+}
+
+fn info_panel_label(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(egui::RichText::new(text).size(12.5).color(ecos_info_text()));
 }
 
 fn single_line_query_text(text: &str) -> String {
@@ -2041,7 +2144,7 @@ fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec
                 enclosure_below: summary.enclosure_below,
                 enclosure_above: summary.enclosure_above,
                 lef58_rule_count: summary.lef58_rule_count,
-                visible: visibility.get(&summary.layer_id).copied().unwrap_or(true),
+                visible: visibility.get(&summary.layer_id).copied().unwrap_or(false),
                 style,
             }
         })
@@ -2541,6 +2644,107 @@ fn paint_parameterized_grid_overlay(
         }
     }
     drawn
+}
+
+fn paint_unrouted_net_guides(
+    painter: &egui::Painter,
+    guides: &[UnroutedNetGuide],
+    visibility: ObjectVisibility,
+    viewport: Rect32,
+    world: Rect32,
+    canvas: egui::Rect,
+    zoom: f32,
+    pan: egui::Vec2,
+) -> usize {
+    let mut drawn = 0usize;
+    for guide in guides {
+        if !unrouted_net_guide_is_visible(guide, visibility, viewport) {
+            continue;
+        }
+        let category = net_kind_drawing_category(Some(&guide.net_kind));
+        let stroke = unrouted_net_guide_stroke(category);
+        let hub = world_to_screen_point(guide.hub, world, canvas, zoom, pan);
+        if canvas.contains(hub) {
+            painter.circle_filled(hub, 2.5, stroke.color);
+        }
+        for pin_center in &guide.pin_centers {
+            let endpoint = world_to_screen_point(*pin_center, world, canvas, zoom, pan);
+            if !screen_line_bounds(hub, endpoint).intersects(canvas) {
+                continue;
+            }
+            if paint_dashed_line(painter, hub, endpoint, stroke, 8.0, 5.0) {
+                drawn += 1;
+            }
+        }
+    }
+    drawn
+}
+
+fn unrouted_net_guide_is_visible(
+    guide: &UnroutedNetGuide,
+    visibility: ObjectVisibility,
+    viewport: Rect32,
+) -> bool {
+    guide.bbox.intersects(viewport)
+        && visibility.is_category_visible(net_kind_drawing_category(Some(&guide.net_kind)))
+}
+
+fn unrouted_net_guide_stroke(category: DrawingCategory) -> egui::Stroke {
+    let color = match category {
+        DrawingCategory::NetClock => egui::Color32::from_rgba_unmultiplied(255, 114, 216, 146),
+        DrawingCategory::NetSignal => egui::Color32::from_rgba_unmultiplied(0, 191, 165, 132),
+        DrawingCategory::NetOther => egui::Color32::from_rgba_unmultiplied(228, 176, 72, 132),
+        _ => egui::Color32::from_rgba_unmultiplied(180, 190, 204, 120),
+    };
+    egui::Stroke::new(1.25, color)
+}
+
+fn paint_dashed_line(
+    painter: &egui::Painter,
+    begin: egui::Pos2,
+    end: egui::Pos2,
+    stroke: egui::Stroke,
+    dash_length: f32,
+    gap_length: f32,
+) -> bool {
+    let segments = dashed_line_segments(begin, end, dash_length, gap_length);
+    let painted = !segments.is_empty();
+    for (dash_begin, dash_end) in segments {
+        painter.line_segment([dash_begin, dash_end], stroke);
+    }
+    painted
+}
+
+fn dashed_line_segments(
+    begin: egui::Pos2,
+    end: egui::Pos2,
+    dash_length: f32,
+    gap_length: f32,
+) -> Vec<(egui::Pos2, egui::Pos2)> {
+    let delta = end - begin;
+    let length = delta.length();
+    if length <= 0.5 {
+        return Vec::new();
+    }
+
+    let dash_length = dash_length.max(1.0);
+    let step = (dash_length + gap_length.max(1.0)).max(2.0);
+    let direction = delta / length;
+    let mut segments = Vec::new();
+    let mut offset = 0.0f32;
+    while offset < length && segments.len() < 256 {
+        let dash_end = (offset + dash_length).min(length);
+        segments.push((begin + direction * offset, begin + direction * dash_end));
+        offset += step;
+    }
+    segments
+}
+
+fn screen_line_bounds(begin: egui::Pos2, end: egui::Pos2) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(begin.x.min(end.x), begin.y.min(end.y)),
+        egui::pos2(begin.x.max(end.x), begin.y.max(end.y)),
+    )
 }
 
 fn parameterized_grid_is_visible(
@@ -3255,6 +3459,7 @@ fn semantic_metadata_lines(
     via_count: usize,
     grid_count: usize,
     connectivity_count: usize,
+    net_count: usize,
     bus_count: usize,
     group_count: usize,
 ) -> Vec<String> {
@@ -3264,6 +3469,7 @@ fn semantic_metadata_lines(
         format!("via definitions: {via_count}"),
         format!("grid definitions: {grid_count}"),
         format!("connectivity endpoints: {connectivity_count}"),
+        format!("net definitions: {net_count}"),
         format!("buses: {bus_count}"),
         format!("groups: {group_count}"),
     ]
@@ -3587,37 +3793,6 @@ fn selection_connectivity_omitted_line(endpoints: &[&ConnectivityMetadata]) -> O
     })
 }
 
-fn endpoint_focus_targets(endpoint: &ConnectivityMetadata) -> Vec<EndpointFocusTarget> {
-    let mut targets = Vec::new();
-    if !endpoint.net_name.is_empty() {
-        targets.push(EndpointFocusTarget {
-            mode: SearchMode::Net,
-            name: endpoint.net_name.clone(),
-        });
-    }
-    if !endpoint.instance_name.is_empty() {
-        targets.push(EndpointFocusTarget {
-            mode: SearchMode::Instance,
-            name: endpoint.instance_name.clone(),
-        });
-    }
-    if !endpoint.pin_name.is_empty() {
-        targets.push(EndpointFocusTarget {
-            mode: SearchMode::Pin,
-            name: endpoint_pin_query_name(endpoint),
-        });
-    }
-    targets
-}
-
-fn endpoint_pin_query_name(endpoint: &ConnectivityMetadata) -> String {
-    if endpoint.instance_name.is_empty() {
-        endpoint.pin_name.clone()
-    } else {
-        format!("{}/{}", endpoint.instance_name, endpoint.pin_name)
-    }
-}
-
 fn selection_connectivity_endpoints<'a>(
     db: &'a ChipViewDb,
     owner: Option<&OwnerRef>,
@@ -3793,6 +3968,7 @@ fn visible_layer_count(layers: &[LayerUiState]) -> usize {
     layers.iter().filter(|layer| layer.visible).count()
 }
 
+#[cfg(test)]
 fn visible_layer_ids(visible_layers: &BTreeMap<LayerId, LayerStyle>) -> Vec<LayerId> {
     visible_layers.keys().copied().collect()
 }
@@ -4679,6 +4855,7 @@ mod tests {
                 shape_index_bytes: 200,
                 view_index_bytes: 300,
                 name_index_bytes: 400,
+                net_index_bytes: 0,
                 connectivity_index_bytes: 0,
                 total_bytes: 1000,
             },
@@ -4769,15 +4946,16 @@ mod tests {
     #[test]
     fn semantic_metadata_lines_report_site_and_master_counts() {
         assert_eq!(
-            semantic_metadata_lines(2, 3, 4, 5, 6, 7, 8),
+            semantic_metadata_lines(2, 3, 4, 5, 6, 7, 8, 9),
             vec![
                 "sites: 2".to_string(),
                 "masters: 3".to_string(),
                 "via definitions: 4".to_string(),
                 "grid definitions: 5".to_string(),
                 "connectivity endpoints: 6".to_string(),
-                "buses: 7".to_string(),
-                "groups: 8".to_string(),
+                "net definitions: 7".to_string(),
+                "buses: 8".to_string(),
+                "groups: 9".to_string(),
             ]
         );
     }
@@ -4787,7 +4965,7 @@ mod tests {
         let endpoints = [
             chip_view_db::ConnectivityMetadata {
                 net_name: "clk".to_string(),
-                net_kind: "regular".to_string(),
+                net_kind: "clock".to_string(),
                 endpoint_type: "instance".to_string(),
                 instance_name: "u0".to_string(),
                 pin_name: "A".to_string(),
@@ -4795,7 +4973,7 @@ mod tests {
             },
             chip_view_db::ConnectivityMetadata {
                 net_name: "clk".to_string(),
-                net_kind: "regular".to_string(),
+                net_kind: "clock".to_string(),
                 endpoint_type: "io".to_string(),
                 pin_name: "CLK".to_string(),
                 ..chip_view_db::ConnectivityMetadata::default()
@@ -4819,7 +4997,7 @@ mod tests {
         let endpoints = (0..8)
             .map(|index| chip_view_db::ConnectivityMetadata {
                 net_name: "data".to_string(),
-                net_kind: "regular".to_string(),
+                net_kind: "signal".to_string(),
                 endpoint_type: "instance".to_string(),
                 instance_name: format!("u{index}"),
                 pin_name: "A".to_string(),
@@ -4832,56 +5010,6 @@ mod tests {
         assert_eq!(lines.len(), 8);
         assert_eq!(lines[0], "connectivity endpoints: 8");
         assert_eq!(lines[7], "endpoints omitted: 2");
-    }
-
-    #[test]
-    fn endpoint_focus_targets_include_search_mode_and_query_name() {
-        let instance_endpoint = chip_view_db::ConnectivityMetadata {
-            net_name: "clk".to_string(),
-            endpoint_type: "instance".to_string(),
-            instance_name: "u0".to_string(),
-            pin_name: "A".to_string(),
-            ..chip_view_db::ConnectivityMetadata::default()
-        };
-
-        assert_eq!(
-            endpoint_focus_targets(&instance_endpoint),
-            vec![
-                EndpointFocusTarget {
-                    mode: SearchMode::Net,
-                    name: "clk".to_string(),
-                },
-                EndpointFocusTarget {
-                    mode: SearchMode::Instance,
-                    name: "u0".to_string(),
-                },
-                EndpointFocusTarget {
-                    mode: SearchMode::Pin,
-                    name: "u0/A".to_string(),
-                },
-            ]
-        );
-
-        let io_endpoint = chip_view_db::ConnectivityMetadata {
-            net_name: "clk".to_string(),
-            endpoint_type: "io".to_string(),
-            pin_name: "CLK".to_string(),
-            ..chip_view_db::ConnectivityMetadata::default()
-        };
-
-        assert_eq!(
-            endpoint_focus_targets(&io_endpoint),
-            vec![
-                EndpointFocusTarget {
-                    mode: SearchMode::Net,
-                    name: "clk".to_string(),
-                },
-                EndpointFocusTarget {
-                    mode: SearchMode::Pin,
-                    name: "CLK".to_string(),
-                },
-            ]
-        );
     }
 
     #[test]
@@ -5077,12 +5205,34 @@ mod tests {
     }
 
     #[test]
+    fn object_visibility_default_matches_startup_drawing_data() {
+        let visibility = ObjectVisibility::default();
+        let enabled = DrawingCategory::ALL
+            .into_iter()
+            .filter(|category| visibility.is_category_visible(*category))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            enabled,
+            vec![
+                DrawingCategory::Instances,
+                DrawingCategory::Placement,
+                DrawingCategory::Boundaries,
+            ]
+        );
+        assert!(!visibility.is_all_visible());
+    }
+
+    #[test]
     fn object_visibility_hides_only_the_requested_owner_categories() {
         let visibility = ObjectVisibility {
             instances: false,
             io_pin: true,
-            net: false,
+            net_signal: false,
+            net_clock: false,
+            net_other: false,
             pdn: true,
+            tracks: true,
             ..ObjectVisibility::default()
         };
 
@@ -5098,8 +5248,26 @@ mod tests {
     }
 
     #[test]
+    fn net_kind_maps_to_drawing_net_categories() {
+        assert_eq!(
+            net_kind_drawing_category(Some("signal")),
+            DrawingCategory::NetSignal
+        );
+        assert_eq!(
+            net_kind_drawing_category(Some("CLOCK")),
+            DrawingCategory::NetClock
+        );
+        assert_eq!(
+            net_kind_drawing_category(Some("power")),
+            DrawingCategory::NetOther
+        );
+        assert_eq!(net_kind_drawing_category(None), DrawingCategory::NetOther);
+    }
+
+    #[test]
     fn extended_drawing_categories_control_vias_and_context_geometry() {
         let mut visibility = ObjectVisibility::default();
+        visibility.set_all_visible(true);
         visibility.set_category_visible(DrawingCategory::Vias, false);
         visibility.set_category_visible(DrawingCategory::Tracks, false);
         visibility.set_category_visible(DrawingCategory::GCells, false);
@@ -5404,6 +5572,8 @@ mod tests {
         let mut layers = vec![layer_state(1, false), layer_state(2, true)];
         layers[0].name = "M1".to_string();
         layers[1].name = "M2".to_string();
+        let mut grid_visibility = ObjectVisibility::default();
+        grid_visibility.set_category_visible(DrawingCategory::Tracks, true);
         let grid = GridMetadata {
             grid_type: "track".to_string(),
             direction: "x".to_string(),
@@ -5417,24 +5587,24 @@ mod tests {
         assert!(!parameterized_grid_is_visible(
             &grid,
             &layers,
-            ObjectVisibility::default(),
+            grid_visibility,
             2.0
         ));
         layers[0].visible = true;
         assert!(parameterized_grid_is_visible(
             &grid,
             &layers,
-            ObjectVisibility::default(),
+            grid_visibility,
             2.0
         ));
         assert!(!parameterized_grid_is_visible(
             &grid,
             &layers,
-            ObjectVisibility::default(),
+            grid_visibility,
             1.0
         ));
 
-        let mut hidden_guides = ObjectVisibility::default();
+        let mut hidden_guides = grid_visibility;
         hidden_guides.set_category_visible(DrawingCategory::Tracks, false);
         assert!(!parameterized_grid_is_visible(
             &grid,
@@ -5442,6 +5612,47 @@ mod tests {
             hidden_guides,
             2.0
         ));
+    }
+
+    #[test]
+    fn unrouted_net_guides_reuse_net_category_visibility_without_layer_filters() {
+        let guide = UnroutedNetGuide {
+            net_name: "clk".to_string(),
+            net_kind: "clock".to_string(),
+            hub: Point32 { x: 50, y: 50 },
+            pin_centers: vec![Point32 { x: 10, y: 10 }, Point32 { x: 90, y: 90 }],
+            bbox: Rect32 {
+                lx: 10,
+                ly: 10,
+                hx: 90,
+                hy: 90,
+            },
+        };
+        let viewport = Rect32 {
+            lx: 0,
+            ly: 0,
+            hx: 100,
+            hy: 100,
+        };
+        let mut visibility = ObjectVisibility::default();
+
+        assert!(!unrouted_net_guide_is_visible(&guide, visibility, viewport));
+
+        visibility.set_category_visible(DrawingCategory::NetClock, true);
+
+        assert!(unrouted_net_guide_is_visible(&guide, visibility, viewport));
+    }
+
+    #[test]
+    fn dashed_line_segments_split_screen_line_into_dashes() {
+        let segments = dashed_line_segments(egui::pos2(0.0, 0.0), egui::pos2(30.0, 0.0), 8.0, 4.0);
+
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[0], (egui::pos2(0.0, 0.0), egui::pos2(8.0, 0.0)));
+        assert_eq!(segments[2], (egui::pos2(24.0, 0.0), egui::pos2(30.0, 0.0)));
+        assert!(
+            dashed_line_segments(egui::pos2(1.0, 1.0), egui::pos2(1.0, 1.0), 8.0, 4.0).is_empty()
+        );
     }
 
     #[test]

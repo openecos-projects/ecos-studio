@@ -1,42 +1,35 @@
+import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createEccRuntimeEnv } from './eccRpc/runtimeEnv'
 import { ChipViewerService } from './chipViewerService'
-import { LayoutViewerService } from './layoutViewerService'
 
 describe('development wrappers', () => {
-  it('uses wrapper scripts for ECC and the layout viewer in development', async () => {
+  it('uses wrapper scripts for ECC and the chip viewer in development', async () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'ecos-studio-dev-wrappers-'))
     const appPath = join(repoRoot, 'ecos', 'gui', 'apps', 'desktop-electron')
     const userDataPath = join(repoRoot, 'user-data')
     const scriptsPath = join(repoRoot, 'ecos', 'scripts')
     const chipViewerPath = join(repoRoot, 'ecos', 'chip-viewer')
-    const layoutViewerPath = join(repoRoot, 'ecos', 'layout-viewer')
     const eccWrapperPath = join(scriptsPath, 'ecc-wrapper.sh')
     const chipViewerWrapperPath = join(scriptsPath, 'chip-viewer-native-wrapper.sh')
     const geometrySnapshotWrapperPath = join(
       scriptsPath,
       'ecc-geometry-snapshot-wrapper.sh',
     )
-    const layoutPackerWrapperPath = join(scriptsPath, 'ecos-layout-packer-wrapper.sh')
-    const layoutViewerWrapperPath = join(scriptsPath, 'layout-viewer-native-wrapper.sh')
 
     mkdirSync(join(repoRoot, 'ecc'), { recursive: true })
     mkdirSync(appPath, { recursive: true })
     mkdirSync(userDataPath, { recursive: true })
     mkdirSync(scriptsPath, { recursive: true })
     mkdirSync(chipViewerPath, { recursive: true })
-    mkdirSync(layoutViewerPath, { recursive: true })
     writeFileSync(join(repoRoot, 'ecc', 'pyproject.toml'), '[project]\nname = "ecc"\n')
     writeFileSync(join(chipViewerPath, 'Cargo.toml'), '[workspace]\n')
-    writeFileSync(join(layoutViewerPath, 'Cargo.toml'), '[workspace]\n')
     writeFileSync(eccWrapperPath, '#!/usr/bin/env bash\n')
     writeFileSync(chipViewerWrapperPath, '#!/usr/bin/env bash\n')
     writeFileSync(geometrySnapshotWrapperPath, '#!/usr/bin/env bash\n')
-    writeFileSync(layoutPackerWrapperPath, '#!/usr/bin/env bash\n')
-    writeFileSync(layoutViewerWrapperPath, '#!/usr/bin/env bash\n')
 
     const env = createEccRuntimeEnv({
       appPath,
@@ -54,49 +47,17 @@ describe('development wrappers', () => {
     expect(env.PATH).toBe(`${runtimeBin}:/usr/bin`)
     expect(readFileSync(eccShimPath, 'utf8')).toContain(`exec "${eccWrapperPath}" "$@"`)
 
-    const execFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
-    const unref = vi.fn()
-    const spawnProcess = vi.fn(() => ({ unref }))
-    const service = new LayoutViewerService({
-      appPath,
-      cwd: appPath,
-      env: {},
-      execFile,
-      fileExists: existsSync,
-      isPackaged: false,
-      platform: 'linux',
-      spawnProcess,
-    })
-    const packageRoot = '/project/output/gcd_route_view'
-    const layoutPackagePath = join(packageRoot, '.layoutpkg')
-
-    await service.open({
-      projectPath: '/project',
-      rebuildPackage: true,
-      viewJsonPackageRoot: packageRoot,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(layoutPackerWrapperPath, [
-      packageRoot,
-      layoutPackagePath,
-    ])
-    expect(spawnProcess).toHaveBeenCalledWith(
-      layoutViewerWrapperPath,
-      [layoutPackagePath],
-      expect.objectContaining({
-        detached: true,
-        stdio: 'ignore',
-      }),
-    )
-    expect(unref).toHaveBeenCalledTimes(1)
-
     let chipManifestWritten = false
     const chipExecFile = vi.fn(async () => {
       chipManifestWritten = true
       return { stderr: '', stdout: '' }
     })
-    const chipUnref = vi.fn()
-    const chipSpawnProcess = vi.fn(() => ({ unref: chipUnref }))
+    const chipViewerChild = new EventEmitter() as EventEmitter & {
+      unref: () => void
+    }
+    const chipUnref = vi.fn(() => undefined)
+    chipViewerChild.unref = chipUnref
+    const chipSpawnProcess = vi.fn(() => chipViewerChild)
     const chipDefPath = '/project/Floorplan_ecc/output/gcd_Floorplan.def.gz'
     const chipDbPath = '/project/Floorplan_ecc/output/gcd_Floorplan_db'
     const chipGdsPath = '/project/Floorplan_ecc/output/gcd_Floorplan.gds'
@@ -107,14 +68,18 @@ describe('development wrappers', () => {
     const chipLefPath = '/pdk/std.lef'
     const chipService = new ChipViewerService({
       appPath,
+      closeLogFile: vi.fn(),
       cwd: appPath,
-      env: {},
+      env: {
+        DISPLAY: ':99',
+      },
       execFile: chipExecFile,
       fileExists: (path) =>
         [chipDefPath, chipDbConfigPath, chipTechLefPath, chipLefPath].includes(path) ||
         (chipManifestWritten && path === chipManifestPath) ||
         existsSync(path),
       isPackaged: false,
+      openLogFile: vi.fn(() => 11),
       platform: 'linux',
       readTextFile: async () =>
         JSON.stringify({
@@ -124,6 +89,8 @@ describe('development wrappers', () => {
           },
         }),
       spawnProcess: chipSpawnProcess,
+      viewerLogDirectory: join(userDataPath, 'logs', 'chip-viewer'),
+      viewerStartupCheckMs: 0,
       workspaceResourceService: {
         resolveStepInfo: async (request) => ({
           id: request.id,
@@ -156,7 +123,7 @@ describe('development wrappers', () => {
       ['--manifest', chipManifestPath, '--mode', 'view'],
       expect.objectContaining({
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
     )
     expect(chipUnref).toHaveBeenCalledTimes(1)

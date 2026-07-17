@@ -45,6 +45,7 @@ pub struct GeometryManifest {
     pub vias: Option<PathBuf>,
     pub grids: Option<PathBuf>,
     pub connectivity: Option<PathBuf>,
+    pub nets: Option<PathBuf>,
     pub buses: Option<PathBuf>,
     pub groups: Option<PathBuf>,
 }
@@ -138,6 +139,12 @@ pub struct ConnectivityMetadata {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NetMetadata {
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BusMetadata {
     pub name: String,
     pub bus_type: String,
@@ -201,6 +208,7 @@ pub struct GeometrySnapshot {
     via_metadata: Vec<ViaMetadata>,
     grid_metadata: Vec<GridMetadata>,
     connectivity_metadata: Vec<ConnectivityMetadata>,
+    net_metadata: Vec<NetMetadata>,
     bus_metadata: Vec<BusMetadata>,
     group_metadata: Vec<GroupMetadata>,
 }
@@ -278,6 +286,7 @@ impl GeometrySnapshot {
         let via_metadata = read_via_metadata(manifest.vias.as_deref())?;
         let grid_metadata = read_grid_metadata(manifest.grids.as_deref())?;
         let connectivity_metadata = read_connectivity_metadata(manifest.connectivity.as_deref())?;
+        let net_metadata = read_net_metadata(manifest.nets.as_deref())?;
         let bus_metadata = read_bus_metadata(manifest.buses.as_deref())?;
         let group_metadata = read_group_metadata(manifest.groups.as_deref())?;
 
@@ -298,6 +307,7 @@ impl GeometrySnapshot {
             via_metadata,
             grid_metadata,
             connectivity_metadata,
+            net_metadata,
             bus_metadata,
             group_metadata,
         };
@@ -367,6 +377,10 @@ impl GeometrySnapshot {
 
     pub fn connectivity_metadata(&self) -> &[ConnectivityMetadata] {
         &self.connectivity_metadata
+    }
+
+    pub fn net_metadata(&self) -> &[NetMetadata] {
+        &self.net_metadata
     }
 
     pub fn bus_metadata(&self) -> &[BusMetadata] {
@@ -503,6 +517,7 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         vias: values.get("vias").map(|value| base.join(value)),
         grids: values.get("grids").map(|value| base.join(value)),
         connectivity: values.get("connectivity").map(|value| base.join(value)),
+        nets: values.get("nets").map(|value| base.join(value)),
         buses: values.get("buses").map(|value| base.join(value)),
         groups: values.get("groups").map(|value| base.join(value)),
     })
@@ -799,7 +814,7 @@ fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMet
         }
         connectivity.push(ConnectivityMetadata {
             net_name: metadata_string(fields[0]),
-            net_kind: metadata_string_with_fallback(fields[1], "regular"),
+            net_kind: metadata_string_with_fallback(fields[1], "other"),
             endpoint_type: metadata_string_with_fallback(fields[2], "unknown"),
             instance_name: metadata_string(fields[3]),
             pin_name: metadata_string(fields[4]),
@@ -807,6 +822,38 @@ fn read_connectivity_metadata(path: Option<&Path>) -> Result<Vec<ConnectivityMet
         });
     }
     Ok(connectivity)
+}
+
+fn read_net_metadata(path: Option<&Path>) -> Result<Vec<NetMetadata>> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut nets = Vec::new();
+    for (line_index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first() == Some(&"name") {
+            continue;
+        }
+        if fields.len() < 2 {
+            anyhow::bail!(
+                "invalid net metadata line {} in {}",
+                line_index + 1,
+                path.display()
+            );
+        }
+        nets.push(NetMetadata {
+            name: metadata_string(fields[0]),
+            kind: metadata_string_with_fallback(fields[1], "other"),
+        });
+    }
+    Ok(nets)
 }
 
 fn read_bus_metadata(path: Option<&Path>) -> Result<Vec<BusMetadata>> {
@@ -1108,6 +1155,7 @@ mod tests {
         assert!(snapshot.via_metadata().is_empty());
         assert!(snapshot.grid_metadata().is_empty());
         assert!(snapshot.connectivity_metadata().is_empty());
+        assert!(snapshot.net_metadata().is_empty());
         assert!(snapshot.bus_metadata().is_empty());
         assert!(snapshot.group_metadata().is_empty());
         assert_eq!(snapshot.mapped_bytes().delta, 0);
@@ -1210,8 +1258,16 @@ mod tests {
         std::fs::write(
             &connectivity_path,
             "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n\
-             clk\tregular\tinstance\tu0\tA\tINVX1\n\
-             clk\tregular\tio\t\tclk_in\t\n",
+             clk\tclock\tinstance\tu0\tA\tINVX1\n\
+             clk\tclock\tio\t\tclk_in\t\n",
+        )
+        .unwrap();
+        let nets_path = snapshot_dir.join("geometry.nets.txt");
+        std::fs::write(
+            &nets_path,
+            "name\tkind\n\
+             clk\tclock\n\
+             data\tunknown\n",
         )
         .unwrap();
         let buses_path = snapshot_dir.join("geometry.buses.txt");
@@ -1248,6 +1304,7 @@ mod tests {
              vias=geometry.vias.txt\n\
              grids=geometry.grids.txt\n\
              connectivity=geometry.connectivity.txt\n\
+             nets=geometry.nets.txt\n\
              buses=geometry.buses.txt\n\
              groups=geometry.groups.txt\n",
         )
@@ -1264,6 +1321,7 @@ mod tests {
             snapshot.manifest().connectivity.as_ref(),
             Some(&connectivity_path)
         );
+        assert_eq!(snapshot.manifest().nets.as_ref(), Some(&nets_path));
         assert_eq!(snapshot.manifest().buses.as_ref(), Some(&buses_path));
         assert_eq!(snapshot.manifest().groups.as_ref(), Some(&groups_path));
         assert_eq!(snapshot.layer_metadata().len(), 2);
@@ -1363,6 +1421,7 @@ mod tests {
         );
         assert_eq!(snapshot.connectivity_metadata().len(), 2);
         assert_eq!(snapshot.connectivity_metadata()[0].net_name, "clk");
+        assert_eq!(snapshot.connectivity_metadata()[0].net_kind, "clock");
         assert_eq!(
             snapshot.connectivity_metadata()[0].endpoint_type,
             "instance"
@@ -1370,6 +1429,19 @@ mod tests {
         assert_eq!(snapshot.connectivity_metadata()[0].instance_name, "u0");
         assert_eq!(snapshot.connectivity_metadata()[0].pin_name, "A");
         assert_eq!(snapshot.connectivity_metadata()[0].master_name, "INVX1");
+        assert_eq!(
+            snapshot.net_metadata(),
+            &[
+                NetMetadata {
+                    name: "clk".to_string(),
+                    kind: "clock".to_string(),
+                },
+                NetMetadata {
+                    name: "data".to_string(),
+                    kind: "unknown".to_string(),
+                },
+            ]
+        );
         assert_eq!(
             snapshot.bus_metadata(),
             &[BusMetadata {

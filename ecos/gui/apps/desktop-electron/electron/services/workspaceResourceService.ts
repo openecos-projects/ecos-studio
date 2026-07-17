@@ -465,9 +465,10 @@ export class WorkspaceResourceService {
     switch (id) {
       case 'layout':
         return existingResourceRefs([
+          step.resources.output.def,
+          step.resources.output.gds,
           step.resources.output.image,
-          step.resources.output.json,
-          step.resources.output.viewJson,
+          step.resources.output.db,
         ])
       case 'views':
         return existingResourceRefs([

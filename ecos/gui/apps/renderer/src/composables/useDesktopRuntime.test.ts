@@ -134,9 +134,6 @@ const desktopBridge = {
     addDesignFiles: async () => ({ added: [], skipped: [] }),
     removeDesignFile: async () => null,
   },
-  layoutViewer: {
-    open: async () => ({ layoutPackagePath: '', packageRoot: '', spawned: true }),
-  },
   workspaceResources: {
     getIndex: async () => ({
       design: '',

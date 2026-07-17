@@ -6,13 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const execFilePromise = promisify(execFileCallback)
 const guiRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
-const REQUIRED_NATIVE_RESOURCES = [
-  'ecos-layout-packer',
-  'layout-viewer-native',
-  'ecc',
-  'ecc-geometry-snapshot',
-  'chip-viewer-native',
-]
+const REQUIRED_NATIVE_RESOURCES = ['ecc', 'ecc-geometry-snapshot', 'chip-viewer-native']
 
 function createCheck(name, status, message, detail) {
   return {

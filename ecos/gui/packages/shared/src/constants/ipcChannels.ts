@@ -71,7 +71,6 @@ export const desktopApiIpcChannels = {
   resourcesImportPdkPath: 'resources:import-pdk-path',
   resourcesImportLocalPath: 'resources:import-local-path',
   resourcesRefreshRegistry: 'resources:refresh-registry',
-  layoutViewerOpen: 'layout-viewer:open',
   chipViewerOpen: 'chip-viewer:open',
   eccRpcHello: 'ecc:rpc-hello',
   eccRpcPing: 'ecc:rpc-ping',

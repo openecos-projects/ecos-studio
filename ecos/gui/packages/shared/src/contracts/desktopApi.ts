@@ -131,18 +131,6 @@ export interface DesktopProjectDirectoryEntry {
   type: 'file' | 'directory'
 }
 
-export interface LayoutViewerOpenRequest {
-  projectPath: string
-  viewJsonPackageRoot: string
-  rebuildPackage?: boolean
-}
-
-export interface LayoutViewerOpenResult {
-  packageRoot: string
-  layoutPackagePath: string
-  spawned: boolean
-}
-
 export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
@@ -262,9 +250,6 @@ export interface DesktopApi {
       path: string,
       listener: (event: DesktopProjectFileChangedEvent) => void,
     ): Promise<DesktopEventUnsubscribe>
-  }
-  layoutViewer: {
-    open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
   chipViewer: {
     open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult>

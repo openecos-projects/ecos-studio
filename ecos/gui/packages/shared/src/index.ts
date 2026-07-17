@@ -19,8 +19,6 @@ export type {
   DesktopSettingsValue,
   ChipViewerOpenRequest,
   ChipViewerOpenResult,
-  LayoutViewerOpenRequest,
-  LayoutViewerOpenResult,
   PdkDetectedFiles,
   ScannedPdkDirectory,
   ScannedRtlDirectory,

@@ -10,13 +10,13 @@ import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
   getElectronMainLogFile,
+  getLogSessionDirectory,
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
 import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import { ChipViewerService } from '../services/chipViewerService'
-import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
 import {
   applyWindowMenuState,
@@ -54,7 +54,6 @@ let services: {
   settingsStore: SettingsStore
   resourceManagerService: ResourceManagerService
   chipViewerService: ChipViewerService
-  layoutViewerService: LayoutViewerService
   shellService: ShellPtyService
   workspaceResourceService: WorkspaceResourceService
   workspaceService: WorkspaceService
@@ -152,14 +151,6 @@ function getDesktopServices() {
     env: runtimeEnv,
     envProvider: runtimeEnvProvider,
   })
-  const layoutViewerService = new LayoutViewerService({
-    appPath: app.getAppPath(),
-    cwd: process.cwd(),
-    env: runtimeEnv,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    resourcesPath: process.resourcesPath,
-  })
   const chipViewerService = new ChipViewerService({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -167,6 +158,7 @@ function getDesktopServices() {
     isPackaged: app.isPackaged,
     platform: process.platform,
     resourcesPath: process.resourcesPath,
+    viewerLogDirectory: join(getLogSessionDirectory(), 'chip-viewer'),
     workspaceResourceService,
   })
 
@@ -177,7 +169,6 @@ function getDesktopServices() {
     remoteContentService,
     projectManifestService,
     resourceManagerService,
-    layoutViewerService,
     settingsStore,
     shellService,
     workspaceResourceService,
@@ -213,7 +204,6 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       projectManifestService: desktopServices.projectManifestService,
       resourceManagerService: desktopServices.resourceManagerService,
       chipViewerService: desktopServices.chipViewerService,
-      layoutViewerService: desktopServices.layoutViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
       workspaceResourceService: desktopServices.workspaceResourceService,

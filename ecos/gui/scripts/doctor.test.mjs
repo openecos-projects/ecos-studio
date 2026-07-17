@@ -36,8 +36,6 @@ describe('runGuiDoctor', () => {
       cwd,
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
@@ -98,8 +96,6 @@ describe('runGuiDoctor', () => {
       cwd,
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
@@ -126,16 +122,12 @@ describe('runGuiDoctor', () => {
     )
   })
 
-  it('requires packaged chip viewer resources alongside legacy layout viewer resources', async () => {
+  it('requires packaged chip viewer resources', async () => {
     const cwd = '/repo/ecos/gui'
 
     const report = await createDoctorFixture({
       cwd,
-      existingPaths: [
-        join(cwd, 'node_modules/.modules.yaml'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecos-layout-packer'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/layout-viewer-native'),
-      ],
+      existingPaths: [join(cwd, 'node_modules/.modules.yaml')],
       commands: [
         ['pnpm --version', { stdout: '11.0.9\n' }],
         ['ecc --version', { stdout: 'ecc 0.1.0a5\n' }],

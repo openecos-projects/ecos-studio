@@ -10,7 +10,6 @@ import type {
   DesktopFileDialogOptions,
   DesktopRtlSourceDialogOptions,
   ChipViewerOpenRequest,
-  LayoutViewerOpenRequest,
   DesktopMenuEventId,
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
@@ -266,10 +265,6 @@ const desktopApi: DesktopApi = {
         )
       }
     },
-  },
-  layoutViewer: {
-    open: (request: LayoutViewerOpenRequest) =>
-      invokeDesktop(desktopApiIpcChannels.layoutViewerOpen, request),
   },
   chipViewer: {
     open: (request: ChipViewerOpenRequest) =>
