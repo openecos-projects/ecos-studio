@@ -9,4 +9,19 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).toContain('query: route.query')
     expect(source).not.toContain(`:to="'/workspace/' + stage.path"`)
   })
+
+  it('keeps full-flow run controls visible for frontend workspaces', () => {
+    const overviewTemplate = source.slice(
+      source.indexOf('<template v-if="showOverviewPanel">'),
+      source.indexOf('<template v-else-if="showSubflowPanel">'),
+    )
+    const subflowTemplate = source.slice(
+      source.indexOf('<template v-else-if="showSubflowPanel">'),
+    )
+
+    expect(source).toContain("isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS'")
+    expect(source).toContain('await runAllFlow({ rerun: isRerun.value })')
+    expect(overviewTemplate).not.toContain('v-if="!isFrontendProject"')
+    expect(subflowTemplate).toContain('v-if="!isFrontendProject"')
+  })
 })

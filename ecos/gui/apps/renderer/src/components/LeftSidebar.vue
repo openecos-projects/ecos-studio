@@ -285,7 +285,6 @@
 
         <!-- 底部操作栏 -->
         <div
-          v-if="!isFrontendProject"
           class="space-y-2 border-t border-(--border-color) bg-(--bg-secondary)/30 p-3"
         >
           <!-- Runtime event message display area -->
@@ -590,6 +589,7 @@
 
         <!-- 底部操作栏 -->
         <div
+          v-if="!isFrontendProject"
           class="space-y-2 border-t border-(--border-color) bg-(--bg-secondary)/30 p-3"
         >
           <!-- 操作按钮组 -->

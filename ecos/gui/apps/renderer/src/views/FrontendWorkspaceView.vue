@@ -650,10 +650,7 @@
                     <button
                       type="button"
                       class="text-action"
-                      @click="
-                        reviewMode = reviewNextAction.mode
-                        activeTab = 'review'
-                      "
+                      @click="openReviewMode(reviewNextAction.mode)"
                     >
                       <i class="ri-arrow-right-line"></i>
                       Open {{ reviewNextAction.label }}
@@ -1904,10 +1901,7 @@
                   type="button"
                   class="console-tab"
                   :class="{ active: consoleTab === 'problems' }"
-                  @click="
-                    consoleTab = 'problems'
-                    consoleCollapsed = false
-                  "
+                  @click="openConsoleTab('problems')"
                 >
                   <i class="ri-error-warning-line"></i>
                   <span>Problems</span>
@@ -1917,10 +1911,7 @@
                   type="button"
                   class="console-tab"
                   :class="{ active: consoleTab === 'log' }"
-                  @click="
-                    consoleTab = 'log'
-                    consoleCollapsed = false
-                  "
+                  @click="openConsoleTab('log')"
                 >
                   <i class="ri-terminal-box-line"></i>
                   <span>Log</span>
@@ -4876,6 +4867,16 @@ function hotspotKey(hotspot: ReviewHotspot): string {
     hotspot.source || '',
     hotspot.line || '',
   ].join(':')
+}
+
+function openReviewMode(mode: ReviewMode): void {
+  reviewMode.value = mode
+  activeTab.value = 'review'
+}
+
+function openConsoleTab(tab: ConsoleTabId): void {
+  consoleTab.value = tab
+  consoleCollapsed.value = false
 }
 
 function openReviewHotspot(hotspot: ReviewHotspot): void {
