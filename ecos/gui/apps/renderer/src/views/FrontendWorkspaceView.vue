@@ -1767,7 +1767,10 @@
                         </button>
                       </div>
                     </header>
-                    <div v-if="selectedCase?.failure" class="sim-failure-summary">
+                    <div
+                      v-if="selectedCase && !selectedCase.ok && selectedCase.failure"
+                      class="sim-failure-summary"
+                    >
                       <strong>{{
                         selectedCase.failure.message ||
                         titleCase(selectedCase.failure.kind || 'simulation failure')
