@@ -139,6 +139,10 @@ function createService(options: {
     vi.fn(async (_file: string, args: string[]) => {
       if (args.includes('--mode') && args.includes('snapshot')) {
         existingPaths.add(GEOMETRY_MANIFEST)
+        files.set(GEOMETRY_MANIFEST, geometryManifest())
+        for (const path of DEFAULT_MANIFEST_FILE_PATHS) {
+          existingPaths.add(path)
+        }
       }
       return {
         stderr: '',
@@ -1091,6 +1095,48 @@ describe('ChipViewerService', () => {
       `Snapshot command completed but did not create manifest: ${GEOMETRY_MANIFEST}`,
     )
     expect(message).toContain('stdout: completed without writing files')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('reports an invalid manifest when snapshot generation exits successfully with incomplete output', async () => {
+    const devBinaries = devChipViewerPaths()
+    const execFile = vi.fn(async () => ({
+      stderr: '',
+      stdout: 'completed with incomplete files',
+    }))
+    const { service, spawnProcess } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [GEOMETRY_MANIFEST]: geometryManifest(),
+      },
+      modifiedTimes: {
+        [GEOMETRY_MANIFEST]: 10,
+        [LEF_A]: 20,
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected invalid generated manifest to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      'Snapshot command completed but wrote an invalid manifest: manifest meta file does not exist',
+    )
+    expect(message).toContain('stdout: completed with incomplete files')
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 

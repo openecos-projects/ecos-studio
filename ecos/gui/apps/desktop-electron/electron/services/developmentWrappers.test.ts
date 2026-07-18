@@ -63,6 +63,33 @@ describe('development wrappers', () => {
     const chipGdsPath = '/project/Floorplan_ecc/output/gcd_Floorplan.gds'
     const chipImagePath = '/project/Floorplan_ecc/output/gcd_Floorplan.png'
     const chipManifestPath = '/project/Floorplan_ecc/output/geometry/geometry.manifest'
+    const chipGeometryEpochDir = '/project/Floorplan_ecc/output/geometry/epochs/1'
+    const chipGeometryFiles = [
+      `${chipGeometryEpochDir}/geometry.meta.bin`,
+      `${chipGeometryEpochDir}/geometry.shapes.bin`,
+      `${chipGeometryEpochDir}/geometry.owners.bin`,
+      `${chipGeometryEpochDir}/geometry.payload.bin`,
+      `${chipGeometryEpochDir}/geometry.names.bin`,
+      `${chipGeometryEpochDir}/geometry.name_index.bin`,
+      `${chipGeometryEpochDir}/geometry.sidmap.bin`,
+      `${chipGeometryEpochDir}/geometry.view.bin`,
+    ]
+    const chipGeometryManifest = [
+      'schema_version=1',
+      'active_epoch=1',
+      'shape_count=1',
+      'owner_count=1',
+      'payload_size=1',
+      'meta=epochs/1/geometry.meta.bin',
+      'shapes=epochs/1/geometry.shapes.bin',
+      'owners=epochs/1/geometry.owners.bin',
+      'payload=epochs/1/geometry.payload.bin',
+      'names=epochs/1/geometry.names.bin',
+      'name_index=epochs/1/geometry.name_index.bin',
+      'sidmap=epochs/1/geometry.sidmap.bin',
+      'view=epochs/1/geometry.view.bin',
+      '',
+    ].join('\n')
     const chipDbConfigPath = '/project/config/db_default_config.json'
     const chipTechLefPath = '/pdk/tech.lef'
     const chipLefPath = '/pdk/std.lef'
@@ -77,17 +104,22 @@ describe('development wrappers', () => {
       fileExists: (path) =>
         [chipDefPath, chipDbConfigPath, chipTechLefPath, chipLefPath].includes(path) ||
         (chipManifestWritten && path === chipManifestPath) ||
+        (chipManifestWritten && chipGeometryFiles.includes(path)) ||
         existsSync(path),
       isPackaged: false,
       openLogFile: vi.fn(() => 11),
       platform: 'linux',
-      readTextFile: async () =>
-        JSON.stringify({
+      readTextFile: async (path) => {
+        if (path === chipManifestPath) {
+          return chipGeometryManifest
+        }
+        return JSON.stringify({
           INPUT: {
             lef_paths: [chipLefPath],
             tech_lef_path: chipTechLefPath,
           },
-        }),
+        })
+      },
       spawnProcess: chipSpawnProcess,
       viewerLogDirectory: join(userDataPath, 'logs', 'chip-viewer'),
       viewerStartupCheckMs: 0,

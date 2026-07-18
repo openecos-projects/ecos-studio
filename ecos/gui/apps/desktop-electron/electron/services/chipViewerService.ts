@@ -1213,6 +1213,17 @@ export class ChipViewerService {
           result,
         )
       }
+      const invalidManifest = await this.findInvalidSnapshotManifest(
+        snapshotInputs.manifestPath,
+      )
+      if (invalidManifest) {
+        throw Object.assign(
+          new Error(
+            `Snapshot command completed but wrote an invalid manifest: ${invalidManifest}`,
+          ),
+          result,
+        )
+      }
     } catch (error) {
       const details = [
         `Geometry snapshot generation failed while ${snapshotBuildReasonText(
