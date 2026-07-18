@@ -10,7 +10,7 @@ if [ ! -f "$SMOKE_SCRIPT" ]; then
 fi
 
 help_output="$(bash "$SMOKE_SCRIPT" --help)"
-for expected in "--workspace" "--step" "--out" "--dry-run" "chipgeom-probe"; do
+for expected in "--workspace" "--step" "--out" "--bench-viewport" "--max-viewport-p95-ns" "--dry-run" "summary.jsonl" "chipgeom-probe"; do
   if [[ "$help_output" != *"$expected"* ]]; then
     echo "missing help text: $expected" >&2
     exit 1
@@ -27,9 +27,13 @@ dry_run_output="$(
     --dry-run \
     --workspace "$workspace" \
     --step place \
+    --bench-viewport \
+    --iterations 3 \
+    --layer 1 \
+    --bbox 0 0 10 10 \
     --out /tmp/chip-viewer-workspace-smoke-test
 )"
-for expected in "cargo run -p chipgeom-probe" "place_dreamplace" "geometry.manifest" "/tmp/chip-viewer-workspace-smoke-test"; do
+for expected in "cargo run -p chipgeom-probe" "place_dreamplace" "geometry.manifest" "--bench-viewport" "--layer 1" "--bbox 0 0 10 10" "--iterations 3" "summary.jsonl" "/tmp/chip-viewer-workspace-smoke-test"; do
   if [[ "$dry_run_output" != *"$expected"* ]]; then
     echo "missing dry-run command fragment: $expected" >&2
     exit 1
