@@ -18,6 +18,7 @@ export type QorPolarity =
   | 'trend_only'
 
 export type QorStatus = 'Green' | 'Yellow' | 'Orange' | 'Red' | 'Blocked'
+export type QorGateStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 
 export interface ProjectQorWorkspaceInput {
   workspaceId: string
@@ -36,11 +37,10 @@ export interface ProjectQorWorkspaceInput {
   stepStatuses: Partial<Record<FlowStep, ProjectStepStatus>>
 }
 
-export interface LegacyStepMetricInput {
+export interface QorStepMetricInput {
   workspaceId: string
   workspacePath: string
   step: FlowStep
-  sourceFile: string
   text: string | null | undefined
 }
 
@@ -54,6 +54,10 @@ export interface ProjectQorMetricRecord {
   unit?: string
   dimension: QorDimension
   polarity: QorPolarity
+  scope: string
+  corner: string | null
+  projectRole: 'final' | 'trend' | 'gate' | 'none'
+  stepRole: 'primary' | 'secondary' | 'detail' | 'hidden'
   sourceFile: string
   confidence: 'high' | 'medium' | 'low'
 }
@@ -90,7 +94,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   workspacePath: string
   status: QorStatus
   overallScore: number | null
-  hardGateCap: number
+  gateStatus: QorGateStatus
   areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
@@ -133,8 +137,7 @@ export interface ProjectQorScoreDimensionDetail {
 
 export interface ProjectQorScoreDetail {
   overallScore: number | null
-  hardGateCap: number
-  hasHardGateCap: boolean
+  gateStatus: QorGateStatus
   dimensions: ProjectQorScoreDimensionDetail[]
 }
 
@@ -220,15 +223,17 @@ export interface ProjectQorTimingSummary {
   unavailableWorkspaceCount: number
 }
 
-interface LegacyMetricMapping {
+type QorMetricConfidence = ProjectQorMetricRecord['confidence']
+type QorMetricProjectRole = ProjectQorMetricRecord['projectRole']
+type QorMetricStepRole = ProjectQorMetricRecord['stepRole']
+
+interface QorMetricDefinition {
   metricName: string
   displayName: string
   unit?: string
   dimension: QorDimension
   polarity: QorPolarity
 }
-
-type QorMetricConfidence = ProjectQorMetricRecord['confidence']
 
 const QOR_FLOW_STEPS: FlowStep[] = [
   'Synth',
@@ -244,21 +249,6 @@ const QOR_FLOW_STEPS: FlowStep[] = [
   'STA',
   'Harden',
 ]
-
-const STEP_ANALYSIS_SOURCE_FILES: Record<FlowStep, string> = {
-  Synth: 'Synthesis_yosys/analysis/Synthesis_metrics.json',
-  Floor: 'Floorplan_ecc/analysis/Floorplan_metrics.json',
-  Fanout: 'fixFanout_ecc/analysis/fixFanout_metrics.json',
-  Place: 'place_dreamplace/analysis/place_metrics.json',
-  CTS: 'CTS_ecc/analysis/CTS_metrics.json',
-  Legal: 'legalization_dreamplace/analysis/legalization_metrics.json',
-  Route: 'route_ecc/analysis/route_metrics.json',
-  DRC: 'drc_ecc/analysis/drc_metrics.json',
-  Filler: 'filler_ecc/analysis/filler_metrics.json',
-  RCX: 'RCX_ecc/analysis/RCX_metrics.json',
-  STA: 'sta_ecc/analysis/sta_metrics.json',
-  Harden: 'Harden_ecc/analysis/Harden_metrics.json',
-}
 
 const QOR_DIMENSIONS: QorDimension[] = [
   'timing',
@@ -277,7 +267,11 @@ const QOR_POLARITIES: QorPolarity[] = [
 
 const QOR_CONFIDENCES: QorMetricConfidence[] = ['high', 'medium', 'low']
 
-const LEGACY_METRIC_MAP: Record<string, LegacyMetricMapping> = {
+const QOR_PROJECT_ROLES: QorMetricProjectRole[] = ['final', 'trend', 'gate', 'none']
+
+const QOR_STEP_ROLES: QorMetricStepRole[] = ['primary', 'secondary', 'detail', 'hidden']
+
+const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
   'cell area': {
     metricName: 'synthesis_cell_area',
     displayName: 'Synthesis Cell Area',
@@ -745,6 +739,10 @@ const LEGACY_METRIC_MAP: Record<string, LegacyMetricMapping> = {
   },
 }
 
+const QOR_METRIC_IDS = new Set(
+  Object.values(QOR_METRIC_REGISTRY).map((definition) => definition.metricName),
+)
+
 const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
   timing: 0.35,
   power_integrity: 0.25,
@@ -805,7 +803,7 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
     id: 'sta_analysis',
     label: 'STA QoR analysis',
     reason:
-      'sta_ecc/analysis/sta_metrics.json is not available in the current workspace data.',
+      'sta_ecc/analysis/qor_metrics.json is not available in the current workspace data.',
     status: '待后续开发',
   },
   {
@@ -818,20 +816,20 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
     id: 'qor_metrics_standard_output',
     label: 'Standard qor_metrics.json',
     reason:
-      'Current ECC workspaces provide legacy *_metrics.json files; standard QoR output is not generated yet.',
+      'No schema v2 qor_metrics.json artifact is available in the current workspace data.',
     status: '待后续开发',
   },
   {
     id: 'qor_summary_standard_output',
     label: 'Standard qor_summary.json',
-    reason:
-      'Step-level QoR summary, risk summary, missing metrics, and blocking issue output is not generated yet.',
+    reason: 'No schema v2 step QoR summary is available in the current workspace data.',
     status: '待后续开发',
   },
   {
     id: 'qor_hotspots',
     label: 'Spatial hotspot QoR data',
-    reason: 'qor_hotspots.json is not generated by analysis modules yet.',
+    reason:
+      'No schema v2 qor_hotspots.json artifact is available in the current workspace data.',
     status: '待后续开发',
   },
   {
@@ -843,47 +841,9 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
   },
 ]
 
-export function normalizeLegacyStepMetrics(
-  input: LegacyStepMetricInput,
-): ProjectQorMetricRecord[] {
+export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetricRecord[] {
   const record = parseJsonObject(input.text)
-  if (!record) return []
-
-  const standardRecords = normalizeStandardQorMetrics(record, input)
-  if (standardRecords.length > 0) return standardRecords
-
-  return Object.entries(record).flatMap(([rawKey, rawValue]) => {
-    if (rawKey.trim().toLowerCase() === 'tool') return []
-
-    const value = flexibleNumber(rawValue)
-    if (value === null) return []
-
-    const mapping = legacyMetricMapping(rawKey)
-    if (!mapping) return []
-
-    return [
-      {
-        workspaceId: input.workspaceId,
-        workspacePath: input.workspacePath,
-        step: input.step,
-        metricName: mapping.metricName,
-        displayName: mapping.displayName,
-        value,
-        unit: mapping.unit,
-        dimension: mapping.dimension,
-        polarity: mapping.polarity,
-        sourceFile: input.sourceFile,
-        confidence: 'high',
-      },
-    ]
-  })
-}
-
-function normalizeStandardQorMetrics(
-  record: Record<string, unknown>,
-  input: LegacyStepMetricInput,
-): ProjectQorMetricRecord[] {
-  if (!Array.isArray(record.metrics)) return []
+  if (record?.schema_version !== 2 || !Array.isArray(record.metrics)) return []
 
   return record.metrics.flatMap((rawMetric) => {
     if (!rawMetric || typeof rawMetric !== 'object' || Array.isArray(rawMetric)) {
@@ -891,14 +851,31 @@ function normalizeStandardQorMetrics(
     }
 
     const metric = rawMetric as Record<string, unknown>
-    const metricName = stringValue(metric.name)
+    const metricName = stringValue(metric.id)
     const value = flexibleNumber(metric.value)
-    const dimension = qorDimensionValue(metric.dimension)
-    const polarity = qorPolarityValue(metric.polarity)
-    if (!metricName || value === null || !dimension || !polarity) return []
+    const dimension = qorDimensionValue(metric.category)
+    const polarity = qorPolarityValue(metric.direction)
+    const scope = stringValue(metric.scope)
+    const projectRole = qorProjectRoleValue(metric.project_role)
+    const stepRole = qorStepRoleValue(metric.step_role)
+    const source = isRecord(metric.source) ? metric.source : null
+    const sourceFile = relativeAnalysisPath(source?.path)
+    const corner = metric.corner === null ? null : stringValue(metric.corner)
+    if (
+      !metricName ||
+      value === null ||
+      !dimension ||
+      !polarity ||
+      !scope ||
+      !projectRole ||
+      !stepRole ||
+      !sourceFile ||
+      (metric.corner !== null && corner === null)
+    ) {
+      return []
+    }
 
     const unit = stringValue(metric.unit)
-    const sourceFile = stringValue(metric.source_file) ?? input.sourceFile
 
     return [
       {
@@ -912,6 +889,10 @@ function normalizeStandardQorMetrics(
         unit: unit || undefined,
         dimension,
         polarity,
+        scope,
+        corner,
+        projectRole,
+        stepRole,
         sourceFile,
         confidence: qorConfidenceValue(metric.confidence),
       },
@@ -994,18 +975,11 @@ export function buildProjectQorScoreDetail(
       },
     ]
   })
-  const usedWeight = dimensions.reduce(
-    (total, dimension) => total + dimension.configuredWeight,
-    0,
-  )
-
   return {
     overallScore: workspace.overallScore,
-    hardGateCap: workspace.hardGateCap,
-    hasHardGateCap: workspace.hardGateCap < 100,
+    gateStatus: workspace.gateStatus,
     dimensions: dimensions.map((dimension) => {
-      const effectiveWeight =
-        usedWeight === 0 ? 0 : dimension.configuredWeight / usedWeight
+      const effectiveWeight = dimension.configuredWeight
       return {
         ...dimension,
         effectiveWeight: roundScore(effectiveWeight * 100),
@@ -1020,7 +994,7 @@ export function buildProjectQorTrendReport(
   metadata: ProjectQorTrendReportMetadata = {},
 ) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: metadata.generatedAt ?? new Date().toISOString(),
     project: {
       id: metadata.projectId ?? '',
@@ -1041,7 +1015,7 @@ export function buildProjectQorTrendReport(
       workspace_path: workspace.workspacePath,
       status: workspace.status,
       overall_score: workspace.overallScore,
-      hard_gate_cap: workspace.hardGateCap,
+      gate_status: workspace.gateStatus,
       area_scoring_step: workspace.areaScoringStep,
       dimension_scores: workspace.dimensionScores,
       record_count: workspace.records.length,
@@ -1053,6 +1027,10 @@ export function buildProjectQorTrendReport(
         unit: record.unit ?? '',
         dimension: record.dimension,
         polarity: record.polarity,
+        scope: record.scope,
+        corner: record.corner,
+        project_role: record.projectRole,
+        step_role: record.stepRole,
         source_file: record.sourceFile,
         confidence: record.confidence,
       })),
@@ -1208,14 +1186,15 @@ function buildWorkspaceSummary(
   workspace: ProjectQorWorkspaceInput,
 ): ProjectQorTrendWorkspaceSummary {
   const records = QOR_FLOW_STEPS.flatMap((step) =>
-    normalizeLegacyStepMetrics({
+    normalizeQorMetrics({
       workspaceId: workspace.workspaceId,
       workspacePath: workspace.workspacePath,
       step,
-      sourceFile: STEP_ANALYSIS_SOURCE_FILES[step],
       text: workspace.stepMetricTexts[step],
     }),
   )
+  const areaScoringStep = resolveLastSuccessfulStep(workspace.stepStatuses)
+  const projectRecords = selectProjectRecords(records, areaScoringStep)
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter(
     (step) => !workspace.stepMetricTexts[step],
   )
@@ -1228,23 +1207,25 @@ function buildWorkspaceSummary(
   const hotspots = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorHotspots(step, workspace.stepHotspotTexts?.[step]),
   )
-  const hardGateCap = hasDrcViolation(records) || blockingIssues.length > 0 ? 60 : 100
-  const areaScoringStep = resolveLastSuccessfulStep(workspace.stepStatuses)
-  const dimensionScores = buildDimensionScores(records, areaScoringStep)
+  const gateStatus = resolveWorkspaceGateStatus(
+    workspace.stepStatuses,
+    workspace.stepSummaryTexts,
+    blockingIssues,
+  )
+  const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
   const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore =
-    weightedScore === null ? null : roundScore(Math.min(weightedScore, hardGateCap))
+  const overallScore = weightedScore === null ? null : roundScore(weightedScore)
 
   return {
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     workspacePath: workspace.workspacePath,
-    status: workspaceStatus(workspace.status, overallScore, hardGateCap),
+    status: workspaceStatus(workspace.status, overallScore, gateStatus),
     overallScore,
-    hardGateCap,
+    gateStatus,
     areaScoringStep,
     dimensionScores,
-    records,
+    records: projectRecords,
     blockingIssues,
     hotspots,
     missingAnalysisSteps,
@@ -1253,6 +1234,62 @@ function buildWorkspaceSummary(
       ...summaryMissingMetrics,
     ]),
   }
+}
+
+const PROJECT_GATE_STEPS: FlowStep[] = ['Route', 'DRC', 'RCX', 'STA', 'Harden']
+
+function resolveWorkspaceGateStatus(
+  stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
+  summaryTexts: ProjectQorWorkspaceInput['stepSummaryTexts'],
+  blockingIssues: ProjectQorBlockingIssue[],
+): QorGateStatus {
+  const knownStepStatuses = Object.values(stepStatuses).length > 0
+  if (!knownStepStatuses) {
+    return blockingIssues.length > 0 ? 'blocked' : 'unavailable'
+  }
+  if (blockingIssues.length > 0) return 'blocked'
+
+  for (const step of PROJECT_GATE_STEPS) {
+    if (stepStatuses[step] !== 'success') return 'incomplete'
+    const status = qorSummaryStatus(summaryTexts?.[step])
+    if (status === 'blocked') return 'blocked'
+    if (status !== 'pass') return 'incomplete'
+  }
+  return 'pass'
+}
+
+function selectProjectRecords(
+  records: ProjectQorMetricRecord[],
+  areaScoringStep: FlowStep | null,
+): ProjectQorMetricRecord[] {
+  const selected = new Map<string, ProjectQorMetricRecord>()
+  for (const record of records) {
+    if (record.projectRole === 'none') continue
+    if (record.dimension === 'area_cost' && record.step !== areaScoringStep) continue
+
+    const current = selected.get(record.metricName)
+    if (!current || compareProjectRecordSelection(record, current) < 0) {
+      selected.set(record.metricName, record)
+    }
+  }
+  return Array.from(selected.values()).sort((left, right) =>
+    left.metricName.localeCompare(right.metricName),
+  )
+}
+
+function compareProjectRecordSelection(
+  left: ProjectQorMetricRecord,
+  right: ProjectQorMetricRecord,
+): number {
+  const rolePriority: Record<ProjectQorMetricRecord['projectRole'], number> = {
+    final: 0,
+    gate: 1,
+    trend: 2,
+    none: 3,
+  }
+  const roleDelta = rolePriority[left.projectRole] - rolePriority[right.projectRole]
+  if (roleDelta !== 0) return roleDelta
+  return QOR_FLOW_STEPS.indexOf(right.step) - QOR_FLOW_STEPS.indexOf(left.step)
 }
 
 function buildProjectQorRisks(
@@ -1386,11 +1423,12 @@ function weightedOverallScore(
   }
 
   if (usedWeight === 0) return null
-  return weightedTotal / usedWeight
+  return weightedTotal
 }
 
 function scoreRecord(record: ProjectQorMetricRecord): number | null {
   if (record.value === null || record.polarity === 'trend_only') return null
+  if (!QOR_METRIC_IDS.has(record.metricName)) return null
 
   if (
     record.metricName === 'sta_setup_wns' ||
@@ -1642,16 +1680,10 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values))
 }
 
-function hasDrcViolation(records: ProjectQorMetricRecord[]): boolean {
-  return records.some(
-    (record) => record.metricName === 'drc_count' && (record.value ?? 0) > 0,
-  )
-}
-
 function workspaceStatus(
   workspaceStatus: ProjectWorkspaceStatus,
   score: number | null,
-  hardGateCap: number,
+  gateStatus: QorGateStatus,
 ): QorStatus {
   if (
     workspaceStatus === 'failed' ||
@@ -1661,7 +1693,8 @@ function workspaceStatus(
   ) {
     return workspaceStatus === 'failed' ? 'Red' : 'Blocked'
   }
-  if (hardGateCap < 100) return 'Orange'
+  if (gateStatus === 'blocked') return 'Orange'
+  if (gateStatus === 'incomplete') return 'Yellow'
   if (score === null) return 'Blocked'
   if (score >= 40) return 'Green'
   if (score >= 25) return 'Yellow'
@@ -1680,6 +1713,10 @@ function parseJsonObject(
   } catch {
     return null
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 type StaTimingAnalysisStatus = 'clean' | 'at_risk' | 'incomplete' | 'unavailable'
@@ -1812,22 +1849,30 @@ function isStringArray(value: unknown): value is string[] {
 
 function hasStandardQorMetricsText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
-  return Array.isArray(record?.metrics)
+  return record?.schema_version === 2 && Array.isArray(record.metrics)
 }
 
 function hasStandardQorSummaryText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return (
-    record?.schema_version === 1 &&
+    record?.schema_version === 2 &&
     (typeof record.metric_count === 'number' ||
       Array.isArray(record.blocking_issues) ||
       typeof record.status === 'string')
   )
 }
 
+function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
+  const record = parseJsonObject(text)
+  const status = stringValue(record?.status)
+  return status === 'pass' || status === 'blocked' || status === 'incomplete'
+    ? status
+    : null
+}
+
 function hasStandardQorHotspotText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
-  return record?.schema_version === 1 && Array.isArray(record.hotspots)
+  return record?.schema_version === 2 && Array.isArray(record.hotspots)
 }
 
 function normalizeQorSummaryBlockingIssues(
@@ -1835,14 +1880,14 @@ function normalizeQorSummaryBlockingIssues(
   text: string | null | undefined,
 ): ProjectQorBlockingIssue[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 1 || !Array.isArray(record.blocking_issues)) {
+  if (record?.schema_version !== 2 || !Array.isArray(record.blocking_issues)) {
     return []
   }
 
   return record.blocking_issues.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return []
     const issue = item as Record<string, unknown>
-    const metric = stringValue(issue.metric)
+    const metric = stringValue(issue.metric_id)
     if (!metric) return []
     return [
       {
@@ -1858,13 +1903,13 @@ function normalizeQorSummaryBlockingIssues(
 
 function normalizeQorSummaryMissingMetrics(text: string | null | undefined): string[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 1 || !Array.isArray(record.missing_metrics)) {
+  if (record?.schema_version !== 2 || !Array.isArray(record.missing_metrics)) {
     return []
   }
 
   return uniqueStrings(
     record.missing_metrics.flatMap((metric) => {
-      const value = stringValue(metric)
+      const value = isRecord(metric) ? stringValue(metric.metric_id) : null
       return value ? [value] : []
     }),
   )
@@ -1875,14 +1920,14 @@ function normalizeQorHotspots(
   text: string | null | undefined,
 ): ProjectQorHotspot[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 1 || !Array.isArray(record.hotspots)) {
+  if (record?.schema_version !== 2 || !Array.isArray(record.hotspots)) {
     return []
   }
 
   return record.hotspots.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return []
     const hotspot = item as Record<string, unknown>
-    const metric = stringValue(hotspot.metric)
+    const metric = stringValue(hotspot.metric_id)
     if (!metric) return []
     return [
       {
@@ -1892,7 +1937,9 @@ function normalizeQorHotspots(
         metric,
         displayName: stringValue(hotspot.display_name) ?? metric,
         value: qorSummaryIssueValue(hotspot.value),
-        sourceFile: stringValue(hotspot.source_file) ?? '',
+        sourceFile: isRecord(hotspot.source)
+          ? (relativeAnalysisPath(hotspot.source.path) ?? '')
+          : '',
         description: stringValue(hotspot.description) ?? 'QoR hotspot',
       },
     ]
@@ -1953,25 +2000,32 @@ function qorConfidenceValue(value: unknown): QorMetricConfidence {
     : 'high'
 }
 
+function qorProjectRoleValue(value: unknown): QorMetricProjectRole | null {
+  const role = stringValue(value)
+  return QOR_PROJECT_ROLES.includes(role as QorMetricProjectRole)
+    ? (role as QorMetricProjectRole)
+    : null
+}
+
+function qorStepRoleValue(value: unknown): QorMetricStepRole | null {
+  const role = stringValue(value)
+  return QOR_STEP_ROLES.includes(role as QorMetricStepRole)
+    ? (role as QorMetricStepRole)
+    : null
+}
+
+function relativeAnalysisPath(value: unknown): string | null {
+  const path = stringValue(value)
+  if (!path || path.startsWith('/') || path.split('/').includes('..')) return null
+  return path
+}
+
 function displayNameFromMetricName(metricName: string): string {
   return metricName
     .split('_')
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
-}
-
-function legacyMetricMapping(rawKey: string): LegacyMetricMapping | null {
-  return LEGACY_METRIC_MAP[normalizeMetricKey(rawKey)] ?? null
-}
-
-function normalizeMetricKey(key: string): string {
-  return key
-    .replace(/\u03bc/g, 'u')
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
 }
 
 function compareWorkspaceInput(

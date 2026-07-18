@@ -3,12 +3,12 @@ import {
   buildProjectQorScoreDetail,
   buildProjectQorTrendSummary,
   serializeProjectQorTrendReport,
-  normalizeLegacyStepMetrics,
+  normalizeQorMetrics,
   type ProjectQorWorkspaceInput,
 } from './projectQorTrend'
 
 describe('project QoR trend model', () => {
-  it('explains the best workspace score with normalized weights and raw metrics', () => {
+  it('explains the provisional score with configured weights and raw metrics', () => {
     const summary = buildProjectQorTrendSummary([
       workspaceInput('ws_0001', {
         Route: JSON.stringify({ Tool: 'ecc', wire_len: 3000, num_via: 900 }),
@@ -18,8 +18,7 @@ describe('project QoR trend model', () => {
     const detail = buildProjectQorScoreDetail(summary.workspaces[0]!)
 
     expect(detail).toMatchObject({
-      hardGateCap: 100,
-      hasHardGateCap: false,
+      gateStatus: 'unavailable',
       dimensions: expect.arrayContaining([
         expect.objectContaining({
           dimension: 'timing',
@@ -44,7 +43,7 @@ describe('project QoR trend model', () => {
         (total, dimension) => total + dimension.effectiveWeight,
         0,
       ),
-    ).toBeCloseTo(100)
+    ).toBeCloseTo(55)
   })
 
   it('uses Area records from only the last successful step for score and details', () => {
@@ -113,18 +112,20 @@ describe('project QoR trend model', () => {
   })
 
   it('normalizes current step analysis metrics into standard QoR metric records', () => {
-    const records = normalizeLegacyStepMetrics({
+    const records = normalizeQorMetrics({
       workspaceId: 'ws_0001',
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Route',
-      sourceFile: 'route_ecc/analysis/route_metrics.json',
-      text: JSON.stringify({
-        Tool: 'ecc',
-        'Core util': '0.42',
-        'Die area [\u03bcm^2]': '2259.861',
-        wire_len: 5198.943,
-        num_via: 1470,
-      }),
+      text: v2MetricText(
+        'Route',
+        JSON.stringify({
+          Tool: 'ecc',
+          'Core util': '0.42',
+          'Die area [\u03bcm^2]': '2259.861',
+          wire_len: 5198.943,
+          num_via: 1470,
+        }),
+      ),
     })
 
     expect(records.map((record) => record.metricName)).toEqual([
@@ -140,42 +141,44 @@ describe('project QoR trend model', () => {
       unit: 'um',
       dimension: 'routability_physical',
       polarity: 'lower_is_better',
-      sourceFile: 'route_ecc/analysis/route_metrics.json',
+      sourceFile: 'feature/Route.step.json',
       confidence: 'high',
     })
   })
 
   it('normalizes standard qor_metrics records when ECC emits the new schema', () => {
-    const records = normalizeLegacyStepMetrics({
+    const records = normalizeQorMetrics({
       workspaceId: 'ws_0001',
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Route',
-      sourceFile: 'route_ecc/analysis/qor_metrics.json',
-      text: JSON.stringify({
-        schema_version: 1,
-        tool: 'ecc',
-        step: 'Route',
-        metrics: [
-          {
-            name: 'route_dr_total_violation_count',
-            display_name: 'Route DR Violations',
-            value: 3,
-            unit: 'count',
-            dimension: 'routability_physical',
-            polarity: 'lower_is_better',
-            source_file: 'route_ecc/analysis/qor_metrics.json',
-            confidence: 'medium',
-          },
-          {
-            name: 'sta_setup_wns',
-            display_name: 'STA Setup WNS',
-            value: '-0.018',
-            unit: 'ns',
-            dimension: 'timing',
-            polarity: 'higher_is_better',
-          },
-        ],
-      }),
+      text: v2MetricText(
+        'Route',
+        JSON.stringify({
+          schema_version: 1,
+          tool: 'ecc',
+          step: 'Route',
+          metrics: [
+            {
+              name: 'route_dr_total_violation_count',
+              display_name: 'Route DR Violations',
+              value: 3,
+              unit: 'count',
+              dimension: 'routability_physical',
+              polarity: 'lower_is_better',
+              source_file: 'route_ecc/analysis/qor_metrics.json',
+              confidence: 'medium',
+            },
+            {
+              name: 'sta_setup_wns',
+              display_name: 'STA Setup WNS',
+              value: '-0.018',
+              unit: 'ns',
+              dimension: 'timing',
+              polarity: 'higher_is_better',
+            },
+          ],
+        }),
+      ),
     })
 
     expect(records).toEqual([
@@ -186,7 +189,7 @@ describe('project QoR trend model', () => {
         unit: 'count',
         dimension: 'routability_physical',
         polarity: 'lower_is_better',
-        sourceFile: 'route_ecc/analysis/qor_metrics.json',
+        sourceFile: 'feature/Route.step.json',
         confidence: 'medium',
       }),
       expect.objectContaining({
@@ -196,37 +199,79 @@ describe('project QoR trend model', () => {
         unit: 'ns',
         dimension: 'timing',
         polarity: 'higher_is_better',
-        sourceFile: 'route_ecc/analysis/qor_metrics.json',
+        sourceFile: 'feature/Route.step.json',
         confidence: 'high',
       }),
     ])
   })
 
+  it('retains schema-valid V2 metrics outside the provisional score profile', () => {
+    const records = normalizeQorMetrics({
+      workspaceId: 'ws_0001',
+      workspacePath: '/projects/gcd/ws_0001',
+      step: 'Harden',
+      text: JSON.stringify({
+        schema_version: 2,
+        metrics: [
+          {
+            id: 'harden_gds_exists',
+            display_name: 'Harden GDS Exists',
+            value: 1,
+            unit: 'boolean',
+            category: 'clock_robustness_dfm',
+            direction: 'higher_is_better',
+            scope: 'final_delivery',
+            corner: null,
+            project_role: 'final',
+            step_role: 'primary',
+            confidence: 'high',
+            source: {
+              kind: 'feature',
+              path: 'feature/Harden.step.json',
+              selector: '/harden/artifacts/harden_gds_exists',
+            },
+          },
+        ],
+      }),
+    })
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        metricName: 'harden_gds_exists',
+        value: 1,
+        projectRole: 'final',
+        sourceFile: 'feature/Harden.step.json',
+      }),
+    ])
+  })
+
   it('normalizes upstream-supported fields once ECC extracts them into step analysis', () => {
-    const records = normalizeLegacyStepMetrics({
+    const records = normalizeQorMetrics({
       workspaceId: 'ws_0001',
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Route',
-      sourceFile: 'route_ecc/analysis/route_metrics.json',
-      text: JSON.stringify({
-        Tool: 'ecc',
-        'Max fanout': 20,
-        HPWL: 4410.5,
-        GRWL: 4688.2,
-        FLUTE: 4301.4,
-        place_congestion_egr_overflow_total: 12,
-        max_clock_wirelength: 602.5,
-        max_level_of_clock_tree: 5,
-        total_movement: 81.25,
-        route_dr_total_violation_count: 2,
-        route_dr_total_patch_count: 7,
-        route_la_total_overflow: 14,
-        rcx_spef_file_count: 9,
-        rcx_missing_corner_count: 0,
-        sta_setup_wns: -0.018,
-        sta_hold_wns: 0.042,
-        harden_artifact_missing_count: 1,
-      }),
+      text: v2MetricText(
+        'Route',
+        JSON.stringify({
+          Tool: 'ecc',
+          'Max fanout': 20,
+          HPWL: 4410.5,
+          GRWL: 4688.2,
+          FLUTE: 4301.4,
+          place_congestion_egr_overflow_total: 12,
+          max_clock_wirelength: 602.5,
+          max_level_of_clock_tree: 5,
+          total_movement: 81.25,
+          route_dr_total_violation_count: 2,
+          route_dr_total_patch_count: 7,
+          route_la_total_overflow: 14,
+          rcx_spef_file_count: 9,
+          rcx_missing_corner_count: 0,
+          sta_setup_wns: -0.018,
+          sta_hold_wns: 0.042,
+          harden_artifact_missing_count: 1,
+        }),
+      ),
     })
 
     expect(records.map((record) => record.metricName)).toEqual(
@@ -252,7 +297,7 @@ describe('project QoR trend model', () => {
     expect(
       records.find((record) => record.metricName === 'route_dr_total_violation_count'),
     ).toMatchObject({
-      displayName: 'Route DR Violations',
+      displayName: 'route_dr_total_violation_count',
       dimension: 'routability_physical',
       polarity: 'lower_is_better',
     })
@@ -266,24 +311,26 @@ describe('project QoR trend model', () => {
   })
 
   it('normalizes existing floorplan physical metrics that were not yet consumed', () => {
-    const records = normalizeLegacyStepMetrics({
+    const records = normalizeQorMetrics({
       workspaceId: 'ws_0001',
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Floor',
-      sourceFile: 'Floorplan_ecc/analysis/Floorplan_metrics.json',
-      text: JSON.stringify({
-        Tool: 'ecc',
-        'Die width [um]': 120.5,
-        'Die height [um]': 94.25,
-        'Die util': 0.57,
-        'Total io pins': 38,
-      }),
+      text: v2MetricText(
+        'Floor',
+        JSON.stringify({
+          Tool: 'ecc',
+          'Die width [um]': 120.5,
+          'Die height [um]': 94.25,
+          'Die util': 0.57,
+          'Total io pins': 38,
+        }),
+      ),
     })
 
     expect(records).toEqual([
       expect.objectContaining({
         metricName: 'die_width',
-        displayName: 'Die Width',
+        displayName: 'die_width',
         value: 120.5,
         unit: 'um',
         dimension: 'area_cost',
@@ -291,7 +338,7 @@ describe('project QoR trend model', () => {
       }),
       expect.objectContaining({
         metricName: 'die_height',
-        displayName: 'Die Height',
+        displayName: 'die_height',
         value: 94.25,
         unit: 'um',
         dimension: 'area_cost',
@@ -299,14 +346,14 @@ describe('project QoR trend model', () => {
       }),
       expect.objectContaining({
         metricName: 'die_utilization',
-        displayName: 'Die Utilization',
+        displayName: 'die_utilization',
         value: 0.57,
         dimension: 'area_cost',
         polarity: 'target_range',
       }),
       expect.objectContaining({
         metricName: 'io_pin_count',
-        displayName: 'IO Pin Count',
+        displayName: 'io_pin_count',
         value: 38,
         dimension: 'routability_physical',
         polarity: 'trend_only',
@@ -326,7 +373,7 @@ describe('project QoR trend model', () => {
       id: 'sta_analysis',
       label: 'STA QoR analysis',
       reason:
-        'sta_ecc/analysis/sta_metrics.json is not available in the current workspace data.',
+        'sta_ecc/analysis/qor_metrics.json is not available in the current workspace data.',
       status: '待后续开发',
     })
     expect(summary.workspaces[0].missingAnalysisSteps).toEqual(
@@ -361,24 +408,47 @@ describe('project QoR trend model', () => {
       ]),
     )
     expect(summary.workspaces[0]?.dimensionScores.timing).toBe(100)
-    expect(summary.workspaces[0]?.hardGateCap).toBe(100)
+    expect(summary.workspaces[0]?.gateStatus).toBe('unavailable')
     expect(summary.unsupportedModules.map((module) => module.id)).not.toContain(
       'sta_analysis',
     )
   })
 
-  it('scores available first-version dimensions and applies DRC hard gate cap', () => {
+  it('reports DRC gates independently from an incomplete provisional score', () => {
     const summary = buildProjectQorTrendSummary([
-      workspaceInput('baseline', {
-        Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
-        DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
-        CTS: JSON.stringify({ Tool: 'ecc', buffer_num: 4, buffer_area: 9.2 }),
-      }),
-      workspaceInput('ws_0002', {
-        Route: JSON.stringify({ Tool: 'ecc', wire_len: 5300, num_via: 1600 }),
-        DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
-        CTS: JSON.stringify({ Tool: 'ecc', buffer_num: 7, buffer_area: 12.4 }),
-      }),
+      workspaceInput(
+        'baseline',
+        {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
+          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+          CTS: JSON.stringify({ Tool: 'ecc', buffer_num: 4, buffer_area: 9.2 }),
+        },
+        {
+          DRC: JSON.stringify({ schema_version: 1, status: 'pass', blocking_issues: [] }),
+        },
+      ),
+      workspaceInput(
+        'ws_0002',
+        {
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5300, num_via: 1600 }),
+          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
+          CTS: JSON.stringify({ Tool: 'ecc', buffer_num: 7, buffer_area: 12.4 }),
+        },
+        {
+          DRC: JSON.stringify({
+            schema_version: 1,
+            status: 'blocked',
+            blocking_issues: [
+              {
+                metric: 'drc_count',
+                display_name: 'DRC Count',
+                value: 2,
+                reason: 'DRC violations are present.',
+              },
+            ],
+          }),
+        },
+      ),
     ])
 
     const baseline = summary.workspaces.find(
@@ -388,10 +458,10 @@ describe('project QoR trend model', () => {
       (workspace) => workspace.workspaceId === 'ws_0002',
     )
 
-    expect(baseline?.status).toBe('Green')
-    expect(baseline?.hardGateCap).toBe(100)
+    expect(baseline?.status).toBe('Orange')
+    expect(baseline?.gateStatus).toBe('unavailable')
     expect(regressed?.status).toBe('Orange')
-    expect(regressed?.hardGateCap).toBe(60)
+    expect(regressed?.gateStatus).toBe('blocked')
     expect(summary.regressions).toContainEqual(
       expect.objectContaining({
         workspaceId: 'ws_0002',
@@ -400,6 +470,40 @@ describe('project QoR trend model', () => {
         priority: 'P0',
       }),
     )
+  })
+
+  it('requires every successful signoff summary before reporting a passing gate state', () => {
+    const stepStatuses = {
+      Route: 'success' as const,
+      DRC: 'success' as const,
+      RCX: 'success' as const,
+      STA: 'success' as const,
+      Harden: 'success' as const,
+    }
+    const passingSummaries = {
+      Route: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+      DRC: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+      RCX: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+      STA: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+      Harden: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+    }
+    const passing = buildProjectQorTrendSummary([
+      workspaceInput('passing', {}, passingSummaries, {}, 'passing', stepStatuses),
+    ])
+    const incomplete = buildProjectQorTrendSummary([
+      workspaceInput(
+        'incomplete',
+        {},
+        { ...passingSummaries, STA: null },
+        {},
+        'incomplete',
+        stepStatuses,
+      ),
+    ])
+
+    expect(passing.workspaces[0]?.gateStatus).toBe('pass')
+    expect(incomplete.workspaces[0]?.gateStatus).toBe('incomplete')
+    expect(incomplete.workspaces[0]?.status).toBe('Yellow')
   })
 
   it('computes delta direction from metric polarity', () => {
@@ -540,7 +644,6 @@ describe('project QoR trend model', () => {
     expect(summary.unsupportedModules.map((module) => module.id)).toEqual([
       'sta_analysis',
       'power_ir_em_analysis',
-      'qor_metrics_standard_output',
       'qor_summary_standard_output',
       'qor_hotspots',
       'project_qor_cache',
@@ -745,7 +848,7 @@ describe('project QoR trend model', () => {
         metric: 'route_la_total_overflow',
         displayName: 'Route LA Overflow',
         value: 2,
-        sourceFile: 'route_ecc/analysis/qor_metrics.json',
+        sourceFile: 'feature/Route.step.json',
         description: 'Route layer assignment overflow is present.',
       },
     ])
@@ -1024,7 +1127,7 @@ describe('project QoR trend model', () => {
 
     expect(withDiagnostics.workspaces[0]).toMatchObject({
       overallScore: withoutDiagnostics.workspaces[0]?.overallScore,
-      hardGateCap: withoutDiagnostics.workspaces[0]?.hardGateCap,
+      gateStatus: withoutDiagnostics.workspaces[0]?.gateStatus,
       dimensionScores: withoutDiagnostics.workspaces[0]?.dimensionScores,
     })
     expect(withDiagnostics.timingClosure.criticalCount).toBe(1)
@@ -1066,7 +1169,7 @@ describe('project QoR trend model', () => {
     )
 
     expect(report).toMatchObject({
-      schema_version: 1,
+      schema_version: 2,
       generated_at: '2026-07-13T00:00:00.000Z',
       project: {
         id: 'proj_gcd',
@@ -1079,7 +1182,7 @@ describe('project QoR trend model', () => {
     expect(report.workspaces).toEqual([
       expect.objectContaining({
         workspace_id: 'baseline',
-        status: 'Orange',
+        status: 'Red',
         record_count: 2,
       }),
       expect.objectContaining({
@@ -1120,10 +1223,391 @@ function workspaceInput(
         : '2026-07-02T09:00:00.000Z',
     status: 'success',
     branchFrom: null,
-    stepMetricTexts,
-    stepSummaryTexts,
-    stepHotspotTexts,
+    stepMetricTexts: Object.fromEntries(
+      Object.entries(stepMetricTexts).map(([step, text]) => [
+        step,
+        v2MetricText(step, text),
+      ]),
+    ),
+    stepSummaryTexts: Object.fromEntries(
+      Object.entries(stepSummaryTexts).map(([step, text]) => [step, v2SummaryText(text)]),
+    ),
+    stepHotspotTexts: Object.fromEntries(
+      Object.entries(stepHotspotTexts).map(([step, text]) => [
+        step,
+        v2HotspotText(step, text),
+      ]),
+    ),
     staTimingIssuesText,
     stepStatuses,
   }
+}
+
+interface TestMetricDefinition {
+  id: string
+  category: string
+  direction: string
+  unit?: string
+}
+
+const TEST_FLAT_METRICS: Record<string, TestMetricDefinition> = {
+  'core util': {
+    id: 'core_utilization',
+    category: 'area_cost',
+    direction: 'target_range',
+  },
+  'die area um 2': {
+    id: 'die_area',
+    category: 'area_cost',
+    direction: 'lower_is_better',
+    unit: 'um^2',
+  },
+  'die width um': {
+    id: 'die_width',
+    category: 'area_cost',
+    direction: 'trend_only',
+    unit: 'um',
+  },
+  'die height um': {
+    id: 'die_height',
+    category: 'area_cost',
+    direction: 'trend_only',
+    unit: 'um',
+  },
+  'die util': { id: 'die_utilization', category: 'area_cost', direction: 'target_range' },
+  'total io pins': {
+    id: 'io_pin_count',
+    category: 'routability_physical',
+    direction: 'trend_only',
+    unit: 'count',
+  },
+  wire_len: {
+    id: 'route_wirelength',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  num_via: {
+    id: 'route_via_count',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  drc_num: {
+    id: 'drc_count',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  buffer_num: {
+    id: 'cts_buffer_count',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  buffer_area: {
+    id: 'cts_buffer_area',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'um^2',
+  },
+  'max fanout': {
+    id: 'fanout_max',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  hpwl: {
+    id: 'place_hpwl',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  grwl: {
+    id: 'place_grwl',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  flute: {
+    id: 'place_flute_wirelength',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  place_congestion_egr_overflow_total: {
+    id: 'place_congestion_egr_overflow_total',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  max_clock_wirelength: {
+    id: 'cts_clock_wirelength_max',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  max_level_of_clock_tree: {
+    id: 'cts_clock_tree_max_level',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  total_movement: {
+    id: 'legal_total_movement',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'um',
+  },
+  route_dr_total_violation_count: {
+    id: 'route_dr_total_violation_count',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  route_dr_total_patch_count: {
+    id: 'route_dr_total_patch_count',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  route_la_total_overflow: {
+    id: 'route_la_total_overflow',
+    category: 'routability_physical',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  rcx_spef_file_count: {
+    id: 'rcx_spef_file_count',
+    category: 'clock_robustness_dfm',
+    direction: 'higher_is_better',
+    unit: 'count',
+  },
+  rcx_missing_corner_count: {
+    id: 'rcx_missing_corner_count',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  sta_setup_wns: {
+    id: 'sta_setup_wns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  sta_hold_wns: {
+    id: 'sta_hold_wns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  sta_corner_count: {
+    id: 'sta_corner_count',
+    category: 'timing',
+    direction: 'trend_only',
+    unit: 'count',
+  },
+  sta_expected_corner_count: {
+    id: 'sta_expected_corner_count',
+    category: 'timing',
+    direction: 'trend_only',
+    unit: 'count',
+  },
+  sta_missing_corner_count: {
+    id: 'sta_missing_corner_count',
+    category: 'timing',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  setup_violation_count: {
+    id: 'sta_setup_violation_count',
+    category: 'timing',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  hold_violation_count: {
+    id: 'sta_hold_violation_count',
+    category: 'timing',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  harden_artifact_missing_count: {
+    id: 'harden_artifact_missing_count',
+    category: 'clock_robustness_dfm',
+    direction: 'lower_is_better',
+    unit: 'count',
+  },
+  max_wns: {
+    id: 'sta_setup_wns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  max_tns: {
+    id: 'sta_setup_tns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  min_wns: {
+    id: 'sta_hold_wns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  min_tns: {
+    id: 'sta_hold_tns',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'ns',
+  },
+  'frequency mhz': {
+    id: 'sta_frequency_mhz',
+    category: 'timing',
+    direction: 'higher_is_better',
+    unit: 'MHz',
+  },
+}
+
+function v2MetricText(step: string, text: string | null | undefined): string | null {
+  if (!text) return null
+  const parsed: unknown = JSON.parse(text)
+  if (!isRecord(parsed)) return null
+  if (parsed.schema_version === 2) return text
+
+  const source = { kind: 'feature', path: `feature/${step}.step.json`, selector: '' }
+  const records = Array.isArray(parsed.metrics)
+    ? parsed.metrics.flatMap((item) => v2RecordFromV1Metric(item, source))
+    : Object.entries(parsed).flatMap(([key, value]) => {
+        const definition = TEST_FLAT_METRICS[normalizeTestMetricKey(key)]
+        const numeric = testNumber(value)
+        return definition && numeric !== null
+          ? [v2Record(definition, numeric, source)]
+          : []
+      })
+
+  return JSON.stringify({ schema_version: 2, metrics: records })
+}
+
+function v2RecordFromV1Metric(
+  value: unknown,
+  source: { kind: string; path: string; selector: string },
+) {
+  if (!isRecord(value)) return []
+  const id = testString(value.name)
+  const numeric = testNumber(value.value)
+  const category = testString(value.dimension)
+  const direction = testString(value.polarity)
+  if (!id || numeric === null || !category || !direction) return []
+  return [
+    {
+      id,
+      display_name: testString(value.display_name) ?? id,
+      value: numeric,
+      unit: testString(value.unit) ?? '',
+      category,
+      direction,
+      scope: 'test',
+      corner: null,
+      project_role: 'trend',
+      step_role: 'primary',
+      confidence: testString(value.confidence) ?? 'high',
+      source,
+    },
+  ]
+}
+
+function v2Record(
+  definition: TestMetricDefinition,
+  value: number,
+  source: { kind: string; path: string; selector: string },
+) {
+  return {
+    id: definition.id,
+    display_name: definition.id,
+    value,
+    unit: definition.unit ?? '',
+    category: definition.category,
+    direction: definition.direction,
+    scope: 'test',
+    corner: null,
+    project_role: 'trend',
+    step_role: 'primary',
+    confidence: 'high',
+    source,
+  }
+}
+
+function v2SummaryText(text: string | null | undefined): string | null {
+  if (!text) return null
+  const parsed: unknown = JSON.parse(text)
+  if (!isRecord(parsed) || parsed.schema_version === 2) return text
+  return JSON.stringify({
+    schema_version: 2,
+    status: parsed.status ?? 'pass',
+    metric_count: parsed.metric_count ?? 0,
+    blocking_issues: Array.isArray(parsed.blocking_issues)
+      ? parsed.blocking_issues.flatMap((item) =>
+          isRecord(item) && testString(item.metric)
+            ? [{ ...item, metric_id: item.metric }]
+            : [],
+        )
+      : [],
+    missing_metrics: Array.isArray(parsed.missing_metrics)
+      ? parsed.missing_metrics.flatMap((item) => {
+          const metricId = testString(item)
+          return metricId ? [{ metric_id: metricId, reason: 'test fixture' }] : []
+        })
+      : [],
+  })
+}
+
+function v2HotspotText(step: string, text: string | null | undefined): string | null {
+  if (!text) return null
+  const parsed: unknown = JSON.parse(text)
+  if (!isRecord(parsed) || parsed.schema_version === 2) return text
+  return JSON.stringify({
+    schema_version: 2,
+    hotspots: Array.isArray(parsed.hotspots)
+      ? parsed.hotspots.flatMap((item) =>
+          isRecord(item) && testString(item.metric)
+            ? [
+                {
+                  ...item,
+                  metric_id: item.metric,
+                  source: {
+                    kind: 'feature',
+                    path: `feature/${step}.step.json`,
+                    selector: '',
+                  },
+                },
+              ]
+            : [],
+        )
+      : [],
+  })
+}
+
+function normalizeTestMetricKey(key: string): string {
+  return key
+    .replace(/\u03bc/g, 'u')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function testString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function testNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string' || !value.trim()) return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }

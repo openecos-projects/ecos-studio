@@ -179,26 +179,31 @@ describe('project management model', () => {
       },
     )
 
-    const model = buildProjectManagementProject(recentProject, manifest, {}, {
-      ws_0001: {
-        staTimingIssuesText: JSON.stringify({
-          schema_version: 1,
-          near_fail_slack_ns: 0.05,
-          missing_corners: [],
-          issues: [
-            {
-              issue_id: 'setup-critical',
-              severity: 'critical',
-              analysis_type: 'setup',
-              corner: 'MAX_125/RCworst',
-              path_group: 'core',
-              check_type: 'setup',
-              slack_ns: -0.032,
-            },
-          ],
-        }),
+    const model = buildProjectManagementProject(
+      recentProject,
+      manifest,
+      {},
+      {
+        ws_0001: {
+          staTimingIssuesText: JSON.stringify({
+            schema_version: 1,
+            near_fail_slack_ns: 0.05,
+            missing_corners: [],
+            issues: [
+              {
+                issue_id: 'setup-critical',
+                severity: 'critical',
+                analysis_type: 'setup',
+                corner: 'MAX_125/RCworst',
+                path_group: 'core',
+                check_type: 'setup',
+                slack_ns: -0.032,
+              },
+            ],
+          }),
+        },
       },
-    })
+    )
 
     expect(model.dashboardSummary).toMatchObject({
       timingCleanCount: 0,
@@ -832,28 +837,66 @@ describe('project management model', () => {
             routeStep: JSON.stringify({ route: { DR: [{ total_wire_length: 1 }] } }),
           },
           stepMetricTexts: {
-            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
-            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+            Route: v2MetricText('Route', [
+              v2Metric(
+                'route_wirelength',
+                'Route Wirelength',
+                5200,
+                'um',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+              v2Metric(
+                'route_via_count',
+                'Route Via Count',
+                1500,
+                'count',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+            ]),
+            DRC: v2MetricText('DRC', [
+              v2Metric(
+                'drc_count',
+                'DRC Count',
+                0,
+                'count',
+                'clock_robustness_dfm',
+                'lower_is_better',
+                'gate',
+              ),
+            ]),
           },
           stepSummaryTexts: {
             Route: JSON.stringify({
-              schema_version: 1,
-              status: 'green',
+              schema_version: 2,
+              status: 'pass',
               metric_count: 2,
+              blocking_issues: [],
+            }),
+            DRC: JSON.stringify({
+              schema_version: 2,
+              status: 'pass',
               blocking_issues: [],
             }),
           },
           stepHotspotTexts: {
             Route: JSON.stringify({
-              schema_version: 1,
+              schema_version: 2,
               hotspots: [
                 {
                   kind: 'routing_overflow',
                   severity: 'critical',
-                  metric: 'route_la_total_overflow',
+                  metric_id: 'route_la_total_overflow',
                   display_name: 'Route LA Overflow',
                   value: 1,
-                  source_file: 'route_ecc/analysis/qor_metrics.json',
+                  source: {
+                    kind: 'feature',
+                    path: 'feature/route.step.json',
+                    selector: '/route/LA',
+                  },
                   description: 'Route overflow is present.',
                 },
               ],
@@ -867,8 +910,51 @@ describe('project management model', () => {
             }),
           },
           stepMetricTexts: {
-            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5300, num_via: 1500 }),
-            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
+            Route: v2MetricText('Route', [
+              v2Metric(
+                'route_wirelength',
+                'Route Wirelength',
+                5300,
+                'um',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+              v2Metric(
+                'route_via_count',
+                'Route Via Count',
+                1500,
+                'count',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+            ]),
+            DRC: v2MetricText('DRC', [
+              v2Metric(
+                'drc_count',
+                'DRC Count',
+                2,
+                'count',
+                'clock_robustness_dfm',
+                'lower_is_better',
+                'gate',
+              ),
+            ]),
+          },
+          stepSummaryTexts: {
+            DRC: JSON.stringify({
+              schema_version: 2,
+              status: 'blocked',
+              blocking_issues: [
+                {
+                  metric_id: 'drc_count',
+                  display_name: 'DRC Count',
+                  value: 2,
+                  reason: 'DRC violations are present.',
+                },
+              ],
+            }),
           },
         },
       },
@@ -878,7 +964,7 @@ describe('project management model', () => {
     expect(model.qorTrendSummary.workspaces[1]).toMatchObject({
       workspaceId: 'ws_0002',
       status: 'Orange',
-      hardGateCap: 60,
+      gateStatus: 'blocked',
     })
     expect(model.qorTrendSummary.regressions).toContainEqual(
       expect.objectContaining({ metricName: 'drc_count', priority: 'P0' }),
@@ -945,23 +1031,85 @@ describe('project management model', () => {
     }
 
     const parsed = parseProjectManifest(serializeProjectManifest(manifest))
-    const model = buildProjectManagementProject(recentProject, parsed, {}, {
-      baseline: {
-        stepMetricTexts: {
-          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
+    const model = buildProjectManagementProject(
+      recentProject,
+      parsed,
+      {},
+      {
+        baseline: {
+          stepMetricTexts: {
+            Route: v2MetricText('Route', [
+              v2Metric(
+                'route_wirelength',
+                'Route Wirelength',
+                5200,
+                'um',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+              v2Metric(
+                'route_via_count',
+                'Route Via Count',
+                1500,
+                'count',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+            ]),
+          },
+        },
+        ws_0002: {
+          stepMetricTexts: {
+            Route: v2MetricText('Route', [
+              v2Metric(
+                'route_wirelength',
+                'Route Wirelength',
+                5400,
+                'um',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+              v2Metric(
+                'route_via_count',
+                'Route Via Count',
+                1600,
+                'count',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+            ]),
+          },
+        },
+        ws_0003: {
+          stepMetricTexts: {
+            Route: v2MetricText('Route', [
+              v2Metric(
+                'route_wirelength',
+                'Route Wirelength',
+                5250,
+                'um',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+              v2Metric(
+                'route_via_count',
+                'Route Via Count',
+                1520,
+                'count',
+                'routability_physical',
+                'lower_is_better',
+                'final',
+              ),
+            ]),
+          },
         },
       },
-      ws_0002: {
-        stepMetricTexts: {
-          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5400, num_via: 1600 }),
-        },
-      },
-      ws_0003: {
-        stepMetricTexts: {
-          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5250, num_via: 1520 }),
-        },
-      },
-    })
+    )
 
     expect(parsed.qor_baseline).toEqual({
       workspace_id: 'baseline',
@@ -1722,3 +1870,42 @@ describe('project management model', () => {
     expect(updated.updated_at).toBe('2026-07-02T10:00:00.000Z')
   })
 })
+
+function v2Metric(
+  id: string,
+  displayName: string,
+  value: number,
+  unit: string,
+  category: string,
+  direction: string,
+  projectRole: string,
+) {
+  return {
+    id,
+    display_name: displayName,
+    value,
+    unit,
+    category,
+    direction,
+    scope: 'test',
+    corner: null,
+    project_role: projectRole,
+    step_role: 'primary',
+    confidence: 'high',
+  }
+}
+
+function v2MetricText(step: string, metrics: Array<Record<string, unknown>>): string {
+  return JSON.stringify({
+    schema_version: 2,
+    step,
+    metrics: metrics.map((metric) => ({
+      ...metric,
+      source: {
+        kind: 'feature',
+        path: `feature/${step}.step.json`,
+        selector: '',
+      },
+    })),
+  })
+}

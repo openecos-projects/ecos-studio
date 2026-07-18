@@ -615,7 +615,7 @@ function addEccLikeResources(
     'script',
   )
   resources.analysis.metrics = createFile(
-    join(directory, 'analysis', `${stepName}_metrics.json`),
+    join(directory, 'analysis', 'qor_metrics.json'),
     'metrics',
   )
   resources.analysis.statis_csv = createFile(
@@ -681,7 +681,7 @@ function addYosysResources(
     'script',
   )
   resources.analysis.metrics = createFile(
-    join(directory, 'analysis', `${stepName}_metrics.json`),
+    join(directory, 'analysis', 'qor_metrics.json'),
     'metrics',
   )
   resources.subflow.path = createFile(join(directory, 'subflow.json'), 'subflow')

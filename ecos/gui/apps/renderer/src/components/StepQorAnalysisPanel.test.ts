@@ -10,6 +10,8 @@ describe('StepQorAnalysisPanel', () => {
     expect(source).toContain('Final DR iteration')
     expect(source).toContain('Path groups')
     expect(source).toContain('Corner records')
+    expect(source).toContain('Metric overview')
+    expect(source).toContain('missingMetrics')
   })
 
   it('keeps analysis data in the workspace inspector rather than project comparison UI', () => {
