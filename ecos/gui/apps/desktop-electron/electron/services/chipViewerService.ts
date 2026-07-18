@@ -107,6 +107,8 @@ export interface ChipViewerServiceOptions {
 interface SnapshotInputs {
   dbPath: string
   defPath: string
+  drcDataPath?: string
+  drcStatisPath?: string
   editCommandDirectory: string
   editResultDirectory: string
   gdsPath: string
@@ -494,6 +496,12 @@ export class ChipViewerService {
     }
 
     const viewerArgs = ['--manifest', snapshotInputs.manifestPath, '--mode', mode]
+    if (snapshotInputs.drcDataPath) {
+      viewerArgs.push('--drc-data', snapshotInputs.drcDataPath)
+    }
+    if (snapshotInputs.drcStatisPath) {
+      viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
+    }
     let editCommandDirectory: string | undefined
     let editResultDirectory: string | undefined
     if (mode === 'edit') {
@@ -582,10 +590,16 @@ export class ChipViewerService {
     const workspaceStepDirectory = dirname(outputDirectory)
     const geometryDir = join(outputDirectory, 'geometry')
     const editDirectory = join(geometryDir, 'edit')
+    const drcDataPath = join(workspaceStepDirectory, 'feature', 'drc.step.json')
+    const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
+    const isDrcStep = stepLabel.toLowerCase() === 'drc' || step.toLowerCase() === 'drc'
 
     return {
       dbPath,
       defPath,
+      drcDataPath: isDrcStep && this.fileExists(drcDataPath) ? drcDataPath : undefined,
+      drcStatisPath:
+        isDrcStep && this.fileExists(drcStatisPath) ? drcStatisPath : undefined,
       editCommandDirectory: join(editDirectory, 'commands'),
       editResultDirectory: join(editDirectory, 'results'),
       gdsPath,

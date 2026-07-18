@@ -19,6 +19,8 @@ const GDS_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.gds')
 const IMAGE_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.png')
 const GEOMETRY_DIR = join(STEP_DIRECTORY, 'output', 'geometry')
 const GEOMETRY_MANIFEST = join(GEOMETRY_DIR, 'geometry.manifest')
+const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
+const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
 const EDIT_COMMAND_DIR = join(GEOMETRY_DIR, 'edit', 'commands')
 const EDIT_RESULT_DIR = join(GEOMETRY_DIR, 'edit', 'results')
 const DB_CONFIG_PATH = join(PROJECT_ROOT, 'config', 'db_default_config.json')
@@ -321,6 +323,46 @@ describe('ChipViewerService', () => {
     expect(openLogFile).toHaveBeenCalledTimes(2)
     expect(closeLogFile).toHaveBeenCalledWith(11)
     expect(closeLogFile).toHaveBeenCalledWith(12)
+  })
+
+  it('passes DRC data files to the native viewer for the DRC step', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        DRC_DATA_PATH,
+        DRC_STATIS_PATH,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: 'drc',
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      [
+        '--manifest',
+        GEOMETRY_MANIFEST,
+        '--mode',
+        'view',
+        '--drc-data',
+        DRC_DATA_PATH,
+        '--drc-statis',
+        DRC_STATIS_PATH,
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
   })
 
   it('reports native viewer startup exits with the viewer log paths', async () => {

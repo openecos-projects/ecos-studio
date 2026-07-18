@@ -19,6 +19,12 @@ struct Args {
 
     #[arg(long)]
     edit_result_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    drc_data: Option<PathBuf>,
+
+    #[arg(long)]
+    drc_statis: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -28,6 +34,7 @@ fn main() -> Result<()> {
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([960.0, 640.0])
             .with_active(true),
+        centered: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -39,6 +46,8 @@ fn main() -> Result<()> {
                 args.mode.clone(),
                 args.edit_command_dir.clone(),
                 args.edit_result_dir.clone(),
+                args.drc_data.clone(),
+                args.drc_statis.clone(),
             )))
         }),
     )
