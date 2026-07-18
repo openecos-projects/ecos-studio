@@ -163,6 +163,54 @@ describe('project management model', () => {
     expect(model.id).toBe(model.path)
   })
 
+  it('derives dashboard timing state from STA timing issue analysis', () => {
+    const manifest = registerWorkspaceInManifest(
+      createProjectManifestDraft({
+        rootPath: '/projects/gcd',
+        name: 'gcd',
+        now: '2026-07-02T08:00:00.000Z',
+      }),
+      {
+        projectRoot: '/projects/gcd',
+        workspacePath: '/projects/gcd/ws_0001',
+        startStep: 'Synth',
+        endStep: 'STA',
+        now: '2026-07-02T08:00:00.000Z',
+      },
+    )
+
+    const model = buildProjectManagementProject(recentProject, manifest, {}, {
+      ws_0001: {
+        staTimingIssuesText: JSON.stringify({
+          schema_version: 1,
+          near_fail_slack_ns: 0.05,
+          missing_corners: [],
+          issues: [
+            {
+              issue_id: 'setup-critical',
+              severity: 'critical',
+              analysis_type: 'setup',
+              corner: 'MAX_125/RCworst',
+              path_group: 'core',
+              check_type: 'setup',
+              slack_ns: -0.032,
+            },
+          ],
+        }),
+      },
+    })
+
+    expect(model.dashboardSummary).toMatchObject({
+      timingCleanCount: 0,
+      timingAtRiskCount: 1,
+      timingIncompleteCount: 0,
+      timingUnavailableCount: 0,
+    })
+    expect(model.qorTrendSummary.timingClosure.issues).toEqual([
+      expect.objectContaining({ issueId: 'setup-critical', workspaceId: 'ws_0001' }),
+    ])
+  })
+
   it('maps project.json workspaces into lineage tree rows, status hints, metrics, and branch links', () => {
     const manifest = createProjectManifestDraft({
       rootPath: '/projects/gcd',

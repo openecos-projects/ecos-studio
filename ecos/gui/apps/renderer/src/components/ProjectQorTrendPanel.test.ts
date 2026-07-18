@@ -94,11 +94,33 @@ describe('ProjectQorTrendPanel', () => {
 
   it('surfaces structured analysis risks in a dedicated scrollable tab', () => {
     expect(source).toContain('Analysis Risks')
-    expect(source).toContain("activeDeltaTab === 'risks'")
+    expect(source).toContain("activeDeltaTab.value === 'risks'")
     expect(source).toContain('props.qorTrendSummary.risks')
     expect(source).toContain('Structured step analysis')
     expect(source).toContain('qor-risk-critical')
     expect(source).toContain('qor-risk-warning')
+  })
+
+  it('uses a continuous right-edge spine for timing closure and selects its workspace', () => {
+    expect(source).toContain('Timing Closure')
+    expect(source).toContain("abbreviation: 'IMP'")
+    expect(source).toContain("abbreviation: 'REG'")
+    expect(source).toContain("abbreviation: 'RISK'")
+    expect(source).toContain("abbreviation: 'STA'")
+    expect(source).toContain('aria-orientation="vertical"')
+    expect(source).toContain('qor-delta-edge-rail')
+    expect(source).toContain('qor-vertical-tab')
+    expect(source).toContain('qor-vertical-tab-tooltip')
+    expect(source).toContain('writing-mode: vertical-rl')
+    expect(source).toContain('text-orientation: upright')
+    expect(source).toContain('qor-vertical-tab-badge')
+    expect(source).toContain('grid-template-columns: minmax(0, 1fr) 38px')
+    expect(source).toContain('.qor-vertical-tab + .qor-vertical-tab')
+    expect(source).toContain('.qor-vertical-tab.selected::before')
+    expect(source).toContain("'select-workspace'")
+    expect(source).toContain('selectTimingIssueWorkspace(issue.workspaceId)')
+    expect(source).toContain('timingClosure.issues')
+    expect(source).not.toContain('qor-delta-tabs')
   })
 
   it('keeps baseline and export actions in the embedded overview header', () => {

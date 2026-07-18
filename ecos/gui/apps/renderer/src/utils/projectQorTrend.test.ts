@@ -826,6 +826,210 @@ describe('project QoR trend model', () => {
     )
   })
 
+  it('separates structured STA timing issues from generic QoR risks', () => {
+    const payload = (
+      issues: unknown[],
+      missingCorners: string[] = [],
+      artifactPaths: unknown[] = [],
+    ) =>
+      JSON.stringify({
+        schema_version: 1,
+        near_fail_slack_ns: 0.05,
+        missing_corners: missingCorners,
+        artifact_paths: artifactPaths,
+        issues,
+      })
+    const issue = (
+      issueId: string,
+      severity: 'critical' | 'warning',
+      analysisType: 'setup' | 'hold',
+      slackNs: number,
+    ) => ({
+      issue_id: issueId,
+      severity,
+      analysis_type: analysisType,
+      corner: 'MAX_125/RCworst',
+      path_group: 'core',
+      check_type: analysisType,
+      slack_ns: slackNs,
+    })
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput('clean', {}, {}, {}, 'clean', {}, payload([])),
+      workspaceInput(
+        'at_risk',
+        {},
+        {},
+        {},
+        'at_risk',
+        {},
+        payload(
+          [
+            issue('setup-warning', 'warning', 'setup', 0.018),
+            issue('setup-critical', 'critical', 'setup', -0.032),
+          ],
+          [],
+          [
+            {
+              corner: 'MAX_125/RCworst',
+              report_dir: 'report/MAX_125/RCworst',
+              feature_dir: 'feature/MAX_125/RCworst',
+              qor_summary_file: 'feature/MAX_125/RCworst/qor_summary.json',
+              timing_paths_file: 'feature/MAX_125/RCworst/timing_paths.json',
+            },
+            {
+              corner: 'MIN_m40/Cbest',
+              report_dir: '/outside/report',
+              feature_dir: 'feature/MIN_m40/Cbest',
+              qor_summary_file: 'feature/MIN_m40/Cbest/qor_summary.json',
+              timing_paths_file: 'feature/MIN_m40/Cbest/timing_paths.json',
+            },
+          ],
+        ),
+      ),
+      workspaceInput(
+        'incomplete',
+        {},
+        {},
+        {},
+        'incomplete',
+        {},
+        payload([issue('hold-critical', 'critical', 'hold', -0.11)], ['MIN_m40/Cbest']),
+      ),
+      workspaceInput('unavailable', {}),
+    ])
+
+    expect(summary.risks).toEqual([])
+    expect(summary.timingClosure).toMatchObject({
+      criticalCount: 2,
+      warningCount: 1,
+      cleanWorkspaceCount: 1,
+      atRiskWorkspaceCount: 1,
+      incompleteWorkspaceCount: 1,
+      unavailableWorkspaceCount: 1,
+    })
+    expect(summary.timingClosure.issues).toEqual([
+      expect.objectContaining({ issueId: 'hold-critical', workspaceId: 'incomplete' }),
+      expect.objectContaining({ issueId: 'setup-critical', workspaceId: 'at_risk' }),
+      expect.objectContaining({ issueId: 'setup-warning', workspaceId: 'at_risk' }),
+    ])
+    expect(summary.timingClosure.artifactPaths).toEqual([
+      {
+        workspaceId: 'at_risk',
+        workspaceName: 'at_risk',
+        corner: 'MAX_125/RCworst',
+        reportDir: 'report/MAX_125/RCworst',
+        featureDir: 'feature/MAX_125/RCworst',
+        qorSummaryFile: 'feature/MAX_125/RCworst/qor_summary.json',
+        timingPathsFile: 'feature/MAX_125/RCworst/timing_paths.json',
+      },
+    ])
+
+    const report = JSON.parse(serializeProjectQorTrendReport(summary))
+    expect(report.timing_closure).toMatchObject({
+      critical_count: 2,
+      warning_count: 1,
+      incomplete_workspace_count: 1,
+    })
+    expect(report.timing_closure.issues[0]).toEqual(
+      expect.objectContaining({ issue_id: 'hold-critical', slack_ns: -0.11 }),
+    )
+    expect(report.timing_closure.artifact_paths).toEqual([
+      {
+        workspace_id: 'at_risk',
+        workspace_name: 'at_risk',
+        corner: 'MAX_125/RCworst',
+        report_dir: 'report/MAX_125/RCworst',
+        feature_dir: 'feature/MAX_125/RCworst',
+        qor_summary_file: 'feature/MAX_125/RCworst/qor_summary.json',
+        timing_paths_file: 'feature/MAX_125/RCworst/timing_paths.json',
+      },
+    ])
+  })
+
+  it('marks malformed structured STA timing analysis as unavailable without fabricating issues', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'malformed',
+        {},
+        {},
+        {},
+        'malformed',
+        {},
+        JSON.stringify({
+          schema_version: 1,
+          near_fail_slack_ns: 0.05,
+          missing_corners: [],
+          issues: [
+            {
+              issue_id: 'bad-slack',
+              severity: 'critical',
+              analysis_type: 'setup',
+              corner: 'MAX_125/RCworst',
+              path_group: 'core',
+              check_type: 'setup',
+              slack_ns: '-0.1',
+            },
+          ],
+        }),
+      ),
+    ])
+
+    expect(summary.timingClosure).toMatchObject({
+      issues: [],
+      unavailableWorkspaceCount: 1,
+      cleanWorkspaceCount: 0,
+    })
+  })
+
+  it('keeps timing diagnostics out of QoR score and hard-gate calculations', () => {
+    const metrics = {
+      Route: JSON.stringify({ Tool: 'ecc', wire_len: 5200, num_via: 1500 }),
+      STA: JSON.stringify({
+        max_WNS: 0.08,
+        max_TNS: 0,
+        min_WNS: 0.02,
+        min_TNS: 0,
+        'Frequency [MHz]': 800,
+      }),
+    }
+    const withoutDiagnostics = buildProjectQorTrendSummary([
+      workspaceInput('ws_0001', metrics),
+    ])
+    const withDiagnostics = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0001',
+        metrics,
+        {},
+        {},
+        'ws_0001',
+        {},
+        JSON.stringify({
+          schema_version: 1,
+          near_fail_slack_ns: 0.05,
+          missing_corners: [],
+          issues: [
+            {
+              issue_id: 'setup-critical',
+              severity: 'critical',
+              analysis_type: 'setup',
+              corner: 'MAX_125/RCworst',
+              path_group: 'core',
+              check_type: 'setup',
+              slack_ns: -0.032,
+            },
+          ],
+        }),
+      ),
+    ])
+
+    expect(withDiagnostics.workspaces[0]).toMatchObject({
+      overallScore: withoutDiagnostics.workspaces[0]?.overallScore,
+      hardGateCap: withoutDiagnostics.workspaces[0]?.hardGateCap,
+      dimensionScores: withoutDiagnostics.workspaces[0]?.dimensionScores,
+    })
+    expect(withDiagnostics.timingClosure.criticalCount).toBe(1)
+  })
+
   it('serializes a project-level QoR trend report payload for explicit export', () => {
     const summary = buildProjectQorTrendSummary(
       [
@@ -904,6 +1108,7 @@ function workspaceInput(
   stepHotspotTexts: Partial<Record<string, string | null>> = {},
   workspaceName = workspaceId,
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'] = {},
+  staTimingIssuesText: ProjectQorWorkspaceInput['staTimingIssuesText'] = null,
 ): ProjectQorWorkspaceInput {
   return {
     workspaceId,
@@ -918,6 +1123,7 @@ function workspaceInput(
     stepMetricTexts,
     stepSummaryTexts,
     stepHotspotTexts,
+    staTimingIssuesText,
     stepStatuses,
   }
 }

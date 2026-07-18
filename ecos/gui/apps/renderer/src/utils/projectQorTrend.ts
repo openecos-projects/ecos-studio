@@ -32,6 +32,7 @@ export interface ProjectQorWorkspaceInput {
   stepMetricTexts: Partial<Record<FlowStep, string | null>>
   stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
   stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
+  staTimingIssuesText?: string | null
   stepStatuses: Partial<Record<FlowStep, ProjectStepStatus>>
 }
 
@@ -107,6 +108,7 @@ export interface ProjectQorTrendSummary {
   regressions: ProjectQorRegression[]
   improvements: ProjectQorDelta[]
   risks: ProjectQorRisk[]
+  timingClosure: ProjectQorTimingSummary
   unsupportedModules: ProjectQorUnsupportedModule[]
 }
 
@@ -183,6 +185,39 @@ export interface ProjectQorRisk {
   displayName: string
   value: number | string | null
   message: string
+}
+
+export interface ProjectQorTimingIssue {
+  issueId: string
+  workspaceId: string
+  workspaceName: string
+  severity: 'critical' | 'warning'
+  analysisType: 'setup' | 'hold'
+  corner: string
+  pathGroup: string
+  checkType: string
+  slackNs: number
+}
+
+export interface ProjectQorTimingArtifactPath {
+  workspaceId: string
+  workspaceName: string
+  corner: string
+  reportDir: string
+  featureDir: string
+  qorSummaryFile: string
+  timingPathsFile: string
+}
+
+export interface ProjectQorTimingSummary {
+  issues: ProjectQorTimingIssue[]
+  artifactPaths: ProjectQorTimingArtifactPath[]
+  criticalCount: number
+  warningCount: number
+  cleanWorkspaceCount: number
+  atRiskWorkspaceCount: number
+  incompleteWorkspaceCount: number
+  unavailableWorkspaceCount: number
 }
 
 interface LegacyMetricMapping {
@@ -899,6 +934,7 @@ export function buildProjectQorTrendSummary(
     baselineWorkspace?.workspaceId ?? null,
   )
   const risks = buildProjectQorRisks(workspaceSummaries)
+  const timingClosure = buildProjectQorTimingSummary(sortedInputs)
 
   return {
     workspaces: workspaceSummaries,
@@ -915,6 +951,7 @@ export function buildProjectQorTrendSummary(
     regressions,
     improvements,
     risks,
+    timingClosure,
     unsupportedModules: buildUnsupportedModules(sortedInputs, workspaceSummaries),
   }
 }
@@ -1078,6 +1115,34 @@ export function buildProjectQorTrendReport(
       value: risk.value,
       message: risk.message,
     })),
+    timing_closure: {
+      critical_count: summary.timingClosure.criticalCount,
+      warning_count: summary.timingClosure.warningCount,
+      clean_workspace_count: summary.timingClosure.cleanWorkspaceCount,
+      at_risk_workspace_count: summary.timingClosure.atRiskWorkspaceCount,
+      incomplete_workspace_count: summary.timingClosure.incompleteWorkspaceCount,
+      unavailable_workspace_count: summary.timingClosure.unavailableWorkspaceCount,
+      artifact_paths: summary.timingClosure.artifactPaths.map((artifact) => ({
+        workspace_id: artifact.workspaceId,
+        workspace_name: artifact.workspaceName,
+        corner: artifact.corner,
+        report_dir: artifact.reportDir,
+        feature_dir: artifact.featureDir,
+        qor_summary_file: artifact.qorSummaryFile,
+        timing_paths_file: artifact.timingPathsFile,
+      })),
+      issues: summary.timingClosure.issues.map((issue) => ({
+        issue_id: issue.issueId,
+        workspace_id: issue.workspaceId,
+        workspace_name: issue.workspaceName,
+        severity: issue.severity,
+        analysis_type: issue.analysisType,
+        corner: issue.corner,
+        path_group: issue.pathGroup,
+        check_type: issue.checkType,
+        slack_ns: issue.slackNs,
+      })),
+    },
     unsupported_modules: summary.unsupportedModules.map((module) => ({
       id: module.id,
       label: module.label,
@@ -1219,6 +1284,45 @@ function buildProjectQorRisks(
       })),
     ])
     .sort(compareProjectQorRisk)
+}
+
+function buildProjectQorTimingSummary(
+  workspaces: ProjectQorWorkspaceInput[],
+): ProjectQorTimingSummary {
+  const summary: ProjectQorTimingSummary = {
+    issues: [],
+    artifactPaths: [],
+    criticalCount: 0,
+    warningCount: 0,
+    cleanWorkspaceCount: 0,
+    atRiskWorkspaceCount: 0,
+    incompleteWorkspaceCount: 0,
+    unavailableWorkspaceCount: 0,
+  }
+
+  for (const workspace of workspaces) {
+    const timingAnalysis = normalizeStaTimingIssues(workspace)
+    summary.issues.push(...timingAnalysis.issues)
+    summary.artifactPaths.push(...timingAnalysis.artifactPaths)
+
+    if (timingAnalysis.status === 'clean') {
+      summary.cleanWorkspaceCount += 1
+    } else if (timingAnalysis.status === 'at_risk') {
+      summary.atRiskWorkspaceCount += 1
+    } else if (timingAnalysis.status === 'incomplete') {
+      summary.incompleteWorkspaceCount += 1
+    } else {
+      summary.unavailableWorkspaceCount += 1
+    }
+  }
+
+  summary.issues.sort(compareProjectQorTimingIssue)
+  summary.artifactPaths.sort(compareProjectQorTimingArtifactPath)
+  summary.criticalCount = summary.issues.filter(
+    (issue) => issue.severity === 'critical',
+  ).length
+  summary.warningCount = summary.issues.length - summary.criticalCount
+  return summary
 }
 
 function buildDimensionScores(
@@ -1578,6 +1682,134 @@ function parseJsonObject(
   }
 }
 
+type StaTimingAnalysisStatus = 'clean' | 'at_risk' | 'incomplete' | 'unavailable'
+
+interface StaTimingAnalysis {
+  status: StaTimingAnalysisStatus
+  issues: ProjectQorTimingIssue[]
+  artifactPaths: ProjectQorTimingArtifactPath[]
+}
+
+function normalizeStaTimingIssues(
+  workspace: ProjectQorWorkspaceInput,
+): StaTimingAnalysis {
+  const unavailable: StaTimingAnalysis = {
+    status: 'unavailable',
+    issues: [],
+    artifactPaths: [],
+  }
+  const record = parseJsonObject(workspace.staTimingIssuesText)
+  if (
+    !record ||
+    record.schema_version !== 1 ||
+    !isFiniteNumber(record.near_fail_slack_ns) ||
+    !isStringArray(record.missing_corners) ||
+    !Array.isArray(record.issues)
+  ) {
+    return unavailable
+  }
+
+  const issueIds = new Set<string>()
+  const issues: ProjectQorTimingIssue[] = []
+  for (const item of record.issues) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return unavailable
+    const issue = item as Record<string, unknown>
+    const issueId = stringValue(issue.issue_id)
+    const severity = issue.severity
+    const analysisType = issue.analysis_type
+    const corner = stringValue(issue.corner)
+    const pathGroup = stringValue(issue.path_group)
+    const checkType = stringValue(issue.check_type)
+    const slackNs = isFiniteNumber(issue.slack_ns) ? issue.slack_ns : null
+    if (
+      !issueId ||
+      issueIds.has(issueId) ||
+      (severity !== 'critical' && severity !== 'warning') ||
+      (analysisType !== 'setup' && analysisType !== 'hold') ||
+      !corner ||
+      !pathGroup ||
+      !checkType ||
+      slackNs === null
+    ) {
+      return unavailable
+    }
+    issueIds.add(issueId)
+    issues.push({
+      issueId,
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      severity,
+      analysisType,
+      corner,
+      pathGroup,
+      checkType,
+      slackNs,
+    })
+  }
+
+  const artifactPaths = normalizeStaTimingArtifactPaths(workspace, record.artifact_paths)
+  const hasMissingCorners = record.missing_corners.length > 0
+  return {
+    status: hasMissingCorners ? 'incomplete' : issues.length > 0 ? 'at_risk' : 'clean',
+    issues,
+    artifactPaths,
+  }
+}
+
+function normalizeStaTimingArtifactPaths(
+  workspace: ProjectQorWorkspaceInput,
+  value: unknown,
+): ProjectQorTimingArtifactPath[] {
+  if (!Array.isArray(value)) return []
+
+  const corners = new Set<string>()
+  const artifacts: ProjectQorTimingArtifactPath[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const artifact = item as Record<string, unknown>
+    const corner = stringValue(artifact.corner)
+    const reportDir = relativeStaArtifactPath(artifact.report_dir)
+    const featureDir = relativeStaArtifactPath(artifact.feature_dir)
+    const qorSummaryFile = relativeStaArtifactPath(artifact.qor_summary_file)
+    const timingPathsFile = relativeStaArtifactPath(artifact.timing_paths_file)
+    if (
+      !corner ||
+      corners.has(corner) ||
+      !reportDir ||
+      !featureDir ||
+      !qorSummaryFile ||
+      !timingPathsFile
+    ) {
+      continue
+    }
+    corners.add(corner)
+    artifacts.push({
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      corner,
+      reportDir,
+      featureDir,
+      qorSummaryFile,
+      timingPathsFile,
+    })
+  }
+  return artifacts
+}
+
+function relativeStaArtifactPath(value: unknown): string | null {
+  const path = stringValue(value)
+  if (!path || path.startsWith('/') || path.split('/').includes('..')) return null
+  return path
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => stringValue(item) !== null)
+}
+
 function hasStandardQorMetricsText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return Array.isArray(record?.metrics)
@@ -1770,6 +2002,35 @@ function compareProjectQorRisk(left: ProjectQorRisk, right: ProjectQorRisk): num
   if (workspaceDelta !== 0) return workspaceDelta
 
   return left.step.localeCompare(right.step) || left.metric.localeCompare(right.metric)
+}
+
+function compareProjectQorTimingIssue(
+  left: ProjectQorTimingIssue,
+  right: ProjectQorTimingIssue,
+): number {
+  const severityOrder = { critical: 0, warning: 1 }
+  const severityDelta = severityOrder[left.severity] - severityOrder[right.severity]
+  if (severityDelta !== 0) return severityDelta
+
+  const slackDelta = left.slackNs - right.slackNs
+  if (slackDelta !== 0) return slackDelta
+
+  return (
+    left.workspaceName.localeCompare(right.workspaceName) ||
+    left.corner.localeCompare(right.corner) ||
+    left.issueId.localeCompare(right.issueId)
+  )
+}
+
+function compareProjectQorTimingArtifactPath(
+  left: ProjectQorTimingArtifactPath,
+  right: ProjectQorTimingArtifactPath,
+): number {
+  return (
+    left.workspaceName.localeCompare(right.workspaceName) ||
+    left.corner.localeCompare(right.corner) ||
+    left.workspaceId.localeCompare(right.workspaceId)
+  )
 }
 
 function compareDeltaMagnitude(left: ProjectQorDelta, right: ProjectQorDelta): number {
