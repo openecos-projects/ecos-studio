@@ -4225,6 +4225,12 @@ fn design_metadata_lines(manifest: &chip_view_db::GeometryManifest) -> Vec<Strin
             "dirty LOD candidates: {dirty_lod_rebuild_candidate_count}"
         ));
     }
+    if let Some(written_side_file_count) = manifest.written_side_file_count {
+        lines.push(format!("written side files: {written_side_file_count}"));
+    }
+    if let Some(reused_side_file_count) = manifest.reused_side_file_count {
+        lines.push(format!("reused side files: {reused_side_file_count}"));
+    }
     lines
 }
 
@@ -5828,6 +5834,8 @@ mod tests {
             manufacture_grid: Some(5),
             dirty_lod_tile_count: Some(7),
             dirty_lod_rebuild_candidate_count: Some(11),
+            written_side_file_count: Some(13),
+            reused_side_file_count: Some(5),
             ..chip_view_db::GeometryManifest::default()
         };
 
@@ -5840,6 +5848,8 @@ mod tests {
                 "manufacture grid: 5",
                 "dirty LOD tiles: 7",
                 "dirty LOD candidates: 11",
+                "written side files: 13",
+                "reused side files: 5",
             ]
         );
         assert!(design_metadata_lines(&chip_view_db::GeometryManifest::default()).is_empty());

@@ -372,6 +372,8 @@ summary = {
     "snapshot_write": {
         "dirty_lod_tile_count": snapshot_write.get("dirty_lod_tile_count"),
         "dirty_lod_rebuild_candidate_count": snapshot_write.get("dirty_lod_rebuild_candidate_count"),
+        "written_side_file_count": snapshot_write.get("written_side_file_count"),
+        "reused_side_file_count": snapshot_write.get("reused_side_file_count"),
     },
 }
 
@@ -401,6 +403,10 @@ if snapshot_write.get("dirty_lod_tile_count") is not None:
     dirty_text += f" dirty_lod_tiles={snapshot_write.get('dirty_lod_tile_count')}"
 if snapshot_write.get("dirty_lod_rebuild_candidate_count") is not None:
     dirty_text += f" dirty_lod_candidates={snapshot_write.get('dirty_lod_rebuild_candidate_count')}"
+if snapshot_write.get("written_side_file_count") is not None:
+    dirty_text += f" written_side_files={snapshot_write.get('written_side_file_count')}"
+if snapshot_write.get("reused_side_file_count") is not None:
+    dirty_text += f" reused_side_files={snapshot_write.get('reused_side_file_count')}"
 
 print(
     f"{step_name}: schema={schema_version} shapes={shape_count} "

@@ -32,6 +32,8 @@ pub struct GeometryManifest {
     pub payload_size: u64,
     pub dirty_lod_tile_count: Option<u64>,
     pub dirty_lod_rebuild_candidate_count: Option<u64>,
+    pub written_side_file_count: Option<u64>,
+    pub reused_side_file_count: Option<u64>,
     pub meta: PathBuf,
     pub shapes: PathBuf,
     pub owners: PathBuf,
@@ -512,6 +514,8 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         payload_size: parse_u64("payload_size")?,
         dirty_lod_tile_count: optional_u64("dirty_lod_tile_count")?,
         dirty_lod_rebuild_candidate_count: optional_u64("dirty_lod_rebuild_candidate_count")?,
+        written_side_file_count: optional_u64("written_side_file_count")?,
+        reused_side_file_count: optional_u64("reused_side_file_count")?,
         meta: base.join(required("meta")?),
         shapes: base.join(required("shapes")?),
         owners: base.join(required("owners")?),
@@ -1570,6 +1574,8 @@ mod tests {
              payload_size=0\n\
              dirty_lod_tile_count=7\n\
              dirty_lod_rebuild_candidate_count=11\n\
+             written_side_file_count=13\n\
+             reused_side_file_count=5\n\
              meta=geometry.meta.bin\n\
              shapes=geometry.shapes.bin\n\
              owners=geometry.owners.bin\n\
@@ -1592,6 +1598,8 @@ mod tests {
             snapshot.manifest().dirty_lod_rebuild_candidate_count,
             Some(11)
         );
+        assert_eq!(snapshot.manifest().written_side_file_count, Some(13));
+        assert_eq!(snapshot.manifest().reused_side_file_count, Some(5));
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }

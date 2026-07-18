@@ -135,6 +135,12 @@ fn main() -> Result<()> {
     {
         println!("dirty_lod_rebuild_candidate_count={dirty_lod_rebuild_candidate_count}");
     }
+    if let Some(written_side_file_count) = db.snapshot().manifest().written_side_file_count {
+        println!("written_side_file_count={written_side_file_count}");
+    }
+    if let Some(reused_side_file_count) = db.snapshot().manifest().reused_side_file_count {
+        println!("reused_side_file_count={reused_side_file_count}");
+    }
     println!("shape_count={}", stats.shape_count);
     println!("owner_count={}", stats.owner_count);
     println!("name_count={}", stats.name_count);
@@ -923,6 +929,8 @@ fn snapshot_write_metadata_json(manifest: &chip_view_db::GeometryManifest) -> Va
     json!({
         "dirty_lod_tile_count": manifest.dirty_lod_tile_count,
         "dirty_lod_rebuild_candidate_count": manifest.dirty_lod_rebuild_candidate_count,
+        "written_side_file_count": manifest.written_side_file_count,
+        "reused_side_file_count": manifest.reused_side_file_count,
     })
 }
 
@@ -1519,6 +1527,8 @@ mod tests {
         let manifest = chip_view_db::GeometryManifest {
             dirty_lod_tile_count: Some(7),
             dirty_lod_rebuild_candidate_count: Some(11),
+            written_side_file_count: Some(13),
+            reused_side_file_count: Some(5),
             ..chip_view_db::GeometryManifest::default()
         };
 
@@ -1526,6 +1536,8 @@ mod tests {
 
         assert_eq!(value["dirty_lod_tile_count"], 7);
         assert_eq!(value["dirty_lod_rebuild_candidate_count"], 11);
+        assert_eq!(value["written_side_file_count"], 13);
+        assert_eq!(value["reused_side_file_count"], 5);
     }
 
     #[test]

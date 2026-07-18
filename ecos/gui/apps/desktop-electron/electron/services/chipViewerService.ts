@@ -53,6 +53,8 @@ const REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS = [
 const OPTIONAL_GEOMETRY_MANIFEST_NUMBER_KEYS = [
   'dirty_lod_tile_count',
   'dirty_lod_rebuild_candidate_count',
+  'written_side_file_count',
+  'reused_side_file_count',
 ] as const
 
 type FileExists = (path: string) => boolean
