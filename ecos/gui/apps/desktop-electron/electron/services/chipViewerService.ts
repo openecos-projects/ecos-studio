@@ -50,6 +50,10 @@ const REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS = [
   'owner_count',
   'payload_size',
 ] as const
+const OPTIONAL_GEOMETRY_MANIFEST_NUMBER_KEYS = [
+  'dirty_lod_tile_count',
+  'dirty_lod_rebuild_candidate_count',
+] as const
 
 type FileExists = (path: string) => boolean
 type EnsureDirectory = (path: string) => Promise<void>
@@ -1165,6 +1169,15 @@ export class ChipViewerService {
     }
 
     for (const key of REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS) {
+      const invalidNumber = invalidManifestNumber(values, key)
+      if (invalidNumber) {
+        return invalidNumber
+      }
+    }
+    for (const key of OPTIONAL_GEOMETRY_MANIFEST_NUMBER_KEYS) {
+      if (!values.has(key)) {
+        continue
+      }
       const invalidNumber = invalidManifestNumber(values, key)
       if (invalidNumber) {
         return invalidNumber

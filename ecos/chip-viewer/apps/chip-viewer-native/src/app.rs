@@ -4217,6 +4217,14 @@ fn design_metadata_lines(manifest: &chip_view_db::GeometryManifest) -> Vec<Strin
     if let Some(manufacture_grid) = manifest.manufacture_grid {
         lines.push(format!("manufacture grid: {manufacture_grid}"));
     }
+    if let Some(dirty_lod_tile_count) = manifest.dirty_lod_tile_count {
+        lines.push(format!("dirty LOD tiles: {dirty_lod_tile_count}"));
+    }
+    if let Some(dirty_lod_rebuild_candidate_count) = manifest.dirty_lod_rebuild_candidate_count {
+        lines.push(format!(
+            "dirty LOD candidates: {dirty_lod_rebuild_candidate_count}"
+        ));
+    }
     lines
 }
 
@@ -5818,6 +5826,8 @@ mod tests {
             design_version: Some("5.8".to_string()),
             dbu_per_micron: Some(2000),
             manufacture_grid: Some(5),
+            dirty_lod_tile_count: Some(7),
+            dirty_lod_rebuild_candidate_count: Some(11),
             ..chip_view_db::GeometryManifest::default()
         };
 
@@ -5828,6 +5838,8 @@ mod tests {
                 "design version: 5.8",
                 "dbu per micron: 2000",
                 "manufacture grid: 5",
+                "dirty LOD tiles: 7",
+                "dirty LOD candidates: 11",
             ]
         );
         assert!(design_metadata_lines(&chip_view_db::GeometryManifest::default()).is_empty());

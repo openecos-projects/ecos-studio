@@ -127,6 +127,14 @@ fn main() -> Result<()> {
     if let Some(manufacture_grid) = db.snapshot().manifest().manufacture_grid {
         println!("design.manufacture_grid={manufacture_grid}");
     }
+    if let Some(dirty_lod_tile_count) = db.snapshot().manifest().dirty_lod_tile_count {
+        println!("dirty_lod_tile_count={dirty_lod_tile_count}");
+    }
+    if let Some(dirty_lod_rebuild_candidate_count) =
+        db.snapshot().manifest().dirty_lod_rebuild_candidate_count
+    {
+        println!("dirty_lod_rebuild_candidate_count={dirty_lod_rebuild_candidate_count}");
+    }
     println!("shape_count={}", stats.shape_count);
     println!("owner_count={}", stats.owner_count);
     println!("name_count={}", stats.name_count);
@@ -911,6 +919,13 @@ fn design_metadata_json(manifest: &chip_view_db::GeometryManifest) -> Value {
     })
 }
 
+fn snapshot_write_metadata_json(manifest: &chip_view_db::GeometryManifest) -> Value {
+    json!({
+        "dirty_lod_tile_count": manifest.dirty_lod_tile_count,
+        "dirty_lod_rebuild_candidate_count": manifest.dirty_lod_rebuild_candidate_count,
+    })
+}
+
 fn bbox_json(bbox: Rect32) -> Value {
     json!({
         "lx": bbox.lx,
@@ -1124,6 +1139,7 @@ fn print_json(
         "manifest": args.manifest,
         "schema_version": db.snapshot().manifest().schema_version,
         "design": design_metadata_json(db.snapshot().manifest()),
+        "snapshot_write": snapshot_write_metadata_json(db.snapshot().manifest()),
         "shape_count": stats.shape_count,
         "owner_count": stats.owner_count,
         "name_count": stats.name_count,
@@ -1496,6 +1512,20 @@ mod tests {
         assert_eq!(value["version"], "5.8");
         assert_eq!(value["dbu_per_micron"], 2000);
         assert_eq!(value["manufacture_grid"], 5);
+    }
+
+    #[test]
+    fn snapshot_write_metadata_json_reports_optional_manifest_fields() {
+        let manifest = chip_view_db::GeometryManifest {
+            dirty_lod_tile_count: Some(7),
+            dirty_lod_rebuild_candidate_count: Some(11),
+            ..chip_view_db::GeometryManifest::default()
+        };
+
+        let value = snapshot_write_metadata_json(&manifest);
+
+        assert_eq!(value["dirty_lod_tile_count"], 7);
+        assert_eq!(value["dirty_lod_rebuild_candidate_count"], 11);
     }
 
     #[test]

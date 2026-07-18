@@ -57,7 +57,7 @@ function dbConfig() {
 }
 
 function geometryManifest(overrides: Record<string, string> = {}) {
-  return [
+  const entries = [
     ['schema_version', '1'],
     ['active_epoch', '1'],
     ['shape_count', '10'],
@@ -72,7 +72,11 @@ function geometryManifest(overrides: Record<string, string> = {}) {
     ['sidmap', 'epochs/1/geometry.sidmap.bin'],
     ['view', 'epochs/1/geometry.view.bin'],
   ]
+  const defaultKeys = new Set(entries.map(([key]) => key))
+  const extraEntries = Object.entries(overrides).filter(([key]) => !defaultKeys.has(key))
+  return entries
     .map(([key, defaultValue]) => `${key}=${overrides[key] ?? defaultValue}`)
+    .concat(extraEntries.map(([key, value]) => `${key}=${value}`))
     .join('\n')
     .concat('\n')
 }
@@ -606,6 +610,44 @@ describe('ChipViewerService', () => {
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.any(Object),
     )
+  })
+
+  it('regenerates an existing geometry snapshot when optional dirty metrics are invalid', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          dirty_lod_tile_count: 'not-a-number',
+        }),
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
   })
 
   it('regenerates an existing geometry snapshot when manifest side files are missing', async () => {

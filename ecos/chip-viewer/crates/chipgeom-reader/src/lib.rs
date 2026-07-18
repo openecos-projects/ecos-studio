@@ -30,6 +30,8 @@ pub struct GeometryManifest {
     pub shape_count: u64,
     pub owner_count: u64,
     pub payload_size: u64,
+    pub dirty_lod_tile_count: Option<u64>,
+    pub dirty_lod_rebuild_candidate_count: Option<u64>,
     pub meta: PathBuf,
     pub shapes: PathBuf,
     pub owners: PathBuf,
@@ -491,6 +493,12 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
             .map(|value| value.parse().with_context(|| format!("invalid {key}")))
             .transpose()
     };
+    let optional_u64 = |key: &'static str| -> Result<Option<u64>> {
+        values
+            .get(key)
+            .map(|value| value.parse().with_context(|| format!("invalid {key}")))
+            .transpose()
+    };
 
     Ok(GeometryManifest {
         path: path.to_path_buf(),
@@ -502,6 +510,8 @@ fn read_manifest(path: &Path) -> Result<GeometryManifest> {
         shape_count: parse_u64("shape_count")?,
         owner_count: parse_u64("owner_count")?,
         payload_size: parse_u64("payload_size")?,
+        dirty_lod_tile_count: optional_u64("dirty_lod_tile_count")?,
+        dirty_lod_rebuild_candidate_count: optional_u64("dirty_lod_rebuild_candidate_count")?,
         meta: base.join(required("meta")?),
         shapes: base.join(required("shapes")?),
         owners: base.join(required("owners")?),
@@ -1558,6 +1568,8 @@ mod tests {
              shape_count=0\n\
              owner_count=0\n\
              payload_size=0\n\
+             dirty_lod_tile_count=7\n\
+             dirty_lod_rebuild_candidate_count=11\n\
              meta=geometry.meta.bin\n\
              shapes=geometry.shapes.bin\n\
              owners=geometry.owners.bin\n\
@@ -1575,6 +1587,11 @@ mod tests {
         assert_eq!(snapshot.manifest().design_version.as_deref(), Some("5.8"));
         assert_eq!(snapshot.manifest().dbu_per_micron, Some(2000));
         assert_eq!(snapshot.manifest().manufacture_grid, Some(5));
+        assert_eq!(snapshot.manifest().dirty_lod_tile_count, Some(7));
+        assert_eq!(
+            snapshot.manifest().dirty_lod_rebuild_candidate_count,
+            Some(11)
+        );
 
         std::fs::remove_dir_all(snapshot_dir).unwrap();
     }
