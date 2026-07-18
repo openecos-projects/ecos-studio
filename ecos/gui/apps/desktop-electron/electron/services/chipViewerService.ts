@@ -21,7 +21,35 @@ import {
 const BUILD_HINT =
   'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build ecc-geometry-snapshot in ecc/chipcompiler/thirdparty/ecc-tools and the ECC CLI package.'
 const DB_CONFIG_RELATIVE_PATH = 'config/db_default_config.json'
+const GEOMETRY_SCHEMA_VERSION = 1
 const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
+const REQUIRED_GEOMETRY_MANIFEST_FILE_KEYS = [
+  'meta',
+  'shapes',
+  'owners',
+  'payload',
+  'names',
+  'name_index',
+  'sidmap',
+  'view',
+] as const
+const OPTIONAL_GEOMETRY_MANIFEST_FILE_KEYS = [
+  'delta',
+  'layers',
+  'sites',
+  'masters',
+  'vias',
+  'grids',
+  'connectivity',
+  'nets',
+  'buses',
+  'groups',
+] as const
+const REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS = [
+  'shape_count',
+  'owner_count',
+  'payload_size',
+] as const
 
 type FileExists = (path: string) => boolean
 type EnsureDirectory = (path: string) => Promise<void>
@@ -146,6 +174,7 @@ interface ViewerLaunchContext {
 type SnapshotBuildReason =
   | { kind: 'forced' }
   | { kind: 'missing-manifest' }
+  | { detail: string; kind: 'invalid-manifest' }
   | { kind: 'stale'; source: SnapshotSourcePath }
 
 function defaultExecFile(file: string, args: string[]): Promise<ExecFileResult> {
@@ -289,6 +318,9 @@ function snapshotBuildReasonText(reason: SnapshotBuildReason): string {
   if (reason.kind === 'missing-manifest') {
     return 'creating missing snapshot'
   }
+  if (reason.kind === 'invalid-manifest') {
+    return `rebuilding invalid snapshot; ${reason.detail}`
+  }
   return `rebuilding stale snapshot; stale source: ${reason.source.label} ${reason.source.path}`
 }
 
@@ -344,6 +376,51 @@ function workspaceStepDetails(result: WorkspaceStepInfoResult): string {
     ...(result.missing.length > 0 ? [`Missing: ${result.missing.join(', ')}`] : []),
   ]
   return details.length > 0 ? ` ${details.join(' ')}` : ''
+}
+
+function parseGeometryManifestText(raw: string): Map<string, string> {
+  const values = new Map<string, string>()
+  for (const line of raw.split(/\r?\n/)) {
+    const separatorIndex = line.indexOf('=')
+    if (separatorIndex < 0) {
+      continue
+    }
+    const key = line.slice(0, separatorIndex).trim()
+    const value = line.slice(separatorIndex + 1).trim()
+    if (key) {
+      values.set(key, value)
+    }
+  }
+  return values
+}
+
+function resolveManifestPath(manifestPath: string, value: string): string {
+  return isAbsolute(value) ? value : join(dirname(manifestPath), value)
+}
+
+function invalidManifestNumber(values: Map<string, string>, key: string): string | null {
+  const raw = values.get(key)
+  if (raw === undefined || raw.length === 0) {
+    return `manifest is missing ${key}`
+  }
+  if (!/^[0-9]+$/.test(raw)) {
+    return `manifest ${key} is not a non-negative integer: ${raw}`
+  }
+  return null
+}
+
+function isDrcWorkspaceStep(
+  step: string,
+  stepLabel: string,
+  stepDirectory: string,
+): boolean {
+  const candidates = [step, stepLabel, basename(stepDirectory)]
+  return candidates.some((candidate) => {
+    const normalized = candidate.toLowerCase()
+    return (
+      normalized === 'drc' || normalized === 'drc_ecc' || normalized.startsWith('drc_')
+    )
+  })
 }
 
 function normalizeChipViewerMode(mode: unknown): ChipViewerMode {
@@ -474,6 +551,14 @@ export class ChipViewerService {
       buildReason = { kind: 'missing-manifest' }
     }
     if (!buildReason) {
+      const invalidManifest = await this.findInvalidSnapshotManifest(
+        snapshotInputs.manifestPath,
+      )
+      if (invalidManifest) {
+        buildReason = { detail: invalidManifest, kind: 'invalid-manifest' }
+      }
+    }
+    if (!buildReason) {
       dbConfig = await readDbConfig()
       const staleSource = await this.findStaleSnapshotSource(
         snapshotInputs.manifestPath,
@@ -592,7 +677,7 @@ export class ChipViewerService {
     const editDirectory = join(geometryDir, 'edit')
     const drcDataPath = join(workspaceStepDirectory, 'feature', 'drc.step.json')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
-    const isDrcStep = stepLabel.toLowerCase() === 'drc' || step.toLowerCase() === 'drc'
+    const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
 
     return {
       dbPath,
@@ -1046,6 +1131,65 @@ export class ChipViewerService {
       const sourceModifiedTime = await this.getFileModifiedTime(sourcePath.path)
       if (sourceModifiedTime !== null && sourceModifiedTime > manifestModifiedTime) {
         return sourcePath
+      }
+    }
+
+    return null
+  }
+
+  private async findInvalidSnapshotManifest(
+    manifestPath: string,
+  ): Promise<string | null> {
+    let values: Map<string, string>
+    try {
+      values = parseGeometryManifestText(await this.readTextFile(manifestPath))
+    } catch (error) {
+      return `manifest cannot be read: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    }
+
+    if (values.size === 0) {
+      return `manifest has no key/value entries: ${manifestPath}`
+    }
+
+    const schemaVersion = values.get('schema_version')
+    if (schemaVersion === undefined || schemaVersion.length === 0) {
+      return 'manifest is missing schema_version'
+    }
+    if (!/^[0-9]+$/.test(schemaVersion)) {
+      return `manifest schema_version is not a non-negative integer: ${schemaVersion}`
+    }
+    if (Number(schemaVersion) !== GEOMETRY_SCHEMA_VERSION) {
+      return `manifest schema_version ${schemaVersion} is unsupported; expected ${GEOMETRY_SCHEMA_VERSION}`
+    }
+
+    for (const key of REQUIRED_GEOMETRY_MANIFEST_NUMBER_KEYS) {
+      const invalidNumber = invalidManifestNumber(values, key)
+      if (invalidNumber) {
+        return invalidNumber
+      }
+    }
+
+    for (const key of REQUIRED_GEOMETRY_MANIFEST_FILE_KEYS) {
+      const value = values.get(key)
+      if (value === undefined || value.length === 0) {
+        return `manifest is missing ${key}`
+      }
+      const path = resolveManifestPath(manifestPath, value)
+      if (!this.fileExists(path)) {
+        return `manifest ${key} file does not exist: ${path}`
+      }
+    }
+
+    for (const key of OPTIONAL_GEOMETRY_MANIFEST_FILE_KEYS) {
+      const value = values.get(key)
+      if (value === undefined || value.length === 0) {
+        continue
+      }
+      const path = resolveManifestPath(manifestPath, value)
+      if (!this.fileExists(path)) {
+        return `manifest ${key} file does not exist: ${path}`
       }
     }
 

@@ -19,6 +19,15 @@ const GDS_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.gds')
 const IMAGE_PATH = join(STEP_DIRECTORY, 'output', 'gcd_Floorplan.png')
 const GEOMETRY_DIR = join(STEP_DIRECTORY, 'output', 'geometry')
 const GEOMETRY_MANIFEST = join(GEOMETRY_DIR, 'geometry.manifest')
+const GEOMETRY_EPOCH_DIR = join(GEOMETRY_DIR, 'epochs', '1')
+const GEOMETRY_META = join(GEOMETRY_EPOCH_DIR, 'geometry.meta.bin')
+const GEOMETRY_SHAPES = join(GEOMETRY_EPOCH_DIR, 'geometry.shapes.bin')
+const GEOMETRY_OWNERS = join(GEOMETRY_EPOCH_DIR, 'geometry.owners.bin')
+const GEOMETRY_PAYLOAD = join(GEOMETRY_EPOCH_DIR, 'geometry.payload.bin')
+const GEOMETRY_NAMES = join(GEOMETRY_EPOCH_DIR, 'geometry.names.bin')
+const GEOMETRY_NAME_INDEX = join(GEOMETRY_EPOCH_DIR, 'geometry.name_index.bin')
+const GEOMETRY_SIDMAP = join(GEOMETRY_EPOCH_DIR, 'geometry.sidmap.bin')
+const GEOMETRY_VIEW = join(GEOMETRY_EPOCH_DIR, 'geometry.view.bin')
 const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
 const EDIT_COMMAND_DIR = join(GEOMETRY_DIR, 'edit', 'commands')
@@ -27,6 +36,16 @@ const DB_CONFIG_PATH = join(PROJECT_ROOT, 'config', 'db_default_config.json')
 const TECH_LEF = '/pdk/prtech/tech.lef'
 const LEF_A = '/pdk/std/a.lef'
 const LEF_B = '/pdk/std/b.lef'
+const DEFAULT_MANIFEST_FILE_PATHS = [
+  GEOMETRY_META,
+  GEOMETRY_SHAPES,
+  GEOMETRY_OWNERS,
+  GEOMETRY_PAYLOAD,
+  GEOMETRY_NAMES,
+  GEOMETRY_NAME_INDEX,
+  GEOMETRY_SIDMAP,
+  GEOMETRY_VIEW,
+]
 
 function dbConfig() {
   return JSON.stringify({
@@ -35,6 +54,27 @@ function dbConfig() {
       tech_lef_path: TECH_LEF,
     },
   })
+}
+
+function geometryManifest(overrides: Record<string, string> = {}) {
+  return [
+    ['schema_version', '1'],
+    ['active_epoch', '1'],
+    ['shape_count', '10'],
+    ['owner_count', '10'],
+    ['payload_size', '128'],
+    ['meta', 'epochs/1/geometry.meta.bin'],
+    ['shapes', 'epochs/1/geometry.shapes.bin'],
+    ['owners', 'epochs/1/geometry.owners.bin'],
+    ['payload', 'epochs/1/geometry.payload.bin'],
+    ['names', 'epochs/1/geometry.names.bin'],
+    ['name_index', 'epochs/1/geometry.name_index.bin'],
+    ['sidmap', 'epochs/1/geometry.sidmap.bin'],
+    ['view', 'epochs/1/geometry.view.bin'],
+  ]
+    .map(([key, defaultValue]) => `${key}=${overrides[key] ?? defaultValue}`)
+    .join('\n')
+    .concat('\n')
 }
 
 function devChipViewerPaths() {
@@ -87,6 +127,12 @@ function createService(options: {
     ...(options.existingPaths ?? []),
     ...files.keys(),
   ])
+  if (existingPaths.has(GEOMETRY_MANIFEST) && !files.has(GEOMETRY_MANIFEST)) {
+    files.set(GEOMETRY_MANIFEST, geometryManifest())
+    for (const path of DEFAULT_MANIFEST_FILE_PATHS) {
+      existingPaths.add(path)
+    }
+  }
   const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
   const execFile =
     options.execFile ??
@@ -365,6 +411,59 @@ describe('ChipViewerService', () => {
     )
   })
 
+  it('passes DRC data files when the workspace step directory is drc_ecc', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+        DRC_DATA_PATH,
+        DRC_STATIS_PATH,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      stepInfoResult: {
+        id: 'layout',
+        info: {
+          db: DB_PATH,
+          def: DEF_PATH,
+          gds: GDS_PATH,
+          image: IMAGE_PATH,
+        },
+        message: [],
+        missing: [],
+        response: 'available',
+        step: 'DRC',
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: 'drc_ecc',
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      [
+        '--manifest',
+        GEOMETRY_MANIFEST,
+        '--mode',
+        'view',
+        '--drc-data',
+        DRC_DATA_PATH,
+        '--drc-statis',
+        DRC_STATIS_PATH,
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+      }),
+    )
+  })
+
   it('reports native viewer startup exits with the viewer log paths', async () => {
     const devBinaries = devChipViewerPaths()
     const child = createSpawnedViewerProcess()
@@ -460,6 +559,85 @@ describe('ChipViewerService', () => {
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
       expect.any(Object),
     )
+  })
+
+  it('regenerates an existing geometry snapshot when the manifest schema is unsupported', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          schema_version: '99',
+        }),
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
+      expect.any(Object),
+    )
+  })
+
+  it('regenerates an existing geometry snapshot when manifest side files are missing', async () => {
+    const devBinaries = devChipViewerPaths()
+    const { execFile, service } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [GEOMETRY_MANIFEST]: geometryManifest(),
+      },
+    })
+
+    await service.open({
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
+      '--tech-lef',
+      TECH_LEF,
+      '--lef',
+      LEF_A,
+      '--lef',
+      LEF_B,
+      '--def',
+      DEF_PATH,
+      '--out',
+      GEOMETRY_DIR,
+      '--mode',
+      'snapshot',
+    ])
   })
 
   it('regenerates an existing geometry snapshot when the source DEF is newer', async () => {
@@ -955,6 +1133,47 @@ describe('ChipViewerService', () => {
       `Geometry snapshot generation failed while rebuilding stale snapshot; stale source: LEF ${LEF_A} for step ${STEP_NAME}.`,
     )
     expect(message).toContain('stderr: DEF/LEF mismatch')
+    expect(spawnProcess).not.toHaveBeenCalled()
+  })
+
+  it('reports the invalid manifest reason when snapshot regeneration fails', async () => {
+    const devBinaries = devChipViewerPaths()
+    const execFile = vi.fn(async () => {
+      throw Object.assign(new Error('snapshot rebuild failed'), {
+        stderr: 'failed after manifest validation',
+      })
+    })
+    const { service, spawnProcess } = createService({
+      execFile,
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+        [GEOMETRY_MANIFEST]: geometryManifest({
+          schema_version: '99',
+        }),
+      },
+    })
+
+    let message = ''
+    try {
+      await service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      })
+      throw new Error('expected invalid manifest regeneration to fail')
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+
+    expect(message).toContain(
+      'Geometry snapshot generation failed while rebuilding invalid snapshot; manifest schema_version 99 is unsupported; expected 1',
+    )
+    expect(message).toContain('stderr: failed after manifest validation')
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
