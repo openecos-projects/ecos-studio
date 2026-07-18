@@ -333,6 +333,7 @@ if bench_report_path:
         raise SystemExit(f"{step_name}: missing bench_viewport report")
 
 memory = report.get("memory") or {}
+snapshot_write = report.get("snapshot_write") or {}
 mapped_plus_index = int(memory.get("mapped_plus_index_bytes", -1))
 view_tiles = int(report.get("view_tile_count", -1))
 
@@ -368,6 +369,10 @@ summary = {
     "layer_count": layer_count,
     "view_tile_count": view_tiles,
     "memory_mapped_plus_index_bytes": mapped_plus_index,
+    "snapshot_write": {
+        "dirty_lod_tile_count": snapshot_write.get("dirty_lod_tile_count"),
+        "dirty_lod_rebuild_candidate_count": snapshot_write.get("dirty_lod_rebuild_candidate_count"),
+    },
 }
 
 if bench is not None:
@@ -391,11 +396,16 @@ if bench is not None:
         f" viewport_p95_ns={bench.get('p95_ns')} "
         f"viewport_hits={bench.get('hits')} viewport_candidates={bench.get('candidates')}"
     )
+dirty_text = ""
+if snapshot_write.get("dirty_lod_tile_count") is not None:
+    dirty_text += f" dirty_lod_tiles={snapshot_write.get('dirty_lod_tile_count')}"
+if snapshot_write.get("dirty_lod_rebuild_candidate_count") is not None:
+    dirty_text += f" dirty_lod_candidates={snapshot_write.get('dirty_lod_rebuild_candidate_count')}"
 
 print(
     f"{step_name}: schema={schema_version} shapes={shape_count} "
     f"layers={layer_count} view_tiles={view_tiles} "
-    f"mapped_plus_index_bytes={mapped_plus_index}{bench_text} report={report_path}"
+    f"mapped_plus_index_bytes={mapped_plus_index}{dirty_text}{bench_text} report={report_path}"
 )
 
 if failures:
