@@ -77,6 +77,18 @@
 
     <div v-else class="min-h-0 flex-1 overflow-auto">
       <section
+        v-if="integrity.status === 'incomplete' || warnings.length"
+        class="border-b border-(--border-color) px-3 py-2 text-[10px] text-amber-400"
+        aria-label="Step QoR analysis warnings"
+      >
+        <p v-if="integrity.status === 'incomplete'">
+          Analysis source validation needs attention.
+        </p>
+        <p v-if="warnings.length" :class="integrity.status === 'incomplete' ? 'mt-1' : ''">
+          {{ warnings.join(' ') }}
+        </p>
+      </section>
+      <section
         v-if="metrics.length"
         class="border-b border-(--border-color) px-3 py-2"
         aria-label="Step QoR metric overview"
@@ -115,7 +127,7 @@
         </p>
       </section>
 
-      <section v-if="kind === 'route'" class="min-w-max">
+      <section v-if="detail && kind === 'route'" class="min-w-max">
         <div
           class="flex items-center justify-between border-b border-(--border-color) px-3 py-2 text-[10px] text-(--text-secondary)"
         >
@@ -173,7 +185,7 @@
         </table>
       </section>
 
-      <section v-else-if="kind === 'place'" class="min-w-max">
+      <section v-else-if="detail && kind === 'place'" class="min-w-max">
         <div
           class="border-b border-(--border-color) px-3 py-2 text-[10px] text-(--text-secondary)"
         >
@@ -221,7 +233,7 @@
         </table>
       </section>
 
-      <section v-else-if="kind === 'sta'" class="min-w-max">
+      <section v-else-if="detail && kind === 'sta'" class="min-w-max">
         <div
           class="flex border-b border-(--border-color) px-3 pt-2"
           role="tablist"
@@ -392,6 +404,7 @@ const {
   currentStep,
   detail,
   error,
+  integrity,
   isEmpty,
   isSupported,
   kind,
@@ -402,6 +415,7 @@ const {
   metricsPath,
   qorStatus,
   refetch,
+  warnings,
 } = useStepQorAnalysis()
 
 const staView = ref<'groups' | 'corners'>('groups')

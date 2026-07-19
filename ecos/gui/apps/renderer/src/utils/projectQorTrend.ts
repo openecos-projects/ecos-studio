@@ -10,6 +10,7 @@ export type QorDimension =
   | 'routability_physical'
   | 'area_cost'
   | 'clock_robustness_dfm'
+  | 'runtime'
 
 export type QorPolarity =
   | 'higher_is_better'
@@ -88,6 +89,35 @@ export interface ProjectQorHotspot {
   description: string
 }
 
+export interface ProjectQorTimingConstraints {
+  status: 'consistent' | 'changed_during_run' | 'unavailable'
+  fingerprint: string | null
+  sourceFile: string | null
+  step: FlowStep | null
+}
+
+export interface ProjectQorAnalysisIntegrityIssue {
+  step: FlowStep
+  invalidMetricSourceIds: string[]
+  invalidDetailIds: string[]
+}
+
+export interface ProjectQorMissingMetricCoverage {
+  step: FlowStep
+  missingMetricCount: number
+}
+
+export interface ProjectQorDataQuality {
+  status: 'complete' | 'limited' | 'incomplete' | 'unavailable'
+  completedStepCount: number
+  analyzedStepCount: number
+  missingCompletedAnalysisSteps: FlowStep[]
+  availableMetricCount: number
+  missingMetricCount: number
+  missingMetricCoverage: ProjectQorMissingMetricCoverage[]
+  invalidSourceCount: number
+}
+
 export interface ProjectQorTrendWorkspaceSummary {
   workspaceId: string
   workspaceName: string
@@ -100,6 +130,9 @@ export interface ProjectQorTrendWorkspaceSummary {
   records: ProjectQorMetricRecord[]
   blockingIssues: ProjectQorBlockingIssue[]
   hotspots: ProjectQorHotspot[]
+  timingConstraints: ProjectQorTimingConstraints
+  analysisIntegrityIssues: ProjectQorAnalysisIntegrityIssue[]
+  dataQuality: ProjectQorDataQuality
   missingAnalysisSteps: FlowStep[]
   missingMetrics: string[]
 }
@@ -182,7 +215,13 @@ export interface ProjectQorRisk {
   workspaceId: string
   workspaceName: string
   step: FlowStep
-  kind: 'blocking_issue' | 'hotspot'
+  kind:
+    | 'blocking_issue'
+    | 'hotspot'
+    | 'constraint_change'
+    | 'analysis_integrity'
+    | 'analysis_coverage'
+    | 'analysis_metric_coverage'
   severity: 'critical' | 'warning' | 'info'
   metric: string
   displayName: string
@@ -200,6 +239,10 @@ export interface ProjectQorTimingIssue {
   pathGroup: string
   checkType: string
   slackNs: number
+  launchClockNetworkDelayNs: number | null
+  captureClockNetworkDelayNs: number | null
+  clockNetworkDelayDeltaNs: number | null
+  triage?: ProjectQorTimingTriage
 }
 
 export interface ProjectQorTimingArtifactPath {
@@ -212,9 +255,59 @@ export interface ProjectQorTimingArtifactPath {
   timingPathsFile: string
 }
 
+export interface ProjectQorTimingCoverage {
+  workspaceId: string
+  workspaceName: string
+  missingCornerCount: number
+  availableArtifactCount: number
+}
+
+export type ProjectQorTimingTriageState =
+  | 'new'
+  | 'regressed'
+  | 'persistent'
+  | 'improved'
+  | 'cleared'
+
+export interface ProjectQorTimingPhysicalSignal {
+  metricName: string
+  displayName: string
+  unit?: string
+  currentValue: number
+  baselineValue: number
+  absoluteDelta: number
+  relativeDeltaPct: number | null
+}
+
+export interface ProjectQorTimingReviewHint {
+  id: 'sta_path_evidence' | 'route' | 'place' | 'cts' | 'rcx'
+  label: string
+}
+
+export interface ProjectQorTimingTriage {
+  issueId: string
+  workspaceId: string
+  workspaceName: string
+  baselineWorkspaceId: string
+  baselineWorkspaceName: string
+  state: ProjectQorTimingTriageState
+  severity: 'critical' | 'warning'
+  analysisType: 'setup' | 'hold'
+  corner: string
+  pathGroup: string
+  checkType: string
+  currentSlackNs: number | null
+  baselineSlackNs: number | null
+  slackDeltaNs: number | null
+  physicalContext: ProjectQorTimingPhysicalSignal[]
+  reviewHints: ProjectQorTimingReviewHint[]
+}
+
 export interface ProjectQorTimingSummary {
   issues: ProjectQorTimingIssue[]
   artifactPaths: ProjectQorTimingArtifactPath[]
+  coverage: ProjectQorTimingCoverage[]
+  triage: ProjectQorTimingTriage[]
   criticalCount: number
   warningCount: number
   cleanWorkspaceCount: number
@@ -256,6 +349,7 @@ const QOR_DIMENSIONS: QorDimension[] = [
   'routability_physical',
   'area_cost',
   'clock_robustness_dfm',
+  'runtime',
 ]
 
 const QOR_POLARITIES: QorPolarity[] = [
@@ -749,6 +843,7 @@ const DIMENSION_WEIGHTS: Record<QorDimension, number> = {
   routability_physical: 0.2,
   area_cost: 0.1,
   clock_robustness_dfm: 0.1,
+  runtime: 0,
 }
 
 const DIMENSION_LABELS: Record<QorDimension, string> = {
@@ -757,6 +852,7 @@ const DIMENSION_LABELS: Record<QorDimension, string> = {
   routability_physical: 'Routability / Physical',
   area_cost: 'Area',
   clock_robustness_dfm: 'Clock / DFM',
+  runtime: 'Runtime',
 }
 
 const METRIC_FAIL_VALUES: Record<string, number> = {
@@ -859,7 +955,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     const projectRole = qorProjectRoleValue(metric.project_role)
     const stepRole = qorStepRoleValue(metric.step_role)
     const source = isRecord(metric.source) ? metric.source : null
-    const sourceFile = relativeAnalysisPath(source?.path)
+    const sourceFile = relativeFeatureSourcePath(source)
     const corner = metric.corner === null ? null : stringValue(metric.corner)
     if (
       !metricName ||
@@ -914,8 +1010,15 @@ export function buildProjectQorTrendSummary(
     workspaceSummaries,
     baselineWorkspace?.workspaceId ?? null,
   )
-  const risks = buildProjectQorRisks(workspaceSummaries)
-  const timingClosure = buildProjectQorTimingSummary(sortedInputs)
+  const risks = [
+    ...buildProjectQorRisks(workspaceSummaries),
+    ...buildTimingConstraintRisks(workspaceSummaries, baselineWorkspace),
+  ].sort(compareProjectQorRisk)
+  const timingClosure = buildProjectQorTimingSummary(
+    sortedInputs,
+    workspaceSummaries,
+    baselineWorkspace?.workspaceId ?? null,
+  )
 
   return {
     workspaces: workspaceSummaries,
@@ -1051,6 +1154,33 @@ export function buildProjectQorTrendReport(
         source_file: hotspot.sourceFile,
         description: hotspot.description,
       })),
+      timing_constraints: {
+        status: workspace.timingConstraints.status,
+        fingerprint: workspace.timingConstraints.fingerprint,
+        source_file: workspace.timingConstraints.sourceFile,
+        step: workspace.timingConstraints.step,
+      },
+      analysis_integrity: workspace.analysisIntegrityIssues.map((issue) => ({
+        step: issue.step,
+        invalid_metric_source_ids: issue.invalidMetricSourceIds,
+        invalid_detail_ids: issue.invalidDetailIds,
+      })),
+      data_quality: {
+        status: workspace.dataQuality.status,
+        completed_step_count: workspace.dataQuality.completedStepCount,
+        analyzed_step_count: workspace.dataQuality.analyzedStepCount,
+        missing_completed_analysis_steps:
+          workspace.dataQuality.missingCompletedAnalysisSteps,
+        available_metric_count: workspace.dataQuality.availableMetricCount,
+        missing_metric_count: workspace.dataQuality.missingMetricCount,
+        missing_metric_coverage: workspace.dataQuality.missingMetricCoverage.map(
+          (coverage) => ({
+            step: coverage.step,
+            missing_metric_count: coverage.missingMetricCount,
+          }),
+        ),
+        invalid_source_count: workspace.dataQuality.invalidSourceCount,
+      },
       missing_analysis_steps: workspace.missingAnalysisSteps,
       missing_metrics: workspace.missingMetrics,
     })),
@@ -1100,6 +1230,41 @@ export function buildProjectQorTrendReport(
       at_risk_workspace_count: summary.timingClosure.atRiskWorkspaceCount,
       incomplete_workspace_count: summary.timingClosure.incompleteWorkspaceCount,
       unavailable_workspace_count: summary.timingClosure.unavailableWorkspaceCount,
+      corner_coverage: summary.timingClosure.coverage.map((coverage) => ({
+        workspace_id: coverage.workspaceId,
+        workspace_name: coverage.workspaceName,
+        missing_corner_count: coverage.missingCornerCount,
+        available_artifact_count: coverage.availableArtifactCount,
+      })),
+      triage: summary.timingClosure.triage.map((triage) => ({
+        issue_id: triage.issueId,
+        workspace_id: triage.workspaceId,
+        workspace_name: triage.workspaceName,
+        baseline_workspace_id: triage.baselineWorkspaceId,
+        baseline_workspace_name: triage.baselineWorkspaceName,
+        state: triage.state,
+        severity: triage.severity,
+        analysis_type: triage.analysisType,
+        corner: triage.corner,
+        path_group: triage.pathGroup,
+        check_type: triage.checkType,
+        current_slack_ns: triage.currentSlackNs,
+        baseline_slack_ns: triage.baselineSlackNs,
+        slack_delta_ns: triage.slackDeltaNs,
+        physical_context: triage.physicalContext.map((signal) => ({
+          metric_name: signal.metricName,
+          display_name: signal.displayName,
+          unit: signal.unit ?? '',
+          current_value: signal.currentValue,
+          baseline_value: signal.baselineValue,
+          absolute_delta: signal.absoluteDelta,
+          relative_delta_pct: signal.relativeDeltaPct,
+        })),
+        review_hints: triage.reviewHints.map((hint) => ({
+          id: hint.id,
+          label: hint.label,
+        })),
+      })),
       artifact_paths: summary.timingClosure.artifactPaths.map((artifact) => ({
         workspace_id: artifact.workspaceId,
         workspace_name: artifact.workspaceName,
@@ -1119,6 +1284,9 @@ export function buildProjectQorTrendReport(
         path_group: issue.pathGroup,
         check_type: issue.checkType,
         slack_ns: issue.slackNs,
+        launch_clock_network_delay_ns: issue.launchClockNetworkDelayNs,
+        capture_clock_network_delay_ns: issue.captureClockNetworkDelayNs,
+        clock_network_delay_delta_ns: issue.clockNetworkDelayDeltaNs,
       })),
     },
     unsupported_modules: summary.unsupportedModules.map((module) => ({
@@ -1193,6 +1361,7 @@ function buildWorkspaceSummary(
       text: workspace.stepMetricTexts[step],
     }),
   )
+  const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
   const areaScoringStep = resolveLastSuccessfulStep(workspace.stepStatuses)
   const projectRecords = selectProjectRecords(records, areaScoringStep)
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter(
@@ -1202,10 +1371,29 @@ function buildWorkspaceSummary(
     normalizeQorSummaryBlockingIssues(step, workspace.stepSummaryTexts?.[step]),
   )
   const summaryMissingMetrics = QOR_FLOW_STEPS.flatMap((step) =>
-    normalizeQorSummaryMissingMetrics(workspace.stepSummaryTexts?.[step]),
+    normalizeQorSummaryMissingMetrics(step, workspace.stepSummaryTexts?.[step]),
   )
   const hotspots = QOR_FLOW_STEPS.flatMap((step) =>
     normalizeQorHotspots(step, workspace.stepHotspotTexts?.[step]),
+  )
+  const analysisIntegrityIssues = QOR_FLOW_STEPS.flatMap((step) =>
+    normalizeQorAnalysisIntegrity(step, workspace.stepMetricTexts[step]),
+  )
+  const missingMetrics = uniqueStrings([
+    ...buildMissingMetrics(records),
+    ...summaryMissingMetrics.map((metric) => metric.metricName),
+  ])
+  const missingMetricCoverage = buildMissingMetricCoverage(
+    records,
+    summaryMissingMetrics,
+    areaScoringStep,
+  )
+  const dataQuality = buildWorkspaceDataQuality(
+    workspace,
+    records,
+    missingMetrics,
+    missingMetricCoverage,
+    analysisIntegrityIssues,
   )
   const gateStatus = resolveWorkspaceGateStatus(
     workspace.stepStatuses,
@@ -1228,11 +1416,54 @@ function buildWorkspaceSummary(
     records: projectRecords,
     blockingIssues,
     hotspots,
+    timingConstraints,
+    analysisIntegrityIssues,
+    dataQuality,
     missingAnalysisSteps,
-    missingMetrics: uniqueStrings([
-      ...buildMissingMetrics(records),
-      ...summaryMissingMetrics,
-    ]),
+    missingMetrics,
+  }
+}
+
+function buildWorkspaceDataQuality(
+  workspace: ProjectQorWorkspaceInput,
+  records: ProjectQorMetricRecord[],
+  missingMetrics: string[],
+  missingMetricCoverage: ProjectQorMissingMetricCoverage[],
+  analysisIntegrityIssues: ProjectQorAnalysisIntegrityIssue[],
+): ProjectQorDataQuality {
+  const completedSteps = QOR_FLOW_STEPS.filter(
+    (step) =>
+      workspace.stepStatuses[step] === 'success' ||
+      workspace.stepStatuses[step] === 'reused',
+  )
+  const analyzedSteps = completedSteps.filter((step) =>
+    hasCurrentQorMetricsText(workspace.stepMetricTexts[step]),
+  )
+  const missingCompletedAnalysisSteps = completedSteps.filter(
+    (step) => !analyzedSteps.includes(step),
+  )
+  const invalidSourceCount = analysisIntegrityIssues.reduce(
+    (count, issue) =>
+      count + issue.invalidMetricSourceIds.length + issue.invalidDetailIds.length,
+    0,
+  )
+  const status =
+    completedSteps.length === 0
+      ? 'unavailable'
+      : missingCompletedAnalysisSteps.length > 0 || invalidSourceCount > 0
+        ? 'incomplete'
+        : missingMetrics.length > 0
+          ? 'limited'
+          : 'complete'
+  return {
+    status,
+    completedStepCount: completedSteps.length,
+    analyzedStepCount: analyzedSteps.length,
+    missingCompletedAnalysisSteps,
+    availableMetricCount: records.length,
+    missingMetricCount: missingMetrics.length,
+    missingMetricCoverage,
+    invalidSourceCount,
   }
 }
 
@@ -1267,9 +1498,10 @@ function selectProjectRecords(
     if (record.projectRole === 'none') continue
     if (record.dimension === 'area_cost' && record.step !== areaScoringStep) continue
 
-    const current = selected.get(record.metricName)
+    const key = projectRecordKey(record)
+    const current = selected.get(key)
     if (!current || compareProjectRecordSelection(record, current) < 0) {
-      selected.set(record.metricName, record)
+      selected.set(key, record)
     }
   }
   return Array.from(selected.values()).sort((left, right) =>
@@ -1319,16 +1551,161 @@ function buildProjectQorRisks(
         value: hotspot.value,
         message: hotspot.description,
       })),
+      ...workspace.analysisIntegrityIssues.map((issue) => {
+        const invalidCount =
+          issue.invalidMetricSourceIds.length + issue.invalidDetailIds.length
+        const metricCount = issue.invalidMetricSourceIds.length
+        const detailCount = issue.invalidDetailIds.length
+        const skippedKinds = [
+          metricCount > 0 ? `${metricCount} metric${metricCount === 1 ? '' : 's'}` : '',
+          detailCount > 0 ? `${detailCount} detail descriptor${detailCount === 1 ? '' : 's'}` : '',
+        ].filter(Boolean)
+        return {
+          workspaceId: workspace.workspaceId,
+          workspaceName: workspace.workspaceName,
+          step: issue.step,
+          kind: 'analysis_integrity' as const,
+          severity: 'warning' as const,
+          metric: 'analysis_feature_provenance',
+          displayName: 'Analysis Feature Provenance',
+          value: invalidCount,
+          message:
+            `QoR analysis ignored ${skippedKinds.join(' and ')} with invalid feature provenance.`,
+        }
+      }),
+      ...buildWorkspaceDataQualityRisks(workspace),
     ])
     .sort(compareProjectQorRisk)
 }
 
+function buildWorkspaceDataQualityRisks(
+  workspace: ProjectQorTrendWorkspaceSummary,
+): ProjectQorRisk[] {
+  const quality = workspace.dataQuality
+  const referenceStep =
+    quality.missingCompletedAnalysisSteps[0] ??
+    workspace.analysisIntegrityIssues[0]?.step ??
+    workspace.areaScoringStep ??
+    'Route'
+  if (quality.status === 'incomplete' && quality.missingCompletedAnalysisSteps.length) {
+    return [
+      {
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step: referenceStep,
+        kind: 'analysis_coverage',
+        severity: 'warning',
+        metric: 'analysis_v2_coverage',
+        displayName: 'V2 Analysis Coverage',
+        value: quality.missingCompletedAnalysisSteps.length,
+        message:
+          `${quality.missingCompletedAnalysisSteps.length} completed step` +
+          `${quality.missingCompletedAnalysisSteps.length === 1 ? '' : 's'} ` +
+          'do not have current-contract V2 QoR analysis.',
+      },
+    ]
+  }
+  if (quality.status === 'limited') {
+    const coverageRisks = quality.missingMetricCoverage.map((coverage) => ({
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      step: coverage.step,
+      kind: 'analysis_metric_coverage' as const,
+      severity: 'info' as const,
+      metric: 'analysis_metric_coverage',
+      displayName: `${coverage.step} Analysis Metric Coverage`,
+      value: coverage.missingMetricCount,
+      message:
+        `${coverage.step} analysis does not provide ${coverage.missingMetricCount} expected QoR metric` +
+        `${coverage.missingMetricCount === 1 ? '.' : 's.'}`,
+    }))
+    if (coverageRisks.length) return coverageRisks
+    return [
+      {
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step: referenceStep,
+        kind: 'analysis_metric_coverage',
+        severity: 'info',
+        metric: 'analysis_metric_coverage',
+        displayName: 'Analysis Metric Coverage',
+        value: quality.missingMetricCount,
+        message:
+          `${quality.missingMetricCount} expected QoR metric` +
+          `${quality.missingMetricCount === 1 ? ' is' : 's are'} unavailable.`,
+      },
+    ]
+  }
+  return []
+}
+
+function buildTimingConstraintRisks(
+  workspaces: ProjectQorTrendWorkspaceSummary[],
+  explicitBaseline: ProjectQorTrendWorkspaceSummary | null,
+): ProjectQorRisk[] {
+  const risks: ProjectQorRisk[] = []
+  let sequentialBaseline: ProjectQorTrendWorkspaceSummary | null = null
+
+  for (const workspace of workspaces) {
+    const constraints = workspace.timingConstraints
+    const baseline = explicitBaseline ?? sequentialBaseline
+    const step = constraints.step ?? 'STA'
+
+    if (constraints.status === 'changed_during_run') {
+      risks.push({
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step,
+        kind: 'constraint_change',
+        severity: 'warning',
+        metric: 'timing_constraint_fingerprint',
+        displayName: 'Timing Constraints',
+        value: 'multiple',
+        message:
+          'Timing constraints changed during this workspace run; QoR values are not directly comparable.',
+      })
+    } else if (
+      baseline &&
+      workspace.workspaceId !== baseline.workspaceId &&
+      constraints.status === 'consistent' &&
+      baseline.timingConstraints.status === 'consistent' &&
+      constraints.fingerprint !== baseline.timingConstraints.fingerprint
+    ) {
+      risks.push({
+        workspaceId: workspace.workspaceId,
+        workspaceName: workspace.workspaceName,
+        step,
+        kind: 'constraint_change',
+        severity: 'warning',
+        metric: 'timing_constraint_fingerprint',
+        displayName: 'Timing Constraints',
+        value: constraints.fingerprint?.slice(0, 12) ?? null,
+        message:
+          `Timing constraints differ from ${baseline.workspaceName || baseline.workspaceId}; ` +
+          'QoR deltas may not be directly comparable.',
+      })
+    }
+
+    if (!explicitBaseline && constraints.status === 'consistent') {
+      sequentialBaseline = workspace
+    }
+  }
+  return risks
+}
+
 function buildProjectQorTimingSummary(
   workspaces: ProjectQorWorkspaceInput[],
+  workspaceSummaries: ProjectQorTrendWorkspaceSummary[],
+  explicitBaselineWorkspaceId: string | null,
 ): ProjectQorTimingSummary {
+  const workspaceSummaryById = new Map(
+    workspaceSummaries.map((workspace) => [workspace.workspaceId, workspace]),
+  )
   const summary: ProjectQorTimingSummary = {
     issues: [],
     artifactPaths: [],
+    coverage: [],
+    triage: [],
     criticalCount: 0,
     warningCount: 0,
     cleanWorkspaceCount: 0,
@@ -1336,11 +1713,18 @@ function buildProjectQorTimingSummary(
     incompleteWorkspaceCount: 0,
     unavailableWorkspaceCount: 0,
   }
+  const timingAnalyses: TimingWorkspaceAnalysis[] = []
 
   for (const workspace of workspaces) {
     const timingAnalysis = normalizeStaTimingIssues(workspace)
+    timingAnalyses.push({
+      workspace,
+      workspaceSummary: workspaceSummaryById.get(workspace.workspaceId) ?? null,
+      timingAnalysis,
+    })
     summary.issues.push(...timingAnalysis.issues)
     summary.artifactPaths.push(...timingAnalysis.artifactPaths)
+    if (timingAnalysis.coverage) summary.coverage.push(timingAnalysis.coverage)
 
     if (timingAnalysis.status === 'clean') {
       summary.cleanWorkspaceCount += 1
@@ -1353,13 +1737,252 @@ function buildProjectQorTimingSummary(
     }
   }
 
+  summary.triage = buildProjectQorTimingTriage(
+    timingAnalyses,
+    explicitBaselineWorkspaceId,
+  )
+  const triageByCurrentIssue = new Map(
+    summary.triage
+      .filter((triage) => triage.state !== 'cleared')
+      .map((triage) => [`${triage.workspaceId}\u0000${triage.issueId}`, triage]),
+  )
+  summary.issues = summary.issues.map((issue) => {
+    const triage = triageByCurrentIssue.get(`${issue.workspaceId}\u0000${issue.issueId}`)
+    return triage ? { ...issue, triage } : issue
+  })
   summary.issues.sort(compareProjectQorTimingIssue)
   summary.artifactPaths.sort(compareProjectQorTimingArtifactPath)
+  summary.coverage.sort(compareProjectQorTimingCoverage)
   summary.criticalCount = summary.issues.filter(
     (issue) => issue.severity === 'critical',
   ).length
   summary.warningCount = summary.issues.length - summary.criticalCount
   return summary
+}
+
+const TIMING_TRIAGE_LIMIT = 20
+const TIMING_SLACK_DELTA_EPSILON_NS = 0.001
+const TIMING_PHYSICAL_CONTEXT_LIMIT = 3
+const TIMING_REVIEW_HINT_LIMIT = 2
+const TIMING_PHYSICAL_CONTEXT_PRIORITY: Record<string, number> = {
+  route_la_total_overflow: 0,
+  route_dr_total_violation_count: 1,
+  place_congestion_egr_overflow_total: 2,
+  place_congestion_egr_overflow_max: 3,
+  place_rudy_utilization_max: 4,
+  place_lutrudy_utilization_max: 5,
+  route_wirelength: 6,
+  route_via_count: 7,
+  cts_worst_optimized_skew_ns: 8,
+  cts_skew_target_unmet_count: 9,
+  cts_clock_wirelength_max: 10,
+  rcx_worst_total_capacitance_ff: 11,
+  rcx_worst_coupling_capacitance_ff: 12,
+  rcx_worst_total_resistance_ohm: 13,
+}
+
+interface TimingWorkspaceAnalysis {
+  workspace: ProjectQorWorkspaceInput
+  workspaceSummary: ProjectQorTrendWorkspaceSummary | null
+  timingAnalysis: StaTimingAnalysis
+}
+
+function buildProjectQorTimingTriage(
+  analyses: TimingWorkspaceAnalysis[],
+  explicitBaselineWorkspaceId: string | null,
+): ProjectQorTimingTriage[] {
+  const explicitBaseline = explicitBaselineWorkspaceId
+    ? (analyses.find(
+        (analysis) => analysis.workspace.workspaceId === explicitBaselineWorkspaceId,
+      ) ?? null)
+    : null
+  const triage: ProjectQorTimingTriage[] = []
+
+  for (let index = 0; index < analyses.length; index += 1) {
+    const current = analyses[index]!
+    const baseline = explicitBaseline
+      ? current.workspace.workspaceId === explicitBaseline.workspace.workspaceId
+        ? null
+        : explicitBaseline
+      : index > 0
+        ? analyses[index - 1]!
+        : null
+    if (!baseline || !isTimingComparisonEligible(current, baseline)) continue
+    triage.push(...compareTimingIssues(current, baseline))
+  }
+
+  return triage.sort(compareProjectQorTimingTriage).slice(0, TIMING_TRIAGE_LIMIT)
+}
+
+function isTimingComparisonEligible(
+  current: TimingWorkspaceAnalysis,
+  baseline: TimingWorkspaceAnalysis,
+): boolean {
+  const currentConstraints = current.workspaceSummary?.timingConstraints
+  const baselineConstraints = baseline.workspaceSummary?.timingConstraints
+  return Boolean(
+    current.timingAnalysis.artifactPaths.length > 0 &&
+      baseline.timingAnalysis.artifactPaths.length > 0 &&
+      !current.timingAnalysis.coverage &&
+      !baseline.timingAnalysis.coverage &&
+      currentConstraints?.status === 'consistent' &&
+      baselineConstraints?.status === 'consistent' &&
+      currentConstraints.fingerprint &&
+      currentConstraints.fingerprint === baselineConstraints.fingerprint,
+  )
+}
+
+function compareTimingIssues(
+  current: TimingWorkspaceAnalysis,
+  baseline: TimingWorkspaceAnalysis,
+): ProjectQorTimingTriage[] {
+  const currentById = new Map(
+    current.timingAnalysis.issues.map((issue) => [issue.issueId, issue]),
+  )
+  const baselineById = new Map(
+    baseline.timingAnalysis.issues.map((issue) => [issue.issueId, issue]),
+  )
+  const issueIds = Array.from(new Set([...currentById.keys(), ...baselineById.keys()]))
+  const physicalContext = buildTimingPhysicalContext(
+    current.workspaceSummary,
+    baseline.workspaceSummary,
+  )
+
+  return issueIds.flatMap((issueId) => {
+    const currentIssue = currentById.get(issueId) ?? null
+    const baselineIssue = baselineById.get(issueId) ?? null
+    const issue = currentIssue ?? baselineIssue
+    if (!issue) return []
+
+    const currentSlackNs = currentIssue?.slackNs ?? null
+    const baselineSlackNs = baselineIssue?.slackNs ?? null
+    const slackDeltaNs =
+      currentSlackNs === null || baselineSlackNs === null
+        ? null
+        : roundMetric(currentSlackNs - baselineSlackNs)
+    const state = timingTriageState(currentSlackNs, baselineSlackNs, slackDeltaNs)
+    return [
+      {
+        issueId,
+        workspaceId: current.workspace.workspaceId,
+        workspaceName: current.workspace.workspaceName,
+        baselineWorkspaceId: baseline.workspace.workspaceId,
+        baselineWorkspaceName: baseline.workspace.workspaceName,
+        state,
+        severity: issue.severity,
+        analysisType: issue.analysisType,
+        corner: issue.corner,
+        pathGroup: issue.pathGroup,
+        checkType: issue.checkType,
+        currentSlackNs,
+        baselineSlackNs,
+        slackDeltaNs,
+        physicalContext: state === 'new' || state === 'regressed' ? physicalContext : [],
+        reviewHints: buildTimingReviewHints(
+          state,
+          state === 'new' || state === 'regressed' ? physicalContext : [],
+        ),
+      },
+    ]
+  })
+}
+
+function buildTimingPhysicalContext(
+  current: ProjectQorTrendWorkspaceSummary | null,
+  baseline: ProjectQorTrendWorkspaceSummary | null,
+): ProjectQorTimingPhysicalSignal[] {
+  if (!current || !baseline) return []
+  const baselineRecordsByKey = new Map(
+    baseline.records.map((record) => [projectRecordKey(record), record]),
+  )
+  const signals = current.records.flatMap((record) => {
+    const priority = TIMING_PHYSICAL_CONTEXT_PRIORITY[record.metricName]
+    const baselineRecord = baselineRecordsByKey.get(projectRecordKey(record))
+    if (
+      priority === undefined ||
+      !baselineRecord ||
+      record.value === null ||
+      baselineRecord.value === null ||
+      record.polarity !== 'lower_is_better' ||
+      baselineRecord.polarity !== record.polarity ||
+      record.unit !== baselineRecord.unit
+    ) {
+      return []
+    }
+    const absoluteDelta = roundMetric(record.value - baselineRecord.value)
+    if (absoluteDelta <= 0) return []
+    const relativeDeltaPct =
+      baselineRecord.value === 0
+        ? null
+        : roundMetric((absoluteDelta / Math.abs(baselineRecord.value)) * 100)
+    return [
+      {
+        metricName: record.metricName,
+        displayName: record.displayName,
+        unit: record.unit,
+        currentValue: record.value,
+        baselineValue: baselineRecord.value,
+        absoluteDelta,
+        relativeDeltaPct,
+      },
+    ]
+  })
+
+  return signals
+    .sort((left, right) => {
+      const priorityDelta =
+        TIMING_PHYSICAL_CONTEXT_PRIORITY[left.metricName] -
+        TIMING_PHYSICAL_CONTEXT_PRIORITY[right.metricName]
+      if (priorityDelta !== 0) return priorityDelta
+      return Math.abs(right.absoluteDelta) - Math.abs(left.absoluteDelta)
+    })
+    .slice(0, TIMING_PHYSICAL_CONTEXT_LIMIT)
+}
+
+function buildTimingReviewHints(
+  state: ProjectQorTimingTriageState,
+  physicalContext: ProjectQorTimingPhysicalSignal[],
+): ProjectQorTimingReviewHint[] {
+  if (state !== 'new' && state !== 'regressed') return []
+  const hints: ProjectQorTimingReviewHint[] = [
+    { id: 'sta_path_evidence', label: 'Review structured STA path evidence' },
+  ]
+  const physicalHint = physicalContext
+    .map((signal) => timingReviewHintForMetric(signal.metricName))
+    .find((hint): hint is ProjectQorTimingReviewHint => hint !== null)
+  if (physicalHint) hints.push(physicalHint)
+  return hints.slice(0, TIMING_REVIEW_HINT_LIMIT)
+}
+
+function timingReviewHintForMetric(
+  metricName: string,
+): ProjectQorTimingReviewHint | null {
+  if (metricName.startsWith('route_')) {
+    return { id: 'route', label: 'Review route overflow and detailed-routing changes' }
+  }
+  if (metricName.startsWith('place_')) {
+    return { id: 'place', label: 'Review placement congestion changes' }
+  }
+  if (metricName.startsWith('cts_')) {
+    return { id: 'cts', label: 'Review CTS skew and clock-network changes' }
+  }
+  if (metricName.startsWith('rcx_')) {
+    return { id: 'rcx', label: 'Review RCX parasitic changes' }
+  }
+  return null
+}
+
+function timingTriageState(
+  currentSlackNs: number | null,
+  baselineSlackNs: number | null,
+  slackDeltaNs: number | null,
+): ProjectQorTimingTriageState {
+  if (currentSlackNs === null) return 'cleared'
+  if (baselineSlackNs === null) return 'new'
+  if (slackDeltaNs === null || Math.abs(slackDeltaNs) < TIMING_SLACK_DELTA_EPSILON_NS) {
+    return 'persistent'
+  }
+  return slackDeltaNs < 0 ? 'regressed' : 'improved'
 }
 
 function buildDimensionScores(
@@ -1508,11 +2131,11 @@ function buildWorkspaceDeltas(
     const currentRecordsByMetric = new Map<string, ProjectQorMetricRecord>()
     for (const record of workspace.records) {
       if (record.value === null) continue
-      currentRecordsByMetric.set(record.metricName, record)
+      currentRecordsByMetric.set(projectRecordKey(record), record)
     }
 
     for (const record of currentRecordsByMetric.values()) {
-      const baseline = previousRecordsByMetric.get(record.metricName)
+      const baseline = previousRecordsByMetric.get(projectRecordKey(record))
       if (baseline?.value !== null && baseline?.value !== undefined) {
         const delta = buildDelta(
           record,
@@ -1533,7 +2156,7 @@ function buildWorkspaceDeltas(
     }
 
     for (const record of currentRecordsByMetric.values()) {
-      previousRecordsByMetric.set(record.metricName, record)
+      previousRecordsByMetric.set(projectRecordKey(record), record)
     }
   }
 
@@ -1558,7 +2181,7 @@ function buildExplicitBaselineDeltas(
     if (workspace.workspaceId === baselineWorkspace.workspaceId) continue
 
     for (const record of recordsByMetric(workspace.records).values()) {
-      const baseline = baselineRecordsByMetric.get(record.metricName)
+      const baseline = baselineRecordsByMetric.get(projectRecordKey(record))
       if (baseline?.value === null || baseline?.value === undefined) continue
 
       const delta = buildDelta(
@@ -1591,9 +2214,13 @@ function recordsByMetric(
   const recordsByMetric = new Map<string, ProjectQorMetricRecord>()
   for (const record of records) {
     if (record.value === null) continue
-    recordsByMetric.set(record.metricName, record)
+    recordsByMetric.set(projectRecordKey(record), record)
   }
   return recordsByMetric
+}
+
+function projectRecordKey(record: ProjectQorMetricRecord): string {
+  return [record.metricName, record.scope, record.corner ?? ''].join('\u0000')
 }
 
 function buildDelta(
@@ -1676,6 +2303,53 @@ function buildMissingMetrics(records: ProjectQorMetricRecord[]): string[] {
   return expected.filter((metric) => !available.has(metric))
 }
 
+function buildMissingMetricCoverage(
+  records: ProjectQorMetricRecord[],
+  summaryMissingMetrics: Array<{ step: FlowStep; metricName: string }>,
+  areaScoringStep: FlowStep | null,
+): ProjectQorMissingMetricCoverage[] {
+  const metricIdsByStep = new Map<FlowStep, Set<string>>()
+  const addMetric = (step: FlowStep, metricName: string) => {
+    const metricIds = metricIdsByStep.get(step) ?? new Set<string>()
+    metricIds.add(metricName)
+    metricIdsByStep.set(step, metricIds)
+  }
+
+  for (const metricName of buildMissingMetrics(records)) {
+    const step = missingMetricProducerStep(metricName, areaScoringStep)
+    if (step) addMetric(step, metricName)
+  }
+  for (const metric of summaryMissingMetrics) {
+    addMetric(metric.step, metric.metricName)
+  }
+
+  return QOR_FLOW_STEPS.flatMap((step) => {
+    const metricIds = metricIdsByStep.get(step)
+    return metricIds?.size ? [{ step, missingMetricCount: metricIds.size }] : []
+  })
+}
+
+function missingMetricProducerStep(
+  metricName: string,
+  areaScoringStep: FlowStep | null,
+): FlowStep | null {
+  switch (metricName) {
+    case 'route_wirelength':
+    case 'route_via_count':
+      return 'Route'
+    case 'drc_count':
+      return 'DRC'
+    case 'cts_buffer_count':
+    case 'cts_buffer_area':
+      return 'CTS'
+    case 'die_area':
+    case 'core_utilization':
+      return areaScoringStep ?? 'Floor'
+    default:
+      return null
+  }
+}
+
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values))
 }
@@ -1715,6 +2389,62 @@ function parseJsonObject(
   }
 }
 
+function resolveWorkspaceTimingConstraints(
+  workspace: ProjectQorWorkspaceInput,
+): ProjectQorTimingConstraints {
+  const entries = QOR_FLOW_STEPS.flatMap((step) => {
+    const context = normalizeTimingConstraintContext({
+      workspaceId: workspace.workspaceId,
+      workspacePath: workspace.workspacePath,
+      step,
+      text: workspace.stepMetricTexts[step],
+    })
+    return context ? [{ ...context, step }] : []
+  })
+  if (entries.length === 0) {
+    return {
+      status: 'unavailable',
+      fingerprint: null,
+      sourceFile: null,
+      step: null,
+    }
+  }
+
+  const fingerprints = new Set(entries.map((entry) => entry.fingerprint))
+  const latest = entries[entries.length - 1]!
+  if (fingerprints.size !== 1) {
+    return {
+      status: 'changed_during_run',
+      fingerprint: null,
+      sourceFile: latest.sourceFile,
+      step: latest.step,
+    }
+  }
+  return {
+    status: 'consistent',
+    fingerprint: latest.fingerprint,
+    sourceFile: latest.sourceFile,
+    step: latest.step,
+  }
+}
+
+function normalizeTimingConstraintContext(
+  input: QorStepMetricInput,
+): { fingerprint: string; sourceFile: string } | null {
+  const record = parseJsonObject(input.text)
+  if (record?.schema_version !== 2 || !isRecord(record.context)) return null
+
+  const constraints = record.context.timing_constraints
+  if (!isRecord(constraints)) return null
+  const fingerprint = stringValue(constraints.sdc_sha256)
+  const source = isRecord(constraints.source) ? constraints.source : null
+  const sourceFile = relativeFeatureSourcePath(source)
+  if (!fingerprint || !/^[a-f0-9]{64}$/.test(fingerprint) || !sourceFile) {
+    return null
+  }
+  return { fingerprint, sourceFile }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -1725,6 +2455,7 @@ interface StaTimingAnalysis {
   status: StaTimingAnalysisStatus
   issues: ProjectQorTimingIssue[]
   artifactPaths: ProjectQorTimingArtifactPath[]
+  coverage: ProjectQorTimingCoverage | null
 }
 
 function normalizeStaTimingIssues(
@@ -1734,6 +2465,7 @@ function normalizeStaTimingIssues(
     status: 'unavailable',
     issues: [],
     artifactPaths: [],
+    coverage: null,
   }
   const record = parseJsonObject(workspace.staTimingIssuesText)
   if (
@@ -1758,6 +2490,19 @@ function normalizeStaTimingIssues(
     const pathGroup = stringValue(issue.path_group)
     const checkType = stringValue(issue.check_type)
     const slackNs = isFiniteNumber(issue.slack_ns) ? issue.slack_ns : null
+    const launchClockNetworkDelayNs = isFiniteNumber(
+      issue.launch_clock_network_delay_ns,
+    )
+      ? issue.launch_clock_network_delay_ns
+      : null
+    const captureClockNetworkDelayNs = isFiniteNumber(
+      issue.capture_clock_network_delay_ns,
+    )
+      ? issue.capture_clock_network_delay_ns
+      : null
+    const clockNetworkDelayDeltaNs = isFiniteNumber(issue.clock_network_delay_delta_ns)
+      ? issue.clock_network_delay_delta_ns
+      : null
     if (
       !issueId ||
       issueIds.has(issueId) ||
@@ -1781,15 +2526,27 @@ function normalizeStaTimingIssues(
       pathGroup,
       checkType,
       slackNs,
+      launchClockNetworkDelayNs,
+      captureClockNetworkDelayNs,
+      clockNetworkDelayDeltaNs,
     })
   }
 
   const artifactPaths = normalizeStaTimingArtifactPaths(workspace, record.artifact_paths)
-  const hasMissingCorners = record.missing_corners.length > 0
+  const missingCornerCount = uniqueStrings(record.missing_corners).length
+  const hasMissingCorners = missingCornerCount > 0
   return {
     status: hasMissingCorners ? 'incomplete' : issues.length > 0 ? 'at_risk' : 'clean',
     issues,
     artifactPaths,
+    coverage: hasMissingCorners
+      ? {
+          workspaceId: workspace.workspaceId,
+          workspaceName: workspace.workspaceName,
+          missingCornerCount,
+          availableArtifactCount: artifactPaths.length,
+        }
+      : null,
   }
 }
 
@@ -1852,6 +2609,14 @@ function hasStandardQorMetricsText(text: string | null | undefined): boolean {
   return record?.schema_version === 2 && Array.isArray(record.metrics)
 }
 
+function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
+  const record = parseJsonObject(text)
+  if (record?.schema_version !== 2 || !Array.isArray(record.metrics)) return false
+  const integrity = isRecord(record.integrity) ? record.integrity : null
+  const status = stringValue(integrity?.status)
+  return status === 'pass' || status === 'incomplete'
+}
+
 function hasStandardQorSummaryText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return (
@@ -1901,18 +2666,52 @@ function normalizeQorSummaryBlockingIssues(
   })
 }
 
-function normalizeQorSummaryMissingMetrics(text: string | null | undefined): string[] {
+function normalizeQorSummaryMissingMetrics(
+  step: FlowStep,
+  text: string | null | undefined,
+): Array<{ step: FlowStep; metricName: string }> {
   const record = parseJsonObject(text)
   if (record?.schema_version !== 2 || !Array.isArray(record.missing_metrics)) {
     return []
   }
 
-  return uniqueStrings(
-    record.missing_metrics.flatMap((metric) => {
-      const value = isRecord(metric) ? stringValue(metric.metric_id) : null
-      return value ? [value] : []
-    }),
+  return Array.from(
+    new Set(
+      record.missing_metrics.flatMap((metric) => {
+        const value = isRecord(metric) ? stringValue(metric.metric_id) : null
+        return value ? [value] : []
+      }),
+    ),
+  ).map((metricName) => ({ step, metricName }))
+}
+
+function normalizeQorAnalysisIntegrity(
+  step: FlowStep,
+  text: string | null | undefined,
+): ProjectQorAnalysisIntegrityIssue[] {
+  const record = parseJsonObject(text)
+  if (record?.schema_version !== 2 || !isRecord(record.integrity)) return []
+  if (stringValue(record.integrity.status) !== 'incomplete') return []
+
+  const invalidMetricSourceIds = uniqueStrings(
+    Array.isArray(record.integrity.invalid_metric_source_ids)
+      ? record.integrity.invalid_metric_source_ids.flatMap((value) => {
+          const id = stringValue(value)
+          return id ? [id] : []
+        })
+      : [],
   )
+  const invalidDetailIds = uniqueStrings(
+    Array.isArray(record.integrity.invalid_detail_ids)
+      ? record.integrity.invalid_detail_ids.flatMap((value) => {
+          const id = stringValue(value)
+          return id ? [id] : []
+        })
+      : [],
+  )
+  if (invalidMetricSourceIds.length === 0 && invalidDetailIds.length === 0) return []
+
+  return [{ step, invalidMetricSourceIds, invalidDetailIds }]
 }
 
 function normalizeQorHotspots(
@@ -1929,6 +2728,8 @@ function normalizeQorHotspots(
     const hotspot = item as Record<string, unknown>
     const metric = stringValue(hotspot.metric_id)
     if (!metric) return []
+    const sourceFile = relativeFeatureSourcePath(hotspot.source)
+    if (!sourceFile) return []
     return [
       {
         step,
@@ -1937,9 +2738,7 @@ function normalizeQorHotspots(
         metric,
         displayName: stringValue(hotspot.display_name) ?? metric,
         value: qorSummaryIssueValue(hotspot.value),
-        sourceFile: isRecord(hotspot.source)
-          ? (relativeAnalysisPath(hotspot.source.path) ?? '')
-          : '',
+        sourceFile,
         description: stringValue(hotspot.description) ?? 'QoR hotspot',
       },
     ]
@@ -2014,9 +2813,19 @@ function qorStepRoleValue(value: unknown): QorMetricStepRole | null {
     : null
 }
 
-function relativeAnalysisPath(value: unknown): string | null {
-  const path = stringValue(value)
-  if (!path || path.startsWith('/') || path.split('/').includes('..')) return null
+function relativeFeatureSourcePath(source: unknown): string | null {
+  if (!isRecord(source) || stringValue(source.kind) !== 'feature') return null
+  const path = stringValue(source.path)
+  const selector = source.selector
+  if (
+    !path ||
+    !path.startsWith('feature/') ||
+    path.split('/').includes('..') ||
+    typeof selector !== 'string' ||
+    (selector !== '' && !selector.startsWith('/'))
+  ) {
+    return null
+  }
   return path
 }
 
@@ -2076,6 +2885,33 @@ function compareProjectQorTimingIssue(
   )
 }
 
+function compareProjectQorTimingTriage(
+  left: ProjectQorTimingTriage,
+  right: ProjectQorTimingTriage,
+): number {
+  const stateOrder: Record<ProjectQorTimingTriageState, number> = {
+    new: 0,
+    regressed: 1,
+    persistent: 2,
+    improved: 3,
+    cleared: 4,
+  }
+  const stateDelta = stateOrder[left.state] - stateOrder[right.state]
+  if (stateDelta !== 0) return stateDelta
+
+  const severityOrder = { critical: 0, warning: 1 }
+  const severityDelta = severityOrder[left.severity] - severityOrder[right.severity]
+  if (severityDelta !== 0) return severityDelta
+
+  const slackDelta = (left.slackDeltaNs ?? 0) - (right.slackDeltaNs ?? 0)
+  if (slackDelta !== 0) return slackDelta
+  return (
+    left.workspaceName.localeCompare(right.workspaceName) ||
+    left.corner.localeCompare(right.corner) ||
+    left.issueId.localeCompare(right.issueId)
+  )
+}
+
 function compareProjectQorTimingArtifactPath(
   left: ProjectQorTimingArtifactPath,
   right: ProjectQorTimingArtifactPath,
@@ -2085,6 +2921,15 @@ function compareProjectQorTimingArtifactPath(
     left.corner.localeCompare(right.corner) ||
     left.workspaceId.localeCompare(right.workspaceId)
   )
+}
+
+function compareProjectQorTimingCoverage(
+  left: ProjectQorTimingCoverage,
+  right: ProjectQorTimingCoverage,
+): number {
+  const missingDelta = right.missingCornerCount - left.missingCornerCount
+  if (missingDelta !== 0) return missingDelta
+  return left.workspaceName.localeCompare(right.workspaceName)
 }
 
 function compareDeltaMagnitude(left: ProjectQorDelta, right: ProjectQorDelta): number {

@@ -12,6 +12,9 @@ describe('StepQorAnalysisPanel', () => {
     expect(source).toContain('Corner records')
     expect(source).toContain('Metric overview')
     expect(source).toContain('missingMetrics')
+    expect(source).toContain('Analysis source validation needs attention.')
+    expect(source).toContain('warnings')
+    expect(source).toContain("detail && kind === 'route'")
   })
 
   it('keeps analysis data in the workspace inspector rather than project comparison UI', () => {

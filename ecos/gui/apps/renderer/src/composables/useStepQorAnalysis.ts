@@ -18,9 +18,34 @@ export interface StepQorMetricOverview {
   unit: string
   direction: 'higher_is_better' | 'lower_is_better' | 'target_range' | 'trend_only'
   role: 'primary' | 'secondary'
+  source: StepQorFeatureSource
 }
 
 export type StepQorSummaryStatus = 'pass' | 'blocked' | 'incomplete' | null
+
+export interface StepQorFeatureSource {
+  path: string
+  selector: string
+}
+
+export interface StepQorDetailEvidence {
+  id: string
+  presentation: string
+  source: StepQorFeatureSource
+}
+
+export interface StepQorAnalysisIntegrity {
+  status: 'pass' | 'incomplete' | 'unavailable'
+  invalidMetricSourceIds: string[]
+  invalidDetailIds: string[]
+}
+
+interface StepQorAnalysisData {
+  detail: Record<string, unknown> | null
+  detailEvidence: StepQorDetailEvidence | null
+  integrity: StepQorAnalysisIntegrity
+  metrics: StepQorMetricOverview[]
+}
 
 const DETAIL_KEY_BY_STEP: Partial<Record<StepEnum, string>> = {
   [StepEnum.PLACEMENT]: 'place_map_metrics',
@@ -45,37 +70,82 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function detailSummary(
+function featureSource(value: unknown): StepQorFeatureSource | null {
+  if (!isRecord(value) || stringValue(value.kind) !== 'feature') return null
+  const path = stringValue(value.path)
+  const selector = value.selector
+  if (
+    !path ||
+    !path.startsWith('feature/') ||
+    path.split('/').includes('..') ||
+    typeof selector !== 'string' ||
+    (selector !== '' && !selector.startsWith('/'))
+  ) {
+    return null
+  }
+  return { path, selector }
+}
+
+function detailData(
   metrics: unknown,
   requestedDetailKey: string,
-): Record<string, unknown> | null {
+): {
+  detail: Record<string, unknown> | null
+  evidence: StepQorDetailEvidence | null
+  invalidDetailIds: string[]
+} {
   if (
     !isRecord(metrics) ||
     metrics.schema_version !== 2 ||
     !Array.isArray(metrics.details)
   ) {
-    return null
+    return { detail: null, evidence: null, invalidDetailIds: [] }
   }
 
   const detail = metrics.details.find(
     (item) => isRecord(item) && item.id === requestedDetailKey,
   )
-  return isRecord(detail) && isRecord(detail.summary) ? detail.summary : null
+  if (!isRecord(detail) || !isRecord(detail.summary)) {
+    return { detail: null, evidence: null, invalidDetailIds: [] }
+  }
+  const source = featureSource(detail.feature_source)
+  const presentation = stringValue(detail.presentation)
+  if (!source || !presentation) {
+    return {
+      detail: null,
+      evidence: null,
+      invalidDetailIds: [requestedDetailKey],
+    }
+  }
+  return {
+    detail: detail.summary,
+    evidence: { id: requestedDetailKey, presentation, source },
+    invalidDetailIds: [],
+  }
 }
 
-function metricOverview(metrics: unknown): StepQorMetricOverview[] {
+function metricOverview(metrics: unknown): {
+  metrics: StepQorMetricOverview[]
+  invalidMetricSourceIds: string[]
+} {
   if (
     !isRecord(metrics) ||
     metrics.schema_version !== 2 ||
     !Array.isArray(metrics.metrics)
   ) {
-    return []
+    return { metrics: [], invalidMetricSourceIds: [] }
   }
 
-  return metrics.metrics
+  const invalidMetricSourceIds: string[] = []
+  const overview = metrics.metrics
     .flatMap((item) => {
       if (!isRecord(item)) return []
       const id = stringValue(item.id)
+      const source = featureSource(item.source)
+      if (id && !source) {
+        invalidMetricSourceIds.push(id)
+        return []
+      }
       const displayName = stringValue(item.display_name)
       const value = numberValue(item.value)
       const direction = metricDirection(item.direction)
@@ -85,6 +155,7 @@ function metricOverview(metrics: unknown): StepQorMetricOverview[] {
         !displayName ||
         value === null ||
         !direction ||
+        !source ||
         (role !== 'primary' && role !== 'secondary')
       ) {
         return []
@@ -97,6 +168,7 @@ function metricOverview(metrics: unknown): StepQorMetricOverview[] {
           unit: stringValue(item.unit) ?? '',
           direction,
           role: role as StepQorMetricOverview['role'],
+          source,
         },
       ]
     })
@@ -104,6 +176,49 @@ function metricOverview(metrics: unknown): StepQorMetricOverview[] {
       if (left.role !== right.role) return left.role === 'primary' ? -1 : 1
       return left.displayName.localeCompare(right.displayName)
     })
+  return { metrics: overview, invalidMetricSourceIds: uniqueStrings(invalidMetricSourceIds) }
+}
+
+function analysisIntegrity(
+  payload: unknown,
+  invalidMetricSourceIds: string[],
+  invalidDetailIds: string[],
+): StepQorAnalysisIntegrity {
+  const integrity = isRecord(payload) && isRecord(payload.integrity) ? payload.integrity : null
+  const declaredMetricIds = stringArray(integrity?.invalid_metric_source_ids)
+  const declaredDetailIds = stringArray(integrity?.invalid_detail_ids)
+  const allMetricIds = uniqueStrings([...declaredMetricIds, ...invalidMetricSourceIds])
+  const allDetailIds = uniqueStrings([...declaredDetailIds, ...invalidDetailIds])
+  const declaredStatus = stringValue(integrity?.status)
+  const status =
+    allMetricIds.length || allDetailIds.length || declaredStatus === 'incomplete'
+      ? 'incomplete'
+      : declaredStatus === 'pass'
+        ? 'pass'
+        : 'unavailable'
+  return {
+    status,
+    invalidMetricSourceIds: allMetricIds,
+    invalidDetailIds: allDetailIds,
+  }
+}
+
+function normalizeAnalysisData(
+  payload: unknown,
+  requestedDetailKey: string,
+): StepQorAnalysisData {
+  const overview = metricOverview(payload)
+  const detail = detailData(payload, requestedDetailKey)
+  return {
+    detail: detail.detail,
+    detailEvidence: detail.evidence,
+    integrity: analysisIntegrity(
+      payload,
+      overview.invalidMetricSourceIds,
+      detail.invalidDetailIds,
+    ),
+    metrics: overview.metrics,
+  }
 }
 
 function summaryStatus(value: unknown): StepQorSummaryStatus {
@@ -144,6 +259,21 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? uniqueStrings(
+        value.flatMap((item) => {
+          const string = stringValue(item)
+          return string ? [string] : []
+        }),
+      )
+    : []
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
 function metricDirection(value: unknown): StepQorMetricOverview['direction'] | null {
   return value === 'higher_is_better' ||
     value === 'lower_is_better' ||
@@ -162,11 +292,18 @@ export function useStepQorAnalysis() {
   const loading = ref(true)
   const error = ref<string | null>(null)
   const detail = ref<Record<string, unknown> | null>(null)
+  const detailEvidence = ref<StepQorDetailEvidence | null>(null)
+  const integrity = ref<StepQorAnalysisIntegrity>({
+    status: 'unavailable',
+    invalidMetricSourceIds: [],
+    invalidDetailIds: [],
+  })
   const metrics = ref<StepQorMetricOverview[]>([])
   const missingMetrics = ref<string[]>([])
   const qorStatus = ref<StepQorSummaryStatus>(null)
   const metricsPath = ref('')
   const messages = ref<string[]>([])
+  const warnings = ref<string[]>([])
   let activeFetchToken: symbol | null = null
 
   const currentStep = computed(() => stepFromRoutePath(route.path))
@@ -178,16 +315,29 @@ export function useStepQorAnalysis() {
   )
   const isSupported = computed(() => Boolean(detailKey.value && kind.value))
   const isEmpty = computed(
-    () => !loading.value && !error.value && !detail.value && metrics.value.length === 0,
+    () =>
+      !loading.value &&
+      !error.value &&
+      !detail.value &&
+      metrics.value.length === 0 &&
+      integrity.value.status !== 'incomplete' &&
+      warnings.value.length === 0,
   )
 
   function clear() {
     detail.value = null
+    detailEvidence.value = null
+    integrity.value = {
+      status: 'unavailable',
+      invalidMetricSourceIds: [],
+      invalidDetailIds: [],
+    }
     metrics.value = []
     missingMetrics.value = []
     qorStatus.value = null
     metricsPath.value = ''
     messages.value = []
+    warnings.value = []
     error.value = null
   }
 
@@ -243,13 +393,20 @@ export function useStepQorAnalysis() {
       if (!canApply() || raw === undefined) return
 
       const payload = JSON.parse(raw) as unknown
+      const analysisData = normalizeAnalysisData(payload, requestedDetailKey)
       metricsPath.value = resolvedPath
-      metrics.value = metricOverview(payload)
-      detail.value = detailSummary(payload, requestedDetailKey)
+      metrics.value = analysisData.metrics
+      detail.value = analysisData.detail
+      detailEvidence.value = analysisData.detailEvidence
+      integrity.value = analysisData.integrity
       if (summaryRaw) {
-        const summary = JSON.parse(summaryRaw) as unknown
-        qorStatus.value = summaryStatus(summary)
-        missingMetrics.value = summaryMissingMetrics(summary)
+        try {
+          const summary = JSON.parse(summaryRaw) as unknown
+          qorStatus.value = summaryStatus(summary)
+          missingMetrics.value = summaryMissingMetrics(summary)
+        } catch {
+          warnings.value = ['QoR summary could not be parsed.']
+        }
       }
     } catch (cause) {
       if (!canApply()) return
@@ -280,7 +437,9 @@ export function useStepQorAnalysis() {
   return {
     currentStep,
     detail,
+    detailEvidence,
     error,
+    integrity,
     isEmpty,
     isSupported,
     kind,
@@ -291,5 +450,6 @@ export function useStepQorAnalysis() {
     metricsPath,
     qorStatus,
     refetch,
+    warnings,
   }
 }

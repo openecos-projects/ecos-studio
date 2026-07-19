@@ -148,11 +148,11 @@
             </template>
             <template v-else>
               <ul
-                v-if="qorTrendSummary.timingClosure.issues.length > 0"
+                v-if="timingWorkItemCount > 0"
                 class="qor-delta-list qor-scroll-list qor-timing-issue-list"
               >
                 <li
-                  v-for="issue in qorTrendSummary.timingClosure.issues"
+                v-for="issue in visibleTimingIssues"
                   :key="issue.issueId"
                   class="qor-timing-issue"
                 >
@@ -163,13 +163,67 @@
                   >
                     <span class="qor-timing-issue-kind">
                       {{ issue.analysisType.toUpperCase() }}
-                      <em>{{ issue.severity.toUpperCase() }}</em>
+                      <em :class="timingTriageClass(issue)">
+                        {{ timingTriageLabel(issue) }}
+                      </em>
                     </span>
                     <strong :class="`qor-risk-${issue.severity}`">
                       {{ formatTimingSlack(issue.slackNs) }}
                     </strong>
                     <small>{{ issue.workspaceName }} · {{ issue.corner }}</small>
                     <small>{{ issue.pathGroup }} · {{ issue.checkType }}</small>
+                    <small v-if="formatTimingTriage(issue)">
+                      {{ formatTimingTriage(issue) }}
+                    </small>
+                    <small v-if="formatTimingPhysicalContext(issue)">
+                      {{ formatTimingPhysicalContext(issue) }}
+                    </small>
+                    <small v-if="formatTimingReviewHints(issue)">
+                      {{ formatTimingReviewHints(issue) }}
+                    </small>
+                    <small v-if="formatTimingClockDelays(issue)">
+                      {{ formatTimingClockDelays(issue) }}
+                    </small>
+                  </button>
+                </li>
+                <li
+                  v-for="triage in clearedTimingTriage"
+                  :key="`cleared-${triage.workspaceId}-${triage.issueId}`"
+                  class="qor-timing-issue qor-timing-cleared"
+                >
+                  <button
+                    type="button"
+                    :class="{ selected: triage.workspaceId === selectedWorkspaceId }"
+                    @click="selectTimingIssueWorkspace(triage.workspaceId)"
+                  >
+                    <span class="qor-timing-issue-kind">
+                      {{ triage.analysisType.toUpperCase() }}
+                      <em class="qor-timing-triage-improved">CLEARED</em>
+                    </span>
+                    <strong class="qor-timing-triage-improved">RESOLVED</strong>
+                    <small>{{ triage.workspaceName }} · vs {{ triage.baselineWorkspaceName }}</small>
+                    <small>{{ triage.corner }} · {{ triage.pathGroup }} · {{ triage.checkType }}</small>
+                  </button>
+                </li>
+                <li
+                  v-for="coverage in qorTrendSummary.timingClosure.coverage"
+                  :key="`coverage-${coverage.workspaceId}`"
+                  class="qor-timing-issue qor-timing-coverage"
+                >
+                  <button
+                    type="button"
+                    :class="{ selected: coverage.workspaceId === selectedWorkspaceId }"
+                    @click="selectTimingIssueWorkspace(coverage.workspaceId)"
+                  >
+                    <span class="qor-timing-issue-kind">
+                      COVERAGE
+                      <em>INCOMPLETE</em>
+                    </span>
+                    <strong class="qor-risk-warning">
+                      {{ formatMissingCornerCount(coverage.missingCornerCount) }}
+                    </strong>
+                    <small>{{ coverage.workspaceName }} · structured STA results missing</small>
+                    <small>{{ formatAvailableArtifactCount(coverage.availableArtifactCount) }}</small>
                   </button>
                 </li>
               </ul>
@@ -200,10 +254,10 @@
               <span class="qor-vertical-tab-abbreviation">{{ tab.abbreviation }}</span>
               <span class="qor-vertical-tab-full-label">{{ tab.label }}</span>
               <span
-                v-if="tab.id === 'timing' && timingIssueCount > 0"
+                v-if="tab.id === 'timing' && timingWorkItemCount > 0"
                 class="qor-vertical-tab-badge"
               >
-                {{ timingIssueCount }}
+                {{ timingWorkItemCount }}
               </span>
               <span class="qor-vertical-tab-tooltip" role="tooltip">{{ tab.label }}</span>
             </button>
@@ -249,7 +303,11 @@ const deltaTabs: Array<{
 ]
 
 const activeDeltaTab = ref<QorDashboardTab>(
-  props.qorTrendSummary.timingClosure.issues.length > 0 ? 'timing' : 'improvements',
+  props.qorTrendSummary.timingClosure.issues.length > 0 ||
+    props.qorTrendSummary.timingClosure.coverage.length > 0 ||
+    props.qorTrendSummary.timingClosure.triage.some((triage) => triage.state === 'cleared')
+    ? 'timing'
+    : 'improvements',
 )
 const chartViewport = ref<HTMLElement | null>(null)
 const chartViewportSize = ref({ width: 0, height: 0 })
@@ -348,10 +406,10 @@ const activeListTitle = computed(() => {
 })
 
 const activeListContext = computed(() => {
-  if (activeDeltaTab.value === 'risks') return 'Structured step analysis'
+  if (activeDeltaTab.value === 'risks') return 'Structured analysis and data quality'
   if (activeDeltaTab.value === 'timing') {
-    return `${timingIssueCount.value} structured timing issue${
-      timingIssueCount.value === 1 ? '' : 's'
+    return `${timingWorkItemCount.value} structured timing work item${
+      timingWorkItemCount.value === 1 ? '' : 's'
     }`
   }
   return `Compared with ${baselineLabel.value}`
@@ -363,7 +421,39 @@ const activeDeltaEmptyMessage = computed(() => {
   return 'No structured analysis risks detected.'
 })
 
-const timingIssueCount = computed(() => props.qorTrendSummary.timingClosure.issues.length)
+const currentTriageIssueKeys = computed(
+  () =>
+    new Set(
+      props.qorTrendSummary.timingClosure.triage
+        .filter((triage) => triage.state !== 'cleared')
+        .map((triage) => `${triage.workspaceId}\u0000${triage.issueId}`),
+    ),
+)
+const triagedBaselineIssueKeys = computed(
+  () => {
+    const currentIssueKeys = currentTriageIssueKeys.value
+    return new Set(
+      props.qorTrendSummary.timingClosure.triage
+        .map((triage) => `${triage.baselineWorkspaceId}\u0000${triage.issueId}`)
+        .filter((issueKey) => !currentIssueKeys.has(issueKey)),
+    )
+  },
+)
+const visibleTimingIssues = computed(() =>
+  props.qorTrendSummary.timingClosure.issues.filter(
+    (issue) => !triagedBaselineIssueKeys.value.has(`${issue.workspaceId}\u0000${issue.issueId}`),
+  ),
+)
+const clearedTimingTriage = computed(() =>
+  props.qorTrendSummary.timingClosure.triage.filter((triage) => triage.state === 'cleared'),
+)
+const timingIssueCount = computed(() => visibleTimingIssues.value.length)
+const timingWorkItemCount = computed(
+  () =>
+    timingIssueCount.value +
+    clearedTimingTriage.value.length +
+    props.qorTrendSummary.timingClosure.coverage.length,
+)
 
 const timingEmptyMessage = computed(() => {
   const summary = props.qorTrendSummary.timingClosure
@@ -382,11 +472,11 @@ const timingEmptyMessage = computed(() => {
 })
 
 watch(
-  () => props.qorTrendSummary.timingClosure.issues.length,
-  (issueCount, previousIssueCount) => {
+  () => timingWorkItemCount.value,
+  (workItemCount, previousWorkItemCount) => {
     if (
-      previousIssueCount === 0 &&
-      issueCount > 0 &&
+      previousWorkItemCount === 0 &&
+      workItemCount > 0 &&
       activeDeltaTab.value === 'improvements'
     ) {
       activeDeltaTab.value = 'timing'
@@ -438,10 +528,74 @@ function formatTimingSlack(slackNs: number): string {
   return `${sign}${slackNs.toFixed(3)} ns`
 }
 
+function timingTriageLabel(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string {
+  return issue.triage?.state.toUpperCase() ?? issue.severity.toUpperCase()
+}
+
+function timingTriageClass(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string {
+  return issue.triage ? `qor-timing-triage-${issue.triage.state}` : ''
+}
+
+function formatTimingTriage(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string | null {
+  const triage = issue.triage
+  if (!triage) return null
+  if (triage.state === 'new') return `New relative to ${triage.baselineWorkspaceName}`
+  if (triage.slackDeltaNs === null) return null
+  const delta = formatTimingSlack(triage.slackDeltaNs)
+  return `vs ${triage.baselineWorkspaceName} · Delta ${delta}`
+}
+
+function formatTimingPhysicalContext(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string | null {
+  const signals = issue.triage?.physicalContext ?? []
+  if (signals.length === 0) return null
+  const changes = signals.map((signal) => {
+    const unit = signal.unit ? ` ${signal.unit}` : ''
+    const sign = signal.absoluteDelta > 0 ? '+' : ''
+    return `${signal.displayName} ${sign}${signal.absoluteDelta}${unit}`
+  })
+  return `Observed physical changes: ${changes.join(' · ')}`
+}
+
+function formatTimingReviewHints(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string | null {
+  const hints = issue.triage?.reviewHints ?? []
+  return hints.length ? `Review next: ${hints.map((hint) => hint.label).join(' · ')}` : null
+}
+
+function formatMissingCornerCount(missingCornerCount: number): string {
+  return `${missingCornerCount} corner${missingCornerCount === 1 ? '' : 's'}`
+}
+
+function formatAvailableArtifactCount(availableArtifactCount: number): string {
+  return `${availableArtifactCount} validated STA artifact${
+    availableArtifactCount === 1 ? '' : 's'
+  } available`
+}
+
+function formatTimingClockDelays(
+  issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
+): string | null {
+  const launch = issue.launchClockNetworkDelayNs
+  const capture = issue.captureClockNetworkDelayNs
+  if (launch === null || capture === null) return null
+  const delta = issue.clockNetworkDelayDeltaNs
+  const deltaText = delta === null ? '' : ` · Delta ${delta.toFixed(3)} ns`
+  return `Launch ${launch.toFixed(3)} ns · Capture ${capture.toFixed(3)} ns${deltaText}`
+}
+
 function tabAriaLabel(tabId: QorDashboardTab): string {
   const label = deltaTabs.find((tab) => tab.id === tabId)?.label ?? 'QoR Dashboard'
-  if (tabId !== 'timing' || timingIssueCount.value === 0) return label
-  return `${label}, ${timingIssueCount.value} timing issues`
+  if (tabId !== 'timing' || timingWorkItemCount.value === 0) return label
+  return `${label}, ${timingWorkItemCount.value} timing work items`
 }
 
 function formatDelta(delta: number | null): string {
@@ -968,6 +1122,23 @@ function qorListItemClass(
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.qor-timing-issue-kind em.qor-timing-triage-new {
+  color: var(--accent-color);
+}
+
+.qor-timing-issue-kind em.qor-timing-triage-regressed {
+  color: var(--error-color, #b91c1c);
+}
+
+.qor-timing-issue-kind em.qor-timing-triage-persistent {
+  color: var(--warning-color, #b45309);
+}
+
+.qor-timing-issue-kind em.qor-timing-triage-improved,
+.qor-timing-issue strong.qor-timing-triage-improved {
+  color: var(--success-color, #15803d);
 }
 
 .qor-timing-issue button > small {

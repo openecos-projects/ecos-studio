@@ -51,6 +51,19 @@ function analysisResponse(path: string) {
   }
 }
 
+function featureSource(path = 'feature/route.step.json', selector = '') {
+  return { kind: 'feature', path, selector }
+}
+
+function routeDetail(summary: Record<string, unknown>) {
+  return {
+    id: 'route_layer_metrics',
+    presentation: 'layer_table',
+    summary,
+    feature_source: featureSource(),
+  }
+}
+
 describe('useStepQorAnalysis', () => {
   let scope: EffectScope
 
@@ -81,13 +94,11 @@ describe('useStepQorAnalysis', () => {
     testState.readProjectTextFile.mockResolvedValue(
       JSON.stringify({
         schema_version: 2,
+        integrity: { status: 'pass' },
         details: [
-          {
-            id: 'route_layer_metrics',
-            summary: {
-              layers: [{ layer: '2', la: { overflow: 1 }, dr: { violation_count: 0 } }],
-            },
-          },
+          routeDetail({
+            layers: [{ layer: '2', la: { overflow: 1 }, dr: { violation_count: 0 } }],
+          }),
         ],
       }),
     )
@@ -102,6 +113,12 @@ describe('useStepQorAnalysis', () => {
     expect(result.detail.value).toMatchObject({
       layers: [{ layer: '2', la: { overflow: 1 } }],
     })
+    expect(result.detailEvidence.value).toEqual({
+      id: 'route_layer_metrics',
+      presentation: 'layer_table',
+      source: { path: 'feature/route.step.json', selector: '' },
+    })
+    expect(result.integrity.value.status).toBe('pass')
     expect(testState.resolveWorkspaceStepInfoApi).toHaveBeenCalledWith({
       step: 'route',
       id: 'analysis',
@@ -159,9 +176,11 @@ describe('useStepQorAnalysis', () => {
               unit: 'um',
               direction: 'lower_is_better',
               step_role: 'primary',
+              source: featureSource(),
             },
           ],
-          details: [{ id: 'route_layer_metrics', summary: { layers: [] } }],
+          integrity: { status: 'pass' },
+          details: [routeDetail({ layers: [] })],
         }),
       )
       .mockResolvedValueOnce(
@@ -189,6 +208,87 @@ describe('useStepQorAnalysis', () => {
     expect(result.missingMetrics.value).toEqual(['route_la_total_overflow'])
   })
 
+  it('rejects analysis and escaping paths while preserving valid V2 data', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+      analysisResponse('/workspace/demo/route_ecc/analysis/qor_metrics.json'),
+    )
+    testState.readProjectTextFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: 2,
+        integrity: { status: 'pass' },
+        metrics: [
+          {
+            id: 'route_wirelength',
+            display_name: 'Route Wirelength',
+            value: 5198.943,
+            unit: 'um',
+            direction: 'lower_is_better',
+            step_role: 'primary',
+            source: featureSource(),
+          },
+          {
+            id: 'route_via_count',
+            display_name: 'Route Via Count',
+            value: 1502,
+            unit: 'count',
+            direction: 'lower_is_better',
+            step_role: 'primary',
+            source: { kind: 'analysis', path: 'analysis/qor_summary.json', selector: '' },
+          },
+        ],
+        details: [
+          {
+            id: 'route_layer_metrics',
+            presentation: 'layer_table',
+            summary: { layers: [] },
+            feature_source: featureSource('feature/../output/route.rpt'),
+          },
+        ],
+      }),
+    )
+
+    const result = scope.run(() => useStepQorAnalysis())!
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false)
+    })
+
+    expect(result.metrics.value.map((metric) => metric.id)).toEqual(['route_wirelength'])
+    expect(result.detail.value).toBeNull()
+    expect(result.detailEvidence.value).toBeNull()
+    expect(result.isEmpty.value).toBe(false)
+    expect(result.integrity.value).toEqual({
+      status: 'incomplete',
+      invalidMetricSourceIds: ['route_via_count'],
+      invalidDetailIds: ['route_layer_metrics'],
+    })
+  })
+
+  it('keeps V2 metrics and detail when the QoR summary is malformed', async () => {
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+      analysisResponse('/workspace/demo/route_ecc/analysis/qor_metrics.json'),
+    )
+    testState.readProjectTextFile
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          schema_version: 2,
+          integrity: { status: 'pass' },
+          details: [routeDetail({ layers: [] })],
+        }),
+      )
+      .mockResolvedValueOnce('{')
+
+    const result = scope.run(() => useStepQorAnalysis())!
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false)
+    })
+
+    expect(result.error.value).toBeNull()
+    expect(result.detail.value).toEqual({ layers: [] })
+    expect(result.warnings.value).toEqual(['QoR summary could not be parsed.'])
+  })
+
   it('ignores a stale analysis read after the workspace session changes', async () => {
     let resolveOldRead: ((content: string) => void) | undefined
     testState.resolveWorkspaceStepInfoApi
@@ -208,7 +308,8 @@ describe('useStepQorAnalysis', () => {
       .mockResolvedValueOnce(
         JSON.stringify({
           schema_version: 2,
-          details: [{ id: 'route_layer_metrics', summary: { workspace: 'current' } }],
+          integrity: { status: 'pass' },
+          details: [routeDetail({ workspace: 'current' })],
         }),
       )
       .mockResolvedValueOnce(undefined)
@@ -233,9 +334,10 @@ describe('useStepQorAnalysis', () => {
     })
 
     resolveOldRead?.(
-      JSON.stringify({
-        schema_version: 2,
-        details: [{ id: 'route_layer_metrics', summary: { workspace: 'stale' } }],
+        JSON.stringify({
+          schema_version: 2,
+          integrity: { status: 'pass' },
+          details: [routeDetail({ workspace: 'stale' })],
       }),
     )
     await nextTick()
