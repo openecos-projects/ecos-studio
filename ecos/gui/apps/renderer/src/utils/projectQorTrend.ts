@@ -1775,10 +1775,11 @@ const TIMING_PHYSICAL_CONTEXT_PRIORITY: Record<string, number> = {
   route_via_count: 7,
   cts_worst_optimized_skew_ns: 8,
   cts_skew_target_unmet_count: 9,
-  cts_clock_wirelength_max: 10,
-  rcx_worst_total_capacitance_ff: 11,
-  rcx_worst_coupling_capacitance_ff: 12,
-  rcx_worst_total_resistance_ohm: 13,
+  cts_worst_max_insertion_latency_ns: 10,
+  cts_clock_wirelength_max: 11,
+  rcx_worst_total_capacitance_ff: 12,
+  rcx_worst_coupling_capacitance_ff: 13,
+  rcx_worst_total_resistance_ohm: 14,
 }
 
 interface TimingWorkspaceAnalysis {
@@ -1964,7 +1965,7 @@ function timingReviewHintForMetric(
     return { id: 'place', label: 'Review placement congestion changes' }
   }
   if (metricName.startsWith('cts_')) {
-    return { id: 'cts', label: 'Review CTS skew and clock-network changes' }
+    return { id: 'cts', label: 'Review CTS timing estimates and clock-network changes' }
   }
   if (metricName.startsWith('rcx_')) {
     return { id: 'rcx', label: 'Review RCX parasitic changes' }
@@ -2341,6 +2342,9 @@ function missingMetricProducerStep(
       return 'DRC'
     case 'cts_buffer_count':
     case 'cts_buffer_area':
+    case 'cts_worst_optimized_skew_ns':
+    case 'cts_worst_max_insertion_latency_ns':
+    case 'cts_skew_target_unmet_count':
       return 'CTS'
     case 'die_area':
     case 'core_utilization':

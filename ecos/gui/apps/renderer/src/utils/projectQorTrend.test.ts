@@ -464,6 +464,104 @@ describe('project QoR trend model', () => {
     )
   })
 
+  it('uses CTS insertion-latency estimates for timing triage without scoring them', () => {
+    const ctsInsertionLatencyMetric = (value: number) =>
+      JSON.stringify({
+        schema_version: 2,
+        metrics: [
+          {
+            id: 'cts_worst_max_insertion_latency_ns',
+            display_name: 'CTS Worst Max Insertion Latency Estimate',
+            value,
+            unit: 'ns',
+            category: 'clock_robustness_dfm',
+            direction: 'lower_is_better',
+            scope: 'cts_fast_sta_post_optimization',
+            corner: null,
+            project_role: 'trend',
+            step_role: 'secondary',
+            confidence: 'medium',
+            source: {
+              kind: 'feature',
+              path: 'feature/CTS.step.json',
+              selector: '/CTS/timing_quality/worst_max_insertion_latency_ns',
+            },
+          },
+        ],
+      })
+    const fingerprint = 'c'.repeat(64)
+    const summary = buildProjectQorTrendSummary(
+      [
+        workspaceInput(
+          'baseline',
+          {
+            CTS: ctsInsertionLatencyMetric(0.18),
+            STA: timingConstraintMetrics(fingerprint),
+          },
+          {},
+          {},
+          'baseline',
+          {},
+          staTimingIssues([]),
+        ),
+        workspaceInput(
+          'current',
+          {
+            CTS: ctsInsertionLatencyMetric(0.32),
+            STA: timingConstraintMetrics(fingerprint),
+          },
+          {},
+          {},
+          'current',
+          {},
+          staTimingIssues([timingIssue('new-path', -0.03)]),
+        ),
+      ],
+      { baselineWorkspaceId: 'baseline' },
+    )
+
+    expect(summary.workspaces[1]?.records).toContainEqual(
+      expect.objectContaining({
+        metricName: 'cts_worst_max_insertion_latency_ns',
+        value: 0.32,
+        confidence: 'medium',
+        sourceFile: 'feature/CTS.step.json',
+      }),
+    )
+    expect(summary.workspaces[1]?.dimensionScores.clock_robustness_dfm).toBeUndefined()
+    expect(summary.timingClosure.triage).toContainEqual(
+      expect.objectContaining({
+        issueId: 'new-path',
+        state: 'new',
+        physicalContext: [
+          expect.objectContaining({
+            metricName: 'cts_worst_max_insertion_latency_ns',
+            currentValue: 0.32,
+            baselineValue: 0.18,
+            absoluteDelta: 0.14,
+          }),
+        ],
+        reviewHints: [
+          { id: 'sta_path_evidence', label: 'Review structured STA path evidence' },
+          { id: 'cts', label: 'Review CTS timing estimates and clock-network changes' },
+        ],
+      }),
+    )
+
+    const report = JSON.parse(serializeProjectQorTrendReport(summary))
+    expect(report.timing_closure.triage).toContainEqual(
+      expect.objectContaining({
+        issue_id: 'new-path',
+        physical_context: [
+          expect.objectContaining({
+            metric_name: 'cts_worst_max_insertion_latency_ns',
+            absolute_delta: 0.14,
+          }),
+        ],
+      }),
+    )
+  })
+
   it('marks QoR deltas when timing constraints differ from the baseline', () => {
     const withConstraints = (fingerprint: string) =>
       JSON.stringify({
@@ -1414,6 +1512,72 @@ describe('project QoR trend model', () => {
     const report = JSON.parse(serializeProjectQorTrendReport(summary))
     expect(report.workspaces[0].data_quality.missing_metric_coverage).toEqual([
       { step: 'STA', missing_metric_count: 5 },
+    ])
+  })
+
+  it('attributes missing CTS timing estimates to CTS analysis coverage', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_cts_coverage',
+        {
+          Floor: JSON.stringify({
+            Tool: 'ecc',
+            'Core util': 0.42,
+            'Die area [μm^2]': 2259.861,
+          }),
+          CTS: JSON.stringify({ Tool: 'ecc', buffer_num: 14, buffer_area: 18.5 }),
+          Route: JSON.stringify({ Tool: 'ecc', wire_len: 5198.943, num_via: 1502 }),
+          DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
+        },
+        {
+          CTS: JSON.stringify({
+            schema_version: 2,
+            status: 'incomplete',
+            metric_count: 2,
+            blocking_issues: [],
+            missing_metrics: [
+              {
+                metric_id: 'cts_worst_optimized_skew_ns',
+                reason: 'FastSTA timing quality is unavailable.',
+              },
+              {
+                metric_id: 'cts_worst_max_insertion_latency_ns',
+                reason: 'FastSTA timing quality is unavailable.',
+              },
+              {
+                metric_id: 'cts_skew_target_unmet_count',
+                reason: 'FastSTA timing quality is unavailable.',
+              },
+            ],
+          }),
+        },
+        {},
+        'cts_coverage',
+        { Floor: 'success', CTS: 'success', Route: 'success', DRC: 'success' },
+      ),
+    ])
+    const workspace = summary.workspaces[0]!
+
+    expect(workspace.dataQuality).toMatchObject({
+      status: 'limited',
+      missingMetricCount: 3,
+      missingMetricCoverage: [{ step: 'CTS', missingMetricCount: 3 }],
+    })
+    expect(summary.risks).toContainEqual({
+      workspaceId: 'ws_cts_coverage',
+      workspaceName: 'cts_coverage',
+      step: 'CTS',
+      kind: 'analysis_metric_coverage',
+      severity: 'info',
+      metric: 'analysis_metric_coverage',
+      displayName: 'CTS Analysis Metric Coverage',
+      value: 3,
+      message: 'CTS analysis does not provide 3 expected QoR metrics.',
+    })
+
+    const report = JSON.parse(serializeProjectQorTrendReport(summary))
+    expect(report.workspaces[0].data_quality.missing_metric_coverage).toEqual([
+      { step: 'CTS', missing_metric_count: 3 },
     ])
   })
 
