@@ -1,26 +1,30 @@
+import type { Project } from '@/types'
 import {
-  archiveWorkspaceInManifest as archiveSharedWorkspaceInManifest,
-  createProjectManifestDraft as createSharedProjectManifestDraft,
-  deleteWorkspaceFromManifest as deleteSharedWorkspaceFromManifest,
-  parseProjectManifest as parseSharedProjectManifest,
-  registerWorkspaceInManifest as registerSharedWorkspaceInManifest,
-  serializeProjectManifest as serializeSharedProjectManifest,
-} from '@ecos-studio/shared'
-import { FLOW_STEPS } from './projectFlow'
+  buildProjectQorTrendSummary,
+  type ProjectQorMetricRecord,
+  type ProjectQorTimingSummary,
+  type ProjectQorTrendSummary,
+  type ProjectQorTrendWorkspaceSummary,
+} from './projectQorTrend'
 import {
-  buildProjectManagementProject,
-  createWorkspaceBranchDraft,
-  nextWorkspaceId,
-  parseWorkspaceFlowStateMap,
-} from './projectManagementAnalysis'
+  buildProjectAnalysisSnapshot,
+  type ProjectAnalysisSnapshot,
+} from './projectAnalysisSnapshot'
 
-export {
-  FLOW_STEPS,
-  buildProjectManagementProject,
-  createWorkspaceBranchDraft,
-  nextWorkspaceId,
-  parseWorkspaceFlowStateMap,
-}
+export const FLOW_STEPS = [
+  'Synth',
+  'Floor',
+  'Fanout',
+  'Place',
+  'CTS',
+  'Legal',
+  'Route',
+  'DRC',
+  'Filler',
+  'RCX',
+  'STA',
+  'Harden',
+] as const
 
 export type FlowStep = (typeof FLOW_STEPS)[number]
 export type ProjectStepStatus =
@@ -41,6 +45,8 @@ export type MetricsRowKind = 'line' | 'bar'
 export type ProjectMetricId =
   | 'wns'
   | 'tns'
+  | 'hold_wns'
+  | 'hold_tns'
   | 'drc'
   | 'area'
   | 'runtime'
@@ -50,26 +56,6 @@ export type ProjectMetricId =
   | 'frequency'
 export type ProjectWorkspaceFlowStateMap = Partial<Record<FlowStep, ProjectStepStatus>>
 export type ProjectWorkspaceFlowStatesById = Record<string, ProjectWorkspaceFlowStateMap>
-export type ProjectFeatureFileKey =
-  | 'synthesisStat'
-  | 'floorplanDb'
-  | 'fanoutDb'
-  | 'fanoutStep'
-  | 'placeDb'
-  | 'placeMap'
-  | 'ctsDb'
-  | 'ctsStep'
-  | 'ctsMap'
-  | 'legalDb'
-  | 'routeDb'
-  | 'routeStep'
-  | 'drcDb'
-  | 'drcStep'
-  | 'fillerDb'
-  | 'fillerStep'
-  | 'rcxDb'
-  | 'staDb'
-
 export interface ProjectManifestBaseDesign {
   pdk?: string
   pdk_root?: string
@@ -81,27 +67,12 @@ export interface ProjectManifestBaseDesign {
   parameters?: Record<string, unknown>
 }
 
-export interface ProjectMetricSummary {
-  wns?: number
-  tns?: number
-  drc_count?: number
-  area?: number
-  runtime_sec?: number
-  [key: string]: unknown
-}
-
-export interface ProjectStaReportInput {
-  corner: string
-  content: string | null
-}
-
 export interface ProjectWorkspaceAnalysisInput {
-  files?: Partial<Record<ProjectFeatureFileKey, string | null>>
   stepMetricTexts?: Partial<Record<FlowStep, string | null>>
-  staReports?: ProjectStaReportInput[]
+  stepSummaryTexts?: Partial<Record<FlowStep, string | null>>
+  stepHotspotTexts?: Partial<Record<FlowStep, string | null>>
+  staTimingIssuesText?: string | null
   flowText?: string | null
-  checklistText?: string | null
-  parametersText?: string | null
 }
 
 export type ProjectWorkspaceAnalysisInputsById = Record<
@@ -126,8 +97,6 @@ export interface ProjectWorkspaceManifest {
   created_at: string
   updated_at: string
   parameter_patch: Record<string, unknown>
-  metrics_summary: ProjectMetricSummary
-  step_metrics: Record<string, Record<string, unknown>>
 }
 
 export interface ProjectManifest {
@@ -145,6 +114,10 @@ export interface ProjectManifest {
   }
   workspaces: ProjectWorkspaceManifest[]
   best_workspace: {
+    workspace_id: string
+    reason: string
+  } | null
+  qor_baseline: {
     workspace_id: string
     reason: string
   } | null
@@ -181,6 +154,7 @@ export interface ProjectFlowStatusHint {
 
 export interface ProjectMetricPoint {
   workspaceId: string
+  workspaceName: string
   label: string
   value: number | null
   state: 'good' | 'warn' | 'bad' | 'pending'
@@ -192,14 +166,6 @@ export interface ProjectMetricRow {
   hint: string
   kind: MetricsRowKind
   points: ProjectMetricPoint[]
-}
-
-export interface ProjectMetricDefinition {
-  id: ProjectMetricId
-  label: string
-  hint: string
-  kind: MetricsRowKind
-  manifestKey: keyof ProjectMetricSummary
 }
 
 export interface ProjectBranchLink {
@@ -278,6 +244,7 @@ export interface ProjectWorkspaceSummary {
   flowMetrics: ProjectWorkspaceFlowMetrics
   steps: ProjectStepSummary[]
   deltaSummaries: ProjectComparisonMetricDiff[]
+  analysis: ProjectAnalysisSnapshot
 }
 
 export interface ProjectStepCompareMetric {
@@ -320,6 +287,9 @@ export interface ProjectDashboardSummary {
   flowSuccessRatio: number
   drcCleanCount: number
   timingCleanCount: number
+  timingAtRiskCount: number
+  timingIncompleteCount: number
+  timingUnavailableCount: number
   signoffReadyCount: number
   runStateSlices: ProjectRunStateSlice[]
   flowMetricSummary: ProjectFlowMetricSummary
@@ -339,6 +309,7 @@ export interface ProjectManagementProject {
   workspaceSummaries: ProjectWorkspaceSummary[]
   stepCompareSummaries: ProjectStepCompareSummary[]
   dashboardSummary: ProjectDashboardSummary
+  qorTrendSummary: ProjectQorTrendSummary
   branchLinks: ProjectBranchLink[]
   comparisonSummary: ProjectComparisonSummary
 }
@@ -390,6 +361,445 @@ export interface WorkspaceBranchDraft {
   originSdc?: string
 }
 
+const FLOW_STEP_ALIASES: Record<string, FlowStep> = {
+  synthesis: 'Synth',
+  synth: 'Synth',
+  floorplan: 'Floor',
+  floor: 'Floor',
+  fixfanout: 'Fanout',
+  fanout: 'Fanout',
+  place: 'Place',
+  placement: 'Place',
+  cts: 'CTS',
+  legalization: 'Legal',
+  legal: 'Legal',
+  route: 'Route',
+  routing: 'Route',
+  drc: 'DRC',
+  filler: 'Filler',
+  rcx: 'RCX',
+  sta: 'STA',
+  gds: 'Harden',
+  signoff: 'Harden',
+  harden: 'Harden',
+}
+
+const RUNTIME_STEP_ARTIFACTS: Record<
+  FlowStep,
+  {
+    directory: string
+    outputName: string
+  }
+> = {
+  Synth: { directory: 'Synthesis_yosys', outputName: 'Synthesis' },
+  Floor: { directory: 'Floorplan_ecc', outputName: 'Floorplan' },
+  Fanout: { directory: 'fixFanout_ecc', outputName: 'fixFanout' },
+  Place: { directory: 'place_dreamplace', outputName: 'place' },
+  CTS: { directory: 'CTS_ecc', outputName: 'CTS' },
+  Legal: { directory: 'legalization_dreamplace', outputName: 'legalization' },
+  Route: { directory: 'route_ecc', outputName: 'route' },
+  DRC: { directory: 'drc_ecc', outputName: 'drc' },
+  Filler: { directory: 'filler_ecc', outputName: 'filler' },
+  RCX: { directory: 'RCX_ecc', outputName: 'RCX' },
+  STA: { directory: 'sta_ecc', outputName: 'sta' },
+  Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
+}
+
+export function buildProjectManagementProject(
+  project?: Project | null,
+  manifest?: ProjectManifest | null,
+  workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
+): ProjectManagementProject {
+  const path = manifest?.root_path ?? project?.path ?? ''
+  const name = manifest?.name ?? project?.name ?? 'No Project Selected'
+  const topModule = manifest?.base_design.top_module ?? project?.topModule
+  const pdk = manifest?.base_design.pdk ?? project?.pdk
+  const manifestWorkspaces = manifest?.workspaces ?? []
+  const lineageItems = sortWorkspacesByLineage(manifestWorkspaces)
+  const sortedWorkspaces = lineageItems.map((item) => item.workspace)
+  const workspaces = lineageItems.map(({ workspace, depth }) =>
+    buildProjectWorkspace(
+      workspace,
+      workspaceFlowStates[workspace.workspace_id] ?? {},
+      depth,
+      workspaceArtifactDesignName(
+        workspace,
+        manifest?.base_design,
+        projectArtifactDesignName(project?.name ?? name, topModule),
+      ),
+    ),
+  )
+  const qorTrendSummary = manifest
+    ? buildProjectQorTrendSummary(
+        sortedWorkspaces.map((workspace) => ({
+          workspaceId: workspace.workspace_id,
+          workspaceName: workspaceDisplayName(workspace),
+          workspacePath: workspace.workspace_path,
+          createdAt: workspace.created_at,
+          status: workspace.status,
+          branchFrom: workspace.branch_from,
+          stepMetricTexts:
+            workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
+          stepSummaryTexts:
+            workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
+          stepHotspotTexts:
+            workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
+          staTimingIssuesText:
+            workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
+          stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
+        })),
+        {
+          baselineWorkspaceId: manifest.qor_baseline?.workspace_id ?? null,
+        },
+      )
+    : buildProjectQorTrendSummary([])
+  const snapshots = buildProjectAnalysisSnapshots(
+    sortedWorkspaces,
+    workspaceAnalysisInputs,
+    workspaceFlowStates,
+  )
+  const workspaceSummaries = buildV3WorkspaceSummaries(
+    sortedWorkspaces,
+    workspaces,
+    snapshots,
+    qorTrendSummary,
+  )
+  const comparisonSummary = buildV3ComparisonSummary(
+    manifest,
+    sortedWorkspaces,
+    qorTrendSummary,
+  )
+
+  return {
+    id: path,
+    name,
+    path,
+    pdk,
+    topModule,
+    objective: buildObjective(project, manifest),
+    bestWorkspaceId: comparisonSummary.bestWorkspaceId,
+    workspaces,
+    metricsRows: buildV3MetricRows(workspaceSummaries),
+    workspaceSummaries,
+    stepCompareSummaries: manifest
+      ? buildStepCompareSummaries(sortedWorkspaces, workspaces, workspaceSummaries)
+      : [],
+    dashboardSummary: buildProjectDashboardSummary(
+      workspaces,
+      workspaceSummaries,
+      qorTrendSummary.timingClosure,
+      qorTrendSummary,
+    ),
+    qorTrendSummary,
+    branchLinks: manifest ? buildBranchLinks(sortedWorkspaces) : [],
+    comparisonSummary,
+  }
+}
+
+function buildProjectAnalysisSnapshots(
+  manifestWorkspaces: ProjectWorkspaceManifest[],
+  inputs: ProjectWorkspaceAnalysisInputsById,
+  flowStates: ProjectWorkspaceFlowStatesById,
+): Map<string, ProjectAnalysisSnapshot> {
+  return new Map(
+    manifestWorkspaces.map((workspace) => {
+      const input = inputs[workspace.workspace_id]
+      return [
+        workspace.workspace_id,
+        buildProjectAnalysisSnapshot(
+          {
+            workspaceId: workspace.workspace_id,
+            workspaceName: workspaceDisplayName(workspace),
+            workspacePath: workspace.workspace_path,
+            createdAt: workspace.created_at,
+            status: workspace.status,
+            branchFrom: workspace.branch_from,
+            stepMetricTexts: input?.stepMetricTexts ?? {},
+            stepSummaryTexts: input?.stepSummaryTexts ?? {},
+            stepHotspotTexts: input?.stepHotspotTexts ?? {},
+            staTimingIssuesText: input?.staTimingIssuesText ?? null,
+            stepStatuses: flowStates[workspace.workspace_id] ?? {},
+          },
+          FLOW_STEPS,
+        ),
+      ]
+    }),
+  )
+}
+
+function buildV3WorkspaceSummaries(
+  manifestWorkspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectWorkspace[],
+  snapshots: Map<string, ProjectAnalysisSnapshot>,
+  qorTrendSummary: ProjectQorTrendSummary,
+): ProjectWorkspaceSummary[] {
+  return manifestWorkspaces.map((workspace) => {
+    const projectWorkspace = workspaces.find((item) => item.id === workspace.workspace_id)
+    const snapshot =
+      snapshots.get(workspace.workspace_id) ??
+      emptyProjectAnalysisSnapshot(workspace.workspace_id, workspace.workspace_path)
+    const qorWorkspace = qorTrendSummary.workspaces.find(
+      (item) => item.workspaceId === workspace.workspace_id,
+    )
+    const finalMetrics = v3FinalMetrics(qorWorkspace)
+    const flowMetrics = v3FlowMetrics(snapshot, projectWorkspace)
+
+    return {
+      workspaceId: workspace.workspace_id,
+      workspaceName: workspaceDisplayName(workspace),
+      workspacePath: workspace.workspace_path,
+      finalMetrics,
+      flowMetrics,
+      steps: FLOW_STEPS.map((step) => {
+        const status =
+          projectWorkspace?.steps.find((cell) => cell.step === step)?.status ?? 'skipped'
+        const analysis = snapshot.steps[step]
+        return {
+          step,
+          title: step,
+          status,
+          metrics: (analysis?.metrics ?? [])
+            .filter(
+              (metric) =>
+                metric.stepRole === 'primary' || metric.stepRole === 'secondary',
+            )
+            .map(v3SummaryMetric)
+            .sort((left, right) => left.label.localeCompare(right.label)),
+          detailHint: detailHintForStep(step),
+        }
+      }),
+      deltaSummaries: [],
+      analysis: snapshot,
+    }
+  })
+}
+
+function emptyProjectAnalysisSnapshot(
+  workspaceId: string,
+  workspacePath: string,
+): ProjectAnalysisSnapshot {
+  return {
+    workspaceId,
+    workspacePath,
+    steps: {},
+    signoffReadiness: {
+      status: 'unavailable',
+      scoreEligible: false,
+      reasonCodes: [],
+      groups: [],
+    },
+    timingConstraints: {
+      status: 'unavailable',
+      fingerprint: null,
+      sourceFile: null,
+      step: null,
+    },
+  }
+}
+
+function v3FinalMetrics(
+  workspace: ProjectQorTrendWorkspaceSummary | undefined,
+): ProjectWorkspaceFinalMetrics {
+  const records = workspace?.records ?? []
+  return {
+    drcCount: v3MetricByName(records, 'drc_count'),
+    setupWns: v3MetricByName(records, 'sta_setup_wns'),
+    setupTns: v3MetricByName(records, 'sta_setup_tns'),
+    holdWns: v3MetricByName(records, 'sta_hold_wns'),
+    holdTns: v3MetricByName(records, 'sta_hold_tns'),
+    area:
+      v3MetricByName(records, 'core_area') ??
+      v3MetricByName(records, 'synthesis_cell_area'),
+    dieArea: v3MetricByName(records, 'die_area'),
+    coreUtil: v3MetricByName(records, 'core_utilization'),
+    frequency: v3MetricByName(records, 'sta_frequency_mhz'),
+  }
+}
+
+function v3MetricByName(
+  records: ProjectQorMetricRecord[],
+  metricName: string,
+): ProjectSummaryMetric | undefined {
+  const record = records.find((item) => item.metricName === metricName)
+  return record ? v3SummaryMetric(record) : undefined
+}
+
+function v3SummaryMetric(record: ProjectQorMetricRecord): ProjectSummaryMetric {
+  const hint = [record.cornerContext?.label, record.analysisGroup]
+    .filter((value): value is string => Boolean(value))
+    .join(' | ')
+  return {
+    id: record.metricName,
+    label: record.displayName,
+    value: record.value,
+    display: record.value === null ? 'N/A' : formatMetricValue(record.value),
+    state: v3MetricState(record),
+    hint: hint || undefined,
+  }
+}
+
+function v3MetricState(record: ProjectQorMetricRecord): ProjectMetricPoint['state'] {
+  if (record.value === null) return 'pending'
+  if (
+    record.metricName.includes('drc') ||
+    record.metricName.includes('violation') ||
+    record.metricName.includes('missing_corner') ||
+    record.metricName.includes('parse_failure')
+  ) {
+    return record.value === 0 ? 'good' : record.value <= 3 ? 'warn' : 'bad'
+  }
+  if (record.metricName.includes('wns') || record.metricName.includes('tns')) {
+    return record.value >= 0 ? 'good' : 'bad'
+  }
+  return 'good'
+}
+
+function v3FlowMetrics(
+  snapshot: ProjectAnalysisSnapshot,
+  workspace: ProjectWorkspace | undefined,
+): ProjectWorkspaceFlowMetrics {
+  const successfulSteps = new Set(
+    workspace?.steps
+      .filter((step) => step.status === 'success' || step.status === 'reused')
+      .map((step) => step.step) ?? [],
+  )
+  const metrics = Object.values(snapshot.steps).flatMap((step) =>
+    step && successfulSteps.has(step.step) ? step.metrics : [],
+  )
+  const runtimes = metrics
+    .filter((metric) => metric.metricName === 'runtime_seconds')
+    .map((metric) => metric.value ?? 0)
+  const memories = metrics
+    .filter((metric) => metric.metricName === 'peak_memory_mb')
+    .map((metric) => metric.value ?? 0)
+  return {
+    totalRuntimeSec: Number(runtimes.reduce((sum, value) => sum + value, 0).toFixed(3)),
+    peakMemoryMb: Math.max(0, ...memories),
+    checklistPassed: 0,
+    checklistFailed: 0,
+    checklistWarning: 0,
+    checklistTotal: 0,
+  }
+}
+
+function buildV3MetricRows(summaries: ProjectWorkspaceSummary[]): ProjectMetricRow[] {
+  if (summaries.length === 0) return []
+  const definitions: Array<{
+    id: ProjectMetricId
+    label: string
+    hint: string
+    metric: keyof ProjectWorkspaceFinalMetrics | 'runtime' | 'memory'
+  }> = [
+    {
+      id: 'die_area',
+      label: 'Die Area',
+      hint: 'V3 final physical metric',
+      metric: 'dieArea',
+    },
+    {
+      id: 'core_util',
+      label: 'Core Util',
+      hint: 'V3 final physical metric',
+      metric: 'coreUtil',
+    },
+    {
+      id: 'frequency',
+      label: 'Frequency [MHz]',
+      hint: 'V3 STA controlling corner',
+      metric: 'frequency',
+    },
+    {
+      id: 'wns',
+      label: 'Setup WNS',
+      hint: 'V3 STA controlling corner',
+      metric: 'setupWns',
+    },
+    {
+      id: 'tns',
+      label: 'Setup TNS',
+      hint: 'V3 STA controlling corner',
+      metric: 'setupTns',
+    },
+    {
+      id: 'hold_wns',
+      label: 'Hold WNS',
+      hint: 'V3 STA controlling corner',
+      metric: 'holdWns',
+    },
+    {
+      id: 'hold_tns',
+      label: 'Hold TNS',
+      hint: 'V3 STA controlling corner',
+      metric: 'holdTns',
+    },
+    { id: 'drc', label: 'DRC', hint: 'V3 DRC metric', metric: 'drcCount' },
+    { id: 'area', label: 'Area', hint: 'V3 final physical metric', metric: 'area' },
+    {
+      id: 'runtime',
+      label: 'Runtime',
+      hint: 'V3 successful-step total',
+      metric: 'runtime',
+    },
+    { id: 'memory', label: 'Memory', hint: 'V3 successful-step peak', metric: 'memory' },
+  ]
+  return definitions.map((definition) => ({
+    id: definition.id,
+    label: definition.label,
+    hint: definition.hint,
+    kind: 'bar',
+    points: summaries.map((summary) => {
+      const metric =
+        definition.metric === 'runtime'
+          ? metricFromNumber(
+              'runtime',
+              'Runtime',
+              summary.flowMetrics.totalRuntimeSec,
+              'good',
+            )
+          : definition.metric === 'memory'
+            ? metricFromNumber(
+                'memory',
+                'Memory',
+                summary.flowMetrics.peakMemoryMb,
+                'good',
+              )
+            : summary.finalMetrics[definition.metric]
+      return {
+        workspaceId: summary.workspaceId,
+        workspaceName: summary.workspaceName,
+        label: metric?.display ?? 'N/A',
+        value: metric?.value ?? null,
+        state: metric?.state ?? 'pending',
+      }
+    }),
+  }))
+}
+
+function buildV3ComparisonSummary(
+  manifest: ProjectManifest | null | undefined,
+  workspaces: ProjectWorkspaceManifest[],
+  qorTrendSummary: ProjectQorTrendSummary,
+): ProjectComparisonSummary {
+  const bestRatedWorkspace = qorTrendSummary.workspaces
+    .filter((workspace) => workspace.overallScore !== null)
+    .sort((left, right) => (right.overallScore ?? -1) - (left.overallScore ?? -1))[0]
+  const explicitBest = manifest?.best_workspace?.workspace_id
+  const bestWorkspaceId =
+    bestRatedWorkspace?.workspaceId ?? explicitBest ?? workspaces[0]?.workspace_id ?? ''
+  return {
+    bestWorkspaceId,
+    bestReason: bestRatedWorkspace
+      ? `Highest eligible QoR score: ${bestRatedWorkspace.overallScore}`
+      : 'No workspace has eligible V3 signoff readiness.',
+    riskLabels: Array.from(
+      new Set(qorTrendSummary.risks.map((risk) => risk.message)),
+    ).slice(0, 8),
+    parameterDiffs: buildParameterDiffs(workspaces),
+    metricDiffs: [],
+  }
+}
+
 export function createSelectionState(
   project: ProjectManagementProject,
 ): ProjectSelectionState {
@@ -438,22 +848,198 @@ export function resolveProjectSelectionUpdate(
 export function createProjectManifestDraft(
   input: ProjectManifestDraftInput,
 ): ProjectManifest {
-  return createSharedProjectManifestDraft(input)
+  const now = input.now ?? new Date().toISOString()
+  return {
+    schema_version: 1,
+    project_id: `proj_${slugify(input.name || basenamePath(input.rootPath) || 'project')}`,
+    name: input.name || basenamePath(input.rootPath) || 'project',
+    description: '',
+    root_path: normalizePath(input.rootPath),
+    created_at: now,
+    updated_at: now,
+    base_design: {
+      parameters: {},
+      rtl_list: [],
+    },
+    objectives: {
+      primary: 'timing',
+      directions: {
+        wns: 'maximize',
+        tns: 'maximize',
+        area: 'minimize',
+        drc_count: 'minimize',
+        power: 'minimize',
+      },
+    },
+    workspaces: [],
+    best_workspace: null,
+    qor_baseline: null,
+  }
 }
 
 export function serializeProjectManifest(manifest: ProjectManifest): string {
-  return serializeSharedProjectManifest(manifest)
+  return `${JSON.stringify(manifest, null, 2)}\n`
 }
 
 export function parseProjectManifest(content: string): ProjectManifest {
-  return parseSharedProjectManifest(content)
+  const parsed = JSON.parse(content) as ProjectManifest
+  if (parsed.schema_version !== 1 || !Array.isArray(parsed.workspaces)) {
+    throw new Error('Invalid project manifest.')
+  }
+  return {
+    ...parsed,
+    qor_baseline: parsed.qor_baseline ?? null,
+  }
+}
+
+export function parseWorkspaceFlowStateMap(
+  content: string,
+): ProjectWorkspaceFlowStateMap {
+  const parsed = JSON.parse(content) as {
+    steps?: Array<{ name?: unknown; state?: unknown }>
+  }
+  if (!Array.isArray(parsed.steps)) return {}
+
+  return parsed.steps.reduce<ProjectWorkspaceFlowStateMap>((stateMap, step) => {
+    const name = optionalString(step.name)
+    const status = projectStepStatusFromFlowState(step.state)
+    if (!name || !status) return stateMap
+
+    stateMap[normalizeFlowStep(name)] = status
+    return stateMap
+  }, {})
+}
+
+export function nextWorkspaceId(project: ProjectManagementProject): string {
+  const numbers = project.workspaces
+    .map((workspace) => Number(workspace.id.replace(/^ws_/, '')))
+    .filter(Number.isFinite)
+  const next = Math.max(0, ...numbers) + 1
+  return `ws_${String(next).padStart(4, '0')}`
+}
+
+export function createWorkspaceBranchDraft(
+  project: ProjectManagementProject,
+  sourceWorkspaceId: string,
+  step: FlowStep,
+): WorkspaceBranchDraft {
+  const targetWorkspaceId = nextWorkspaceId(project)
+  const sourceWorkspace = project.workspaces.find(
+    (workspace) => workspace.id === sourceWorkspaceId,
+  )
+  const sourceOutputType = step === 'Synth' ? 'verilog' : 'def'
+  const sourceWorkspacePath =
+    sourceWorkspace?.workspacePath ?? joinPath(project.path, sourceWorkspaceId)
+  const designName =
+    sourceWorkspace?.artifactDesignName ||
+    projectArtifactDesignName(project.name, project.topModule)
+  const sourceOutputPath = sourceStepOutputPath(sourceWorkspacePath, step, designName)
+  const originSdc = sourceWorkspaceSdcPath(sourceWorkspacePath, designName)
+  const artifactOrigin =
+    sourceOutputType === 'verilog'
+      ? { originVerilog: sourceOutputPath }
+      : {
+          originDef: sourceOutputPath,
+          originVerilog: sourceStepOutputVerilogPath(
+            sourceWorkspacePath,
+            step,
+            designName,
+          ),
+        }
+
+  return {
+    sourceWorkspaceId,
+    sourceWorkspacePath,
+    step,
+    targetWorkspaceId,
+    targetWorkspacePath: joinPath(project.path, targetWorkspaceId),
+    targetStartStep: nextFlowStep(step),
+    targetEndStep: 'Harden',
+    sourceOutputType,
+    sourceOutputPath,
+    originSdc,
+    ...artifactOrigin,
+  }
 }
 
 export function registerWorkspaceInManifest(
   manifest: ProjectManifest,
   input: ProjectWorkspaceRegistrationInput,
 ): ProjectManifest {
-  return registerSharedWorkspaceInManifest(manifest, input)
+  const now = input.now ?? new Date().toISOString()
+  const workspacePath = normalizePath(input.workspacePath)
+  const workspaceId = basenamePath(workspacePath) || nextManifestWorkspaceId(manifest)
+  const existingWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id === workspaceId ||
+      normalizePath(workspace.workspace_path) === workspacePath,
+  )
+  const sourceStep = input.sourceStep ? normalizeFlowStep(input.sourceStep) : null
+  const sourceWorkspaceId =
+    input.sourceWorkspaceId || existingWorkspace?.source_workspace_id || null
+  const branchFrom =
+    sourceWorkspaceId && sourceStep
+      ? {
+          source_workspace_id: sourceWorkspaceId,
+          source_step: sourceStep,
+          source_output_type:
+            input.sourceOutputType ||
+            existingWorkspace?.branch_from?.source_output_type ||
+            defaultSourceOutputType(sourceStep),
+          source_output_path:
+            input.sourceOutputPath || existingWorkspace?.branch_from?.source_output_path,
+        }
+      : (existingWorkspace?.branch_from ?? null)
+  const startStep = input.startStep
+    ? normalizeFlowStep(input.startStep)
+    : sourceStep
+      ? nextFlowStep(sourceStep)
+      : normalizeFlowStep(existingWorkspace?.start_step ?? 'Synth')
+  const endStep = input.endStep
+    ? normalizeFlowStep(input.endStep)
+    : normalizeFlowStep(existingWorkspace?.end_step ?? 'Harden')
+  const workspaceName =
+    basenamePath(workspacePath) || existingWorkspace?.name || workspaceId
+  const parameterPatch = input.config?.parameters
+    ? {
+        ...existingWorkspace?.parameter_patch,
+        ...buildParameterPatch(
+          manifest.base_design.parameters ?? {},
+          input.config.parameters,
+        ),
+      }
+    : (existingWorkspace?.parameter_patch ?? {})
+
+  const workspace: ProjectWorkspaceManifest = {
+    workspace_id: workspaceId,
+    name: workspaceName,
+    workspace_path: workspacePath,
+    source_workspace_id: sourceWorkspaceId,
+    branch_from: branchFrom,
+    start_step: startStep,
+    end_step: endStep,
+    status: existingWorkspace?.status ?? 'not_started',
+    created_at: existingWorkspace?.created_at ?? now,
+    updated_at: now,
+    parameter_patch: parameterPatch,
+  }
+
+  const workspaces = existingWorkspace
+    ? manifest.workspaces.map((item) =>
+        item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
+      )
+    : [...manifest.workspaces, workspace]
+
+  return {
+    ...manifest,
+    name: input.projectName || manifest.name,
+    root_path: normalizePath(input.projectRoot || manifest.root_path),
+    updated_at: now,
+    base_design: mergeBaseDesignConfig(manifest.base_design, input.config, {
+      includeDesignParameter: !sourceWorkspaceId && !branchFrom,
+    }),
+    workspaces,
+  }
 }
 
 export function archiveWorkspaceInManifest(
@@ -461,7 +1047,46 @@ export function archiveWorkspaceInManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
-  return archiveSharedWorkspaceInManifest(manifest, workspaceId, now)
+  return {
+    ...manifest,
+    updated_at: now,
+    best_workspace:
+      manifest.best_workspace?.workspace_id === workspaceId
+        ? null
+        : manifest.best_workspace,
+    qor_baseline:
+      manifest.qor_baseline?.workspace_id === workspaceId ? null : manifest.qor_baseline,
+    workspaces: manifest.workspaces.map((workspace) =>
+      workspace.workspace_id === workspaceId
+        ? {
+            ...workspace,
+            status: 'archived',
+            updated_at: now,
+          }
+        : workspace,
+    ),
+  }
+}
+
+export function setQorBaselineInManifest(
+  manifest: ProjectManifest,
+  workspaceId: string,
+  reason = 'Selected from Project QoR Trend',
+  now = new Date().toISOString(),
+): ProjectManifest {
+  const hasWorkspace = manifest.workspaces.some(
+    (workspace) => workspace.workspace_id === workspaceId,
+  )
+  if (!hasWorkspace) return manifest
+
+  return {
+    ...manifest,
+    updated_at: now,
+    qor_baseline: {
+      workspace_id: workspaceId,
+      reason,
+    },
+  }
 }
 
 export function deleteWorkspaceFromManifest(
@@ -469,5 +1094,786 @@ export function deleteWorkspaceFromManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
-  return deleteSharedWorkspaceFromManifest(manifest, workspaceId, now)
+  return {
+    ...manifest,
+    updated_at: now,
+    best_workspace:
+      manifest.best_workspace?.workspace_id === workspaceId
+        ? null
+        : manifest.best_workspace,
+    qor_baseline:
+      manifest.qor_baseline?.workspace_id === workspaceId ? null : manifest.qor_baseline,
+    workspaces: manifest.workspaces
+      .filter((workspace) => workspace.workspace_id !== workspaceId)
+      .map((workspace) => {
+        const clearsSource =
+          workspace.source_workspace_id === workspaceId ||
+          workspace.branch_from?.source_workspace_id === workspaceId
+        if (!clearsSource) return workspace
+
+        return {
+          ...workspace,
+          source_workspace_id:
+            workspace.source_workspace_id === workspaceId
+              ? null
+              : workspace.source_workspace_id,
+          branch_from:
+            workspace.branch_from?.source_workspace_id === workspaceId
+              ? null
+              : workspace.branch_from,
+          updated_at: now,
+        }
+      }),
+  }
+}
+
+function buildObjective(
+  project?: Project | null,
+  manifest?: ProjectManifest | null,
+): string {
+  if (manifest?.objectives.primary) return `${manifest.objectives.primary} objective`
+  return project?.frequencyTarget
+    ? `timing · ${project.frequencyTarget}MHz`
+    : 'No project data'
+}
+
+function buildProjectWorkspace(
+  workspace: ProjectWorkspaceManifest,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
+  depth = 0,
+  artifactDesignName = '',
+): ProjectWorkspace {
+  const startStep = normalizeFlowStep(workspace.start_step)
+  const endStep = normalizeFlowStep(workspace.end_step)
+  const branchStep = workspace.branch_from
+    ? normalizeFlowStep(workspace.branch_from.source_step)
+    : null
+
+  const steps = FLOW_STEPS.map((step) =>
+    buildStepCell(workspace, step, startStep, endStep, branchStep, flowStateMap),
+  )
+
+  return {
+    id: workspace.workspace_id,
+    name: workspaceDisplayName(workspace),
+    workspacePath: workspace.workspace_path,
+    artifactDesignName,
+    status: workspace.status,
+    description: workspace.branch_from
+      ? `from ${workspace.branch_from.source_workspace_id}/${branchStep}`
+      : 'initial workspace',
+    sourceWorkspaceId: workspace.source_workspace_id,
+    branchStep,
+    startStep,
+    endStep,
+    depth,
+    flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
+    steps,
+  }
+}
+
+function workspaceDisplayName(workspace: ProjectWorkspaceManifest): string {
+  return (
+    basenamePath(workspace.workspace_path) || workspace.name || workspace.workspace_id
+  )
+}
+
+function sortWorkspacesByLineage(workspaces: ProjectWorkspaceManifest[]): Array<{
+  workspace: ProjectWorkspaceManifest
+  depth: number
+}> {
+  const byId = new Map(workspaces.map((workspace) => [workspace.workspace_id, workspace]))
+  const childrenBySource = new Map<string, ProjectWorkspaceManifest[]>()
+  const roots: ProjectWorkspaceManifest[] = []
+
+  for (const workspace of workspaces) {
+    const sourceWorkspaceId =
+      workspace.branch_from?.source_workspace_id ?? workspace.source_workspace_id
+    if (sourceWorkspaceId && byId.has(sourceWorkspaceId)) {
+      const children = childrenBySource.get(sourceWorkspaceId) ?? []
+      children.push(workspace)
+      childrenBySource.set(sourceWorkspaceId, children)
+    } else {
+      roots.push(workspace)
+    }
+  }
+
+  const sortByCreatedAt = (
+    left: ProjectWorkspaceManifest,
+    right: ProjectWorkspaceManifest,
+  ) =>
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
+    left.workspace_id.localeCompare(right.workspace_id)
+
+  roots.sort(sortByCreatedAt)
+  for (const children of childrenBySource.values()) children.sort(sortByCreatedAt)
+
+  const visited = new Set<string>()
+  const sorted: Array<{ workspace: ProjectWorkspaceManifest; depth: number }> = []
+  const visit = (workspace: ProjectWorkspaceManifest, depth: number) => {
+    if (visited.has(workspace.workspace_id)) return
+    visited.add(workspace.workspace_id)
+    sorted.push({ workspace, depth })
+    for (const child of childrenBySource.get(workspace.workspace_id) ?? []) {
+      visit(child, depth + 1)
+    }
+  }
+
+  for (const root of roots) visit(root, 0)
+  for (const workspace of [...workspaces].sort(sortByCreatedAt)) {
+    visit(workspace, 0)
+  }
+
+  return sorted
+}
+
+function buildFlowStatusHint(
+  steps: ProjectStepCell[],
+  startStep: FlowStep,
+  endStep: FlowStep,
+): ProjectFlowStatusHint {
+  const startIndex = FLOW_STEPS.indexOf(startStep)
+  const endIndex = FLOW_STEPS.indexOf(endStep)
+  const configuredSteps = steps.filter((cell) => {
+    const stepIndex = FLOW_STEPS.indexOf(cell.step)
+    return stepIndex >= startIndex && stepIndex <= endIndex
+  })
+  const firstIncomplete = configuredSteps.find((cell) => cell.status !== 'success')
+  if (!firstIncomplete) {
+    return {
+      state: 'success',
+      label: 'Success',
+    }
+  }
+
+  return {
+    state: flowHintState(firstIncomplete.status),
+    step: firstIncomplete.step,
+    label: `${firstIncomplete.step} ${flowHintStatusLabel(firstIncomplete.status)}`,
+  }
+}
+
+function flowHintState(status: ProjectStepStatus): ProjectFlowStatusHint['state'] {
+  if (status === 'failed') return 'failed'
+  if (status === 'running') return 'running'
+  if (status === 'success' || status === 'reused') return 'success'
+  if (status === 'skipped') return 'skipped'
+  return 'unstart'
+}
+
+function flowHintStatusLabel(status: ProjectStepStatus): string {
+  if (status === 'reused') return 'success'
+  if (status === 'unstart') return 'unstart'
+  return status
+}
+
+function buildStepCell(
+  workspace: ProjectWorkspaceManifest,
+  step: FlowStep,
+  startStep: FlowStep,
+  endStep: FlowStep,
+  branchStep: FlowStep | null,
+  flowStateMap: ProjectWorkspaceFlowStateMap,
+): ProjectStepCell {
+  const stepIndex = FLOW_STEPS.indexOf(step)
+  const startIndex = FLOW_STEPS.indexOf(startStep)
+  const endIndex = FLOW_STEPS.indexOf(endStep)
+  const isBeforeStart = stepIndex < startIndex
+  const isAfterEnd = stepIndex > endIndex
+  let status: ProjectStepStatus
+
+  const flowStatus = flowStateMap[step]
+  if (workspace.status !== 'archived' && flowStatus) {
+    status = flowStatus
+  } else if (workspace.status === 'archived') {
+    status = 'skipped'
+  } else if (isBeforeStart) {
+    status =
+      workspace.branch_from && branchStep && stepIndex <= FLOW_STEPS.indexOf(branchStep)
+        ? 'reused'
+        : 'skipped'
+  } else if (isAfterEnd) {
+    status = 'skipped'
+  } else if (workspace.status === 'running') {
+    status = 'running'
+  } else if (workspace.status === 'failed' && stepIndex === endIndex) {
+    status = 'failed'
+  } else if (workspace.status === 'not_started') {
+    status = 'unstart'
+  } else {
+    status = 'success'
+  }
+
+  return {
+    step,
+    status,
+    label: labelForStepStatus(status),
+    canCreateWorkspace: status === 'success',
+  }
+}
+
+function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | null {
+  const normalized = optionalString(state).toLowerCase()
+  if (!normalized) return null
+
+  if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
+    return 'success'
+  if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
+  if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized))
+    return 'failed'
+  if (
+    ['unstart', 'unstarted', 'not_started', 'not started', 'pending', 'created'].includes(
+      normalized,
+    )
+  )
+    return 'unstart'
+  return null
+}
+
+function buildBranchLinks(workspaces: ProjectWorkspaceManifest[]): ProjectBranchLink[] {
+  return workspaces.flatMap((workspace) => {
+    if (!workspace.branch_from) return []
+    return [
+      {
+        fromWorkspaceId: workspace.branch_from.source_workspace_id,
+        fromStep: normalizeFlowStep(workspace.branch_from.source_step),
+        toWorkspaceId: workspace.workspace_id,
+        toStep: normalizeFlowStep(workspace.start_step),
+      },
+    ]
+  })
+}
+
+function buildStepCompareSummaries(
+  manifestWorkspaces: ProjectWorkspaceManifest[],
+  workspaces: ProjectWorkspace[],
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): ProjectStepCompareSummary[] {
+  return FLOW_STEPS.map((step) => {
+    const definitions = stepMetricDefinitions(step, workspaceSummaries)
+    const metrics = definitions.map((definition) => ({
+      id: definition.id,
+      label: definition.label,
+      hint: definition.hint,
+      points: manifestWorkspaces.map((workspace) => {
+        const summary = workspaceSummaries.find(
+          (item) => item.workspaceId === workspace.workspace_id,
+        )
+        const metric = stepMetricFromSummary(summary, step, definition.id)
+        const value = metric?.value ?? null
+        return {
+          workspaceId: workspace.workspace_id,
+          workspaceName: workspaceDisplayName(workspace),
+          label: metric?.display ?? 'N/A',
+          value,
+          state: metric?.state ?? 'pending',
+        }
+      }),
+    }))
+    const primaryMetric = metrics[0] ?? {
+      id: 'none',
+      label: 'metric',
+      hint: 'No metric available',
+      points: manifestWorkspaces.map((workspace) => ({
+        workspaceId: workspace.workspace_id,
+        workspaceName: workspaceDisplayName(workspace),
+        label: 'N/A',
+        value: null,
+        state: 'pending' as const,
+      })),
+    }
+    const configuredCount = workspaces.filter(
+      (workspace) =>
+        workspace.steps.find((cell) => cell.step === step)?.status !== 'skipped',
+    ).length
+    const successCount = workspaces.filter(
+      (workspace) =>
+        workspace.steps.find((cell) => cell.step === step)?.status === 'success',
+    ).length
+    const missingCount = primaryMetric.points.filter(
+      (point) => point.value === null,
+    ).length
+
+    return {
+      step,
+      title: `${step} Compare`,
+      metricLabel: primaryMetric.label,
+      metricHint: primaryMetric.hint,
+      configuredCount,
+      successCount,
+      missingCount,
+      points: primaryMetric.points,
+      metrics,
+    }
+  })
+}
+
+function buildProjectDashboardSummary(
+  workspaces: ProjectWorkspace[],
+  workspaceSummaries: ProjectWorkspaceSummary[],
+  timingClosure: ProjectQorTimingSummary,
+  qorTrendSummary: ProjectQorTrendSummary,
+): ProjectDashboardSummary {
+  const configuredCells = workspaces.flatMap((workspace) =>
+    workspace.steps.filter((cell) => cell.status !== 'skipped'),
+  )
+  const successStepCount = configuredCells.filter(
+    (cell) => cell.status === 'success' || cell.status === 'reused',
+  ).length
+  const failedStepCount = configuredCells.filter(
+    (cell) => cell.status === 'failed',
+  ).length
+  const runningStepCount = configuredCells.filter(
+    (cell) => cell.status === 'running',
+  ).length
+  const configuredStepCount = configuredCells.length
+  const flowSuccessRatio =
+    configuredStepCount === 0
+      ? 0
+      : Math.round((successStepCount / configuredStepCount) * 100)
+  const drcCleanCount = workspaceSummaries.filter(
+    (summary) => summary.finalMetrics.drcCount?.value === 0,
+  ).length
+  const signoffReadyCount = qorTrendSummary.workspaces.filter(
+    (workspace) => workspace.signoffReadiness.status === 'pass',
+  ).length
+  const blockingCounts = new Map<FlowStep, number>()
+  for (const workspace of workspaces) {
+    const blockedStep = workspace.steps.find(
+      (cell) =>
+        cell.status === 'failed' ||
+        cell.status === 'running' ||
+        cell.status === 'unstart',
+    )
+    if (!blockedStep) continue
+    blockingCounts.set(blockedStep.step, (blockingCounts.get(blockedStep.step) ?? 0) + 1)
+  }
+  const runStateSlices = buildRunStateSlices(workspaces)
+  const flowMetricSummary = buildFlowMetricSummary(workspaceSummaries)
+
+  return {
+    workspaceCount: workspaces.length,
+    configuredStepCount,
+    successStepCount,
+    failedStepCount,
+    runningStepCount,
+    flowSuccessRatio,
+    drcCleanCount,
+    timingCleanCount: timingClosure.cleanWorkspaceCount,
+    timingAtRiskCount: timingClosure.atRiskWorkspaceCount,
+    timingIncompleteCount: timingClosure.incompleteWorkspaceCount,
+    timingUnavailableCount: timingClosure.unavailableWorkspaceCount,
+    signoffReadyCount,
+    runStateSlices,
+    flowMetricSummary,
+    topBlockingSteps: [...blockingCounts.entries()]
+      .sort(
+        (left, right) =>
+          right[1] - left[1] ||
+          FLOW_STEPS.indexOf(left[0]) - FLOW_STEPS.indexOf(right[0]),
+      )
+      .slice(0, 3)
+      .map(([step, count]) => ({ step, count })),
+  }
+}
+
+function buildRunStateSlices(workspaces: ProjectWorkspace[]): ProjectRunStateSlice[] {
+  const labels: Record<ProjectFlowStatusHint['state'], string> = {
+    success: 'Success',
+    failed: 'Failed',
+    running: 'Running',
+    unstart: 'Not Started',
+    skipped: 'Skipped',
+  }
+  const total = workspaces.length
+  const counts = workspaces.reduce((map, workspace) => {
+    const state = workspace.flowStatusHint.state
+    map.set(state, (map.get(state) ?? 0) + 1)
+    return map
+  }, new Map<ProjectFlowStatusHint['state'], number>())
+
+  return (
+    [
+      'success',
+      'failed',
+      'running',
+      'unstart',
+      'skipped',
+    ] satisfies ProjectFlowStatusHint['state'][]
+  ).flatMap((state) => {
+    const count = counts.get(state) ?? 0
+    if (count === 0) return []
+    return [
+      {
+        state,
+        label: labels[state],
+        count,
+        percent: total === 0 ? 0 : Math.round((count / total) * 100),
+      },
+    ]
+  })
+}
+
+function buildFlowMetricSummary(
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): ProjectFlowMetricSummary {
+  const empty = emptyFlowMetrics()
+  const totals = workspaceSummaries.reduce(
+    (summary, workspace) => ({
+      totalRuntimeSec: summary.totalRuntimeSec + workspace.flowMetrics.totalRuntimeSec,
+      peakMemoryMb: Math.max(summary.peakMemoryMb, workspace.flowMetrics.peakMemoryMb),
+      checklistPassed: summary.checklistPassed + workspace.flowMetrics.checklistPassed,
+      checklistFailed: summary.checklistFailed + workspace.flowMetrics.checklistFailed,
+      checklistWarning: summary.checklistWarning + workspace.flowMetrics.checklistWarning,
+      checklistTotal: summary.checklistTotal + workspace.flowMetrics.checklistTotal,
+    }),
+    empty,
+  )
+
+  return {
+    ...totals,
+    runtimePoints: workspaceSummaries.map((summary) => ({
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      label: formatRuntimeLabel(summary.flowMetrics.totalRuntimeSec),
+      value: summary.flowMetrics.totalRuntimeSec,
+      state: summary.flowMetrics.totalRuntimeSec > 0 ? 'good' : 'pending',
+    })),
+    memoryPoints: workspaceSummaries.map((summary) => ({
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      label: `${formatMetricValue(summary.flowMetrics.peakMemoryMb)} MB`,
+      value: summary.flowMetrics.peakMemoryMb,
+      state: summary.flowMetrics.peakMemoryMb > 0 ? 'good' : 'pending',
+    })),
+  }
+}
+
+function emptyFlowMetrics(): ProjectWorkspaceFlowMetrics {
+  return {
+    totalRuntimeSec: 0,
+    peakMemoryMb: 0,
+    checklistPassed: 0,
+    checklistFailed: 0,
+    checklistWarning: 0,
+    checklistTotal: 0,
+  }
+}
+
+function metricFromNumber(
+  id: string,
+  label: string,
+  value: number | null,
+  state: ProjectMetricPoint['state'],
+  hint?: string,
+  format: 'default' | 'percent' | 'compact' = 'default',
+): ProjectSummaryMetric | undefined {
+  if (value === null) return undefined
+  return {
+    id,
+    label: `${label} ${formatMetricValue(value, format)}`,
+    value,
+    display: formatMetricValue(value, format),
+    state,
+    hint,
+  }
+}
+
+interface StepCompareDefinition {
+  id: string
+  label: string
+  hint: string
+}
+
+function stepMetricDefinitions(
+  step: FlowStep,
+  workspaceSummaries: ProjectWorkspaceSummary[],
+): StepCompareDefinition[] {
+  const definitions = new Map<string, StepCompareDefinition>()
+  for (const summary of workspaceSummaries) {
+    const stepSummary = summary.steps.find((item) => item.step === step)
+    for (const metric of stepSummary?.metrics ?? []) {
+      if (definitions.has(metric.id)) continue
+      definitions.set(metric.id, {
+        id: metric.id,
+        label: metric.label,
+        hint: metric.hint ?? metric.label,
+      })
+    }
+  }
+  return [...definitions.values()]
+}
+
+function stepMetricFromSummary(
+  summary: ProjectWorkspaceSummary | undefined,
+  step: FlowStep,
+  metricId: string,
+): ProjectSummaryMetric | undefined {
+  return summary?.steps
+    .find((item) => item.step === step)
+    ?.metrics.find((metric) => metric.id === metricId)
+}
+
+function detailHintForStep(step: FlowStep): string {
+  const hints: Record<FlowStep, string> = {
+    Synth: 'Open workspace Synthesis for cell type and netlist details.',
+    Floor: 'Open workspace Floorplan for geometry, pin and fanout details.',
+    Fanout: 'Open workspace Fanout for high-fanout net details.',
+    Place: 'Open workspace Place for density and congestion maps.',
+    CTS: 'Open workspace CTS for clock tree and post-CTS congestion.',
+    Legal: 'Open workspace Legalization for placement cleanup details.',
+    Route: 'Open workspace Route for route iterations and layer pressure.',
+    DRC: 'Open workspace DRC for rule/layer heatmaps and violation maps.',
+    Filler: 'Open workspace Filler for final filler impact details.',
+    RCX: 'Open workspace RCX for extraction readiness details.',
+    STA: 'Open workspace STA for path detail and corner matrix.',
+    Harden: 'Open workspace Harden for final artifact details.',
+  }
+  return hints[step]
+}
+
+function buildParameterDiffs(
+  workspaces: ProjectWorkspaceManifest[],
+): ProjectComparisonParameterDiff[] {
+  return workspaces.flatMap((workspace) =>
+    Object.entries(workspace.parameter_patch ?? {}).map(([name, patch]) => {
+      const values = parameterPatchValues(patch)
+      return {
+        workspaceId: workspace.workspace_id,
+        name,
+        from: diffValueLabel(values.from),
+        to: diffValueLabel(values.to),
+      }
+    }),
+  )
+}
+
+function parameterPatchValues(patch: unknown): { from: unknown; to: unknown } {
+  if (patch && typeof patch === 'object' && ('from' in patch || 'to' in patch)) {
+    const record = patch as { from?: unknown; to?: unknown }
+    return { from: record.from, to: record.to }
+  }
+  return { from: undefined, to: patch }
+}
+
+function diffValueLabel(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  return String(value)
+}
+
+function sourceStepOutputPath(
+  workspacePath: string,
+  step: FlowStep,
+  designName: string,
+): string {
+  return sourceStepArtifactPath(
+    workspacePath,
+    step,
+    defaultSourceOutputType(step),
+    designName,
+  )
+}
+
+function sourceStepOutputVerilogPath(
+  workspacePath: string,
+  step: FlowStep,
+  designName: string,
+): string {
+  return sourceStepArtifactPath(workspacePath, step, 'verilog', designName)
+}
+
+function sourceWorkspaceSdcPath(workspacePath: string, designName: string): string {
+  return joinPath(workspacePath, 'origin', `${designName || 'design'}.sdc`)
+}
+
+function sourceStepArtifactPath(
+  workspacePath: string,
+  step: FlowStep,
+  artifactType: 'verilog' | 'def',
+  designName: string,
+): string {
+  const artifact = RUNTIME_STEP_ARTIFACTS[step]
+  if (!artifact || !designName) {
+    const fileName = artifactType === 'verilog' ? 'design.v' : 'design.def'
+    return joinPath(workspacePath, step, 'output', fileName)
+  }
+
+  const suffix =
+    artifactType === 'verilog' ? (step === 'Synth' ? '_fixed.v.gz' : '.v.gz') : '.def.gz'
+  return joinPath(
+    workspacePath,
+    artifact.directory,
+    'output',
+    `${designName}_${artifact.outputName}${suffix}`,
+  )
+}
+
+function projectArtifactDesignName(name: string, topModule?: string): string {
+  return normalizeArtifactDesignName(topModule) || normalizeArtifactDesignName(name)
+}
+
+function workspaceArtifactDesignName(
+  workspace: ProjectWorkspaceManifest,
+  baseDesign: ProjectManifestBaseDesign | undefined,
+  fallback: string,
+): string {
+  return (
+    normalizeArtifactDesignName(
+      parameterPatchValues((workspace.parameter_patch ?? {}).design).to,
+    ) ||
+    (workspace.branch_from || workspace.source_workspace_id
+      ? normalizeArtifactDesignName(workspace.name)
+      : '') ||
+    normalizeArtifactDesignName(baseDesign?.parameters?.design) ||
+    fallback ||
+    normalizeArtifactDesignName(workspace.workspace_id)
+  )
+}
+
+function normalizeArtifactDesignName(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().replace(/[\\/]/g, '_').replace(/\s+/g, '_')
+    : ''
+}
+
+function defaultSourceOutputType(step: FlowStep): 'verilog' | 'def' {
+  return step === 'Synth' ? 'verilog' : 'def'
+}
+
+function buildParameterPatch(
+  baseParameters: Record<string, unknown>,
+  nextParameters: Record<string, unknown>,
+): Record<string, { from: unknown; to: unknown }> {
+  return Object.fromEntries(
+    Object.entries(nextParameters)
+      .filter(([key, value]) => baseParameters[key] !== value)
+      .map(([key, value]) => [
+        key,
+        {
+          from: Object.prototype.hasOwnProperty.call(baseParameters, key)
+            ? baseParameters[key]
+            : undefined,
+          to: value,
+        },
+      ]),
+  )
+}
+
+function normalizeFlowStep(step: FlowStep | string): FlowStep {
+  if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
+  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? 'Synth'
+}
+
+function nextFlowStep(step: FlowStep): FlowStep {
+  const index = FLOW_STEPS.indexOf(step)
+  return FLOW_STEPS[Math.min(index + 1, FLOW_STEPS.length - 1)]
+}
+
+function nextManifestWorkspaceId(manifest: ProjectManifest): string {
+  const numbers = manifest.workspaces
+    .map((workspace) => Number(workspace.workspace_id.replace(/^ws_/, '')))
+    .filter(Number.isFinite)
+  const next = Math.max(0, ...numbers) + 1
+  return `ws_${String(next).padStart(4, '0')}`
+}
+
+function mergeBaseDesignConfig(
+  baseDesign: ProjectManifestBaseDesign,
+  config: ProjectWorkspaceRegistrationInput['config'],
+  options: { includeDesignParameter?: boolean } = {},
+): ProjectManifestBaseDesign {
+  if (!config) return baseDesign
+
+  const parameters = config.parameters ?? {}
+  const baseDesignParameters = Object.fromEntries(
+    Object.entries(parameters).filter(
+      ([key]) => options.includeDesignParameter !== false || key !== 'design',
+    ),
+  )
+  const next: ProjectManifestBaseDesign = {
+    ...baseDesign,
+    parameters: {
+      ...baseDesign.parameters,
+      ...baseDesignParameters,
+    },
+  }
+  const pdk = optionalString(config.pdk)
+  const pdkRoot = optionalString(config.pdk_root)
+  const topModule = optionalString(parameters.top_module)
+  const clock = optionalString(parameters.clock)
+  const originVerilog = optionalString(config.origin_verilog)
+  const originDef = optionalString(config.origin_def)
+
+  if (pdk) next.pdk = pdk
+  if (pdkRoot) next.pdk_root = pdkRoot
+  if (topModule) next.top_module = topModule
+  if (clock) next.clock = clock
+  if (originVerilog) next.origin_verilog = originVerilog
+  if (originDef) next.origin_def = originDef
+  if (config.rtl_list && config.rtl_list.length > 0) next.rtl_list = [...config.rtl_list]
+
+  return next
+}
+
+function formatRuntimeLabel(seconds: number): string {
+  if (seconds >= 3600) return `${Number((seconds / 3600).toFixed(2))} h`
+  if (seconds >= 60) return `${Number((seconds / 60).toFixed(1))} min`
+  return `${Number(seconds.toFixed(1))} s`
+}
+
+function formatMetricValue(
+  value: number,
+  format: 'default' | 'percent' | 'compact' = 'default',
+): string {
+  if (format === 'percent') return `${Number((value * 100).toFixed(1))}%`
+  if (format === 'compact') {
+    if (Math.abs(value) >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
+    if (Math.abs(value) >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+  }
+  if (Math.abs(value) >= 100) return String(Number(value.toFixed(1)))
+  if (Math.abs(value) >= 10) return String(Number(value.toFixed(2)))
+  return String(Number(value.toFixed(3)))
+}
+
+function optionalString(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+function labelForStepStatus(status: ProjectStepStatus): string {
+  const map: Record<ProjectStepStatus, string> = {
+    success: 'S',
+    reused: 'R',
+    skipped: '-',
+    unstart: 'U',
+    running: '...',
+    failed: '!',
+  }
+  return map[status]
+}
+
+function slugify(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  return slug || 'project'
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+function joinPath(...parts: string[]): string {
+  const joined = parts
+    .filter(Boolean)
+    .map((part, index) =>
+      index === 0 ? part.replace(/\/+$/g, '') : part.replace(/^\/+|\/+$/g, ''),
+    )
+    .join('/')
+  return normalizePath(joined)
+}
+
+function basenamePath(path: string): string {
+  return normalizePath(path).split('/').filter(Boolean).pop() ?? ''
 }

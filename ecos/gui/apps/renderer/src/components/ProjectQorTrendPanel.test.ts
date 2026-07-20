@@ -41,6 +41,17 @@ describe('ProjectQorTrendPanel', () => {
     expect(source).toContain('.qor-chart-score-label.threshold')
   })
 
+  it('marks non-eligible workspaces as NR without a fabricated score point or line segment', () => {
+    expect(source).toContain('isNotRated: point.score === null')
+    expect(source).toContain('const chartNotRatedY = 76')
+    expect(source).toContain('scorePolylines')
+    expect(source).toContain('if (point.isNotRated)')
+    expect(source).toContain('v-if="!point.isNotRated"')
+    expect(source).toContain('qor-chart-not-rated')
+    expect(source).toContain('Not rated')
+    expect(source).not.toContain('score === null ? 50')
+  })
+
   it('uses prepared QoR model data instead of reading project files directly', () => {
     expect(source).toContain('qorTrendSummary')
     expect(source).not.toContain('readOptionalProjectTextFile')
@@ -127,7 +138,9 @@ describe('ProjectQorTrendPanel', () => {
     expect(source).toContain('clearedTimingTriage')
     expect(source).toContain('timingWorkItemCount')
     expect(source).toContain('formatMissingCornerCount(coverage.missingCornerCount)')
-    expect(source).toContain('formatAvailableArtifactCount(coverage.availableArtifactCount)')
+    expect(source).toContain(
+      'formatAvailableArtifactCount(coverage.availableArtifactCount)',
+    )
     expect(source).toContain('formatTimingClockDelays(issue)')
     expect(source).toContain('formatTimingTriage(issue)')
     expect(source).toContain('formatTimingPhysicalContext(issue)')

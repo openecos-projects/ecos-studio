@@ -86,20 +86,22 @@
               :y2="chartBottom"
             />
             <polyline
-              v-if="scorePolyline"
+              v-for="(segment, index) in scorePolylines"
+              :key="`score-segment-${index}`"
               class="qor-score-polyline"
-              :points="scorePolyline"
+              :points="segment"
               fill="none"
             />
             <g v-for="(point, index) in scoreChartPoints" :key="point.workspaceId">
               <circle
-                v-if="point.isBest"
+                v-if="point.isBest && !point.isNotRated"
                 class="qor-chart-best-ring"
                 :cx="point.x"
                 :cy="point.y"
                 r="3.7"
               />
               <circle
+                v-if="!point.isNotRated"
                 class="qor-chart-point"
                 :class="{ best: point.isBest }"
                 :cx="point.x"
@@ -108,6 +110,17 @@
               >
                 <title>{{ `${point.label}: ${formatScore(point.score)}` }}</title>
               </circle>
+              <text
+                v-else
+                class="qor-chart-not-rated"
+                :x="point.x"
+                :y="point.y"
+                text-anchor="middle"
+                dominant-baseline="middle"
+              >
+                <title>{{ `${point.label}: ${formatScore(point.score)}` }}</title>
+                NR
+              </text>
               <text
                 class="qor-chart-workspace-label"
                 :x="point.x"
@@ -155,7 +168,7 @@
                 class="qor-delta-list qor-scroll-list qor-timing-issue-list"
               >
                 <li
-                v-for="issue in visibleTimingIssues"
+                  v-for="issue in visibleTimingIssues"
                   :key="issue.issueId"
                   class="qor-timing-issue"
                 >
@@ -204,8 +217,14 @@
                       <em class="qor-timing-triage-improved">CLEARED</em>
                     </span>
                     <strong class="qor-timing-triage-improved">RESOLVED</strong>
-                    <small>{{ triage.workspaceName }} · vs {{ triage.baselineWorkspaceName }}</small>
-                    <small>{{ triage.corner }} · {{ triage.pathGroup }} · {{ triage.checkType }}</small>
+                    <small
+                      >{{ triage.workspaceName }} · vs
+                      {{ triage.baselineWorkspaceName }}</small
+                    >
+                    <small
+                      >{{ triage.corner }} · {{ triage.pathGroup }} ·
+                      {{ triage.checkType }}</small
+                    >
                   </button>
                 </li>
                 <li
@@ -225,8 +244,13 @@
                     <strong class="qor-risk-warning">
                       {{ formatMissingCornerCount(coverage.missingCornerCount) }}
                     </strong>
-                    <small>{{ coverage.workspaceName }} · structured STA results missing</small>
-                    <small>{{ formatAvailableArtifactCount(coverage.availableArtifactCount) }}</small>
+                    <small
+                      >{{ coverage.workspaceName }} · structured STA results
+                      missing</small
+                    >
+                    <small>{{
+                      formatAvailableArtifactCount(coverage.availableArtifactCount)
+                    }}</small>
                   </button>
                 </li>
               </ul>
@@ -291,6 +315,7 @@ const chartLeft = 10
 const chartRight = 3
 const chartTop = 6
 const chartBottom = 80
+const chartNotRatedY = 76
 const chartWorkspaceLabelY = 91
 type QorDashboardTab = 'improvements' | 'regressions' | 'risks' | 'timing'
 
@@ -308,7 +333,9 @@ const deltaTabs: Array<{
 const activeDeltaTab = ref<QorDashboardTab>(
   props.qorTrendSummary.timingClosure.issues.length > 0 ||
     props.qorTrendSummary.timingClosure.coverage.length > 0 ||
-    props.qorTrendSummary.timingClosure.triage.some((triage) => triage.state === 'cleared')
+    props.qorTrendSummary.timingClosure.triage.some(
+      (triage) => triage.state === 'cleared',
+    )
     ? 'timing'
     : 'improvements',
 )
@@ -389,15 +416,25 @@ const scoreChartPoints = computed(() => {
       point.score !== null &&
       highestTrendScore.value !== null &&
       point.score === highestTrendScore.value,
+    isNotRated: point.score === null,
     x: pointCount <= 1 ? chartLeft : chartLeft + (index / (pointCount - 1)) * plotWidth,
-    y: scoreToChartY(point.score),
+    y: point.score === null ? chartNotRatedY : scoreToChartY(point.score),
   }))
 })
 
-const scorePolyline = computed(() => {
-  return scoreChartPoints.value
-    .map((point) => `${Number(point.x.toFixed(2))},${Number(point.y.toFixed(2))}`)
-    .join(' ')
+const scorePolylines = computed(() => {
+  const segments: string[] = []
+  let activeSegment: string[] = []
+  for (const point of scoreChartPoints.value) {
+    if (point.isNotRated) {
+      if (activeSegment.length >= 2) segments.push(activeSegment.join(' '))
+      activeSegment = []
+      continue
+    }
+    activeSegment.push(`${Number(point.x.toFixed(2))},${Number(point.y.toFixed(2))}`)
+  }
+  if (activeSegment.length >= 2) segments.push(activeSegment.join(' '))
+  return segments
 })
 
 const activeDeltaItems = computed(() => {
@@ -436,23 +473,24 @@ const currentTriageIssueKeys = computed(
         .map((triage) => `${triage.workspaceId}\u0000${triage.issueId}`),
     ),
 )
-const triagedBaselineIssueKeys = computed(
-  () => {
-    const currentIssueKeys = currentTriageIssueKeys.value
-    return new Set(
-      props.qorTrendSummary.timingClosure.triage
-        .map((triage) => `${triage.baselineWorkspaceId}\u0000${triage.issueId}`)
-        .filter((issueKey) => !currentIssueKeys.has(issueKey)),
-    )
-  },
-)
+const triagedBaselineIssueKeys = computed(() => {
+  const currentIssueKeys = currentTriageIssueKeys.value
+  return new Set(
+    props.qorTrendSummary.timingClosure.triage
+      .map((triage) => `${triage.baselineWorkspaceId}\u0000${triage.issueId}`)
+      .filter((issueKey) => !currentIssueKeys.has(issueKey)),
+  )
+})
 const visibleTimingIssues = computed(() =>
   props.qorTrendSummary.timingClosure.issues.filter(
-    (issue) => !triagedBaselineIssueKeys.value.has(`${issue.workspaceId}\u0000${issue.issueId}`),
+    (issue) =>
+      !triagedBaselineIssueKeys.value.has(`${issue.workspaceId}\u0000${issue.issueId}`),
   ),
 )
 const clearedTimingTriage = computed(() =>
-  props.qorTrendSummary.timingClosure.triage.filter((triage) => triage.state === 'cleared'),
+  props.qorTrendSummary.timingClosure.triage.filter(
+    (triage) => triage.state === 'cleared',
+  ),
 )
 const timingIssueCount = computed(() => visibleTimingIssues.value.length)
 const timingWorkItemCount = computed(
@@ -491,8 +529,8 @@ watch(
   },
 )
 
-function scoreToChartY(score: number | null): number {
-  const normalizedScore = score === null ? 50 : Math.max(0, Math.min(100, score))
+function scoreToChartY(score: number): number {
+  const normalizedScore = Math.max(0, Math.min(100, score))
   return Number(
     (chartBottom - (normalizedScore / 100) * (chartBottom - chartTop)).toFixed(2),
   )
@@ -527,7 +565,7 @@ function selectTimingIssueWorkspace(workspaceId: string) {
 }
 
 function formatScore(score: number | null): string {
-  return score === null ? 'N/A' : score.toFixed(1)
+  return score === null ? 'Not rated' : score.toFixed(1)
 }
 
 function formatTimingSlack(slackNs: number): string {
@@ -575,7 +613,9 @@ function formatTimingReviewHints(
   issue: ProjectQorTrendSummary['timingClosure']['issues'][number],
 ): string | null {
   const hints = issue.triage?.reviewHints ?? []
-  return hints.length ? `Review next: ${hints.map((hint) => hint.label).join(' · ')}` : null
+  return hints.length
+    ? `Review next: ${hints.map((hint) => hint.label).join(' · ')}`
+    : null
 }
 
 function formatMissingCornerCount(missingCornerCount: number): string {
@@ -903,6 +943,12 @@ function qorListItemClass(
   fill: #189968;
   stroke: #0b6b48;
   stroke-width: 1.1;
+}
+
+.qor-chart-not-rated {
+  fill: var(--warning-color);
+  font-size: 3.8px;
+  font-weight: 760;
 }
 
 .qor-delta-layout {

@@ -95,6 +95,11 @@ export interface ProjectQorSignoffReadiness {
   groups: ProjectQorSignoffGroup[]
 }
 
+export interface ProjectQorSignoffComparisonContext {
+  rcxCornerFingerprint: string | null
+  staPvtRcFingerprint: string | null
+}
+
 export interface ProjectQorUnsupportedModule {
   id: string
   label: string
@@ -134,6 +139,14 @@ export interface ProjectQorAnalysisIntegrityIssue {
   invalidDetailIds: string[]
 }
 
+export interface ProjectQorDetailDescriptor {
+  id: string
+  presentation: string
+  summary: Record<string, unknown>
+  sourceFile: string
+  selector: string
+}
+
 export interface ProjectQorMissingMetricCoverage {
   step: FlowStep
   missingMetricCount: number
@@ -158,6 +171,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   overallScore: number | null
   gateStatus: QorGateStatus
   signoffReadiness: ProjectQorSignoffReadiness
+  signoffComparison: ProjectQorSignoffComparisonContext
   areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
@@ -256,6 +270,7 @@ export interface ProjectQorRisk {
     | 'analysis_coverage'
     | 'analysis_metric_coverage'
     | 'signoff_readiness'
+    | 'signoff_context_change'
   severity: 'critical' | 'warning' | 'info'
   metric: string
   displayName: string
@@ -988,6 +1003,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     const scope = stringValue(metric.scope)
     const projectRole = qorProjectRoleValue(metric.project_role)
     const stepRole = qorStepRoleValue(metric.step_role)
+    const analysisGroup = stringValue(metric.analysis_group)
     const source = isRecord(metric.source) ? metric.source : null
     const sourceFile = relativeFeatureSourcePath(source)
     const corner = metric.corner === null ? null : stringValue(metric.corner)
@@ -1000,6 +1016,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
       !scope ||
       !projectRole ||
       !stepRole ||
+      !analysisGroup ||
       !sourceFile ||
       (metric.corner !== null && corner === null)
     ) {
@@ -1007,7 +1024,8 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     }
 
     const unit = stringValue(metric.unit)
-    const rating = qorMetricRatingValue(metric.rating, projectRole, polarity)
+    const rating = qorMetricRatingValue(metric.rating)
+    if (!rating) return []
 
     return [
       {
@@ -1024,7 +1042,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
         scope,
         corner,
         cornerContext,
-        analysisGroup: stringValue(metric.analysis_group) ?? metricName,
+        analysisGroup,
         rating,
         projectRole,
         stepRole,
@@ -1035,11 +1053,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
   })
 }
 
-function qorMetricRatingValue(
-  value: unknown,
-  projectRole: QorMetricProjectRole,
-  polarity: QorPolarity,
-): ProjectQorMetricRating {
+function qorMetricRatingValue(value: unknown): ProjectQorMetricRating | null {
   if (
     isRecord(value) &&
     typeof value.gate === 'boolean' &&
@@ -1048,11 +1062,7 @@ function qorMetricRatingValue(
   ) {
     return { gate: value.gate, score: value.score, trend: value.trend }
   }
-  return {
-    gate: projectRole === 'gate',
-    score: polarity !== 'trend_only',
-    trend: true,
-  }
+  return null
 }
 
 function qorCornerContextValue(value: unknown): ProjectQorCornerContext | null {
@@ -1086,6 +1096,7 @@ export function buildProjectQorTrendSummary(
   const risks = [
     ...buildProjectQorRisks(workspaceSummaries),
     ...buildTimingConstraintRisks(workspaceSummaries, baselineWorkspace),
+    ...buildSignoffComparisonRisks(workspaceSummaries, baselineWorkspace),
   ].sort(compareProjectQorRisk)
   const timingClosure = buildProjectQorTimingSummary(
     sortedInputs,
@@ -1202,6 +1213,10 @@ export function buildProjectQorTrendReport(
           status: group.status,
           gate: group.gate,
         })),
+      },
+      signoff_comparison: {
+        rcx_corner_fingerprint: workspace.signoffComparison.rcxCornerFingerprint,
+        sta_pvt_rc_fingerprint: workspace.signoffComparison.staPvtRcFingerprint,
       },
       area_scoring_step: workspace.areaScoringStep,
       dimension_scores: workspace.dimensionScores,
@@ -1488,12 +1503,14 @@ function buildWorkspaceSummary(
     blockingIssues,
   )
   const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
+  const signoffComparison = resolveWorkspaceSignoffComparisonContext(workspace)
   const effectiveGateStatus = combineGateStatus(gateStatus, signoffReadiness.status)
   const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
   const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore = signoffReadiness.scoreEligible && weightedScore !== null
-    ? roundScore(weightedScore)
-    : null
+  const overallScore =
+    signoffReadiness.scoreEligible && weightedScore !== null
+      ? roundScore(weightedScore)
+      : null
 
   return {
     workspaceId: workspace.workspaceId,
@@ -1503,6 +1520,7 @@ function buildWorkspaceSummary(
     overallScore,
     gateStatus: effectiveGateStatus,
     signoffReadiness,
+    signoffComparison,
     areaScoringStep,
     dimensionScores,
     records: projectRecords,
@@ -1587,11 +1605,12 @@ function combineGateStatus(
 ): QorGateStatus {
   if (baseStatus === 'blocked' || signoffStatus === 'blocked') return 'blocked'
   if (baseStatus === 'incomplete' || signoffStatus === 'incomplete') return 'incomplete'
-  if (baseStatus === 'unavailable' || signoffStatus === 'unavailable') return 'unavailable'
+  if (baseStatus === 'unavailable' || signoffStatus === 'unavailable')
+    return 'unavailable'
   return 'pass'
 }
 
-function resolveWorkspaceSignoffReadiness(
+export function resolveWorkspaceSignoffReadiness(
   workspace: ProjectQorWorkspaceInput,
 ): ProjectQorSignoffReadiness {
   const entries = (['RCX', 'STA'] as const).flatMap((step) => {
@@ -1611,7 +1630,9 @@ function resolveWorkspaceSignoffReadiness(
         })
       : []
     const reasonCodes = Array.isArray(readiness.reason_codes)
-      ? readiness.reason_codes.flatMap((code) => stringValue(code) ? [stringValue(code)!] : [])
+      ? readiness.reason_codes.flatMap((code) =>
+          stringValue(code) ? [stringValue(code)!] : [],
+        )
       : []
     return [{ step, status, groups, reasonCodes }]
   })
@@ -1632,6 +1653,55 @@ function resolveWorkspaceSignoffReadiness(
     reasonCodes: uniqueStrings(entries.flatMap((entry) => entry.reasonCodes)),
     groups: entries.flatMap((entry) => entry.groups),
   }
+}
+
+export function resolveWorkspaceSignoffComparisonContext(
+  workspace: ProjectQorWorkspaceInput,
+): ProjectQorSignoffComparisonContext {
+  const rcxDetail = normalizeQorDetailDescriptors(workspace.stepMetricTexts.RCX).find(
+    (detail) => detail.presentation === 'rcx_spef_corner_table',
+  )
+  const rcxCornerFingerprint = rcxDetail
+    ? stableDetailRowFingerprint(rcxDetail.summary.rc_corners, 'rc_corner')
+    : null
+
+  const staDetail = normalizeQorDetailDescriptors(workspace.stepMetricTexts.STA).find(
+    (detail) => detail.presentation === 'path_group_table',
+  )
+  const staPvtRcFingerprint = staDetail
+    ? stableStaPvtRcFingerprint(staDetail.summary.records)
+    : null
+
+  return { rcxCornerFingerprint, staPvtRcFingerprint }
+}
+
+function stableDetailRowFingerprint(value: unknown, field: string): string | null {
+  if (!Array.isArray(value)) return null
+  const values = value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const itemValue = stringValue(item[field])
+    return itemValue ? [itemValue] : []
+  })
+  return values.length === value.length && values.length > 0
+    ? Array.from(new Set(values)).sort().join('\u0000')
+    : null
+}
+
+function stableStaPvtRcFingerprint(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  const values = value.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const pathGroup = stringValue(item.path_group)
+    const context = isRecord(item.corner_context)
+      ? qorCornerContextValue(item.corner_context)
+      : null
+    if (!pathGroup || !context) return []
+    const identity = cornerContextIdentity(context)
+    return identity ? [`${pathGroup}\u0000${identity}`] : []
+  })
+  return values.length === value.length && values.length > 0
+    ? Array.from(new Set(values)).sort().join('\u0001')
+    : null
 }
 
 function selectProjectRecords(
@@ -1703,7 +1773,9 @@ function buildProjectQorRisks(
         const detailCount = issue.invalidDetailIds.length
         const skippedKinds = [
           metricCount > 0 ? `${metricCount} metric${metricCount === 1 ? '' : 's'}` : '',
-          detailCount > 0 ? `${detailCount} detail descriptor${detailCount === 1 ? '' : 's'}` : '',
+          detailCount > 0
+            ? `${detailCount} detail descriptor${detailCount === 1 ? '' : 's'}`
+            : '',
         ].filter(Boolean)
         return {
           workspaceId: workspace.workspaceId,
@@ -1714,8 +1786,7 @@ function buildProjectQorRisks(
           metric: 'analysis_feature_provenance',
           displayName: 'Analysis Feature Provenance',
           value: invalidCount,
-          message:
-            `QoR analysis ignored ${skippedKinds.join(' and ')} with invalid feature provenance.`,
+          message: `QoR analysis ignored ${skippedKinds.join(' and ')} with invalid feature provenance.`,
         }
       }),
       ...buildSignoffReadinessRisks(workspace),
@@ -1732,27 +1803,30 @@ function buildSignoffReadinessRisks(
   const step = readiness.reasonCodes.some((code) => code.startsWith('sta_'))
     ? 'STA'
     : 'RCX'
-  const severity = readiness.status === 'blocked'
-    ? 'critical'
-    : readiness.status === 'incomplete'
-      ? 'warning'
-      : 'info'
+  const severity =
+    readiness.status === 'blocked'
+      ? 'critical'
+      : readiness.status === 'incomplete'
+        ? 'warning'
+        : 'info'
   const message = readiness.reasonCodes.length
     ? readiness.reasonCodes.join(', ')
     : readiness.status === 'unavailable'
       ? 'RCX and STA signoff readiness is unavailable.'
       : `RCX and STA signoff readiness is ${readiness.status}.`
-  return [{
-    workspaceId: workspace.workspaceId,
-    workspaceName: workspace.workspaceName,
-    step,
-    kind: 'signoff_readiness',
-    severity,
-    metric: 'signoff_readiness',
-    displayName: 'Signoff Readiness',
-    value: readiness.status,
-    message,
-  }]
+  return [
+    {
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      step,
+      kind: 'signoff_readiness',
+      severity,
+      metric: 'signoff_readiness',
+      displayName: 'Signoff Readiness',
+      value: readiness.status,
+      message,
+    },
+  ]
 }
 
 function buildWorkspaceDataQualityRisks(
@@ -1866,6 +1940,53 @@ function buildTimingConstraintRisks(
     if (!explicitBaseline && constraints.status === 'consistent') {
       sequentialBaseline = workspace
     }
+  }
+  return risks
+}
+
+function buildSignoffComparisonRisks(
+  workspaces: ProjectQorTrendWorkspaceSummary[],
+  explicitBaseline: ProjectQorTrendWorkspaceSummary | null,
+): ProjectQorRisk[] {
+  const risks: ProjectQorRisk[] = []
+  let sequentialBaseline: ProjectQorTrendWorkspaceSummary | null = null
+
+  for (const workspace of workspaces) {
+    const baseline = explicitBaseline ?? sequentialBaseline
+    if (baseline && workspace.workspaceId !== baseline.workspaceId) {
+      const rcxChanged =
+        workspace.signoffComparison.rcxCornerFingerprint !== null &&
+        baseline.signoffComparison.rcxCornerFingerprint !== null &&
+        workspace.signoffComparison.rcxCornerFingerprint !==
+          baseline.signoffComparison.rcxCornerFingerprint
+      const staChanged =
+        workspace.signoffComparison.staPvtRcFingerprint !== null &&
+        baseline.signoffComparison.staPvtRcFingerprint !== null &&
+        workspace.signoffComparison.staPvtRcFingerprint !==
+          baseline.signoffComparison.staPvtRcFingerprint
+      const scope = [
+        rcxChanged ? 'RCX corners' : null,
+        staChanged ? 'STA PVT+RC set' : null,
+      ]
+        .filter(Boolean)
+        .join(' and ')
+      if (rcxChanged || staChanged)
+        risks.push({
+          workspaceId: workspace.workspaceId,
+          workspaceName: workspace.workspaceName,
+          step: staChanged ? 'STA' : 'RCX',
+          kind: 'signoff_context_change',
+          severity: 'warning',
+          metric: 'signoff_comparison_context',
+          displayName: 'Signoff Comparison Context',
+          value: scope,
+          message:
+            `${scope || 'Signoff context'} differs from ` +
+            `${baseline.workspaceName || baseline.workspaceId}; affected QoR deltas are suppressed.`,
+        })
+    }
+
+    if (!explicitBaseline) sequentialBaseline = workspace
   }
   return risks
 }
@@ -2000,13 +2121,13 @@ function isTimingComparisonEligible(
   const baselineConstraints = baseline.workspaceSummary?.timingConstraints
   return Boolean(
     current.timingAnalysis.artifactPaths.length > 0 &&
-      baseline.timingAnalysis.artifactPaths.length > 0 &&
-      !current.timingAnalysis.coverage &&
-      !baseline.timingAnalysis.coverage &&
-      currentConstraints?.status === 'consistent' &&
-      baselineConstraints?.status === 'consistent' &&
-      currentConstraints.fingerprint &&
-      currentConstraints.fingerprint === baselineConstraints.fingerprint,
+    baseline.timingAnalysis.artifactPaths.length > 0 &&
+    !current.timingAnalysis.coverage &&
+    !baseline.timingAnalysis.coverage &&
+    currentConstraints?.status === 'consistent' &&
+    baselineConstraints?.status === 'consistent' &&
+    currentConstraints.fingerprint &&
+    currentConstraints.fingerprint === baselineConstraints.fingerprint,
   )
 }
 
@@ -2299,6 +2420,9 @@ function buildWorkspaceDeltas(
   const regressions: ProjectQorRegression[] = []
   const improvements: ProjectQorDelta[] = []
   const previousRecordsByMetric = new Map<string, ProjectQorMetricRecord>()
+  const workspaceById = new Map(
+    workspaces.map((workspace) => [workspace.workspaceId, workspace]),
+  )
   const workspaceNamesById = new Map(
     workspaces.map((workspace) => [
       workspace.workspaceId,
@@ -2315,7 +2439,15 @@ function buildWorkspaceDeltas(
 
     for (const record of currentRecordsByMetric.values()) {
       const baseline = previousRecordsByMetric.get(projectRecordKey(record))
-      if (baseline?.value !== null && baseline?.value !== undefined) {
+      const baselineWorkspace = baseline
+        ? (workspaceById.get(baseline.workspaceId) ?? null)
+        : null
+      if (
+        baseline?.value !== null &&
+        baseline?.value !== undefined &&
+        baselineWorkspace &&
+        recordsAreComparable(workspace, baselineWorkspace, record)
+      ) {
         const delta = buildDelta(
           record,
           baseline,
@@ -2362,6 +2494,7 @@ function buildExplicitBaselineDeltas(
     for (const record of recordsByMetric(workspace.records).values()) {
       const baseline = baselineRecordsByMetric.get(projectRecordKey(record))
       if (baseline?.value === null || baseline?.value === undefined) continue
+      if (!recordsAreComparable(workspace, baselineWorkspace, record)) continue
 
       const delta = buildDelta(
         record,
@@ -2385,6 +2518,38 @@ function buildExplicitBaselineDeltas(
     regressions: regressions.sort(compareRegressionPriority),
     improvements: improvements.sort(compareDeltaMagnitude),
   }
+}
+
+function recordsAreComparable(
+  current: ProjectQorTrendWorkspaceSummary,
+  baseline: ProjectQorTrendWorkspaceSummary,
+  record: ProjectQorMetricRecord,
+): boolean {
+  if (record.step === 'RCX') {
+    return (
+      current.signoffReadiness.groups.some(
+        (group) => group.step === 'RCX' && group.status === 'pass',
+      ) &&
+      baseline.signoffReadiness.groups.some(
+        (group) => group.step === 'RCX' && group.status === 'pass',
+      ) &&
+      current.signoffComparison.rcxCornerFingerprint !== null &&
+      current.signoffComparison.rcxCornerFingerprint ===
+        baseline.signoffComparison.rcxCornerFingerprint
+    )
+  }
+  if (record.step === 'STA') {
+    return (
+      current.timingConstraints.status === 'consistent' &&
+      baseline.timingConstraints.status === 'consistent' &&
+      current.timingConstraints.fingerprint !== null &&
+      current.timingConstraints.fingerprint === baseline.timingConstraints.fingerprint &&
+      current.signoffComparison.staPvtRcFingerprint !== null &&
+      current.signoffComparison.staPvtRcFingerprint ===
+        baseline.signoffComparison.staPvtRcFingerprint
+    )
+  }
+  return true
 }
 
 function recordsByMetric(
@@ -2587,7 +2752,7 @@ function parseJsonObject(
   }
 }
 
-function resolveWorkspaceTimingConstraints(
+export function resolveWorkspaceTimingConstraints(
   workspace: ProjectQorWorkspaceInput,
 ): ProjectQorTimingConstraints {
   const entries = QOR_FLOW_STEPS.flatMap((step) => {
@@ -2688,9 +2853,7 @@ function normalizeStaTimingIssues(
     const pathGroup = stringValue(issue.path_group)
     const checkType = stringValue(issue.check_type)
     const slackNs = isFiniteNumber(issue.slack_ns) ? issue.slack_ns : null
-    const launchClockNetworkDelayNs = isFiniteNumber(
-      issue.launch_clock_network_delay_ns,
-    )
+    const launchClockNetworkDelayNs = isFiniteNumber(issue.launch_clock_network_delay_ns)
       ? issue.launch_clock_network_delay_ns
       : null
     const captureClockNetworkDelayNs = isFiniteNumber(
@@ -2807,7 +2970,7 @@ function hasStandardQorMetricsText(text: string | null | undefined): boolean {
   return record?.schema_version === 3 && Array.isArray(record.metrics)
 }
 
-function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
+export function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   if (record?.schema_version !== 3 || !Array.isArray(record.metrics)) return false
   const integrity = isRecord(record.integrity) ? record.integrity : null
@@ -2825,14 +2988,17 @@ function hasStandardQorSummaryText(text: string | null | undefined): boolean {
   )
 }
 
-function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
+export function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
   const record = parseJsonObject(text)
   return qorGateStatusValue(record?.status)
 }
 
 function qorGateStatusValue(value: unknown): QorGateStatus | null {
   const status = stringValue(value)
-  return status === 'pass' || status === 'blocked' || status === 'incomplete' || status === 'unavailable'
+  return status === 'pass' ||
+    status === 'blocked' ||
+    status === 'incomplete' ||
+    status === 'unavailable'
     ? status
     : null
 }
@@ -2842,7 +3008,7 @@ function hasStandardQorHotspotText(text: string | null | undefined): boolean {
   return record?.schema_version === 3 && Array.isArray(record.hotspots)
 }
 
-function normalizeQorSummaryBlockingIssues(
+export function normalizeQorSummaryBlockingIssues(
   step: FlowStep,
   text: string | null | undefined,
 ): ProjectQorBlockingIssue[] {
@@ -2868,7 +3034,7 @@ function normalizeQorSummaryBlockingIssues(
   })
 }
 
-function normalizeQorSummaryMissingMetrics(
+export function normalizeQorSummaryMissingMetrics(
   step: FlowStep,
   text: string | null | undefined,
 ): Array<{ step: FlowStep; metricName: string }> {
@@ -2887,7 +3053,7 @@ function normalizeQorSummaryMissingMetrics(
   ).map((metricName) => ({ step, metricName }))
 }
 
-function normalizeQorAnalysisIntegrity(
+export function normalizeQorAnalysisIntegrity(
   step: FlowStep,
   text: string | null | undefined,
 ): ProjectQorAnalysisIntegrityIssue[] {
@@ -2916,7 +3082,7 @@ function normalizeQorAnalysisIntegrity(
   return [{ step, invalidMetricSourceIds, invalidDetailIds }]
 }
 
-function normalizeQorHotspots(
+export function normalizeQorHotspots(
   step: FlowStep,
   text: string | null | undefined,
 ): ProjectQorHotspot[] {
@@ -2944,6 +3110,26 @@ function normalizeQorHotspots(
         description: stringValue(hotspot.description) ?? 'QoR hotspot',
       },
     ]
+  })
+}
+
+export function normalizeQorDetailDescriptors(
+  text: string | null | undefined,
+): ProjectQorDetailDescriptor[] {
+  const record = parseJsonObject(text)
+  if (record?.schema_version !== 3 || !Array.isArray(record.details)) return []
+
+  return record.details.flatMap((item) => {
+    if (!isRecord(item)) return []
+    const id = stringValue(item.id)
+    const presentation = stringValue(item.presentation)
+    const summary = isRecord(item.summary) ? item.summary : null
+    const source = relativeFeatureSourcePath(item.feature_source)
+    const selector = isRecord(item.feature_source) ? item.feature_source.selector : null
+    if (!id || !presentation || !summary || !source || typeof selector !== 'string') {
+      return []
+    }
+    return [{ id, presentation, summary, sourceFile: source, selector }]
   })
 }
 
@@ -3015,7 +3201,7 @@ function qorStepRoleValue(value: unknown): QorMetricStepRole | null {
     : null
 }
 
-function relativeFeatureSourcePath(source: unknown): string | null {
+export function relativeFeatureSourcePath(source: unknown): string | null {
   if (!isRecord(source) || stringValue(source.kind) !== 'feature') return null
   const path = stringValue(source.path)
   const selector = source.selector
