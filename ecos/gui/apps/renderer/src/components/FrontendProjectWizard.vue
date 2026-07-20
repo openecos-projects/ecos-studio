@@ -920,7 +920,6 @@ const selectedTestSuiteId = ref('')
 const cpuSourceMode = ref<CpuSourceMode>('filelist')
 const selectedCpuRtlFiles = ref<string[]>([])
 const cpuSelectionConfirming = ref(false)
-const cpuSelectionConfirmed = ref(false)
 const cpuSelectionMessage = ref('')
 let validationToken = 0
 let cpuTopContractScrollPending = false
@@ -1142,6 +1141,12 @@ const directoryError = computed(() => {
   return ''
 })
 
+const cpuInputReady = computed(() => {
+  if (!requiresCpuInput.value) return true
+  if (cpuSourceMode.value === 'files') return selectedCpuRtlFiles.value.length > 0
+  return Boolean(config.value.parameters.cpu_filelist.trim())
+})
+
 const canProceed = computed(() => {
   switch (currentStep.value) {
     case 1:
@@ -1158,9 +1163,7 @@ const canProceed = computed(() => {
         selectedSocHarnessId.value !== '' &&
         selectedToolchainId.value !== '' &&
         selectedTestSuiteId.value !== '' &&
-        (!requiresCpuInput.value ||
-          cpuSourceMode.value === 'filelist' ||
-          cpuSelectionConfirmed.value) &&
+        cpuInputReady.value &&
         validationOk.value &&
         !validationBusy.value
       )
@@ -1450,7 +1453,6 @@ const selectCpuFilelist = async () => {
 
 async function selectCpuSourceMode(mode: CpuSourceMode): Promise<void> {
   cpuSourceMode.value = mode
-  cpuSelectionConfirmed.value = false
   cpuSelectionMessage.value = ''
   if (mode === 'files' && selectedCpuRtlFiles.value.length === 0) {
     await selectCpuRtlFiles()
@@ -1476,19 +1478,16 @@ async function selectCpuRtlFiles(): Promise<void> {
     if (file.trim()) merged.add(file)
   }
   selectedCpuRtlFiles.value = [...merged]
-  cpuSelectionConfirmed.value = false
   cpuSelectionMessage.value = ''
 }
 
 function removeCpuRtlFile(file: string): void {
   selectedCpuRtlFiles.value = selectedCpuRtlFiles.value.filter((item) => item !== file)
-  cpuSelectionConfirmed.value = false
   cpuSelectionMessage.value = ''
 }
 
 function clearCpuRtlFiles(): void {
   selectedCpuRtlFiles.value = []
-  cpuSelectionConfirmed.value = false
   cpuSelectionMessage.value = ''
 }
 
@@ -1519,11 +1518,9 @@ async function confirmCpuRtlSelection(): Promise<void> {
   try {
     await refreshValidation()
     if (validationOk.value) {
-      cpuSelectionConfirmed.value = true
       nextStep()
       return
     }
-    cpuSelectionConfirmed.value = false
     cpuSelectionMessage.value =
       validationIssues.value.find((issue) => issue.severity === 'error')?.message ||
       'The selected RTL files could not be validated.'

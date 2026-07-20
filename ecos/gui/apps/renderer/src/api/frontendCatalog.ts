@@ -1,4 +1,5 @@
 import { getDesktopApi } from '@/platform/desktop'
+import { toDesktopBridgeData } from './desktopPayload'
 import { CMDEnum, ResponseEnum, type ResponseData } from './type'
 
 export interface FrontendCpuPortContract {
@@ -118,7 +119,7 @@ export function listFrontendCatalogApi() {
 
 export function validateFrontendConfigApi(config: Record<string, unknown>) {
   return getDesktopApi()
-    .runtime.frontend.validateConfig(config)
+    .runtime.frontend.validateConfig(toDesktopBridgeData(config))
     .then((data) => ({
       cmd: CMDEnum.validate_frontend_config,
       data: data as unknown as FrontendValidationResult,
