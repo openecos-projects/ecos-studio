@@ -7,6 +7,7 @@ import {
   parseWorkspaceFlowStateMap,
   registerWorkspaceInManifest,
   setQorBaselineInManifest,
+  workspaceStatusFromFlow,
   type FlowStep,
 } from './projectManagement'
 import type { Project } from '@/types'
@@ -318,6 +319,20 @@ describe('project management V3 model', () => {
         }),
       ),
     ).toEqual({ Route: 'running', STA: 'success' })
+  })
+
+  it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {
+    expect(workspaceStatusFromFlow('not_started', successStates)).toBe('success')
+    expect(workspaceStatusFromFlow('not_started', { Route: 'running' })).toBe('running')
+    expect(workspaceStatusFromFlow('success', { Route: 'failed' })).toBe('failed')
+
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: successStates },
+      { ws_0004: v3Inputs() },
+    )
+    expect(model.qorTrendSummary.workspaces[0]?.status).not.toBe('Blocked')
   })
 
   it('keeps baseline selection as project metadata without manifest metrics', () => {

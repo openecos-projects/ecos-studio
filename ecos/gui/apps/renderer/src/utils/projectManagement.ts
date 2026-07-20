@@ -418,18 +418,22 @@ export function buildProjectManagementProject(
   const manifestWorkspaces = manifest?.workspaces ?? []
   const lineageItems = sortWorkspacesByLineage(manifestWorkspaces)
   const sortedWorkspaces = lineageItems.map((item) => item.workspace)
-  const workspaces = lineageItems.map(({ workspace, depth }) =>
-    buildProjectWorkspace(
-      workspace,
-      workspaceFlowStates[workspace.workspace_id] ?? {},
+  const workspaces = lineageItems.map(({ workspace, depth }) => {
+    const flowStates = workspaceFlowStates[workspace.workspace_id] ?? {}
+    return buildProjectWorkspace(
+      {
+        ...workspace,
+        status: workspaceStatusFromFlow(workspace.status, flowStates),
+      },
+      flowStates,
       depth,
       workspaceArtifactDesignName(
         workspace,
         manifest?.base_design,
         projectArtifactDesignName(project?.name ?? name, topModule),
       ),
-    ),
-  )
+    )
+  })
   const qorTrendSummary = manifest
     ? buildProjectQorTrendSummary(
         sortedWorkspaces.map((workspace) => ({
@@ -437,7 +441,10 @@ export function buildProjectManagementProject(
           workspaceName: workspaceDisplayName(workspace),
           workspacePath: workspace.workspace_path,
           createdAt: workspace.created_at,
-          status: workspace.status,
+          status: workspaceStatusFromFlow(
+            workspace.status,
+            workspaceFlowStates[workspace.workspace_id] ?? {},
+          ),
           branchFrom: workspace.branch_from,
           stepMetricTexts:
             workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
@@ -1170,6 +1177,20 @@ function buildProjectWorkspace(
     flowStatusHint: buildFlowStatusHint(steps, startStep, endStep),
     steps,
   }
+}
+
+export function workspaceStatusFromFlow(
+  manifestStatus: ProjectWorkspaceStatus,
+  flowStates: ProjectWorkspaceFlowStateMap,
+): ProjectWorkspaceStatus {
+  if (manifestStatus === 'archived') return 'archived'
+  const states = Object.values(flowStates)
+  if (states.length === 0) return manifestStatus
+  if (states.includes('failed')) return 'failed'
+  if (states.includes('running')) return 'running'
+  if (states.includes('unstart')) return 'in_progress'
+  if (states.some((state) => state === 'success' || state === 'reused')) return 'success'
+  return manifestStatus
 }
 
 function workspaceDisplayName(workspace: ProjectWorkspaceManifest): string {

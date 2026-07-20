@@ -101,10 +101,10 @@ describe('project QoR trend V3 model', () => {
     const detail = buildProjectQorScoreDetail(qorWorkspace)
 
     expect(qorWorkspace.overallScore).not.toBeNull()
-    expect(qorWorkspace.areaScoringStep).toBe('STA')
+    expect(qorWorkspace.areaScoringStep).toBe('Route')
     expect(
       detail.dimensions.find((dimension) => dimension.dimension === 'area_cost')?.metrics,
-    ).toBeUndefined()
+    ).toEqual([expect.objectContaining({ metricName: 'die_area', value: 2100 })])
   })
 
   it('keeps runtime and peak memory as V3 trend-only records outside score dimensions', () => {

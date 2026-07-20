@@ -135,7 +135,7 @@
                 </tbody>
               </table>
             </div>
-            <p v-else class="stage-empty">No bounded detail rows are available.</p>
+            <p v-else class="stage-empty">{{ detailEmptyMessage(detail) }}</p>
           </article>
         </div>
       </section>
@@ -328,10 +328,34 @@ function detailLabel(presentation: string): string {
 
 function detailRows(detail: ProjectQorDetailDescriptor): Record<string, unknown>[] {
   const summary = detail.summary
+  if (detail.presentation === 'cts_clock_skew_table') {
+    return [
+      {
+        clock_count: summary.clock_count,
+        worst_optimized_skew_ns: summary.worst_optimized_skew_ns,
+        worst_max_insertion_latency_ns: summary.worst_max_insertion_latency_ns,
+        target_unmet_count: summary.target_unmet_count,
+      },
+    ].filter((row) => Object.values(row).some(isDisplayValue))
+  }
+  if (detail.presentation === 'place_map_summary') {
+    return arrayRows(summary.maps).map((row) => ({
+      group: row.group,
+      metric: row.metric,
+      top_5_percent_average: row.top_5_percent_average,
+      max: row.max,
+      high_bin_ratio: row.high_bin_ratio,
+    }))
+  }
+  if (detail.presentation === 'layer_table') {
+    return arrayRows(summary.layers).map((row) => ({
+      layer: row.layer,
+      dr_wirelength: recordValue(row.dr, 'wirelength'),
+      dr_via_count: recordValue(row.dr, 'via_count'),
+      la_overflow: recordValue(row.la, 'overflow'),
+    }))
+  }
   const key = {
-    place_map_summary: 'maps',
-    cts_clock_skew_table: 'clocks',
-    layer_table: 'layers',
     rule_layer_table: 'top_violations',
     rcx_spef_corner_table: 'rc_corners',
     path_group_table: 'records',
@@ -342,14 +366,20 @@ function detailRows(detail: ProjectQorDetailDescriptor): Record<string, unknown>
 
 function detailFields(detail: ProjectQorDetailDescriptor): string[] {
   const fields = {
-    place_map_summary: ['group', 'metric', 'mean', 'maximum'],
-    cts_clock_skew_table: [
-      'clock',
-      'sink_count',
-      'optimized_skew_ns',
-      'max_insertion_latency_ns',
+    place_map_summary: [
+      'group',
+      'metric',
+      'top_5_percent_average',
+      'max',
+      'high_bin_ratio',
     ],
-    layer_table: ['layer', 'wire_length', 'via_count', 'overflow'],
+    cts_clock_skew_table: [
+      'clock_count',
+      'worst_optimized_skew_ns',
+      'worst_max_insertion_latency_ns',
+      'target_unmet_count',
+    ],
+    layer_table: ['layer', 'dr_wirelength', 'dr_via_count', 'la_overflow'],
     rule_layer_table: ['display_name', 'value', 'unit'],
     rcx_spef_corner_table: [
       'rc_corner',
@@ -389,6 +419,12 @@ function detailValue(row: Record<string, unknown>, field: string): string {
   return isDisplayValue(value) ? String(value) : 'N/A'
 }
 
+function detailEmptyMessage(detail: ProjectQorDetailDescriptor): string {
+  return detail.presentation === 'rule_layer_table'
+    ? 'No DRC violations.'
+    : 'No bounded detail rows are available.'
+}
+
 function detailRowKey(
   detail: ProjectQorDetailDescriptor,
   row: Record<string, unknown>,
@@ -405,8 +441,29 @@ function detailRowKey(
 }
 
 function fieldLabel(field: string): string {
-  if (field === 'corner_context') return 'PVT / RC corner'
+  const labels: Record<string, string> = {
+    corner_context: 'PVT / RC corner',
+    clock_count: 'Clock count',
+    worst_optimized_skew_ns: 'Worst skew [ns]',
+    worst_max_insertion_latency_ns: 'Worst insertion latency [ns]',
+    target_unmet_count: 'Target unmet',
+    top_5_percent_average: 'Top 5% average',
+    max: 'Maximum',
+    high_bin_ratio: 'High-bin ratio',
+    dr_wirelength: 'DR wirelength',
+    dr_via_count: 'DR via count',
+    la_overflow: 'LA overflow',
+  }
+  if (labels[field]) return labels[field]
   return field.replace(/_/g, ' ')
+}
+
+function arrayRows(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : []
+}
+
+function recordValue(value: unknown, field: string): unknown {
+  return isRecord(value) ? value[field] : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

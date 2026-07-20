@@ -39,7 +39,17 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(source).toContain(
       "path_group_table: ['corner_context', 'path_group', 'setup', 'hold']",
     )
-    expect(source).toContain("return 'PVT / RC corner'")
+    expect(source).toContain("corner_context: 'PVT / RC corner'")
     expect(source).not.toContain('process_corner')
+  })
+
+  it('adapts the current bounded V3 detail summaries without feature reads', () => {
+    expect(source).toContain('clock_count: summary.clock_count')
+    expect(source).toContain('top_5_percent_average: row.top_5_percent_average')
+    expect(source).toContain("dr_wirelength: recordValue(row.dr, 'wirelength')")
+    expect(source).toContain("la_overflow: recordValue(row.la, 'overflow')")
+    expect(source).toContain("? 'No DRC violations.'")
+    expect(source).toContain("'Worst skew [ns]'")
+    expect(source).toContain("'DR wirelength'")
   })
 })

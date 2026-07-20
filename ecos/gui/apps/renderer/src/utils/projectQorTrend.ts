@@ -1464,7 +1464,7 @@ function buildWorkspaceSummary(
     }),
   )
   const timingConstraints = resolveWorkspaceTimingConstraints(workspace)
-  const areaScoringStep = resolveLastSuccessfulStep(workspace.stepStatuses)
+  const areaScoringStep = resolveLastSuccessfulAreaStep(records, workspace.stepStatuses)
   const projectRecords = selectProjectRecords(records, areaScoringStep)
   const missingAnalysisSteps = QOR_FLOW_STEPS.filter(
     (step) => !workspace.stepMetricTexts[step],
@@ -2319,12 +2319,21 @@ function isRecordIncludedInDimensionScore(
   return dimension !== 'area_cost' || record.step === areaScoringStep
 }
 
-function resolveLastSuccessfulStep(
+function resolveLastSuccessfulAreaStep(
+  records: ProjectQorMetricRecord[],
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
 ): FlowStep | null {
   for (let index = QOR_FLOW_STEPS.length - 1; index >= 0; index -= 1) {
     const step = QOR_FLOW_STEPS[index]!
-    if (stepStatuses[step] === 'success') return step
+    if (
+      stepStatuses[step] === 'success' &&
+      records.some(
+        (record) =>
+          record.step === step && record.dimension === 'area_cost' && record.rating.score,
+      )
+    ) {
+      return step
+    }
   }
   return null
 }
