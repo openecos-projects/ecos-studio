@@ -93,7 +93,7 @@ describe('useStepQorAnalysis', () => {
     )
     testState.readProjectTextFile.mockResolvedValue(
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         integrity: { status: 'pass' },
         details: [
           routeDetail({
@@ -126,6 +126,46 @@ describe('useStepQorAnalysis', () => {
     expect(testState.readProjectTextFile).toHaveBeenCalledWith(
       '/workspace/demo/route_ecc/analysis/qor_metrics.json',
     )
+  })
+
+  it('loads RCX corner coverage detail from V3 analysis', async () => {
+    testState.route.path = '/workspace/RCX'
+    testState.resolveWorkspaceStepInfoApi.mockResolvedValue(
+      analysisResponse('/workspace/demo/RCX_ecc/analysis/qor_metrics.json'),
+    )
+    testState.readProjectTextFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: 3,
+        integrity: { status: 'pass' },
+        details: [
+          {
+            id: 'rcx_electrical_corner_metrics',
+            presentation: 'rcx_spef_corner_table',
+            summary: {
+              coverage: { status: 'incomplete', expected_count: 2, available_count: 1 },
+              rc_corners: [{ rc_corner: 'RCworst', availability: 'available' }],
+            },
+            feature_source: featureSource('feature/RCX.step.json', '/rcx/signoff_metrics'),
+          },
+        ],
+      }),
+    )
+
+    const result = scope.run(() => useStepQorAnalysis())!
+
+    await vi.waitFor(() => {
+      expect(result.loading.value).toBe(false)
+    })
+
+    expect(result.kind.value).toBe('rcx')
+    expect(result.detail.value).toMatchObject({
+      coverage: { status: 'incomplete', expected_count: 2 },
+    })
+    expect(result.detailEvidence.value).toEqual({
+      id: 'rcx_electrical_corner_metrics',
+      presentation: 'rcx_spef_corner_table',
+      source: { path: 'feature/RCX.step.json', selector: '/rcx/signoff_metrics' },
+    })
   })
 
   it('does not request analysis for unsupported workspace steps', async () => {
@@ -167,7 +207,7 @@ describe('useStepQorAnalysis', () => {
     testState.readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           metrics: [
             {
               id: 'route_wirelength',
@@ -185,7 +225,7 @@ describe('useStepQorAnalysis', () => {
       )
       .mockResolvedValueOnce(
         JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           status: 'incomplete',
           missing_metrics: [{ metric_id: 'route_la_total_overflow' }],
         }),
@@ -214,7 +254,7 @@ describe('useStepQorAnalysis', () => {
     )
     testState.readProjectTextFile.mockResolvedValueOnce(
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         integrity: { status: 'pass' },
         metrics: [
           {
@@ -271,7 +311,7 @@ describe('useStepQorAnalysis', () => {
     testState.readProjectTextFile
       .mockResolvedValueOnce(
         JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           integrity: { status: 'pass' },
           details: [routeDetail({ layers: [] })],
         }),
@@ -307,7 +347,7 @@ describe('useStepQorAnalysis', () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(
         JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           integrity: { status: 'pass' },
           details: [routeDetail({ workspace: 'current' })],
         }),
@@ -335,7 +375,7 @@ describe('useStepQorAnalysis', () => {
 
     resolveOldRead?.(
         JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           integrity: { status: 'pass' },
           details: [routeDetail({ workspace: 'stale' })],
       }),

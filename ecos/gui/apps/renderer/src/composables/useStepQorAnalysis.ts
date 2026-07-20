@@ -9,7 +9,7 @@ import { useWorkspaceLifecycle } from '@/composables/useWorkspaceLifecycle'
 import { readProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 
-export type StepQorAnalysisKind = 'place' | 'route' | 'sta'
+export type StepQorAnalysisKind = 'place' | 'route' | 'rcx' | 'sta'
 
 export interface StepQorMetricOverview {
   id: string
@@ -21,7 +21,7 @@ export interface StepQorMetricOverview {
   source: StepQorFeatureSource
 }
 
-export type StepQorSummaryStatus = 'pass' | 'blocked' | 'incomplete' | null
+export type StepQorSummaryStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable' | null
 
 export interface StepQorFeatureSource {
   path: string
@@ -50,12 +50,14 @@ interface StepQorAnalysisData {
 const DETAIL_KEY_BY_STEP: Partial<Record<StepEnum, string>> = {
   [StepEnum.PLACEMENT]: 'place_map_metrics',
   [StepEnum.ROUTING]: 'route_layer_metrics',
+  [StepEnum.RCX]: 'rcx_electrical_corner_metrics',
   [StepEnum.STA]: 'sta_path_group_metrics',
 }
 
 const KIND_BY_STEP: Partial<Record<StepEnum, StepQorAnalysisKind>> = {
   [StepEnum.PLACEMENT]: 'place',
   [StepEnum.ROUTING]: 'route',
+  [StepEnum.RCX]: 'rcx',
   [StepEnum.STA]: 'sta',
 }
 
@@ -96,7 +98,7 @@ function detailData(
 } {
   if (
     !isRecord(metrics) ||
-    metrics.schema_version !== 2 ||
+    metrics.schema_version !== 3 ||
     !Array.isArray(metrics.details)
   ) {
     return { detail: null, evidence: null, invalidDetailIds: [] }
@@ -130,7 +132,7 @@ function metricOverview(metrics: unknown): {
 } {
   if (
     !isRecord(metrics) ||
-    metrics.schema_version !== 2 ||
+    metrics.schema_version !== 3 ||
     !Array.isArray(metrics.metrics)
   ) {
     return { metrics: [], invalidMetricSourceIds: [] }
@@ -222,10 +224,11 @@ function normalizeAnalysisData(
 }
 
 function summaryStatus(value: unknown): StepQorSummaryStatus {
-  if (!isRecord(value) || value.schema_version !== 2) return null
+  if (!isRecord(value) || value.schema_version !== 3) return null
   return value.status === 'pass' ||
     value.status === 'blocked' ||
-    value.status === 'incomplete'
+    value.status === 'incomplete' ||
+    value.status === 'unavailable'
     ? value.status
     : null
 }
@@ -233,7 +236,7 @@ function summaryStatus(value: unknown): StepQorSummaryStatus {
 function summaryMissingMetrics(value: unknown): string[] {
   if (
     !isRecord(value) ||
-    value.schema_version !== 2 ||
+    value.schema_version !== 3 ||
     !Array.isArray(value.missing_metrics)
   ) {
     return []

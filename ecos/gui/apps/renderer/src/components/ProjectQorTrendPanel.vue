@@ -28,6 +28,9 @@
           <span>Export</span>
         </button>
         <span class="qor-baseline-tag">Baseline: {{ baselineLabel }}</span>
+        <span class="qor-baseline-tag" :class="`qor-signoff-${selectedSignoffStatus}`">
+          Signoff: {{ selectedSignoffStatus }}
+        </span>
       </div>
     </header>
 
@@ -356,6 +359,10 @@ const selectedWorkspace = computed(() => {
     null
   )
 })
+
+const selectedSignoffStatus = computed(
+  () => selectedWorkspace.value?.signoffReadiness.status ?? 'unavailable',
+)
 
 const canSetSelectedWorkspaceAsBaseline = computed(() => {
   const workspaceId = selectedWorkspace.value?.workspaceId
@@ -757,6 +764,19 @@ function qorListItemClass(
 .qor-baseline-button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+.qor-baseline-tag.qor-signoff-pass {
+  color: #34d399;
+}
+
+.qor-baseline-tag.qor-signoff-blocked {
+  color: #f87171;
+}
+
+.qor-baseline-tag.qor-signoff-incomplete,
+.qor-baseline-tag.qor-signoff-unavailable {
+  color: #fbbf24;
 }
 
 .qor-baseline-tag {

@@ -871,20 +871,20 @@ describe('project management model', () => {
           },
           stepSummaryTexts: {
             Route: JSON.stringify({
-              schema_version: 2,
+              schema_version: 3,
               status: 'pass',
               metric_count: 2,
               blocking_issues: [],
             }),
             DRC: JSON.stringify({
-              schema_version: 2,
+              schema_version: 3,
               status: 'pass',
               blocking_issues: [],
             }),
           },
           stepHotspotTexts: {
             Route: JSON.stringify({
-              schema_version: 2,
+              schema_version: 3,
               hotspots: [
                 {
                   kind: 'routing_overflow',
@@ -944,7 +944,7 @@ describe('project management model', () => {
           },
           stepSummaryTexts: {
             DRC: JSON.stringify({
-              schema_version: 2,
+              schema_version: 3,
               status: 'blocked',
               blocking_issues: [
                 {
@@ -1897,7 +1897,7 @@ function v2Metric(
 
 function v2MetricText(step: string, metrics: Array<Record<string, unknown>>): string {
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     step,
     metrics: metrics.map((metric) => ({
       ...metric,

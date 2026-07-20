@@ -57,10 +57,42 @@ export interface ProjectQorMetricRecord {
   polarity: QorPolarity
   scope: string
   corner: string | null
+  cornerContext: ProjectQorCornerContext | null
+  analysisGroup: string
+  rating: ProjectQorMetricRating
   projectRole: 'final' | 'trend' | 'gate' | 'none'
   stepRole: 'primary' | 'secondary' | 'detail' | 'hidden'
   sourceFile: string
   confidence: 'high' | 'medium' | 'low'
+}
+
+export interface ProjectQorCornerContext {
+  configuredRole: string | null
+  processCorner: string | null
+  voltageV: number | null
+  temperatureC: number | null
+  rcCorner: string | null
+  label: string | null
+}
+
+export interface ProjectQorMetricRating {
+  gate: boolean
+  score: boolean
+  trend: boolean
+}
+
+export interface ProjectQorSignoffGroup {
+  step: 'RCX' | 'STA'
+  id: string
+  status: QorGateStatus
+  gate: boolean
+}
+
+export interface ProjectQorSignoffReadiness {
+  status: QorGateStatus
+  scoreEligible: boolean
+  reasonCodes: string[]
+  groups: ProjectQorSignoffGroup[]
 }
 
 export interface ProjectQorUnsupportedModule {
@@ -125,6 +157,7 @@ export interface ProjectQorTrendWorkspaceSummary {
   status: QorStatus
   overallScore: number | null
   gateStatus: QorGateStatus
+  signoffReadiness: ProjectQorSignoffReadiness
   areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
@@ -222,6 +255,7 @@ export interface ProjectQorRisk {
     | 'analysis_integrity'
     | 'analysis_coverage'
     | 'analysis_metric_coverage'
+    | 'signoff_readiness'
   severity: 'critical' | 'warning' | 'info'
   metric: string
   displayName: string
@@ -912,20 +946,20 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
     id: 'qor_metrics_standard_output',
     label: 'Standard qor_metrics.json',
     reason:
-      'No schema v2 qor_metrics.json artifact is available in the current workspace data.',
+      'No schema v3 qor_metrics.json artifact is available in the current workspace data.',
     status: '待后续开发',
   },
   {
     id: 'qor_summary_standard_output',
     label: 'Standard qor_summary.json',
-    reason: 'No schema v2 step QoR summary is available in the current workspace data.',
+    reason: 'No schema v3 step QoR summary is available in the current workspace data.',
     status: '待后续开发',
   },
   {
     id: 'qor_hotspots',
     label: 'Spatial hotspot QoR data',
     reason:
-      'No schema v2 qor_hotspots.json artifact is available in the current workspace data.',
+      'No schema v3 qor_hotspots.json artifact is available in the current workspace data.',
     status: '待后续开发',
   },
   {
@@ -939,7 +973,7 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
 
 export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetricRecord[] {
   const record = parseJsonObject(input.text)
-  if (record?.schema_version !== 2 || !Array.isArray(record.metrics)) return []
+  if (record?.schema_version !== 3 || !Array.isArray(record.metrics)) return []
 
   return record.metrics.flatMap((rawMetric) => {
     if (!rawMetric || typeof rawMetric !== 'object' || Array.isArray(rawMetric)) {
@@ -957,6 +991,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     const source = isRecord(metric.source) ? metric.source : null
     const sourceFile = relativeFeatureSourcePath(source)
     const corner = metric.corner === null ? null : stringValue(metric.corner)
+    const cornerContext = qorCornerContextValue(metric.corner_context)
     if (
       !metricName ||
       value === null ||
@@ -972,6 +1007,7 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
     }
 
     const unit = stringValue(metric.unit)
+    const rating = qorMetricRatingValue(metric.rating, projectRole, polarity)
 
     return [
       {
@@ -987,6 +1023,9 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
         polarity,
         scope,
         corner,
+        cornerContext,
+        analysisGroup: stringValue(metric.analysis_group) ?? metricName,
+        rating,
         projectRole,
         stepRole,
         sourceFile,
@@ -994,6 +1033,40 @@ export function normalizeQorMetrics(input: QorStepMetricInput): ProjectQorMetric
       },
     ]
   })
+}
+
+function qorMetricRatingValue(
+  value: unknown,
+  projectRole: QorMetricProjectRole,
+  polarity: QorPolarity,
+): ProjectQorMetricRating {
+  if (
+    isRecord(value) &&
+    typeof value.gate === 'boolean' &&
+    typeof value.score === 'boolean' &&
+    typeof value.trend === 'boolean'
+  ) {
+    return { gate: value.gate, score: value.score, trend: value.trend }
+  }
+  return {
+    gate: projectRole === 'gate',
+    score: polarity !== 'trend_only',
+    trend: true,
+  }
+}
+
+function qorCornerContextValue(value: unknown): ProjectQorCornerContext | null {
+  if (!isRecord(value)) return null
+  const voltageV = flexibleNumber(value.voltage_v)
+  const temperatureC = flexibleNumber(value.temperature_c)
+  return {
+    configuredRole: stringValue(value.configured_role),
+    processCorner: stringValue(value.process_corner),
+    voltageV,
+    temperatureC,
+    rcCorner: stringValue(value.rc_corner),
+    label: stringValue(value.label),
+  }
 }
 
 export function buildProjectQorTrendSummary(
@@ -1097,7 +1170,7 @@ export function buildProjectQorTrendReport(
   metadata: ProjectQorTrendReportMetadata = {},
 ) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     generated_at: metadata.generatedAt ?? new Date().toISOString(),
     project: {
       id: metadata.projectId ?? '',
@@ -1119,6 +1192,17 @@ export function buildProjectQorTrendReport(
       status: workspace.status,
       overall_score: workspace.overallScore,
       gate_status: workspace.gateStatus,
+      signoff_readiness: {
+        status: workspace.signoffReadiness.status,
+        score_eligible: workspace.signoffReadiness.scoreEligible,
+        reason_codes: workspace.signoffReadiness.reasonCodes,
+        groups: workspace.signoffReadiness.groups.map((group) => ({
+          step: group.step,
+          id: group.id,
+          status: group.status,
+          gate: group.gate,
+        })),
+      },
       area_scoring_step: workspace.areaScoringStep,
       dimension_scores: workspace.dimensionScores,
       record_count: workspace.records.length,
@@ -1132,6 +1216,9 @@ export function buildProjectQorTrendReport(
         polarity: record.polarity,
         scope: record.scope,
         corner: record.corner,
+        corner_context: record.cornerContext,
+        analysis_group: record.analysisGroup,
+        rating: record.rating,
         project_role: record.projectRole,
         step_role: record.stepRole,
         source_file: record.sourceFile,
@@ -1400,17 +1487,22 @@ function buildWorkspaceSummary(
     workspace.stepSummaryTexts,
     blockingIssues,
   )
+  const signoffReadiness = resolveWorkspaceSignoffReadiness(workspace)
+  const effectiveGateStatus = combineGateStatus(gateStatus, signoffReadiness.status)
   const dimensionScores = buildDimensionScores(projectRecords, areaScoringStep)
   const weightedScore = weightedOverallScore(dimensionScores)
-  const overallScore = weightedScore === null ? null : roundScore(weightedScore)
+  const overallScore = signoffReadiness.scoreEligible && weightedScore !== null
+    ? roundScore(weightedScore)
+    : null
 
   return {
     workspaceId: workspace.workspaceId,
     workspaceName: workspace.workspaceName,
     workspacePath: workspace.workspacePath,
-    status: workspaceStatus(workspace.status, overallScore, gateStatus),
+    status: workspaceStatus(workspace.status, overallScore, effectiveGateStatus),
     overallScore,
-    gateStatus,
+    gateStatus: effectiveGateStatus,
+    signoffReadiness,
     areaScoringStep,
     dimensionScores,
     records: projectRecords,
@@ -1487,6 +1579,59 @@ function resolveWorkspaceGateStatus(
     if (status !== 'pass') return 'incomplete'
   }
   return 'pass'
+}
+
+function combineGateStatus(
+  baseStatus: QorGateStatus,
+  signoffStatus: QorGateStatus,
+): QorGateStatus {
+  if (baseStatus === 'blocked' || signoffStatus === 'blocked') return 'blocked'
+  if (baseStatus === 'incomplete' || signoffStatus === 'incomplete') return 'incomplete'
+  if (baseStatus === 'unavailable' || signoffStatus === 'unavailable') return 'unavailable'
+  return 'pass'
+}
+
+function resolveWorkspaceSignoffReadiness(
+  workspace: ProjectQorWorkspaceInput,
+): ProjectQorSignoffReadiness {
+  const entries = (['RCX', 'STA'] as const).flatMap((step) => {
+    const record = parseJsonObject(workspace.stepSummaryTexts?.[step])
+    const readiness = isRecord(record?.signoff_readiness)
+      ? record.signoff_readiness
+      : null
+    const status = qorGateStatusValue(readiness?.status)
+    if (!readiness || !status) return []
+    const groups = Array.isArray(readiness.groups)
+      ? readiness.groups.flatMap((group) => {
+          if (!isRecord(group)) return []
+          const id = stringValue(group.id)
+          const groupStatus = qorGateStatusValue(group.status)
+          if (!id || !groupStatus || typeof group.gate !== 'boolean') return []
+          return [{ step, id, status: groupStatus, gate: group.gate }]
+        })
+      : []
+    const reasonCodes = Array.isArray(readiness.reason_codes)
+      ? readiness.reason_codes.flatMap((code) => stringValue(code) ? [stringValue(code)!] : [])
+      : []
+    return [{ step, status, groups, reasonCodes }]
+  })
+  if (entries.length === 0) {
+    return { status: 'unavailable', scoreEligible: false, reasonCodes: [], groups: [] }
+  }
+  const statuses = entries.map((entry) => entry.status)
+  const status = statuses.includes('blocked')
+    ? 'blocked'
+    : statuses.includes('incomplete')
+      ? 'incomplete'
+      : entries.length === 2 && statuses.every((item) => item === 'pass')
+        ? 'pass'
+        : 'unavailable'
+  return {
+    status,
+    scoreEligible: status === 'pass',
+    reasonCodes: uniqueStrings(entries.flatMap((entry) => entry.reasonCodes)),
+    groups: entries.flatMap((entry) => entry.groups),
+  }
 }
 
 function selectProjectRecords(
@@ -1573,9 +1718,41 @@ function buildProjectQorRisks(
             `QoR analysis ignored ${skippedKinds.join(' and ')} with invalid feature provenance.`,
         }
       }),
+      ...buildSignoffReadinessRisks(workspace),
       ...buildWorkspaceDataQualityRisks(workspace),
     ])
     .sort(compareProjectQorRisk)
+}
+
+function buildSignoffReadinessRisks(
+  workspace: ProjectQorTrendWorkspaceSummary,
+): ProjectQorRisk[] {
+  const readiness = workspace.signoffReadiness
+  if (readiness.status === 'pass') return []
+  const step = readiness.reasonCodes.some((code) => code.startsWith('sta_'))
+    ? 'STA'
+    : 'RCX'
+  const severity = readiness.status === 'blocked'
+    ? 'critical'
+    : readiness.status === 'incomplete'
+      ? 'warning'
+      : 'info'
+  const message = readiness.reasonCodes.length
+    ? readiness.reasonCodes.join(', ')
+    : readiness.status === 'unavailable'
+      ? 'RCX and STA signoff readiness is unavailable.'
+      : `RCX and STA signoff readiness is ${readiness.status}.`
+  return [{
+    workspaceId: workspace.workspaceId,
+    workspaceName: workspace.workspaceName,
+    step,
+    kind: 'signoff_readiness',
+    severity,
+    metric: 'signoff_readiness',
+    displayName: 'Signoff Readiness',
+    value: readiness.status,
+    message,
+  }]
 }
 
 function buildWorkspaceDataQualityRisks(
@@ -1595,13 +1772,13 @@ function buildWorkspaceDataQualityRisks(
         step: referenceStep,
         kind: 'analysis_coverage',
         severity: 'warning',
-        metric: 'analysis_v2_coverage',
-        displayName: 'V2 Analysis Coverage',
+        metric: 'analysis_v3_coverage',
+        displayName: 'V3 Analysis Coverage',
         value: quality.missingCompletedAnalysisSteps.length,
         message:
           `${quality.missingCompletedAnalysisSteps.length} completed step` +
           `${quality.missingCompletedAnalysisSteps.length === 1 ? '' : 's'} ` +
-          'do not have current-contract V2 QoR analysis.',
+          'do not have current-contract V3 QoR analysis.',
       },
     ]
   }
@@ -2017,6 +2194,7 @@ function isRecordIncludedInDimensionScore(
   areaScoringStep: FlowStep | null,
 ): boolean {
   if (record.dimension !== dimension) return false
+  if (!record.rating.score) return false
   return dimension !== 'area_cost' || record.step === areaScoringStep
 }
 
@@ -2221,7 +2399,23 @@ function recordsByMetric(
 }
 
 function projectRecordKey(record: ProjectQorMetricRecord): string {
-  return [record.metricName, record.scope, record.corner ?? ''].join('\u0000')
+  return [
+    record.metricName,
+    record.scope,
+    record.corner ?? '',
+    cornerContextIdentity(record.cornerContext),
+  ].join('\u0000')
+}
+
+function cornerContextIdentity(context: ProjectQorCornerContext | null): string {
+  if (!context) return ''
+  return [
+    context.configuredRole ?? '',
+    context.processCorner ?? '',
+    context.voltageV ?? '',
+    context.temperatureC ?? '',
+    context.rcCorner ?? '',
+  ].join('|')
 }
 
 function buildDelta(
@@ -2436,7 +2630,7 @@ function normalizeTimingConstraintContext(
   input: QorStepMetricInput,
 ): { fingerprint: string; sourceFile: string } | null {
   const record = parseJsonObject(input.text)
-  if (record?.schema_version !== 2 || !isRecord(record.context)) return null
+  if (record?.schema_version !== 3 || !isRecord(record.context)) return null
 
   const constraints = record.context.timing_constraints
   if (!isRecord(constraints)) return null
@@ -2610,12 +2804,12 @@ function isStringArray(value: unknown): value is string[] {
 
 function hasStandardQorMetricsText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
-  return record?.schema_version === 2 && Array.isArray(record.metrics)
+  return record?.schema_version === 3 && Array.isArray(record.metrics)
 }
 
 function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 2 || !Array.isArray(record.metrics)) return false
+  if (record?.schema_version !== 3 || !Array.isArray(record.metrics)) return false
   const integrity = isRecord(record.integrity) ? record.integrity : null
   const status = stringValue(integrity?.status)
   return status === 'pass' || status === 'incomplete'
@@ -2624,7 +2818,7 @@ function hasCurrentQorMetricsText(text: string | null | undefined): boolean {
 function hasStandardQorSummaryText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return (
-    record?.schema_version === 2 &&
+    record?.schema_version === 3 &&
     (typeof record.metric_count === 'number' ||
       Array.isArray(record.blocking_issues) ||
       typeof record.status === 'string')
@@ -2633,15 +2827,19 @@ function hasStandardQorSummaryText(text: string | null | undefined): boolean {
 
 function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
   const record = parseJsonObject(text)
-  const status = stringValue(record?.status)
-  return status === 'pass' || status === 'blocked' || status === 'incomplete'
+  return qorGateStatusValue(record?.status)
+}
+
+function qorGateStatusValue(value: unknown): QorGateStatus | null {
+  const status = stringValue(value)
+  return status === 'pass' || status === 'blocked' || status === 'incomplete' || status === 'unavailable'
     ? status
     : null
 }
 
 function hasStandardQorHotspotText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
-  return record?.schema_version === 2 && Array.isArray(record.hotspots)
+  return record?.schema_version === 3 && Array.isArray(record.hotspots)
 }
 
 function normalizeQorSummaryBlockingIssues(
@@ -2649,7 +2847,7 @@ function normalizeQorSummaryBlockingIssues(
   text: string | null | undefined,
 ): ProjectQorBlockingIssue[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 2 || !Array.isArray(record.blocking_issues)) {
+  if (record?.schema_version !== 3 || !Array.isArray(record.blocking_issues)) {
     return []
   }
 
@@ -2675,7 +2873,7 @@ function normalizeQorSummaryMissingMetrics(
   text: string | null | undefined,
 ): Array<{ step: FlowStep; metricName: string }> {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 2 || !Array.isArray(record.missing_metrics)) {
+  if (record?.schema_version !== 3 || !Array.isArray(record.missing_metrics)) {
     return []
   }
 
@@ -2694,7 +2892,7 @@ function normalizeQorAnalysisIntegrity(
   text: string | null | undefined,
 ): ProjectQorAnalysisIntegrityIssue[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 2 || !isRecord(record.integrity)) return []
+  if (record?.schema_version !== 3 || !isRecord(record.integrity)) return []
   if (stringValue(record.integrity.status) !== 'incomplete') return []
 
   const invalidMetricSourceIds = uniqueStrings(
@@ -2723,7 +2921,7 @@ function normalizeQorHotspots(
   text: string | null | undefined,
 ): ProjectQorHotspot[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 2 || !Array.isArray(record.hotspots)) {
+  if (record?.schema_version !== 3 || !Array.isArray(record.hotspots)) {
     return []
   }
 

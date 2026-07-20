@@ -46,6 +46,45 @@ describe('project QoR trend model', () => {
     ).toBeCloseTo(55)
   })
 
+  it('does not rate a project when configured RCX signoff evidence is incomplete', () => {
+    const summary = buildProjectQorTrendSummary([
+      workspaceInput(
+        'ws_0001',
+        { Route: JSON.stringify({ Tool: 'ecc', wire_len: 3000, num_via: 900 }) },
+        {
+          RCX: JSON.stringify({
+            schema_version: 3,
+            status: 'incomplete',
+            signoff_readiness: {
+              status: 'incomplete',
+              score_eligible: false,
+              reason_codes: ['rcx_corner_summary_missing'],
+              groups: [
+                { id: 'rcx_corner_coverage', status: 'incomplete', gate: true },
+                { id: 'rcx_parse_health', status: 'pass', gate: true },
+              ],
+            },
+          }),
+        },
+      ),
+    ])
+
+    expect(summary.workspaces[0]).toMatchObject({
+      overallScore: null,
+      signoffReadiness: {
+        status: 'incomplete',
+        scoreEligible: false,
+        reasonCodes: ['rcx_corner_summary_missing'],
+      },
+    })
+    expect(summary.risks).toContainEqual(
+      expect.objectContaining({
+        kind: 'signoff_readiness',
+        metric: 'signoff_readiness',
+      }),
+    )
+  })
+
   it('uses Area records from only the last successful step for score and details', () => {
     const summary = buildProjectQorTrendSummary([
       workspaceInput(
@@ -211,7 +250,7 @@ describe('project QoR trend model', () => {
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Route',
       text: JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'runtime_seconds',
@@ -251,7 +290,7 @@ describe('project QoR trend model', () => {
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Route',
       text: JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'route_wirelength',
@@ -323,25 +362,25 @@ describe('project QoR trend model', () => {
       [
         workspaceInput('baseline', {
           Synth: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             metrics: [
               runtimeRecord('synthesis_execution', 10, 'feature/Synthesis.step.json'),
             ],
           }),
           Route: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             metrics: [runtimeRecord('route_execution', 40, 'feature/route.step.json')],
           }),
         }),
         workspaceInput('ws_0002', {
           Synth: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             metrics: [
               runtimeRecord('synthesis_execution', 20, 'feature/Synthesis.step.json'),
             ],
           }),
           Route: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             metrics: [runtimeRecord('route_execution', 30, 'feature/route.step.json')],
           }),
         }),
@@ -367,7 +406,7 @@ describe('project QoR trend model', () => {
   it('compares RCX electrical summaries without adding them to the score', () => {
     const rcxElectricalMetric = (value: number) =>
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'rcx_worst_total_capacitance_ff',
@@ -417,7 +456,7 @@ describe('project QoR trend model', () => {
   it('compares CTS optimized skew estimates without treating them as signoff skew', () => {
     const ctsSkewMetric = (value: number) =>
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'cts_worst_optimized_skew_ns',
@@ -467,7 +506,7 @@ describe('project QoR trend model', () => {
   it('uses CTS insertion-latency estimates for timing triage without scoring them', () => {
     const ctsInsertionLatencyMetric = (value: number) =>
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'cts_worst_max_insertion_latency_ns',
@@ -565,7 +604,7 @@ describe('project QoR trend model', () => {
   it('marks QoR deltas when timing constraints differ from the baseline', () => {
     const withConstraints = (fingerprint: string) =>
       JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [],
         context: {
           timing_constraints: {
@@ -609,7 +648,7 @@ describe('project QoR trend model', () => {
       workspacePath: '/projects/gcd/ws_0001',
       step: 'Harden',
       text: JSON.stringify({
-        schema_version: 2,
+        schema_version: 3,
         metrics: [
           {
             id: 'harden_gds_exists',
@@ -879,11 +918,11 @@ describe('project QoR trend model', () => {
       Harden: 'success' as const,
     }
     const passingSummaries = {
-      Route: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
-      DRC: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
-      RCX: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
-      STA: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
-      Harden: JSON.stringify({ schema_version: 2, status: 'pass', blocking_issues: [] }),
+      Route: JSON.stringify({ schema_version: 3, status: 'pass', blocking_issues: [] }),
+      DRC: JSON.stringify({ schema_version: 3, status: 'pass', blocking_issues: [] }),
+      RCX: signoffSummaryText('RCX'),
+      STA: signoffSummaryText('STA'),
+      Harden: JSON.stringify({ schema_version: 3, status: 'pass', blocking_issues: [] }),
     }
     const passing = buildProjectQorTrendSummary([
       workspaceInput('passing', {}, passingSummaries, {}, 'passing', stepStatuses),
@@ -1042,7 +1081,6 @@ describe('project QoR trend model', () => {
     expect(summary.unsupportedModules.map((module) => module.id)).toEqual([
       'sta_analysis',
       'power_ir_em_analysis',
-      'qor_summary_standard_output',
       'qor_hotspots',
       'project_qor_cache',
     ])
@@ -1076,7 +1114,7 @@ describe('project QoR trend model', () => {
     expect(summary.unsupportedModules.map((module) => module.id)).not.toContain(
       'qor_metrics_standard_output',
     )
-    expect(summary.unsupportedModules.map((module) => module.id)).toContain(
+    expect(summary.unsupportedModules.map((module) => module.id)).not.toContain(
       'qor_summary_standard_output',
     )
     expect(summary.unsupportedModules.map((module) => module.id)).not.toContain(
@@ -1315,6 +1353,17 @@ describe('project QoR trend model', () => {
         value: 11,
         message: 'Placement EGR overflow is present.',
       },
+      {
+        workspaceId: 'ws_0002',
+        workspaceName: 'route_eco_a',
+        step: 'RCX',
+        kind: 'signoff_readiness',
+        severity: 'info',
+        metric: 'signoff_readiness',
+        displayName: 'Signoff Readiness',
+        value: 'unavailable',
+        message: 'RCX and STA signoff readiness is unavailable.',
+      },
     ])
 
     const report = JSON.parse(serializeProjectQorTrendReport(summary))
@@ -1331,7 +1380,7 @@ describe('project QoR trend model', () => {
     const summary = buildProjectQorTrendSummary([
       workspaceInput('ws_0003', {
         CTS: JSON.stringify({
-          schema_version: 2,
+          schema_version: 3,
           metrics: [],
           integrity: {
             status: 'incomplete',
@@ -1406,7 +1455,7 @@ describe('project QoR trend model', () => {
       expect.objectContaining({
         kind: 'analysis_coverage',
         severity: 'warning',
-        metric: 'analysis_v2_coverage',
+        metric: 'analysis_v3_coverage',
         step: 'Floor',
         value: 1,
       }),
@@ -1472,7 +1521,7 @@ describe('project QoR trend model', () => {
         },
         {
           STA: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             status: 'incomplete',
             metric_count: 1,
             blocking_issues: [],
@@ -1531,7 +1580,7 @@ describe('project QoR trend model', () => {
         },
         {
           CTS: JSON.stringify({
-            schema_version: 2,
+            schema_version: 3,
             status: 'incomplete',
             metric_count: 2,
             blocking_issues: [],
@@ -1611,7 +1660,7 @@ describe('project QoR trend model', () => {
       { Route: 'success' },
     )
     workspace.stepMetricTexts.Route = JSON.stringify({
-      schema_version: 2,
+      schema_version: 3,
       metrics: [],
     })
 
@@ -1626,7 +1675,7 @@ describe('project QoR trend model', () => {
     expect(summary.risks).toContainEqual(
       expect.objectContaining({
         kind: 'analysis_coverage',
-        metric: 'analysis_v2_coverage',
+        metric: 'analysis_v3_coverage',
         step: 'Route',
       }),
     )
@@ -2188,7 +2237,7 @@ describe('project QoR trend model', () => {
     )
 
     expect(report).toMatchObject({
-      schema_version: 2,
+      schema_version: 3,
       generated_at: '2026-07-13T00:00:00.000Z',
       project: {
         id: 'proj_gcd',
@@ -2248,9 +2297,13 @@ function workspaceInput(
         v2MetricText(step, text),
       ]),
     ),
-    stepSummaryTexts: Object.fromEntries(
+    stepSummaryTexts: {
+      RCX: signoffSummaryText('RCX'),
+      STA: signoffSummaryText('STA'),
+      ...Object.fromEntries(
       Object.entries(stepSummaryTexts).map(([step, text]) => [step, v2SummaryText(text)]),
-    ),
+      ),
+    },
     stepHotspotTexts: Object.fromEntries(
       Object.entries(stepHotspotTexts).map(([step, text]) => [
         step,
@@ -2264,7 +2317,7 @@ function workspaceInput(
 
 function timingConstraintMetrics(fingerprint: string): string {
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     integrity: {
       status: 'pass',
       invalid_metric_source_ids: [],
@@ -2280,6 +2333,32 @@ function timingConstraintMetrics(fingerprint: string): string {
           selector: '/run/timing_constraints',
         },
       },
+    },
+  })
+}
+
+function signoffSummaryText(step: 'RCX' | 'STA'): string {
+  const groups = step === 'RCX'
+    ? [
+        { id: 'rcx_corner_coverage', status: 'pass', gate: true },
+        { id: 'rcx_parse_health', status: 'pass', gate: true },
+      ]
+    : [
+        { id: 'sta_signoff_coverage', status: 'pass', gate: true },
+        { id: 'sta_setup_closure', status: 'pass', gate: true },
+        { id: 'sta_hold_closure', status: 'pass', gate: true },
+      ]
+  return JSON.stringify({
+    schema_version: 3,
+    status: 'pass',
+    metric_count: 0,
+    blocking_issues: [],
+    missing_metrics: [],
+    signoff_readiness: {
+      status: 'pass',
+      score_eligible: true,
+      reason_codes: [],
+      groups,
     },
   })
 }
@@ -2544,7 +2623,7 @@ function v2MetricText(step: string, text: string | null | undefined): string | n
   if (!text) return null
   const parsed: unknown = JSON.parse(text)
   if (!isRecord(parsed)) return null
-  if (parsed.schema_version === 2) {
+  if (parsed.schema_version === 3) {
     return JSON.stringify({
       ...parsed,
       integrity: isRecord(parsed.integrity)
@@ -2569,7 +2648,7 @@ function v2MetricText(step: string, text: string | null | undefined): string | n
       })
 
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     metrics: records,
     integrity: {
       status: 'pass',
@@ -2631,9 +2710,9 @@ function v2Record(
 function v2SummaryText(text: string | null | undefined): string | null {
   if (!text) return null
   const parsed: unknown = JSON.parse(text)
-  if (!isRecord(parsed) || parsed.schema_version === 2) return text
+  if (!isRecord(parsed) || parsed.schema_version === 3) return text
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     status: parsed.status ?? 'pass',
     metric_count: parsed.metric_count ?? 0,
     blocking_issues: Array.isArray(parsed.blocking_issues)
@@ -2655,9 +2734,9 @@ function v2SummaryText(text: string | null | undefined): string | null {
 function v2HotspotText(step: string, text: string | null | undefined): string | null {
   if (!text) return null
   const parsed: unknown = JSON.parse(text)
-  if (!isRecord(parsed) || parsed.schema_version === 2) return text
+  if (!isRecord(parsed) || parsed.schema_version === 3) return text
   return JSON.stringify({
-    schema_version: 2,
+    schema_version: 3,
     hotspots: Array.isArray(parsed.hotspots)
       ? parsed.hotspots.flatMap((item) =>
           isRecord(item) && testString(item.metric)
