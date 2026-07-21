@@ -1,6 +1,5 @@
 import type {
   FlowStep,
-  ProjectFeatureFileKey,
   ProjectManifest,
   ProjectWorkspaceAnalysisInput,
   ProjectWorkspaceAnalysisInputsById,
@@ -9,58 +8,87 @@ import type {
 import { parseWorkspaceFlowStateMap } from '@/utils/projectManagement'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 
-const WORKSPACE_ANALYSIS_FILE_SPECS: Array<{ key: ProjectFeatureFileKey; path: string }> =
-  [
-    { key: 'synthesisStat', path: 'Synthesis_yosys/feature/Synthesis_stat.json' },
-    { key: 'floorplanDb', path: 'Floorplan_ecc/feature/Floorplan.db.json' },
-    { key: 'fanoutDb', path: 'fixFanout_ecc/feature/fixFanout.db.json' },
-    { key: 'fanoutStep', path: 'fixFanout_ecc/feature/fixFanout.step.json' },
-    { key: 'placeDb', path: 'place_dreamplace/feature/place.db.json' },
-    { key: 'placeMap', path: 'place_dreamplace/feature/place.map.json' },
-    { key: 'ctsDb', path: 'CTS_ecc/feature/CTS.db.json' },
-    { key: 'ctsStep', path: 'CTS_ecc/feature/CTS.step.json' },
-    { key: 'ctsMap', path: 'CTS_ecc/feature/CTS.map.json' },
-    { key: 'legalDb', path: 'legalization_dreamplace/feature/legalization.db.json' },
-    { key: 'routeDb', path: 'route_ecc/feature/route.db.json' },
-    { key: 'routeStep', path: 'route_ecc/feature/route.step.json' },
-    { key: 'drcDb', path: 'drc_ecc/feature/drc.db.json' },
-    { key: 'drcStep', path: 'drc_ecc/feature/drc.step.json' },
-    { key: 'fillerDb', path: 'filler_ecc/feature/filler.db.json' },
-    { key: 'fillerStep', path: 'filler_ecc/feature/filler.step.json' },
-    { key: 'rcxDb', path: 'RCX_ecc/feature/RCX.db.json' },
-    { key: 'staDb', path: 'sta_ecc/feature/sta.db.json' },
-  ]
-
-const WORKSPACE_STEP_METRICS_FILE_SPECS: Array<{ step: FlowStep; path: string }> = [
-  { step: 'Synth', path: 'Synthesis_yosys/analysis/Synthesis_metrics.json' },
-  { step: 'Floor', path: 'Floorplan_ecc/analysis/Floorplan_metrics.json' },
-  { step: 'Fanout', path: 'fixFanout_ecc/analysis/fixFanout_metrics.json' },
-  { step: 'Place', path: 'place_dreamplace/analysis/place_metrics.json' },
-  { step: 'CTS', path: 'CTS_ecc/analysis/CTS_metrics.json' },
-  { step: 'Legal', path: 'legalization_dreamplace/analysis/legalization_metrics.json' },
-  { step: 'Route', path: 'route_ecc/analysis/route_metrics.json' },
-  { step: 'DRC', path: 'drc_ecc/analysis/drc_metrics.json' },
-  { step: 'Filler', path: 'filler_ecc/analysis/filler_metrics.json' },
-  { step: 'RCX', path: 'RCX_ecc/analysis/RCX_metrics.json' },
-  { step: 'STA', path: 'sta_ecc/analysis/sta_metrics.json' },
-  { step: 'Harden', path: 'Harden_ecc/analysis/Harden_metrics.json' },
+const WORKSPACE_STEP_ANALYSIS_SPECS: Array<{
+  step: FlowStep
+  metricsPath: string
+  summaryPath: string
+  hotspotsPath: string
+}> = [
+  {
+    step: 'Synth',
+    metricsPath: 'Synthesis_yosys/analysis/qor_metrics.json',
+    summaryPath: 'Synthesis_yosys/analysis/qor_summary.json',
+    hotspotsPath: 'Synthesis_yosys/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Floor',
+    metricsPath: 'Floorplan_ecc/analysis/qor_metrics.json',
+    summaryPath: 'Floorplan_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'Floorplan_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Fanout',
+    metricsPath: 'fixFanout_ecc/analysis/qor_metrics.json',
+    summaryPath: 'fixFanout_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'fixFanout_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Place',
+    metricsPath: 'place_dreamplace/analysis/qor_metrics.json',
+    summaryPath: 'place_dreamplace/analysis/qor_summary.json',
+    hotspotsPath: 'place_dreamplace/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'CTS',
+    metricsPath: 'CTS_ecc/analysis/qor_metrics.json',
+    summaryPath: 'CTS_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'CTS_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Legal',
+    metricsPath: 'legalization_dreamplace/analysis/qor_metrics.json',
+    summaryPath: 'legalization_dreamplace/analysis/qor_summary.json',
+    hotspotsPath: 'legalization_dreamplace/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Route',
+    metricsPath: 'route_ecc/analysis/qor_metrics.json',
+    summaryPath: 'route_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'route_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'DRC',
+    metricsPath: 'drc_ecc/analysis/qor_metrics.json',
+    summaryPath: 'drc_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'drc_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Filler',
+    metricsPath: 'filler_ecc/analysis/qor_metrics.json',
+    summaryPath: 'filler_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'filler_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'RCX',
+    metricsPath: 'RCX_ecc/analysis/qor_metrics.json',
+    summaryPath: 'RCX_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'RCX_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'STA',
+    metricsPath: 'sta_ecc/analysis/qor_metrics.json',
+    summaryPath: 'sta_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'sta_ecc/analysis/qor_hotspots.json',
+  },
+  {
+    step: 'Harden',
+    metricsPath: 'Harden_ecc/analysis/qor_metrics.json',
+    summaryPath: 'Harden_ecc/analysis/qor_summary.json',
+    hotspotsPath: 'Harden_ecc/analysis/qor_hotspots.json',
+  },
 ]
 
-const STA_CORNER_PATHS = [
-  'MAX_125/Cworst',
-  'MAX_125/RCworst',
-  'TYP_25/TYPICAL',
-  'ML_125/Cworst',
-  'ML_125/RCworst',
-  'ML_125/Cbest',
-  'ML_125/RCbest',
-  'MIN_m40/Cworst',
-  'MIN_m40/RCworst',
-  'MIN_m40/Cbest',
-  'MIN_m40/RCbest',
-  'WCL_m40/Cworst',
-  'WCL_m40/RCworst',
-]
+const STA_TIMING_ISSUES_PATH = 'sta_ecc/analysis/sta_timing_issues.json'
 
 export async function readProjectWorkspaceFlowStates(
   manifest: ProjectManifest,
@@ -91,15 +119,12 @@ export async function readProjectWorkspaceFlowStates(
 export async function readProjectWorkspaceAnalysisInputs(
   manifest: ProjectManifest,
 ): Promise<ProjectWorkspaceAnalysisInputsById> {
-  const designName = normalizeArtifactDesignName(
-    manifest.base_design.top_module || manifest.name || 'design',
-  )
   const entries = await Promise.all(
     manifest.workspaces.map(async (workspace) => {
       try {
         return [
           workspace.workspace_id,
-          await readWorkspaceAnalysisInput(workspace.workspace_path, designName),
+          await readWorkspaceAnalysisInput(workspace.workspace_path),
         ] as const
       } catch (error) {
         console.warn(
@@ -116,56 +141,47 @@ export async function readProjectWorkspaceAnalysisInputs(
 
 async function readWorkspaceAnalysisInput(
   workspacePath: string,
-  designName: string,
 ): Promise<ProjectWorkspaceAnalysisInput> {
   const [
-    fileEntries,
     stepMetricEntries,
-    staReports,
+    stepSummaryEntries,
+    stepHotspotEntries,
+    staTimingIssuesText,
     flowText,
-    checklistText,
-    parametersText,
   ] = await Promise.all([
     Promise.all(
-      WORKSPACE_ANALYSIS_FILE_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.path, {
-          projectPath: workspacePath,
-        })
-        return [spec.key, content] as const
-      }),
-    ),
-    Promise.all(
-      WORKSPACE_STEP_METRICS_FILE_SPECS.map(async (spec) => {
-        const content = await readOptionalProjectTextFile(spec.path, {
+      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
+        const content = await readOptionalProjectTextFile(spec.metricsPath, {
           projectPath: workspacePath,
         })
         return [spec.step, content] as const
       }),
     ),
     Promise.all(
-      STA_CORNER_PATHS.map(async (corner) => {
-        const content = await readOptionalProjectTextFile(
-          `sta_ecc/output/${corner}/${designName}.rpt.json`,
-          { projectPath: workspacePath },
-        )
-        return { corner, content }
+      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
+        const content = await readOptionalProjectTextFile(spec.summaryPath, {
+          projectPath: workspacePath,
+        })
+        return [spec.step, content] as const
       }),
     ),
+    Promise.all(
+      WORKSPACE_STEP_ANALYSIS_SPECS.map(async (spec) => {
+        const content = await readOptionalProjectTextFile(spec.hotspotsPath, {
+          projectPath: workspacePath,
+        })
+        return [spec.step, content] as const
+      }),
+    ),
+    readOptionalProjectTextFile(STA_TIMING_ISSUES_PATH, { projectPath: workspacePath }),
     readOptionalProjectTextFile('home/flow.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('home/checklist.json', { projectPath: workspacePath }),
-    readOptionalProjectTextFile('home/parameters.json', { projectPath: workspacePath }),
   ])
 
   return {
-    files: Object.fromEntries(fileEntries),
     stepMetricTexts: Object.fromEntries(stepMetricEntries),
-    staReports,
+    stepSummaryTexts: Object.fromEntries(stepSummaryEntries),
+    stepHotspotTexts: Object.fromEntries(stepHotspotEntries),
+    staTimingIssuesText,
     flowText,
-    checklistText,
-    parametersText,
   }
-}
-
-function normalizeArtifactDesignName(value: string): string {
-  return value.trim().replace(/[\\/]/g, '_').replace(/\s+/g, '_') || 'design'
 }

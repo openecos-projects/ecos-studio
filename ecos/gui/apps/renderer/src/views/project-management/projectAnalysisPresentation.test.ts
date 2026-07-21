@@ -26,6 +26,7 @@ function point(
 ): ProjectMetricPoint {
   return {
     workspaceId,
+    workspaceName: workspaceId,
     value,
     label,
     state: value === null ? 'pending' : 'good',

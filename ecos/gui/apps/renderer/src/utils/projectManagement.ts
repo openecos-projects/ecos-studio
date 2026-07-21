@@ -918,9 +918,15 @@ export function parseWorkspaceFlowStateMap(
   }, {})
 }
 
-export function nextWorkspaceId(project: ProjectManagementProject): string {
+export function nextWorkspaceId(
+  project: ProjectManagementProject,
+  occupiedWorkspaceIds: string[] = [],
+): string {
   const numbers = project.workspaces
     .map((workspace) => Number(workspace.id.replace(/^ws_/, '')))
+    .concat(
+      occupiedWorkspaceIds.map((workspaceId) => Number(workspaceId.replace(/^ws_/, ''))),
+    )
     .filter(Number.isFinite)
   const next = Math.max(0, ...numbers) + 1
   return `ws_${String(next).padStart(4, '0')}`
@@ -930,8 +936,8 @@ export function createWorkspaceBranchDraft(
   project: ProjectManagementProject,
   sourceWorkspaceId: string,
   step: FlowStep,
+  targetWorkspaceId = nextWorkspaceId(project),
 ): WorkspaceBranchDraft {
-  const targetWorkspaceId = nextWorkspaceId(project)
   const sourceWorkspace = project.workspaces.find(
     (workspace) => workspace.id === sourceWorkspaceId,
   )

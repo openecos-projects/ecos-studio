@@ -121,6 +121,7 @@ export function buildBestWorkspacePpaMetrics(
 export function pendingMetricPoint(workspaceId: string): ProjectMetricPoint {
   return {
     workspaceId,
+    workspaceName: workspaceId,
     label: 'N/A',
     value: null,
     state: 'pending',

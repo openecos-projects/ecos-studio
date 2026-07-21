@@ -78,14 +78,23 @@
   background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
 }
 
+.analysis-dashboard-v3 {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .dashboard-grid {
   display: grid;
   min-height: 0;
   grid-auto-rows: minmax(166px, auto);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  overflow: auto;
-  padding-right: 2px;
+  overflow: visible;
 }
 
 .dashboard-card {
