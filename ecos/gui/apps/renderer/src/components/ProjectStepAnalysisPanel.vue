@@ -191,9 +191,21 @@
                 <dt>Expected</dt>
                 <dd>{{ findingExpectedLabel(finding) }}</dd>
               </div>
+              <div v-if="finding.condition">
+                <dt>Pass condition</dt>
+                <dd>{{ finding.condition }}</dd>
+              </div>
               <div>
-                <dt>Source</dt>
+                <dt>Analysis record</dt>
                 <dd>{{ finding.source }}</dd>
+              </div>
+              <div v-if="finding.evidence">
+                <dt>Evidence</dt>
+                <dd>{{ finding.evidence }}</dd>
+              </div>
+              <div>
+                <dt>Diagnosis</dt>
+                <dd>{{ finding.detail }}</dd>
               </div>
             </dl>
           </details>
@@ -215,6 +227,8 @@ import type {
 } from '@/utils/projectManagement'
 import type {
   ProjectQorDetailDescriptor,
+  ProjectQorFindingEvidence,
+  ProjectQorTimingIssue,
   ProjectQorTrendSummary,
 } from '@/utils/projectQorTrend'
 
@@ -229,6 +243,8 @@ interface StageFinding {
   value: number | string | null
   unit?: string
   expected?: number | string | null
+  condition?: string
+  evidence?: string
   detail: string
   source: string
 }
@@ -364,8 +380,8 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
         expected: 'available',
         detail:
           artifact.status === 'invalid'
-            ? 'The artifact does not match the current analysis schema.'
-            : 'The successful step did not produce this required analysis artifact.',
+            ? `${artifact.source} exists but does not satisfy the current V3 analysis schema.`
+            : `The successful ${props.selectedStep} step did not create required file ${artifact.source}.`,
         source: artifact.source,
       })
     }
@@ -382,7 +398,10 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       metric: issue.metric,
       value: issue.value,
       unit: unitFor(issue.metric),
-      detail: issue.reason,
+      expected: issue.evidence.expectedValue,
+      condition: findingCondition(issue.metric, issue.evidence, unitFor(issue.metric)),
+      evidence: findingEvidenceLocation(issue.evidence),
+      detail: issue.evidence.diagnosis ?? issue.reason,
       source: 'analysis/qor_summary.json',
     }
     findings.push(finding)
@@ -393,8 +412,15 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
     const existing = findingsByMetric.get(gate.metric)
     if (existing) {
       existing.kind = `${existing.kind} / failed hard gate`
-      existing.expected = gate.threshold
-      existing.detail = `${existing.detail} Hard gate ${gate.id} failed.`
+      existing.expected = gate.evidence.expectedValue ?? gate.threshold
+      existing.condition = findingCondition(
+        gate.metric,
+        gate.evidence,
+        unitFor(gate.metric),
+      )
+      existing.evidence = findingEvidenceLocation(gate.evidence) ?? existing.evidence
+      existing.detail =
+        gate.evidence.diagnosis ?? `${existing.detail} Hard gate ${gate.id} failed.`
       continue
     }
     const finding: StageFinding = {
@@ -407,8 +433,12 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       metric: gate.metric,
       value: gate.actual,
       unit: unitFor(gate.metric),
-      expected: gate.threshold,
-      detail: `Hard gate ${gate.id} did not meet its required threshold.`,
+      expected: gate.evidence.expectedValue ?? gate.threshold,
+      condition: findingCondition(gate.metric, gate.evidence, unitFor(gate.metric)),
+      evidence: findingEvidenceLocation(gate.evidence),
+      detail:
+        gate.evidence.diagnosis ??
+        `Hard gate ${gate.id} did not meet its required threshold.`,
       source: 'analysis/qor_summary.json',
     }
     findings.push(finding)
@@ -444,7 +474,8 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       label: missingMetric.metricName,
       metric: missingMetric.metricName,
       value: null,
-      detail: missingMetric.reason,
+      evidence: findingEvidenceLocation(missingMetric.evidence),
+      detail: missingMetric.evidence.diagnosis ?? missingMetric.reason,
       source: 'analysis/qor_summary.json',
     })
   }
@@ -460,7 +491,7 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
         label: 'Metric provenance',
         metric: id,
         value: null,
-        detail: 'The metric source reference is invalid.',
+        detail: `Metric ${id} has no valid feature/ source reference in qor_metrics.json.`,
         source: 'analysis/qor_metrics.json',
       })
     }
@@ -474,7 +505,7 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
         label: 'Detail provenance',
         metric: id,
         value: null,
-        detail: 'The detail source reference is invalid.',
+        detail: `Detail ${id} has no valid feature/ source reference in qor_metrics.json.`,
         source: 'analysis/qor_metrics.json',
       })
     }
@@ -496,8 +527,8 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       expected: 'pass',
       detail:
         reasonCodes.length > 0
-          ? `Signoff readiness reason: ${reasonCodes.join(', ')}.`
-          : 'Signoff readiness for this group is not complete.',
+          ? `${titleFromIdentifier(group.id)} is ${group.status}; reported reasons: ${reasonCodes.join(', ')}.`
+          : `${titleFromIdentifier(group.id)} is ${group.status}; no specific reason code was emitted.`,
       source: 'analysis/qor_summary.json',
     })
   }
@@ -514,7 +545,8 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       value: timingIssue.slackNs,
       unit: 'ns',
       expected: '>= 0 ns',
-      detail: `${timingIssue.corner} · ${timingIssue.pathGroup}.`,
+      evidence: `analysis/sta_timing_issues.json (issue_id=${timingIssue.issueId})`,
+      detail: timingIssueDiagnosis(timingIssue),
       source: 'analysis/sta_timing_issues.json',
     })
   }
@@ -531,7 +563,7 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       value: analysis.timingCoverage.missingCornerCount,
       unit: 'count',
       expected: 0,
-      detail: `${analysis.timingCoverage.availableArtifactCount} timing corner artifacts are available.`,
+      detail: `Missing timing corner artifacts: ${analysis.timingCoverage.missingCorners.join(', ')}. ${analysis.timingCoverage.availableArtifactCount} corner artifacts are available.`,
       source: 'analysis/sta_timing_issues.json',
     })
   }
@@ -554,7 +586,7 @@ function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFindi
       metric: 'qor_summary.status',
       value: analysis.summaryStatus,
       expected: 'pass',
-      detail: 'The step summary did not report a passing analysis status.',
+      detail: `${props.selectedStep} qor_summary.json reports status ${analysis.summaryStatus}; no more specific finding was emitted.`,
       source: 'analysis/qor_summary.json',
     })
   }
@@ -572,6 +604,44 @@ function findingValueLabel(finding: StageFinding): string {
 
 function findingExpectedLabel(finding: StageFinding): string {
   return formatFindingScalar(finding.expected ?? null, finding.unit)
+}
+
+function findingEvidenceLocation(
+  evidence: ProjectQorFindingEvidence,
+): string | undefined {
+  if (!evidence.sourceFile) return undefined
+  return evidence.sourceSelector
+    ? `${evidence.sourceFile}#${evidence.sourceSelector}`
+    : evidence.sourceFile
+}
+
+function findingCondition(
+  metric: string,
+  evidence: ProjectQorFindingEvidence,
+  unit?: string,
+): string | undefined {
+  if (!evidence.expectedOperator || evidence.expectedValue === null) return undefined
+  return `${metric} ${evidence.expectedOperator} ${formatFindingScalar(
+    evidence.expectedValue,
+    unit,
+  )}`
+}
+
+function timingIssueDiagnosis(timingIssue: ProjectQorTimingIssue): string {
+  const clockDelay = [
+    timingIssue.launchClockNetworkDelayNs === null
+      ? null
+      : `launch delay ${timingIssue.launchClockNetworkDelayNs} ns`,
+    timingIssue.captureClockNetworkDelayNs === null
+      ? null
+      : `capture delay ${timingIssue.captureClockNetworkDelayNs} ns`,
+    timingIssue.clockNetworkDelayDeltaNs === null
+      ? null
+      : `clock-delay delta ${timingIssue.clockNetworkDelayDeltaNs} ns`,
+  ]
+    .filter((item): item is string => item !== null)
+    .join(', ')
+  return `${timingIssue.corner} / ${timingIssue.pathGroup} / ${timingIssue.checkType}: slack ${timingIssue.slackNs} ns violates the required >= 0 ns.${clockDelay ? ` ${clockDelay}.` : ''}`
 }
 
 function formatFindingScalar(value: number | string | null, unit?: string): string {

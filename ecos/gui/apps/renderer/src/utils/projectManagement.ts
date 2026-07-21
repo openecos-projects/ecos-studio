@@ -1651,7 +1651,7 @@ const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
     'io_pin_count',
     'net_count',
   ],
-  Legal: ['legal_total_movement'],
+  Legal: [],
   Route: [
     'route_dr_total_patch_count',
     'route_dr_total_via_count',

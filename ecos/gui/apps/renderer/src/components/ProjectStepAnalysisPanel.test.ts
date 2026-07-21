@@ -31,7 +31,7 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(source).toContain('analysis.timingIssues')
     expect(source).toContain('analysis.timingCoverage')
     expect(source).not.toContain('readOptionalProjectTextFile')
-    expect(source).not.toContain('feature/')
+    expect(source).toContain('Evidence')
     expect(source).not.toContain('report/')
   })
 
@@ -68,6 +68,9 @@ describe('ProjectStepAnalysisPanel', () => {
     expect(source).toContain('v-for="row in metricWorkspaceRows"')
     expect(source).toContain('class="finding-detail-info"')
     expect(source).toContain('Detail info')
+    expect(source).toContain('Pass condition')
+    expect(source).toContain('Evidence')
+    expect(source).toContain('Diagnosis')
     expect(source).toContain('Actual: {{ findingValueLabel(finding) }}')
     expect(source).toContain('Required metric unavailable')
     expect(source).toContain('Required signoff gate')

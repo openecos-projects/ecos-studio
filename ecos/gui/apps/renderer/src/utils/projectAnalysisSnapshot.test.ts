@@ -14,12 +14,7 @@ describe('ProjectAnalysisSnapshot', () => {
       artifactStatus: 'available',
       summaryArtifactStatus: 'available',
       hotspotArtifactStatus: 'missing',
-      missingMetrics: [
-        {
-          metricName: 'place_overflow',
-          reason: 'Placement overflow data was not emitted.',
-        },
-      ],
+      missingMetrics: [],
     })
     expect(snapshot.steps.Harden?.hardGateFailures).toEqual([
       expect.objectContaining({
@@ -27,6 +22,15 @@ describe('ProjectAnalysisSnapshot', () => {
         metric: 'harden_artifact_missing_count',
         threshold: 0,
         actual: 2,
+        evidence: {
+          sourceFile: 'feature/Harden.step.json',
+          sourceSelector: '/harden/artifact_missing_count',
+          expectedOperator: '==',
+          expectedValue: 0,
+          diagnosis:
+            'Observed harden_artifact_missing_count = 2; required condition is == 0.',
+          availability: null,
+        },
       }),
     ])
     expect(snapshot.steps.STA).toMatchObject({
@@ -39,6 +43,7 @@ describe('ProjectAnalysisSnapshot', () => {
       ],
       timingCoverage: {
         missingCornerCount: 1,
+        missingCorners: ['MIN_m40/Cbest'],
         availableArtifactCount: 0,
       },
     })
@@ -61,15 +66,10 @@ function workspaceInput(): ProjectQorWorkspaceInput {
     stepSummaryTexts: {
       Place: JSON.stringify({
         schema_version: 3,
-        status: 'incomplete',
+        status: 'pass',
         blocking_issues: [],
         hard_gates: [],
-        missing_metrics: [
-          {
-            metric_id: 'place_overflow',
-            reason: 'Placement overflow data was not emitted.',
-          },
-        ],
+        missing_metrics: [],
       }),
       STA: JSON.stringify({
         schema_version: 3,
@@ -96,6 +96,16 @@ function workspaceInput(): ProjectQorWorkspaceInput {
             metric: 'harden_artifact_missing_count',
             threshold: 0,
             actual: 2,
+            evidence: {
+              source: {
+                kind: 'feature',
+                path: 'feature/Harden.step.json',
+                selector: '/harden/artifact_missing_count',
+              },
+              expected: { operator: '==', value: 0 },
+              diagnosis:
+                'Observed harden_artifact_missing_count = 2; required condition is == 0.',
+            },
           },
         ],
       }),

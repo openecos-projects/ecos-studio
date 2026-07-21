@@ -113,12 +113,14 @@ export interface ProjectQorBlockingIssue {
   displayName: string
   value: number | string | null
   reason: string
+  evidence: ProjectQorFindingEvidence
 }
 
 export interface ProjectQorMissingMetric {
   step: FlowStep
   metricName: string
   reason: string
+  evidence: ProjectQorFindingEvidence
 }
 
 export interface ProjectQorHardGateFailure {
@@ -128,6 +130,16 @@ export interface ProjectQorHardGateFailure {
   metric: string
   threshold: number | string | null
   actual: number | string | null
+  evidence: ProjectQorFindingEvidence
+}
+
+export interface ProjectQorFindingEvidence {
+  sourceFile: string | null
+  sourceSelector: string | null
+  expectedOperator: string | null
+  expectedValue: number | string | null
+  diagnosis: string | null
+  availability: string | null
 }
 
 export interface ProjectQorHotspot {
@@ -323,6 +335,7 @@ export interface ProjectQorTimingCoverage {
   workspaceId: string
   workspaceName: string
   missingCornerCount: number
+  missingCorners: string[]
   availableArtifactCount: number
 }
 
@@ -659,13 +672,6 @@ const QOR_METRIC_REGISTRY: Record<string, QorMetricDefinition> = {
     dimension: 'clock_robustness_dfm',
     polarity: 'lower_is_better',
   },
-  total_movement: {
-    metricName: 'legal_total_movement',
-    displayName: 'Legal Total Movement',
-    unit: 'um',
-    dimension: 'routability_physical',
-    polarity: 'lower_is_better',
-  },
   wire_len: {
     metricName: 'route_wirelength',
     displayName: 'Route Wirelength',
@@ -940,7 +946,6 @@ const METRIC_FAIL_VALUES: Record<string, number> = {
   place_congestion_egr_overflow_max: 20,
   place_rudy_utilization_max: 1,
   place_lutrudy_utilization_max: 1,
-  legal_total_movement: 1000,
   route_dr_total_violation_count: 50,
   route_dr_total_patch_count: 100,
   route_dr_total_wirelength: 6000,
@@ -2931,6 +2936,7 @@ export function normalizeStaTimingIssues(
           workspaceId: workspace.workspaceId,
           workspaceName: workspace.workspaceName,
           missingCornerCount,
+          missingCorners: uniqueStrings(record.missing_corners),
           availableArtifactCount: artifactPaths.length,
         }
       : null,
@@ -3055,6 +3061,7 @@ export function normalizeQorSummaryBlockingIssues(
         displayName: stringValue(issue.display_name) ?? metric,
         value: qorSummaryIssueValue(issue.value),
         reason: stringValue(issue.reason) ?? 'QoR blocking issue',
+        evidence: qorFindingEvidence(issue.evidence),
       },
     ]
   })
@@ -3078,6 +3085,7 @@ export function normalizeQorSummaryMissingMetrics(
       step,
       metricName,
       reason: stringValue(item.reason) ?? 'The required metric is unavailable.',
+      evidence: qorFindingEvidence(item.evidence),
     })
   }
   return [...missingByMetric.values()].sort((left, right) =>
@@ -3105,9 +3113,25 @@ export function normalizeQorSummaryHardGateFailures(
       metric,
       threshold: qorSummaryIssueValue(item.threshold),
       actual: qorSummaryIssueValue(item.actual),
+      evidence: qorFindingEvidence(item.evidence),
     })
   }
   return [...gatesById.values()].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function qorFindingEvidence(value: unknown): ProjectQorFindingEvidence {
+  const evidence = isRecord(value) ? value : null
+  const source = evidence && isRecord(evidence.source) ? evidence.source : null
+  const expected = evidence && isRecord(evidence.expected) ? evidence.expected : null
+  const location = relativeQorEvidenceSource(source)
+  return {
+    sourceFile: location?.path ?? null,
+    sourceSelector: location?.selector ?? null,
+    expectedOperator: stringValue(expected?.operator),
+    expectedValue: qorSummaryIssueValue(expected?.value),
+    diagnosis: stringValue(evidence?.diagnosis),
+    availability: stringValue(evidence?.availability),
+  }
 }
 
 export function normalizeQorAnalysisIntegrity(
@@ -3272,6 +3296,31 @@ export function relativeFeatureSourcePath(source: unknown): string | null {
     return null
   }
   return path
+}
+
+function relativeQorEvidenceSource(
+  source: Record<string, unknown> | null,
+): { path: string; selector: string | null } | null {
+  if (!source) return null
+  const kind = stringValue(source.kind)
+  const path = stringValue(source.path)
+  const selector = source.selector
+  const isFeature = kind === 'feature' && path?.startsWith('feature/')
+  const isAnalysis =
+    kind === 'analysis' &&
+    path !== null &&
+    (path.startsWith('analysis/') || path.includes('_ecc/analysis/'))
+  if (
+    !path ||
+    (!isFeature && !isAnalysis) ||
+    path.startsWith('/') ||
+    path.split('/').includes('..') ||
+    typeof selector !== 'string' ||
+    (selector !== '' && !selector.startsWith('/'))
+  ) {
+    return null
+  }
+  return { path, selector: selector || null }
 }
 
 function displayNameFromMetricName(metricName: string): string {
