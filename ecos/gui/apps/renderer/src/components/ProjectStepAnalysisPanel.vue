@@ -2,19 +2,21 @@
   <section class="stage-workbench" aria-label="Project Step Analysis">
     <aside class="stage-rail" aria-label="Flow stages">
       <span class="stage-rail-label">Flow Stages</span>
-      <button
-        v-for="stage in steps"
-        :key="stage.step"
-        type="button"
-        class="stage-rail-item"
-        :class="{ selected: stage.step === selectedStep }"
-        :aria-pressed="stage.step === selectedStep"
-        @click="emit('select-step', stage.step)"
-      >
-        <strong>{{ stage.step }}</strong>
-        <span>{{ stage.successCount }}/{{ stage.configuredCount }}</span>
-        <i v-if="stage.missingCount > 0">{{ stage.missingCount }}</i>
-      </button>
+      <div class="stage-rail-list">
+        <button
+          v-for="stage in steps"
+          :key="stage.step"
+          type="button"
+          class="stage-rail-item"
+          :class="{ selected: stage.step === selectedStep }"
+          :aria-pressed="stage.step === selectedStep"
+          @click="emit('select-step', stage.step)"
+        >
+          <strong>{{ stage.step }}</strong>
+          <span>{{ stage.successCount }}/{{ stage.configuredCount }}</span>
+          <i v-if="stage.missingCount > 0">{{ stage.missingCount }}</i>
+        </button>
+      </div>
     </aside>
 
     <div class="stage-main">
@@ -43,49 +45,48 @@
       <section class="stage-metric-surface" aria-label="Selected step V3 metrics">
         <header class="stage-surface-header">
           <span>Workspace Metrics</span>
-          <small>{{ selectedMetrics.length }} primary and secondary metrics</small>
+          <small>{{ selectedMetrics.length }} step key metrics</small>
         </header>
         <div
           v-if="selectedMetrics.length > 0"
           class="stage-metric-table"
-          :style="{ '--metric-count': String(selectedMetrics.length) }"
+          :style="{ '--workspace-count': String(workspaceMetricColumns.length) }"
         >
-          <div class="stage-metric-heading workspace">Workspace</div>
-          <div
-            v-for="metric in selectedMetrics"
-            :key="metric.id"
-            class="stage-metric-heading"
-            :title="metric.hint"
+          <div class="stage-metric-heading metric">Metric</div>
+          <button
+            v-for="workspace in workspaceMetricColumns"
+            :key="workspace.workspaceId"
+            type="button"
+            class="stage-workspace-cell stage-workspace-heading"
+            :class="{ selected: workspace.workspaceId === selectedWorkspaceId }"
+            :title="workspace.workspaceName"
+            @click="emit('select-workspace', workspace.workspaceId)"
           >
-            {{ metric.label }}
-          </div>
-          <template v-for="row in workspaceMetricRows" :key="row.workspaceId">
-            <button
-              type="button"
-              class="stage-workspace-cell"
-              :class="{ selected: row.workspaceId === selectedWorkspaceId }"
-              @click="emit('select-workspace', row.workspaceId)"
-            >
-              {{ row.workspaceName }}
-            </button>
+            {{ workspace.workspaceName }}
+          </button>
+          <template v-for="row in metricWorkspaceRows" :key="row.metric.id">
+            <div class="stage-metric-heading metric" :title="row.metric.hint">
+              {{ row.metric.label }}
+            </div>
             <button
               v-for="cell in row.cells"
-              :key="`${row.workspaceId}-${cell.metric.id}`"
+              :key="`${cell.workspaceId}-${row.metric.id}`"
               type="button"
               class="stage-metric-cell"
               :class="cell.point.state"
-              :title="metricCellTitle(row.workspaceName, cell.metric, cell.point)"
-              @click="emit('select-workspace', row.workspaceId)"
+              :title="metricCellTitle(cell.workspaceName, row.metric, cell.point)"
+              @click="emit('select-workspace', cell.workspaceId)"
             >
               <strong>{{ cell.point.label }}</strong>
             </button>
           </template>
         </div>
-        <p v-else class="stage-empty">No V3 metrics are available for this stage.</p>
+        <p v-else class="stage-empty">
+          No step-specific V3 metrics are available for this stage.
+        </p>
       </section>
 
       <section
-        v-if="selectedDetails.length > 0"
         class="stage-detail-surface"
         aria-label="Selected workspace detail summaries"
       >
@@ -93,7 +94,7 @@
           <span>Selected Workspace Details</span>
           <small>{{ selectedWorkspace?.workspaceName ?? 'No workspace selected' }}</small>
         </header>
-        <div class="stage-detail-list">
+        <div v-if="selectedDetails.length > 0" class="stage-detail-list">
           <article
             v-for="detail in selectedDetails"
             :key="detail.id"
@@ -103,41 +104,54 @@
               <span>{{ detailLabel(detail.presentation) }}</span>
               <small>{{ detail.id }}</small>
             </header>
-            <div v-if="detailCoverage(detail)" class="detail-coverage">
-              <span
-                >{{ detailCoverage(detail)?.available }}/{{
-                  detailCoverage(detail)?.expected
-                }}
-                corners</span
-              >
-              <strong :class="detailCoverage(detail)?.status">{{
-                detailCoverage(detail)?.status
-              }}</strong>
+            <div class="stage-detail-content">
+              <div v-if="detailCoverage(detail)" class="detail-coverage">
+                <span
+                  >{{ detailCoverage(detail)?.available }}/{{
+                    detailCoverage(detail)?.expected
+                  }}
+                  corners</span
+                >
+                <strong :class="detailCoverage(detail)?.status">{{
+                  detailCoverage(detail)?.status
+                }}</strong>
+              </div>
+              <div v-if="detailRows(detail).length > 0" class="detail-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th
+                        v-for="field in detailFields(detail)"
+                        :key="field"
+                        :title="fieldLabel(field)"
+                      >
+                        {{ fieldLabel(field) }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(row, index) in detailRows(detail)"
+                      :key="detailRowKey(detail, row, index)"
+                    >
+                      <td
+                        v-for="field in detailFields(detail)"
+                        :key="field"
+                        :title="detailValue(row, field)"
+                      >
+                        {{ detailValue(row, field) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else class="stage-empty">{{ detailEmptyMessage(detail) }}</p>
             </div>
-            <div v-if="detailRows(detail).length > 0" class="detail-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th v-for="field in detailFields(detail)" :key="field">
-                      {{ fieldLabel(field) }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(row, index) in detailRows(detail)"
-                    :key="detailRowKey(detail, row, index)"
-                  >
-                    <td v-for="field in detailFields(detail)" :key="field">
-                      {{ detailValue(row, field) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-else class="stage-empty">{{ detailEmptyMessage(detail) }}</p>
           </article>
         </div>
+        <p v-else class="stage-empty">
+          No bounded detail data is available for this stage.
+        </p>
       </section>
     </div>
 
@@ -148,11 +162,41 @@
       </header>
       <ul v-if="findings.length > 0">
         <li v-for="finding in findings" :key="finding.id" :class="finding.severity">
-          <button type="button" @click="emit('select-workspace', finding.workspaceId)">
+          <button
+            type="button"
+            class="finding-select"
+            @click="emit('select-workspace', finding.workspaceId)"
+          >
             <span>{{ finding.workspaceName }}</span>
             <strong>{{ finding.label }}</strong>
+            <em>Actual: {{ findingValueLabel(finding) }}</em>
             <small>{{ finding.detail }}</small>
           </button>
+          <details class="finding-detail-info">
+            <summary>Detail info</summary>
+            <dl>
+              <div>
+                <dt>Type</dt>
+                <dd>{{ finding.kind }}</dd>
+              </div>
+              <div>
+                <dt>Metric</dt>
+                <dd>{{ finding.metric }}</dd>
+              </div>
+              <div>
+                <dt>Actual</dt>
+                <dd>{{ findingValueLabel(finding) }}</dd>
+              </div>
+              <div v-if="finding.expected !== undefined && finding.expected !== null">
+                <dt>Expected</dt>
+                <dd>{{ findingExpectedLabel(finding) }}</dd>
+              </div>
+              <div>
+                <dt>Source</dt>
+                <dd>{{ finding.source }}</dd>
+              </div>
+            </dl>
+          </details>
         </li>
       </ul>
       <p v-else class="stage-empty">No blocking issues or hotspots.</p>
@@ -174,6 +218,21 @@ import type {
   ProjectQorTrendSummary,
 } from '@/utils/projectQorTrend'
 
+interface StageFinding {
+  id: string
+  workspaceId: string
+  workspaceName: string
+  severity: 'info' | 'warning' | 'critical'
+  kind: string
+  label: string
+  metric: string
+  value: number | string | null
+  unit?: string
+  expected?: number | string | null
+  detail: string
+  source: string
+}
+
 const props = defineProps<{
   steps: ProjectStepCompareSummary[]
   workspaceSummaries: ProjectWorkspaceSummary[]
@@ -193,15 +252,23 @@ const selectedStage = computed(
 const selectedMetrics = computed<ProjectStepCompareMetric[]>(
   () => selectedStage.value?.metrics ?? [],
 )
-const workspaceMetricRows = computed(() =>
+const workspaceMetricColumns = computed(() =>
   props.workspaceSummaries.map((summary) => ({
     workspaceId: summary.workspaceId,
     workspaceName: summary.workspaceName,
-    cells: selectedMetrics.value.map((metric) => ({
+    summary,
+  })),
+)
+const metricWorkspaceRows = computed(() =>
+  selectedMetrics.value.map((metric) => ({
+    metric,
+    cells: workspaceMetricColumns.value.map((workspace) => ({
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
       metric,
       point:
-        metric.points.find((point) => point.workspaceId === summary.workspaceId) ??
-        emptyPoint(summary),
+        metric.points.find((point) => point.workspaceId === workspace.workspaceId) ??
+        emptyPoint(workspace.summary),
     })),
   })),
 )
@@ -250,50 +317,275 @@ const selectedSignoffStatus = computed(() => {
   if (statuses.every((status) => status === 'pass')) return 'pass'
   return 'unavailable'
 })
-const findings = computed(() =>
+const findings = computed<StageFinding[]>(() =>
   props.workspaceSummaries
-    .flatMap((summary) => {
-      const analysis = summary.analysis.steps[props.selectedStep]
-      if (!analysis) return []
-      return [
-        ...analysis.blockingIssues.map((issue) => ({
-          id: `blocking-${summary.workspaceId}-${issue.metric}`,
-          workspaceId: summary.workspaceId,
-          workspaceName: summary.workspaceName,
-          severity: 'critical' as const,
-          label: issue.displayName,
-          detail: issue.reason,
-        })),
-        ...analysis.hotspots.map((hotspot) => ({
-          id: `hotspot-${summary.workspaceId}-${hotspot.metric}-${hotspot.kind}`,
-          workspaceId: summary.workspaceId,
-          workspaceName: summary.workspaceName,
-          severity: hotspot.severity,
-          label: hotspot.displayName,
-          detail: hotspot.description,
-        })),
-        ...analysis.integrityIssues.flatMap((issue) => [
-          ...issue.invalidMetricSourceIds.map((id) => ({
-            id: `integrity-metric-${summary.workspaceId}-${id}`,
-            workspaceId: summary.workspaceId,
-            workspaceName: summary.workspaceName,
-            severity: 'warning' as const,
-            label: 'Metric provenance',
-            detail: id,
-          })),
-          ...issue.invalidDetailIds.map((id) => ({
-            id: `integrity-detail-${summary.workspaceId}-${id}`,
-            workspaceId: summary.workspaceId,
-            workspaceName: summary.workspaceName,
-            severity: 'warning' as const,
-            label: 'Detail provenance',
-            detail: id,
-          })),
-        ]),
-      ]
-    })
+    .flatMap((summary) => stageFindingsForWorkspace(summary))
+    .sort((left, right) => findingSeverityRank(left) - findingSeverityRank(right))
     .slice(0, 24),
 )
+
+function stageFindingsForWorkspace(summary: ProjectWorkspaceSummary): StageFinding[] {
+  const analysis = summary.analysis.steps[props.selectedStep]
+  if (!analysis) return []
+
+  const unitFor = (metric: string) =>
+    analysis.metrics.find((item) => item.metricName === metric)?.unit
+  const findings: StageFinding[] = []
+  const findingsByMetric = new Map<string, StageFinding>()
+
+  if (analysis.flowStatus === 'success') {
+    for (const artifact of [
+      {
+        status: analysis.artifactStatus,
+        label: 'QoR metrics artifact',
+        source: 'analysis/qor_metrics.json',
+      },
+      {
+        status: analysis.summaryArtifactStatus,
+        label: 'QoR summary artifact',
+        source: 'analysis/qor_summary.json',
+      },
+      {
+        status: analysis.hotspotArtifactStatus,
+        label: 'QoR hotspots artifact',
+        source: 'analysis/qor_hotspots.json',
+      },
+    ]) {
+      if (artifact.status === 'available') continue
+      findings.push({
+        id: `artifact-${summary.workspaceId}-${artifact.source}`,
+        workspaceId: summary.workspaceId,
+        workspaceName: summary.workspaceName,
+        severity: artifact.status === 'invalid' ? 'critical' : 'warning',
+        kind: 'Analysis artifact',
+        label: artifact.label,
+        metric: artifact.source,
+        value: artifact.status,
+        expected: 'available',
+        detail:
+          artifact.status === 'invalid'
+            ? 'The artifact does not match the current analysis schema.'
+            : 'The successful step did not produce this required analysis artifact.',
+        source: artifact.source,
+      })
+    }
+  }
+
+  for (const issue of analysis.blockingIssues) {
+    const finding: StageFinding = {
+      id: `blocking-${summary.workspaceId}-${issue.metric}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: 'critical',
+      kind: 'Blocking issue',
+      label: issue.displayName,
+      metric: issue.metric,
+      value: issue.value,
+      unit: unitFor(issue.metric),
+      detail: issue.reason,
+      source: 'analysis/qor_summary.json',
+    }
+    findings.push(finding)
+    findingsByMetric.set(issue.metric, finding)
+  }
+
+  for (const gate of analysis.hardGateFailures) {
+    const existing = findingsByMetric.get(gate.metric)
+    if (existing) {
+      existing.kind = `${existing.kind} / failed hard gate`
+      existing.expected = gate.threshold
+      existing.detail = `${existing.detail} Hard gate ${gate.id} failed.`
+      continue
+    }
+    const finding: StageFinding = {
+      id: `hard-gate-${summary.workspaceId}-${gate.id}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: 'critical',
+      kind: gate.kind ? `Failed hard gate: ${gate.kind}` : 'Failed hard gate',
+      label: titleFromIdentifier(gate.id),
+      metric: gate.metric,
+      value: gate.actual,
+      unit: unitFor(gate.metric),
+      expected: gate.threshold,
+      detail: `Hard gate ${gate.id} did not meet its required threshold.`,
+      source: 'analysis/qor_summary.json',
+    }
+    findings.push(finding)
+    findingsByMetric.set(gate.metric, finding)
+  }
+
+  for (const hotspot of analysis.hotspots) {
+    if (findingsByMetric.has(hotspot.metric)) continue
+    const finding: StageFinding = {
+      id: `hotspot-${summary.workspaceId}-${hotspot.metric}-${hotspot.kind}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: hotspot.severity,
+      kind: `Hotspot: ${hotspot.kind}`,
+      label: hotspot.displayName,
+      metric: hotspot.metric,
+      value: hotspot.value,
+      unit: unitFor(hotspot.metric),
+      detail: hotspot.description,
+      source: hotspot.sourceFile,
+    }
+    findings.push(finding)
+    findingsByMetric.set(hotspot.metric, finding)
+  }
+
+  for (const missingMetric of analysis.missingMetrics) {
+    findings.push({
+      id: `missing-metric-${summary.workspaceId}-${missingMetric.metricName}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: 'warning',
+      kind: 'Required metric unavailable',
+      label: missingMetric.metricName,
+      metric: missingMetric.metricName,
+      value: null,
+      detail: missingMetric.reason,
+      source: 'analysis/qor_summary.json',
+    })
+  }
+
+  for (const issue of analysis.integrityIssues) {
+    for (const id of issue.invalidMetricSourceIds) {
+      findings.push({
+        id: `integrity-metric-${summary.workspaceId}-${id}`,
+        workspaceId: summary.workspaceId,
+        workspaceName: summary.workspaceName,
+        severity: 'warning',
+        kind: 'Metric provenance',
+        label: 'Metric provenance',
+        metric: id,
+        value: null,
+        detail: 'The metric source reference is invalid.',
+        source: 'analysis/qor_metrics.json',
+      })
+    }
+    for (const id of issue.invalidDetailIds) {
+      findings.push({
+        id: `integrity-detail-${summary.workspaceId}-${id}`,
+        workspaceId: summary.workspaceId,
+        workspaceName: summary.workspaceName,
+        severity: 'warning',
+        kind: 'Detail provenance',
+        label: 'Detail provenance',
+        metric: id,
+        value: null,
+        detail: 'The detail source reference is invalid.',
+        source: 'analysis/qor_metrics.json',
+      })
+    }
+  }
+
+  for (const group of summary.analysis.signoffReadiness.groups.filter(
+    (item) => item.step === props.selectedStep && item.status !== 'pass',
+  )) {
+    const reasonCodes = summary.analysis.signoffReadiness.reasonCodes
+    findings.push({
+      id: `signoff-${summary.workspaceId}-${group.id}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: group.status === 'blocked' ? 'critical' : 'warning',
+      kind: group.gate ? 'Required signoff gate' : 'Signoff readiness',
+      label: titleFromIdentifier(group.id),
+      metric: group.id,
+      value: group.status,
+      expected: 'pass',
+      detail:
+        reasonCodes.length > 0
+          ? `Signoff readiness reason: ${reasonCodes.join(', ')}.`
+          : 'Signoff readiness for this group is not complete.',
+      source: 'analysis/qor_summary.json',
+    })
+  }
+
+  for (const timingIssue of analysis.timingIssues) {
+    findings.push({
+      id: `timing-${summary.workspaceId}-${timingIssue.issueId}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: timingIssue.severity,
+      kind: `Timing path: ${timingIssue.analysisType}`,
+      label: `${timingIssue.analysisType.toUpperCase()} ${timingIssue.checkType}`,
+      metric: timingIssue.issueId,
+      value: timingIssue.slackNs,
+      unit: 'ns',
+      expected: '>= 0 ns',
+      detail: `${timingIssue.corner} · ${timingIssue.pathGroup}.`,
+      source: 'analysis/sta_timing_issues.json',
+    })
+  }
+
+  if (analysis.timingCoverage) {
+    findings.push({
+      id: `timing-coverage-${summary.workspaceId}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: 'warning',
+      kind: 'STA timing coverage',
+      label: 'STA timing corners missing',
+      metric: 'sta_missing_corner_count',
+      value: analysis.timingCoverage.missingCornerCount,
+      unit: 'count',
+      expected: 0,
+      detail: `${analysis.timingCoverage.availableArtifactCount} timing corner artifacts are available.`,
+      source: 'analysis/sta_timing_issues.json',
+    })
+  }
+
+  const hasSummaryEvidence = findings.some(
+    (finding) => finding.source === 'analysis/qor_summary.json',
+  )
+  if (
+    analysis.summaryStatus &&
+    analysis.summaryStatus !== 'pass' &&
+    !hasSummaryEvidence
+  ) {
+    findings.push({
+      id: `summary-status-${summary.workspaceId}-${props.selectedStep}`,
+      workspaceId: summary.workspaceId,
+      workspaceName: summary.workspaceName,
+      severity: analysis.summaryStatus === 'blocked' ? 'critical' : 'warning',
+      kind: 'Step analysis status',
+      label: `${props.selectedStep} analysis ${analysis.summaryStatus}`,
+      metric: 'qor_summary.status',
+      value: analysis.summaryStatus,
+      expected: 'pass',
+      detail: 'The step summary did not report a passing analysis status.',
+      source: 'analysis/qor_summary.json',
+    })
+  }
+
+  return findings
+}
+
+function findingSeverityRank(finding: StageFinding): number {
+  return { critical: 0, warning: 1, info: 2 }[finding.severity]
+}
+
+function findingValueLabel(finding: StageFinding): string {
+  return formatFindingScalar(finding.value, finding.unit)
+}
+
+function findingExpectedLabel(finding: StageFinding): string {
+  return formatFindingScalar(finding.expected ?? null, finding.unit)
+}
+
+function formatFindingScalar(value: number | string | null, unit?: string): string {
+  if (value === null) return 'Not reported'
+  if (typeof value === 'string') return value
+  const absolute = Math.abs(value)
+  const digits = absolute > 0 && absolute < 0.01 ? 6 : absolute < 1 ? 4 : 3
+  const label = String(Number(value.toFixed(digits)))
+  return unit ? `${label} ${unit}` : label
+}
+
+function titleFromIdentifier(value: string): string {
+  return value.replace(/[_-]+/g, ' ')
+}
 
 function emptyPoint(summary: ProjectWorkspaceSummary): ProjectMetricPoint {
   return {
@@ -485,6 +777,7 @@ function stringValue(value: unknown): string | null {
 .stage-workbench {
   display: grid;
   grid-template-columns: 116px minmax(0, 1fr) minmax(176px, 0.28fr);
+  height: 100%;
   min-height: 0;
   border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   border-radius: 8px;
@@ -495,15 +788,24 @@ function stringValue(value: unknown): string | null {
 .stage-rail,
 .findings-rail {
   min-width: 0;
+  min-height: 0;
   padding: 10px 8px;
   background: color-mix(in srgb, var(--bg-primary) 65%, transparent);
 }
 
 .stage-rail {
   display: grid;
-  align-content: start;
-  gap: 4px;
+  grid-template-rows: 16px minmax(0, 1fr);
   border-right: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+}
+
+.stage-rail-list {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .stage-rail-label,
@@ -522,7 +824,10 @@ function stringValue(value: unknown): string | null {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 6px;
-  min-height: 36px;
+  box-sizing: border-box;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
   border: 0;
   border-left: 2px solid transparent;
   padding: 6px 6px 6px 8px;
@@ -530,6 +835,7 @@ function stringValue(value: unknown): string | null {
   background: transparent;
   cursor: pointer;
   text-align: left;
+  overflow: hidden;
 }
 
 .stage-rail-item:hover,
@@ -543,14 +849,20 @@ function stringValue(value: unknown): string | null {
 }
 
 .stage-rail-item strong {
+  overflow: hidden;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-rail-item span,
 .stage-rail-item i {
   align-self: center;
+  overflow: hidden;
   font-size: 10px;
   font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-rail-item i {
@@ -560,9 +872,10 @@ function stringValue(value: unknown): string | null {
 
 .stage-main {
   display: grid;
-  grid-template-rows: auto minmax(170px, 0.85fr) minmax(0, 1fr);
+  grid-template-rows: 64px minmax(0, 1.06fr) minmax(0, 0.94fr);
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .stage-header,
@@ -576,9 +889,12 @@ function stringValue(value: unknown): string | null {
 }
 
 .stage-header {
-  min-height: 58px;
+  box-sizing: border-box;
+  height: 64px;
+  min-height: 64px;
   padding: 10px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  overflow: hidden;
 }
 
 .stage-status-row {
@@ -623,8 +939,10 @@ function stringValue(value: unknown): string | null {
 .stage-metric-surface,
 .stage-detail-surface {
   display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
   min-height: 0;
   padding: 10px 12px;
+  gap: 8px;
 }
 
 .stage-metric-surface {
@@ -632,20 +950,32 @@ function stringValue(value: unknown): string | null {
 }
 
 .stage-surface-header {
-  min-height: 20px;
-  margin-bottom: 8px;
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
   font-size: 12px;
   font-weight: 760;
+  overflow: hidden;
+}
+
+.stage-surface-header > span,
+.stage-surface-header > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-metric-table {
   display: grid;
-  grid-template-columns: minmax(116px, 0.8fr) repeat(
-      var(--metric-count),
-      minmax(92px, 1fr)
+  grid-template-columns: minmax(160px, 1.35fr) repeat(
+      var(--workspace-count),
+      minmax(104px, 1fr)
     );
   min-height: 0;
+  min-width: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
   border-radius: 6px;
 }
@@ -653,8 +983,11 @@ function stringValue(value: unknown): string | null {
 .stage-metric-heading,
 .stage-workspace-cell,
 .stage-metric-cell {
+  box-sizing: border-box;
   min-width: 0;
-  min-height: 36px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
   border: 0;
   border-right: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 64%, transparent);
@@ -663,6 +996,9 @@ function stringValue(value: unknown): string | null {
   color: var(--text-secondary);
   font-size: 10px;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-metric-heading {
@@ -670,9 +1006,22 @@ function stringValue(value: unknown): string | null {
   text-transform: uppercase;
 }
 
+.stage-metric-heading.metric {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-secondary);
+}
+
 .stage-workspace-cell,
 .stage-metric-cell {
   cursor: pointer;
+}
+
+.stage-workspace-heading {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 760;
 }
 
 .stage-workspace-cell:hover,
@@ -709,24 +1058,68 @@ function stringValue(value: unknown): string | null {
   gap: 8px;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .stage-detail-view {
+  display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
+  box-sizing: border-box;
+  height: 176px;
+  min-height: 176px;
+  max-height: 176px;
+  gap: 6px;
   border-top: 1px solid color-mix(in srgb, var(--border-color) 66%, transparent);
-  padding-top: 8px;
+  padding-top: 6px;
+  overflow: hidden;
 }
 
 .stage-detail-view header {
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
   font-size: 11px;
   font-weight: 760;
+  overflow: hidden;
+}
+
+.stage-detail-view header span,
+.stage-detail-view header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-detail-content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  gap: 6px;
+}
+
+.stage-detail-content > .detail-table-wrap:first-child,
+.stage-detail-content > .stage-empty:first-child {
+  grid-row: 1 / -1;
 }
 
 .detail-coverage {
+  box-sizing: border-box;
+  min-height: 20px;
+  max-height: 20px;
   display: flex;
   justify-content: space-between;
-  margin: 6px 0;
+  gap: 8px;
+  margin: 0;
   color: var(--text-secondary);
   font-size: 10px;
+  overflow: hidden;
+}
+
+.detail-coverage span,
+.detail-coverage strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-coverage strong.pass {
@@ -741,7 +1134,9 @@ function stringValue(value: unknown): string | null {
 }
 
 .detail-table-wrap {
+  min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 1px solid color-mix(in srgb, var(--border-color) 68%, transparent);
   border-radius: 6px;
 }
@@ -754,10 +1149,16 @@ table {
 
 th,
 td {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   min-width: 92px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent);
   padding: 6px 7px;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -768,26 +1169,49 @@ th {
 }
 
 .findings-rail {
+  display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
+  gap: 8px;
   border-left: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  overflow: hidden;
 }
 
 .findings-rail header {
-  margin-bottom: 8px;
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
   font-size: 12px;
   font-weight: 760;
 }
 
 .findings-rail ul {
   display: grid;
+  align-content: start;
   gap: 6px;
   margin: 0;
+  min-height: 0;
   padding: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   list-style: none;
 }
 
+.findings-rail > .stage-empty {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .findings-rail li {
+  position: relative;
+  box-sizing: border-box;
+  height: 108px;
+  min-height: 108px;
+  max-height: 108px;
   border-left: 2px solid var(--text-secondary);
   background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  overflow: visible;
 }
 
 .findings-rail li.critical {
@@ -797,9 +1221,14 @@ th {
   border-left-color: var(--warning-color);
 }
 
-.findings-rail button {
+.findings-rail .finding-select {
   display: grid;
+  grid-template-rows: 12px 14px 13px minmax(0, 1fr);
   width: 100%;
+  box-sizing: border-box;
+  height: 78px;
+  min-height: 78px;
+  max-height: 78px;
   gap: 3px;
   border: 0;
   padding: 7px 8px;
@@ -807,21 +1236,103 @@ th {
   background: transparent;
   cursor: pointer;
   text-align: left;
+  overflow: hidden;
 }
 
-.findings-rail button:hover {
+.findings-rail .finding-select:hover {
   background: var(--success-bg);
 }
-.findings-rail button span {
+.findings-rail .finding-select span {
+  overflow: hidden;
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.findings-rail button strong {
+.findings-rail .finding-select strong {
   color: var(--text-primary);
+  overflow: hidden;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.findings-rail button small {
+.findings-rail .finding-select em {
+  color: var(--warning-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow: hidden;
+  font-size: 10px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.findings-rail li.critical .finding-select em {
+  color: var(--error-color);
+}
+.findings-rail .finding-select small {
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 10px;
   line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.finding-detail-info {
+  box-sizing: border-box;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 54%, transparent);
+  color: var(--text-secondary);
+  font-size: 10px;
+  overflow: hidden;
+}
+
+.finding-detail-info[open] {
+  position: absolute;
+  z-index: 2;
+  top: 78px;
+  right: 0;
+  left: 0;
+  height: 150px;
+  max-height: 150px;
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 18px color-mix(in srgb, #000 36%, transparent);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.finding-detail-info summary {
+  box-sizing: border-box;
+  height: 29px;
+  min-height: 29px;
+  padding: 6px 8px;
+  color: var(--success-color);
+  cursor: pointer;
+  font-weight: 760;
+}
+
+.finding-detail-info dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px 8px;
+}
+
+.finding-detail-info dl div {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.finding-detail-info dt {
+  color: var(--text-secondary);
+}
+
+.finding-detail-info dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .stage-empty {

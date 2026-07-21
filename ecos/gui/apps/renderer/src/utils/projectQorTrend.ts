@@ -115,6 +115,21 @@ export interface ProjectQorBlockingIssue {
   reason: string
 }
 
+export interface ProjectQorMissingMetric {
+  step: FlowStep
+  metricName: string
+  reason: string
+}
+
+export interface ProjectQorHardGateFailure {
+  step: FlowStep
+  id: string
+  kind: string | null
+  metric: string
+  threshold: number | string | null
+  actual: number | string | null
+}
+
 export interface ProjectQorHotspot {
   step: FlowStep
   kind: string
@@ -1415,10 +1430,10 @@ function buildUnsupportedModules(
     Object.values(workspace.stepMetricTexts).some(hasStandardQorMetricsText),
   )
   const hasStandardQorSummary = inputs.some((workspace) =>
-    Object.values(workspace.stepSummaryTexts ?? {}).some(hasStandardQorSummaryText),
+    Object.values(workspace.stepSummaryTexts ?? {}).some(hasCurrentQorSummaryText),
   )
   const hasStandardQorHotspots = inputs.some((workspace) =>
-    Object.values(workspace.stepHotspotTexts ?? {}).some(hasStandardQorHotspotText),
+    Object.values(workspace.stepHotspotTexts ?? {}).some(hasCurrentQorHotspotText),
   )
   const records = workspaces.flatMap((workspace) => workspace.records)
   const hasStaAnalysis = records.some((record) => record.step === 'STA')
@@ -1541,10 +1556,8 @@ function buildWorkspaceDataQuality(
   missingMetricCoverage: ProjectQorMissingMetricCoverage[],
   analysisIntegrityIssues: ProjectQorAnalysisIntegrityIssue[],
 ): ProjectQorDataQuality {
-  const completedSteps = QOR_FLOW_STEPS.filter(
-    (step) =>
-      workspace.stepStatuses[step] === 'success' ||
-      workspace.stepStatuses[step] === 'reused',
+  const completedSteps = QOR_FLOW_STEPS.filter((step) =>
+    isCompletedStepStatus(workspace.stepStatuses[step]),
   )
   const analyzedSteps = completedSteps.filter((step) =>
     hasCurrentQorMetricsText(workspace.stepMetricTexts[step]),
@@ -1591,12 +1604,16 @@ function resolveWorkspaceGateStatus(
   if (blockingIssues.length > 0) return 'blocked'
 
   for (const step of PROJECT_GATE_STEPS) {
-    if (stepStatuses[step] !== 'success') return 'incomplete'
+    if (!isCompletedStepStatus(stepStatuses[step])) return 'incomplete'
     const status = qorSummaryStatus(summaryTexts?.[step])
     if (status === 'blocked') return 'blocked'
     if (status !== 'pass') return 'incomplete'
   }
   return 'pass'
+}
+
+function isCompletedStepStatus(status: ProjectStepStatus | undefined): boolean {
+  return status === 'success' || status === 'reused'
 }
 
 function combineGateStatus(
@@ -2083,7 +2100,7 @@ const TIMING_PHYSICAL_CONTEXT_PRIORITY: Record<string, number> = {
 interface TimingWorkspaceAnalysis {
   workspace: ProjectQorWorkspaceInput
   workspaceSummary: ProjectQorTrendWorkspaceSummary | null
-  timingAnalysis: StaTimingAnalysis
+  timingAnalysis: ProjectQorStaTimingAnalysis
 }
 
 function buildProjectQorTimingTriage(
@@ -2326,7 +2343,7 @@ function resolveLastSuccessfulAreaStep(
   for (let index = QOR_FLOW_STEPS.length - 1; index >= 0; index -= 1) {
     const step = QOR_FLOW_STEPS[index]!
     if (
-      stepStatuses[step] === 'success' &&
+      isCompletedStepStatus(stepStatuses[step]) &&
       records.some(
         (record) =>
           record.step === step && record.dimension === 'area_cost' && record.rating.score,
@@ -2823,17 +2840,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 type StaTimingAnalysisStatus = 'clean' | 'at_risk' | 'incomplete' | 'unavailable'
 
-interface StaTimingAnalysis {
+export interface ProjectQorStaTimingAnalysis {
   status: StaTimingAnalysisStatus
   issues: ProjectQorTimingIssue[]
   artifactPaths: ProjectQorTimingArtifactPath[]
   coverage: ProjectQorTimingCoverage | null
 }
 
-function normalizeStaTimingIssues(
+export function normalizeStaTimingIssues(
   workspace: ProjectQorWorkspaceInput,
-): StaTimingAnalysis {
-  const unavailable: StaTimingAnalysis = {
+): ProjectQorStaTimingAnalysis {
+  const unavailable: ProjectQorStaTimingAnalysis = {
     status: 'unavailable',
     issues: [],
     artifactPaths: [],
@@ -2987,7 +3004,7 @@ export function hasCurrentQorMetricsText(text: string | null | undefined): boole
   return status === 'pass' || status === 'incomplete'
 }
 
-function hasStandardQorSummaryText(text: string | null | undefined): boolean {
+export function hasCurrentQorSummaryText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return (
     record?.schema_version === 3 &&
@@ -3012,7 +3029,7 @@ function qorGateStatusValue(value: unknown): QorGateStatus | null {
     : null
 }
 
-function hasStandardQorHotspotText(text: string | null | undefined): boolean {
+export function hasCurrentQorHotspotText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return record?.schema_version === 3 && Array.isArray(record.hotspots)
 }
@@ -3046,20 +3063,51 @@ export function normalizeQorSummaryBlockingIssues(
 export function normalizeQorSummaryMissingMetrics(
   step: FlowStep,
   text: string | null | undefined,
-): Array<{ step: FlowStep; metricName: string }> {
+): ProjectQorMissingMetric[] {
   const record = parseJsonObject(text)
   if (record?.schema_version !== 3 || !Array.isArray(record.missing_metrics)) {
     return []
   }
 
-  return Array.from(
-    new Set(
-      record.missing_metrics.flatMap((metric) => {
-        const value = isRecord(metric) ? stringValue(metric.metric_id) : null
-        return value ? [value] : []
-      }),
-    ),
-  ).map((metricName) => ({ step, metricName }))
+  const missingByMetric = new Map<string, ProjectQorMissingMetric>()
+  for (const item of record.missing_metrics) {
+    if (!isRecord(item)) continue
+    const metricName = stringValue(item.metric_id)
+    if (!metricName || missingByMetric.has(metricName)) continue
+    missingByMetric.set(metricName, {
+      step,
+      metricName,
+      reason: stringValue(item.reason) ?? 'The required metric is unavailable.',
+    })
+  }
+  return [...missingByMetric.values()].sort((left, right) =>
+    left.metricName.localeCompare(right.metricName),
+  )
+}
+
+export function normalizeQorSummaryHardGateFailures(
+  step: FlowStep,
+  text: string | null | undefined,
+): ProjectQorHardGateFailure[] {
+  const record = parseJsonObject(text)
+  if (record?.schema_version !== 3 || !Array.isArray(record.hard_gates)) return []
+
+  const gatesById = new Map<string, ProjectQorHardGateFailure>()
+  for (const item of record.hard_gates) {
+    if (!isRecord(item) || item.passed !== false) continue
+    const id = stringValue(item.id)
+    const metric = stringValue(item.metric)
+    if (!id || !metric || gatesById.has(id)) continue
+    gatesById.set(id, {
+      step,
+      id,
+      kind: stringValue(item.kind),
+      metric,
+      threshold: qorSummaryIssueValue(item.threshold),
+      actual: qorSummaryIssueValue(item.actual),
+    })
+  }
+  return [...gatesById.values()].sort((left, right) => left.id.localeCompare(right.id))
 }
 
 export function normalizeQorAnalysisIntegrity(

@@ -910,9 +910,10 @@ export function parseWorkspaceFlowStateMap(
   return parsed.steps.reduce<ProjectWorkspaceFlowStateMap>((stateMap, step) => {
     const name = optionalString(step.name)
     const status = projectStepStatusFromFlowState(step.state)
-    if (!name || !status) return stateMap
+    const flowStep = knownFlowStep(name)
+    if (!flowStep || !status) return stateMap
 
-    stateMap[normalizeFlowStep(name)] = status
+    stateMap[flowStep] = status
     return stateMap
   }, {})
 }
@@ -1259,7 +1260,9 @@ function buildFlowStatusHint(
     const stepIndex = FLOW_STEPS.indexOf(cell.step)
     return stepIndex >= startIndex && stepIndex <= endIndex
   })
-  const firstIncomplete = configuredSteps.find((cell) => cell.status !== 'success')
+  const firstIncomplete = configuredSteps.find(
+    (cell) => !isCompletedStepStatus(cell.status),
+  )
   if (!firstIncomplete) {
     return {
       state: 'success',
@@ -1329,7 +1332,7 @@ function buildStepCell(
     step,
     status,
     label: labelForStepStatus(status),
-    canCreateWorkspace: status === 'success',
+    canCreateWorkspace: isCompletedStepStatus(status),
   }
 }
 
@@ -1339,6 +1342,8 @@ function projectStepStatusFromFlowState(state: unknown): ProjectStepStatus | nul
 
   if (['success', 'succeeded', 'complete', 'completed', 'done'].includes(normalized))
     return 'success'
+  if (['reused', 'reuse'].includes(normalized)) return 'reused'
+  if (['skipped', 'skip'].includes(normalized)) return 'skipped'
   if (['ongoing', 'running', 'run'].includes(normalized)) return 'running'
   if (['failed', 'failure', 'error', 'invalid', 'incomplete'].includes(normalized))
     return 'failed'
@@ -1407,9 +1412,10 @@ function buildStepCompareSummaries(
       (workspace) =>
         workspace.steps.find((cell) => cell.step === step)?.status !== 'skipped',
     ).length
-    const successCount = workspaces.filter(
-      (workspace) =>
-        workspace.steps.find((cell) => cell.step === step)?.status === 'success',
+    const successCount = workspaces.filter((workspace) =>
+      isCompletedStepStatus(
+        workspace.steps.find((cell) => cell.step === step)?.status ?? 'skipped',
+      ),
     ).length
     const missingCount = primaryMetric.points.filter(
       (point) => point.value === null,
@@ -1606,23 +1612,87 @@ interface StepCompareDefinition {
   hint: string
 }
 
+const STEP_ANALYSIS_METRIC_IDS: Record<FlowStep, readonly string[]> = {
+  Synth: [
+    'synthesis_cell_area',
+    'synthesis_cell_count',
+    'synthesis_port_count',
+    'synthesis_wire_count',
+  ],
+  Floor: ['die_area', 'core_area', 'core_utilization', 'instance_count', 'net_count'],
+  Fanout: ['fanout_max', 'instance_count', 'net_count'],
+  Place: [
+    'place_congestion_egr_overflow_max',
+    'place_congestion_egr_overflow_total',
+    'place_flute_wirelength',
+    'place_grwl',
+    'place_hpwl',
+    'place_lutrudy_utilization_max',
+    'place_rudy_utilization_max',
+  ],
+  CTS: [
+    'clock_path_max_buffer',
+    'clock_path_min_buffer',
+    'clock_wirelength',
+    'cts_buffer_area',
+    'cts_buffer_count',
+    'cts_clock_tree_max_level',
+    'cts_clock_wirelength_max',
+    'cts_worst_optimized_skew_ns',
+    'cts_worst_max_insertion_latency_ns',
+    'cts_skew_target_unmet_count',
+    'instance_count',
+    'io_pin_count',
+    'net_count',
+  ],
+  Legal: ['legal_total_movement'],
+  Route: [
+    'route_dr_total_patch_count',
+    'route_dr_total_via_count',
+    'route_dr_total_violation_count',
+    'route_dr_total_wirelength',
+    'route_la_total_demand',
+    'route_la_total_overflow',
+    'route_via_count',
+    'route_wirelength',
+  ],
+  DRC: ['drc_count'],
+  Filler: [],
+  RCX: [
+    'rcx_missing_corner_count',
+    'rcx_spef_parse_failure_count',
+    'rcx_worst_total_capacitance_ff',
+    'rcx_worst_total_resistance_ohm',
+  ],
+  STA: [
+    'sta_setup_wns',
+    'sta_setup_tns',
+    'sta_hold_wns',
+    'sta_hold_tns',
+    'sta_frequency_mhz',
+  ],
+  Harden: ['harden_artifact_missing_count'],
+}
+
 function stepMetricDefinitions(
   step: FlowStep,
   workspaceSummaries: ProjectWorkspaceSummary[],
 ): StepCompareDefinition[] {
-  const definitions = new Map<string, StepCompareDefinition>()
+  const definitionsById = new Map<string, StepCompareDefinition>()
   for (const summary of workspaceSummaries) {
     const stepSummary = summary.steps.find((item) => item.step === step)
     for (const metric of stepSummary?.metrics ?? []) {
-      if (definitions.has(metric.id)) continue
-      definitions.set(metric.id, {
+      if (definitionsById.has(metric.id)) continue
+      definitionsById.set(metric.id, {
         id: metric.id,
         label: metric.label,
         hint: metric.hint ?? metric.label,
       })
     }
   }
-  return [...definitions.values()]
+  return STEP_ANALYSIS_METRIC_IDS[step].flatMap(
+    (metricId) => definitionsById.get(metricId) ?? [],
+  )
 }
 
 function stepMetricFromSummary(
@@ -1781,8 +1851,16 @@ function buildParameterPatch(
 }
 
 function normalizeFlowStep(step: FlowStep | string): FlowStep {
+  return knownFlowStep(step) ?? 'Synth'
+}
+
+function knownFlowStep(step: FlowStep | string): FlowStep | null {
   if ((FLOW_STEPS as readonly string[]).includes(step)) return step as FlowStep
-  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? 'Synth'
+  return FLOW_STEP_ALIASES[String(step).toLowerCase()] ?? null
+}
+
+function isCompletedStepStatus(status: ProjectStepStatus): boolean {
+  return status === 'success' || status === 'reused'
 }
 
 function nextFlowStep(step: FlowStep): FlowStep {

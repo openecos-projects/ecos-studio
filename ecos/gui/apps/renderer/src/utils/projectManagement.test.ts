@@ -9,6 +9,7 @@ import {
   setQorBaselineInManifest,
   workspaceStatusFromFlow,
   type FlowStep,
+  type ProjectStepStatus,
 } from './projectManagement'
 import type { Project } from '@/types'
 
@@ -120,7 +121,56 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
   }
   return {
     stepMetricTexts: {
+      Synth: metricsArtifact('synthesis', [
+        metric('synthesis_cell_area', 842, { unit: 'um^2' }),
+        metric('synthesis_cell_count', 612),
+        metric('synthesis_port_count', 48),
+        metric('synthesis_wire_count', 376),
+      ]),
+      Floor: metricsArtifact('Floorplan', [
+        metric('die_area', 2400, { unit: 'um^2' }),
+        metric('core_area', 1600, { unit: 'um^2' }),
+        metric('core_utilization', 0.62, { unit: 'ratio' }),
+        metric('instance_count', 612),
+        metric('net_count', 376),
+      ]),
+      Fanout: metricsArtifact('fixFanout', [
+        metric('fanout_max', 12),
+        metric('instance_count', 618),
+        metric('net_count', 381),
+      ]),
+      Place: metricsArtifact('place', [
+        metric('place_congestion_egr_overflow_max', 9),
+        metric('place_congestion_egr_overflow_total', 37),
+        metric('place_flute_wirelength', 4955.31, { unit: 'um' }),
+        metric('place_grwl', 4932, { unit: 'um' }),
+        metric('place_hpwl', 4000.84, { unit: 'um' }),
+        metric('place_lutrudy_utilization_max', 0.005455, { unit: 'ratio' }),
+        metric('place_rudy_utilization_max', 0.005027, { unit: 'ratio' }),
+      ]),
+      CTS: metricsArtifact('CTS', [
+        metric('clock_path_max_buffer', 2),
+        metric('clock_path_min_buffer', 2),
+        metric('clock_wirelength', 310004, { unit: 'um' }),
+        metric('cts_buffer_area', 8.4, { unit: 'um^2' }),
+        metric('cts_buffer_count', 3),
+        metric('cts_clock_tree_max_level', 2),
+        metric('cts_clock_wirelength_max', 114771, { unit: 'um' }),
+        metric('cts_worst_optimized_skew_ns', 0.000144, { unit: 'ns' }),
+        metric('cts_worst_max_insertion_latency_ns', 0.176659, { unit: 'ns' }),
+        metric('cts_skew_target_unmet_count', 0),
+        metric('instance_count', 669),
+        metric('io_pin_count', 58),
+        metric('net_count', 373),
+      ]),
       Route: metricsArtifact('route', [
+        metric('route_dr_total_patch_count', 82),
+        metric('route_dr_total_via_count', 1526),
+        metric('route_dr_total_violation_count', 0),
+        metric('route_dr_total_wirelength', 5573.534, { unit: 'um' }),
+        metric('route_la_total_demand', 11440),
+        metric('route_la_total_overflow', 4),
+        metric('route_via_count', 1526),
         metric('route_wirelength', 5200, {
           unit: 'um',
           rating: { gate: false, score: true, trend: true },
@@ -258,7 +308,7 @@ describe('project management V3 model', () => {
     expect(createSelectionState(model).selectedWorkspaceId).toBe('')
   })
 
-  it('derives dashboard keys and Step Analysis from schema v3 metric ids', () => {
+  it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {
     const manifest = manifestWithWorkspace()
     const model = buildProjectManagementProject(
       project,
@@ -281,11 +331,83 @@ describe('project management V3 model', () => {
       state: 'good',
     })
     expect(
-      model.stepCompareSummaries.find((item) => item.step === 'Route')?.metrics,
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Synth')
+        ?.metrics.map((metric) => metric.id),
     ).toEqual([
-      expect.objectContaining({ id: 'route_wirelength' }),
-      expect.objectContaining({ id: 'runtime_seconds' }),
+      'synthesis_cell_area',
+      'synthesis_cell_count',
+      'synthesis_port_count',
+      'synthesis_wire_count',
     ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Floor')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'die_area',
+      'core_area',
+      'core_utilization',
+      'instance_count',
+      'net_count',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Fanout')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual(['fanout_max', 'instance_count', 'net_count'])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Place')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'place_congestion_egr_overflow_max',
+      'place_congestion_egr_overflow_total',
+      'place_flute_wirelength',
+      'place_grwl',
+      'place_hpwl',
+      'place_lutrudy_utilization_max',
+      'place_rudy_utilization_max',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'CTS')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'clock_path_max_buffer',
+      'clock_path_min_buffer',
+      'clock_wirelength',
+      'cts_buffer_area',
+      'cts_buffer_count',
+      'cts_clock_tree_max_level',
+      'cts_clock_wirelength_max',
+      'cts_worst_optimized_skew_ns',
+      'cts_worst_max_insertion_latency_ns',
+      'cts_skew_target_unmet_count',
+      'instance_count',
+      'io_pin_count',
+      'net_count',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Route')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'route_dr_total_patch_count',
+      'route_dr_total_via_count',
+      'route_dr_total_violation_count',
+      'route_dr_total_wirelength',
+      'route_la_total_demand',
+      'route_la_total_overflow',
+      'route_via_count',
+      'route_wirelength',
+    ])
+    expect(
+      model.stepCompareSummaries.find((item) => item.step === 'RCX')?.metrics,
+    ).not.toContainEqual(expect.objectContaining({ id: 'peak_memory_mb' }))
+    expect(
+      model.stepCompareSummaries.find((item) => item.step === 'Harden')?.metrics,
+    ).toEqual([])
     expect(
       summary.analysis.steps.STA?.metrics.find(
         (item) => item.metricName === 'sta_setup_wns',
@@ -315,10 +437,12 @@ describe('project management V3 model', () => {
           steps: [
             { name: 'route', state: 'running' },
             { name: 'sta', state: 'success' },
+            { name: 'Floorplan', state: 'reused' },
+            { name: 'future_signoff', state: 'success' },
           ],
         }),
       ),
-    ).toEqual({ Route: 'running', STA: 'success' })
+    ).toEqual({ Route: 'running', STA: 'success', Floor: 'reused' })
   })
 
   it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {
@@ -333,6 +457,32 @@ describe('project management V3 model', () => {
       { ws_0004: v3Inputs() },
     )
     expect(model.qorTrendSummary.workspaces[0]?.status).not.toBe('Blocked')
+  })
+
+  it('treats reused steps as completed for area scoring, gates, and Step Analysis', () => {
+    const reusedHardenStates = {
+      ...successStates,
+      Harden: 'reused',
+    } as Partial<Record<FlowStep, ProjectStepStatus>>
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: reusedHardenStates },
+      { ws_0004: v3Inputs() },
+    )
+
+    expect(model.workspaces[0]?.flowStatusHint.state).toBe('success')
+    expect(
+      model.workspaces[0]?.steps.find((step) => step.step === 'Harden'),
+    ).toMatchObject({ status: 'reused', canCreateWorkspace: true })
+    expect(model.qorTrendSummary.workspaces[0]).toMatchObject({
+      areaScoringStep: 'Harden',
+      gateStatus: 'pass',
+    })
+    expect(model.workspaceSummaries[0]?.finalMetrics.area?.value).toBe(1200)
+    expect(
+      model.stepCompareSummaries.find((summary) => summary.step === 'Harden'),
+    ).toMatchObject({ configuredCount: 1, successCount: 1 })
   })
 
   it('keeps baseline selection as project metadata without manifest metrics', () => {
