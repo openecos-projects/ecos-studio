@@ -36,15 +36,7 @@
       v-if="hasProjectData && selectedAnalysisTab === 'dashboard'"
       class="analysis-dashboard-v3"
     >
-      <ProjectQorTrendPanel
-        :qor-trend-summary="project.qorTrendSummary"
-        :selected-workspace-id="selectedWorkspaceId"
-        @export-report="exportReport"
-        @set-baseline="setBaseline"
-        @select-workspace="selectWorkspace($event.workspaceId)"
-      />
-
-      <div class="dashboard-grid">
+      <div class="dashboard-summary-grid">
         <section class="dashboard-card dashboard-run-state-card">
           <span>Workspace Run State</span>
           <div class="run-state-layout">
@@ -110,60 +102,66 @@
           </div>
           <div v-else class="dashboard-empty-note">No frequency data available.</div>
         </section>
-
-        <section class="dashboard-card dashboard-chart-card dashboard-key-metric-card">
-          <header>
-            <span>Key Metric Snapshot</span>
-            <small>workspace comparison table</small>
-          </header>
-          <div
-            class="dashboard-key-metric-table"
-            :style="{
-              '--dashboard-metric-count': String(dashboardMetricRows.length),
-            }"
-            aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], WNS, TNS, DRC, Runtime, Memory"
-          >
-            <div class="dashboard-key-header dashboard-key-workspace-header">
-              Workspace
-            </div>
-            <div
-              v-for="metric in dashboardMetricRows"
-              :key="metric.id"
-              class="dashboard-key-header"
-            >
-              {{ metric.label }}
-            </div>
-            <template v-for="row in dashboardWorkspaceMetricRows" :key="row.workspaceId">
-              <button
-                type="button"
-                class="dashboard-key-workspace-cell"
-                :class="{ selected: row.workspaceId === selectedWorkspaceId }"
-                @click="selectWorkspace(row.workspaceId)"
-              >
-                {{ row.workspaceId }}
-              </button>
-              <button
-                v-for="cell in row.cells"
-                :key="`${row.workspaceId}-${cell.metric.id}`"
-                type="button"
-                class="dashboard-key-metric-cell"
-                :class="metricValueClass(cell.point.state)"
-                :title="`${row.workspaceId} ${cell.metric.label}: ${cell.point.label}`"
-                @click="selectWorkspace(row.workspaceId)"
-              >
-                <strong>{{ cell.point.label }}</strong>
-                <span class="metric-track">
-                  <i
-                    :style="{
-                      width: `${metricInlineWidth(cell.point, cell.metric.points)}%`,
-                    }"
-                  ></i>
-                </span>
-              </button>
-            </template>
-          </div>
-        </section>
       </div>
+
+      <ProjectQorTrendPanel
+        :qor-trend-summary="project.qorTrendSummary"
+        :selected-workspace-id="selectedWorkspaceId"
+        @export-report="exportReport"
+        @set-baseline="setBaseline"
+        @select-workspace="selectWorkspace($event.workspaceId)"
+      />
+
+      <section class="dashboard-card dashboard-chart-card dashboard-key-metric-card">
+        <header>
+          <span>Key Metric Snapshot</span>
+          <small>workspace comparison table</small>
+        </header>
+        <div
+          class="dashboard-key-metric-table"
+          :style="{
+            '--dashboard-metric-count': String(dashboardMetricRows.length),
+          }"
+          aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], WNS, TNS, DRC, Runtime, Memory"
+        >
+          <div class="dashboard-key-header dashboard-key-workspace-header">Workspace</div>
+          <div
+            v-for="metric in dashboardMetricRows"
+            :key="metric.id"
+            class="dashboard-key-header"
+          >
+            {{ metric.label }}
+          </div>
+          <template v-for="row in dashboardWorkspaceMetricRows" :key="row.workspaceId">
+            <button
+              type="button"
+              class="dashboard-key-workspace-cell"
+              :class="{ selected: row.workspaceId === selectedWorkspaceId }"
+              @click="selectWorkspace(row.workspaceId)"
+            >
+              {{ row.workspaceId }}
+            </button>
+            <button
+              v-for="cell in row.cells"
+              :key="`${row.workspaceId}-${cell.metric.id}`"
+              type="button"
+              class="dashboard-key-metric-cell"
+              :class="metricValueClass(cell.point.state)"
+              :title="`${row.workspaceId} ${cell.metric.label}: ${cell.point.label}`"
+              @click="selectWorkspace(row.workspaceId)"
+            >
+              <strong>{{ cell.point.label }}</strong>
+              <span class="metric-track">
+                <i
+                  :style="{
+                    width: `${metricInlineWidth(cell.point, cell.metric.points)}%`,
+                  }"
+                ></i>
+              </span>
+            </button>
+          </template>
+        </div>
+      </section>
     </div>
 
     <ProjectStepAnalysisPanel

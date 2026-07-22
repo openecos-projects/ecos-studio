@@ -872,8 +872,11 @@ function stringValue(value: unknown): string | null {
 .stage-rail-list {
   display: grid;
   align-content: start;
+  grid-auto-flow: row;
+  grid-auto-rows: 40px;
   min-height: 0;
   gap: 4px;
+  overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -1038,6 +1041,8 @@ function stringValue(value: unknown): string | null {
 
 .stage-metric-table {
   display: grid;
+  grid-auto-flow: row;
+  grid-auto-rows: 40px;
   grid-template-columns: minmax(160px, 1.35fr) repeat(
       var(--workspace-count),
       minmax(104px, 1fr)
@@ -1125,9 +1130,13 @@ function stringValue(value: unknown): string | null {
 
 .stage-detail-list {
   display: grid;
+  align-content: start;
+  grid-auto-flow: row;
+  grid-auto-rows: 176px;
   gap: 8px;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
@@ -1258,6 +1267,8 @@ th {
 .findings-rail ul {
   display: grid;
   align-content: start;
+  grid-auto-flow: row;
+  grid-auto-rows: minmax(108px, max-content);
   gap: 6px;
   margin: 0;
   min-height: 0;
@@ -1274,14 +1285,13 @@ th {
 }
 
 .findings-rail li {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
-  height: 108px;
   min-height: 108px;
-  max-height: 108px;
   border-left: 2px solid var(--text-secondary);
   background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .findings-rail li.critical {
@@ -1358,15 +1368,10 @@ th {
 }
 
 .finding-detail-info[open] {
-  position: absolute;
-  z-index: 2;
-  top: 78px;
-  right: 0;
-  left: 0;
   height: 150px;
+  min-height: 150px;
   max-height: 150px;
   background: var(--bg-secondary);
-  box-shadow: 0 8px 18px color-mix(in srgb, #000 36%, transparent);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

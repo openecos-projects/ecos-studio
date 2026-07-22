@@ -342,7 +342,16 @@ describe('ProjectsView project management surface', () => {
     expect(analysisSource).toContain(':workspace-summaries="project.workspaceSummaries"')
     expect(analysisSource).toContain(':steps="project.stepCompareSummaries"')
     expect(analysisSurfaceSource).toContain('.analysis-dashboard-v3 {')
-    expect(analysisSurfaceSource).toContain('grid-template-rows: minmax(0, 1fr) auto;')
+    expect(analysisSurfaceSource).toContain('.dashboard-summary-grid {')
+    expect(analysisSurfaceSource).toContain('grid-template-rows: 252px;')
+    expect(analysisSurfaceSource).toContain('flex: 0 0 498px;')
+    expect(analysisSource).toContain('class="dashboard-summary-grid"')
+    expect(analysisSource.indexOf('class="dashboard-summary-grid"')).toBeLessThan(
+      analysisSource.indexOf('<ProjectQorTrendPanel'),
+    )
+    expect(analysisSource.indexOf('<ProjectQorTrendPanel')).toBeLessThan(
+      analysisSource.indexOf('Key Metric Snapshot'),
+    )
     expect(source).toContain('const hasOpenedStepAnalysis = ref(false)')
     expect(source).toContain('handleAnalysisTabSelection')
     expect(source).toContain('exportQorTrendReport')
