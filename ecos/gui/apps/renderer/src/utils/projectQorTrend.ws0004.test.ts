@@ -36,7 +36,7 @@ describe('ws_0004 V3 QoR acceptance', () => {
       available_count: 9,
     })
     expect(staDetail?.summary.records).toHaveLength(13)
-    expect(setup?.cornerContext?.label).toBe('MAX - SS - 1.08 V - 125 C - Cworst')
+    expect(setup?.cornerContext?.label).toBe('WCL - SS - 1.08 V - -40 C - Cworst')
     expect(hold?.cornerContext?.label).toBe('MIN - FF - 1.32 V - -40 C - Cbest')
     expect(trend.workspaces[0]).toMatchObject({
       overallScore: expect.any(Number),
