@@ -117,7 +117,11 @@
             </div>
           </div>
 
-          <section class="frontend-flow-strip" aria-label="Frontend flow tool readiness">
+          <section
+            v-if="categoryFilter === 'frontend'"
+            class="frontend-flow-strip"
+            aria-label="Frontend flow tool readiness"
+          >
             <div class="frontend-flow-summary">
               <strong>Frontend Flow</strong>
               <span
@@ -130,18 +134,21 @@
                 {{ frontendAvailableCount }} ready to install
               </em>
             </div>
-            <div class="frontend-flow-steps">
-              <button
+            <div
+              class="frontend-flow-steps"
+              role="list"
+              aria-label="Frontend tool readiness by workflow stage"
+            >
+              <div
                 v-for="item in frontendFlowItems"
                 :key="item.label"
-                type="button"
                 class="frontend-flow-step"
                 :class="item.status"
-                @click="categoryFilter = 'frontend'"
+                role="listitem"
               >
                 <span>{{ item.label }}</span>
                 <b>{{ item.installed }}/{{ item.total }}</b>
-              </button>
+              </div>
             </div>
           </section>
 
@@ -1262,7 +1269,7 @@ async function openDocs(): Promise<void> {
 }
 
 .manager-table-meta button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.55;
 }
 
@@ -1318,7 +1325,7 @@ async function openDocs(): Promise<void> {
   border-radius: 7px;
   color: var(--text-secondary);
   background: var(--bg-primary);
-  cursor: pointer;
+  cursor: default;
   font-size: 11px;
 }
 
@@ -1708,8 +1715,8 @@ async function openDocs(): Promise<void> {
   z-index: 10;
 }
 
-.row-action-btn[data-title]:hover::after,
-.row-action-btn[data-title]:hover::before {
+.row-action-btn[data-title]:not(:disabled):hover::after,
+.row-action-btn[data-title]:not(:disabled):hover::before {
   opacity: 1;
   transform: translateX(-50%) scale(1);
 }
@@ -1719,7 +1726,7 @@ async function openDocs(): Promise<void> {
   background: var(--accent-color);
 }
 
-.row-action-btn.primary:hover {
+.row-action-btn.primary:not(:disabled):hover {
   opacity: 0.9;
 }
 
@@ -1729,7 +1736,7 @@ async function openDocs(): Promise<void> {
   border: 1px solid var(--danger-color);
 }
 
-.row-action-btn.danger-outlined:hover {
+.row-action-btn.danger-outlined:not(:disabled):hover {
   background: var(--danger-bg);
 }
 
@@ -1738,7 +1745,7 @@ async function openDocs(): Promise<void> {
   background: var(--info-bg);
 }
 
-.row-action-btn.info:hover {
+.row-action-btn.info:not(:disabled):hover {
   opacity: 0.85;
 }
 
@@ -1748,12 +1755,12 @@ async function openDocs(): Promise<void> {
 }
 
 .row-action-btn.warn:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.7;
 }
 
 .row-action-btn:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.65;
 }
 
@@ -2045,7 +2052,7 @@ async function openDocs(): Promise<void> {
 }
 
 .download-button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.5;
 }
 
