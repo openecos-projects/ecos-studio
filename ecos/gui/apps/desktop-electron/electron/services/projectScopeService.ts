@@ -153,6 +153,10 @@ export class ProjectScopeService {
   private activeProjectRoot: string | null = null
   private activeExtraRoots: string[] = []
 
+  async resolveProjectRoot(path: string): Promise<string> {
+    return await canonicalizeExistingDirectory(path)
+  }
+
   async getProjectRoot(): Promise<string> {
     if (!this.activeProjectRoot) {
       throw new Error('Project root is not registered')
@@ -162,7 +166,7 @@ export class ProjectScopeService {
   }
 
   async registerProjectRoot(path: string): Promise<string> {
-    const canonicalPath = await canonicalizeExistingDirectory(path)
+    const canonicalPath = await this.resolveProjectRoot(path)
     this.activeProjectRoot = canonicalPath
     this.activeExtraRoots = await detectFrontendExtraRoots(canonicalPath)
     return canonicalPath

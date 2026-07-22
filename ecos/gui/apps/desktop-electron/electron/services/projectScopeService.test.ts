@@ -45,6 +45,16 @@ describe('ProjectScopeService', () => {
     )
   })
 
+  it('canonicalizes a manifest project root without changing the active workspace root', async () => {
+    const activeRoot = await createTempDir('ecos-active-project-root-')
+    const manifestRoot = await createTempDir('ecos-manifest-project-root-')
+    const service = new ProjectScopeService()
+    await service.registerProjectRoot(activeRoot)
+
+    await expect(service.resolveProjectRoot(manifestRoot)).resolves.toBe(manifestRoot)
+    await expect(service.getProjectRoot()).resolves.toBe(activeRoot)
+  })
+
   it('rejects paths that escape the active project root via symlinks', async () => {
     const root = await createTempDir('ecos-project-root-')
     const outside = await createTempDir('ecos-project-outside-')

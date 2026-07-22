@@ -1,12 +1,6 @@
 import type { WorkspaceConfig } from '@/types'
 import { waitForDesktopApi } from '@/platform/desktop'
-import {
-  createProjectManifestDraft,
-  parseProjectManifest,
-  registerWorkspaceInManifest,
-  serializeProjectManifest,
-} from '@/utils/projectManagement'
-import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
+import { mutateProjectManifest } from '@/api/projectManifest'
 
 export interface ProjectRouteContext {
   projectRoot: string
@@ -67,33 +61,26 @@ export async function registerProjectManagedWorkspace(
       queryString(input.routeQuery?.projectName) ||
       basenamePath(registeredProjectRoot) ||
       'project'
-    const manifestText = await readOptionalProjectTextFile('project.json', {
-      projectPath: registeredProjectRoot,
-    })
-    const manifest = manifestText
-      ? parseProjectManifest(manifestText)
-      : createProjectManifestDraft({ rootPath: registeredProjectRoot, name: projectName })
-    const updated = registerWorkspaceInManifest(manifest, {
-      projectRoot: registeredProjectRoot,
-      projectName,
-      workspacePath,
-      sourceWorkspaceId: queryString(input.routeQuery?.sourceWorkspace) || undefined,
-      sourceStep: queryString(input.routeQuery?.sourceStep) || undefined,
-      sourceOutputPath: queryString(input.routeQuery?.sourceOutputPath) || undefined,
-      sourceOutputType: queryString(input.routeQuery?.sourceOutputType) || undefined,
-      startStep:
-        queryString(input.routeQuery?.startStep) ||
-        optionalString(input.config?.flow_config?.start_step) ||
-        undefined,
-      endStep:
-        queryString(input.routeQuery?.endStep) ||
-        optionalString(input.config?.flow_config?.end_step) ||
-        undefined,
-      config: input.config,
-    })
-
-    await writeProjectTextFile('project.json', serializeProjectManifest(updated), {
-      projectPath: registeredProjectRoot,
+    await mutateProjectManifest(registeredProjectRoot, {
+      type: 'register-workspace',
+      input: {
+        projectRoot: registeredProjectRoot,
+        projectName,
+        workspacePath,
+        sourceWorkspaceId: queryString(input.routeQuery?.sourceWorkspace) || undefined,
+        sourceStep: queryString(input.routeQuery?.sourceStep) || undefined,
+        sourceOutputPath: queryString(input.routeQuery?.sourceOutputPath) || undefined,
+        sourceOutputType: queryString(input.routeQuery?.sourceOutputType) || undefined,
+        startStep:
+          queryString(input.routeQuery?.startStep) ||
+          optionalString(input.config?.flow_config?.start_step) ||
+          undefined,
+        endStep:
+          queryString(input.routeQuery?.endStep) ||
+          optionalString(input.config?.flow_config?.end_step) ||
+          undefined,
+        config: input.config,
+      },
     })
   } catch (error) {
     console.warn('Failed to update project manifest after workspace creation.', error)

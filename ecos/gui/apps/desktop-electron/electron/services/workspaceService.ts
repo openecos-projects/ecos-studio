@@ -1,5 +1,15 @@
-import { open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import {
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { watch, type FSWatcher } from 'chokidar'
 import type {
   DesktopProjectFileChangedEvent,
@@ -35,6 +45,7 @@ export interface ProjectScopeProvider {
 
 export interface WorkspaceServiceOptions {
   projectScopeProvider: ProjectScopeProvider
+  replacementJournalDirectory: string
   runtimeMutationGuard?: RuntimeMutationGuard
 }
 
@@ -42,9 +53,57 @@ export interface RuntimeMutationGuard {
   isWorkspaceRuntimeActive(projectRoot: string): boolean | Promise<boolean>
 }
 
+interface DirectoryReplacementRecord {
+  backupPath: string
+  journalPath: string
+  projectRoot: string
+  recoveryMode: DirectoryReplacementRecoveryMode
+  targetPath: string
+}
+
+type DirectoryReplacementJournalState =
+  | 'preparing'
+  | 'prepared'
+  | 'committed'
+  | 'retained'
+type DirectoryReplacementRecoveryMode = 'delete' | 'retain' | 'rollback'
+
+interface DirectoryReplacementJournalRecord {
+  backupPath: string
+  id: string
+  projectRoot: string
+  recoveryMode: DirectoryReplacementRecoveryMode
+  state: DirectoryReplacementJournalState
+  targetPath: string
+  version: 1
+}
+
 const UTF8_MAX_BYTES_PER_CODE_UNIT = 4
 const WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE =
   'Cannot save workspace configuration while the workspace flow is running. Wait for it to finish before editing parameters or step config.'
+const WORKSPACE_REPLACEMENT_BLOCKED_MESSAGE =
+  'Cannot replace a workspace while its flow is running. Wait for it to finish before deleting or replacing the workspace.'
+
+function isDirectoryReplacementJournalRecord(
+  value: unknown,
+): value is DirectoryReplacementJournalRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return (
+    record.version === 1 &&
+    typeof record.id === 'string' &&
+    typeof record.projectRoot === 'string' &&
+    typeof record.targetPath === 'string' &&
+    typeof record.backupPath === 'string' &&
+    (record.recoveryMode === 'delete' ||
+      record.recoveryMode === 'retain' ||
+      record.recoveryMode === 'rollback') &&
+    (record.state === 'preparing' ||
+      record.state === 'prepared' ||
+      record.state === 'committed' ||
+      record.state === 'retained')
+  )
+}
 
 function boundedTextCharCount(maxChars: number): number {
   return Math.max(1, Math.min(Math.floor(maxChars), 2 * 1024 * 1024))
@@ -80,6 +139,51 @@ function shouldIgnoreWatchPath(path: string, targetPath: string): boolean {
 
 function normalizeRelativePathForMatch(path: string): string {
   return path.replace(/\\/g, '/')
+}
+
+function normalizePathForMatch(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/g, '')
+}
+
+async function readManifestReplacementReferences(
+  projectRoot: string,
+  targetPath: string,
+  backupPath: string,
+): Promise<{ backupReferenced: boolean; targetReferenced: boolean }> {
+  try {
+    const parsed: unknown = JSON.parse(
+      await readFile(join(projectRoot, 'project.json'), 'utf8'),
+    )
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      !('workspaces' in parsed) ||
+      !Array.isArray(parsed.workspaces)
+    ) {
+      return { backupReferenced: false, targetReferenced: false }
+    }
+
+    const normalizedTargetPath = normalizePathForMatch(targetPath)
+    const normalizedBackupPath = normalizePathForMatch(backupPath)
+    let backupReferenced = false
+    let targetReferenced = false
+    for (const workspace of parsed.workspaces) {
+      if (
+        typeof workspace !== 'object' ||
+        workspace === null ||
+        !('workspace_path' in workspace) ||
+        typeof workspace.workspace_path !== 'string'
+      ) {
+        continue
+      }
+      const workspacePath = normalizePathForMatch(workspace.workspace_path)
+      backupReferenced ||= workspacePath === normalizedBackupPath
+      targetReferenced ||= workspacePath === normalizedTargetPath
+    }
+    return { backupReferenced, targetReferenced }
+  } catch {
+    return { backupReferenced: false, targetReferenced: false }
+  }
 }
 
 function isRuntimeProtectedProjectPath(
@@ -200,13 +304,16 @@ async function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
 
 export class WorkspaceService {
   private readonly projectScopeProvider: ProjectScopeProvider
+  private readonly replacementJournalDirectory: string
   private readonly runtimeMutationGuard?: RuntimeMutationGuard
   private readonly logTailService: LogTailService
+  private readonly directoryReplacements = new Map<string, DirectoryReplacementRecord>()
   private readonly projectFileWatchers = new Map<string, { close: () => Promise<void> }>()
   private nextProjectFileWatchId = 1
 
   constructor(options: WorkspaceServiceOptions) {
     this.projectScopeProvider = options.projectScopeProvider
+    this.replacementJournalDirectory = options.replacementJournalDirectory
     this.runtimeMutationGuard = options.runtimeMutationGuard
     this.logTailService = new LogTailService({
       projectScopeProvider: this.projectScopeProvider,
@@ -388,34 +495,43 @@ export class WorkspaceService {
     }
   }
 
-  async removeProjectDirectory(path: string): Promise<void> {
-    const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
-    const projectRoot = await this.projectScopeProvider.getProjectRoot()
-    if (isSamePath(canonicalPath, projectRoot)) {
-      throw new Error('Refusing to remove the project root as a workspace directory')
-    }
-
-    try {
-      const pathStats = await stat(canonicalPath)
-      if (!pathStats.isDirectory()) {
-        throw new Error(`${canonicalPath} is not a directory`)
-      }
-    } catch (error) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
-        return
-      }
-
-      throw error
-    }
-
-    await rm(canonicalPath, { force: true, recursive: true })
-  }
-
   async prepareProjectDirectoryReplacement(
     path: string,
   ): Promise<WorkspaceDirectoryReplacement | null> {
     const canonicalPath = await this.projectScopeProvider.requestProjectPathAccess(path)
     const projectRoot = await this.projectScopeProvider.getProjectRoot()
+    return await this.prepareDirectoryReplacement(canonicalPath, projectRoot, {
+      requireEcOSWorkspace: true,
+    })
+  }
+
+  async prepareManagedProjectWorkspaceDirectoryReplacement(
+    projectRoot: string,
+    workspaceId: string,
+    workspacePath: string,
+  ): Promise<WorkspaceDirectoryReplacement | null> {
+    const canonicalProjectRoot = resolve(projectRoot)
+    const targetPath = resolve(workspacePath)
+    if (!workspaceId || workspaceId.includes('/') || workspaceId.includes('\\')) {
+      throw new Error('Workspace manifest id must name a direct project child directory')
+    }
+    const expectedTargetPath = join(canonicalProjectRoot, workspaceId)
+    if (
+      !isWithinRoot(targetPath, canonicalProjectRoot) ||
+      !isSamePath(targetPath, expectedTargetPath)
+    ) {
+      throw new Error('Workspace manifest path is not a direct child of the project root')
+    }
+    return await this.prepareDirectoryReplacement(targetPath, canonicalProjectRoot, {
+      requireEcOSWorkspace: false,
+    })
+  }
+
+  private async prepareDirectoryReplacement(
+    canonicalPath: string,
+    projectRoot: string,
+    options: { requireEcOSWorkspace: boolean },
+  ): Promise<WorkspaceDirectoryReplacement | null> {
     if (isSamePath(canonicalPath, projectRoot)) {
       throw new Error('Refusing to replace the registered project root directly')
     }
@@ -430,49 +546,284 @@ export class WorkspaceService {
       throw error
     }
 
+    if (
+      options.requireEcOSWorkspace &&
+      !(await this.projectScopeProvider.isProjectDirectory(canonicalPath))
+    ) {
+      throw new Error('Refusing to replace a directory that is not an ECOS workspace')
+    }
+    await this.assertCanReplaceWorkspace(canonicalPath)
+
     const backupPath = await createUniqueReplacementBackupPath(canonicalPath)
-    await rename(canonicalPath, backupPath)
+    const id = randomUUID()
+    const journalPath = this.replacementJournalPath(id)
+    const journal: DirectoryReplacementJournalRecord = {
+      backupPath,
+      id,
+      projectRoot,
+      recoveryMode: 'rollback',
+      state: 'preparing',
+      targetPath: canonicalPath,
+      version: 1,
+    }
+    await this.writeReplacementJournal(journalPath, journal)
+
+    try {
+      await rename(canonicalPath, backupPath)
+      await this.writeReplacementJournal(journalPath, {
+        ...journal,
+        state: 'prepared',
+      })
+    } catch (error) {
+      await this.recoverDirectoryReplacement(journalPath, journal).catch(() => undefined)
+      throw error
+    }
+
+    this.directoryReplacements.set(id, {
+      backupPath,
+      journalPath,
+      projectRoot,
+      recoveryMode: journal.recoveryMode,
+      targetPath: canonicalPath,
+    })
     return {
+      id,
       targetPath: canonicalPath,
       backupPath,
     }
   }
 
-  async restoreProjectDirectoryReplacement(
-    replacement: WorkspaceDirectoryReplacement,
-  ): Promise<void> {
-    const canonicalTarget = await this.projectScopeProvider.requestProjectPathAccess(
-      replacement.targetPath,
-    )
-    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
-      replacement.backupPath,
-    )
+  async restoreProjectDirectoryReplacement(replacementId: string): Promise<void> {
+    const replacement = this.requireDirectoryReplacement(replacementId)
+    const { backupPath, targetPath } = replacement
 
-    if (!(await pathExists(canonicalBackup))) {
+    await this.assertCanReplaceWorkspace(targetPath)
+
+    if (!(await pathExists(backupPath))) {
       throw new Error(
-        `Workspace replacement backup is missing: ${canonicalBackup}. Refusing to delete ${canonicalTarget}.`,
+        `Workspace replacement backup is missing: ${backupPath}. Refusing to delete ${targetPath}.`,
       )
     }
 
-    await rm(canonicalTarget, { force: true, recursive: true })
+    await rm(targetPath, { force: true, recursive: true })
 
     try {
-      await rename(canonicalBackup, canonicalTarget)
+      await rename(backupPath, targetPath)
+      this.directoryReplacements.delete(replacementId)
+      await this.removeReplacementJournal(replacement.journalPath).catch(() => undefined)
     } catch (error) {
       throw new Error(
-        `Failed to restore workspace replacement backup from ${canonicalBackup} to ${canonicalTarget}.`,
+        `Failed to restore workspace replacement backup from ${backupPath} to ${targetPath}.`,
         { cause: error },
       )
     }
   }
 
-  async finalizeProjectDirectoryReplacement(
-    replacement: WorkspaceDirectoryReplacement,
+  async finalizeProjectDirectoryReplacement(replacementId: string): Promise<void> {
+    const replacement = this.requireDirectoryReplacement(replacementId)
+    await this.writeReplacementJournal(replacement.journalPath, {
+      backupPath: replacement.backupPath,
+      id: replacementId,
+      projectRoot: replacement.projectRoot,
+      recoveryMode: replacement.recoveryMode,
+      state: 'committed',
+      targetPath: replacement.targetPath,
+      version: 1,
+    })
+    await rm(replacement.backupPath, { force: true, recursive: true })
+    this.directoryReplacements.delete(replacementId)
+    await this.removeReplacementJournal(replacement.journalPath).catch(() => undefined)
+  }
+
+  async retainProjectDirectoryReplacement(replacementId: string): Promise<void> {
+    const replacement = this.requireDirectoryReplacement(replacementId)
+    await this.writeReplacementJournal(replacement.journalPath, {
+      backupPath: replacement.backupPath,
+      id: replacementId,
+      projectRoot: replacement.projectRoot,
+      recoveryMode: replacement.recoveryMode,
+      state: 'retained',
+      targetPath: replacement.targetPath,
+      version: 1,
+    })
+    this.directoryReplacements.delete(replacementId)
+    await this.removeReplacementJournal(replacement.journalPath).catch(() => undefined)
+  }
+
+  async setProjectDirectoryReplacementRecoveryMode(
+    replacementId: string,
+    recoveryMode: Exclude<DirectoryReplacementRecoveryMode, 'rollback'>,
   ): Promise<void> {
-    const canonicalBackup = await this.projectScopeProvider.requestProjectPathAccess(
-      replacement.backupPath,
-    )
-    await rm(canonicalBackup, { force: true, recursive: true })
+    const replacement = this.requireDirectoryReplacement(replacementId)
+    await this.writeReplacementJournal(replacement.journalPath, {
+      backupPath: replacement.backupPath,
+      id: replacementId,
+      projectRoot: replacement.projectRoot,
+      recoveryMode,
+      state: 'prepared',
+      targetPath: replacement.targetPath,
+      version: 1,
+    })
+    replacement.recoveryMode = recoveryMode
+  }
+
+  async recoverProjectDirectoryReplacements(): Promise<void> {
+    let entries: string[]
+    try {
+      entries = await readdir(this.replacementJournalDirectory)
+    } catch (error) {
+      if (isNodeErrorWithCode(error, 'ENOENT')) return
+      throw error
+    }
+
+    let firstError: unknown = null
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) continue
+      const journalPath = join(this.replacementJournalDirectory, entry)
+      try {
+        const journal = await this.readReplacementJournal(journalPath)
+        await this.recoverDirectoryReplacement(journalPath, journal)
+      } catch (error) {
+        firstError ??= error
+      }
+    }
+    if (firstError) throw firstError
+  }
+
+  getProjectDirectoryReplacement(
+    replacementId: string,
+  ): WorkspaceDirectoryReplacement & { projectRoot: string } {
+    const replacement = this.requireDirectoryReplacement(replacementId)
+    return {
+      id: replacementId,
+      targetPath: replacement.targetPath,
+      backupPath: replacement.backupPath,
+      projectRoot: replacement.projectRoot,
+    }
+  }
+
+  private requireDirectoryReplacement(replacementId: string): DirectoryReplacementRecord {
+    if (!replacementId) {
+      throw new Error('Workspace replacement id is required')
+    }
+
+    const replacement = this.directoryReplacements.get(replacementId)
+    if (!replacement) {
+      throw new Error('Workspace replacement is missing or has already been completed')
+    }
+
+    if (
+      !isWithinRoot(replacement.targetPath, replacement.projectRoot) ||
+      !isWithinRoot(replacement.backupPath, replacement.projectRoot)
+    ) {
+      this.directoryReplacements.delete(replacementId)
+      throw new Error(
+        'Workspace replacement paths are outside the registered project root',
+      )
+    }
+
+    return replacement
+  }
+
+  private replacementJournalPath(replacementId: string): string {
+    return join(this.replacementJournalDirectory, `${replacementId}.json`)
+  }
+
+  private async writeReplacementJournal(
+    journalPath: string,
+    journal: DirectoryReplacementJournalRecord,
+  ): Promise<void> {
+    await mkdir(this.replacementJournalDirectory, { recursive: true })
+    const temporaryPath = `${journalPath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporaryPath, JSON.stringify(journal), 'utf8')
+      await rename(temporaryPath, journalPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined)
+      throw error
+    }
+  }
+
+  private async readReplacementJournal(
+    journalPath: string,
+  ): Promise<DirectoryReplacementJournalRecord> {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(await readFile(journalPath, 'utf8'))
+    } catch (error) {
+      throw new Error(`Unable to read workspace replacement journal: ${journalPath}`, {
+        cause: error,
+      })
+    }
+
+    if (!isDirectoryReplacementJournalRecord(parsed)) {
+      throw new Error(`Invalid workspace replacement journal: ${journalPath}`)
+    }
+    this.assertReplacementJournalPaths(parsed)
+    return parsed
+  }
+
+  private async recoverDirectoryReplacement(
+    journalPath: string,
+    journal: DirectoryReplacementJournalRecord,
+  ): Promise<void> {
+    this.assertReplacementJournalPaths(journal)
+    if (journal.state === 'retained') {
+      await this.removeReplacementJournal(journalPath)
+      return
+    }
+    if (journal.state === 'committed') {
+      await rm(journal.backupPath, { force: true, recursive: true })
+      await this.removeReplacementJournal(journalPath)
+      return
+    }
+
+    const backupExists = await pathExists(journal.backupPath)
+    const targetExists = await pathExists(journal.targetPath)
+    if (journal.recoveryMode !== 'rollback') {
+      const references = await readManifestReplacementReferences(
+        journal.projectRoot,
+        journal.targetPath,
+        journal.backupPath,
+      )
+      if (journal.recoveryMode === 'retain' && references.backupReferenced) {
+        await this.removeReplacementJournal(journalPath)
+        return
+      }
+      if (journal.recoveryMode === 'delete' && !references.targetReferenced) {
+        if (backupExists) {
+          await rm(journal.backupPath, { force: true, recursive: true })
+        }
+        await this.removeReplacementJournal(journalPath)
+        return
+      }
+    }
+    if (backupExists) {
+      if (targetExists) {
+        await rm(journal.targetPath, { force: true, recursive: true })
+      }
+      await rename(journal.backupPath, journal.targetPath)
+    }
+    await this.removeReplacementJournal(journalPath)
+  }
+
+  private assertReplacementJournalPaths(
+    journal: DirectoryReplacementJournalRecord,
+  ): void {
+    if (
+      !isAbsolute(journal.projectRoot) ||
+      !isAbsolute(journal.targetPath) ||
+      !isAbsolute(journal.backupPath) ||
+      isSamePath(journal.targetPath, journal.projectRoot) ||
+      !isWithinRoot(journal.targetPath, journal.projectRoot) ||
+      !isWithinRoot(journal.backupPath, journal.projectRoot)
+    ) {
+      throw new Error('Workspace replacement journal paths are outside the project root')
+    }
+  }
+
+  private async removeReplacementJournal(journalPath: string): Promise<void> {
+    await rm(journalPath, { force: true })
   }
 
   async watchProjectFile(
@@ -618,6 +969,15 @@ export class WorkspaceService {
 
     if (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(projectRoot)) {
       throw new Error(WORKSPACE_RUNTIME_MUTATION_BLOCKED_MESSAGE)
+    }
+  }
+
+  private async assertCanReplaceWorkspace(canonicalPath: string): Promise<void> {
+    if (
+      this.runtimeMutationGuard &&
+      (await this.runtimeMutationGuard.isWorkspaceRuntimeActive(canonicalPath))
+    ) {
+      throw new Error(WORKSPACE_REPLACEMENT_BLOCKED_MESSAGE)
     }
   }
 }

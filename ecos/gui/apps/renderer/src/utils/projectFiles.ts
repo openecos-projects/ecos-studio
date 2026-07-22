@@ -201,14 +201,6 @@ export async function writeProjectTextFile(
   await getDesktopApi().workspace.writeProjectTextFile(resolvedPath, content)
 }
 
-export async function removeProjectDirectory(
-  path: string,
-  options: ProjectFilePathOptions = {},
-): Promise<void> {
-  const resolvedPath = resolveProjectFilePath(path, options.projectPath)
-  await getDesktopApi().workspace.removeProjectDirectory(resolvedPath)
-}
-
 export async function watchProjectFile(
   path: string,
   listener: (event: DesktopProjectFileChangedEvent) => void,

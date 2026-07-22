@@ -168,3 +168,29 @@ export {
   resolveProjectFileAbsolutePath,
 } from './utils/localPath.ts'
 export { isHdlFilePath } from './utils/hdlPath.ts'
+export {
+  applyProjectManifestMutation,
+  archiveWorkspaceInManifest,
+  createProjectManifestDraft,
+  deleteWorkspaceFromManifest,
+  parseProjectManifest,
+  projectManifestFlowSteps,
+  recordReplacementBackupInManifest,
+  registerWorkspaceInManifest,
+  serializeProjectManifest,
+} from './utils/projectManifest.ts'
+export type {
+  ProjectManifest,
+  ProjectManifestBaseDesign,
+  ProjectManifestDraftInput,
+  ProjectManifestFlowStep,
+  ProjectManifestMetricSummary,
+  ProjectManifestMutation,
+  ProjectManifestMutationRequest,
+  ProjectManifestMutationResult,
+  ProjectManifestReplacementBackupInput,
+  ProjectManifestResolvedReplacementBackupInput,
+  ProjectManifestWorkspace,
+  ProjectManifestWorkspaceRegistrationInput,
+  ProjectManifestWorkspaceStatus,
+} from './utils/projectManifest.ts'

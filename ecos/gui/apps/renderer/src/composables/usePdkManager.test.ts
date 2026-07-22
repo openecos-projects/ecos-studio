@@ -135,6 +135,9 @@ const desktopBridge = {
     readTextFile: async () => '',
     readJsonFile: async <T = unknown>() => null as T,
   },
+  projectManifest: {
+    mutate: async () => ({ content: '' }),
+  },
   dialog: {
     pickDirectory,
     pickFiles: async () => null,
@@ -152,10 +155,10 @@ const desktopBridge = {
     readProjectBinaryFile: async () => new Uint8Array(),
     writeProjectTextFile: async () => undefined,
     listProjectDirectory: async () => [],
-    removeProjectDirectory: async () => undefined,
     prepareProjectDirectoryReplacement: async () => null,
     restoreProjectDirectoryReplacement: async () => undefined,
     finalizeProjectDirectoryReplacement: async () => undefined,
+    retainProjectDirectoryReplacement: async () => undefined,
     scanPdkDirectory,
     scanRtlDirectory,
     watchProjectFile: async () => () => undefined,

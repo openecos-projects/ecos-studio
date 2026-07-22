@@ -912,6 +912,7 @@ describe('project management model', () => {
     const project = buildProjectManagementProject(recentProject, manifest)
 
     expect(nextWorkspaceId(project)).toBe('ws_0002')
+    expect(nextWorkspaceId(project, ['ws_0002', 'workspace-cache'])).toBe('ws_0003')
     expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor')).toEqual({
       sourceWorkspaceId: 'ws_0001',
       sourceWorkspacePath: '/projects/gcd/workspaces/ws_0001',

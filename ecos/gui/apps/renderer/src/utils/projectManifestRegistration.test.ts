@@ -6,8 +6,7 @@ import {
 } from './projectManifestRegistration'
 
 const registerProjectRoot = vi.fn()
-const readOptionalProjectTextFile = vi.fn()
-const writeProjectTextFile = vi.fn()
+const mutateProjectManifest = vi.fn()
 
 vi.mock('@/platform/desktop', () => ({
   waitForDesktopApi: vi.fn(async () => ({
@@ -17,20 +16,16 @@ vi.mock('@/platform/desktop', () => ({
   })),
 }))
 
-vi.mock('@/utils/projectFiles', () => ({
-  readOptionalProjectTextFile: (...args: unknown[]) =>
-    readOptionalProjectTextFile(...args),
-  writeProjectTextFile: (...args: unknown[]) => writeProjectTextFile(...args),
+vi.mock('@/api/projectManifest', () => ({
+  mutateProjectManifest: (...args: unknown[]) => mutateProjectManifest(...args),
 }))
 
 describe('projectManifestRegistration', () => {
   beforeEach(() => {
     registerProjectRoot.mockReset()
-    readOptionalProjectTextFile.mockReset()
-    writeProjectTextFile.mockReset()
+    mutateProjectManifest.mockReset()
     registerProjectRoot.mockImplementation(async (path: string) => path)
-    readOptionalProjectTextFile.mockResolvedValue(null)
-    writeProjectTextFile.mockResolvedValue(undefined)
+    mutateProjectManifest.mockResolvedValue(undefined)
   })
 
   it('derives project context from wizard project_context payload', () => {
@@ -50,7 +45,7 @@ describe('projectManifestRegistration', () => {
     })
   })
 
-  it('writes project.json when a project-managed workspace is registered', async () => {
+  it('mutates project.json when a project-managed workspace is registered', async () => {
     const warnings: string[] = []
     const config = {
       directory: '/projects/gcd/ws_0001',
@@ -85,10 +80,12 @@ describe('projectManifestRegistration', () => {
     expect(warnings).toEqual([])
     expect(registerProjectRoot).toHaveBeenCalledWith('/projects/gcd')
     expect(registerProjectRoot).toHaveBeenCalledWith('/projects/gcd/ws_0001')
-    expect(writeProjectTextFile).toHaveBeenCalledWith(
-      'project.json',
-      expect.stringContaining('"workspace_id": "ws_0001"'),
-      { projectPath: '/projects/gcd' },
+    expect(mutateProjectManifest).toHaveBeenCalledWith(
+      '/projects/gcd',
+      expect.objectContaining({
+        type: 'register-workspace',
+        input: expect.objectContaining({ workspacePath: '/projects/gcd/ws_0001' }),
+      }),
     )
   })
 
@@ -100,6 +97,6 @@ describe('projectManifestRegistration', () => {
       } as WorkspaceConfig,
     })
 
-    expect(writeProjectTextFile).not.toHaveBeenCalled()
+    expect(mutateProjectManifest).not.toHaveBeenCalled()
   })
 })

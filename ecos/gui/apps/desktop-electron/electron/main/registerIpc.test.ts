@@ -89,6 +89,9 @@ function registerHandlers() {
       readJsonFile: vi.fn(),
       readTextFile: vi.fn(),
     },
+    projectManifestService: {
+      mutate: vi.fn(),
+    },
     workspaceService: {
       clearProjectRoot: vi.fn(),
       isProjectDirectory: vi.fn(),
@@ -99,7 +102,6 @@ function registerHandlers() {
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
       registerProjectRoot: vi.fn(),
-      removeProjectDirectory: vi.fn(),
       listProjectDirectory: vi.fn(),
       requestProjectPathAccess: vi.fn(),
       scanPdkDirectory: vi.fn(),
@@ -110,6 +112,7 @@ function registerHandlers() {
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
+      retainProjectDirectoryReplacement: vi.fn(),
       subscribeProjectLogTail: vi.fn(),
       unwatchProjectFile: vi.fn(),
       unsubscribeProjectLogTail: vi.fn(),
@@ -734,6 +737,7 @@ describe('registerIpc', () => {
       '/tmp/project/home.json',
     )
     services.workspaceService.prepareProjectDirectoryReplacement.mockResolvedValue({
+      id: 'replacement-ws-0001',
       targetPath: '/tmp/project/ws_0001',
       backupPath: '/tmp/project/.ws_0001.replace-backup',
     })
@@ -876,11 +880,8 @@ describe('registerIpc', () => {
         type: 'file',
       },
     ])
-    await handlers.get(desktopApiIpcChannels.workspaceRemoveProjectDirectory)?.(
-      event,
-      '/tmp/project/ws_0001',
-    )
     const replacement = {
+      id: 'replacement-ws-0001',
       targetPath: '/tmp/project/ws_0001',
       backupPath: '/tmp/project/.ws_0001.replace-backup',
     }
@@ -892,10 +893,13 @@ describe('registerIpc', () => {
     ).resolves.toEqual(replacement)
     await handlers.get(
       desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
-    )?.(event, replacement)
+    )?.(event, replacement.id)
     await handlers.get(
       desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
-    )?.(event, replacement)
+    )?.(event, replacement.id)
+    await handlers.get(
+      desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
+    )?.(event, replacement.id)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceScanPdkDirectory)?.(event, '/tmp/pdk'),
     ).resolves.toMatchObject({
@@ -952,19 +956,50 @@ describe('registerIpc', () => {
     expect(services.workspaceService.listProjectDirectory).toHaveBeenCalledWith(
       '/tmp/project/origin',
     )
-    expect(services.workspaceService.removeProjectDirectory).toHaveBeenCalledWith(
-      '/tmp/project/ws_0001',
-    )
     expect(
       services.workspaceService.prepareProjectDirectoryReplacement,
     ).toHaveBeenCalledWith('/tmp/project/ws_0001')
     expect(
       services.workspaceService.restoreProjectDirectoryReplacement,
-    ).toHaveBeenCalledWith(replacement)
+    ).toHaveBeenCalledWith(replacement.id)
     expect(
       services.workspaceService.finalizeProjectDirectoryReplacement,
-    ).toHaveBeenCalledWith(replacement)
+    ).toHaveBeenCalledWith(replacement.id)
+    expect(
+      services.workspaceService.retainProjectDirectoryReplacement,
+    ).toHaveBeenCalledWith(replacement.id)
     expect(services.workspaceService.clearProjectRoot).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects malformed replacement ids before calling the workspace service', async () => {
+    const { handlers, services } = registerHandlers()
+    const event = { sender: { id: 'web-contents' } }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement)?.(
+        event,
+        { id: 'replacement-ws-0001' },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace replacement id must be a string' },
+      ok: false,
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement)?.(
+        event,
+        null,
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace replacement id must be a string' },
+      ok: false,
+    })
+
+    expect(
+      services.workspaceService.restoreProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+    expect(
+      services.workspaceService.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
   })
 
   it('opens RTL source file picker as single file selection and rejects returned directories', async () => {

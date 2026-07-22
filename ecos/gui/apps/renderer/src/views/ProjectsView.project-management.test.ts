@@ -1,13 +1,28 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import source from './ProjectsView.vue?raw'
+import analysisSource from './project-management/ProjectAnalysisPanel.vue?raw'
+import presentationSource from './project-management/projectAnalysisPresentation.ts?raw'
+import analysisDataSource from './project-management/projectWorkspaceAnalysisData.ts?raw'
 
 const normalizedSource = source.replace(/\s+/g, ' ')
+const projectStyles = readFileSync(
+  new URL('./project-management/projectsView.css', import.meta.url),
+  'utf8',
+)
+const analysisStyles = readFileSync(
+  new URL('./project-management/projectAnalysisPanel.css', import.meta.url),
+  'utf8',
+)
+const projectSurfaceSource = `${source}\n${projectStyles}`
+const analysisSurfaceSource = `${analysisSource}\n${analysisStyles}`
 
 describe('ProjectsView project management surface', () => {
   it('renders the project tree and project analysis surface instead of the old flow matrix', () => {
-    expect(source).toContain('Project Analysis')
-    expect(source).toContain('Dashboard')
-    expect(source).toContain('Step Analysis')
+    expect(source).toContain('ProjectAnalysisPanel')
+    expect(analysisSource).toContain('Project Analysis')
+    expect(analysisSource).toContain('Dashboard')
+    expect(analysisSource).toContain('Step Analysis')
     expect(source).toContain('class="project-workspace-tree"')
     expect(source).toContain('class="workspace-tree-list"')
     expect(source).toContain('class="workspace-flow-popover"')
@@ -39,38 +54,41 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('class="project-list-title"')
     expect(source).toContain('<h2>Projects</h2>')
     expect(source).toContain('class="project-list-actions"')
-    expect(source).toContain(
+    expect(projectSurfaceSource).toContain(
       'grid-template-columns: minmax(330px, 390px) minmax(780px, 1fr);',
     )
-    expect(source).toContain('.manager-scrim {')
-    expect(source).toContain('display: none;')
-    expect(source).toContain('.workspace-flow-popover::before')
-    expect(source).toContain('left: calc(100% + 14px);')
+    expect(projectSurfaceSource).toContain('.manager-scrim {')
+    expect(projectSurfaceSource).toContain('display: none;')
+    expect(projectSurfaceSource).toContain('.workspace-flow-popover::before')
+    expect(projectSurfaceSource).toContain('left: calc(100% + 14px);')
     expect(source).toContain('class="resource-row project-tree-row mockup-project-row"')
-    expect(source).toContain('class="analysis-panel mockup-analysis-panel"')
-    expect(source).toContain('class="dashboard-card dashboard-run-state-card"')
-    expect(source).toContain('class="dashboard-card dashboard-best-card"')
-    expect(source).toContain(
+    expect(analysisSource).toContain('class="analysis-panel mockup-analysis-panel"')
+    expect(analysisSource).toContain('class="dashboard-card dashboard-run-state-card"')
+    expect(analysisSource).toContain('class="dashboard-card dashboard-best-card"')
+    expect(analysisSource).toContain(
       'class="dashboard-card dashboard-chart-card dashboard-key-metric-card"',
     )
   })
 
   it('uses theme-mixed colors for the Projects list background', () => {
-    expect(source).toContain(
+    expect(projectSurfaceSource).toContain(
       '--project-list-bg: color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-primary));',
     )
-    expect(source).toContain('background: var(--project-list-bg);')
-    expect(source).toContain(
+    expect(projectSurfaceSource).toContain('background: var(--project-list-bg);')
+    expect(projectSurfaceSource).toContain(
       '--project-tree-bg: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));',
     )
-    expect(source).not.toContain('--mockup-soft: #f3f4f6')
-    expect(source).not.toContain('--mockup-bg: #f9fafb')
+    expect(projectSurfaceSource).not.toContain('--mockup-soft: #f3f4f6')
+    expect(projectSurfaceSource).not.toContain('--mockup-bg: #f9fafb')
   })
 
   it('keeps the Projects toolbar fixed while the workspace tree scrolls vertically', () => {
-    const projectListStart = source.indexOf('.project-list {')
-    const projectListEnd = source.indexOf('.project-workspace-tree {', projectListStart)
-    const projectListStyles = source.slice(projectListStart, projectListEnd)
+    const projectListStart = projectStyles.indexOf('.project-list {')
+    const projectListEnd = projectStyles.indexOf(
+      '.project-workspace-tree {',
+      projectListStart,
+    )
+    const projectListStyles = projectStyles.slice(projectListStart, projectListEnd)
 
     expect(projectListStyles).toContain('overflow-y: auto;')
     expect(projectListStyles).toContain('overflow-x: hidden;')
@@ -78,8 +96,8 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain(
       ':class="{ \'project-list--popover-open\': Boolean(popoverWorkspaceId) }"',
     )
-    expect(source).toContain('.project-list--popover-open {')
-    expect(source).toContain('overflow: visible;')
+    expect(projectStyles).toContain('.project-list--popover-open {')
+    expect(projectStyles).toContain('overflow: visible;')
   })
 
   it('provides a maximize toggle for the project management dialog', () => {
@@ -87,7 +105,7 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('toggleDialogMaximized')
     expect(source).toContain('ri-expand-diagonal-line')
     expect(source).toContain('ri-collapse-diagonal-line')
-    expect(source).toContain('.manager-dialog.maximized')
+    expect(projectStyles).toContain('.manager-dialog.maximized')
   })
 
   it('puts project-level workspace actions on each project item using circle icons', () => {
@@ -101,7 +119,7 @@ describe('ProjectsView project management surface', () => {
     expect(rowSource).toContain('circle-action')
     expect(rowSource).toContain('title="Import or open workspace"')
     expect(rowSource).toContain('title="New workspace"')
-    expect(rowSource).toContain('title="Delete project"')
+    expect(rowSource).toContain('title="Remove from Project Management"')
     expect(rowSource).toContain('@click.stop="importWorkspaceIntoProject(project.model)"')
     expect(rowSource).toContain('@click.stop="createWorkspaceForProject(project.model)"')
     expect(rowSource).toContain('@click.stop="requestDeleteProject(project.source)"')
@@ -153,8 +171,10 @@ describe('ProjectsView project management surface', () => {
 
   it('uses an up-right arrow glyph for opening workspace rows', () => {
     expect(source).toContain('<i class="circle-glyph open"></i>')
-    expect(source).toMatch(/\.circle-glyph\.open::before\s*\{[\s\S]*rotate\(-45deg\)/)
-    expect(source).toMatch(/\.circle-glyph\.open::after\s*\{[\s\S]*rotate\(0deg\)/)
+    expect(projectStyles).toMatch(
+      /\.circle-glyph\.open::before\s*\{[\s\S]*rotate\(-45deg\)/,
+    )
+    expect(projectStyles).toMatch(/\.circle-glyph\.open::after\s*\{[\s\S]*rotate\(0deg\)/)
   })
 
   it('shows a near-row flow step popover for successful source steps', () => {
@@ -195,11 +215,18 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('confirmDeleteWorkspace')
     expect(source).toContain('confirmDeleteProject')
     expect(source).toContain('Delete Workspace')
-    expect(source).toContain('Delete Project')
+    expect(source).toContain('Remove from Project Management')
     expect(source).toContain('Keep workspace data')
     expect(source).toContain('checked by default')
-    expect(source).toContain('removeProjectDirectory')
-    expect(normalizedSource).toContain('This will not delete the project directory')
+    expect(source).toContain('const keepWorkspaceDataOnDelete = ref(true)')
+    expect(source).toContain('deleteDirectory: !options.keepWorkspaceData')
+    expect(source).not.toContain('prepareProjectDirectoryReplacement')
+    expect(source).not.toContain('restoreProjectDirectoryReplacement')
+    expect(source).not.toContain('finalizeProjectDirectoryReplacement')
+    expect(source).toContain('nextAvailableWorkspaceId')
+    expect(normalizedSource).toContain(
+      'The project folder and project.json on disk will be kept',
+    )
   })
 
   it('searches both projects and their workspaces', () => {
@@ -233,8 +260,7 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('Project Storage Location')
     expect(source).toContain('selectProjectStorageLocation')
     expect(source).toContain('createProjectFolderDraft')
-    expect(source).toContain('writeProjectTextFile')
-    expect(source).toContain('createProjectManifestDraft')
+    expect(source).toContain('mutateProjectManifest')
 
     const createStart = source.indexOf('async function createProjectFolderDraft')
     const createEnd = source.indexOf('const goBack =', createStart)
@@ -246,8 +272,8 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('renders an empty state instead of generated demo workspace data', () => {
-    expect(source).toContain('No project data available')
-    expect(source).toContain('hasProjectData')
+    expect(analysisSource).toContain('No project data available')
+    expect(analysisSource).toContain('hasProjectData')
     expect(source).not.toContain('gcd_backend')
     expect(source).not.toContain('iter_0001')
   })
@@ -261,67 +287,65 @@ describe('ProjectsView project management surface', () => {
 
   it('loads workspace home flow.json states and analysis snapshots for project analysis', () => {
     expect(source).toContain('workspaceFlowStates')
-    expect(source).toContain("readOptionalProjectTextFile('home/flow.json'")
-    expect(source).toContain('parseWorkspaceFlowStateMap')
+    expect(analysisDataSource).toContain("readOptionalProjectTextFile('home/flow.json'")
+    expect(analysisDataSource).toContain('parseWorkspaceFlowStateMap')
     expect(source).toContain('workspaceAnalysisInputs')
-    expect(source).toContain('readWorkspaceAnalysisInputs')
+    expect(source).toContain('readProjectWorkspaceAnalysisInputs')
     expect(source).toContain('ProjectWorkspaceAnalysisInputsById')
-    expect(source).toContain('Synthesis_yosys/feature/Synthesis_stat.json')
-    expect(source).toContain('WORKSPACE_STEP_METRICS_FILE_SPECS')
-    expect(source).toContain('Synthesis_yosys/analysis/Synthesis_metrics.json')
-    expect(source).toContain('route_ecc/analysis/route_metrics.json')
-    expect(source).toContain('stepMetricTexts')
-    expect(source).toContain('sta_ecc/output')
+    expect(analysisDataSource).toContain('Synthesis_yosys/feature/Synthesis_stat.json')
+    expect(analysisDataSource).toContain('WORKSPACE_STEP_METRICS_FILE_SPECS')
+    expect(analysisDataSource).toContain(
+      'Synthesis_yosys/analysis/Synthesis_metrics.json',
+    )
+    expect(analysisDataSource).toContain('route_ecc/analysis/route_metrics.json')
+    expect(analysisDataSource).toContain('stepMetricTexts')
+    expect(analysisDataSource).toContain('sta_ecc/output')
   })
 
   it('renders dashboard and step analysis charts from derived project data', () => {
-    expect(source).toContain('selectedProject.dashboardSummary')
-    expect(source).not.toContain('Flow Success Ratio')
-    expect(source).not.toContain(
+    expect(analysisSource).toContain('project.dashboardSummary')
+    expect(analysisSource).not.toContain('Flow Success Ratio')
+    expect(analysisSource).not.toContain(
       'class="dashboard-card dashboard-ratio-card mockup-dashboard-card"',
     )
-    expect(source).not.toContain('flowSuccessRatio * 100')
-    expect(source).toContain('runStateSlices')
-    expect(source).toContain('class="dashboard-card dashboard-run-state-card"')
-    expect(source).toContain('class="dashboard-card dashboard-best-card"')
-    expect(source).toContain('Best')
-    expect(source).toContain('bestFrequencyWorkspace')
-    expect(source).toContain('bestWorkspacePpaMetrics')
-    expect(source).not.toContain('Flow Metric Snapshot')
-    expect(source).not.toContain('class="dashboard-card dashboard-flow-metric-card"')
-    expect(source).toContain('flowMetricSummary')
-    expect(source).toContain('dashboardMetricRows')
-    expect(source).toContain('dashboardWorkspaceMetricRows')
-    expect(source).toContain('dashboard-key-metric-table')
-    expect(source).toContain(
-      "const metricOrder = ['die_area', 'core_util', 'frequency', 'wns', 'tns', 'drc']",
+    expect(analysisSource).not.toContain('flowSuccessRatio * 100')
+    expect(analysisSource).toContain('runStateSlices')
+    expect(analysisSource).toContain('class="dashboard-card dashboard-run-state-card"')
+    expect(analysisSource).toContain('class="dashboard-card dashboard-best-card"')
+    expect(analysisSource).toContain('Best')
+    expect(analysisSource).toContain('bestFrequencyWorkspace')
+    expect(analysisSource).toContain('bestWorkspacePpaMetrics')
+    expect(analysisSource).not.toContain('Flow Metric Snapshot')
+    expect(analysisSource).not.toContain(
+      'class="dashboard-card dashboard-flow-metric-card"',
     )
-    expect(source).toContain('Die Area')
-    expect(source).toContain('Core Util')
-    expect(source).toContain('Frequency [MHz]')
-    expect(source.indexOf("'die_area'")).toBeLessThan(source.indexOf("'wns'"))
-    expect(source.indexOf("'core_util'")).toBeLessThan(source.indexOf("'wns'"))
-    expect(source.indexOf("'frequency'")).toBeLessThan(source.indexOf("'wns'"))
-    expect(source).toContain('runtimePoints')
-    expect(source).toContain('memoryPoints')
-    expect(source).not.toContain('Top Blocking Steps')
-    expect(source).not.toContain('class="dashboard-blockers-card"')
-    expect(source).toContain('selectedStepCompareMetrics')
-    expect(source).toContain('selectedStepWorkspaceMetricRows')
-    expect(source).toContain('step-compare-metric-table')
-    expect(source).toContain('step-compare-workspace-cell')
-    expect(source).toContain('step-compare-metric-cell')
-    expect(source).toContain('aria-label="Selected step metrics by workspace"')
-    expect(source).toMatch(
+    expect(analysisSource).toContain('flowMetricSummary')
+    expect(analysisSource).toContain('dashboardMetricRows')
+    expect(analysisSource).toContain('dashboardWorkspaceMetricRows')
+    expect(analysisSource).toContain('dashboard-key-metric-table')
+    expect(analysisSource).toContain('Die Area')
+    expect(analysisSource).toContain('Core Util')
+    expect(analysisSource).toContain('Frequency [MHz]')
+    expect(presentationSource).toContain('runtimePoints')
+    expect(presentationSource).toContain('memoryPoints')
+    expect(analysisSource).not.toContain('Top Blocking Steps')
+    expect(analysisSource).not.toContain('class="dashboard-blockers-card"')
+    expect(analysisSource).toContain('selectedStepCompareMetrics')
+    expect(analysisSource).toContain('selectedStepWorkspaceMetricRows')
+    expect(analysisSource).toContain('step-compare-metric-table')
+    expect(analysisSource).toContain('step-compare-workspace-cell')
+    expect(analysisSource).toContain('step-compare-metric-cell')
+    expect(analysisSource).toContain('aria-label="Selected step metrics by workspace"')
+    expect(analysisSurfaceSource).toMatch(
       /repeat\(\s*var\(--step-compare-metric-count\),\s*minmax\(92px,\s*1fr\)\s*\)/,
     )
-    expect(source).toContain('grid-auto-rows: 42px;')
-    expect(source).not.toContain('align-self: stretch;')
-    expect(source).not.toContain('step-compare-metric-card')
-    expect(source).not.toContain('step-compare-metric-chart')
-    expect(source).not.toContain('class="step-compare-point"')
+    expect(analysisSurfaceSource).toContain('grid-auto-rows: 42px;')
+    expect(analysisSource).not.toContain('align-self: stretch;')
+    expect(analysisSource).not.toContain('step-compare-metric-card')
+    expect(analysisSource).not.toContain('step-compare-metric-chart')
+    expect(analysisSource).not.toContain('class="step-compare-point"')
     expect(source).toContain('const hasOpenedStepAnalysis = ref(false)')
-    expect(source).toContain('@click="openStepAnalysis"')
+    expect(source).toContain('handleAnalysisTabSelection')
     expect(source).toContain('function openStepAnalysis()')
     expect(source).toContain("selectedStep.value = 'Synth'")
     expect(source).toContain('hasOpenedStepAnalysis.value = true')
@@ -329,12 +353,14 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('keeps only Dashboard and Step Analysis tabs on the right side of the project analysis header', () => {
-    const analysisStart = source.indexOf('class="panel-title-row analysis-heading"')
-    const analysisEnd = source.indexOf(
-      '</div>',
-      source.indexOf('class="analysis-header-actions"', analysisStart),
+    const analysisStart = analysisSource.indexOf(
+      'class="panel-title-row analysis-heading"',
     )
-    const analysisHeaderSource = source.slice(analysisStart, analysisEnd + 6)
+    const analysisEnd = analysisSource.indexOf(
+      '</div>',
+      analysisSource.indexOf('class="analysis-header-actions"', analysisStart),
+    )
+    const analysisHeaderSource = analysisSource.slice(analysisStart, analysisEnd + 6)
 
     expect(analysisHeaderSource).toContain('class="analysis-header-actions"')
     expect(analysisHeaderSource).toContain('class="analysis-tabs"')
@@ -343,19 +369,19 @@ describe('ProjectsView project management surface', () => {
     expect(analysisHeaderSource).not.toContain('Backend Design')
     expect(analysisHeaderSource).not.toContain('toolbar-action')
     expect(source).not.toContain('openBackendDesign')
-    expect(source).toContain('.analysis-heading {')
-    expect(source).toContain('justify-content: space-between;')
-    expect(source).toContain('.analysis-header-actions {')
-    expect(source).toContain('margin-left: auto;')
+    expect(analysisSurfaceSource).toContain('.analysis-heading {')
+    expect(analysisSurfaceSource).toContain('justify-content: space-between;')
+    expect(analysisSurfaceSource).toContain('.analysis-header-actions {')
+    expect(analysisSurfaceSource).toContain('margin-left: auto;')
   })
 
   it('keeps the workspace flow popover inside the project manager bounds', () => {
     expect(source).toContain('workspacePopoverPlacementClass(workspace.id)')
     expect(source).toContain(':class="workspacePopoverPlacementClass(workspace.id)"')
     expect(source).not.toContain('workspace-popover-flip')
-    expect(source).toContain('max-width: min(322px, calc(100vw - 80px));')
-    expect(source).toContain('left: calc(100% + 14px);')
-    expect(source).not.toContain('right: calc(100% + 14px);')
+    expect(projectSurfaceSource).toContain('max-width: min(322px, calc(100vw - 80px));')
+    expect(projectSurfaceSource).toContain('left: calc(100% + 14px);')
+    expect(projectSurfaceSource).not.toContain('right: calc(100% + 14px);')
   })
 
   it('uses dedicated project history instead of workspace recent records', () => {
@@ -368,7 +394,7 @@ describe('ProjectsView project management surface', () => {
     expect(source).not.toContain('localProjectDrafts')
   })
 
-  it('registers project roots before reading or writing project.json', () => {
+  it('registers project roots before reading or mutating project.json', () => {
     expect(source).toContain('registerProjectRootForProjectManagement')
     expect(source).toContain('desktopApi.workspace.registerProjectRoot')
 
@@ -377,12 +403,12 @@ describe('ProjectsView project management surface', () => {
       'await registerProjectRootForProjectManagement(directory)',
       createStart,
     )
-    const createWrite = source.indexOf(
-      "await writeProjectTextFile('project.json'",
+    const createMutation = source.indexOf(
+      'await mutateProjectManifest(projectRoot,',
       createStart,
     )
     expect(createRegister).toBeGreaterThan(createStart)
-    expect(createWrite).toBeGreaterThan(createRegister)
+    expect(createMutation).toBeGreaterThan(createRegister)
 
     const importStart = source.indexOf('async function importProject')
     const importRegister = source.indexOf(
@@ -422,7 +448,7 @@ describe('ProjectsView project management surface', () => {
   })
 
   it('persists project history when project.json is updated', () => {
-    const writeStart = source.indexOf('async function writeProjectManifestForProject')
+    const writeStart = source.indexOf('async function applyProjectManifestForProject')
     const writeRemember = source.indexOf('await rememberProjectHistoryEntry(', writeStart)
     const writeProjectFromManifest = source.indexOf(
       'projectFromManifest(manifest, normalizedRoot)',

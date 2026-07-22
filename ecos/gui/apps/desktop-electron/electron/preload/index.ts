@@ -15,6 +15,7 @@ import type {
   DesktopProjectFileChangedEvent,
   DesktopProjectLogTailEvent,
   RemoteContentReadJsonFileRequest,
+  ProjectManifestMutationRequest,
   ResourceJob,
   ResourceImportLocalRequest,
   ResourceInstallRequest,
@@ -127,6 +128,10 @@ const desktopApi: DesktopApi = {
     readJsonFile: <T = unknown>(request: RemoteContentReadJsonFileRequest) =>
       invokeDesktop<T>(desktopApiIpcChannels.remoteContentReadJsonFile, request),
   },
+  projectManifest: {
+    mutate: (request: ProjectManifestMutationRequest) =>
+      invokeDesktop(desktopApiIpcChannels.projectManifestMutate, request),
+  },
   dialog: {
     pickDirectory: (options?: DesktopDirectoryDialogOptions) =>
       invokeDesktop(desktopApiIpcChannels.dialogPickDirectory, options),
@@ -200,22 +205,25 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceWriteProjectTextFile, path, content),
     listProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceListProjectDirectory, path),
-    removeProjectDirectory: (path) =>
-      invokeDesktop(desktopApiIpcChannels.workspaceRemoveProjectDirectory, path),
     prepareProjectDirectoryReplacement: (path) =>
       invokeDesktop(
         desktopApiIpcChannels.workspacePrepareProjectDirectoryReplacement,
         path,
       ),
-    restoreProjectDirectoryReplacement: (replacement) =>
+    restoreProjectDirectoryReplacement: (replacementId) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceRestoreProjectDirectoryReplacement,
-        replacement,
+        replacementId,
       ),
-    finalizeProjectDirectoryReplacement: (replacement) =>
+    finalizeProjectDirectoryReplacement: (replacementId) =>
       invokeDesktop(
         desktopApiIpcChannels.workspaceFinalizeProjectDirectoryReplacement,
-        replacement,
+        replacementId,
+      ),
+    retainProjectDirectoryReplacement: (replacementId) =>
+      invokeDesktop(
+        desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
+        replacementId,
       ),
     scanPdkDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceScanPdkDirectory, path),

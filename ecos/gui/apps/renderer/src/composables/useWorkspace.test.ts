@@ -122,6 +122,9 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
         settingsData.delete(key)
       }),
     },
+    projectManifest: {
+      mutate: vi.fn(async () => ({ content: '' })),
+    },
     dialog: {
       pickDirectory: vi.fn(),
       pickFiles: vi.fn(),
@@ -143,10 +146,10 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       readProjectBinaryFile: vi.fn(),
       writeProjectTextFile: vi.fn(),
       listProjectDirectory: vi.fn(),
-      removeProjectDirectory: vi.fn(),
       prepareProjectDirectoryReplacement: vi.fn(),
       restoreProjectDirectoryReplacement: vi.fn(),
       finalizeProjectDirectoryReplacement: vi.fn(),
+      retainProjectDirectoryReplacement: vi.fn(),
       scanPdkDirectory: vi.fn(),
       scanRtlDirectory: vi.fn(),
       listDesignFiles: vi.fn(),
@@ -2346,6 +2349,7 @@ describe('useWorkspace openProject', () => {
   it('replaces an existing workspace by creating from a temporary backup directory', async () => {
     const workspace = useWorkspace()
     const replacement = {
+      id: 'replacement-demo-1',
       targetPath: '/work/demo',
       backupPath: '/work/.demo.replace-backup-1',
     }
@@ -2395,7 +2399,7 @@ describe('useWorkspace openProject', () => {
       }),
     )
     expect(desktopApi.workspace.finalizeProjectDirectoryReplacement).toHaveBeenCalledWith(
-      replacement,
+      replacement.id,
     )
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
   })
@@ -2403,14 +2407,15 @@ describe('useWorkspace openProject', () => {
   it('keeps replacement backup and records it in project.json when requested', async () => {
     const workspace = useWorkspace()
     const replacement = {
+      id: 'replacement-demo-1',
       targetPath: '/work/demo',
       backupPath: '/work/.demo.replace-backup-1',
     }
     vi.mocked(
       desktopApi.workspace.prepareProjectDirectoryReplacement,
     ).mockResolvedValueOnce(replacement)
-    vi.mocked(desktopApi.workspace.readOptionalProjectTextFile).mockResolvedValueOnce(
-      JSON.stringify({
+    vi.mocked(desktopApi.projectManifest.mutate).mockResolvedValueOnce({
+      content: JSON.stringify({
         schema_version: 1,
         project_id: 'proj_work',
         name: 'work',
@@ -2418,24 +2423,12 @@ describe('useWorkspace openProject', () => {
         root_path: '/work',
         created_at: '2026-07-08T00:00:00.000Z',
         updated_at: '2026-07-08T00:00:00.000Z',
-        base_design: {
-          parameters: {},
-          rtl_list: [],
-        },
-        objectives: {
-          primary: 'timing',
-          directions: {
-            wns: 'maximize',
-            tns: 'maximize',
-            area: 'minimize',
-            drc_count: 'minimize',
-            power: 'minimize',
-          },
-        },
+        base_design: { parameters: {}, rtl_list: [] },
+        objectives: { primary: 'timing', directions: {} },
         workspaces: [],
         best_workspace: null,
       }),
-    )
+    })
     createWorkspaceApiMock.mockResolvedValueOnce({
       response: 'success',
       data: {
@@ -2472,20 +2465,183 @@ describe('useWorkspace openProject', () => {
     expect(
       desktopApi.workspace.finalizeProjectDirectoryReplacement,
     ).not.toHaveBeenCalled()
-    expect(desktopApi.workspace.writeProjectTextFile).toHaveBeenCalledWith(
-      '/work/project.json',
-      expect.stringContaining('/work/.demo.replace-backup-1'),
+    expect(desktopApi.projectManifest.mutate).toHaveBeenCalledWith({
+      projectRoot: '/work',
+      mutation: {
+        type: 'record-replacement-backup',
+        input: {
+          replacementId: 'replacement-demo-1',
+          fallbackStartStep: undefined,
+          fallbackEndStep: undefined,
+        },
+      },
+    })
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).not.toHaveBeenCalled()
+  })
+
+  it('restores the original workspace when replacement finalization fails', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      id: 'replacement-demo-1',
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    vi.mocked(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).mockRejectedValueOnce(new Error('backup cleanup failed'))
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
     )
-    expect(desktopApi.workspace.writeProjectTextFile).toHaveBeenCalledWith(
-      '/work/project.json',
-      expect.stringContaining('"status": "archived"'),
+    expect(workspace.currentProject.value).toBeNull()
+  })
+
+  it('releases a replacement token when backup manifest recording fails', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      id: 'replacement-demo-1',
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    vi.mocked(desktopApi.projectManifest.mutate).mockRejectedValueOnce(
+      new Error('manifest write failed'),
+    )
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '/work/demo/origin/demo.def',
+        origin_verilog: '/work/demo/origin/demo.v',
+        rtl_list: ['/work/demo/origin/demo.v'],
+        project_context: {
+          mode: 'select',
+          project_name: 'work',
+          project_root: '/work',
+          project_json_path: '/work/project.json',
+        },
+      }),
+    ).resolves.toBe(true)
+
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
     )
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).not.toHaveBeenCalled()
+    expect(
+      desktopApi.workspace.finalizeProjectDirectoryReplacement,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('restores the original workspace when backup retention fails', async () => {
+    const workspace = useWorkspace()
+    const replacement = {
+      id: 'replacement-demo-1',
+      targetPath: '/work/demo',
+      backupPath: '/work/.demo.replace-backup-1',
+    }
+    vi.mocked(
+      desktopApi.workspace.prepareProjectDirectoryReplacement,
+    ).mockResolvedValueOnce(replacement)
+    vi.mocked(desktopApi.projectManifest.mutate).mockRejectedValueOnce(
+      new Error('manifest write failed'),
+    )
+    vi.mocked(
+      desktopApi.workspace.retainProjectDirectoryReplacement,
+    ).mockRejectedValueOnce(new Error('backup retention failed'))
+    createWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_id: 'workspace-demo',
+      },
+      message: [],
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/demo',
+        replaceExistingWorkspace: true,
+        keepReplacementBackup: true,
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+        parameters: {
+          design: 'demo',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        project_context: {
+          mode: 'select',
+          project_name: 'work',
+          project_root: '/work',
+          project_json_path: '/work/project.json',
+        },
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.retainProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
+    )
+    expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
+      replacement.id,
+    )
+    expect(workspace.currentProject.value).toBeNull()
   })
 
   it('restores the original workspace backup when replacement creation fails', async () => {
     const workspace = useWorkspace()
     const replacement = {
+      id: 'replacement-demo-1',
       targetPath: '/work/demo',
       backupPath: '/work/.demo.replace-backup-1',
     }
@@ -2516,7 +2672,7 @@ describe('useWorkspace openProject', () => {
     ).resolves.toBe(false)
 
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
-      replacement,
+      replacement.id,
     )
     expect(
       desktopApi.workspace.finalizeProjectDirectoryReplacement,

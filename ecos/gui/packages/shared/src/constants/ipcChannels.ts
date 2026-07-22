@@ -13,6 +13,7 @@ export const desktopApiIpcChannels = {
   remoteContentListFiles: 'remote-content:list-files',
   remoteContentReadTextFile: 'remote-content:read-text-file',
   remoteContentReadJsonFile: 'remote-content:read-json-file',
+  projectManifestMutate: 'project-manifest:mutate',
   dialogPickDirectory: 'dialog:pick-directory',
   dialogPickFiles: 'dialog:pick-files',
   dialogPickRtlSources: 'dialog:pick-rtl-sources',
@@ -33,13 +34,14 @@ export const desktopApiIpcChannels = {
   workspaceReadProjectBinaryFile: 'workspace:read-project-binary-file',
   workspaceWriteProjectTextFile: 'workspace:write-project-text-file',
   workspaceListProjectDirectory: 'workspace:list-project-directory',
-  workspaceRemoveProjectDirectory: 'workspace:remove-project-directory',
   workspacePrepareProjectDirectoryReplacement:
     'workspace:prepare-project-directory-replacement',
   workspaceRestoreProjectDirectoryReplacement:
     'workspace:restore-project-directory-replacement',
   workspaceFinalizeProjectDirectoryReplacement:
     'workspace:finalize-project-directory-replacement',
+  workspaceRetainProjectDirectoryReplacement:
+    'workspace:retain-project-directory-replacement',
   workspaceScanPdkDirectory: 'workspace:scan-pdk-directory',
   workspaceScanRtlDirectory: 'workspace:scan-rtl-directory',
   workspaceListDesignFiles: 'workspace:list-design-files',

@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile,
@@ -31,7 +32,7 @@ function createProjectScopeProvider(
   return {
     clearProjectRoot: vi.fn(),
     getProjectRoot: vi.fn().mockResolvedValue(rootPath),
-    isProjectDirectory: vi.fn(),
+    isProjectDirectory: vi.fn().mockResolvedValue(true),
     registerProjectRoot: vi.fn(),
     requestProjectPathAccess: vi.fn().mockResolvedValue(canonicalPath),
     scanPdkDirectory: vi.fn(),
@@ -53,6 +54,7 @@ function createWorkspaceService(
   const projectScopeProvider = createProjectScopeProvider(rootPath, canonicalPath)
   const service = new WorkspaceService({
     projectScopeProvider,
+    replacementJournalDirectory: join(rootPath, '.workspace-replacement-journals'),
     ...options,
   })
 
@@ -289,36 +291,6 @@ describe('WorkspaceService', () => {
     )
   })
 
-  it('removes a project-scoped workspace directory without deleting the project root', async () => {
-    const directory = await createTempDir('ecos-workspace-service-remove-dir-')
-    const workspaceDirectory = join(directory, 'ws_0001')
-    const filePath = join(workspaceDirectory, 'home', 'parameters.json')
-    await mkdir(join(workspaceDirectory, 'home'), { recursive: true })
-    await writeFile(filePath, '{}', 'utf8')
-
-    const { projectScopeProvider, service } = createWorkspaceService(
-      directory,
-      workspaceDirectory,
-    )
-
-    await expect(
-      service.removeProjectDirectory('/project/ws_0001'),
-    ).resolves.toBeUndefined()
-    await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(projectScopeProvider.requestProjectPathAccess).toHaveBeenCalledWith(
-      '/project/ws_0001',
-    )
-  })
-
-  it('refuses to remove the registered project root as a workspace directory', async () => {
-    const directory = await createTempDir('ecos-workspace-service-remove-root-')
-    const { service } = createWorkspaceService(directory, directory)
-
-    await expect(service.removeProjectDirectory('/project')).rejects.toThrow(
-      'Refusing to remove the project root',
-    )
-  })
-
   it('prepares a workspace directory replacement by moving the current workspace aside', async () => {
     const directory = await createTempDir('ecos-workspace-service-replace-dir-')
     const workspaceDirectory = join(directory, 'ws_0001')
@@ -345,34 +317,209 @@ describe('WorkspaceService', () => {
     )
   })
 
+  it('refuses to prepare a replacement for a directory that is not an ECOS workspace', async () => {
+    const directory = await createTempDir('ecos-workspace-service-non-workspace-')
+    const targetPath = join(directory, 'origin')
+    await mkdir(targetPath, { recursive: true })
+    const { projectScopeProvider, service } = createWorkspaceService(
+      directory,
+      targetPath,
+    )
+    vi.mocked(projectScopeProvider.isProjectDirectory).mockResolvedValueOnce(false)
+
+    await expect(
+      service.prepareProjectDirectoryReplacement('/project/origin'),
+    ).rejects.toThrow('not an ECOS workspace')
+    await expect(readdir(targetPath)).resolves.toEqual([])
+  })
+
+  it('prepares an incomplete manifest-owned workspace without relying on active scope', async () => {
+    const directory = await createTempDir('ecos-workspace-service-managed-replacement-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'partial.txt'), 'partial workspace', 'utf8')
+    const { projectScopeProvider, service } = createWorkspaceService(
+      directory,
+      targetPath,
+    )
+    vi.mocked(projectScopeProvider.isProjectDirectory).mockResolvedValueOnce(false)
+
+    const replacement = await service.prepareManagedProjectWorkspaceDirectoryReplacement(
+      directory,
+      'ws_0001',
+      targetPath,
+    )
+
+    expect(replacement?.targetPath).toBe(targetPath)
+    await expect(readFile(join(targetPath, 'partial.txt'), 'utf8')).rejects.toMatchObject(
+      {
+        code: 'ENOENT',
+      },
+    )
+    await expect(
+      readFile(join(replacement?.backupPath ?? '', 'partial.txt'), 'utf8'),
+    ).resolves.toBe('partial workspace')
+    expect(projectScopeProvider.isProjectDirectory).not.toHaveBeenCalled()
+  })
+
+  it('refuses a manifest workspace path outside its direct project child directory', async () => {
+    const directory = await createTempDir('ecos-workspace-service-managed-path-')
+    const outsidePath = await createTempDir('ecos-workspace-service-managed-outside-')
+    const { service } = createWorkspaceService(directory, join(directory, 'ws_0001'))
+
+    await expect(
+      service.prepareManagedProjectWorkspaceDirectoryReplacement(
+        directory,
+        'ws_0001',
+        outsidePath,
+      ),
+    ).rejects.toThrow('not a direct child')
+  })
+
+  it('refuses to replace a workspace while its runtime flow is active', async () => {
+    const directory = await createTempDir('ecos-workspace-service-running-replacement-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    const runtimeMutationGuard = {
+      isWorkspaceRuntimeActive: vi.fn().mockResolvedValue(true),
+    }
+    const { service } = createWorkspaceService(directory, targetPath, {
+      runtimeMutationGuard,
+    })
+
+    await expect(
+      service.prepareProjectDirectoryReplacement('/project/ws_0001'),
+    ).rejects.toThrow('flow is running')
+    await expect(readdir(targetPath)).resolves.toEqual([])
+    expect(runtimeMutationGuard.isWorkspaceRuntimeActive).toHaveBeenCalledWith(targetPath)
+  })
+
+  it('restores an uncommitted replacement from its durable journal after restart', async () => {
+    const directory = await createTempDir('ecos-workspace-service-recovery-rollback-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'original', 'utf8')
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+
+    const { service: restartedService } = createWorkspaceService(directory, targetPath)
+    await restartedService.recoverProjectDirectoryReplacements()
+
+    await expect(readFile(join(targetPath, 'marker.txt'), 'utf8')).resolves.toBe(
+      'original',
+    )
+    await expect(
+      readFile(join(replacement.backupPath, 'marker.txt'), 'utf8'),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('finalizes a manifest-committed deletion during restart recovery', async () => {
+    const directory = await createTempDir('ecos-workspace-service-recovery-delete-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'original', 'utf8')
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+    await service.setProjectDirectoryReplacementRecoveryMode(replacement.id, 'delete')
+    await writeFile(
+      join(directory, 'project.json'),
+      JSON.stringify({ workspaces: [] }),
+      'utf8',
+    )
+
+    const { service: restartedService } = createWorkspaceService(directory, targetPath)
+    await restartedService.recoverProjectDirectoryReplacements()
+
+    await expect(readFile(join(targetPath, 'marker.txt'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(
+      readFile(join(replacement.backupPath, 'marker.txt'), 'utf8'),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
+  it('retains a manifest-recorded replacement backup during restart recovery', async () => {
+    const directory = await createTempDir('ecos-workspace-service-recovery-retain-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'original', 'utf8')
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'replacement', 'utf8')
+    await service.setProjectDirectoryReplacementRecoveryMode(replacement.id, 'retain')
+    await writeFile(
+      join(directory, 'project.json'),
+      JSON.stringify({
+        workspaces: [{ workspace_path: replacement.backupPath }],
+      }),
+      'utf8',
+    )
+
+    const { service: restartedService } = createWorkspaceService(directory, targetPath)
+    await restartedService.recoverProjectDirectoryReplacements()
+
+    await expect(readFile(join(targetPath, 'marker.txt'), 'utf8')).resolves.toBe(
+      'replacement',
+    )
+    await expect(
+      readFile(join(replacement.backupPath, 'marker.txt'), 'utf8'),
+    ).resolves.toBe('original')
+  })
+
+  it('continues recovering valid replacements when another journal is malformed', async () => {
+    const directory = await createTempDir('ecos-workspace-service-recovery-isolation-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'original', 'utf8')
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+    const journalDirectory = join(directory, '.workspace-replacement-journals')
+    await writeFile(join(journalDirectory, 'broken.json'), '{', 'utf8')
+
+    const { service: restartedService } = createWorkspaceService(directory, targetPath)
+    await expect(restartedService.recoverProjectDirectoryReplacements()).rejects.toThrow(
+      'Unable to read workspace replacement journal',
+    )
+    await expect(readFile(join(targetPath, 'marker.txt'), 'utf8')).resolves.toBe(
+      'original',
+    )
+  })
+
   it('restores a prepared replacement by replacing a partial target with the backup', async () => {
     const directory = await createTempDir('ecos-workspace-service-restore-dir-')
     const targetPath = join(directory, 'ws_0001')
-    const backupPath = join(directory, '.ws_0001.replace-backup')
     await mkdir(join(targetPath, 'home'), { recursive: true })
-    await mkdir(join(backupPath, 'origin'), { recursive: true })
-    await writeFile(join(targetPath, 'home', 'parameters.json'), '{}', 'utf8')
-    await writeFile(join(backupPath, 'origin', 'top.v'), 'module top; endmodule', 'utf8')
+    await writeFile(join(targetPath, 'origin.v'), 'module top; endmodule', 'utf8')
 
-    const projectScopeProvider = createProjectScopeProvider(directory, targetPath)
-    vi.mocked(projectScopeProvider.requestProjectPathAccess).mockImplementation(
-      async (path: string) => {
-        if (path === targetPath) return targetPath
-        if (path === backupPath) return backupPath
-        return path
-      },
-    )
-    const service = new WorkspaceService({ projectScopeProvider })
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+    await mkdir(join(targetPath, 'home'), { recursive: true })
+    await writeFile(join(targetPath, 'home', 'parameters.json'), '{}', 'utf8')
 
     await expect(
-      service.restoreProjectDirectoryReplacement({ targetPath, backupPath }),
+      service.restoreProjectDirectoryReplacement(replacement.id),
     ).resolves.toBeUndefined()
 
-    await expect(readFile(join(targetPath, 'origin', 'top.v'), 'utf8')).resolves.toBe(
+    await expect(readFile(join(targetPath, 'origin.v'), 'utf8')).resolves.toBe(
       'module top; endmodule',
     )
     await expect(
-      readFile(join(backupPath, 'origin', 'top.v'), 'utf8'),
+      readFile(join(replacement.backupPath, 'origin.v'), 'utf8'),
     ).rejects.toMatchObject({
       code: 'ENOENT',
     })
@@ -383,22 +530,19 @@ describe('WorkspaceService', () => {
       'ecos-workspace-service-restore-missing-backup-',
     )
     const targetPath = join(directory, 'ws_0001')
-    const backupPath = join(directory, '.ws_0001.replace-backup')
+    await mkdir(join(targetPath, 'home'), { recursive: true })
+    await writeFile(join(targetPath, 'origin.v'), 'module top; endmodule', 'utf8')
+
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
     await mkdir(join(targetPath, 'home'), { recursive: true })
     await writeFile(join(targetPath, 'home', 'parameters.json'), '{}', 'utf8')
-
-    const projectScopeProvider = createProjectScopeProvider(directory, targetPath)
-    vi.mocked(projectScopeProvider.requestProjectPathAccess).mockImplementation(
-      async (path: string) => {
-        if (path === targetPath) return targetPath
-        if (path === backupPath) return backupPath
-        return path
-      },
-    )
-    const service = new WorkspaceService({ projectScopeProvider })
+    await rm(replacement.backupPath, { force: true, recursive: true })
 
     await expect(
-      service.restoreProjectDirectoryReplacement({ targetPath, backupPath }),
+      service.restoreProjectDirectoryReplacement(replacement.id),
     ).rejects.toThrow('Workspace replacement backup is missing')
 
     await expect(
@@ -409,22 +553,47 @@ describe('WorkspaceService', () => {
   it('finalizes a prepared replacement by removing the backup directory', async () => {
     const directory = await createTempDir('ecos-workspace-service-finalize-dir-')
     const targetPath = join(directory, 'ws_0001')
-    const backupPath = join(directory, '.ws_0001.replace-backup')
-    await mkdir(join(backupPath, 'origin'), { recursive: true })
-    await writeFile(join(backupPath, 'origin', 'top.v'), 'module top; endmodule', 'utf8')
+    await mkdir(join(targetPath, 'origin'), { recursive: true })
+    await writeFile(join(targetPath, 'origin', 'top.v'), 'module top; endmodule', 'utf8')
 
-    const projectScopeProvider = createProjectScopeProvider(directory, backupPath)
-    const service = new WorkspaceService({ projectScopeProvider })
+    const { service } = createWorkspaceService(directory, targetPath)
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
 
     await expect(
-      service.finalizeProjectDirectoryReplacement({ targetPath, backupPath }),
+      service.finalizeProjectDirectoryReplacement(replacement.id),
     ).resolves.toBeUndefined()
 
     await expect(
-      readFile(join(backupPath, 'origin', 'top.v'), 'utf8'),
+      readFile(join(replacement.backupPath, 'origin', 'top.v'), 'utf8'),
     ).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it('rejects unknown or previously consumed replacement ids', async () => {
+    const directory = await createTempDir('ecos-workspace-service-replacement-id-')
+    const targetPath = join(directory, 'ws_0001')
+    await mkdir(targetPath, { recursive: true })
+    await writeFile(join(targetPath, 'marker.txt'), 'retained', 'utf8')
+
+    const { service } = createWorkspaceService(directory, targetPath)
+    await expect(service.finalizeProjectDirectoryReplacement('unknown')).rejects.toThrow(
+      'Workspace replacement is missing',
+    )
+
+    const replacement =
+      await service.prepareProjectDirectoryReplacement('/project/ws_0001')
+    if (!replacement) throw new Error('Expected replacement token')
+    await service.retainProjectDirectoryReplacement(replacement.id)
+
+    await expect(
+      service.restoreProjectDirectoryReplacement(replacement.id),
+    ).rejects.toThrow('Workspace replacement is missing')
+    await expect(
+      readFile(join(replacement.backupPath, 'marker.txt'), 'utf8'),
+    ).resolves.toBe('retained')
   })
 
   it('blocks configuration writes while the workspace runtime is active', async () => {
