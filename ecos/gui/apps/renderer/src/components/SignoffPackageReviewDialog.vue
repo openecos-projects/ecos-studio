@@ -12,7 +12,7 @@
     <div class="signoff-package-review-content">
       <div v-if="loading" class="signoff-package-review-loading" role="status">
         <i class="ri-loader-4-line animate-spin" aria-hidden="true" />
-        <span>Checking signoff package resources...</span>
+        <span>Rechecking current signoff outputs...</span>
       </div>
 
       <div v-else-if="error" class="signoff-package-review-error" role="alert">
@@ -30,8 +30,8 @@
           <button
             type="button"
             class="signoff-package-review-refresh"
-            title="Refresh review"
-            aria-label="Refresh review"
+            title="Recheck current outputs"
+            aria-label="Recheck current outputs"
             @click="emit('refresh')"
           >
             <i class="ri-refresh-line" aria-hidden="true" />
@@ -183,9 +183,13 @@ function statusSummary(status: EccSignoffReviewStatus): string {
   return 'Resolve the blocking resources before exporting this package.'
 }
 
-function detailKindLabel(kind: 'resource' | 'flow' | 'checklist'): string {
+function detailKindLabel(
+  kind: 'resource' | 'flow' | 'checklist' | 'analysis' | 'freshness',
+): string {
   if (kind === 'resource') return 'Resource'
   if (kind === 'flow') return 'Flow'
+  if (kind === 'analysis') return 'QoR Analysis'
+  if (kind === 'freshness') return 'Analysis Refresh'
   return 'Checklist'
 }
 
@@ -441,6 +445,16 @@ function detailKey(detail: {
 }
 
 .signoff-package-review-details [data-kind='checklist'] {
+  background: color-mix(in srgb, var(--warn-bg) 70%, transparent);
+  color: var(--warn-color);
+}
+
+.signoff-package-review-details [data-kind='analysis'] {
+  background: color-mix(in srgb, var(--danger-bg) 60%, transparent);
+  color: var(--danger-color);
+}
+
+.signoff-package-review-details [data-kind='freshness'] {
   background: color-mix(in srgb, var(--warn-bg) 70%, transparent);
   color: var(--warn-color);
 }

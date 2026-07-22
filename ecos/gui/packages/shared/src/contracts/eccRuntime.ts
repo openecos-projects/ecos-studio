@@ -60,7 +60,12 @@ export interface EccSignoffReviewGroup {
   summary: string
 }
 
-export type EccSignoffReviewDetailKind = 'resource' | 'flow' | 'checklist'
+export type EccSignoffReviewDetailKind =
+  | 'resource'
+  | 'flow'
+  | 'checklist'
+  | 'analysis'
+  | 'freshness'
 
 export interface EccSignoffReviewDetail {
   kind: EccSignoffReviewDetailKind
