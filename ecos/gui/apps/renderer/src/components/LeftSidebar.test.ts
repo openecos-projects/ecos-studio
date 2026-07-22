@@ -10,18 +10,22 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).not.toContain(`:to="'/workspace/' + stage.path"`)
   })
 
-  it('keeps full-flow run controls visible for frontend workspaces', () => {
+  it('uses the flow overview instead of backend subflow data for frontend steps', () => {
     const overviewTemplate = source.slice(
-      source.indexOf('<template v-if="showOverviewPanel">'),
-      source.indexOf('<template v-else-if="showSubflowPanel">'),
+      source.indexOf('<template v-if="showFlowOverviewPanel">'),
+      source.indexOf('<template v-else-if="showBackendSubflowPanel">'),
     )
     const subflowTemplate = source.slice(
-      source.indexOf('<template v-else-if="showSubflowPanel">'),
+      source.indexOf('<template v-else-if="showBackendSubflowPanel">'),
     )
 
     expect(source).toContain("isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS'")
     expect(source).toContain('await runAllFlow({ rerun: isRerun.value })')
-    expect(overviewTemplate).not.toContain('v-if="!isFrontendProject"')
+    expect(source).toContain('showOverviewPanel.value ||')
+    expect(source).toContain('isFrontendProject.value && showSubflowPanel.value')
+    expect(source).toContain('showSubflowPanel.value && !isFrontendProject.value')
+    expect(overviewTemplate).toContain('currentStage === stage.path')
+    expect(overviewTemplate).toContain('v-if="showOverviewRunControls"')
     expect(subflowTemplate).toContain('v-if="!isFrontendProject"')
   })
 })

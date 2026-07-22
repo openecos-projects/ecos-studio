@@ -64,7 +64,7 @@
       class="flex w-[240px] max-w-[300px] min-w-[200px] shrink-0 flex-col overflow-hidden border-r border-(--border-color) bg-(--bg-primary)"
     >
       <!-- ========== Home 概览面板 ========== -->
-      <template v-if="showOverviewPanel">
+      <template v-if="showFlowOverviewPanel">
         <!-- 顶部标题栏 -->
         <div class="border-b border-(--border-color) px-4 py-4">
           <div class="flex items-center gap-3">
@@ -177,7 +177,10 @@
               :key="stage.path"
               :to="workspaceStageLink(stage.path)"
               class="group relative flex cursor-pointer items-center gap-3 rounded-lg p-2 transition-all hover:bg-(--bg-secondary)/50"
-              :class="{ 'bg-(--bg-secondary)/30': stage.state === 'Ongoing' }"
+              :class="{
+                'bg-(--bg-secondary)/30': stage.state === 'Ongoing',
+                'bg-(--accent-color)/10': currentStage === stage.path,
+              }"
             >
               <!-- 连接线 -->
               <div
@@ -285,6 +288,7 @@
 
         <!-- 底部操作栏 -->
         <div
+          v-if="showOverviewRunControls"
           class="space-y-2 border-t border-(--border-color) bg-(--bg-secondary)/30 p-3"
         >
           <!-- Runtime event message display area -->
@@ -382,7 +386,7 @@
       </template>
 
       <!-- ========== 子流程面板 ========== -->
-      <template v-else-if="showSubflowPanel">
+      <template v-else-if="showBackendSubflowPanel">
         <!-- 顶部标题栏 -->
         <div class="border-b border-(--border-color) px-4 py-4">
           <div class="flex items-center gap-3">
@@ -695,6 +699,15 @@ const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
 
 const { ensureApiReady, currentProject } = useWorkspace()
 const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
+const showFlowOverviewPanel = computed(
+  () => showOverviewPanel.value || (isFrontendProject.value && showSubflowPanel.value),
+)
+const showBackendSubflowPanel = computed(
+  () => showSubflowPanel.value && !isFrontendProject.value,
+)
+const showOverviewRunControls = computed(
+  () => showOverviewPanel.value || !isFrontendProject.value,
+)
 const { activeRunMode, isRerun, runModes, selectRunMode } = useFlowRunMode(currentStage, {
   fullFlowLabel: computed(() => (isFrontendProject.value ? 'Frontend Flow' : 'RTL2GDS')),
 })
