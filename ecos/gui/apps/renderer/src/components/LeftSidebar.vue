@@ -60,7 +60,7 @@
 
     <!-- 第二栏：流程进度面板 (Configure 页面不显示) -->
     <div
-      v-if="showProgressPanel"
+      v-if="showWorkspaceProgressPanel"
       class="flex w-[240px] max-w-[300px] min-w-[200px] shrink-0 flex-col overflow-hidden border-r border-(--border-color) bg-(--bg-primary)"
     >
       <!-- ========== Home 概览面板 ========== -->
@@ -699,6 +699,13 @@ const { currentStage, showProgressPanel, showOverviewPanel, showSubflowPanel } =
 
 const { ensureApiReady, currentProject } = useWorkspace()
 const isFrontendProject = computed(() => currentProject.value?.designTool === 'frontend')
+const isFrontendExpandedView = computed(
+  () =>
+    isFrontendProject.value && ['src', 'wave'].includes(currentStage.value.toLowerCase()),
+)
+const showWorkspaceProgressPanel = computed(
+  () => showProgressPanel.value && !isFrontendExpandedView.value,
+)
 const showFlowOverviewPanel = computed(
   () => showOverviewPanel.value || (isFrontendProject.value && showSubflowPanel.value),
 )

@@ -28,4 +28,10 @@ describe('LeftSidebar workspace navigation', () => {
     expect(overviewTemplate).toContain('v-if="showOverviewRunControls"')
     expect(subflowTemplate).toContain('v-if="!isFrontendProject"')
   })
+
+  it('gives frontend source and waveform views the progress panel width', () => {
+    expect(source).toContain('v-if="showWorkspaceProgressPanel"')
+    expect(source).toContain("['src', 'wave'].includes(currentStage.value.toLowerCase())")
+    expect(source).toContain('showProgressPanel.value && !isFrontendExpandedView.value')
+  })
 })
