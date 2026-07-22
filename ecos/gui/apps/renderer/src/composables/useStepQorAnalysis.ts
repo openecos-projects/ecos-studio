@@ -21,7 +21,12 @@ export interface StepQorMetricOverview {
   source: StepQorFeatureSource
 }
 
-export type StepQorSummaryStatus = 'pass' | 'blocked' | 'incomplete' | 'unavailable' | null
+export type StepQorSummaryStatus =
+  | 'pass'
+  | 'blocked'
+  | 'incomplete'
+  | 'unavailable'
+  | null
 
 export interface StepQorFeatureSource {
   path: string
@@ -178,7 +183,10 @@ function metricOverview(metrics: unknown): {
       if (left.role !== right.role) return left.role === 'primary' ? -1 : 1
       return left.displayName.localeCompare(right.displayName)
     })
-  return { metrics: overview, invalidMetricSourceIds: uniqueStrings(invalidMetricSourceIds) }
+  return {
+    metrics: overview,
+    invalidMetricSourceIds: uniqueStrings(invalidMetricSourceIds),
+  }
 }
 
 function analysisIntegrity(
@@ -186,7 +194,8 @@ function analysisIntegrity(
   invalidMetricSourceIds: string[],
   invalidDetailIds: string[],
 ): StepQorAnalysisIntegrity {
-  const integrity = isRecord(payload) && isRecord(payload.integrity) ? payload.integrity : null
+  const integrity =
+    isRecord(payload) && isRecord(payload.integrity) ? payload.integrity : null
   const declaredMetricIds = stringArray(integrity?.invalid_metric_source_ids)
   const declaredDetailIds = stringArray(integrity?.invalid_detail_ids)
   const allMetricIds = uniqueStrings([...declaredMetricIds, ...invalidMetricSourceIds])

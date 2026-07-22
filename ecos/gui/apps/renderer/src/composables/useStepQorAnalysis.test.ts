@@ -145,7 +145,10 @@ describe('useStepQorAnalysis', () => {
               coverage: { status: 'incomplete', expected_count: 2, available_count: 1 },
               rc_corners: [{ rc_corner: 'RCworst', availability: 'available' }],
             },
-            feature_source: featureSource('feature/RCX.step.json', '/rcx/signoff_metrics'),
+            feature_source: featureSource(
+              'feature/RCX.step.json',
+              '/rcx/signoff_metrics',
+            ),
           },
         ],
       }),
@@ -374,10 +377,10 @@ describe('useStepQorAnalysis', () => {
     })
 
     resolveOldRead?.(
-        JSON.stringify({
-          schema_version: 3,
-          integrity: { status: 'pass' },
-          details: [routeDetail({ workspace: 'stale' })],
+      JSON.stringify({
+        schema_version: 3,
+        integrity: { status: 'pass' },
+        details: [routeDetail({ workspace: 'stale' })],
       }),
     )
     await nextTick()

@@ -58,7 +58,10 @@ describe('ECCView project management handoff', () => {
 
   it('still opens the workspace wizard when source workspace prefill cannot be read', () => {
     const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
-    const prefillEnd = source.indexOf('function projectManagedWizardInitialConfig', prefillStart)
+    const prefillEnd = source.indexOf(
+      'function projectManagedWizardInitialConfig',
+      prefillStart,
+    )
     const prefillSource = source.slice(prefillStart, prefillEnd)
     const loaderStart = source.indexOf('async function loadSourceWorkspaceInitialConfig')
     const loaderEnd = source.indexOf('function mergeBranchInitialConfig', loaderStart)

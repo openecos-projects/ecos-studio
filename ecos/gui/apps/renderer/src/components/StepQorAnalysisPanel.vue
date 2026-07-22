@@ -84,7 +84,10 @@
         <p v-if="integrity.status === 'incomplete'">
           Analysis source validation needs attention.
         </p>
-        <p v-if="warnings.length" :class="integrity.status === 'incomplete' ? 'mt-1' : ''">
+        <p
+          v-if="warnings.length"
+          :class="integrity.status === 'incomplete' ? 'mt-1' : ''"
+        >
           {{ warnings.join(' ') }}
         </p>
       </section>
@@ -234,15 +237,24 @@
       </section>
 
       <section v-else-if="detail && kind === 'rcx'" class="min-w-max">
-        <div class="flex items-center justify-between border-b border-(--border-color) px-3 py-2 text-[10px] text-(--text-secondary)">
+        <div
+          class="flex items-center justify-between border-b border-(--border-color) px-3 py-2 text-[10px] text-(--text-secondary)"
+        >
           <span>{{ rcxCoverage.status || 'unavailable' }} RC corner coverage</span>
-          <span>{{ rcxCoverage.availableCount }}/{{ rcxCoverage.expectedCount }} available</span>
+          <span
+            >{{ rcxCoverage.availableCount }}/{{
+              rcxCoverage.expectedCount
+            }}
+            available</span
+          >
         </div>
         <table
           class="w-full border-collapse text-left text-[11px] tabular-nums"
           aria-label="RCX parasitic corner analysis"
         >
-          <thead class="sticky top-0 bg-(--bg-secondary) text-[10px] text-(--text-secondary)">
+          <thead
+            class="sticky top-0 bg-(--bg-secondary) text-[10px] text-(--text-secondary)"
+          >
             <tr>
               <th class="px-3 py-2 font-semibold">RC corner</th>
               <th class="px-2 py-2 font-semibold">Status</th>
@@ -257,8 +269,12 @@
               :key="corner.id"
               class="border-b border-(--border-color)/70 hover:bg-(--bg-hover)"
             >
-              <th class="px-3 py-2 font-medium text-(--text-primary)">{{ corner.label }}</th>
-              <td class="px-2 py-2" :class="rcxStatusClass(corner.availability)">{{ corner.availability }}</td>
+              <th class="px-3 py-2 font-medium text-(--text-primary)">
+                {{ corner.label }}
+              </th>
+              <td class="px-2 py-2" :class="rcxStatusClass(corner.availability)">
+                {{ corner.availability }}
+              </td>
               <td class="px-2 py-2">{{ formatMetric(corner.totalCapacitance) }} fF</td>
               <td class="px-2 py-2">{{ formatMetric(corner.couplingCapacitance) }} fF</td>
               <td class="px-3 py-2">{{ formatMetric(corner.totalResistance) }} ohm</td>
@@ -372,7 +388,10 @@
               class="border-b border-(--border-color)/70 hover:bg-(--bg-hover)"
               :title="record.sourceFile"
             >
-              <th class="px-3 py-2 font-medium text-(--text-primary)" :title="record.corner">
+              <th
+                class="px-3 py-2 font-medium text-(--text-primary)"
+                :title="record.corner"
+              >
                 {{ record.cornerLabel }}
               </th>
               <td class="px-2 py-2">{{ record.pathGroup }}</td>
@@ -486,9 +505,8 @@ const routeLayers = computed(() => {
 const routeFinalIteration = computed(() => field(detail.value, 'final_dr_iteration'))
 
 const rcxCoverage = computed(() => {
-  const coverage = isRecord(detail.value) && isRecord(detail.value.coverage)
-    ? detail.value.coverage
-    : {}
+  const coverage =
+    isRecord(detail.value) && isRecord(detail.value.coverage) ? detail.value.coverage : {}
   return {
     status: stringField(coverage, 'status'),
     expectedCount: field(coverage, 'expected_count') ?? 0,
@@ -497,9 +515,10 @@ const rcxCoverage = computed(() => {
 })
 
 const rcxCorners = computed(() => {
-  const corners = isRecord(detail.value) && Array.isArray(detail.value.rc_corners)
-    ? detail.value.rc_corners
-    : []
+  const corners =
+    isRecord(detail.value) && Array.isArray(detail.value.rc_corners)
+      ? detail.value.rc_corners
+      : []
   return corners.filter(isRecord).map((corner, index) => ({
     id: stringField(corner, 'rc_corner') || `${index}`,
     label: stringField(corner, 'label') || stringField(corner, 'rc_corner') || '-',
@@ -575,7 +594,8 @@ const staRecords = computed(() => {
   return records.filter(isRecord).map((record, index) => ({
     id: `${stringField(record, 'corner')}-${stringField(record, 'path_group')}-${index}`,
     corner: stringField(record, 'corner') || '-',
-    cornerLabel: stringField(record.corner_context, 'label') || stringField(record, 'corner') || '-',
+    cornerLabel:
+      stringField(record.corner_context, 'label') || stringField(record, 'corner') || '-',
     pathGroup: stringField(record, 'path_group') || '-',
     sourceFile: stringField(record, 'source_file'),
     setup: timingValues(record.setup),
@@ -604,9 +624,7 @@ function timingRiskClass(value: Numeric): string {
 }
 
 function rcxStatusClass(status: string): string {
-  return status === 'available'
-    ? 'text-emerald-400'
-    : 'font-semibold text-amber-400'
+  return status === 'available' ? 'text-emerald-400' : 'font-semibold text-amber-400'
 }
 
 function sourceFileName(path: string): string {
