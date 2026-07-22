@@ -880,6 +880,21 @@ export class ResourceManagerService {
         continue
       }
 
+      const registrySha256 = readSha256(candidate.asset.sha256)
+      if (sha256 !== registrySha256) {
+        const item: ResourceUpdateCheckItem = {
+          resource_id: candidate.resourceId,
+          checked_at: checkedAt,
+          sha256,
+          status: 'skipped',
+          update_available: false,
+          error: 'Registry lock has not caught up with the published asset',
+        }
+        resources.push(item)
+        cacheResources[candidate.resourceId] = { ...item, update_url: updateSource.url }
+        continue
+      }
+
       const item: ResourceUpdateCheckItem = {
         resource_id: candidate.resourceId,
         checked_at: checkedAt,
@@ -1462,6 +1477,7 @@ export class ResourceManagerService {
     listener?: (event: ResourceJob) => void,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (asset.supplemental_assets.length > 0) return
     if (asset.post_install.length === 0) return
     const assetNames = await readPdkReleaseAssetNames(destination)
     const baseUrl = releaseDownloadBaseUrl(asset.url, version)

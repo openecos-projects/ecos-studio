@@ -1941,7 +1941,7 @@ describe('ResourceManagerService', () => {
                   'all-platform': {
                     url: `file://${archive.path}`,
                     sha256_url: shaUrl,
-                    sha256: 'b'.repeat(64),
+                    sha256: latestSha,
                     size: archive.size,
                     strip_prefix: 'ecc-fe-runtime',
                   },
@@ -2054,7 +2054,7 @@ describe('ResourceManagerService', () => {
                   'all-platform': {
                     url: `file://${archive.path}`,
                     metadata_url: metadataUrl,
-                    sha256: 'b'.repeat(64),
+                    sha256: latestSha,
                     size: 1,
                     strip_prefix: 'ecc-fe-runtime',
                   },
@@ -2259,7 +2259,7 @@ describe('ResourceManagerService', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('does not use registry static sha to decide rolling latest updates while listing', async () => {
+  it('waits for the registry lock before offering a rolling latest update', async () => {
     const root = await createTempDir('ecos-resources-')
     const archive = await createEccFeArchive(root)
     const registryPath = join(root, 'registry.json')
@@ -2352,6 +2352,34 @@ describe('ResourceManagerService', () => {
       actions: ['uninstall'],
     })
     expect(fetchImpl).not.toHaveBeenCalled()
+
+    await expect(service.checkResourceUpdates({ force: true })).resolves.toMatchObject({
+      status: 'ok',
+      checked_count: 0,
+      update_count: 0,
+      resources: [
+        expect.objectContaining({
+          resource_id: 'tool:ecc-fe',
+          sha256: latestSha,
+          status: 'skipped',
+          update_available: false,
+          error: 'Registry lock has not caught up with the published asset',
+        }),
+      ],
+    })
+
+    await expect(service.getResource('tool:ecc-fe')).resolves.toMatchObject({
+      status: 'installed',
+      actions: ['uninstall'],
+      health: expect.objectContaining({
+        update_check: expect.objectContaining({
+          sha256: latestSha,
+          status: 'skipped',
+          error: 'Registry lock has not caught up with the published asset',
+        }),
+      }),
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it('streams remote downloads and emits byte progress while downloading a managed tool', async () => {
@@ -2978,9 +3006,11 @@ describe('ResourceManagerService', () => {
     })
   })
 
-  it('downloads and verifies locked PDK supplemental assets before post-install', async () => {
+  it('downloads only locked PDK supplemental assets before post-install', async () => {
     const root = await createTempDir('ecos-resources-')
-    const archive = await createPdkArchive(root)
+    const archive = await createPdkArchive(root, {
+      makefileContent: 'RELEASE_FILE := unlocked-extra.tar.bz2\n',
+    })
     const archiveBytes = await readFile(archive.path)
     const registryPath = join(root, 'registry.json')
     const archiveUrl =
