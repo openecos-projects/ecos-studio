@@ -47,6 +47,36 @@ describe('ProjectAnalysisSnapshot', () => {
       },
     })
   })
+
+  it('preserves structured RCX and STA detail descriptors from V3 artifacts', () => {
+    const snapshot = buildProjectAnalysisSnapshot(workspaceInput(), ['RCX', 'STA'])
+
+    expect(snapshot.steps.RCX?.details).toEqual([
+      expect.objectContaining({
+        id: 'rcx_electrical_corner_metrics',
+        presentation: 'rcx_spef_corner_table',
+        summary: {
+          coverage: { status: 'pass', expected_count: 9, available_count: 9 },
+        },
+        sourceFile: 'feature/RCX.step.json',
+        selector: '/rcx/signoff_metrics',
+      }),
+    ])
+    expect(snapshot.steps.STA?.details).toEqual([
+      expect.objectContaining({
+        id: 'sta_path_group_metrics',
+        presentation: 'path_group_table',
+        summary: expect.objectContaining({
+          records: expect.arrayContaining([
+            expect.objectContaining({ path_group: 'group_01' }),
+          ]),
+        }),
+        sourceFile: 'feature/sta.step.json',
+        selector: '/timing/path_groups',
+      }),
+    ])
+    expect(snapshot.steps.STA?.details[0]?.summary.records).toHaveLength(13)
+  })
 })
 
 function workspaceInput(): ProjectQorWorkspaceInput {
@@ -131,6 +161,41 @@ function workspaceInput(): ProjectQorWorkspaceInput {
 }
 
 function metricsArtifact(step: string): string {
+  const details =
+    step === 'RCX'
+      ? [
+          {
+            id: 'rcx_electrical_corner_metrics',
+            presentation: 'rcx_spef_corner_table',
+            summary: {
+              coverage: { status: 'pass', expected_count: 9, available_count: 9 },
+            },
+            feature_source: {
+              kind: 'feature',
+              path: 'feature/RCX.step.json',
+              selector: '/rcx/signoff_metrics',
+            },
+          },
+        ]
+      : step === 'sta'
+        ? [
+            {
+              id: 'sta_path_group_metrics',
+              presentation: 'path_group_table',
+              summary: {
+                records: Array.from({ length: 13 }, (_, index) => ({
+                  path_group: `group_${String(index + 1).padStart(2, '0')}`,
+                })),
+              },
+              feature_source: {
+                kind: 'feature',
+                path: 'feature/sta.step.json',
+                selector: '/timing/path_groups',
+              },
+            },
+          ]
+        : []
+
   return JSON.stringify({
     schema_version: 3,
     step,
@@ -157,6 +222,6 @@ function metricsArtifact(step: string): string {
         source: { kind: 'feature', path: 'feature/step.json', selector: '/metric' },
       },
     ],
-    details: [],
+    details,
   })
 }
