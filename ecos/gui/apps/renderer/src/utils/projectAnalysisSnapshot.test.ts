@@ -89,6 +89,7 @@ function workspaceInput(): ProjectQorWorkspaceInput {
     branchFrom: null,
     stepMetricTexts: {
       Place: metricsArtifact('place'),
+      RCX: metricsArtifact('RCX'),
       STA: metricsArtifact('sta'),
       DRC: metricsArtifact('drc'),
     },

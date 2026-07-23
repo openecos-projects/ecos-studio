@@ -72,25 +72,19 @@ function metricsArtifact(step: string, metrics: Record<string, unknown>[]) {
 
 function summaryArtifact(
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable',
-  readiness?: Record<string, unknown>,
+  gates: Record<string, unknown>[] = [],
 ) {
   return JSON.stringify({
-    schema_version: 3,
-    status,
-    blocking_issues: [],
+    schema_version: 4,
+    analysis_status: 'valid',
+    quality_status: status,
+    gates,
     missing_metrics: [],
-    ...(readiness ? { signoff_readiness: readiness } : {}),
   })
 }
 
-function passingReadiness(groups: Array<{ id: string; gate: boolean }>) {
-  return {
-    status: 'pass',
-    score_eligible: true,
-    reason_codes: [],
-    groups: groups.map((group) => ({ ...group, status: 'pass' })),
-    ocv: { status: 'unavailable' },
-  }
+function passingGates(groups: Array<{ id: string; gate: boolean }>) {
+  return groups.map(({ id }) => ({ id, state: 'pass', blocking: true }))
 }
 
 function manifestWithWorkspace(workspaceId = 'ws_0004') {
@@ -252,20 +246,15 @@ function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
       RCX: summaryArtifact(
         readinessStatus,
         readinessStatus === 'pass'
-          ? passingReadiness([
+          ? passingGates([
               { id: 'rcx_corner_coverage', gate: true },
               { id: 'rcx_parse_health', gate: true },
             ])
-          : {
-              status: 'incomplete',
-              score_eligible: false,
-              reason_codes: ['rcx_corner_missing'],
-              groups: [{ id: 'rcx_corner_coverage', status: 'incomplete', gate: true }],
-            },
+          : [{ id: 'rcx_corner_coverage', state: 'unavailable', blocking: true }],
       ),
       STA: summaryArtifact(
         'pass',
-        passingReadiness([
+        passingGates([
           { id: 'sta_signoff_coverage', gate: true },
           { id: 'sta_setup_closure', gate: true },
           { id: 'sta_hold_closure', gate: true },
