@@ -356,10 +356,19 @@ describe('EccWorkspaceRuntime', () => {
         {
           details: [
             {
-              kind: 'resource',
+              kind: 'artifact',
               label: 'Harden GDS',
               location: 'Harden_ecc/output/gcd_Harden.gds',
               reason: 'Required file is missing or empty',
+              owner: 'checklist',
+              policy: 'block',
+              state: 'failed',
+              evidence: [
+                {
+                  kind: 'file',
+                  path: 'Harden_ecc/output/gcd_Harden.gds',
+                },
+              ],
             },
           ],
           severity: 'blocked',

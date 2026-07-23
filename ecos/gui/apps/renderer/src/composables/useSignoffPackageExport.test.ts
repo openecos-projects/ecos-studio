@@ -82,10 +82,19 @@ function blockedReview() {
       {
         details: [
           {
-            kind: 'resource' as const,
+            kind: 'artifact' as const,
             label: 'Harden GDS',
             location: 'Harden_ecc/output/gcd_Harden.gds',
             reason: 'Required file is missing or empty',
+            owner: 'checklist' as const,
+            policy: 'block' as const,
+            state: 'failed' as const,
+            evidence: [
+              {
+                kind: 'file',
+                path: 'Harden_ecc/output/gcd_Harden.gds',
+              },
+            ],
           },
         ],
         severity: 'blocked' as const,
