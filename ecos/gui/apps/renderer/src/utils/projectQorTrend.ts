@@ -987,7 +987,7 @@ const UNSUPPORTED_MODULES: ProjectQorUnsupportedModule[] = [
   {
     id: 'qor_summary_standard_output',
     label: 'Standard qor_summary.json',
-    reason: 'No schema v3 step QoR summary is available in the current workspace data.',
+    reason: 'No schema v4 step QoR summary is available in the current workspace data.',
     status: '待后续开发',
   },
   {
@@ -1595,7 +1595,7 @@ function buildWorkspaceDataQuality(
   }
 }
 
-const PROJECT_GATE_STEPS: FlowStep[] = ['Route', 'DRC', 'RCX', 'STA', 'Harden']
+const PROJECT_GATE_STEPS: FlowStep[] = ['DRC', 'RCX', 'STA']
 
 function resolveWorkspaceGateStatus(
   stepStatuses: ProjectQorWorkspaceInput['stepStatuses'],
@@ -1637,26 +1637,34 @@ export function resolveWorkspaceSignoffReadiness(
 ): ProjectQorSignoffReadiness {
   const entries = (['RCX', 'STA'] as const).flatMap((step) => {
     const record = parseJsonObject(workspace.stepSummaryTexts?.[step])
-    const readiness = isRecord(record?.signoff_readiness)
-      ? record.signoff_readiness
-      : null
-    const status = qorGateStatusValue(readiness?.status)
-    if (!readiness || !status) return []
-    const groups = Array.isArray(readiness.groups)
-      ? readiness.groups.flatMap((group) => {
-          if (!isRecord(group)) return []
-          const id = stringValue(group.id)
-          const groupStatus = qorGateStatusValue(group.status)
-          if (!id || !groupStatus || typeof group.gate !== 'boolean') return []
-          return [{ step, id, status: groupStatus, gate: group.gate }]
-        })
-      : []
-    const reasonCodes = Array.isArray(readiness.reason_codes)
-      ? readiness.reason_codes.flatMap((code) =>
-          stringValue(code) ? [stringValue(code)!] : [],
-        )
-      : []
-    return [{ step, status, groups, reasonCodes }]
+    if (record?.schema_version !== 4 || !Array.isArray(record.gates)) return []
+    const groups = record.gates.flatMap((gate) => {
+      if (!isRecord(gate)) return []
+      const id = stringValue(gate.id)
+      const state = stringValue(gate.state)
+      if (!id || !state) return []
+      const status =
+        state === 'pass'
+          ? 'pass'
+          : state === 'failed'
+            ? 'blocked'
+            : state === 'unavailable'
+              ? 'unavailable'
+              : 'incomplete'
+      return [{ step, id, status: status as QorGateStatus, gate: true }]
+    })
+    if (groups.length === 0) return []
+    const status = qorGateStatusValue(record.quality_status) ?? 'incomplete'
+    return [
+      {
+        step,
+        status,
+        groups,
+        reasonCodes: groups
+          .filter((group) => group.status !== 'pass')
+          .map((group) => group.id),
+      },
+    ]
   })
   if (entries.length === 0) {
     return { status: 'unavailable', scoreEligible: false, reasonCodes: [], groups: [] }
@@ -3013,16 +3021,16 @@ export function hasCurrentQorMetricsText(text: string | null | undefined): boole
 export function hasCurrentQorSummaryText(text: string | null | undefined): boolean {
   const record = parseJsonObject(text)
   return (
-    record?.schema_version === 3 &&
-    (typeof record.metric_count === 'number' ||
-      Array.isArray(record.blocking_issues) ||
-      typeof record.status === 'string')
+    record?.schema_version === 4 &&
+    typeof record.analysis_status === 'string' &&
+    typeof record.quality_status === 'string' &&
+    Array.isArray(record.gates)
   )
 }
 
 export function qorSummaryStatus(text: string | null | undefined): QorGateStatus | null {
   const record = parseJsonObject(text)
-  return qorGateStatusValue(record?.status)
+  return qorGateStatusValue(record?.quality_status)
 }
 
 function qorGateStatusValue(value: unknown): QorGateStatus | null {
@@ -3045,23 +3053,22 @@ export function normalizeQorSummaryBlockingIssues(
   text: string | null | undefined,
 ): ProjectQorBlockingIssue[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 3 || !Array.isArray(record.blocking_issues)) {
+  if (record?.schema_version !== 4 || !Array.isArray(record.gates)) {
     return []
   }
 
-  return record.blocking_issues.flatMap((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
-    const issue = item as Record<string, unknown>
-    const metric = stringValue(issue.metric_id)
-    if (!metric) return []
+  return record.gates.flatMap((item) => {
+    if (!isRecord(item) || item.state !== 'failed') return []
+    const gateId = stringValue(item.id)
+    if (!gateId) return []
     return [
       {
         step,
-        metric,
-        displayName: stringValue(issue.display_name) ?? metric,
-        value: qorSummaryIssueValue(issue.value),
-        reason: stringValue(issue.reason) ?? 'QoR blocking issue',
-        evidence: qorFindingEvidence(issue.evidence),
+        metric: gateId,
+        displayName: stringValue(item.title) ?? gateId,
+        value: 'failed',
+        reason: qorGateSummary(item),
+        evidence: qorGateFindingEvidence(item),
       },
     ]
   })
@@ -3072,7 +3079,7 @@ export function normalizeQorSummaryMissingMetrics(
   text: string | null | undefined,
 ): ProjectQorMissingMetric[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 3 || !Array.isArray(record.missing_metrics)) {
+  if (record?.schema_version !== 4 || !Array.isArray(record.missing_metrics)) {
     return []
   }
 
@@ -3098,25 +3105,61 @@ export function normalizeQorSummaryHardGateFailures(
   text: string | null | undefined,
 ): ProjectQorHardGateFailure[] {
   const record = parseJsonObject(text)
-  if (record?.schema_version !== 3 || !Array.isArray(record.hard_gates)) return []
+  if (record?.schema_version !== 4 || !Array.isArray(record.gates)) return []
 
   const gatesById = new Map<string, ProjectQorHardGateFailure>()
-  for (const item of record.hard_gates) {
-    if (!isRecord(item) || item.passed !== false) continue
+  for (const item of record.gates) {
+    if (!isRecord(item) || item.state === 'pass') continue
     const id = stringValue(item.id)
-    const metric = stringValue(item.metric)
+    const firstMetric =
+      Array.isArray(item.metrics) && isRecord(item.metrics[0]) ? item.metrics[0] : null
+    const metric = stringValue(firstMetric?.id)
     if (!id || !metric || gatesById.has(id)) continue
     gatesById.set(id, {
       step,
       id,
-      kind: stringValue(item.kind),
+      kind: 'quality_gate',
       metric,
-      threshold: qorSummaryIssueValue(item.threshold),
-      actual: qorSummaryIssueValue(item.actual),
-      evidence: qorFindingEvidence(item.evidence),
+      threshold: qorSummaryIssueValue(firstMetric?.expected),
+      actual: qorSummaryIssueValue(firstMetric?.actual),
+      evidence: qorGateFindingEvidence(item),
     })
   }
   return [...gatesById.values()].sort((left, right) => left.id.localeCompare(right.id))
+}
+
+function qorGateSummary(gate: Record<string, unknown>): string {
+  const metrics = Array.isArray(gate.metrics) ? gate.metrics : []
+  const descriptions = metrics.flatMap((metric) => {
+    if (!isRecord(metric)) return []
+    const id = stringValue(metric.id)
+    if (!id) return []
+    return [
+      `${id}=${String(metric.actual)} (required ${String(metric.operator)} ${String(metric.expected)})`,
+    ]
+  })
+  return descriptions.join('; ') || 'QoR quality gate failed.'
+}
+
+function qorGateFindingEvidence(
+  gate: Record<string, unknown>,
+): ProjectQorFindingEvidence {
+  const metrics = Array.isArray(gate.metrics) ? gate.metrics : []
+  const metric = metrics.find(isRecord) ?? null
+  const source = isRecord(metric?.source)
+    ? metric.source
+    : Array.isArray(gate.evidence)
+      ? (gate.evidence.find(isRecord) ?? null)
+      : null
+  const location = relativeQorEvidenceSource(source)
+  return {
+    sourceFile: location?.path ?? null,
+    sourceSelector: location?.selector ?? null,
+    expectedOperator: stringValue(metric?.operator),
+    expectedValue: qorSummaryIssueValue(metric?.expected),
+    diagnosis: qorGateSummary(gate),
+    availability: gate.state === 'unavailable' ? 'gate_unavailable' : null,
+  }
 }
 
 function qorFindingEvidence(value: unknown): ProjectQorFindingEvidence {

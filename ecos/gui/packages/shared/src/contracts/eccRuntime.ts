@@ -61,17 +61,30 @@ export interface EccSignoffReviewGroup {
 }
 
 export type EccSignoffReviewDetailKind =
-  | 'resource'
   | 'flow'
-  | 'checklist'
-  | 'analysis'
+  | 'artifact'
+  | 'configuration'
+  | 'provenance'
+  | 'quality_gate'
+  | 'report'
   | 'freshness'
+
+export interface EccSignoffReviewEvidence {
+  destination?: string
+  kind: string
+  path: string
+  selector?: string
+}
 
 export interface EccSignoffReviewDetail {
   kind: EccSignoffReviewDetailKind
   label: string
   location: string
   reason: string
+  owner: 'qor' | 'checklist'
+  policy: 'block' | 'warn'
+  state: 'pass' | 'failed' | 'warning' | 'unavailable'
+  evidence: EccSignoffReviewEvidence[]
 }
 
 export interface EccSignoffReviewRisk {

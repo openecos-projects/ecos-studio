@@ -8,19 +8,23 @@ export type ChecklistStateKind =
 
 export function normalizeChecklistState(state: string): ChecklistStateKind {
   switch (state) {
+    case 'pass':
     case 'Passed':
     case 'Success':
     case 'Accepted':
       return 'success'
+    case 'failed':
     case 'Failed':
     case 'Imcomplete':
       return 'failed'
+    case 'warning':
     case 'Warning':
       return 'warning'
     case 'Ongoing':
       return 'ongoing'
     case 'Pending':
       return 'pending'
+    case 'unavailable':
     case 'Unstart':
       return 'unstart'
     default:

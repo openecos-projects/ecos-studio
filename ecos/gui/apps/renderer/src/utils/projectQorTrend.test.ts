@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProjectQorScoreDetail,
   buildProjectQorTrendSummary,
+  hasCurrentQorSummaryText,
   normalizeQorMetrics,
+  normalizeQorSummaryBlockingIssues,
+  qorSummaryStatus,
   serializeProjectQorTrendReport,
   type ProjectQorWorkspaceInput,
 } from './projectQorTrend'
@@ -240,6 +243,37 @@ describe('project QoR trend V3 model', () => {
     ])
   })
 
+  it('reads V4 quality gates and does not treat route diagnostics as blockers', () => {
+    const summary = JSON.stringify({
+      schema_version: 4,
+      analysis_status: 'valid',
+      quality_status: 'blocked',
+      gates: [
+        {
+          id: 'qor.drc.clean',
+          title: 'Final DRC clean',
+          state: 'failed',
+          blocking: true,
+          metrics: [{ id: 'drc_count', actual: 2, operator: '==', expected: 0 }],
+          evidence: [{ kind: 'feature', path: 'drc_ecc/feature/drc.step.json' }],
+        },
+      ],
+    })
+
+    expect(hasCurrentQorSummaryText(summary)).toBe(true)
+    expect(qorSummaryStatus(summary)).toBe('blocked')
+    expect(normalizeQorSummaryBlockingIssues('DRC', summary)).toEqual([
+      expect.objectContaining({
+        metric: 'qor.drc.clean',
+        displayName: 'Final DRC clean',
+        value: 'failed',
+      }),
+    ])
+    expect(
+      normalizeQorSummaryBlockingIssues('Route', signoffSummary('RCX', 'pass')),
+    ).toEqual([])
+  })
+
   it('serializes readiness and corner-comparison fingerprints in the project report', () => {
     const summary = buildProjectQorTrendSummary([
       workspace('ws_0004', {
@@ -472,29 +506,35 @@ function staMetrics(fingerprint: string, setupWns = 2.905): string {
 }
 
 function signoffSummary(step: 'RCX' | 'STA', status: 'pass' | 'incomplete'): string {
-  const groups =
+  const gates =
     step === 'RCX'
       ? [
-          { id: 'rcx_corner_coverage', status, gate: true },
-          { id: 'rcx_parse_health', status: 'pass', gate: true },
+          {
+            id: 'qor.rcx.corner_coverage',
+            title: 'RCX corner coverage',
+            state: status === 'pass' ? 'pass' : 'unavailable',
+          },
+          { id: 'qor.rcx.spef_parse_health', title: 'RCX SPEF integrity', state: 'pass' },
         ]
       : [
-          { id: 'sta_signoff_coverage', status, gate: true },
-          { id: 'sta_setup_closure', status, gate: true },
-          { id: 'sta_hold_closure', status, gate: true },
+          {
+            id: 'qor.sta.setup_closed',
+            title: 'STA setup closure',
+            state: status === 'pass' ? 'pass' : 'unavailable',
+          },
+          {
+            id: 'qor.sta.hold_closed',
+            title: 'STA hold closure',
+            state: status === 'pass' ? 'pass' : 'unavailable',
+          },
         ]
   return JSON.stringify({
-    schema_version: 3,
-    status,
+    schema_version: 4,
+    analysis_status: 'valid',
+    quality_status: status,
     metric_count: 0,
-    blocking_issues: [],
     missing_metrics: [],
-    signoff_readiness: {
-      status,
-      score_eligible: status === 'pass',
-      reason_codes: status === 'pass' ? [] : [`${step.toLowerCase()}_incomplete`],
-      groups,
-    },
+    gates: gates.map((gate) => ({ ...gate, blocking: true, metrics: [], evidence: [] })),
   })
 }
 

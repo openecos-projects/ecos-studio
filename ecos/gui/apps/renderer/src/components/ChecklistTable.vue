@@ -14,28 +14,34 @@
         <thead>
           <tr>
             <th>Step</th>
-            <th>Type</th>
-            <th>Item</th>
+            <th>Category</th>
+            <th>Requirement</th>
+            <th>Policy</th>
             <th>State</th>
-            <th v-if="hasInfo">Info</th>
+            <th v-if="hasSummary">Details</th>
           </tr>
         </thead>
         <tbody>
           <tr
             v-for="(item, idx) in items"
-            :key="idx"
+            :key="item.id || idx"
             :class="checklistStateClass(item.state)"
           >
             <td class="col-step">{{ item.step }}</td>
-            <td class="col-type">{{ item.type }}</td>
-            <td class="col-item">{{ item.item }}</td>
+            <td class="col-type">{{ item.category }}</td>
+            <td class="col-item">{{ item.title }}</td>
+            <td class="col-policy">
+              <span class="policy-tag" :data-policy="item.policy">
+                {{ item.owner === 'qor' ? 'QoR' : 'Checklist' }} · {{ item.policy }}
+              </span>
+            </td>
             <td class="col-state">
               <span class="state-tag" :class="checklistStateClass(item.state)">
                 <i :class="checklistStateIcon(item.state)" class="state-icon"></i>
                 {{ item.state }}
               </span>
             </td>
-            <td v-if="hasInfo" class="col-info">{{ item.info || '—' }}</td>
+            <td v-if="hasSummary" class="col-info">{{ item.summary || '—' }}</td>
           </tr>
         </tbody>
       </table>
@@ -66,7 +72,9 @@ const props = withDefaults(
   },
 )
 
-const hasInfo = computed(() => props.items.some((item) => Boolean(item.info?.trim())))
+const hasSummary = computed(() =>
+  props.items.some((item) => Boolean(item.summary?.trim())),
+)
 const passedCount = computed(
   () => props.items.filter((item) => isChecklistPassed(item.state)).length,
 )
@@ -99,19 +107,22 @@ const passedCount = computed(
 }
 
 .checklist-table thead th:nth-child(1) {
-  width: 16%;
+  width: 13%;
 }
 .checklist-table thead th:nth-child(2) {
-  width: 14%;
+  width: 13%;
 }
 .checklist-table thead th:nth-child(3) {
-  width: auto;
+  width: 26%;
 }
 .checklist-table thead th:nth-child(4) {
-  width: 14%;
+  width: 16%;
 }
 .checklist-table thead th:nth-child(5) {
-  width: 22%;
+  width: 12%;
+}
+.checklist-table thead th:nth-child(6) {
+  width: 20%;
 }
 
 .checklist-table thead th {
@@ -153,12 +164,28 @@ const passedCount = computed(
 
 .col-type,
 .col-item,
-.col-info {
+.col-info,
+.col-policy {
   color: var(--text-secondary);
 }
 
 .col-info {
   font-size: 9px;
+}
+
+.policy-tag {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.policy-tag[data-policy='block'] {
+  background: color-mix(in srgb, var(--danger-bg) 70%, transparent);
+  color: var(--danger-color);
 }
 
 .state-tag {

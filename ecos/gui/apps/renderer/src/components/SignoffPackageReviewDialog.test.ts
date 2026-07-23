@@ -17,7 +17,8 @@ describe('SignoffPackageReviewDialog', () => {
     expect(source).toContain('{{ detail.location }}')
     expect(source).toContain('{{ detail.reason }}')
     expect(source).toContain(':data-kind="detail.kind"')
-    expect(source).toContain("if (kind === 'analysis') return 'QoR Analysis'")
+    expect(source).toContain("if (kind === 'quality_gate') return 'QoR Gate'")
+    expect(source).toContain("detail.owner === 'qor' ? 'QoR' : 'Checklist'")
     expect(source).toContain("if (kind === 'freshness') return 'Analysis Refresh'")
   })
 

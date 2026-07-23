@@ -3,11 +3,11 @@ import { buildProjectAnalysisSnapshot } from './projectAnalysisSnapshot'
 import type { ProjectQorWorkspaceInput } from './projectQorTrend'
 
 describe('ProjectAnalysisSnapshot', () => {
-  it('preserves current V3 findings from summary, artifact, and STA timing analysis', () => {
+  it('preserves current V4 findings from summary, artifact, and STA timing analysis', () => {
     const snapshot = buildProjectAnalysisSnapshot(workspaceInput(), [
       'Place',
       'STA',
-      'Harden',
+      'DRC',
     ])
 
     expect(snapshot.steps.Place).toMatchObject({
@@ -16,19 +16,18 @@ describe('ProjectAnalysisSnapshot', () => {
       hotspotArtifactStatus: 'missing',
       missingMetrics: [],
     })
-    expect(snapshot.steps.Harden?.hardGateFailures).toEqual([
+    expect(snapshot.steps.DRC?.hardGateFailures).toEqual([
       expect.objectContaining({
-        id: 'final_package_complete',
-        metric: 'harden_artifact_missing_count',
+        id: 'qor.drc.clean',
+        metric: 'drc_count',
         threshold: 0,
         actual: 2,
         evidence: {
-          sourceFile: 'feature/Harden.step.json',
-          sourceSelector: '/harden/artifact_missing_count',
+          sourceFile: 'feature/drc.step.json',
+          sourceSelector: '/drc/number',
           expectedOperator: '==',
           expectedValue: 0,
-          diagnosis:
-            'Observed harden_artifact_missing_count = 2; required condition is == 0.',
+          diagnosis: 'drc_count=2 (required == 0)',
           availability: null,
         },
       }),
@@ -61,58 +60,54 @@ function workspaceInput(): ProjectQorWorkspaceInput {
     stepMetricTexts: {
       Place: metricsArtifact('place'),
       STA: metricsArtifact('sta'),
-      Harden: metricsArtifact('Harden'),
+      DRC: metricsArtifact('drc'),
     },
     stepSummaryTexts: {
       Place: JSON.stringify({
-        schema_version: 3,
-        status: 'pass',
-        blocking_issues: [],
-        hard_gates: [],
+        schema_version: 4,
+        analysis_status: 'valid',
+        quality_status: 'pass',
+        gates: [],
         missing_metrics: [],
       }),
       STA: JSON.stringify({
-        schema_version: 3,
-        status: 'incomplete',
-        blocking_issues: [],
-        hard_gates: [],
-        missing_metrics: [],
-        signoff_readiness: {
-          status: 'incomplete',
-          score_eligible: false,
-          reason_codes: ['sta_corner_missing'],
-          groups: [{ id: 'sta_signoff_coverage', status: 'incomplete', gate: true }],
-        },
-      }),
-      Harden: JSON.stringify({
-        schema_version: 3,
-        status: 'blocked',
-        blocking_issues: [],
-        missing_metrics: [],
-        hard_gates: [
+        schema_version: 4,
+        analysis_status: 'valid',
+        quality_status: 'incomplete',
+        gates: [
           {
-            id: 'final_package_complete',
-            passed: false,
-            metric: 'harden_artifact_missing_count',
-            threshold: 0,
-            actual: 2,
-            evidence: {
-              source: {
-                kind: 'feature',
-                path: 'feature/Harden.step.json',
-                selector: '/harden/artifact_missing_count',
-              },
-              expected: { operator: '==', value: 0 },
-              diagnosis:
-                'Observed harden_artifact_missing_count = 2; required condition is == 0.',
-            },
+            id: 'qor.sta.setup_closed',
+            title: 'STA setup closure',
+            state: 'unavailable',
+            blocking: true,
+            metrics: [],
+            evidence: [],
+          },
+        ],
+        missing_metrics: [],
+      }),
+      DRC: JSON.stringify({
+        schema_version: 4,
+        analysis_status: 'valid',
+        quality_status: 'blocked',
+        missing_metrics: [],
+        gates: [
+          {
+            id: 'qor.drc.clean',
+            title: 'Final DRC clean',
+            state: 'failed',
+            blocking: true,
+            metrics: [{ id: 'drc_count', actual: 2, operator: '==', expected: 0 }],
+            evidence: [
+              { kind: 'feature', path: 'feature/drc.step.json', selector: '/drc/number' },
+            ],
           },
         ],
       }),
     },
     stepHotspotTexts: {
       STA: JSON.stringify({ schema_version: 3, hotspots: [] }),
-      Harden: JSON.stringify({ schema_version: 3, hotspots: [] }),
+      DRC: JSON.stringify({ schema_version: 3, hotspots: [] }),
     },
     staTimingIssuesText: JSON.stringify({
       schema_version: 1,
@@ -131,7 +126,7 @@ function workspaceInput(): ProjectQorWorkspaceInput {
       ],
       artifact_paths: [],
     }),
-    stepStatuses: { Place: 'success', STA: 'success', Harden: 'success' },
+    stepStatuses: { Place: 'success', STA: 'success', DRC: 'success' },
   }
 }
 
