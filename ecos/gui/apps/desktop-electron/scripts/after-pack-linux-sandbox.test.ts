@@ -10,7 +10,18 @@ async function writeRpcCapableEcc(appOutDir: string): Promise<void> {
   const binariesDir = join(appOutDir, 'resources', 'binaries')
   const eccPath = join(binariesDir, 'ecc')
   await mkdir(binariesDir, { recursive: true })
-  await writeFile(eccPath, '#!/bin/sh\nexit 0\n')
+  await writeFile(
+    eccPath,
+    '#!/bin/sh\n[ "$1" = rpc ] && [ "$2" = serve ] && [ "$3" = --help ] || exit 64\n',
+  )
+  await chmod(eccPath, 0o755)
+}
+
+async function writeNonRpcEcc(appOutDir: string): Promise<void> {
+  const binariesDir = join(appOutDir, 'resources', 'binaries')
+  const eccPath = join(binariesDir, 'ecc')
+  await mkdir(binariesDir, { recursive: true })
+  await writeFile(eccPath, '#!/bin/sh\nexit 64\n')
   await chmod(eccPath, 0o755)
 }
 
@@ -56,6 +67,26 @@ describe('afterPackLinuxSandbox', () => {
     const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
+
+    await expect(
+      afterPackLinuxSandbox({
+        appOutDir,
+        electronPlatformName: 'linux',
+        packager: {
+          appInfo: {
+            productFilename: 'ecos-studio',
+          },
+          executableName: 'ecos-studio',
+        },
+      }),
+    ).rejects.toThrow('Packaged ECC RPC sidecar validation failed')
+  })
+
+  it('rejects Linux packaging when the ECC binary does not support RPC', async () => {
+    const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
+    tempDirs.push(appOutDir)
+    await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
+    await writeNonRpcEcc(appOutDir)
 
     await expect(
       afterPackLinuxSandbox({
