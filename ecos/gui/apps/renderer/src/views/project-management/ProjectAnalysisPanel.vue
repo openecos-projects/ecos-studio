@@ -122,7 +122,7 @@
           :style="{
             '--dashboard-metric-count': String(dashboardMetricRows.length),
           }"
-          aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], WNS, TNS, DRC, Runtime, Memory"
+          aria-label="Key metrics include Die Area, Core Util, Frequency [MHz], Setup WNS, Setup TNS, Hold WNS, Hold TNS, DRC, Runtime, Memory"
         >
           <div class="dashboard-key-header dashboard-key-workspace-header">Workspace</div>
           <div

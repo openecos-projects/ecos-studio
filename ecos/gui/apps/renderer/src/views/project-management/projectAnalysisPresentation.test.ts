@@ -61,6 +61,9 @@ describe('project analysis presentation', () => {
       [
         metric('drc', 'DRC', [point('ws_a', 0)]),
         metric('wns', 'WNS', [point('ws_a', 0.12)]),
+        metric('tns', 'TNS', [point('ws_a', 0)]),
+        metric('hold_wns', 'Hold WNS', [point('ws_a', 0.08)]),
+        metric('hold_tns', 'Hold TNS', [point('ws_a', 0)]),
         metric('frequency', 'Frequency [MHz]', [point('ws_a', 125)]),
         metric('die_area', 'Die Area', [point('ws_a', 820)]),
         metric('core_util', 'Core Util', [point('ws_a', 0.7)]),
@@ -75,6 +78,8 @@ describe('project analysis presentation', () => {
       'frequency',
       'wns',
       'tns',
+      'hold_wns',
+      'hold_tns',
       'drc',
     ])
     expect(rows.map((row) => row.id)).toEqual([
@@ -82,6 +87,9 @@ describe('project analysis presentation', () => {
       'core_util',
       'frequency',
       'wns',
+      'tns',
+      'hold_wns',
+      'hold_tns',
       'drc',
       'runtime',
       'memory',
@@ -131,6 +139,9 @@ describe('project analysis presentation', () => {
         point('ws_pending', null),
       ]),
       metric('wns', 'WNS', [point('ws_fast', 0.08, '0.08 ns')]),
+      metric('tns', 'TNS', [point('ws_fast', 0, '0 ns')]),
+      metric('hold_wns', 'Hold WNS', [point('ws_fast', 0.03, '0.03 ns')]),
+      metric('hold_tns', 'Hold TNS', [point('ws_fast', 0, '0 ns')]),
       metric('die_area', 'Die Area', [point('ws_fast', 820, '820 um2')]),
     ]
 
@@ -141,6 +152,8 @@ describe('project analysis presentation', () => {
       'frequency',
       'wns',
       'tns',
+      'hold_wns',
+      'hold_tns',
       'drc',
       'die_area',
       'core_util',
@@ -153,6 +166,9 @@ describe('project analysis presentation', () => {
         state: 'good',
       },
       { id: 'wns', label: 'WNS', display: '0.08 ns', state: 'good' },
+      { id: 'tns', label: 'TNS', display: '0 ns', state: 'good' },
+      { id: 'hold_wns', label: 'Hold WNS', display: '0.03 ns', state: 'good' },
+      { id: 'hold_tns', label: 'Hold TNS', display: '0 ns', state: 'good' },
       { id: 'drc', label: 'DRC', display: '0', state: 'good' },
       { id: 'die_area', label: 'Die Area', display: '820 um2', state: 'good' },
       { id: 'core_util', label: 'Core Util', display: '72%', state: 'good' },
