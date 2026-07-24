@@ -345,6 +345,10 @@ describe('ProjectsView project management surface', () => {
     expect(analysisSurfaceSource).toContain('.dashboard-summary-grid {')
     expect(analysisSurfaceSource).toContain('grid-template-rows: 252px;')
     expect(analysisSurfaceSource).toContain('flex: 0 0 498px;')
+    expect(analysisSurfaceSource).toContain('.dashboard-summary-grid > .dashboard-best-card')
+    expect(analysisSurfaceSource).toContain('.best-ppa-grid {')
+    expect(analysisSurfaceSource).toContain('overflow-y: auto;')
+    expect(analysisSurfaceSource).toContain('overscroll-behavior: contain;')
     expect(analysisSource).toContain('class="dashboard-summary-grid"')
     expect(analysisSource.indexOf('class="dashboard-summary-grid"')).toBeLessThan(
       analysisSource.indexOf('<ProjectQorTrendPanel'),

@@ -104,6 +104,14 @@
   overflow: hidden;
 }
 
+.dashboard-summary-grid > .dashboard-best-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  overflow: hidden;
+}
+
 .analysis-dashboard-v3 > .qor-overview-panel {
   height: 498px;
   min-height: 498px;
@@ -181,6 +189,12 @@
   min-height: 166px;
 }
 
+.dashboard-best-card > header,
+.dashboard-best-card > .best-workspace-summary,
+.dashboard-best-card > .dashboard-empty-note {
+  flex: 0 0 auto;
+}
+
 .best-workspace-summary {
   display: flex;
   align-items: flex-start;
@@ -215,15 +229,22 @@
 
 .best-ppa-grid {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
 }
 
 .best-ppa-item {
   display: grid;
   min-width: 0;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-secondary) 46%, transparent);

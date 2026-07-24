@@ -37,7 +37,14 @@
     <div class="qor-main-grid">
       <section class="qor-trend-card qor-chart-card">
         <div class="qor-section-title">
-          <span>Overall Score</span>
+          <div class="qor-score-heading">
+            <span>Overall Score</span>
+            <strong v-if="highestTrendScore !== null" class="qor-best-score-chip">
+              {{ formatScore(highestTrendScore) }}
+              <em>best</em>
+            </strong>
+            <strong v-else class="qor-best-score-chip muted">NR</strong>
+          </div>
           <small>{{ qorTrendSummary.trendPoints.length }} workspaces</small>
         </div>
         <div
@@ -51,6 +58,34 @@
             role="img"
             aria-label="Overall QoR score trend from 0 to 100"
           >
+            <defs>
+              <linearGradient
+                :id="scoreAreaGradientId"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stop-color="currentColor"
+                  stop-opacity="0.2"
+                />
+                <stop
+                  offset="100%"
+                  stop-color="currentColor"
+                  stop-opacity="0.02"
+                />
+              </linearGradient>
+            </defs>
+            <rect
+              class="qor-chart-plot-bg"
+              :x="chartLeft"
+              :y="chartTop"
+              :width="Math.max(0, chartPlotRight - chartLeft)"
+              :height="Math.max(0, chartBottom - chartTop)"
+              rx="1.2"
+            />
             <g v-for="score in scoreTicks" :key="score">
               <line
                 class="qor-chart-gridline"
@@ -63,7 +98,7 @@
               <text
                 class="qor-chart-score-label"
                 :class="{ threshold: score === 60 }"
-                :x="chartLeft - 3"
+                :x="chartLeft - 2.4"
                 :y="scoreToChartY(score)"
                 text-anchor="end"
                 dominant-baseline="middle"
@@ -85,6 +120,13 @@
               :y1="chartBottom"
               :y2="chartBottom"
             />
+            <path
+              v-for="(path, index) in scoreAreaPaths"
+              :key="`score-area-${index}`"
+              class="qor-score-area"
+              :d="path"
+              :fill="`url(#${scoreAreaGradientId})`"
+            />
             <polyline
               v-for="(segment, index) in scorePolylines"
               :key="`score-segment-${index}`"
@@ -92,13 +134,17 @@
               :points="segment"
               fill="none"
             />
-            <g v-for="(point, index) in scoreChartPoints" :key="point.workspaceId">
-              <circle
-                v-if="point.isBest && !point.isNotRated"
-                class="qor-chart-best-ring"
-                :cx="point.x"
-                :cy="point.y"
-                r="3.7"
+            <g v-for="point in scoreChartPoints" :key="point.workspaceId">
+              <line
+                class="qor-chart-stem"
+                :class="{
+                  rated: !point.isNotRated,
+                  best: point.isBest && !point.isNotRated,
+                }"
+                :x1="point.x"
+                :x2="point.x"
+                :y1="chartBottom"
+                :y2="point.y"
               />
               <circle
                 v-if="!point.isNotRated"
@@ -106,32 +152,64 @@
                 :class="{ best: point.isBest }"
                 :cx="point.x"
                 :cy="point.y"
-                r="2.1"
+                r="1.45"
               >
                 <title>{{ `${point.label}: ${formatScore(point.score)}` }}</title>
               </circle>
               <text
-                v-else
-                class="qor-chart-not-rated"
+                v-if="!point.isNotRated"
+                class="qor-chart-value-label"
+                :class="{ best: point.isBest }"
                 :x="point.x"
-                :y="point.y"
+                :y="point.y - 5.2"
                 text-anchor="middle"
-                dominant-baseline="middle"
               >
+                {{ formatScore(point.score) }}
+              </text>
+              <g v-else class="qor-chart-nr-marker">
                 <title>{{ `${point.label}: ${formatScore(point.score)}` }}</title>
-                NR
-              </text>
-              <text
-                class="qor-chart-workspace-label"
-                :x="point.x"
-                :y="chartWorkspaceLabelY"
-                :text-anchor="workspaceLabelAnchor(index, scoreChartPoints.length)"
+                <rect
+                  class="qor-chart-nr-pill"
+                  :x="point.x - 4.2"
+                  :y="point.y - 2.6"
+                  width="8.4"
+                  height="5.2"
+                  rx="1.4"
+                />
+                <text
+                  class="qor-chart-not-rated"
+                  :x="point.x"
+                  :y="point.y"
+                  text-anchor="middle"
+                  dominant-baseline="middle"
+                >
+                  NR
+                </text>
+              </g>
+              <g
+                class="qor-chart-workspace-tick"
+                :transform="`translate(${point.x}, ${chartBottom})`"
               >
-                <title>{{ point.label }}</title>
-                {{ shortenWorkspaceLabel(point.label) }}
-              </text>
+                <line class="qor-chart-x-tick" x1="0" y1="0" x2="0" y2="2.4" />
+                <text
+                  class="qor-chart-workspace-label"
+                  :class="{ best: point.isBest && !point.isNotRated }"
+                  x="0"
+                  y="9.2"
+                  text-anchor="end"
+                  transform="rotate(-40)"
+                >
+                  <title>{{ point.label }}</title>
+                  {{ shortenWorkspaceLabel(point.label) }}
+                </text>
+              </g>
             </g>
           </svg>
+        </div>
+        <div class="qor-chart-legend" aria-hidden="true">
+          <span><i class="legend-best"></i>Best</span>
+          <span><i class="legend-pass"></i>Pass 60</span>
+          <span><i class="legend-nr"></i>Not rated</span>
         </div>
       </section>
 
@@ -296,7 +374,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import type { ProjectQorTrendSummary } from '@/utils/projectQorTrend'
 
 const props = defineProps<{
@@ -311,12 +389,12 @@ const emit = defineEmits<{
 }>()
 
 const scoreTicks = [0, 20, 40, 60, 80, 100] as const
-const chartLeft = 10
-const chartRight = 3
-const chartTop = 6
-const chartBottom = 80
-const chartNotRatedY = 76
-const chartWorkspaceLabelY = 91
+const chartLeft = 20
+const chartRight = 8
+const chartTop = 10
+const chartBottom = 68
+const chartNotRatedY = 56
+const scoreAreaGradientId = useId().replace(/:/g, '')
 type QorDashboardTab = 'improvements' | 'regressions' | 'risks' | 'timing'
 
 const deltaTabs: Array<{
@@ -437,6 +515,42 @@ const scorePolylines = computed(() => {
   return segments
 })
 
+const scoreAreaPaths = computed(() => {
+  const paths: string[] = []
+  let activeSegment: Array<{ x: number; y: number }> = []
+
+  const flushSegment = () => {
+    if (activeSegment.length < 2) {
+      activeSegment = []
+      return
+    }
+    const first = activeSegment[0]
+    const last = activeSegment[activeSegment.length - 1]
+    const topEdge = activeSegment
+      .map((point) => `L ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+      .join(' ')
+    paths.push(
+      [
+        `M ${first.x.toFixed(2)} ${chartBottom}`,
+        topEdge,
+        `L ${last.x.toFixed(2)} ${chartBottom}`,
+        'Z',
+      ].join(' '),
+    )
+    activeSegment = []
+  }
+
+  for (const point of scoreChartPoints.value) {
+    if (point.isNotRated) {
+      flushSegment()
+      continue
+    }
+    activeSegment.push({ x: point.x, y: point.y })
+  }
+  flushSegment()
+  return paths
+})
+
 const activeDeltaItems = computed(() => {
   if (activeDeltaTab.value === 'improvements') return props.qorTrendSummary.improvements
   if (activeDeltaTab.value === 'regressions') return props.qorTrendSummary.regressions
@@ -539,15 +653,6 @@ function scoreToChartY(score: number): number {
 function shortenWorkspaceLabel(label: string): string {
   const maxLength = 8
   return label.length > maxLength ? `${label.slice(0, maxLength)}...` : label
-}
-
-function workspaceLabelAnchor(
-  index: number,
-  pointCount: number,
-): 'start' | 'middle' | 'end' {
-  if (index === 0) return 'start'
-  if (index === pointCount - 1) return 'end'
-  return 'middle'
 }
 
 function exportReport() {
@@ -829,6 +934,45 @@ function qorListItemClass(
   padding: 14px;
 }
 
+.qor-chart-card {
+  min-height: 0;
+  gap: 0;
+}
+
+.qor-score-heading {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.qor-best-score-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success-color, #2f9f6f) 14%, var(--bg-primary));
+  color: var(--success-color, #2f9f6f);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.qor-best-score-chip em {
+  color: color-mix(in srgb, var(--success-color, #2f9f6f) 72%, var(--text-secondary));
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.qor-best-score-chip.muted {
+  background: color-mix(in srgb, var(--text-secondary) 12%, var(--bg-primary));
+  color: var(--text-secondary);
+}
+
 .qor-section-title span,
 .qor-delta-list span {
   font-size: 12px;
@@ -856,11 +1000,12 @@ function qorListItemClass(
 
 .qor-section-title {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: -14px -14px 12px;
-  padding: 10px 14px;
+  margin: -14px -14px 0;
+  padding: 12px 14px;
   border-width: 0 0 1px;
   border-radius: 8px 8px 0 0;
   background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
@@ -869,8 +1014,9 @@ function qorListItemClass(
 .qor-chart-viewport {
   min-height: 0;
   flex: 1 1 auto;
+  margin: 0 -4px;
+  padding: 10px 4px 2px;
   overflow: hidden;
-  overflow-y: hidden;
   overscroll-behavior: contain;
 }
 
@@ -879,76 +1025,171 @@ function qorListItemClass(
   width: 100%;
   min-width: 0;
   height: 100%;
-  min-height: 250px;
   color: var(--accent-color);
 }
 
+.qor-chart-plot-bg {
+  fill: color-mix(in srgb, var(--bg-secondary) 42%, var(--bg-primary));
+}
+
 .qor-chart-gridline {
-  stroke: color-mix(in srgb, var(--border-color) 72%, transparent);
-  stroke-width: 0.65;
+  stroke: color-mix(in srgb, var(--border-color) 58%, transparent);
+  stroke-width: 0.55;
   vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-gridline.threshold {
-  stroke: #7f1d1d;
-  stroke-width: 1.1;
+  stroke: color-mix(in srgb, var(--warn-color, #d99a2b) 78%, #b45309);
+  stroke-width: 1;
+  stroke-dasharray: 2.8 2.2;
 }
 
 .qor-chart-axis {
-  stroke: color-mix(in srgb, var(--text-secondary) 70%, var(--border-color));
-  stroke-width: 1;
+  stroke: color-mix(in srgb, var(--text-secondary) 42%, var(--border-color));
+  stroke-width: 0.9;
   vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-score-label,
-.qor-chart-workspace-label {
+.qor-chart-workspace-label,
+.qor-chart-value-label {
   fill: var(--text-secondary);
-  font-size: 4.2px;
+  font-size: 3.5px;
   font-weight: 600;
 }
 
 .qor-chart-score-label.threshold {
-  fill: #7f1d1d;
+  fill: color-mix(in srgb, var(--warn-color, #d99a2b) 86%, var(--text-secondary));
+}
+
+.qor-chart-x-tick {
+  stroke: color-mix(in srgb, var(--text-secondary) 42%, var(--border-color));
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-workspace-label {
-  font-size: 3.9px;
-  font-weight: 500;
+  font-size: 3.1px;
+  font-weight: 560;
+}
+
+.qor-chart-workspace-label.best {
+  fill: var(--success-color, #2f9f6f);
+  font-weight: 720;
+}
+
+.qor-chart-value-label {
+  fill: var(--accent-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 3.6px;
+  font-weight: 760;
+}
+
+.qor-chart-value-label.best {
+  fill: var(--success-color, #2f9f6f);
+}
+
+.qor-score-area {
+  opacity: 0.95;
 }
 
 .qor-score-polyline {
-  stroke: color-mix(in srgb, var(--text-secondary) 82%, #7c93ad);
-  stroke-width: 1.25;
-  stroke-dasharray: 3.5 2.5;
+  stroke: var(--accent-color);
+  stroke-width: 1.55;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
-.qor-chart-point {
-  fill: var(--bg-primary);
-  stroke: var(--accent-color);
-  stroke-width: 1.4;
+.qor-chart-stem {
+  stroke: color-mix(in srgb, var(--border-color) 72%, transparent);
+  stroke-width: 0.7;
+  stroke-dasharray: 1.4 1.4;
   vector-effect: non-scaling-stroke;
 }
 
-.qor-chart-best-ring {
+.qor-chart-stem.rated {
+  stroke: color-mix(in srgb, var(--accent-color) 34%, transparent);
+  stroke-dasharray: none;
+  stroke-width: 1;
+}
+
+.qor-chart-stem.best {
+  stroke: color-mix(in srgb, var(--success-color, #2f9f6f) 42%, transparent);
+}
+
+.qor-chart-point {
   fill: var(--bg-primary);
-  stroke: #189968;
-  stroke-width: 1.2;
+  stroke: var(--accent-color);
+  stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-point.best {
-  fill: #189968;
-  stroke: #0b6b48;
-  stroke-width: 1.1;
+  fill: var(--success-color, #2f9f6f);
+  stroke: color-mix(in srgb, var(--success-color, #2f9f6f) 55%, #0b6b48);
+  stroke-width: 0.9;
+}
+
+.qor-chart-nr-pill {
+  fill: color-mix(in srgb, var(--text-secondary) 10%, var(--bg-primary));
+  stroke: color-mix(in srgb, var(--text-secondary) 28%, var(--border-color));
+  stroke-width: 0.55;
+  vector-effect: non-scaling-stroke;
 }
 
 .qor-chart-not-rated {
-  fill: var(--warning-color);
-  font-size: 3.8px;
-  font-weight: 760;
+  fill: var(--text-secondary);
+  font-size: 2.9px;
+  font-weight: 780;
+  letter-spacing: 0.06em;
+}
+
+.qor-chart-legend {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.qor-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qor-chart-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-sizing: border-box;
+}
+
+.qor-chart-legend .legend-best {
+  width: 8px;
+  height: 8px;
+  background: var(--success-color, #2f9f6f);
+}
+
+.qor-chart-legend .legend-pass {
+  border: 1.5px dashed color-mix(in srgb, var(--warn-color, #d99a2b) 88%, #b45309);
+  background: transparent;
+  border-radius: 2px;
+  height: 0;
+  width: 14px;
+}
+
+.qor-chart-legend .legend-nr {
+  border: 1px solid color-mix(in srgb, var(--text-secondary) 34%, var(--border-color));
+  background: color-mix(in srgb, var(--text-secondary) 10%, var(--bg-primary));
+  border-radius: 3px;
 }
 
 .qor-delta-layout {
