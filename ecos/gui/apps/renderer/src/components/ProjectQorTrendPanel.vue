@@ -59,23 +59,9 @@
             aria-label="Overall QoR score trend from 0 to 100"
           >
             <defs>
-              <linearGradient
-                :id="scoreAreaGradientId"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop
-                  offset="0%"
-                  stop-color="currentColor"
-                  stop-opacity="0.2"
-                />
-                <stop
-                  offset="100%"
-                  stop-color="currentColor"
-                  stop-opacity="0.02"
-                />
+              <linearGradient :id="scoreAreaGradientId" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="currentColor" stop-opacity="0.2" />
+                <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
               </linearGradient>
             </defs>
             <rect
