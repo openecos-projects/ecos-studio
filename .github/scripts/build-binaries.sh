@@ -21,58 +21,22 @@ build_ecc() {
     [ -x dist/ecc/ecc ] && dist/ecc/ecc rpc serve --help >/dev/null
   }
 
-  download_ecc_ci_artifact() {
-    local artifact_dir commit run_id artifact
-
-    commit="$(git rev-parse HEAD)"
-    if ! run_id="$(
-      gh api "repos/openecos-projects/ecc/actions/workflows/ci.yml/runs?head_sha=${commit}&per_page=20" \
-        --jq '[.workflow_runs[] | select(.conclusion == "success") | .id][0] // empty'
-    )"; then
-      echo "ERROR: failed to look up ECC CI artifacts for ${commit}." >&2
-      return 1
-    fi
-
-    if [ -z "$run_id" ]; then
-      echo "ERROR: no successful ECC CI run found for submodule commit ${commit}." >&2
-      return 1
-    fi
-
-    artifact_dir="dist/ecc-ci-artifact"
-    rm -rf dist/ecc "$artifact_dir"
-    mkdir -p dist/ecc "$artifact_dir"
-
-    if ! gh run download "$run_id" \
-      --repo openecos-projects/ecc \
-      --name ecc-cli-linux-x86_64 \
-      --dir "$artifact_dir"; then
-      echo "ERROR: failed to download ECC CI artifact from run ${run_id}." >&2
-      return 1
-    fi
-
-    artifact="$(find "$artifact_dir" -maxdepth 1 -type f -name 'ecc.tar' -print -quit)"
-    if [ -z "$artifact" ]; then
-      echo "ERROR: ECC CI artifact from run ${run_id} did not contain ecc.tar." >&2
-      return 1
-    fi
-
-    if ! tar -xf "$artifact" -C dist/ecc; then
-      echo "ERROR: failed to extract ECC CI artifact from run ${run_id}." >&2
-      return 1
-    fi
-
-    if ! ecc_supports_rpc; then
-      echo "ERROR: ECC CI artifact from run ${run_id} does not support 'ecc rpc serve --help'." >&2
-      return 1
-    fi
-  }
-
   if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
-    if ! download_ecc_ci_artifact; then
-      echo "ERROR: AppImage builds require the verified ECC artifact for the pinned submodule commit." >&2
-      exit 1
+    version="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+
+    rm -rf dist/ecc
+    mkdir -p dist/ecc
+    if gh release download "v$version" \
+      --repo openecos-projects/ecc \
+      --pattern '*.tar.gz' \
+      --output dist/ecc.tar.gz \
+      --clobber && \
+      tar -xvf dist/ecc.tar.gz -C dist/ecc && \
+      ecc_supports_rpc; then
+      return
     fi
-    return
+
+    echo "ECC release v$version is unavailable or lacks the required RPC sidecar; building from source."
   fi
 
   build_ecc_from_source

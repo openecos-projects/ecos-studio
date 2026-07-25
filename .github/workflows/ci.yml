@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -58,7 +57,7 @@ jobs:
               - 'Makefile'
               - 'ecos/scripts/**'
             ci:
-              - '.github/**'
+              - '.github/workflows/**'
             docs_only:
               - 'README.md'
               - 'docs/**'
