@@ -318,6 +318,32 @@
                           <span>Steps</span>
                         </button>
                         <button
+                          v-if="selectedFlowLogSegment"
+                          type="button"
+                          class="flow-log-copy-btn"
+                          :class="{
+                            'is-copied': flowLogCopyFeedback === 'copied',
+                            'is-error':
+                              flowLogCopyFeedback === 'failed' ||
+                              flowLogCopyFeedback === 'empty',
+                          }"
+                          :disabled="!canCopyFlowLogText"
+                          :title="flowLogCopyButtonTitle"
+                          :aria-label="flowLogCopyButtonTitle"
+                          @click="onCopyFlowLogText"
+                        >
+                          <i
+                            :class="
+                              flowLogCopyFeedback === 'copied'
+                                ? 'ri-check-line'
+                                : 'ri-file-copy-line'
+                            "
+                          ></i>
+                          <span>{{
+                            flowLogCopyFeedback === 'copied' ? 'Copied' : 'Copy'
+                          }}</span>
+                        </button>
+                        <button
                           v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
                           type="button"
                           class="flow-log-jump-live-btn"
@@ -544,6 +570,32 @@
                         <span>Steps</span>
                       </button>
                       <button
+                        v-if="selectedFlowLogSegment"
+                        type="button"
+                        class="flow-log-copy-btn"
+                        :class="{
+                          'is-copied': flowLogCopyFeedback === 'copied',
+                          'is-error':
+                            flowLogCopyFeedback === 'failed' ||
+                            flowLogCopyFeedback === 'empty',
+                        }"
+                        :disabled="!canCopyFlowLogText"
+                        :title="flowLogCopyButtonTitle"
+                        :aria-label="flowLogCopyButtonTitle"
+                        @click="onCopyFlowLogText"
+                      >
+                        <i
+                          :class="
+                            flowLogCopyFeedback === 'copied'
+                              ? 'ri-check-line'
+                              : 'ri-file-copy-line'
+                          "
+                        ></i>
+                        <span>{{
+                          flowLogCopyFeedback === 'copied' ? 'Copied' : 'Copy'
+                        }}</span>
+                      </button>
+                      <button
                         v-if="liveFlowLogKey && liveFlowLogKey !== selectedFlowLogKey"
                         type="button"
                         class="flow-log-jump-live-btn"
@@ -670,6 +722,24 @@
           </section>
         </div>
       </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <span
+        v-if="flowLogCopyFeedback"
+        ref="flowLogCopyTooltipRef"
+        class="flow-log-copy-tooltip"
+        :class="{
+          'is-copied': flowLogCopyFeedback === 'copied',
+          'is-error':
+            flowLogCopyFeedback === 'failed' || flowLogCopyFeedback === 'empty',
+          'is-above': flowLogCopyTooltipStyle?.placement === 'above',
+        }"
+        :style="flowLogCopyTooltipInlineStyle"
+        role="status"
+      >
+        {{ flowLogCopyTooltip }}
+      </span>
     </Teleport>
 
     <!-- ===== 图表预览 Lightbox ===== -->
@@ -855,6 +925,14 @@ import {
   reconcileSelectedFlowLogKey,
   toFlowLogListItems,
 } from './homeViewFlowLogSelection'
+import {
+  computeFlowLogCopyTooltipStyle,
+  copyFlowLogText,
+  flowLogCopyFeedbackFromResult,
+  flowLogCopyFeedbackTooltip,
+  type FlowLogCopyFeedback,
+  type FlowLogCopyTooltipStyle,
+} from './homeViewFlowLogCopy'
 import { ensureMonitorChartInstance } from './homeMonitorCharts'
 
 // 注册 ECharts 组件（按需引入）
@@ -928,6 +1006,33 @@ const selectedFlowLogContent = computed(() => {
   if (!selectedFlowLogKey.value) return ''
   return flowLogContentByKey.value[selectedFlowLogKey.value] ?? ''
 })
+const canCopyFlowLogText = computed(
+  () =>
+    Boolean(selectedFlowLogSegment.value) &&
+    !selectedFlowLogSegment.value?.missing &&
+    selectedFlowLogContent.value.length > 0,
+)
+const flowLogCopyFeedback = ref<FlowLogCopyFeedback | null>(null)
+const flowLogCopyTooltipStyle = ref<FlowLogCopyTooltipStyle | null>(null)
+const flowLogCopyTooltipRef = ref<HTMLElement | null>(null)
+let flowLogCopyFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+let flowLogCopyFeedbackToken = 0
+const flowLogCopyTooltip = computed(() =>
+  flowLogCopyFeedbackTooltip(flowLogCopyFeedback.value),
+)
+const flowLogCopyButtonTitle = computed(() =>
+  flowLogCopyFeedback.value
+    ? flowLogCopyTooltip.value
+    : flowLogCopyFeedbackTooltip(null),
+)
+const flowLogCopyTooltipInlineStyle = computed(() => {
+  const style = flowLogCopyTooltipStyle.value
+  if (!style) return undefined
+  return {
+    left: style.left,
+    top: style.top,
+  }
+})
 const flowLogSelectionSignature = computed(() =>
   flowLogSegments.value
     .map((segment) =>
@@ -935,6 +1040,83 @@ const flowLogSelectionSignature = computed(() =>
     )
     .join('\u001e'),
 )
+
+function clearFlowLogCopyFeedbackTimer(): void {
+  if (flowLogCopyFeedbackTimer) {
+    clearTimeout(flowLogCopyFeedbackTimer)
+    flowLogCopyFeedbackTimer = null
+  }
+}
+
+function getFlowLogCopyViewport() {
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+}
+
+function positionFlowLogCopyTooltip(
+  trigger: HTMLElement,
+  tooltipSize?: { width: number; height: number },
+): void {
+  const triggerRect = trigger.getBoundingClientRect()
+  flowLogCopyTooltipStyle.value = computeFlowLogCopyTooltipStyle(
+    triggerRect,
+    getFlowLogCopyViewport(),
+    tooltipSize
+      ? {
+          tooltipWidthPx: tooltipSize.width,
+          tooltipHeightPx: tooltipSize.height,
+        }
+      : undefined,
+  )
+}
+
+async function refineFlowLogCopyTooltipPosition(
+  trigger: HTMLElement,
+  token: number,
+): Promise<void> {
+  await nextTick()
+  if (token !== flowLogCopyFeedbackToken) return
+  const tooltipEl = flowLogCopyTooltipRef.value
+  if (!tooltipEl || !trigger.isConnected) return
+
+  const tooltipRect = tooltipEl.getBoundingClientRect()
+  positionFlowLogCopyTooltip(trigger, {
+    width: tooltipRect.width,
+    height: tooltipRect.height,
+  })
+}
+
+function setFlowLogCopyFeedback(
+  feedback: FlowLogCopyFeedback,
+  trigger?: HTMLElement | null,
+): void {
+  clearFlowLogCopyFeedbackTimer()
+  const token = ++flowLogCopyFeedbackToken
+  flowLogCopyFeedback.value = feedback
+
+  if (trigger?.isConnected) {
+    positionFlowLogCopyTooltip(trigger)
+    void refineFlowLogCopyTooltipPosition(trigger, token)
+  } else {
+    flowLogCopyTooltipStyle.value = null
+  }
+
+  flowLogCopyFeedbackTimer = setTimeout(() => {
+    if (token !== flowLogCopyFeedbackToken) return
+    flowLogCopyFeedback.value = null
+    flowLogCopyTooltipStyle.value = null
+    flowLogCopyFeedbackTimer = null
+  }, 2000)
+}
+
+async function onCopyFlowLogText(event: MouseEvent): Promise<void> {
+  const trigger =
+    event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  const result = await copyFlowLogText(selectedFlowLogContent.value)
+  setFlowLogCopyFeedback(flowLogCopyFeedbackFromResult(result), trigger)
+}
 
 function toggleFlowLogStepChooser(): void {
   flowLogChooser.toggleFlowLogStepChooser()
@@ -1585,6 +1767,10 @@ onUnmounted(() => {
     cancelAnimationFrame(pendingDashboardSettleRaf)
     pendingDashboardSettleRaf = null
   }
+  clearFlowLogCopyFeedbackTimer()
+  flowLogCopyFeedbackToken += 1
+  flowLogCopyFeedback.value = null
+  flowLogCopyTooltipStyle.value = null
   document.removeEventListener('keydown', onFullscreenKeydown)
 })
 
@@ -2489,6 +2675,8 @@ html.dark .chart-card:hover {
 }
 
 .flow-log-viewer-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2594,6 +2782,7 @@ html.dark .chart-card:hover {
 }
 
 .flow-log-steps-trigger,
+.flow-log-copy-btn,
 .flow-log-jump-live-btn,
 .flow-log-expand-btn,
 .flow-log-icon-btn {
@@ -2617,6 +2806,7 @@ html.dark .chart-card:hover {
 }
 
 .flow-log-steps-trigger:hover:not(:disabled),
+.flow-log-copy-btn:hover:not(:disabled),
 .flow-log-jump-live-btn:hover:not(:disabled),
 .flow-log-expand-btn:hover:not(:disabled),
 .flow-log-icon-btn:hover:not(:disabled) {
@@ -2625,12 +2815,70 @@ html.dark .chart-card:hover {
   background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
 }
 
+.flow-log-copy-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.flow-log-copy-btn.is-copied {
+  color: var(--text-primary);
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+}
+
+.flow-log-copy-btn.is-error {
+  color: var(--text-primary);
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.flow-log-copy-tooltip {
+  position: fixed;
+  z-index: 20020;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.flow-log-copy-tooltip.is-copied {
+  border-color: rgba(var(--accent-rgb, 59, 130, 246), 0.45);
+}
+
+.flow-log-copy-tooltip.is-error {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.flow-log-copy-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  right: 12px;
+  border: 5px solid transparent;
+  border-bottom-color: var(--border-color);
+}
+
+.flow-log-copy-tooltip.is-above::after {
+  top: 100%;
+  bottom: auto;
+  border-bottom-color: transparent;
+  border-top-color: var(--border-color);
+}
+
 .flow-log-expand-btn:disabled {
   opacity: 0.7;
   cursor: progress;
 }
 
 .flow-log-steps-trigger i,
+.flow-log-copy-btn i,
 .flow-log-jump-live-btn i,
 .flow-log-expand-btn i,
 .flow-log-icon-btn i {

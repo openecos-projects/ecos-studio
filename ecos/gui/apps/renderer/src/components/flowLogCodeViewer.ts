@@ -13,7 +13,6 @@ export function buildFlowLogViewerExtensions(): Extension[] {
     }),
     keymap.of(searchKeymap),
     EditorState.readOnly.of(true),
-    EditorView.editable.of(false),
     EditorView.lineWrapping,
     EditorView.theme({
       '&': {

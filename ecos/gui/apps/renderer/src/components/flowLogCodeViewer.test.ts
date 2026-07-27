@@ -590,11 +590,13 @@ afterEach(() => {
 })
 
 describe('flowLogCodeViewer helpers', () => {
-  it('creates a readonly extension bundle', () => {
+  it('creates a readonly extension bundle that still allows selection', () => {
     const extensions = buildFlowLogViewerExtensions()
 
     expect(Array.isArray(extensions)).toBe(true)
     expect(extensions.length).toBeGreaterThan(0)
+    expect(helperSource).toContain('EditorState.readOnly.of(true)')
+    expect(helperSource).not.toContain('EditorView.editable.of(false)')
   })
 
   it('treats only near-tail scroll positions as pinned', () => {
