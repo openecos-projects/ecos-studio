@@ -118,6 +118,10 @@ pub struct GeometryEditResult {
     pub committed_bbox: Rect32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// A session-scoped snapshot exported by ECC after an accepted edit. The
+    /// formal output manifest is only returned after Save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry_manifest_path: Option<String>,
 }
 
 impl OwnerType {

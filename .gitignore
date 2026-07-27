@@ -13,6 +13,7 @@ result
 .vscode/
 # Claude Code
 .claude/
+.trellis/
 .humanize*
 .humanize/
 docs/superpowers/

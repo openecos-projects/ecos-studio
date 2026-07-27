@@ -15,6 +15,15 @@ import {
   normalizeLocalPath,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
+  type EccLayoutEditApplyRequest,
+  type EccLayoutEditApplyResult,
+  type EccLayoutEditBeginRequest,
+  type EccLayoutEditBeginResult,
+  type EccLayoutEditDiscardRequest,
+  type EccLayoutEditDiscardResult,
+  type EccLayoutEditSaveRequest,
+  type EccLayoutEditSaveResult,
+  type EccWorkspaceOpenResult,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
 
@@ -105,6 +114,45 @@ interface ChipViewerBinaries {
   viewerPath: string
 }
 
+interface LayoutEditRuntime {
+  layoutEditApply(request: EccLayoutEditApplyRequest): Promise<EccLayoutEditApplyResult>
+  layoutEditBegin(request: EccLayoutEditBeginRequest): Promise<EccLayoutEditBeginResult>
+  layoutEditDiscard(
+    request: EccLayoutEditDiscardRequest,
+  ): Promise<EccLayoutEditDiscardResult>
+  layoutEditSave(request: EccLayoutEditSaveRequest): Promise<EccLayoutEditSaveResult>
+  openWorkspace(request: { directory: string }): Promise<EccWorkspaceOpenResult>
+}
+
+interface LayoutEditContext {
+  bridgeId: string
+  dirty: boolean
+  editSessionId: string
+  geometryManifestPath: string
+  revision: number
+  step: string
+  workspaceHandle: string
+}
+
+interface NativeGeometryEditCommand {
+  command_id: number
+  expected_version: number
+  instance_name?: string
+  op: string
+  requested_bbox: {
+    hx: number
+    hy: number
+    lx: number
+    ly: number
+  }
+  shape_id: number
+}
+
+interface NativeSessionControlCommand {
+  action: 'discard' | 'save'
+  command_id: number
+}
+
 interface PackagedBinaryResolution {
   binaries: ChipViewerBinaries | null
   missingPaths: string[]
@@ -119,6 +167,7 @@ export interface ChipViewerServiceOptions {
   fileExists?: FileExists
   getFileModifiedTime?: GetFileModifiedTime
   isPackaged: boolean
+  layoutEditRuntime?: LayoutEditRuntime
   openLogFile?: OpenLogFile
   platform?: NodeJS.Platform
   readTextFile?: ReadTextFile
@@ -258,6 +307,94 @@ function ancestorPaths(startPath: string, maxDepth = 12): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function requireInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw new Error(`invalid native edit command field: ${field}`)
+  }
+  return value
+}
+
+function parseNativeGeometryEditCommand(raw: string): NativeGeometryEditCommand {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('native edit command is not valid JSON')
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.requested_bbox)) {
+    throw new Error('native edit command is missing requested_bbox')
+  }
+  const instanceName = parsed.instance_name
+  if (instanceName !== undefined && typeof instanceName !== 'string') {
+    throw new Error('native edit command instance_name must be a string')
+  }
+  if (typeof parsed.op !== 'string') {
+    throw new Error('native edit command is missing op')
+  }
+  return {
+    command_id: requireInteger(parsed.command_id, 'command_id'),
+    expected_version: requireInteger(parsed.expected_version, 'expected_version'),
+    ...(instanceName?.trim() ? { instance_name: instanceName.trim() } : {}),
+    op: parsed.op,
+    requested_bbox: {
+      hx: requireInteger(parsed.requested_bbox.hx, 'requested_bbox.hx'),
+      hy: requireInteger(parsed.requested_bbox.hy, 'requested_bbox.hy'),
+      lx: requireInteger(parsed.requested_bbox.lx, 'requested_bbox.lx'),
+      ly: requireInteger(parsed.requested_bbox.ly, 'requested_bbox.ly'),
+    },
+    shape_id: requireInteger(parsed.shape_id, 'shape_id'),
+  }
+}
+
+function parseNativeSessionControlCommand(raw: string): NativeSessionControlCommand {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('native session control command is not valid JSON')
+  }
+  if (!isRecord(parsed) || (parsed.action !== 'save' && parsed.action !== 'discard')) {
+    throw new Error('native session control command has an invalid action')
+  }
+  return {
+    action: parsed.action,
+    command_id: requireInteger(parsed.command_id, 'command_id'),
+  }
+}
+
+function geometryDeltaShapeVersion(
+  geometryDelta: Record<string, unknown>,
+  shapeId: number,
+  expectedVersion: number,
+): number {
+  const events = geometryDelta.events
+  if (!Array.isArray(events)) {
+    return expectedVersion
+  }
+  const matchingEvent = events.find(
+    (event) =>
+      isRecord(event) &&
+      event.shapeId === shapeId &&
+      typeof event.newVersion === 'number' &&
+      Number.isSafeInteger(event.newVersion),
+  )
+  return isRecord(matchingEvent) && typeof matchingEvent.newVersion === 'number'
+    ? matchingEvent.newVersion
+    : expectedVersion
+}
+
+function geometryDeltaMessage(geometryDelta: Record<string, unknown>): string {
+  const updated = geometryDelta.updatedShapeCount
+  const inserted = geometryDelta.insertedShapeCount
+  const deleted = geometryDelta.deletedShapeCount
+  const count = [updated, inserted, deleted].every(
+    (value) => typeof value === 'number' && Number.isSafeInteger(value),
+  )
+  return count
+    ? `geometry updated: ${updated} updated, ${inserted} inserted, ${deleted} deleted`
+    : 'geometry updated'
 }
 
 function stringValue(record: Record<string, unknown>, key: string): string {
@@ -491,6 +628,7 @@ export class ChipViewerService {
   private readonly fileExists: FileExists
   private readonly getFileModifiedTime: GetFileModifiedTime
   private readonly isPackaged: boolean
+  private readonly layoutEditRuntime?: LayoutEditRuntime
   private readonly openLogFile: OpenLogFile
   private readonly platform: NodeJS.Platform
   private readonly readTextFile: ReadTextFile
@@ -503,7 +641,9 @@ export class ChipViewerService {
   private readonly writeTextFile: WriteTextFile
   private readonly workspaceResourceService: ChipViewerServiceOptions['workspaceResourceService']
   private readonly editBridgeWatchers = new Map<string, DirectoryWatcher>()
+  private readonly layoutEditContexts = new Map<string, LayoutEditContext>()
   private readonly processedEditCommands = new Set<string>()
+  private nextEditBridgeId = 1
 
   constructor(options: ChipViewerServiceOptions) {
     this.appPath = options.appPath
@@ -515,6 +655,7 @@ export class ChipViewerService {
     this.fileExists = options.fileExists ?? existsSync
     this.getFileModifiedTime = options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged
+    this.layoutEditRuntime = options.layoutEditRuntime
     this.openLogFile = options.openLogFile ?? openSync
     this.platform = options.platform ?? process.platform
     this.readTextFile = options.readTextFile ?? defaultReadTextFile
@@ -586,36 +727,76 @@ export class ChipViewerService {
       )
     }
 
-    const viewerArgs = ['--manifest', snapshotInputs.manifestPath, '--mode', mode]
+    let viewerManifestPath = snapshotInputs.manifestPath
+    let editCommandDirectory: string | undefined
+    let editResultDirectory: string | undefined
+    let layoutEdit: LayoutEditContext | undefined
+    let viewerSnapshotInputs = snapshotInputs
+    if (mode === 'edit') {
+      layoutEdit = await this.beginLayoutEdit(projectPath, request.step)
+      viewerManifestPath = layoutEdit.geometryManifestPath
+      viewerSnapshotInputs = {
+        ...snapshotInputs,
+        editCommandDirectory: join(
+          snapshotInputs.editCommandDirectory,
+          layoutEdit.editSessionId,
+          layoutEdit.bridgeId,
+        ),
+        editResultDirectory: join(
+          snapshotInputs.editResultDirectory,
+          layoutEdit.editSessionId,
+          layoutEdit.bridgeId,
+        ),
+      }
+      await this.ensureDirectory(viewerSnapshotInputs.editCommandDirectory)
+      await this.ensureDirectory(viewerSnapshotInputs.editResultDirectory)
+      this.startEditCommandBridge(binaries, viewerSnapshotInputs, layoutEdit)
+      editCommandDirectory = viewerSnapshotInputs.editCommandDirectory
+      editResultDirectory = viewerSnapshotInputs.editResultDirectory
+    }
+
+    const viewerArgs = ['--manifest', viewerManifestPath, '--mode', mode]
     if (snapshotInputs.drcDataPath) {
       viewerArgs.push('--drc-data', snapshotInputs.drcDataPath)
     }
     if (snapshotInputs.drcStatisPath) {
       viewerArgs.push('--drc-statis', snapshotInputs.drcStatisPath)
     }
-    let editCommandDirectory: string | undefined
-    let editResultDirectory: string | undefined
     if (mode === 'edit') {
-      dbConfig ??= await readDbConfig()
-      await this.ensureDirectory(snapshotInputs.editCommandDirectory)
-      await this.ensureDirectory(snapshotInputs.editResultDirectory)
-      this.startEditCommandBridge(binaries, dbConfig, snapshotInputs)
       viewerArgs.push(
         '--edit-command-dir',
-        snapshotInputs.editCommandDirectory,
+        viewerSnapshotInputs.editCommandDirectory,
         '--edit-result-dir',
-        snapshotInputs.editResultDirectory,
+        viewerSnapshotInputs.editResultDirectory,
       )
-      editCommandDirectory = snapshotInputs.editCommandDirectory
-      editResultDirectory = snapshotInputs.editResultDirectory
+      if (layoutEdit?.dirty) {
+        viewerArgs.push('--edit-dirty')
+      }
     }
 
-    await this.launchViewer(binaries.viewerPath, viewerArgs, snapshotInputs)
+    try {
+      await this.launchViewer(
+        binaries.viewerPath,
+        viewerArgs,
+        {
+          ...viewerSnapshotInputs,
+          manifestPath: viewerManifestPath,
+        },
+        mode === 'edit' && editCommandDirectory
+          ? () => this.stopEditCommandBridge(editCommandDirectory)
+          : undefined,
+      )
+    } catch (error) {
+      if (mode === 'edit' && editCommandDirectory) {
+        this.stopEditCommandBridge(editCommandDirectory)
+      }
+      throw error
+    }
 
     return {
       editCommandDirectory,
       editResultDirectory,
-      geometryManifestPath: snapshotInputs.manifestPath,
+      geometryManifestPath: viewerManifestPath,
       spawned: true,
       workspaceStepDirectory: snapshotInputs.workspaceStepDirectory,
     }
@@ -680,7 +861,9 @@ export class ChipViewerService {
     const outputDirectory = dirname(defPath)
     const workspaceStepDirectory = dirname(outputDirectory)
     const geometryDir = join(outputDirectory, 'geometry')
-    const editDirectory = join(geometryDir, 'edit')
+    // Geometry is atomically replaced by layout.edit.save. Keep the live
+    // command/result transport outside that published artifact tree.
+    const editDirectory = join(workspaceStepDirectory, '.chip-viewer', 'layout-edit')
     const drcDataPath = join(workspaceStepDirectory, 'feature', 'drc.step.json')
     const drcStatisPath = join(workspaceStepDirectory, 'analysis', 'drc_statis.csv')
     const isDrcStep = isDrcWorkspaceStep(step, stepLabel, workspaceStepDirectory)
@@ -705,6 +888,7 @@ export class ChipViewerService {
     viewerPath: string,
     viewerArgs: string[],
     snapshotInputs: SnapshotInputs,
+    onExit?: () => void,
   ): Promise<void> {
     const viewerEnv = createChipViewerProcessEnv(this.env)
     if (this.platform === 'linux' && !hasLinuxDisplayEnvironment(viewerEnv)) {
@@ -746,6 +930,9 @@ export class ChipViewerService {
       stderrFd = null
 
       await this.waitForViewerStartup(child)
+      if (onExit) {
+        child.once('exit', onExit)
+      }
       child.unref()
     } catch (error) {
       this.closeOpenLogFile(stdoutFd)
@@ -815,11 +1002,9 @@ export class ChipViewerService {
   private snapshotArgs(
     dbConfig: DbGeometryConfig,
     snapshotInputs: SnapshotInputs,
-    mode: 'snapshot' | 'apply-edit',
-    editCommandPath?: string,
-    editResultPath?: string,
+    mode: 'snapshot',
   ): string[] {
-    const args = [
+    return [
       '--tech-lef',
       dbConfig.techLefPath,
       ...dbConfig.lefPaths.flatMap((lefPath) => ['--lef', lefPath]),
@@ -830,31 +1015,42 @@ export class ChipViewerService {
       '--mode',
       mode,
     ]
-    if (mode === 'apply-edit') {
-      if (!editCommandPath || !editResultPath) {
-        throw new Error('Edit command and result paths are required')
-      }
-      args.push(
-        '--edit-command',
-        editCommandPath,
-        '--edit-result',
-        editResultPath,
-        '--write-def',
-        snapshotInputs.defPath,
-        '--write-db',
-        snapshotInputs.dbPath,
-        '--write-gds',
-        snapshotInputs.gdsPath,
-      )
+  }
+
+  private async beginLayoutEdit(
+    projectPath: string,
+    step: string,
+  ): Promise<LayoutEditContext> {
+    if (!this.layoutEditRuntime) {
+      throw new Error('ECC layout edit runtime is not configured')
     }
-    return args
+    const workspace = await this.layoutEditRuntime.openWorkspace({
+      directory: projectPath,
+    })
+    const editSession = await this.layoutEditRuntime.layoutEditBegin({
+      step,
+      workspaceHandle: workspace.workspaceHandle,
+    })
+    if (!editSession.geometryManifestPath) {
+      throw new Error('ECC layout edit session did not return a geometry manifest')
+    }
+    return {
+      bridgeId: `bridge-${this.nextEditBridgeId++}`,
+      dirty: editSession.dirty,
+      editSessionId: editSession.editSessionId,
+      geometryManifestPath: editSession.geometryManifestPath,
+      revision: editSession.revision,
+      step,
+      workspaceHandle: workspace.workspaceHandle,
+    }
   }
 
   private startEditCommandBridge(
     binaries: ChipViewerBinaries,
-    dbConfig: DbGeometryConfig,
     snapshotInputs: SnapshotInputs,
+    layoutEdit: LayoutEditContext,
   ): void {
+    this.layoutEditContexts.set(snapshotInputs.editCommandDirectory, layoutEdit)
     if (this.editBridgeWatchers.has(snapshotInputs.editCommandDirectory)) {
       return
     }
@@ -862,77 +1058,318 @@ export class ChipViewerService {
     const watcher = this.watchDirectory(
       snapshotInputs.editCommandDirectory,
       (fileName) => {
-        void this.handleEditCommandFile(binaries, dbConfig, snapshotInputs, fileName)
+        void this.handleEditCommandFile(binaries, snapshotInputs, fileName)
       },
     )
     this.editBridgeWatchers.set(snapshotInputs.editCommandDirectory, watcher)
   }
 
+  private stopEditCommandBridge(editCommandDirectory: string): void {
+    this.editBridgeWatchers.get(editCommandDirectory)?.close()
+    this.editBridgeWatchers.delete(editCommandDirectory)
+    this.layoutEditContexts.delete(editCommandDirectory)
+    for (const commandPath of this.processedEditCommands) {
+      if (dirname(commandPath) === editCommandDirectory) {
+        this.processedEditCommands.delete(commandPath)
+      }
+    }
+  }
+
   private async handleEditCommandFile(
     binaries: ChipViewerBinaries,
-    dbConfig: DbGeometryConfig,
     snapshotInputs: SnapshotInputs,
     fileName: string,
   ): Promise<void> {
-    if (!/^command-[0-9]+\.json$/.test(fileName)) {
+    const layoutEdit = this.layoutEditContexts.get(snapshotInputs.editCommandDirectory)
+    if (!layoutEdit) {
       return
     }
 
     const commandPath = join(snapshotInputs.editCommandDirectory, fileName)
+    const editMatch = /^command-([0-9]+)\.json$/.exec(fileName)
+    const controlMatch = /^control-(save|discard)-([0-9]+)\.json$/.exec(fileName)
+    if (!editMatch && !controlMatch) {
+      return
+    }
     if (this.processedEditCommands.has(commandPath)) {
       return
     }
     this.processedEditCommands.add(commandPath)
 
-    const resultPath = join(
-      snapshotInputs.editResultDirectory,
-      fileName.replace(/^command-/, 'result-'),
-    )
+    const resultFileName = editMatch
+      ? fileName.replace(/^command-/, 'result-')
+      : `control-result-${controlMatch![1]}-${controlMatch![2]}.json`
+    const resultPath = join(snapshotInputs.editResultDirectory, resultFileName)
     const temporaryResultPath = `${resultPath}.tmp`
+    const progressPath = controlMatch
+      ? join(
+          snapshotInputs.editResultDirectory,
+          `control-progress-${controlMatch[1]}-${controlMatch[2]}.json`,
+        )
+      : undefined
 
-    try {
-      const gdsModifiedTimeBefore = await this.getFileModifiedTime(snapshotInputs.gdsPath)
-      await this.execFile(
-        binaries.snapshotPath,
-        this.snapshotArgs(
-          dbConfig,
-          snapshotInputs,
-          'apply-edit',
-          commandPath,
-          temporaryResultPath,
-        ),
+    if (editMatch) {
+      await this.handleGeometryEditCommand(commandPath, temporaryResultPath, layoutEdit)
+    } else if (controlMatch) {
+      await this.handleSessionControlCommand(
+        binaries,
+        commandPath,
+        temporaryResultPath,
+        progressPath!,
+        layoutEdit,
+        controlMatch[1] as NativeSessionControlCommand['action'],
+        snapshotInputs,
       )
-      try {
-        await this.refreshLayoutImageIfGdsChanged(
-          binaries,
-          snapshotInputs,
-          gdsModifiedTimeBefore,
-        )
-      } catch (imageError) {
-        await this.appendEditResultMessage(
-          temporaryResultPath,
-          `layout image refresh failed: ${
-            imageError instanceof Error ? imageError.message : String(imageError)
-          }`,
-        )
+    }
+    await this.ensureDirectory(dirname(temporaryResultPath))
+    await this.renameFile(temporaryResultPath, resultPath)
+  }
+
+  private async handleGeometryEditCommand(
+    commandPath: string,
+    resultPath: string,
+    layoutEdit: LayoutEditContext,
+  ): Promise<void> {
+    try {
+      const command = parseNativeGeometryEditCommand(await this.readTextFile(commandPath))
+      if (command.op !== 'move_shape') {
+        throw new Error('only instance move is supported by the layout edit session')
       }
-      await this.renameFile(temporaryResultPath, resultPath)
+      if (!command.instance_name) {
+        throw new Error('selected shape does not identify an instance')
+      }
+      if (!this.layoutEditRuntime) {
+        throw new Error('ECC layout edit runtime is not configured')
+      }
+
+      const applied = await this.layoutEditRuntime.layoutEditApply({
+        baseRevision: layoutEdit.revision,
+        commandId: `${layoutEdit.bridgeId}:${command.command_id}`,
+        editSessionId: layoutEdit.editSessionId,
+        operation: {
+          cellmaster: '',
+          createIfMissing: false,
+          instName: command.instance_name,
+          kind: 'place_instance',
+          llx: command.requested_bbox.lx,
+          lly: command.requested_bbox.ly,
+          orient: '',
+          placementStatus: 'preserve',
+          source: '',
+        },
+        workspaceHandle: layoutEdit.workspaceHandle,
+      })
+      layoutEdit.revision = applied.revision
+      layoutEdit.geometryManifestPath = applied.geometryManifestPath
+      await this.writeTextFile(
+        resultPath,
+        `${JSON.stringify(
+          {
+            command_id: command.command_id,
+            committed_bbox: command.requested_bbox,
+            geometry_manifest_path: applied.geometryManifestPath,
+            message: geometryDeltaMessage(applied.geometryDelta),
+            new_version: geometryDeltaShapeVersion(
+              applied.geometryDelta,
+              command.shape_id,
+              command.expected_version,
+            ),
+            shape_id: command.shape_id,
+            status: 'accepted',
+          },
+          null,
+          2,
+        )}\n`,
+      )
     } catch (error) {
-      await this.writeRejectedEditResult(commandPath, temporaryResultPath, error)
-      await this.renameFile(temporaryResultPath, resultPath)
+      await this.writeRejectedEditResult(commandPath, resultPath, error)
     }
   }
 
-  private async refreshLayoutImageIfGdsChanged(
+  private async handleSessionControlCommand(
     binaries: ChipViewerBinaries,
+    commandPath: string,
+    resultPath: string,
+    progressPath: string,
+    layoutEdit: LayoutEditContext,
+    expectedAction: NativeSessionControlCommand['action'],
     snapshotInputs: SnapshotInputs,
-    gdsModifiedTimeBefore: number | null,
   ): Promise<void> {
-    const gdsModifiedTimeAfter = await this.getFileModifiedTime(snapshotInputs.gdsPath)
-    if (gdsModifiedTimeAfter === null || gdsModifiedTimeAfter === gdsModifiedTimeBefore) {
-      return
+    let command: NativeSessionControlCommand | undefined
+    try {
+      command = parseNativeSessionControlCommand(await this.readTextFile(commandPath))
+      if (command.action !== expectedAction) {
+        throw new Error('session control action does not match its file name')
+      }
+      if (!this.layoutEditRuntime) {
+        throw new Error('ECC layout edit runtime is not configured')
+      }
+
+      let geometryManifestPath: string
+      let message: string
+      if (command.action === 'save') {
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Saving layout edits in ECC',
+          percent: 15,
+          phase: 'saving',
+        })
+        const saved = await this.layoutEditRuntime.layoutEditSave({
+          editSessionId: layoutEdit.editSessionId,
+          expectedRevision: layoutEdit.revision,
+          workspaceHandle: layoutEdit.workspaceHandle,
+        })
+        if (!saved.saved || saved.dirty) {
+          throw new Error('ECC did not confirm that dirty layout edits were published')
+        }
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Verifying published DEF, IDB, GDS, and geometry manifest',
+          percent: 50,
+          phase: 'verifying_artifacts',
+        })
+        await this.verifyPublishedLayoutArtifacts(saved)
+        layoutEdit.revision = saved.revision
+        geometryManifestPath = saved.artifacts.geometryManifestPath
+        layoutEdit.geometryManifestPath = geometryManifestPath
+        message = 'layout edit saved; verified DEF, IDB, GDS, and geometry manifest'
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Refreshing layout image',
+          percent: 75,
+          phase: 'refreshing_layout_image',
+        })
+        try {
+          await this.refreshLayoutImage(binaries, snapshotInputs)
+        } catch (imageError) {
+          message += `; layout image refresh failed: ${
+            imageError instanceof Error ? imageError.message : String(imageError)
+          }`
+        }
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Published layout artifacts verified',
+          percent: 90,
+          phase: 'published',
+        })
+      } else {
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Discarding in-memory layout edits',
+          percent: 25,
+          phase: 'discarding',
+        })
+        await this.layoutEditRuntime.layoutEditDiscard({
+          editSessionId: layoutEdit.editSessionId,
+          workspaceHandle: layoutEdit.workspaceHandle,
+        })
+        const reset = await this.layoutEditRuntime.layoutEditBegin({
+          step: layoutEdit.step,
+          workspaceHandle: layoutEdit.workspaceHandle,
+        })
+        layoutEdit.editSessionId = reset.editSessionId
+        layoutEdit.geometryManifestPath = reset.geometryManifestPath
+        layoutEdit.revision = reset.revision
+        geometryManifestPath = reset.geometryManifestPath
+        message = 'layout edit discarded'
+        await this.writeSessionActionProgress(progressPath, command, {
+          message: 'Started a clean layout edit session',
+          percent: 90,
+          phase: 'published',
+        })
+      }
+
+      await this.writeTextFile(
+        resultPath,
+        `${JSON.stringify(
+          {
+            accepted: true,
+            action: command.action,
+            command_id: command.command_id,
+            geometry_manifest_path: geometryManifestPath,
+            message,
+          },
+          null,
+          2,
+        )}\n`,
+      )
+    } catch (error) {
+      if (command) {
+        try {
+          await this.writeSessionActionProgress(progressPath, command, {
+            message: error instanceof Error ? error.message : String(error),
+            percent: 100,
+            phase: 'failed',
+          })
+        } catch {
+          // The final rejection result remains the authoritative failure signal.
+        }
+      }
+      await this.ensureDirectory(dirname(resultPath))
+      await this.writeRejectedControlResult(
+        commandPath,
+        resultPath,
+        expectedAction,
+        error,
+      )
+    }
+  }
+
+  private async writeSessionActionProgress(
+    progressPath: string,
+    command: NativeSessionControlCommand,
+    progress: {
+      message: string
+      percent: number
+      phase:
+        | 'saving'
+        | 'discarding'
+        | 'verifying_artifacts'
+        | 'refreshing_layout_image'
+        | 'published'
+        | 'failed'
+    },
+  ): Promise<void> {
+    const temporaryProgressPath = `${progressPath}.tmp`
+    await this.ensureDirectory(dirname(progressPath))
+    await this.writeTextFile(
+      temporaryProgressPath,
+      `${JSON.stringify(
+        {
+          action: command.action,
+          command_id: command.command_id,
+          ...progress,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    await this.renameFile(temporaryProgressPath, progressPath)
+  }
+
+  private async verifyPublishedLayoutArtifacts(
+    saved: EccLayoutEditSaveResult,
+  ): Promise<void> {
+    const artifacts = [
+      ['DEF', saved.artifacts.defPath],
+      ['IDB', saved.artifacts.dbPath],
+      ['GDS', saved.artifacts.gdsPath],
+      ['geometry manifest', saved.artifacts.geometryManifestPath],
+    ]
+    const missing = artifacts
+      .filter(([, path]) => !path.trim() || !this.fileExists(path))
+      .map(([label]) => label)
+    if (missing.length > 0) {
+      throw new Error(`layout save did not publish: ${missing.join(', ')}`)
     }
 
+    const invalidManifest = await this.findInvalidSnapshotManifest(
+      saved.artifacts.geometryManifestPath,
+    )
+    if (invalidManifest) {
+      throw new Error(`published geometry manifest is invalid: ${invalidManifest}`)
+    }
+  }
+
+  private async refreshLayoutImage(
+    binaries: ChipViewerBinaries,
+    snapshotInputs: SnapshotInputs,
+  ): Promise<void> {
     await this.ensureDirectory(dirname(snapshotInputs.imagePath))
     await this.execFile(binaries.eccPath, [
       'layout-image',
@@ -941,24 +1378,6 @@ export class ChipViewerService {
       '--image',
       snapshotInputs.imagePath,
     ])
-  }
-
-  private async appendEditResultMessage(
-    resultPath: string,
-    message: string,
-  ): Promise<void> {
-    try {
-      const parsed: unknown = JSON.parse(await this.readTextFile(resultPath))
-      if (!isRecord(parsed)) {
-        return
-      }
-      const currentMessage =
-        typeof parsed.message === 'string' ? parsed.message.trim() : ''
-      parsed.message = currentMessage ? `${currentMessage}; ${message}` : message
-      await this.writeTextFile(resultPath, `${JSON.stringify(parsed, null, 2)}\n`)
-    } catch {
-      // Keep the accepted edit result publishable even if warning annotation fails.
-    }
   }
 
   private async writeRejectedEditResult(
@@ -989,6 +1408,35 @@ export class ChipViewerService {
             lx: 0,
             ly: 0,
           },
+          message: error instanceof Error ? error.message : String(error),
+        },
+        null,
+        2,
+      )}\n`,
+    )
+  }
+
+  private async writeRejectedControlResult(
+    commandPath: string,
+    resultPath: string,
+    action: NativeSessionControlCommand['action'],
+    error: unknown,
+  ): Promise<void> {
+    let commandId = 0
+    try {
+      commandId = parseNativeSessionControlCommand(
+        await this.readTextFile(commandPath),
+      ).command_id
+    } catch {
+      // Preserve a machine-readable rejection even if the command is malformed.
+    }
+    await this.writeTextFile(
+      resultPath,
+      `${JSON.stringify(
+        {
+          accepted: false,
+          action,
+          command_id: commandId,
           message: error instanceof Error ? error.message : String(error),
         },
         null,

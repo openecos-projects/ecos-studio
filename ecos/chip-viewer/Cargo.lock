@@ -704,6 +704,7 @@ dependencies = [
  "clap",
  "eframe",
  "egui",
+ "serde",
  "serde_json",
 ]
 

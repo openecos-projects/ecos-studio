@@ -21,6 +21,9 @@ struct Args {
     edit_result_dir: Option<PathBuf>,
 
     #[arg(long)]
+    edit_dirty: bool,
+
+    #[arg(long)]
     drc_data: Option<PathBuf>,
 
     #[arg(long)]
@@ -46,6 +49,7 @@ fn main() -> Result<()> {
                 args.mode.clone(),
                 args.edit_command_dir.clone(),
                 args.edit_result_dir.clone(),
+                args.edit_dirty,
                 args.drc_data.clone(),
                 args.drc_statis.clone(),
             )))

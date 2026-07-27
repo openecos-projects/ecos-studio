@@ -13,4 +13,5 @@ chipgeom-format = { path = "../../crates/chipgeom-format" }
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
+serde.workspace = true
 serde_json.workspace = true

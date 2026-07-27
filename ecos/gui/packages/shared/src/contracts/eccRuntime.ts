@@ -141,6 +141,65 @@ export interface EccWorkspaceInspectSignoffResult {
   risks: EccSignoffReviewRisk[]
 }
 
+export interface EccLayoutEditBeginRequest extends EccWorkspaceHandleRequest {
+  expectedSourceFingerprint?: string
+  step: string
+}
+
+export interface EccLayoutEditBeginResult {
+  dirty: boolean
+  editSessionId: string
+  geometryManifestPath: string
+  geometryRevision: number
+  revision: number
+  sourceFingerprint: string
+}
+
+export interface EccLayoutEditApplyRequest extends EccWorkspaceHandleRequest {
+  baseRevision: number
+  commandId: string
+  editSessionId: string
+  operation: Record<string, unknown>
+}
+
+export interface EccLayoutEditApplyResult {
+  dirty: boolean
+  editSessionId: string
+  geometryDelta: Record<string, unknown>
+  geometryManifestPath: string
+  geometryRevision: number
+  revision: number
+}
+
+export interface EccLayoutEditSaveRequest extends EccWorkspaceHandleRequest {
+  editSessionId: string
+  expectedRevision: number
+}
+
+export interface EccLayoutEditSaveResult {
+  artifacts: {
+    dbPath: string
+    defPath: string
+    gdsPath: string
+    geometryManifestPath: string
+  }
+  dirty: boolean
+  editSessionId: string
+  geometryRevision: number
+  revision: number
+  saved: boolean
+}
+
+export interface EccLayoutEditDiscardRequest extends EccWorkspaceHandleRequest {
+  editSessionId: string
+}
+
+export interface EccLayoutEditDiscardResult {
+  discarded: boolean
+  dirty: boolean
+  editSessionId: string
+}
+
 export interface EccFlowRunRequest extends EccWorkspaceHandleRequest {
   rerun?: boolean
 }

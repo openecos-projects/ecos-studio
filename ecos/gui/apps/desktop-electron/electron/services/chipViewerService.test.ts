@@ -30,8 +30,13 @@ const GEOMETRY_SIDMAP = join(GEOMETRY_EPOCH_DIR, 'geometry.sidmap.bin')
 const GEOMETRY_VIEW = join(GEOMETRY_EPOCH_DIR, 'geometry.view.bin')
 const DRC_DATA_PATH = join(STEP_DIRECTORY, 'feature', 'drc.step.json')
 const DRC_STATIS_PATH = join(STEP_DIRECTORY, 'analysis', 'drc_statis.csv')
-const EDIT_COMMAND_DIR = join(GEOMETRY_DIR, 'edit', 'commands')
-const EDIT_RESULT_DIR = join(GEOMETRY_DIR, 'edit', 'results')
+const EDIT_ROOT_DIR = join(STEP_DIRECTORY, '.chip-viewer', 'layout-edit')
+const EDIT_COMMAND_DIR = join(EDIT_ROOT_DIR, 'commands')
+const EDIT_RESULT_DIR = join(EDIT_ROOT_DIR, 'results')
+const EDIT_SESSION_ID = 'layout-edit-1'
+const EDIT_BRIDGE_ID = 'bridge-1'
+const EDIT_SESSION_COMMAND_DIR = join(EDIT_COMMAND_DIR, EDIT_SESSION_ID, EDIT_BRIDGE_ID)
+const EDIT_SESSION_RESULT_DIR = join(EDIT_RESULT_DIR, EDIT_SESSION_ID, EDIT_BRIDGE_ID)
 const DB_CONFIG_PATH = join(PROJECT_ROOT, 'config', 'db_default_config.json')
 const TECH_LEF = '/pdk/prtech/tech.lef'
 const LEF_A = '/pdk/std/a.lef'
@@ -112,6 +117,7 @@ function createService(options: {
   includeDefaultDefPath?: boolean
   includeDefaultGeometryInputPaths?: boolean
   isPackaged?: boolean
+  layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
   openLogFile?: (path: string, flags: string) => number
   resourcesPath?: string
@@ -190,6 +196,51 @@ function createService(options: {
       return result
     }),
   }
+  const layoutEditRuntime = options.layoutEditRuntime ?? {
+    layoutEditApply: vi.fn(async () => ({
+      dirty: true,
+      editSessionId: 'layout-edit-1',
+      geometryDelta: {
+        deletedShapeCount: 0,
+        insertedShapeCount: 0,
+        updatedShapeCount: 1,
+      },
+      geometryManifestPath: GEOMETRY_MANIFEST,
+      geometryRevision: 1,
+      revision: 1,
+    })),
+    layoutEditBegin: vi.fn(async () => ({
+      dirty: false,
+      editSessionId: 'layout-edit-1',
+      geometryManifestPath: GEOMETRY_MANIFEST,
+      geometryRevision: 0,
+      revision: 0,
+      sourceFingerprint: 'source-1',
+    })),
+    layoutEditDiscard: vi.fn(async () => ({
+      discarded: true,
+      dirty: true,
+      editSessionId: 'layout-edit-1',
+      geometryManifestPath: GEOMETRY_MANIFEST,
+    })),
+    layoutEditSave: vi.fn(async () => ({
+      artifacts: {
+        dbPath: DB_PATH,
+        defPath: DEF_PATH,
+        gdsPath: GDS_PATH,
+        geometryManifestPath: GEOMETRY_MANIFEST,
+      },
+      dirty: false,
+      editSessionId: 'layout-edit-1',
+      geometryRevision: 1,
+      revision: 1,
+      saved: true,
+    })),
+    openWorkspace: vi.fn(async () => ({
+      directory: PROJECT_ROOT,
+      workspaceHandle: 'workspace-handle-1',
+    })),
+  }
   const service = new ChipViewerService({
     appPath: options.appPath ?? join(REPO_ROOT, 'ecos/gui/apps/desktop-electron'),
     closeLogFile,
@@ -206,6 +257,7 @@ function createService(options: {
         return existingPaths.has(path) ? 100 : null
       }),
     isPackaged: options.isPackaged ?? false,
+    layoutEditRuntime,
     openLogFile,
     platform: 'linux',
     readTextFile: async (path) => {
@@ -231,6 +283,7 @@ function createService(options: {
     execFile,
     openLogFile,
     service,
+    layoutEditRuntime,
     spawnProcess,
     spawnedProcess,
     unref,
@@ -319,26 +372,76 @@ describe('ChipViewerService', () => {
         '--mode',
         'edit',
         '--edit-command-dir',
-        EDIT_COMMAND_DIR,
+        EDIT_SESSION_COMMAND_DIR,
         '--edit-result-dir',
-        EDIT_RESULT_DIR,
+        EDIT_SESSION_RESULT_DIR,
       ],
       expect.objectContaining({
         detached: true,
         stdio: ['ignore', expect.any(Number), expect.any(Number)],
       }),
     )
-    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_COMMAND_DIR)
-    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_RESULT_DIR)
-    expect(watchDirectory).toHaveBeenCalledWith(EDIT_COMMAND_DIR, expect.any(Function))
+    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_SESSION_COMMAND_DIR)
+    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_SESSION_RESULT_DIR)
+    expect(watchDirectory).toHaveBeenCalledWith(
+      EDIT_SESSION_COMMAND_DIR,
+      expect.any(Function),
+    )
     expect(unref).toHaveBeenCalledTimes(1)
     expect(result).toEqual({
-      editCommandDirectory: EDIT_COMMAND_DIR,
-      editResultDirectory: EDIT_RESULT_DIR,
+      editCommandDirectory: EDIT_SESSION_COMMAND_DIR,
+      editResultDirectory: EDIT_SESSION_RESULT_DIR,
       geometryManifestPath: GEOMETRY_MANIFEST,
       spawned: true,
       workspaceStepDirectory: STEP_DIRECTORY,
     })
+    expect(result.editCommandDirectory).not.toContain(`${GEOMETRY_DIR}/`)
+    expect(result.editResultDirectory).not.toContain(`${GEOMETRY_DIR}/`)
+  })
+
+  it('restores the dirty state when reopening an ECC edit session', async () => {
+    const devBinaries = devChipViewerPaths()
+    const layoutEditBegin = vi.fn(async () => ({
+      dirty: true,
+      editSessionId: EDIT_SESSION_ID,
+      geometryManifestPath: GEOMETRY_MANIFEST,
+      geometryRevision: 1,
+      revision: 1,
+      sourceFingerprint: 'source-1',
+    }))
+    const { service, spawnProcess } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      layoutEditRuntime: {
+        layoutEditApply: vi.fn(),
+        layoutEditBegin,
+        layoutEditDiscard: vi.fn(),
+        layoutEditSave: vi.fn(),
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(spawnProcess).toHaveBeenCalledWith(
+      devBinaries.viewer,
+      expect.arrayContaining(['--edit-dirty']),
+      expect.any(Object),
+    )
   })
 
   it('launches the native viewer with sanitized environment and diagnostic logs', async () => {
@@ -777,19 +880,35 @@ describe('ChipViewerService', () => {
     ])
   })
 
-  it('bridges native edit command files through ecc geometry apply-edit', async () => {
+  it('bridges an instance move through the ECC edit session without publishing artifacts', async () => {
     const devBinaries = devChipViewerPaths()
-    const { execFile, renameFile, service, watchDirectory } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-    })
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'command-42.json')
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, 'result-42.json')
+    const execFile = vi.fn(async (_file: string, _args: string[]) => ({
+      stderr: '',
+      stdout: '',
+    }))
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        execFile,
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.snapshot,
+          devBinaries.viewer,
+          GEOMETRY_MANIFEST,
+        ],
+        files: {
+          [DB_CONFIG_PATH]: dbConfig(),
+          [commandPath]: JSON.stringify({
+            command_id: 42,
+            expected_version: 3,
+            instance_name: 'u_sram_0',
+            op: 'move_shape',
+            requested_bbox: { hx: 120, hy: 240, lx: 100, ly: 200 },
+            shape_id: 99,
+          }),
+        },
+      })
 
     await service.open({
       mode: 'edit',
@@ -802,62 +921,112 @@ describe('ChipViewerService', () => {
     editListener?.('command-42.json')
 
     await vi.waitFor(() => {
-      expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-        '--tech-lef',
-        TECH_LEF,
-        '--lef',
-        LEF_A,
-        '--lef',
-        LEF_B,
-        '--def',
-        DEF_PATH,
-        '--out',
-        GEOMETRY_DIR,
-        '--mode',
-        'apply-edit',
-        '--edit-command',
-        join(EDIT_COMMAND_DIR, 'command-42.json'),
-        '--edit-result',
-        join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
-        '--write-def',
-        DEF_PATH,
-        '--write-db',
-        DB_PATH,
-        '--write-gds',
-        GDS_PATH,
-      ])
-      expect(renameFile).toHaveBeenCalledWith(
-        join(EDIT_RESULT_DIR, 'result-42.json.tmp'),
-        join(EDIT_RESULT_DIR, 'result-42.json'),
+      expect(layoutEditRuntime.layoutEditApply).toHaveBeenCalledWith({
+        baseRevision: 0,
+        commandId: 'bridge-1:42',
+        editSessionId: 'layout-edit-1',
+        operation: {
+          cellmaster: '',
+          createIfMissing: false,
+          instName: 'u_sram_0',
+          kind: 'place_instance',
+          llx: 100,
+          lly: 200,
+          orient: '',
+          placementStatus: 'preserve',
+          source: '',
+        },
+        workspaceHandle: 'workspace-handle-1',
+      })
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${resultPath}.tmp`,
+        expect.stringContaining('"geometry_manifest_path"'),
       )
+      expect(renameFile).toHaveBeenCalledWith(`${resultPath}.tmp`, resultPath)
+    })
+    expect(
+      execFile.mock.calls.some(([, args]) =>
+        args.some((argument) =>
+          ['--write-def', '--write-db', '--write-gds', 'apply-edit'].includes(argument),
+        ),
+      ),
+    ).toBe(false)
+  })
+
+  it('rejects command IDs outside the JavaScript safe integer range', async () => {
+    const devBinaries = devChipViewerPaths()
+    const unsafeCommandId = Number.MAX_SAFE_INTEGER + 1
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, `command-${unsafeCommandId}.json`)
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, `result-${unsafeCommandId}.json`)
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.snapshot,
+          devBinaries.viewer,
+          GEOMETRY_MANIFEST,
+        ],
+        files: {
+          [DB_CONFIG_PATH]: dbConfig(),
+          [commandPath]: JSON.stringify({
+            command_id: unsafeCommandId,
+            expected_version: 3,
+            instance_name: 'u_sram_0',
+            op: 'move_shape',
+            requested_bbox: { hx: 120, hy: 240, lx: 100, ly: 200 },
+            shape_id: 99,
+          }),
+        },
+      })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+
+    editListener?.(`command-${unsafeCommandId}.json`)
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditApply).not.toHaveBeenCalled()
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${resultPath}.tmp`,
+        expect.stringContaining('invalid native edit command field: command_id'),
+      )
+      expect(renameFile).toHaveBeenCalledWith(`${resultPath}.tmp`, resultPath)
     })
   })
 
-  it('refreshes the layout image after apply-edit rewrites the step GDS', async () => {
+  it('publishes through Save and refreshes the layout image only after session save', async () => {
     const devBinaries = devChipViewerPaths()
-    let gdsStatCount = 0
     const execFile = vi.fn(async () => ({
       stderr: '',
       stdout: '',
     }))
-    const { ensureDirectory, service, watchDirectory } = createService({
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-43.json')
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, 'control-result-save-43.json')
+    const progressPath = join(EDIT_SESSION_RESULT_DIR, 'control-progress-save-43.json')
+    const {
+      ensureDirectory,
+      layoutEditRuntime,
+      renameFile,
+      service,
+      watchDirectory,
+      writeTextFile,
+    } = createService({
       execFile,
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.snapshot,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
+        DB_PATH,
         GDS_PATH,
       ],
       files: {
         [DB_CONFIG_PATH]: dbConfig(),
-      },
-      getFileModifiedTime: async (path) => {
-        if (path === GDS_PATH) {
-          gdsStatCount += 1
-          return gdsStatCount === 1 ? 100 : 200
-        }
-        return path === GEOMETRY_MANIFEST ? 100 : null
+        [commandPath]: JSON.stringify({ action: 'save', command_id: 43 }),
       },
     })
 
@@ -868,9 +1037,14 @@ describe('ChipViewerService', () => {
     })
     const editListener = watchDirectory.mock.calls[0]?.[1]
 
-    editListener?.('command-42.json')
+    editListener?.('control-save-43.json')
 
     await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditSave).toHaveBeenCalledWith({
+        editSessionId: 'layout-edit-1',
+        expectedRevision: 0,
+        workspaceHandle: 'workspace-handle-1',
+      })
       expect(ensureDirectory).toHaveBeenCalledWith(join(STEP_DIRECTORY, 'output'))
       expect(execFile).toHaveBeenCalledWith(devBinaries.ecc, [
         'layout-image',
@@ -879,25 +1053,172 @@ describe('ChipViewerService', () => {
         '--image',
         IMAGE_PATH,
       ])
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${resultPath}.tmp`,
+        expect.stringContaining('verified DEF, IDB, GDS, and geometry manifest'),
+      )
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${progressPath}.tmp`,
+        expect.stringContaining('"phase": "published"'),
+      )
+      expect(renameFile).toHaveBeenCalledWith(`${progressPath}.tmp`, progressPath)
+      expect(renameFile).toHaveBeenCalledWith(`${resultPath}.tmp`, resultPath)
     })
   })
 
-  it('publishes rejected edit results atomically when apply-edit fails', async () => {
+  it('rejects Save when ECC does not publish every persistent layout artifact', async () => {
     const devBinaries = devChipViewerPaths()
-    const commandPath = join(EDIT_COMMAND_DIR, 'command-42.json')
-    const resultPath = join(EDIT_RESULT_DIR, 'result-42.json')
-    const temporaryResultPath = `${resultPath}.tmp`
-    const execFile = vi.fn(async (_file: string, args: string[]) => {
-      if (args.includes('apply-edit')) {
-        throw new Error('apply-edit failed')
-      }
-      return {
-        stderr: '',
-        stdout: '',
-      }
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-save-44.json')
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, 'control-result-save-44.json')
+    const progressPath = join(EDIT_SESSION_RESULT_DIR, 'control-progress-save-44.json')
+    const execFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        execFile,
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.snapshot,
+          devBinaries.viewer,
+          GEOMETRY_MANIFEST,
+          GDS_PATH,
+        ],
+        files: {
+          [DB_CONFIG_PATH]: dbConfig(),
+          [commandPath]: JSON.stringify({ action: 'save', command_id: 44 }),
+        },
+      })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
     })
-    const { renameFile, service, watchDirectory, writeTextFile } = createService({
-      execFile,
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+
+    editListener?.('control-save-44.json')
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditSave).toHaveBeenCalledTimes(1)
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${resultPath}.tmp`,
+        expect.stringContaining('layout save did not publish: IDB'),
+      )
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${progressPath}.tmp`,
+        expect.stringContaining('"phase": "failed"'),
+      )
+      expect(renameFile).toHaveBeenCalledWith(`${resultPath}.tmp`, resultPath)
+    })
+    expect(execFile).not.toHaveBeenCalledWith(
+      devBinaries.ecc,
+      expect.arrayContaining(['layout-image']),
+    )
+  })
+
+  it('discards the session, then starts a clean session without publishing artifacts', async () => {
+    const devBinaries = devChipViewerPaths()
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'control-discard-44.json')
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, 'control-result-discard-44.json')
+    const layoutEditBegin = vi
+      .fn()
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: EDIT_SESSION_ID,
+        geometryManifestPath: '/tmp/layout-edit-1/geometry.manifest',
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-1',
+      })
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: EDIT_SESSION_ID,
+        geometryManifestPath: '/tmp/layout-edit-2/geometry.manifest',
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-1',
+      })
+    const layoutEditDiscard = vi.fn(async () => ({
+      discarded: true,
+      dirty: true,
+      editSessionId: EDIT_SESSION_ID,
+    }))
+    const execFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        execFile,
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.snapshot,
+          devBinaries.viewer,
+          GEOMETRY_MANIFEST,
+        ],
+        files: {
+          [DB_CONFIG_PATH]: dbConfig(),
+          [commandPath]: JSON.stringify({ action: 'discard', command_id: 44 }),
+        },
+        layoutEditRuntime: {
+          layoutEditApply: vi.fn(),
+          layoutEditBegin,
+          layoutEditDiscard,
+          layoutEditSave: vi.fn(),
+          openWorkspace: vi.fn(async () => ({
+            directory: PROJECT_ROOT,
+            workspaceHandle: 'workspace-handle-1',
+          })),
+        },
+      })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const editListener = watchDirectory.mock.calls[0]?.[1]
+
+    editListener?.('control-discard-44.json')
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditDiscard).toHaveBeenCalledWith({
+        editSessionId: EDIT_SESSION_ID,
+        workspaceHandle: 'workspace-handle-1',
+      })
+      expect(layoutEditRuntime.layoutEditBegin).toHaveBeenLastCalledWith({
+        step: STEP_NAME,
+        workspaceHandle: 'workspace-handle-1',
+      })
+      expect(writeTextFile).toHaveBeenCalledWith(
+        `${resultPath}.tmp`,
+        expect.stringContaining('/tmp/layout-edit-2/geometry.manifest'),
+      )
+      expect(renameFile).toHaveBeenCalledWith(`${resultPath}.tmp`, resultPath)
+    })
+    expect(execFile).not.toHaveBeenCalledWith(
+      devBinaries.ecc,
+      expect.arrayContaining(['layout-image']),
+    )
+  })
+
+  it('uses a bridge-scoped directory and command id each time the editor opens', async () => {
+    const devBinaries = devChipViewerPaths()
+    const layoutEditBegin = vi
+      .fn()
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: EDIT_SESSION_ID,
+        geometryManifestPath: '/tmp/layout-edit-1/geometry.manifest',
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-1',
+      })
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: 'layout-edit-2',
+        geometryManifestPath: '/tmp/layout-edit-2/geometry.manifest',
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-1',
+      })
+    const { service, watchDirectory } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.snapshot,
@@ -906,12 +1227,65 @@ describe('ChipViewerService', () => {
       ],
       files: {
         [DB_CONFIG_PATH]: dbConfig(),
-        [commandPath]: JSON.stringify({
-          command_id: 42,
-          shape_id: 99,
-        }),
+      },
+      layoutEditRuntime: {
+        layoutEditApply: vi.fn(),
+        layoutEditBegin,
+        layoutEditDiscard: vi.fn(),
+        layoutEditSave: vi.fn(),
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+        })),
       },
     })
+
+    const first = await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    const second = await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+
+    expect(first.editCommandDirectory).toBe(EDIT_SESSION_COMMAND_DIR)
+    expect(second.editCommandDirectory).toBe(
+      join(EDIT_COMMAND_DIR, 'layout-edit-2', 'bridge-2'),
+    )
+    expect(watchDirectory.mock.calls.map(([path]) => path)).toEqual([
+      EDIT_SESSION_COMMAND_DIR,
+      join(EDIT_COMMAND_DIR, 'layout-edit-2', 'bridge-2'),
+    ])
+  })
+
+  it('rejects resize commands before calling the placement RPC', async () => {
+    const devBinaries = devChipViewerPaths()
+    const commandPath = join(EDIT_SESSION_COMMAND_DIR, 'command-42.json')
+    const resultPath = join(EDIT_SESSION_RESULT_DIR, 'result-42.json')
+    const temporaryResultPath = `${resultPath}.tmp`
+    const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
+      createService({
+        existingPaths: [
+          devBinaries.cargoManifest,
+          devBinaries.snapshot,
+          devBinaries.viewer,
+          GEOMETRY_MANIFEST,
+        ],
+        files: {
+          [DB_CONFIG_PATH]: dbConfig(),
+          [commandPath]: JSON.stringify({
+            command_id: 42,
+            expected_version: 3,
+            instance_name: 'u_sram_0',
+            op: 'resize_rect',
+            requested_bbox: { hx: 120, hy: 240, lx: 100, ly: 200 },
+            shape_id: 99,
+          }),
+        },
+      })
 
     await service.open({
       mode: 'edit',
@@ -923,6 +1297,7 @@ describe('ChipViewerService', () => {
     editListener?.('command-42.json')
 
     await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditApply).not.toHaveBeenCalled()
       expect(writeTextFile).toHaveBeenCalledWith(
         temporaryResultPath,
         expect.stringContaining('"status": "rejected"'),

@@ -159,6 +159,7 @@ function getDesktopServices() {
     platform: process.platform,
     resourcesPath: process.resourcesPath,
     viewerLogDirectory: join(getLogSessionDirectory(), 'chip-viewer'),
+    layoutEditRuntime: eccRuntimeService,
     workspaceResourceService,
   })
 

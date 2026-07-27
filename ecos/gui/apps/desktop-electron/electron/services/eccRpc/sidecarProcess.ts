@@ -102,10 +102,14 @@ export class EccRpcSidecarProcess {
     this.logFile = this.createLogFile()
     this.shuttingDown = false
 
-    const child = this.spawnImpl(this.command, ['rpc', 'serve', '--stdio'], {
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    const child = this.spawnImpl(
+      this.command,
+      ['rpc', 'serve', '--stdio', '--persistent-db'],
+      {
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    )
     this.child = child
     this.spawnEnv = { ...env }
 

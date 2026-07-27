@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -17,15 +16,19 @@ use chipgeom_format::{
     OwnerType, Point32, Rect32, ShapeId, ShapeKind, ShapeRecord, ShapeState,
 };
 use eframe::egui;
+use serde::{Deserialize, Serialize};
 
 const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
 const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
+const LAYOUT_GEOMETRY_LAYER: LayerId = 0;
 const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
 const HOVER_NEAREST_RADIUS_PX: f32 = 8.0;
 const MAX_PARAMETERIZED_GRID_LINES_PER_GRID: usize = 4096;
+const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+const SIDEBAR_SECTION_RESERVE_HEIGHT: f32 = 34.0;
 
 pub struct ChipViewerApp {
     state: ViewerState,
@@ -38,6 +41,7 @@ struct LoadingViewer {
     started_at: Instant,
     receiver: Receiver<Result<ChipViewDb, String>>,
     edit_enabled: bool,
+    initial_session_dirty: bool,
     edit_command_dir: Option<PathBuf>,
     edit_result_dir: Option<PathBuf>,
     drc_data_path: Option<PathBuf>,
@@ -60,10 +64,14 @@ struct LoadedViewer {
     highlighted: BTreeSet<ShapeId>,
     selected: Option<ShapeId>,
     pending_focus: Option<PendingFocus>,
-    edit_tool: EditTool,
     draft: Option<EditDraft>,
     pending_edit: Option<PendingEdit>,
+    pending_session_action: Option<PendingSessionAction>,
+    session_action_progress: Option<SessionActionProgress>,
     last_edit_result: Option<String>,
+    session_dirty: bool,
+    close_confirmation_visible: bool,
+    close_after_session_action: bool,
     snapshot_signature: SnapshotFileSignature,
     next_snapshot_refresh_check: Instant,
     render_cache: RenderPlanCache,
@@ -99,6 +107,14 @@ struct LayerUiState {
     lef58_rule_count: u32,
     visible: bool,
     style: LayerStyle,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SidebarSectionHeights {
+    view: f32,
+    interaction: f32,
+    physical_layers: f32,
+    drawing_data: f32,
 }
 
 struct DrcOverlay {
@@ -138,14 +154,128 @@ struct EditDraft {
     command_id: u64,
     shape_id: ShapeId,
     expected_version: u32,
-    op: GeometryEditOp,
-    resize_corner: ResizeCorner,
+    instance_name: Option<String>,
     original_bbox: Rect32,
     requested_bbox: Rect32,
 }
 
 struct PendingEdit {
-    shape_id: ShapeId,
+    result_path: PathBuf,
+}
+
+#[derive(Serialize)]
+struct ViewerEditCommand<'a> {
+    #[serde(flatten)]
+    command: &'a GeometryEditCommand,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance_name: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SessionActionKind {
+    Save,
+    Discard,
+}
+
+impl SessionActionKind {
+    fn label(self) -> &'static str {
+        match self {
+            SessionActionKind::Save => "save",
+            SessionActionKind::Discard => "discard",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+struct SessionActionCommand {
+    command_id: u64,
+    action: SessionActionKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+struct SessionActionResult {
+    command_id: u64,
+    action: SessionActionKind,
+    accepted: bool,
+    #[serde(default)]
+    geometry_manifest_path: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SessionActionProgressPhase {
+    Queued,
+    Saving,
+    Discarding,
+    VerifyingArtifacts,
+    RefreshingLayoutImage,
+    Published,
+    ReloadingGeometry,
+    Completed,
+    Failed,
+}
+
+impl SessionActionProgressPhase {
+    fn label(self) -> &'static str {
+        match self {
+            SessionActionProgressPhase::Queued => "Queued",
+            SessionActionProgressPhase::Saving => "Saving in ECC",
+            SessionActionProgressPhase::Discarding => "Discarding edits",
+            SessionActionProgressPhase::VerifyingArtifacts => "Verifying artifacts",
+            SessionActionProgressPhase::RefreshingLayoutImage => "Refreshing layout image",
+            SessionActionProgressPhase::Published => "Published",
+            SessionActionProgressPhase::ReloadingGeometry => "Reloading geometry",
+            SessionActionProgressPhase::Completed => "Completed",
+            SessionActionProgressPhase::Failed => "Failed",
+        }
+    }
+
+    fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            SessionActionProgressPhase::Completed | SessionActionProgressPhase::Failed
+        )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SessionActionProgress {
+    command_id: u64,
+    action: SessionActionKind,
+    phase: SessionActionProgressPhase,
+    percent: u8,
+    message: String,
+}
+
+impl SessionActionProgress {
+    fn new(
+        action: SessionActionKind,
+        command_id: u64,
+        phase: SessionActionProgressPhase,
+        percent: u8,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            command_id,
+            action,
+            phase,
+            percent,
+            message: message.into(),
+        }
+    }
+
+    fn fraction(&self) -> f32 {
+        f32::from(self.percent.min(100)) / 100.0
+    }
+}
+
+struct PendingSessionAction {
+    action: SessionActionKind,
+    command_id: u64,
+    progress_path: PathBuf,
     result_path: PathBuf,
 }
 
@@ -177,20 +307,6 @@ struct EditResultAction {
     reload_snapshot: bool,
     selected_shape_id: Option<ShapeId>,
     message: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EditTool {
-    Move,
-    Resize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ResizeCorner {
-    LowerLeft,
-    LowerRight,
-    UpperLeft,
-    UpperRight,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -546,22 +662,6 @@ impl CoordinateUnit {
     }
 }
 
-impl EditTool {
-    fn label(self) -> &'static str {
-        match self {
-            EditTool::Move => "move",
-            EditTool::Resize => "resize",
-        }
-    }
-
-    fn op(self) -> GeometryEditOp {
-        match self {
-            EditTool::Move => GeometryEditOp::MoveShape,
-            EditTool::Resize => GeometryEditOp::ResizeRect,
-        }
-    }
-}
-
 enum ViewerState {
     Loading(LoadingViewer),
     Loaded(LoadedViewer),
@@ -574,6 +674,7 @@ impl ChipViewerApp {
         mode: String,
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
+        initial_session_dirty: bool,
         drc_data_path: Option<PathBuf>,
         drc_statis_path: Option<PathBuf>,
     ) -> Self {
@@ -590,6 +691,7 @@ impl ChipViewerApp {
                 started_at: Instant::now(),
                 receiver,
                 edit_enabled,
+                initial_session_dirty,
                 edit_command_dir,
                 edit_result_dir,
                 drc_data_path,
@@ -659,6 +761,7 @@ impl ChipViewerApp {
                 Ok(Ok(db)) => Some(ViewerState::Loaded(LoadedViewer::new(
                     db,
                     loading.edit_enabled,
+                    loading.initial_session_dirty,
                     loading.edit_command_dir.clone(),
                     loading.edit_result_dir.clone(),
                     loading.drc_data_path.clone(),
@@ -951,6 +1054,7 @@ impl LoadedViewer {
     fn new(
         db: ChipViewDb,
         edit_enabled: bool,
+        initial_session_dirty: bool,
         edit_command_dir: Option<PathBuf>,
         edit_result_dir: Option<PathBuf>,
         drc_data_path: Option<PathBuf>,
@@ -976,10 +1080,14 @@ impl LoadedViewer {
             highlighted: BTreeSet::new(),
             selected: None,
             pending_focus: None,
-            edit_tool: EditTool::Move,
             draft: None,
             pending_edit: None,
+            pending_session_action: None,
+            session_action_progress: None,
             last_edit_result: None,
+            session_dirty: initial_session_dirty,
+            close_confirmation_visible: false,
+            close_after_session_action: false,
             snapshot_signature,
             next_snapshot_refresh_check: Instant::now() + SNAPSHOT_REFRESH_CHECK_INTERVAL,
             render_cache: RenderPlanCache::default(),
@@ -1081,37 +1189,32 @@ impl LoadedViewer {
     }
 
     fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
-        let available_height = ui.available_height().max(360.0);
+        let section_heights = sidebar_section_heights(ui.available_height());
         let available_width = ui.available_width();
-        let view_height = (available_height * 1.0 / 13.0).clamp(54.0, 78.0);
-        let query_height = (available_height * 2.0 / 13.0).clamp(136.0, 180.0);
-        let list_total_height = (available_height - view_height - query_height - 34.0).max(220.0);
-        let physical_height = (list_total_height * 0.5).clamp(120.0, 420.0);
-        let drawing_height = (list_total_height - physical_height).clamp(120.0, 420.0);
 
         ui.add_space(4.0);
         ui.allocate_ui_with_layout(
-            egui::vec2(available_width, view_height),
+            egui::vec2(available_width, section_heights.view),
             egui::Layout::top_down(egui::Align::Min),
             |ui| self.sidebar_view_section(ui),
         );
         ui.separator();
         ui.allocate_ui_with_layout(
-            egui::vec2(available_width, physical_height),
+            egui::vec2(available_width, section_heights.physical_layers),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| self.sidebar_physical_layers_section(ui, physical_height),
+            |ui| self.sidebar_physical_layers_section(ui, section_heights.physical_layers),
         );
         ui.separator();
         ui.allocate_ui_with_layout(
-            egui::vec2(available_width, drawing_height),
+            egui::vec2(available_width, section_heights.drawing_data),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| self.sidebar_drawing_data_section(ui, drawing_height),
+            |ui| self.sidebar_drawing_data_section(ui, section_heights.drawing_data),
         );
         ui.separator();
         ui.allocate_ui_with_layout(
-            egui::vec2(available_width, query_height),
+            egui::vec2(available_width, section_heights.interaction),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| self.sidebar_interaction_section(ui, query_height),
+            |ui| self.sidebar_interaction_section(ui, section_heights.interaction),
         );
     }
 
@@ -1119,6 +1222,35 @@ impl LoadedViewer {
         ui.horizontal(|ui| {
             section_heading(ui, "VIEW");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.edit_enabled {
+                    let action_pending = self.pending_session_action.is_some();
+                    let can_manage_session =
+                        self.pending_edit.is_none() && self.draft.is_none() && !action_pending;
+                    if ui
+                        .add_enabled(
+                            can_manage_session && self.session_dirty,
+                            egui::Button::new(egui::RichText::new("💾").size(16.0))
+                                .min_size(egui::vec2(28.0, 26.0))
+                                .selected(self.session_dirty),
+                        )
+                        .on_hover_text("Save uncommitted layout edits")
+                        .clicked()
+                    {
+                        self.request_session_action(SessionActionKind::Save, false);
+                    }
+                    if ui
+                        .add_enabled(
+                            can_manage_session && self.session_dirty,
+                            egui::Button::new(egui::RichText::new("↶").size(18.0))
+                                .min_size(egui::vec2(28.0, 26.0)),
+                        )
+                        .on_hover_text("Discard uncommitted layout edits")
+                        .clicked()
+                    {
+                        self.request_session_action(SessionActionKind::Discard, false);
+                    }
+                    ui.separator();
+                }
                 for panel in [SidebarInfoPanel::Diagnostics, SidebarInfoPanel::Selection] {
                     let active = self.sidebar_info_panel == Some(panel);
                     if ui
@@ -1288,26 +1420,25 @@ impl LoadedViewer {
         section_heading(ui, "QUERY");
         self.query_input_ui(ui, (max_height - 22.0).max(112.0));
         if self.edit_enabled {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.edit_tool, EditTool::Move, "Move");
-                ui.selectable_value(&mut self.edit_tool, EditTool::Resize, "Resize");
-            });
             if self.edit_command_dir.is_none() || self.edit_result_dir.is_none() {
                 ui.colored_label(ecos_warning(), "edit channel is not configured");
-            }
-            if let Some(pending) = &self.pending_edit {
+            } else if let Some(pending) = &self.pending_session_action {
                 ui.label(
-                    egui::RichText::new(format!("pending shape: {}", pending.shape_id))
+                    egui::RichText::new(format!("{} pending", pending.action.label()))
                         .small()
                         .color(ecos_text_secondary()),
                 );
-            }
-            if let Some(result) = &self.last_edit_result {
+            } else if let Some(result) = &self.last_edit_result {
                 ui.label(
                     egui::RichText::new(result)
                         .small()
                         .color(ecos_text_secondary()),
+                );
+            } else if self.session_dirty {
+                ui.label(
+                    egui::RichText::new("Unsaved changes")
+                        .small()
+                        .color(ecos_warning()),
                 );
             }
         }
@@ -1586,10 +1717,13 @@ impl LoadedViewer {
             {
                 Some(CanvasDragMode::Pan)
             } else if response.drag_started_by(egui::PointerButton::Primary) {
+                let edit_start_pos = ui
+                    .ctx()
+                    .input(|input| input.pointer.press_origin())
+                    .or_else(|| response.interact_pointer_pos());
                 let edit_started = self.edit_enabled
-                    && response
-                        .interact_pointer_pos()
-                        .is_some_and(|pos| self.begin_edit_drag(pos, world, canvas));
+                    && edit_start_pos
+                        .is_some_and(|pos| self.begin_edit_drag_at_pointer(pos, world, canvas));
                 Some(if edit_started {
                     CanvasDragMode::Edit
                 } else {
@@ -1955,10 +2089,9 @@ impl LoadedViewer {
         let Some(owner) = self.db.owner_for_shape(shape) else {
             return false;
         };
-        if !edit_tool_is_allowed(owner.owner_type, self.edit_tool) {
+        if !instance_move_is_allowed(owner.owner_type) {
             self.last_edit_result = Some(format!(
-                "{} is not supported for {}",
-                self.edit_tool.label(),
+                "instance move is not supported for {}",
                 ChipViewDb::owner_type_label(owner.owner_type)
             ));
             return false;
@@ -1970,17 +2103,34 @@ impl LoadedViewer {
 
         let expected_version = shape.version;
         let original_bbox = shape.bbox;
-        let resize_corner = resize_corner_from_screen_pos(pos, screen);
+        let instance_name = matches!(
+            OwnerType::from_raw(owner.owner_type),
+            Some(OwnerType::InstanceBBox)
+        )
+        .then(|| self.db.owner_name(owner).map(str::to_owned))
+        .flatten();
         self.draft = Some(EditDraft {
             command_id: self.allocate_command_id(),
             shape_id,
             expected_version,
-            op: self.edit_tool.op(),
-            resize_corner,
+            instance_name,
             original_bbox,
             requested_bbox: original_bbox,
         });
         true
+    }
+
+    fn begin_edit_drag_at_pointer(
+        &mut self,
+        pos: egui::Pos2,
+        world: Rect32,
+        canvas: egui::Rect,
+    ) -> bool {
+        let point = screen_to_world_point(pos, world, canvas, self.zoom, self.pan);
+        if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+            self.selected = Some(shape_id);
+        }
+        self.begin_edit_drag(pos, world, canvas)
     }
 
     fn update_edit_drag(&mut self, screen_delta: egui::Vec2, world: Rect32, canvas: egui::Rect) {
@@ -1988,24 +2138,18 @@ impl LoadedViewer {
             return;
         };
         let (dx, dy) = screen_to_world_delta(screen_delta, world, canvas, self.zoom);
-        draft.requested_bbox = match draft.op {
-            GeometryEditOp::MoveShape => translate_rect(draft.original_bbox, dx, dy),
-            GeometryEditOp::ResizeRect => {
-                resize_rect_from_delta(draft.original_bbox, dx, dy, draft.resize_corner)
-            }
-            GeometryEditOp::ReplaceLine => draft.original_bbox,
-        };
+        draft.requested_bbox = translate_rect(draft.original_bbox, dx, dy);
     }
 
     fn commit_draft(&mut self) {
         let Some(draft) = self.draft.take() else {
             return;
         };
-        let Some(command_dir) = &self.edit_command_dir else {
+        let Some(command_dir) = self.edit_command_dir.clone() else {
             self.last_edit_result = Some("edit command directory is missing".to_string());
             return;
         };
-        let Some(result_dir) = &self.edit_result_dir else {
+        let Some(result_dir) = self.edit_result_dir.clone() else {
             self.last_edit_result = Some("edit result directory is missing".to_string());
             return;
         };
@@ -2014,18 +2158,15 @@ impl LoadedViewer {
             command_id: draft.command_id,
             shape_id: draft.shape_id,
             expected_version: draft.expected_version,
-            op: draft.op,
+            op: GeometryEditOp::MoveShape,
             requested_bbox: draft.requested_bbox,
         };
         let command_path = command_dir.join(format!("command-{}.json", command.command_id));
         let result_path = result_dir.join(format!("result-{}.json", command.command_id));
 
-        match write_edit_command(&command_path, &command) {
+        match write_edit_command(&command_path, &command, draft.instance_name.as_deref()) {
             Ok(()) => {
-                self.pending_edit = Some(PendingEdit {
-                    shape_id: command.shape_id,
-                    result_path,
-                });
+                self.pending_edit = Some(PendingEdit { result_path });
                 self.last_edit_result = Some(format!("command {} pending", command.command_id));
             }
             Err(err) => {
@@ -2057,7 +2198,7 @@ impl LoadedViewer {
         let action = edit_result_action(&result);
         self.selected = action.selected_shape_id;
         if action.reload_snapshot {
-            match self.reload_snapshot() {
+            match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
                 Ok(()) => {}
                 Err(err) => {
                     self.last_edit_result = Some(format!("failed to reload geometry: {err}"));
@@ -2067,12 +2208,294 @@ impl LoadedViewer {
             }
         }
 
+        if matches!(
+            result.status,
+            GeometryEditStatus::Accepted | GeometryEditStatus::AdjustedAccepted
+        ) {
+            self.session_dirty = true;
+        }
+
         self.last_edit_result = Some(action.message);
         self.pending_edit = None;
     }
 
+    fn request_session_action(&mut self, action: SessionActionKind, close_after: bool) {
+        if !self.session_dirty {
+            self.last_edit_result = Some("there are no uncommitted layout edits".to_string());
+            return;
+        }
+        if self.pending_edit.is_some()
+            || self.draft.is_some()
+            || self.pending_session_action.is_some()
+        {
+            self.last_edit_result = Some("wait for the current edit to finish".to_string());
+            return;
+        }
+        let Some(command_dir) = self.edit_command_dir.clone() else {
+            self.last_edit_result = Some("edit command directory is missing".to_string());
+            return;
+        };
+        let Some(result_dir) = self.edit_result_dir.clone() else {
+            self.last_edit_result = Some("edit result directory is missing".to_string());
+            return;
+        };
+
+        let command = SessionActionCommand {
+            command_id: self.allocate_command_id(),
+            action,
+        };
+        let command_path = command_dir.join(format!(
+            "control-{}-{}.json",
+            action.label(),
+            command.command_id
+        ));
+        let result_path = result_dir.join(format!(
+            "control-result-{}-{}.json",
+            action.label(),
+            command.command_id
+        ));
+        let progress_path = result_dir.join(format!(
+            "control-progress-{}-{}.json",
+            action.label(),
+            command.command_id
+        ));
+
+        match write_session_action_command(&command_path, &command) {
+            Ok(()) => {
+                self.pending_session_action = Some(PendingSessionAction {
+                    action,
+                    command_id: command.command_id,
+                    progress_path,
+                    result_path,
+                });
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    action,
+                    command.command_id,
+                    SessionActionProgressPhase::Queued,
+                    0,
+                    format!("{} request queued", action.label()),
+                ));
+                self.close_after_session_action = close_after;
+                self.last_edit_result = Some(format!("{} pending", action.label()));
+            }
+            Err(err) => {
+                let message = format!("failed to request {}: {err}", action.label());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    action,
+                    command.command_id,
+                    SessionActionProgressPhase::Failed,
+                    100,
+                    message.clone(),
+                ));
+                self.last_edit_result = Some(message);
+            }
+        }
+    }
+
+    fn poll_session_action_progress(&mut self) {
+        let Some(pending) = self.pending_session_action.as_ref() else {
+            return;
+        };
+        let expected_action = pending.action;
+        let expected_command_id = pending.command_id;
+        let progress_path = pending.progress_path.clone();
+        let progress = fs::read_to_string(progress_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<SessionActionProgress>(&content).ok());
+        let Some(progress) = progress else {
+            return;
+        };
+        if progress.action == expected_action
+            && progress.command_id == expected_command_id
+            && progress.percent <= 100
+        {
+            self.session_action_progress = Some(progress);
+        }
+    }
+
+    /// Returns true when a successful Save or Discard was requested by the
+    /// close confirmation and the native window may now exit.
+    fn poll_session_action_result(&mut self) -> bool {
+        let Some(pending) = &self.pending_session_action else {
+            return false;
+        };
+        if !pending.result_path.exists() {
+            return false;
+        }
+
+        let expected_action = pending.action;
+        let expected_command_id = pending.command_id;
+        let result = match fs::read_to_string(&pending.result_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<SessionActionResult>(&content).ok())
+        {
+            Some(result)
+                if result.action == expected_action && result.command_id == expected_command_id =>
+            {
+                result
+            }
+            Some(_) => {
+                let message = "received a mismatched session action result".to_string();
+                self.last_edit_result = Some(message.clone());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    expected_action,
+                    expected_command_id,
+                    SessionActionProgressPhase::Failed,
+                    100,
+                    message,
+                ));
+                self.pending_session_action = None;
+                self.close_after_session_action = false;
+                return false;
+            }
+            None => {
+                let message = "failed to read session action result".to_string();
+                self.last_edit_result = Some(message.clone());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    expected_action,
+                    expected_command_id,
+                    SessionActionProgressPhase::Failed,
+                    100,
+                    message,
+                ));
+                self.pending_session_action = None;
+                self.close_after_session_action = false;
+                return false;
+            }
+        };
+
+        let close_after = self.close_after_session_action;
+        self.close_after_session_action = false;
+        self.pending_session_action = None;
+        if !result.accepted {
+            let message = session_action_result_message(&result);
+            self.last_edit_result = Some(message.clone());
+            self.session_action_progress = Some(SessionActionProgress::new(
+                expected_action,
+                expected_command_id,
+                SessionActionProgressPhase::Failed,
+                100,
+                message,
+            ));
+            return false;
+        }
+
+        self.session_action_progress = Some(SessionActionProgress::new(
+            expected_action,
+            expected_command_id,
+            SessionActionProgressPhase::ReloadingGeometry,
+            95,
+            "Reloading published geometry",
+        ));
+        match self.reload_snapshot_at(result.geometry_manifest_path.as_deref()) {
+            Ok(()) => {
+                self.session_dirty = false;
+                self.close_confirmation_visible = false;
+                let message = session_action_result_message(&result);
+                self.last_edit_result = Some(message.clone());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    expected_action,
+                    expected_command_id,
+                    SessionActionProgressPhase::Completed,
+                    100,
+                    message,
+                ));
+                close_after
+            }
+            Err(err) => {
+                let message = format!(
+                    "{} completed but geometry reload failed: {err}",
+                    result.action.label()
+                );
+                self.last_edit_result = Some(message.clone());
+                self.session_action_progress = Some(SessionActionProgress::new(
+                    expected_action,
+                    expected_command_id,
+                    SessionActionProgressPhase::Failed,
+                    100,
+                    message,
+                ));
+                false
+            }
+        }
+    }
+
+    fn show_close_confirmation(&mut self, ctx: &egui::Context) {
+        if !self.close_confirmation_visible || self.pending_session_action.is_some() {
+            return;
+        }
+
+        egui::Window::new("Unsaved layout edits")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_min_width(310.0);
+                ui.label("Save or discard the pending layout edits before closing.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Keep editing").clicked() {
+                        self.close_confirmation_visible = false;
+                    }
+                    if ui.button("Discard").clicked() {
+                        self.request_session_action(SessionActionKind::Discard, true);
+                    }
+                    if ui.button("Save").clicked() {
+                        self.request_session_action(SessionActionKind::Save, true);
+                    }
+                });
+            });
+    }
+
+    fn show_session_action_progress(&mut self, ctx: &egui::Context) {
+        let Some(progress) = self.session_action_progress.clone() else {
+            return;
+        };
+        let title = match progress.action {
+            SessionActionKind::Save => "Saving layout",
+            SessionActionKind::Discard => "Discarding layout edits",
+        };
+        let mut dismiss = false;
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.label(egui::RichText::new(progress.phase.label()).strong());
+                ui.add_space(8.0);
+                ui.add(
+                    egui::ProgressBar::new(progress.fraction())
+                        .show_percentage()
+                        .animate(!progress.phase.is_terminal()),
+                );
+                ui.add_space(6.0);
+                ui.label(&progress.message);
+                if !progress.phase.is_terminal() {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("This window updates until the operation finishes.");
+                    });
+                } else {
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("×").on_hover_text("Close status").clicked() {
+                            dismiss = true;
+                        }
+                    });
+                }
+            });
+        if dismiss {
+            self.session_action_progress = None;
+        }
+    }
+
     fn poll_external_snapshot_refresh(&mut self) {
-        if self.pending_edit.is_some() || self.draft.is_some() {
+        if self.pending_edit.is_some()
+            || self.pending_session_action.is_some()
+            || self.draft.is_some()
+        {
             return;
         }
 
@@ -2099,7 +2522,19 @@ impl LoadedViewer {
 
     fn reload_snapshot(&mut self) -> Result<(), String> {
         let manifest_path = self.db.snapshot().manifest().path.clone();
-        let db = ChipViewDb::open(&manifest_path).map_err(|err| err.to_string())?;
+        self.reload_snapshot_from(&manifest_path)
+    }
+
+    fn reload_snapshot_at(&mut self, manifest_path: Option<&str>) -> Result<(), String> {
+        let manifest_path = manifest_path
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.db.snapshot().manifest().path.clone());
+        self.reload_snapshot_from(&manifest_path)
+    }
+
+    fn reload_snapshot_from(&mut self, manifest_path: &Path) -> Result<(), String> {
+        let db = ChipViewDb::open(manifest_path).map_err(|err| err.to_string())?;
         let snapshot_signature = snapshot_signature_for_db(&db);
         self.replace_db(db);
         self.snapshot_signature = snapshot_signature;
@@ -2129,9 +2564,7 @@ impl LoadedViewer {
     }
 
     fn allocate_command_id(&mut self) -> u64 {
-        let counter = self.next_command_counter;
-        self.next_command_counter = self.next_command_counter.saturating_add(1);
-        ((process::id() as u64) << 32) | counter as u64
+        next_native_command_id(&mut self.next_command_counter)
     }
 
     fn refresh_highlight(&mut self) {
@@ -2288,19 +2721,42 @@ impl LoadedViewer {
             self.zoom,
             self.pan,
         );
+        let point = chipgeom_format::Point32 {
+            x: hit.lx,
+            y: hit.ly,
+        };
+        if self.edit_enabled {
+            if let Some(shape_id) = self.pick_editable_instance_bbox_at(point) {
+                return Some(shape_id);
+            }
+        }
         self.db
-            .pick_top_shape(
-                query_layer_ids,
-                chipgeom_format::Point32 {
-                    x: hit.lx,
-                    y: hit.ly,
-                },
-            )
+            .pick_top_shape(query_layer_ids, point)
             .filter(|shape_id| {
                 self.db.find_shape(*shape_id).is_some_and(|shape| {
                     self.shape_is_visible(shape) && self.shape_is_drawn_at_current_zoom(shape)
                 })
             })
+    }
+
+    fn pick_editable_instance_bbox_at(&self, point: Point32) -> Option<ShapeId> {
+        let point_bbox = Rect32 {
+            lx: point.x,
+            ly: point.y,
+            hx: point.x,
+            hy: point.y,
+        };
+        pick_top_editable_instance_bbox(
+            self.db
+                .query_layer_intersect_records(LAYOUT_GEOMETRY_LAYER, point_bbox)
+                .into_iter()
+                .filter_map(|shape| {
+                    let owner = self.db.owner_for_shape(shape)?;
+                    (self.shape_is_visible(shape) && self.shape_is_drawn_at_current_zoom(shape))
+                        .then_some((shape, owner))
+                }),
+            point,
+        )
     }
 
     fn pick_drc_violation_at(
@@ -2407,10 +2863,20 @@ impl eframe::App for ChipViewerApp {
             self.startup_focus_requested = true;
         }
         self.poll_loading();
+        let close_requested = ctx.input(|input| input.viewport().close_requested());
+        let mut close_after_session_action = false;
         if let ViewerState::Loaded(loaded) = &mut self.state {
             loaded.poll_edit_result();
+            loaded.poll_session_action_progress();
+            close_after_session_action = loaded.poll_session_action_result();
             loaded.poll_external_snapshot_refresh();
-            if let Some(interval) = edit_poll_repaint_interval(loaded.pending_edit.is_some()) {
+            if close_requested && loaded.session_dirty {
+                loaded.close_confirmation_visible = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+            if let Some(interval) = edit_poll_repaint_interval(
+                loaded.pending_edit.is_some() || loaded.pending_session_action.is_some(),
+            ) {
                 ctx.request_repaint_after(interval);
             } else {
                 ctx.request_repaint_after(SNAPSHOT_REFRESH_CHECK_INTERVAL);
@@ -2437,6 +2903,13 @@ impl eframe::App for ChipViewerApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.canvas(ui);
         });
+        if let ViewerState::Loaded(loaded) = &mut self.state {
+            loaded.show_close_confirmation(ctx);
+            loaded.show_session_action_progress(ctx);
+        }
+        if close_after_session_action {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 }
 
@@ -3956,61 +4429,6 @@ fn translate_rect(rect: Rect32, dx: i32, dy: i32) -> Rect32 {
     }
 }
 
-fn resize_corner_from_screen_pos(pos: egui::Pos2, rect: egui::Rect) -> ResizeCorner {
-    [
-        (ResizeCorner::LowerLeft, rect.left_bottom()),
-        (ResizeCorner::LowerRight, rect.right_bottom()),
-        (ResizeCorner::UpperLeft, rect.left_top()),
-        (ResizeCorner::UpperRight, rect.right_top()),
-    ]
-    .into_iter()
-    .min_by(|(_, lhs), (_, rhs)| {
-        squared_distance(pos, *lhs).total_cmp(&squared_distance(pos, *rhs))
-    })
-    .map(|(corner, _)| corner)
-    .unwrap_or(ResizeCorner::UpperRight)
-}
-
-fn squared_distance(lhs: egui::Pos2, rhs: egui::Pos2) -> f32 {
-    let dx = lhs.x - rhs.x;
-    let dy = lhs.y - rhs.y;
-    dx * dx + dy * dy
-}
-
-fn resize_rect_from_delta(rect: Rect32, dx: i32, dy: i32, corner: ResizeCorner) -> Rect32 {
-    let dragged_lx = rect.lx.saturating_add(dx).min(rect.hx.saturating_sub(1));
-    let dragged_ly = rect.ly.saturating_add(dy).min(rect.hy.saturating_sub(1));
-    let dragged_hx = rect.hx.saturating_add(dx).max(rect.lx.saturating_add(1));
-    let dragged_hy = rect.hy.saturating_add(dy).max(rect.ly.saturating_add(1));
-
-    match corner {
-        ResizeCorner::LowerLeft => Rect32 {
-            lx: dragged_lx,
-            ly: dragged_ly,
-            hx: rect.hx,
-            hy: rect.hy,
-        },
-        ResizeCorner::LowerRight => Rect32 {
-            lx: rect.lx,
-            ly: dragged_ly,
-            hx: dragged_hx,
-            hy: rect.hy,
-        },
-        ResizeCorner::UpperLeft => Rect32 {
-            lx: dragged_lx,
-            ly: rect.ly,
-            hx: rect.hx,
-            hy: dragged_hy,
-        },
-        ResizeCorner::UpperRight => Rect32 {
-            lx: rect.lx,
-            ly: rect.ly,
-            hx: dragged_hx,
-            hy: dragged_hy,
-        },
-    }
-}
-
 fn should_use_view_tiles_for_state(
     view_tile_count: usize,
     _has_highlight: bool,
@@ -4040,8 +4458,8 @@ fn should_use_view_tiles_for_state(
     zoom <= 0.35 && viewport_area >= world_area.saturating_mul(6)
 }
 
-fn edit_poll_repaint_interval(has_pending_edit: bool) -> Option<Duration> {
-    has_pending_edit.then_some(Duration::from_millis(100))
+fn edit_poll_repaint_interval(has_pending_command: bool) -> Option<Duration> {
+    has_pending_command.then_some(Duration::from_millis(100))
 }
 
 fn snapshot_signature_for_db(db: &ChipViewDb) -> SnapshotFileSignature {
@@ -4296,36 +4714,27 @@ fn canvas_cursor_icon(hovered: bool, pan_active: bool) -> Option<egui::CursorIco
     }
 }
 
-fn edit_tool_is_allowed(owner_type: u8, tool: EditTool) -> bool {
-    match tool {
-        EditTool::Move => matches!(
-            OwnerType::from_raw(owner_type),
-            Some(
-                OwnerType::InstanceBBox
-                    | OwnerType::NetWireSegment
-                    | OwnerType::SpecialWireSegment
-                    | OwnerType::PinPortShape
-                    | OwnerType::IoPinPortShape
-                    | OwnerType::Blockage
-                    | OwnerType::Fill
-                    | OwnerType::Region
-                    | OwnerType::Slot
-            )
-        ),
-        EditTool::Resize => matches!(
-            OwnerType::from_raw(owner_type),
-            Some(
-                OwnerType::NetWireSegment
-                    | OwnerType::SpecialWireSegment
-                    | OwnerType::PinPortShape
-                    | OwnerType::IoPinPortShape
-                    | OwnerType::Blockage
-                    | OwnerType::Fill
-                    | OwnerType::Region
-                    | OwnerType::Slot
-            )
-        ),
-    }
+fn instance_move_is_allowed(owner_type: u8) -> bool {
+    OwnerType::from_raw(owner_type) == Some(OwnerType::InstanceBBox)
+}
+
+fn pick_top_editable_instance_bbox<'a>(
+    candidates: impl IntoIterator<Item = (&'a ShapeRecord, &'a OwnerRef)>,
+    point: Point32,
+) -> Option<ShapeId> {
+    candidates
+        .into_iter()
+        .filter(|(shape, owner)| {
+            shape.state == ShapeState::Alive as u8
+                && shape.kind == ShapeKind::Rect as u8
+                && OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox)
+                && point.x >= shape.bbox.lx
+                && point.x <= shape.bbox.hx
+                && point.y >= shape.bbox.ly
+                && point.y <= shape.bbox.hy
+        })
+        .last()
+        .map(|(shape, _)| shape.id)
 }
 
 fn edit_capability_lines(
@@ -4347,27 +4756,17 @@ fn edit_capability_lines(
         return vec!["edit: read-only, owner unavailable".to_string()];
     };
 
-    let mut allowed = Vec::new();
-    for tool in [EditTool::Move, EditTool::Resize] {
-        if edit_tool_is_allowed(owner.owner_type, tool) {
-            allowed.push(tool.label());
-        }
-    }
-    if allowed.is_empty() {
+    if !instance_move_is_allowed(owner.owner_type) {
         return vec![format!(
             "edit: read-only, {} is not editable",
             ChipViewDb::owner_type_label(owner.owner_type)
         )];
     }
 
-    let mut lines = vec![format!("edit: {}", allowed.join(", "))];
-    if OwnerType::from_raw(owner.owner_type) == Some(OwnerType::InstanceBBox)
-        && !allowed.contains(&"resize")
-    {
-        lines
-            .push("edit note: instance resize is rejected; move preserves master size".to_string());
-    }
-    lines
+    vec![
+        "edit: move".to_string(),
+        "edit note: instance resize is rejected; move preserves master size".to_string(),
+    ]
 }
 
 fn is_context_owner_type(owner_type: u8) -> bool {
@@ -4733,6 +5132,33 @@ where
     shape_ids.retain(|shape_id| exists(*shape_id));
 }
 
+fn sidebar_section_heights(available_height: f32) -> SidebarSectionHeights {
+    let available_height = available_height.max(360.0);
+    let view = (available_height / 13.0).clamp(54.0, 78.0);
+    let interaction = (available_height * 2.0 / 13.0).clamp(136.0, 180.0);
+    let list_total =
+        (available_height - view - interaction - SIDEBAR_SECTION_RESERVE_HEIGHT).max(220.0);
+    let physical_layers = (list_total * 0.5).clamp(120.0, 420.0);
+    let drawing_data = (list_total - physical_layers).clamp(120.0, 420.0);
+
+    SidebarSectionHeights {
+        view,
+        interaction,
+        physical_layers,
+        drawing_data,
+    }
+}
+
+fn next_native_command_id(counter: &mut u32) -> u64 {
+    let command_id = u64::from(*counter);
+    assert!(
+        command_id <= MAX_JAVASCRIPT_SAFE_INTEGER,
+        "native edit command ID exceeds the JavaScript safe integer range"
+    );
+    *counter = counter.saturating_add(1);
+    command_id
+}
+
 fn set_layer_visibility(layers: &mut [LayerUiState], visible: bool) {
     for layer in layers {
         layer.visible = visible;
@@ -4877,7 +5303,28 @@ impl PanDragState {
     }
 }
 
-fn write_edit_command(path: &Path, command: &GeometryEditCommand) -> std::io::Result<()> {
+fn write_edit_command(
+    path: &Path,
+    command: &GeometryEditCommand,
+    instance_name: Option<&str>,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_vec_pretty(&ViewerEditCommand {
+        command,
+        instance_name,
+    })
+    .map_err(std::io::Error::other)?;
+    let temp_path = path.with_extension("json.tmp");
+    fs::write(&temp_path, content)?;
+    fs::rename(temp_path, path)
+}
+
+fn write_session_action_command(
+    path: &Path,
+    command: &SessionActionCommand,
+) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -4885,6 +5332,20 @@ fn write_edit_command(path: &Path, command: &GeometryEditCommand) -> std::io::Re
     let temp_path = path.with_extension("json.tmp");
     fs::write(&temp_path, content)?;
     fs::rename(temp_path, path)
+}
+
+fn session_action_result_message(result: &SessionActionResult) -> String {
+    let detail = result.message.as_deref().map(str::trim).unwrap_or_default();
+    let outcome = if result.accepted {
+        "completed"
+    } else {
+        "rejected"
+    };
+    if detail.is_empty() {
+        format!("{} {}", result.action.label(), outcome)
+    } else {
+        format!("{} {}: {detail}", result.action.label(), outcome)
+    }
 }
 
 #[cfg(test)]
@@ -5301,135 +5762,6 @@ mod tests {
                 hx: 13,
                 hy: 2,
             }
-        );
-    }
-
-    #[test]
-    fn resize_rect_anchors_lower_left_corner() {
-        let rect = chipgeom_format::Rect32 {
-            lx: 10,
-            ly: 20,
-            hx: 30,
-            hy: 40,
-        };
-
-        assert_eq!(
-            resize_rect_from_delta(rect, 5, -8, ResizeCorner::UpperRight),
-            chipgeom_format::Rect32 {
-                lx: 10,
-                ly: 20,
-                hx: 35,
-                hy: 32,
-            }
-        );
-    }
-
-    #[test]
-    fn resize_rect_keeps_a_positive_extent() {
-        let rect = chipgeom_format::Rect32 {
-            lx: 10,
-            ly: 20,
-            hx: 30,
-            hy: 40,
-        };
-
-        assert_eq!(
-            resize_rect_from_delta(rect, -100, -100, ResizeCorner::UpperRight),
-            chipgeom_format::Rect32 {
-                lx: 10,
-                ly: 20,
-                hx: 11,
-                hy: 21,
-            }
-        );
-    }
-
-    #[test]
-    fn resize_rect_drags_the_selected_corner_and_keeps_the_opposite_corner_fixed() {
-        let rect = chipgeom_format::Rect32 {
-            lx: 10,
-            ly: 20,
-            hx: 30,
-            hy: 40,
-        };
-
-        assert_eq!(
-            resize_rect_from_delta(rect, -3, 4, ResizeCorner::LowerLeft),
-            chipgeom_format::Rect32 {
-                lx: 7,
-                ly: 24,
-                hx: 30,
-                hy: 40,
-            }
-        );
-        assert_eq!(
-            resize_rect_from_delta(rect, 5, -6, ResizeCorner::LowerRight),
-            chipgeom_format::Rect32 {
-                lx: 10,
-                ly: 14,
-                hx: 35,
-                hy: 40,
-            }
-        );
-        assert_eq!(
-            resize_rect_from_delta(rect, 8, 3, ResizeCorner::UpperLeft),
-            chipgeom_format::Rect32 {
-                lx: 18,
-                ly: 20,
-                hx: 30,
-                hy: 43,
-            }
-        );
-    }
-
-    #[test]
-    fn resize_rect_clamps_dragged_corner_before_it_crosses_the_opposite_corner() {
-        let rect = chipgeom_format::Rect32 {
-            lx: 10,
-            ly: 20,
-            hx: 30,
-            hy: 40,
-        };
-
-        assert_eq!(
-            resize_rect_from_delta(rect, 100, 100, ResizeCorner::LowerLeft),
-            chipgeom_format::Rect32 {
-                lx: 29,
-                ly: 39,
-                hx: 30,
-                hy: 40,
-            }
-        );
-        assert_eq!(
-            resize_rect_from_delta(rect, -100, -100, ResizeCorner::UpperRight),
-            chipgeom_format::Rect32 {
-                lx: 10,
-                ly: 20,
-                hx: 11,
-                hy: 21,
-            }
-        );
-    }
-
-    #[test]
-    fn resize_corner_from_screen_pos_selects_nearest_corner() {
-        let screen = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(50.0, 80.0));
-
-        assert_eq!(
-            resize_corner_from_screen_pos(egui::pos2(12.0, 78.0), screen),
-            ResizeCorner::LowerLeft
-        );
-        assert_eq!(
-            resize_corner_from_screen_pos(egui::pos2(48.0, 79.0), screen),
-            ResizeCorner::LowerRight
-        );
-        assert_eq!(
-            resize_corner_from_screen_pos(egui::pos2(11.0, 21.0), screen),
-            ResizeCorner::UpperLeft
-        );
-        assert_eq!(
-            resize_corner_from_screen_pos(egui::pos2(49.0, 22.0), screen),
-            ResizeCorner::UpperRight
         );
     }
 
@@ -6930,7 +7262,7 @@ mod tests {
         let dir = temp_snapshot_dir("external-refresh-new-delta");
         write_empty_snapshot(&dir, false);
         let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
-        let mut loaded = LoadedViewer::new(db, false, None, None, None, None);
+        let mut loaded = LoadedViewer::new(db, false, false, None, None, None, None);
         let delta_path = dir.join("geometry.delta.bin");
 
         assert!(!loaded.snapshot_signature.files.contains_key(&delta_path));
@@ -6953,71 +7285,105 @@ mod tests {
     }
 
     #[test]
-    fn edit_tool_allows_only_supported_owner_operations() {
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::InstanceBBox as u8,
-            EditTool::Move
+    fn restored_edit_session_starts_dirty() {
+        let dir = temp_snapshot_dir("restored-edit-session-dirty");
+        write_empty_snapshot(&dir, false);
+        let db = ChipViewDb::open(dir.join("geometry.manifest")).unwrap();
+        let loaded = LoadedViewer::new(db, true, true, None, None, None, None);
+
+        assert!(loaded.session_dirty);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn instance_move_allows_only_instance_bounding_boxes() {
+        assert!(instance_move_is_allowed(
+            chipgeom_format::OwnerType::InstanceBBox as u8
         ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::NetWireSegment as u8,
-            EditTool::Move
+        assert!(!instance_move_is_allowed(
+            chipgeom_format::OwnerType::NetWireSegment as u8
         ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::NetWireSegment as u8,
-            EditTool::Resize
+        assert!(!instance_move_is_allowed(
+            chipgeom_format::OwnerType::PinPortShape as u8
         ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::SpecialWireSegment as u8,
-            EditTool::Resize
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Blockage as u8,
-            EditTool::Resize
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Fill as u8,
-            EditTool::Move
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Fill as u8,
-            EditTool::Resize
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Region as u8,
-            EditTool::Resize
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::Slot as u8,
-            EditTool::Move
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::PinPortShape as u8,
-            EditTool::Move
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::PinPortShape as u8,
-            EditTool::Resize
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::IoPinPortShape as u8,
-            EditTool::Move
-        ));
-        assert!(edit_tool_is_allowed(
-            chipgeom_format::OwnerType::IoPinPortShape as u8,
-            EditTool::Resize
-        ));
-        assert!(!edit_tool_is_allowed(
-            chipgeom_format::OwnerType::InstancePinPortShape as u8,
-            EditTool::Move
-        ));
-        assert!(!edit_tool_is_allowed(
-            chipgeom_format::OwnerType::InstancePinPortShape as u8,
-            EditTool::Resize
-        ));
-        assert!(!edit_tool_is_allowed(
-            chipgeom_format::OwnerType::InstanceBBox as u8,
-            EditTool::Resize
-        ));
+    }
+
+    #[test]
+    fn editable_instance_hit_ignores_overlapping_non_instance_shapes() {
+        let point = Point32 { x: 15, y: 15 };
+        let instance = ShapeRecord {
+            id: 10,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            },
+            ..ShapeRecord::default()
+        };
+        let wire = ShapeRecord {
+            id: 99,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            bbox: instance.bbox,
+            ..ShapeRecord::default()
+        };
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        let wire_owner = OwnerRef {
+            owner_type: OwnerType::NetWireSegment as u8,
+            ..OwnerRef::default()
+        };
+
+        assert_eq!(
+            pick_top_editable_instance_bbox(
+                [(&instance, &instance_owner), (&wire, &wire_owner)],
+                point,
+            ),
+            Some(instance.id)
+        );
+    }
+
+    #[test]
+    fn editable_instance_hit_uses_topmost_overlapping_instance_bbox() {
+        let point = Point32 { x: 15, y: 15 };
+        let lower_instance = ShapeRecord {
+            id: 20,
+            kind: ShapeKind::Rect as u8,
+            state: ShapeState::Alive as u8,
+            bbox: Rect32 {
+                lx: 0,
+                ly: 0,
+                hx: 30,
+                hy: 30,
+            },
+            ..ShapeRecord::default()
+        };
+        let upper_instance = ShapeRecord {
+            id: 10,
+            bbox: lower_instance.bbox,
+            ..lower_instance
+        };
+        let instance_owner = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+
+        assert_eq!(
+            pick_top_editable_instance_bbox(
+                [
+                    (&lower_instance, &instance_owner),
+                    (&upper_instance, &instance_owner)
+                ],
+                point,
+            ),
+            Some(upper_instance.id)
+        );
     }
 
     #[test]
@@ -7053,11 +7419,11 @@ mod tests {
         );
         assert_eq!(
             edit_capability_lines(&shape, Some(&net_owner), true),
-            vec!["edit: move, resize".to_string()]
+            vec!["edit: read-only, net_wire_segment is not editable".to_string()]
         );
         assert_eq!(
             edit_capability_lines(&shape, Some(&pin_owner), true),
-            vec!["edit: move, resize".to_string()]
+            vec!["edit: read-only, pin_port_shape is not editable".to_string()]
         );
     }
 
@@ -7107,6 +7473,7 @@ mod tests {
                 hy: 10,
             },
             message: None,
+            geometry_manifest_path: None,
         }
     }
 
@@ -7313,6 +7680,118 @@ mod tests {
                 core::mem::size_of::<T>(),
             )
         }
+    }
+
+    #[test]
+    fn session_action_command_is_written_atomically_with_action_and_id() {
+        let directory = temp_snapshot_dir("session-action-command");
+        let path = directory.join("control-save-42.json");
+        let command = SessionActionCommand {
+            action: SessionActionKind::Save,
+            command_id: 42,
+        };
+
+        write_session_action_command(&path, &command).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(content["action"], "save");
+        assert_eq!(content["command_id"], 42);
+        assert!(!path.with_extension("json.tmp").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn native_command_ids_are_javascript_safe_and_monotonic() {
+        let mut counter = 1;
+        assert_eq!(next_native_command_id(&mut counter), 1);
+        assert_eq!(next_native_command_id(&mut counter), 2);
+
+        let mut last_counter = u32::MAX;
+        let last_id = next_native_command_id(&mut last_counter);
+        assert_eq!(last_id, u64::from(u32::MAX));
+        assert!(last_id <= MAX_JAVASCRIPT_SAFE_INTEGER);
+    }
+
+    #[test]
+    fn sidebar_keeps_query_section_at_the_original_bottom_height() {
+        let heights = sidebar_section_heights(640.0);
+        let used_height = heights.view
+            + heights.interaction
+            + heights.physical_layers
+            + heights.drawing_data
+            + SIDEBAR_SECTION_RESERVE_HEIGHT;
+
+        assert!((136.0..=180.0).contains(&heights.interaction));
+        assert!(used_height <= 640.0);
+    }
+
+    #[test]
+    fn viewer_edit_command_preserves_geometry_fields_and_instance_name() {
+        let directory = temp_snapshot_dir("viewer-edit-command");
+        let path = directory.join("command-42.json");
+        let command = GeometryEditCommand {
+            command_id: 42,
+            shape_id: 11,
+            expected_version: 3,
+            op: GeometryEditOp::MoveShape,
+            requested_bbox: Rect32 {
+                lx: 100,
+                ly: 200,
+                hx: 120,
+                hy: 240,
+            },
+        };
+
+        write_edit_command(&path, &command, Some("u_sram_0")).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(content["command_id"], 42);
+        assert_eq!(content["shape_id"], 11);
+        assert_eq!(content["instance_name"], "u_sram_0");
+        assert_eq!(content["requested_bbox"]["lx"], 100);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn session_action_result_message_includes_status_and_diagnostic() {
+        let result = SessionActionResult {
+            action: SessionActionKind::Discard,
+            accepted: false,
+            command_id: 17,
+            geometry_manifest_path: None,
+            message: Some("source changed".to_string()),
+        };
+
+        assert_eq!(
+            session_action_result_message(&result),
+            "discard rejected: source changed"
+        );
+    }
+
+    #[test]
+    fn session_action_progress_deserializes_the_cross_process_save_protocol() {
+        let progress: SessionActionProgress = serde_json::from_str(
+            r#"{
+                "action": "save",
+                "command_id": 42,
+                "phase": "verifying_artifacts",
+                "percent": 50,
+                "message": "Verifying published artifacts"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(progress.action, SessionActionKind::Save);
+        assert_eq!(progress.command_id, 42);
+        assert_eq!(
+            progress.phase,
+            SessionActionProgressPhase::VerifyingArtifacts
+        );
+        assert_eq!(progress.percent, 50);
+        assert_eq!(progress.fraction(), 0.5);
+        assert!(!progress.phase.is_terminal());
     }
 
     fn layer_visibility(layers: &[LayerUiState]) -> Vec<bool> {
