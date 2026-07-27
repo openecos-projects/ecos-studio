@@ -12,9 +12,7 @@ export type FlowLogCopyTooltipStyle = {
   placement: FlowLogCopyTooltipPlacement
 }
 
-export function flowLogCopyFeedbackTooltip(
-  feedback: FlowLogCopyFeedback | null,
-): string {
+export function flowLogCopyFeedbackTooltip(feedback: FlowLogCopyFeedback | null): string {
   switch (feedback) {
     case 'copied':
       return 'Copied to clipboard'

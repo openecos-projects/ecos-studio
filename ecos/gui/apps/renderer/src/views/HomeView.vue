@@ -731,8 +731,7 @@
         class="flow-log-copy-tooltip"
         :class="{
           'is-copied': flowLogCopyFeedback === 'copied',
-          'is-error':
-            flowLogCopyFeedback === 'failed' || flowLogCopyFeedback === 'empty',
+          'is-error': flowLogCopyFeedback === 'failed' || flowLogCopyFeedback === 'empty',
           'is-above': flowLogCopyTooltipStyle?.placement === 'above',
         }"
         :style="flowLogCopyTooltipInlineStyle"
@@ -1021,9 +1020,7 @@ const flowLogCopyTooltip = computed(() =>
   flowLogCopyFeedbackTooltip(flowLogCopyFeedback.value),
 )
 const flowLogCopyButtonTitle = computed(() =>
-  flowLogCopyFeedback.value
-    ? flowLogCopyTooltip.value
-    : flowLogCopyFeedbackTooltip(null),
+  flowLogCopyFeedback.value ? flowLogCopyTooltip.value : flowLogCopyFeedbackTooltip(null),
 )
 const flowLogCopyTooltipInlineStyle = computed(() => {
   const style = flowLogCopyTooltipStyle.value
@@ -1112,8 +1109,7 @@ function setFlowLogCopyFeedback(
 }
 
 async function onCopyFlowLogText(event: MouseEvent): Promise<void> {
-  const trigger =
-    event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   const result = await copyFlowLogText(selectedFlowLogContent.value)
   setFlowLogCopyFeedback(flowLogCopyFeedbackFromResult(result), trigger)
 }

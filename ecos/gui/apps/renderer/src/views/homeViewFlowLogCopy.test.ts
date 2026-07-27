@@ -47,12 +47,8 @@ describe('flowLogCopyFeedbackTooltip', () => {
 
   it('maps copy results to feedback states', () => {
     expect(flowLogCopyFeedbackFromResult({ ok: true })).toBe('copied')
-    expect(
-      flowLogCopyFeedbackFromResult({ ok: false, reason: 'empty' }),
-    ).toBe('empty')
-    expect(
-      flowLogCopyFeedbackFromResult({ ok: false, reason: 'failed' }),
-    ).toBe('failed')
+    expect(flowLogCopyFeedbackFromResult({ ok: false, reason: 'empty' })).toBe('empty')
+    expect(flowLogCopyFeedbackFromResult({ ok: false, reason: 'failed' })).toBe('failed')
   })
 })
 

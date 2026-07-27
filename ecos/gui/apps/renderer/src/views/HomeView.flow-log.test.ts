@@ -73,7 +73,9 @@ describe('HomeView floating chooser integration', () => {
     expect(homeViewSource).toContain('copyFlowLogText')
     expect(homeViewSource).toContain("is-copied': flowLogCopyFeedback === 'copied'")
     expect(homeViewSource).toContain("flowLogCopyFeedback === 'failed'")
-    expect(homeViewSource).toContain("is-above': flowLogCopyTooltipStyle?.placement === 'above'")
+    expect(homeViewSource).toContain(
+      "is-above': flowLogCopyTooltipStyle?.placement === 'above'",
+    )
     expect(homeViewSource).not.toContain('is-feedback')
   })
 
