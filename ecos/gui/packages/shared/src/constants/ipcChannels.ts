@@ -87,6 +87,9 @@ export const desktopApiIpcChannels = {
   eccWorkspaceInspectSignoff: 'ecc:workspace-inspect-signoff',
   eccFlowRun: 'ecc:flow-run',
   eccFlowRunStep: 'ecc:flow-run-step',
+  agentStart: 'agent:start',
+  agentStartSession: 'agent:start-session',
+  agentSendMessage: 'agent:send-message',
   shellCreateSession: 'shell:create-session',
   shellWrite: 'shell:write',
   shellResize: 'shell:resize',
@@ -103,6 +106,7 @@ export const desktopApiEventChannels = {
   workspaceLogTail: 'workspace:log-tail',
   resourcesProgress: 'resources:progress',
   eccEvent: 'ecc:event',
+  agentEvent: 'agent:event',
   shellData: 'shell:data',
   shellExit: 'shell:exit',
 } as const

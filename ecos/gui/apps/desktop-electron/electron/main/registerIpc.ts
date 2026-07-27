@@ -36,6 +36,14 @@ import {
   type DesktopSettingsValue,
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
+  type DesktopAgentEvent,
+  type DesktopAgentSendMessageRequest,
+  type DesktopAgentStartRequest,
+  type DesktopAgentStartSessionRequest,
+  type RemoteContentFile,
+  type RemoteContentListFilesRequest,
+  type RemoteContentReadJsonFileRequest,
+  type RemoteContentReadTextFileRequest,
   type ResourceImportPdkRequest,
   type ResourceImportLocalRequest,
   type ResourceInstallRequest,
@@ -53,6 +61,7 @@ import {
   type WorkspaceStepInfoRequest,
   type WorkspaceStepInfoResult,
 } from '@ecos-studio/shared'
+import type { AgentProviderRuntime } from '../services/agent/agentProviderContract'
 import {
   closeWindow,
   confirmWindowClose,
@@ -88,6 +97,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export interface DesktopBridgeServices {
+  agentRuntimeService?: AgentProviderRuntime
   appInfoService: {
     getVersions(): Promise<VersionInfo>
   }
@@ -498,6 +508,13 @@ export function registerIpc(
     }
   >()
   const workspaceHandleClosePromises = new Map<string, Promise<unknown>>()
+  const agentSessionSubscriptions = new Map<
+    string,
+    {
+      sender: IpcMainInvokeEvent['sender']
+      onDestroyed: () => void
+    }
+  >()
   /** Last runtime.ready per directory, replayed when a handle subscribes after ensureStarted. */
   const lastReadyByDirectory = new Map<string, EccRuntimeEvent>()
 
@@ -509,6 +526,50 @@ export function registerIpc(
       return
     }
     sender.send(desktopApiEventChannels.eccEvent, payload)
+  }
+
+  const agentSessionKey = (providerId: string, sessionId: string): string =>
+    `${providerId}:${sessionId}`
+
+  const sendAgentEventToSender = (
+    sender: IpcMainInvokeEvent['sender'],
+    payload: DesktopAgentEvent,
+  ): void => {
+    if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return
+    sender.send(desktopApiEventChannels.agentEvent, payload)
+  }
+
+  const trackAgentSession = (
+    sender: IpcMainInvokeEvent['sender'],
+    request: DesktopAgentStartSessionRequest,
+  ): void => {
+    const providerId = readAgentProviderId(request)
+    const key = agentSessionKey(providerId, request.sessionId ?? '')
+    const previous = agentSessionSubscriptions.get(key)
+    if (previous && previous.sender !== sender) {
+      throw new Error('Agent session belongs to another window.')
+    }
+    if (previous) return
+
+    const onDestroyed = (): void => {
+      agentSessionSubscriptions.delete(key)
+    }
+    agentSessionSubscriptions.set(key, { sender, onDestroyed })
+    if (typeof sender.once === 'function') sender.once('destroyed', onDestroyed)
+    if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) onDestroyed()
+  }
+
+  const requireAgentSessionOwner = (
+    sender: IpcMainInvokeEvent['sender'],
+    request: DesktopAgentSendMessageRequest,
+  ): void => {
+    const providerId = readAgentProviderId(request)
+    const subscription = agentSessionSubscriptions.get(
+      agentSessionKey(providerId, request.sessionId),
+    )
+    if (!subscription || subscription.sender !== sender) {
+      throw new Error('Unknown agent session for this window.')
+    }
   }
 
   const deliverDirectoryScopedEvent = (payload: EccRuntimeEvent): void => {
@@ -556,6 +617,14 @@ export function registerIpc(
     }
 
     deliverDirectoryScopedEvent(payload)
+  })
+
+  services.agentRuntimeService?.onEvent((payload) => {
+    if (!payload.providerId || !payload.sessionId) return
+    const subscription = agentSessionSubscriptions.get(
+      agentSessionKey(payload.providerId, payload.sessionId),
+    )
+    if (subscription) sendAgentEventToSender(subscription.sender, payload)
   })
 
   const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
@@ -1300,6 +1369,22 @@ export function registerIpc(
     return await services.eccRuntimeService.runStep(request as EccFlowRunStepRequest)
   })
 
+  handle(desktopApiIpcChannels.agentStart, async (_event, request) => {
+    await requireAgentRuntime(services).start(readAgentStartRequest(request))
+  })
+
+  handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
+    const agentRequest = readAgentStartSessionRequest(request)
+    trackAgentSession(event.sender, agentRequest)
+    return await requireAgentRuntime(services).startSession(agentRequest)
+  })
+
+  handle(desktopApiIpcChannels.agentSendMessage, async (event, request) => {
+    const agentRequest = readAgentSendMessageRequest(request)
+    requireAgentSessionOwner(event.sender, agentRequest)
+    return await requireAgentRuntime(services).sendMessage(agentRequest)
+  })
+
   handle(desktopApiIpcChannels.shellCreateSession, async (event, options) => {
     const sender = event.sender
     const isSenderDestroyed = (): boolean =>
@@ -1362,4 +1447,61 @@ export function registerIpc(
   handle(desktopApiIpcChannels.systemOpenExternal, async (_event, url) => {
     await shell.openExternal(url as string)
   })
+}
+
+function requireAgentRuntime(services: DesktopBridgeServices): AgentProviderRuntime {
+  if (!services.agentRuntimeService) {
+    throw new Error(
+      'No agent provider is configured. Set ECOS_AGENT_PROVIDER_ROOTS before starting ECOS Studio.',
+    )
+  }
+  return services.agentRuntimeService
+}
+
+function readAgentStartRequest(value: unknown): DesktopAgentStartRequest {
+  return { providerId: readAgentProviderId(value) }
+}
+
+function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionRequest {
+  const record = readAgentRecord(value)
+  return {
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageRequest {
+  const record = readAgentRecord(value)
+  const message = record.message
+  if (typeof message !== 'string' || message.length > 512) {
+    throw new Error('Agent message must be a string of at most 512 characters.')
+  }
+  return {
+    message,
+    providerId: readAgentProviderId(record),
+    sessionId: readAgentSessionId(record.sessionId),
+  }
+}
+
+function readAgentRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error('Agent request must be an object.')
+  return value
+}
+
+function readAgentProviderId(value: unknown): string {
+  const providerId = isRecord(value) ? value.providerId : undefined
+  if (
+    typeof providerId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(providerId)
+  ) {
+    throw new Error('Agent providerId is invalid.')
+  }
+  return providerId
+}
+
+function readAgentSessionId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+    throw new Error('Agent sessionId is invalid.')
+  }
+  return value
 }

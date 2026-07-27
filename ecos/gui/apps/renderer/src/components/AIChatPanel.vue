@@ -44,55 +44,11 @@
         ></textarea>
 
         <div class="mt-2 flex items-center justify-between px-1">
-          <div class="flex items-center gap-3">
-            <!-- 模式选择器 - Cursor 风格 -->
-            <div class="relative" ref="modeSelectRef">
-              <button
-                @click="toggleModeMenu"
-                class="mode-selector flex items-center gap-1.5 rounded-full border border-(--border-color) bg-(--bg-primary) px-2 py-0.5 transition-colors duration-150 hover:border-(--text-secondary)/50"
-              >
-                <i :class="[currentMode.icon, 'text-sm text-(--text-secondary)']"></i>
-                <i
-                  class="ri-arrow-down-s-line text-xs text-(--text-secondary) transition-transform duration-200"
-                  :class="{ 'rotate-180': showModeMenu }"
-                ></i>
-              </button>
-
-              <!-- 上拉菜单 -->
-              <Transition name="popup">
-                <div
-                  v-if="showModeMenu"
-                  class="absolute bottom-full left-0 z-50 mb-2 min-w-[140px] overflow-hidden rounded-xl border border-(--border-color)/50 bg-(--bg-tertiary) shadow-xl"
-                >
-                  <div class="py-1">
-                    <div
-                      v-for="mode in modes"
-                      :key="mode.id"
-                      @click="selectMode(mode.id)"
-                      :class="[
-                        'flex cursor-pointer items-center gap-2.5 px-3 py-2 transition-colors duration-150',
-                        currentModeId === mode.id
-                          ? 'bg-(--bg-secondary) text-(--text-primary)'
-                          : 'text-(--text-secondary) hover:bg-(--bg-secondary)/50 hover:text-(--text-primary)',
-                      ]"
-                    >
-                      <i :class="[mode.icon, 'text-sm']"></i>
-                      <span class="flex-1 text-xs font-medium">{{ mode.label }}</span>
-                      <i
-                        v-if="currentModeId === mode.id"
-                        class="ri-check-line text-xs text-(--accent-color)"
-                      ></i>
-                    </div>
-                  </div>
-                </div>
-              </Transition>
-            </div>
-          </div>
-
           <button
             @click="handleSubmit"
+            :disabled="!agentSessionId || isAgentRequestPending"
             class="send-btn"
-            :class="{ 'send-btn-active': inputValue.trim() }"
+            :class="{ 'send-btn-active': inputValue.trim() && agentSessionId }"
           >
             <i class="ri-send-plane-2-fill"></i>
           </button>
@@ -103,58 +59,73 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
 import { storeToRefs } from 'pinia'
+import type { DesktopAgentEvent } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import { useMessageStore } from '../stores/messageStore'
+import { getOptionalDesktopApi } from '@/platform/desktop'
 
+const AGENT_PROVIDER_ID = 'flow_agent'
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
-
-// 模式选择器相关
-const modeSelectRef = ref<HTMLDivElement | null>(null)
-const showModeMenu = ref(false)
-const currentModeId = ref<'chat' | 'builder'>('chat')
-
-// 模式定义
-const modes = [
-  { id: 'chat' as const, label: 'Chat', icon: 'ri-chat-3-line' },
-  { id: 'builder' as const, label: 'Builder', icon: 'ri-infinity-line' },
-]
-
-// 当前选中的模式
-const currentMode = computed(() => {
-  return modes.find((m) => m.id === currentModeId.value) || modes[0]
-})
-
-// 切换菜单显示
-const toggleModeMenu = () => {
-  showModeMenu.value = !showModeMenu.value
-}
-
-// 选择模式
-const selectMode = (modeId: 'chat' | 'builder') => {
-  currentModeId.value = modeId
-  showModeMenu.value = false
-}
-
-// 点击外部关闭菜单
-const handleClickOutside = (e: MouseEvent) => {
-  if (modeSelectRef.value && !modeSelectRef.value.contains(e.target as Node)) {
-    showModeMenu.value = false
-  }
-}
+const agentSessionId = ref<string | null>(null)
+const isAgentRequestPending = ref(false)
+let unsubscribeAgentEvents: (() => void) | undefined
 
 onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
+  void connectAgent()
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
+  unsubscribeAgentEvents?.()
 })
+
+async function connectAgent(): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  if (!agent) return
+
+  unsubscribeAgentEvents = agent.onEvent(handleAgentEvent)
+  const sessionId = crypto.randomUUID()
+  agentSessionId.value = sessionId
+
+  try {
+    await agent.start({ providerId: AGENT_PROVIDER_ID })
+    await agent.startSession({
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    agentSessionId.value = null
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  }
+}
+
+function handleAgentEvent(event: DesktopAgentEvent): void {
+  if (
+    event.providerId !== AGENT_PROVIDER_ID ||
+    event.sessionId !== agentSessionId.value ||
+    !event.text
+  ) {
+    return
+  }
+
+  if (event.type === 'error') {
+    messageStore.addAssistantMessage(event.text, 'error')
+    return
+  }
+  if (event.type === 'message' || event.type === 'tool') {
+    messageStore.addAssistantMessage(event.text, 'done')
+  }
+}
+
+function agentErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 // Near-bottom 阈值（像素）
 const NEAR_BOTTOM_THRESHOLD = 32
@@ -230,11 +201,26 @@ watch(
   },
 )
 
-const handleSubmit = () => {
-  if (inputValue.value.trim()) {
-    messageStore.addMessage(inputValue.value)
-    inputValue.value = ''
-    // TODO: 集成实际的 AI Agent 逻辑
+const handleSubmit = async () => {
+  const message = inputValue.value.trim()
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const sessionId = agentSessionId.value
+  if (!message || !agent || !sessionId || isAgentRequestPending.value) return
+
+  if (message) messageStore.addMessage(message)
+  inputValue.value = ''
+  isAgentRequestPending.value = true
+  try {
+    await agent.sendMessage({
+      message,
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+    })
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  } finally {
+    isAgentRequestPending.value = false
   }
 }
 

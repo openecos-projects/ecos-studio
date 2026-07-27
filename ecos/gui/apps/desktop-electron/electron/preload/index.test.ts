@@ -45,6 +45,12 @@ async function loadDesktopBridge() {
         inspectSignoff(request: unknown): Promise<unknown>
       }
     }
+    agent: {
+      onEvent(listener: (event: unknown) => void): () => void
+      sendMessage(request: unknown): Promise<unknown>
+      start(request: unknown): Promise<void>
+      startSession(request: unknown): Promise<unknown>
+    }
     dialog: {
       saveFile(options: unknown): Promise<unknown>
     }
@@ -190,6 +196,65 @@ describe('preload desktop bridge contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       desktopApiIpcChannels.eccFlowRunStep,
       request,
+    )
+  })
+
+  it('routes agent requests and events through shared IPC channels', async () => {
+    const bridge = await loadDesktopBridge()
+    const session = {
+      providerId: 'flow_agent',
+      sessionId: 'gui-session-1',
+    }
+    const listener = vi.fn()
+    ipcRenderer.invoke.mockResolvedValueOnce(undefined)
+    ipcRenderer.invoke.mockResolvedValueOnce(session)
+    ipcRenderer.invoke.mockResolvedValueOnce({
+      messageId: 'message-1',
+      sessionId: session.sessionId,
+    })
+
+    await expect(
+      bridge.agent.start({ providerId: session.providerId }),
+    ).resolves.toBeUndefined()
+    await expect(bridge.agent.startSession(session)).resolves.toEqual(session)
+    await expect(bridge.agent.sendMessage({ ...session, message: '1' })).resolves.toEqual(
+      {
+        messageId: 'message-1',
+        sessionId: session.sessionId,
+      },
+    )
+    const unsubscribe = bridge.agent.onEvent(listener)
+    const eventListener = ipcRenderer.on.mock.calls.at(-1)?.[1]
+    eventListener?.({}, { ...session, text: 'Select language', type: 'message' })
+    unsubscribe()
+
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      1,
+      desktopApiIpcChannels.agentStart,
+      { providerId: session.providerId },
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      2,
+      desktopApiIpcChannels.agentStartSession,
+      session,
+    )
+    expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
+      3,
+      desktopApiIpcChannels.agentSendMessage,
+      { ...session, message: '1' },
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentEvent,
+      expect.any(Function),
+    )
+    expect(listener).toHaveBeenCalledWith({
+      ...session,
+      text: 'Select language',
+      type: 'message',
+    })
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      desktopApiEventChannels.agentEvent,
+      eventListener,
     )
   })
 

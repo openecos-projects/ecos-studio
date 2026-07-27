@@ -6,6 +6,7 @@ import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
 import { handleSecondInstance } from '../services/appSecondInstance'
+import { createAgentRuntimeFromEnvironment } from '../services/agent/agentProviderRuntimeFactory'
 import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
@@ -189,7 +190,9 @@ async function ensureDesktopBridgeReady(): Promise<void> {
   }
 
   if (!ipcRegistered) {
+    const agentRuntimeService = await createAgentRuntimeFromEnvironment()
     registerIpc(undefined, {
+      agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,
       createWindow: async (options) => {
         await launchWindow({

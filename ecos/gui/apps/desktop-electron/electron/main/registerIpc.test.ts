@@ -72,14 +72,17 @@ vi.mock('../services/menuService', () => ({
   setMenuActionEnabled,
 }))
 
-import { registerIpc } from './registerIpc'
+import { registerIpc, type DesktopBridgeServices } from './registerIpc'
 import { workspaceWindowRegistry } from '../services/workspaceWindowRegistry'
 
 type RegisteredHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown
 
-function registerHandlers() {
+function registerHandlers(
+  agentRuntimeService?: DesktopBridgeServices['agentRuntimeService'],
+) {
   const handlers = new Map<string, RegisteredHandler>()
   const services = {
+    agentRuntimeService,
     settingsStore: {
       delete: vi.fn(),
       get: vi.fn(),
@@ -234,6 +237,78 @@ describe('registerIpc', () => {
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
     )
+  })
+
+  it('binds an agent session before forwarding its first provider event', async () => {
+    let emitAgentEvent:
+      | ((event: {
+          providerId: string
+          sessionId: string
+          text: string
+          type: 'message'
+        }) => void)
+      | undefined
+    const agentRuntimeService = {
+      onEvent: vi.fn((listener) => {
+        emitAgentEvent = listener
+        return () => undefined
+      }),
+      sendMessage: vi.fn(async (request) => ({
+        messageId: 'message-1',
+        sessionId: request.sessionId,
+      })),
+      start: vi.fn(async () => {}),
+      startSession: vi.fn(async (request) => {
+        emitAgentEvent?.({
+          providerId: request.providerId,
+          sessionId: request.sessionId,
+          text: 'Select language',
+          type: 'message',
+        })
+        return { sessionId: request.sessionId }
+      }),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers } = registerHandlers(agentRuntimeService)
+    const sender = {
+      id: 101,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const event = { sender }
+    const session = {
+      providerId: 'flow_agent',
+      sessionId: 'gui-session-1',
+    }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentStart)?.(event, {
+        providerId: session.providerId,
+      }),
+    ).resolves.toBeUndefined()
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentStartSession)?.(event, session),
+    ).resolves.toEqual({ sessionId: session.sessionId })
+    await expect(
+      handlers.get(desktopApiIpcChannels.agentSendMessage)?.(event, {
+        ...session,
+        message: '',
+      }),
+    ).resolves.toEqual({
+      messageId: 'message-1',
+      sessionId: session.sessionId,
+    })
+
+    expect(sender.send).toHaveBeenCalledWith(desktopApiEventChannels.agentEvent, {
+      providerId: session.providerId,
+      sessionId: session.sessionId,
+      text: 'Select language',
+      type: 'message',
+    })
+    expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith({
+      ...session,
+      message: '',
+    })
   })
 
   it('returns version information from the app info service', async () => {

@@ -34,6 +34,14 @@ import type {
   DesktopShellSession,
   DesktopShellSessionOptions,
 } from './desktopShell.ts'
+import type {
+  DesktopAgentEvent,
+  DesktopAgentSendMessageRequest,
+  DesktopAgentSendMessageResponse,
+  DesktopAgentStartRequest,
+  DesktopAgentStartSessionRequest,
+  DesktopAgentStartSessionResponse,
+} from './desktopAgent.ts'
 
 export type DesktopSettingsValue =
   | string
@@ -284,6 +292,16 @@ export interface DesktopApi {
     onProgress(listener: (event: ResourceJob) => void): DesktopEventUnsubscribe
   }
   ecc: EccRuntimeApi
+  agent?: {
+    start(request: DesktopAgentStartRequest): Promise<void>
+    startSession(
+      request: DesktopAgentStartSessionRequest,
+    ): Promise<DesktopAgentStartSessionResponse>
+    sendMessage(
+      request: DesktopAgentSendMessageRequest,
+    ): Promise<DesktopAgentSendMessageResponse>
+    onEvent(listener: (event: DesktopAgentEvent) => void): DesktopEventUnsubscribe
+  }
   shell: {
     createSession(options: DesktopShellSessionOptions): Promise<DesktopShellSession>
     write(sessionId: string, data: string): Promise<void>
