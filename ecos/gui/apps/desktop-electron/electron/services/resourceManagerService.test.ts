@@ -169,7 +169,6 @@ async function createEccFeCpuRtlArchive(
     'ibex',
     'learn-fpga',
     'picorv32',
-    'rt-thread-am',
     'scr1',
     'serv',
     'vexriscv',
@@ -179,11 +178,6 @@ async function createEccFeCpuRtlArchive(
   await writeFile(
     join(sourceDir, 'thirdparty', 'README'),
     'fixture thirdparty bundle\n',
-    'utf8',
-  )
-  await writeFile(
-    join(sourceDir, 'thirdparty', 'rtthread_prepare.py'),
-    '# fixture helper\n',
     'utf8',
   )
   await writeFile(
@@ -250,7 +244,6 @@ async function createInstalledEccFeCpuRtlRoot(root: string): Promise<void> {
     'ibex',
     'learn-fpga',
     'picorv32',
-    'rt-thread-am',
     'scr1',
     'serv',
     'vexriscv',
@@ -260,11 +253,6 @@ async function createInstalledEccFeCpuRtlRoot(root: string): Promise<void> {
   await writeFile(
     join(root, 'thirdparty', 'README'),
     'fixture thirdparty bundle\n',
-    'utf8',
-  )
-  await writeFile(
-    join(root, 'thirdparty', 'rtthread_prepare.py'),
-    '# fixture helper\n',
     'utf8',
   )
 }
@@ -1480,7 +1468,6 @@ describe('ResourceManagerService', () => {
       'ibex',
       'learn-fpga',
       'picorv32',
-      'rt-thread-am',
       'scr1',
       'serv',
       'vexriscv',
@@ -1490,11 +1477,6 @@ describe('ResourceManagerService', () => {
     await writeFile(
       join(staleCpuRtlRoot, 'thirdparty', 'README'),
       'stale bundle\n',
-      'utf8',
-    )
-    await writeFile(
-      join(staleCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'),
-      '# stale helper\n',
       'utf8',
     )
     await mkdir(resourcesDir, { recursive: true })
@@ -1599,8 +1581,8 @@ describe('ResourceManagerService', () => {
       sha256: cpuRtlArchive.sha256,
     })
     await expect(
-      readFile(join(staleCpuRtlRoot, 'thirdparty', 'rtthread_prepare.py'), 'utf8'),
-    ).resolves.toContain('fixture helper')
+      readFile(join(staleCpuRtlRoot, 'thirdparty', 'cv32e40p', 'README.md'), 'utf8'),
+    ).resolves.toContain('fixture cpu rtl')
     expect(verifySha256).toHaveBeenCalledTimes(2)
     expect(progress).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -2016,7 +2016,12 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
 import { readOptionalProjectTextFileTail } from '@/utils/projectFiles'
-import { simContextsEqual, type SimRunContext } from '@/utils/simRunContext'
+import {
+  SIM_SUITE_IDS,
+  simContextsEqual,
+  type SimRunContext,
+  type SimSuite,
+} from '@/utils/simRunContext'
 import { getDesktopApi } from '@/platform/desktop'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
@@ -2207,7 +2212,6 @@ type TabId = 'summary' | 'review' | 'elab' | 'lint' | 'cases' | 'src'
 type ConsoleTabId = 'problems' | 'log'
 type RunPhase = 'idle' | 'queued' | 'running' | 'refreshing'
 type ReviewMode = 'source' | 'yosys' | 'modules'
-type SimSuite = 'cpu_tests' | 'rtthread' | 'coremark'
 type CoremarkCompilePreset = 'balanced' | 'speed' | 'size' | 'debug' | 'custom'
 
 interface ConsoleProblem {
@@ -2492,11 +2496,11 @@ const sourceFocusTarget = ref<{
   token: number
 } | null>(null)
 let sourceFocusToken = 0
-const simSuites: Array<{ id: SimSuite; label: string; icon: string }> = [
-  { id: 'cpu_tests', label: 'CPU Tests', icon: 'ri-cpu-line' },
-  { id: 'rtthread', label: 'RT-Thread', icon: 'ri-terminal-box-line' },
-  { id: 'coremark', label: 'CoreMark', icon: 'ri-speed-up-line' },
-]
+const simSuitePresentation: Record<SimSuite, { label: string; icon: string }> = {
+  cpu_tests: { label: 'CPU Tests', icon: 'ri-cpu-line' },
+  coremark: { label: 'CoreMark', icon: 'ri-speed-up-line' },
+}
+const simSuites = SIM_SUITE_IDS.map((id) => ({ id, ...simSuitePresentation[id] }))
 const coremarkCompilePresets: Array<{
   id: CoremarkCompilePreset
   label: string
@@ -2814,7 +2818,7 @@ const workspaceGuideItems = computed(() => [
   {
     icon: 'ri-play-list-2-line',
     title: 'Simulation workflow',
-    text: 'Run prepare first, then choose CPU Tests, RT-Thread, or CoreMark in Sim. Changed selections are marked stale until rerun.',
+    text: 'Run prepare first, then choose CPU Tests or CoreMark in Sim. Changed selections are marked stale until rerun.',
   },
   {
     icon: 'ri-bug-line',
@@ -4060,9 +4064,6 @@ function normalizeWorkspacePath(path: string): string {
 function simRunPayload(suiteOverride?: SimSuite) {
   if (!isSimStep.value) return {}
   const suite = suiteOverride || simSuite.value
-  if (suite === 'rtthread') {
-    return { sim_test_suite: 'rtthread' }
-  }
   if (suite === 'coremark') {
     return {
       sim_test_suite: 'coremark',
@@ -4101,18 +4102,11 @@ function resultContextFromDetail(): SimRunContext | null {
   )
   const caseNames = resultCaseNames()
   const suite: SimRunContext['suite'] =
-    resultSuite === 'rtthread' ||
-    resultSuite === 'RT-Thread' ||
-    caseNames.includes('rtthread.soc')
-      ? 'rtthread'
-      : resultSuite === 'coremark' ||
-          resultSuite === 'CoreMark' ||
-          caseNames.includes('coremark.soc')
-        ? 'coremark'
-        : 'cpu_tests'
-  if (suite === 'rtthread') {
-    return { suite, mode: 'selected', cases: ['rtthread.soc'] }
-  }
+    resultSuite === 'coremark' ||
+    resultSuite === 'CoreMark' ||
+    caseNames.includes('coremark.soc')
+      ? 'coremark'
+      : 'cpu_tests'
   if (suite === 'coremark') {
     return { suite, mode: 'selected', cases: ['coremark.soc'] }
   }
@@ -4152,14 +4146,12 @@ function resultCaseNames(): string[] {
 }
 
 function simContextLabel(context: SimRunContext): string {
-  if (context.suite === 'rtthread') return 'RT-Thread'
   if (context.suite === 'coremark') return 'CoreMark'
   if (context.mode === 'all') return 'CPU Tests · All'
   return `CPU Tests · ${context.cases.length ? context.cases.join(', ') : 'Selected'}`
 }
 
 function simCasesForSuite(suite: SimSuite): string[] {
-  if (suite === 'rtthread') return ['rtthread.soc']
   if (suite === 'coremark') return ['coremark.soc']
   return selectedCpuRunCases.value
 }

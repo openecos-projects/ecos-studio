@@ -1,4 +1,6 @@
-export type SimSuite = 'cpu_tests' | 'rtthread' | 'coremark'
+export const SIM_SUITE_IDS = ['cpu_tests', 'coremark'] as const
+
+export type SimSuite = (typeof SIM_SUITE_IDS)[number]
 
 export interface SimRunContext {
   suite: SimSuite

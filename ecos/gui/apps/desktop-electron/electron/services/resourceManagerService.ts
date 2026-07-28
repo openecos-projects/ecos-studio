@@ -2942,14 +2942,12 @@ function requiredToolMarkers(normalizedName: string): string[] {
   if (normalizedName === 'ecc-fe-cpu-rtl') {
     return [
       'thirdparty/README',
-      'thirdparty/rtthread_prepare.py',
       'thirdparty/cv32e40p',
       'thirdparty/cva6',
       'thirdparty/darkriscv',
       'thirdparty/ibex',
       'thirdparty/learn-fpga',
       'thirdparty/picorv32',
-      'thirdparty/rt-thread-am',
       'thirdparty/scr1',
       'thirdparty/serv',
       'thirdparty/vexriscv',

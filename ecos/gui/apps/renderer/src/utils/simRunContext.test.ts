@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeSimCaseNameForComparison, simContextsEqual } from './simRunContext'
+import {
+  normalizeSimCaseNameForComparison,
+  SIM_SUITE_IDS,
+  simContextsEqual,
+} from './simRunContext'
 
 describe('simRunContext', () => {
+  it('exposes only the supported simulation suites', () => {
+    expect(SIM_SUITE_IDS).toEqual(['cpu_tests', 'coremark'])
+  })
+
   it('treats CPU test source names and generated SoC case names as the same selection', () => {
     expect(
       simContextsEqual(
