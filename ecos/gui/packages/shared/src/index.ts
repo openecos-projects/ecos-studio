@@ -89,6 +89,8 @@ export type {
 } from './contracts/desktopShell.ts'
 export type {
   DesktopAgentEvent,
+  DesktopAgentContractField,
+  DesktopAgentExecutionContract,
   DesktopAgentEventType,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,

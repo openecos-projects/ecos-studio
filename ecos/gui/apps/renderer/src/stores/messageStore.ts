@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { DesktopAgentExecutionContract } from '@ecos-studio/shared'
 import type { Message, Thumbnail, InfoData, MapData } from '../types'
 
 // 生成唯一 ID
@@ -109,6 +110,17 @@ export const useMessageStore = defineStore('messages', () => {
     return id
   }
 
+  const addExecutionContract = (contract: DesktopAgentExecutionContract): string =>
+    addInfoMessage({
+      title: contract.title,
+      step: 'Execution contract',
+      items: contract.fields.map((field) => ({
+        label: field.label,
+        content: field.value,
+        format: 'text',
+      })),
+    })
+
   /**
    * 添加 Map 消息（展示热力图/密度图）
    */
@@ -150,6 +162,7 @@ export const useMessageStore = defineStore('messages', () => {
     appendToMessage,
     addImageMessage,
     addInfoMessage,
+    addExecutionContract,
     addMapMessage,
     removeMessage,
     clearMessages,

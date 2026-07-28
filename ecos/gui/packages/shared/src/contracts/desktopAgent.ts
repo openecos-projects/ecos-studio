@@ -71,9 +71,27 @@ export interface DesktopAgentResumeSessionResponse {
   sessionId: string
 }
 
-export type DesktopAgentEventType = 'status' | 'session' | 'message' | 'tool' | 'error'
+export interface DesktopAgentContractField {
+  label: string
+  value: string
+}
+
+export interface DesktopAgentExecutionContract {
+  fields: DesktopAgentContractField[]
+  schema_version: 'flow-agent.resolved_execution_contract.v1'
+  title: string
+}
+
+export type DesktopAgentEventType =
+  | 'status'
+  | 'session'
+  | 'message'
+  | 'tool'
+  | 'contract'
+  | 'error'
 
 export interface DesktopAgentEvent {
+  contract?: DesktopAgentExecutionContract
   providerId?: string
   sessionId?: string
   text?: string

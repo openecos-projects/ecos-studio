@@ -36,4 +36,31 @@ describe('messageStore', () => {
 
     expect(messages.value).toEqual([])
   })
+
+  it('renders a provider contract as a structured assistant message', () => {
+    const store = useMessageStore()
+
+    store.addExecutionContract({
+      fields: [
+        { label: 'Design', value: 'gcd' },
+        { label: 'Backend', value: 'local_ecc' },
+      ],
+      schema_version: 'flow-agent.resolved_execution_contract.v1',
+      title: 'Resolved execution contract',
+    })
+
+    expect(store.messages).toMatchObject([
+      {
+        infoData: {
+          items: [
+            { content: 'gcd', label: 'Design' },
+            { content: 'local_ecc', label: 'Backend' },
+          ],
+          title: 'Resolved execution contract',
+        },
+        role: 'assistant',
+        type: 'info',
+      },
+    ])
+  })
 })

@@ -108,12 +108,16 @@ async function connectAgent(): Promise<void> {
 function handleAgentEvent(event: DesktopAgentEvent): void {
   if (
     event.providerId !== AGENT_PROVIDER_ID ||
-    event.sessionId !== agentSessionId.value ||
-    !event.text
+    event.sessionId !== agentSessionId.value
   ) {
     return
   }
 
+  if (event.type === 'contract' && event.contract) {
+    messageStore.addExecutionContract(event.contract)
+    return
+  }
+  if (!event.text) return
   if (event.type === 'error') {
     messageStore.addAssistantMessage(event.text, 'error')
     return

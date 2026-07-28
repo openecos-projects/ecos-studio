@@ -1,7 +1,9 @@
 import { spawn as spawnChild } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type {
+  DesktopAgentEventType,
   DesktopAgentEvent,
+  DesktopAgentExecutionContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
   DesktopAgentProviderRequest,
@@ -251,8 +253,8 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
 
   private handleProtocolRecord(record: Record<string, unknown>): void {
     if (record.type === 'event') {
-      const event = readRecord(record.event) as Partial<DesktopAgentEvent>
-      if (typeof event.type === 'string') {
+      const event = readDesktopAgentEvent(record.event)
+      if (event) {
         this.eventFanout.emit({
           ...event,
           providerId: event.providerId ?? this.manifest.providerId,
@@ -301,4 +303,67 @@ function errorMessage(error: string | { message?: string }): string {
 
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+const agentEventTypes = new Set<DesktopAgentEventType>([
+  'status',
+  'session',
+  'message',
+  'tool',
+  'contract',
+  'error',
+])
+
+function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
+  const record = readRecord(value)
+  const type = record.type
+  if (typeof type !== 'string' || !agentEventTypes.has(type as DesktopAgentEventType)) {
+    return null
+  }
+  const contract = readExecutionContract(record.contract)
+  if (type === 'contract' && !contract) return null
+  const providerId = readEventText(record.providerId)
+  const sessionId = readEventText(record.sessionId)
+  const text = readEventText(record.text)
+
+  return {
+    ...(contract ? { contract } : {}),
+    ...(providerId ? { providerId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(text ? { text } : {}),
+    type: type as DesktopAgentEventType,
+  }
+}
+
+function readExecutionContract(value: unknown): DesktopAgentExecutionContract | null {
+  const record = readRecord(value)
+  if (
+    record.schema_version !== 'flow-agent.resolved_execution_contract.v1' ||
+    !readEventText(record.title) ||
+    !Array.isArray(record.fields) ||
+    record.fields.length === 0 ||
+    record.fields.length > 16
+  ) {
+    return null
+  }
+
+  const fields = record.fields.map((value) => {
+    const field = readRecord(value)
+    const label = readEventText(field.label)
+    const fieldValue = readEventText(field.value)
+    return label && fieldValue ? { label, value: fieldValue } : null
+  })
+  if (fields.some((field) => field === null)) return null
+
+  return {
+    fields: fields as DesktopAgentExecutionContract['fields'],
+    schema_version: 'flow-agent.resolved_execution_contract.v1',
+    title: readEventText(record.title) as string,
+  }
+}
+
+function readEventText(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096
+    ? value
+    : null
 }

@@ -128,6 +128,36 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('drops malformed execution contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: { fields: [], title: 'Unvalidated contract' },
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('rejects pending requests when the provider process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({
