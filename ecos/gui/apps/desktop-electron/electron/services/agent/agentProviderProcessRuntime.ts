@@ -4,6 +4,7 @@ import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
   DesktopAgentExecutionContract,
+  DesktopAgentWorkspaceSetupStepRequest,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
@@ -313,6 +314,8 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'tool',
   'contract',
   'workspace_setup',
+  'workspace_setup_step',
+  'workspace_create',
   'error',
 ])
 
@@ -324,8 +327,12 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   }
   const contract = readExecutionContract(record.contract)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
+  const workspaceSetupStep = readWorkspaceSetupStepRequest(record.workspaceSetupStep)
+  const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
+  if (type === 'workspace_setup_step' && !workspaceSetupStep) return null
+  if (type === 'workspace_create' && !workspaceCreateSetupId) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
@@ -336,6 +343,8 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(sessionId ? { sessionId } : {}),
     ...(text ? { text } : {}),
     ...(workspaceSetup ? { workspaceSetup } : {}),
+    ...(workspaceSetupStep ? { workspaceSetupStep } : {}),
+    ...(workspaceCreateSetupId ? { workspaceCreateSetupId } : {}),
     type: type as DesktopAgentEventType,
   }
 }
@@ -371,18 +380,102 @@ function readWorkspaceSetupContract(
   if (record.suggested_workspace_name != null && !suggestedWorkspaceName) return null
   const parameters = readWorkspaceSetupParameters(record.parameters)
   const flowConfig = readWorkspaceSetupFlowConfig(record.flow_config)
-  if (!parameters || !flowConfig) return null
+  const setupId = readOptionalIdentifier(record.setup_id)
+  if (!parameters || !flowConfig || !setupId) return null
   return {
     flow_config: flowConfig,
     parameters,
     pdk: 'ics55',
     requires_gui_review: true,
     schema_version: 'flow-agent.workspace_setup_contract.v1',
+    setup_id: setupId,
     ...(suggestedWorkspaceName
       ? { suggested_workspace_name: suggestedWorkspaceName }
       : {}),
     title: readEventText(record.title) as string,
   }
+}
+
+function readWorkspaceSetupStepRequest(
+  value: unknown,
+): DesktopAgentWorkspaceSetupStepRequest | null {
+  const record = readRecord(value)
+  const setupId = readOptionalIdentifier(record.setup_id)
+  const step = record.step
+  const defaults = readRecord(record.defaults)
+  if (
+    record.schema_version !== 'flow-agent.workspace_setup_step_request.v1' ||
+    !setupId ||
+    (step !== 'project' &&
+      step !== 'basic' &&
+      step !== 'flow' &&
+      step !== 'design_files' &&
+      step !== 'pdk' &&
+      step !== 'spec') ||
+    (record.authority !== 'gui_native' && record.authority !== 'agent_text') ||
+    (record.authority === 'gui_native' &&
+      step !== 'project' &&
+      step !== 'design_files' &&
+      step !== 'pdk') ||
+    (record.authority === 'agent_text' &&
+      step !== 'basic' &&
+      step !== 'flow' &&
+      step !== 'spec')
+  ) {
+    return null
+  }
+  if (!readWorkspaceSetupStepDefaults(step, defaults)) return null
+  return {
+    authority: record.authority,
+    defaults,
+    schema_version: 'flow-agent.workspace_setup_step_request.v1',
+    setup_id: setupId,
+    step,
+  }
+}
+
+function readWorkspaceSetupStepDefaults(
+  step: DesktopAgentWorkspaceSetupStepRequest['step'],
+  defaults: Record<string, unknown>,
+): boolean {
+  if (step === 'project')
+    return (
+      hasOnlyKeys(defaults, ['project_name']) &&
+      readWorkspaceSetupText(defaults.project_name) !== null
+    )
+  if (step === 'basic')
+    return (
+      hasOnlyKeys(defaults, ['description', 'workspace_name']) &&
+      readWorkspaceSetupDescription(defaults.description) !== null &&
+      readWorkspaceSetupText(defaults.workspace_name) !== null
+    )
+  if (step === 'flow')
+    return (
+      hasOnlyKeys(defaults, ['flow_end', 'flow_start']) &&
+      isWorkspaceSetupFlowStep(defaults.flow_start) &&
+      isWorkspaceSetupFlowStep(defaults.flow_end)
+    )
+  if (step === 'design_files')
+    return (
+      hasOnlyKeys(defaults, ['flow_start']) &&
+      isWorkspaceSetupFlowStep(defaults.flow_start)
+    )
+  if (step === 'pdk') return hasOnlyKeys(defaults, ['pdk']) && defaults.pdk === 'ics55'
+  return (
+    hasOnlyKeys(defaults, ['clock', 'design', 'frequency_max', 'top_module']) &&
+    readWorkspaceSetupText(defaults.clock) !== null &&
+    readWorkspaceSetupText(defaults.design) !== null &&
+    readFiniteNumber(defaults.frequency_max, 1, 10_000) !== null &&
+    readWorkspaceSetupText(defaults.top_module) !== null
+  )
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(record).length === keys.length && keys.every((key) => key in record)
+}
+
+function isWorkspaceSetupFlowStep(value: unknown): boolean {
+  return typeof value === 'string' && workspaceSetupFlowSteps.includes(value)
 }
 
 function readWorkspaceSetupParameters(
@@ -392,18 +485,22 @@ function readWorkspaceSetupParameters(
   const design = readWorkspaceSetupText(record.design)
   const topModule = readWorkspaceSetupText(record.top_module)
   const clock = readWorkspaceSetupText(record.clock)
+  const description = readWorkspaceSetupDescription(record.description)
   const dieAreaMode = record.die_area_mode
   const frequency = readFiniteNumber(record.frequency_max, 1, 10_000)
   const margin = readFiniteNumber(record.margin, 0, 1_000_000)
+  const maxFanout = readFiniteNumber(record.max_fanout, 1, 1_000_000)
   const density = readFiniteNumber(record.target_density, 0.1, 1)
   const overflow = readFiniteNumber(record.target_overflow, Number.MIN_VALUE, 1)
   if (
     design === null ||
     topModule === null ||
     clock === null ||
+    description === null ||
     (dieAreaMode !== 'utilitization_margin' && dieAreaMode !== 'width_height') ||
     frequency === null ||
     margin === null ||
+    maxFanout === null ||
     density === null ||
     overflow === null
   ) {
@@ -416,12 +513,14 @@ function readWorkspaceSetupParameters(
       ? null
       : {
           clock,
+          description,
           design,
           die_area_mode: dieAreaMode,
           die_height: height,
           die_width: width,
           frequency_max: frequency,
           margin,
+          max_fanout: maxFanout,
           target_density: density,
           target_overflow: overflow,
           top_module: topModule,
@@ -432,10 +531,12 @@ function readWorkspaceSetupParameters(
     ? null
     : {
         clock,
+        description,
         design,
         die_area_mode: dieAreaMode,
         frequency_max: frequency,
         margin,
+        max_fanout: maxFanout,
         target_density: density,
         target_overflow: overflow,
         top_module: topModule,
@@ -464,7 +565,7 @@ function readWorkspaceSetupFlowConfig(
 }
 
 function readOptionalIdentifier(value: unknown): string | null {
-  return typeof value === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
     ? value
     : null
 }
@@ -472,6 +573,10 @@ function readOptionalIdentifier(value: unknown): string | null {
 function readWorkspaceSetupText(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 128) return null
   return value === '' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) ? value : null
+}
+
+function readWorkspaceSetupDescription(value: unknown): string | null {
+  return typeof value === 'string' && value.length <= 512 ? value : null
 }
 
 function readFiniteNumber(

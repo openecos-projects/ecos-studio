@@ -30,6 +30,14 @@
           @close="messageStore.removeMessage(msg.id)"
           class="message-item w-full max-w-full min-w-0"
         />
+        <AgentWorkspaceSetupPanel
+          :contract="workspaceSetupContract"
+          :create-setup-id="workspaceCreateSetupId"
+          :disabled="isAgentRequestPending || isWorkspaceCreationPending"
+          :request="workspaceSetupStep"
+          @complete-host-step="sendWorkspaceSetupResponse"
+          @create-workspace="createWorkspaceFromAgent"
+        />
       </div>
     </div>
 
@@ -61,8 +69,12 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
 import { storeToRefs } from 'pinia'
-import type { DesktopAgentEvent } from '@ecos-studio/shared'
+import type {
+  DesktopAgentEvent,
+  DesktopAgentWorkspaceSetupStepResponse,
+} from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import { useMessageStore } from '../stores/messageStore'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
@@ -70,12 +82,16 @@ import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 const AGENT_PROVIDER_ID = 'flow_agent'
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
-const openWorkspaceSetup = inject(agentWorkspaceSetupKey)
+const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const agentSessionId = ref<string | null>(null)
 const isAgentRequestPending = ref(false)
+const isWorkspaceCreationPending = ref(false)
+const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
+const workspaceSetupStep = ref<DesktopAgentEvent['workspaceSetupStep']>()
+const workspaceCreateSetupId = ref<string>()
 let unsubscribeAgentEvents: (() => void) | undefined
 
 onMounted(() => {
@@ -120,7 +136,16 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     return
   }
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
-    openWorkspaceSetup?.(event.workspaceSetup)
+    workspaceSetupContract.value = event.workspaceSetup
+    if (event.text) messageStore.addAssistantMessage(event.text, 'done')
+    return
+  }
+  if (event.type === 'workspace_setup_step' && event.workspaceSetupStep) {
+    workspaceSetupStep.value = event.workspaceSetupStep
+    return
+  }
+  if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
+    workspaceCreateSetupId.value = event.workspaceCreateSetupId
     return
   }
   if (!event.text) return
@@ -231,6 +256,44 @@ const handleSubmit = async () => {
     messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
   } finally {
     isAgentRequestPending.value = false
+  }
+}
+
+async function sendWorkspaceSetupResponse(
+  workspaceSetupResponse: DesktopAgentWorkspaceSetupStepResponse,
+): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const agent = desktopApi?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId || isAgentRequestPending.value) return
+  isAgentRequestPending.value = true
+  try {
+    await agent.sendMessage({
+      message: '',
+      providerId: AGENT_PROVIDER_ID,
+      sessionId,
+      workspaceSetupResponse,
+    })
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  } finally {
+    isAgentRequestPending.value = false
+  }
+}
+
+async function createWorkspaceFromAgent(
+  config: import('@/types').WorkspaceConfig,
+): Promise<void> {
+  if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
+  isWorkspaceCreationPending.value = true
+  try {
+    const created = await createAgentWorkspace(config)
+    if (!created)
+      messageStore.addAssistantMessage('Workspace creation was not completed.', 'error')
+  } catch (error) {
+    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+  } finally {
+    isWorkspaceCreationPending.value = false
   }
 }
 

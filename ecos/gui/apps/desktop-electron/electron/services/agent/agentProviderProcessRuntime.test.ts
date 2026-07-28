@@ -181,6 +181,7 @@ describe('AgentProviderProcessRuntime', () => {
           type: 'workspace_setup',
           workspaceSetup: {
             schema_version: 'flow-agent.workspace_setup_contract.v1',
+            setup_id: 'setup-1',
             title: 'New workspace prefills',
             suggested_workspace_name: 'gcd_trial',
             pdk: 'ics55',
@@ -188,10 +189,12 @@ describe('AgentProviderProcessRuntime', () => {
               design: 'gcd',
               top_module: 'gcd',
               clock: 'clk',
+              description: '',
               frequency_max: 50,
               die_area_mode: 'utilitization_margin',
               utilitization: 0.6,
               margin: 0,
+              max_fanout: 32,
               target_density: 0.2,
               target_overflow: 0.1,
             },
@@ -224,6 +227,100 @@ describe('AgentProviderProcessRuntime', () => {
       expect.objectContaining({
         type: 'workspace_setup',
         workspaceSetup: expect.objectContaining({ pdk: 'ics55' }),
+      }),
+    )
+  })
+
+  it('drops workspace setup steps with unrecognized defaults', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup_step',
+          workspaceSetupStep: {
+            authority: 'gui_native',
+            defaults: { project_name: 'gcd', project_root: '/not-allowed' },
+            schema_version: 'flow-agent.workspace_setup_step_request.v1',
+            setup_id: 'setup-1',
+            step: 'project',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('forwards typed six-step workspace setup events only with matching authority', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup_step',
+          workspaceSetupStep: {
+            authority: 'agent_text',
+            defaults: { description: '', workspace_name: 'gcd' },
+            schema_version: 'flow-agent.workspace_setup_step_request.v1',
+            setup_id: 'setup-1',
+            step: 'basic',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup_step',
+          workspaceSetupStep: {
+            authority: 'gui_native',
+            defaults: {},
+            schema_version: 'flow-agent.workspace_setup_step_request.v1',
+            setup_id: 'setup-1',
+            step: 'basic',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'workspace_setup_step',
+        workspaceSetupStep: expect.objectContaining({ step: 'basic' }),
       }),
     )
   })

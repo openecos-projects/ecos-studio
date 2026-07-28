@@ -280,6 +280,11 @@ describe('registerIpc', () => {
       providerId: 'flow_agent',
       sessionId: 'gui-session-1',
     }
+    const workspaceSetupResponse = {
+      schema_version: 'flow-agent.workspace_setup_step_response.v1' as const,
+      setup_id: 'setup-1',
+      step: 'project' as const,
+    }
 
     await expect(
       handlers.get(desktopApiIpcChannels.agentStart)?.(event, {
@@ -293,6 +298,7 @@ describe('registerIpc', () => {
       handlers.get(desktopApiIpcChannels.agentSendMessage)?.(event, {
         ...session,
         message: '',
+        workspaceSetupResponse,
       }),
     ).resolves.toEqual({
       messageId: 'message-1',
@@ -308,6 +314,32 @@ describe('registerIpc', () => {
     expect(agentRuntimeService?.sendMessage).toHaveBeenCalledWith({
       ...session,
       message: '',
+      workspaceSetupResponse,
+    })
+  })
+
+  it('rejects workspace setup responses with host data attached', async () => {
+    const { handlers } = registerHandlers()
+    const handler = handlers.get(desktopApiIpcChannels.agentSendMessage)
+
+    await expect(
+      handler?.(
+        { sender: { id: 1 } },
+        {
+          providerId: 'flow_agent',
+          sessionId: 'gui-session-1',
+          message: '',
+          workspaceSetupResponse: {
+            schema_version: 'flow-agent.workspace_setup_step_response.v1',
+            setup_id: 'setup-1',
+            step: 'project',
+            project_root: '/not-forwarded',
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace setup response is invalid.' },
+      ok: false,
     })
   })
 

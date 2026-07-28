@@ -38,6 +38,7 @@ import {
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
   type DesktopAgentSendMessageRequest,
+  type DesktopAgentWorkspaceSetupStepResponse,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
   type RemoteContentFile,
@@ -1473,6 +1474,7 @@ function readAgentStartSessionRequest(value: unknown): DesktopAgentStartSessionR
 function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageRequest {
   const record = readAgentRecord(value)
   const message = record.message
+  const workspaceSetupResponse = readWorkspaceSetupResponse(record.workspaceSetupResponse)
   if (typeof message !== 'string' || message.length > 512) {
     throw new Error('Agent message must be a string of at most 512 characters.')
   }
@@ -1480,6 +1482,30 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
     message,
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
+    ...(workspaceSetupResponse ? { workspaceSetupResponse } : {}),
+  }
+}
+
+function readWorkspaceSetupResponse(
+  value: unknown,
+): DesktopAgentWorkspaceSetupStepResponse | undefined {
+  if (value == null) return undefined
+  if (!isRecord(value)) throw new Error('Workspace setup response is invalid.')
+  const setupId = value.setup_id
+  const step = value.step
+  if (
+    value.schema_version !== 'flow-agent.workspace_setup_step_response.v1' ||
+    Object.keys(value).length !== 3 ||
+    typeof setupId !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(setupId) ||
+    (step !== 'project' && step !== 'design_files' && step !== 'pdk')
+  ) {
+    throw new Error('Workspace setup response is invalid.')
+  }
+  return {
+    schema_version: 'flow-agent.workspace_setup_step_response.v1' as const,
+    setup_id: setupId,
+    step: step as DesktopAgentWorkspaceSetupStepResponse['step'],
   }
 }
 

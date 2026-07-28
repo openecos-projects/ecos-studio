@@ -7,8 +7,17 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('addExecutionContract(event.contract)')
   })
 
-  it('hands workspace setup contracts to the native workspace wizard', () => {
+  it('keeps workspace setup inside chat instead of reopening the native wizard', () => {
     expect(source).toContain("event.type === 'workspace_setup'")
-    expect(source).toContain('openWorkspaceSetup?.(event.workspaceSetup)')
+    expect(source).toContain('AgentWorkspaceSetupPanel')
+    expect(source).toContain('workspaceSetupContract.value = event.workspaceSetup')
+    expect(source).not.toContain('openWorkspaceSetup?.(event.workspaceSetup)')
+  })
+
+  it('returns GUI-native steps through the typed setup response', () => {
+    expect(source).toContain('workspaceSetupResponse')
+    expect(source).toContain("event.type === 'workspace_setup_step'")
+    expect(source).toContain("event.type === 'workspace_create'")
+    expect(source).toContain('isWorkspaceCreationPending')
   })
 })
