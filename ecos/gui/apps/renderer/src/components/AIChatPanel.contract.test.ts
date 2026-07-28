@@ -6,4 +6,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain("event.type === 'contract'")
     expect(source).toContain('addExecutionContract(event.contract)')
   })
+
+  it('hands workspace setup contracts to the native workspace wizard', () => {
+    expect(source).toContain("event.type === 'workspace_setup'")
+    expect(source).toContain('openWorkspaceSetup?.(event.workspaceSetup)')
+  })
 })

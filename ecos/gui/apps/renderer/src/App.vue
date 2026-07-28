@@ -134,8 +134,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { appMenuActionIds, type DesktopApi } from '@ecos-studio/shared'
+import { ref, onMounted, onUnmounted, computed, provide, watch } from 'vue'
+import {
+  appMenuActionIds,
+  type DesktopAgentWorkspaceSetupContract,
+  type DesktopApi,
+} from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
@@ -162,6 +166,7 @@ import DesignFilesManageDialog from '@/components/DesignFilesManageDialog.vue'
 import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
+import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
@@ -173,6 +178,7 @@ type WorkspaceWizardInitialConfig = Partial<WorkspaceConfig> & {
   managedWorkspaceRoot?: string
   deriveDirectoryFromDesign?: boolean
   lockWorkspaceDirectory?: boolean
+  suggestedWorkspaceName?: string
 }
 
 const router = useRouter()
@@ -241,6 +247,19 @@ const showWorkspaceUpdateBackupDialog = ref(false)
 const workspaceWizardTitle = computed(() => {
   return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'
 })
+
+function openAgentWorkspaceSetup(setup: DesktopAgentWorkspaceSetupContract): void {
+  workspaceWizardInitialConfig.value = {
+    pdk: setup.pdk,
+    parameters: { ...setup.parameters },
+    flow_config: setup.flow_config,
+    suggestedWorkspaceName: setup.suggested_workspace_name,
+  }
+  reconfigureWorkspacePath.value = ''
+  showNewProjectWizard.value = true
+}
+
+provide(agentWorkspaceSetupKey, openAgentWorkspaceSetup)
 const showAboutDialog = ref(false)
 const terminalExpanded = ref(false)
 const terminalPanelHeight = ref('min(300px, 42vh)')

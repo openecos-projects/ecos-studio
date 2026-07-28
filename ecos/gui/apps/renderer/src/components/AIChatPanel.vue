@@ -59,16 +59,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { DesktopAgentEvent } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import { useMessageStore } from '../stores/messageStore'
 import { getOptionalDesktopApi } from '@/platform/desktop'
+import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 
 const AGENT_PROVIDER_ID = 'flow_agent'
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
+const openWorkspaceSetup = inject(agentWorkspaceSetupKey)
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
@@ -115,6 +117,10 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
 
   if (event.type === 'contract' && event.contract) {
     messageStore.addExecutionContract(event.contract)
+    return
+  }
+  if (event.type === 'workspace_setup' && event.workspaceSetup) {
+    openWorkspaceSetup?.(event.workspaceSetup)
     return
   }
   if (!event.text) return

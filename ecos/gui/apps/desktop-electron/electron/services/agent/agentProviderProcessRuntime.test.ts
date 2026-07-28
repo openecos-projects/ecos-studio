@@ -158,6 +158,76 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('forwards validated workspace setup contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_setup',
+          workspaceSetup: {
+            schema_version: 'flow-agent.workspace_setup_contract.v1',
+            title: 'New workspace prefills',
+            suggested_workspace_name: 'gcd_trial',
+            pdk: 'ics55',
+            parameters: {
+              design: 'gcd',
+              top_module: 'gcd',
+              clock: 'clk',
+              frequency_max: 50,
+              die_area_mode: 'utilitization_margin',
+              utilitization: 0.6,
+              margin: 0,
+              target_density: 0.2,
+              target_overflow: 0.1,
+            },
+            flow_config: {
+              start_step: 'Synthesis',
+              end_step: 'Harden',
+              steps: [
+                'Synthesis',
+                'Floorplan',
+                'fixFanout',
+                'place',
+                'CTS',
+                'legalization',
+                'route',
+                'drc',
+                'filler',
+                'RCX',
+                'sta',
+                'Harden',
+              ],
+            },
+            requires_gui_review: true,
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'workspace_setup',
+        workspaceSetup: expect.objectContaining({ pdk: 'ics55' }),
+      }),
+    )
+  })
+
   it('rejects pending requests when the provider process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

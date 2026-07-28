@@ -953,6 +953,8 @@ export function useWorkspace() {
         'Die Area': dieArea,
         'Frequency max [MHz]': toNumber(frontendParams.frequency_max, 100),
         'Max fanout': toNumber(frontendParams.max_fanout, 20),
+        'Target density': toNumber(frontendParams.target_density, 0.2),
+        'Target overflow': toNumber(frontendParams.target_overflow, 0.1),
         PDK: pdkName,
         Core: {
           Utilitization:
