@@ -6,6 +6,8 @@ import * as ts from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildFlowLogViewerExtensions,
+  computeFlowLogContextMenuStyle,
+  getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
 import flowLogCodeViewerSource from './FlowLogCodeViewer.vue?raw'
@@ -46,8 +48,15 @@ function loadFlowLogCodeViewerComponent(vue: typeof import('vue')) {
     if (id === './flowLogCodeViewer' || id === './flowLogCodeViewer.ts') {
       return {
         buildFlowLogViewerExtensions,
+        computeFlowLogContextMenuStyle,
         FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX: 16,
+        getFlowLogViewerSelectedText,
         isFlowLogViewerNearTail,
+      }
+    }
+    if (id === './flowLogCopy' || id === './flowLogCopy.ts') {
+      return {
+        copyFlowLogText: vi.fn(),
       }
     }
     if (id === '@codemirror/state') {
@@ -368,6 +377,8 @@ class FakeElement extends FakeNode {
 
   readonly style: Record<string, string> = {}
 
+  private readonly listeners = new Map<string, Set<(event: unknown) => void>>()
+
   private _className = ''
 
   constructor(tagName: string) {
@@ -431,6 +442,29 @@ class FakeElement extends FakeNode {
     this.attributes.delete(name)
   }
 
+  addEventListener(type: string, listener: (event: unknown) => void) {
+    const listeners = this.listeners.get(type) ?? new Set()
+    listeners.add(listener)
+    this.listeners.set(type, listeners)
+  }
+
+  removeEventListener(type: string, listener: (event: unknown) => void) {
+    this.listeners.get(type)?.delete(listener)
+  }
+
+  dispatchEvent(event: { type: string }) {
+    this.listeners.get(event.type)?.forEach((listener) => listener(event))
+    return true
+  }
+
+  contains(target: FakeNode | null): boolean {
+    if (!target) return false
+    if (target === this) return true
+    return this.childNodes.some(
+      (child) => child instanceof FakeElement && child.contains(target),
+    )
+  }
+
   querySelector(selector: string): FakeElement | null {
     return this.querySelectorAll(selector)[0] ?? null
   }
@@ -470,7 +504,8 @@ function ensureDom() {
     createElementNS: (_namespace: string, tagName: string) => new FakeElement(tagName),
     createTextNode: (text: string) => new FakeText(text),
     createComment: (text: string) => new FakeComment(text),
-    querySelector: (selector: string) => body.querySelector(selector),
+    querySelector: (selector: string) =>
+      selector === 'body' ? body : body.querySelector(selector),
     querySelectorAll: (selector: string) => body.querySelectorAll(selector),
   }
 
@@ -638,6 +673,64 @@ describe('flowLogCodeViewer helpers', () => {
     expect(helperSource).toContain("fontSize: '11px'")
     expect(helperSource).toContain("lineHeight: '1.6'")
     expect(helperSource).toContain("padding: '0 16px'")
+  })
+
+  it('returns only the active CodeMirror selection for context-menu copying', () => {
+    const text = 'first selected last'
+    const selected = getFlowLogViewerSelectedText({
+      selection: {
+        main: {
+          from: 6,
+          to: 14,
+          empty: false,
+        },
+      },
+      sliceDoc: (from, to) => text.slice(from, to),
+    })
+
+    expect(selected).toBe('selected')
+    expect(
+      getFlowLogViewerSelectedText({
+        selection: {
+          main: {
+            from: 6,
+            to: 6,
+            empty: true,
+          },
+        },
+        sliceDoc: (from, to) => text.slice(from, to),
+      }),
+    ).toBe('')
+  })
+
+  it('keeps the selection context menu inside the viewport', () => {
+    expect(
+      computeFlowLogContextMenuStyle({ x: 990, y: 790 }, { width: 1000, height: 800 }),
+    ).toEqual({
+      left: '868px',
+      top: '756px',
+    })
+
+    expect(
+      computeFlowLogContextMenuStyle({ x: 1, y: 2 }, { width: 1000, height: 800 }),
+    ).toEqual({
+      left: '8px',
+      top: '8px',
+    })
+  })
+
+  it('offers Copy from a selected-text context menu and closes it from global input', () => {
+    expect(flowLogCodeViewerSource).toContain('@contextmenu="onViewerContextMenu"')
+    expect(flowLogCodeViewerSource).toContain('flow-log-context-menu')
+    expect(flowLogCodeViewerSource).toContain('role="menu"')
+    expect(flowLogCodeViewerSource).toContain('role="menuitem"')
+    expect(flowLogCodeViewerSource).toContain('copyFlowLogText(contextMenu.text)')
+    expect(flowLogCodeViewerSource).toContain(
+      "document.addEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)",
+    )
+    expect(flowLogCodeViewerSource).toContain(
+      "document.addEventListener?.('keydown', onFlowLogContextMenuKeydown)",
+    )
   })
 })
 
