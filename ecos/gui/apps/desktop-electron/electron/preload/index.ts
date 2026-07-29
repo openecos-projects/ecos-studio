@@ -84,6 +84,7 @@ const desktopApi: DesktopApi = {
     confirmClose: () => invokeDesktop(desktopApiIpcChannels.windowConfirmClose),
     setTitle: (title) => invokeDesktop(desktopApiIpcChannels.windowSetTitle, title),
     isMaximized: () => invokeDesktop(desktopApiIpcChannels.windowIsMaximized),
+    create: (options) => invokeDesktop(desktopApiIpcChannels.windowCreate, options),
     onCloseRequested: (listener) =>
       subscribeToDesktopEvent(desktopApiEventChannels.windowCloseRequested, () => {
         listener()
@@ -144,6 +145,12 @@ const desktopApi: DesktopApi = {
   workspace: {
     isProjectDirectory: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceIsProjectDirectory, path),
+    openOrFocus: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceOpenOrFocus, path),
+    bindWindow: (path) => invokeDesktop(desktopApiIpcChannels.workspaceBindWindow, path),
+    unbindWindow: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceUnbindWindow, path),
+    getBoundPath: () => invokeDesktop(desktopApiIpcChannels.workspaceGetBoundPath),
     registerProjectRoot: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectRoot, path),
     clearProjectRoot: () =>

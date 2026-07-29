@@ -151,6 +151,16 @@ export interface WorkspaceDirectoryReplacement {
   backupPath: string
 }
 
+export type WorkspaceOpenOrFocusResult =
+  | {
+      action: 'focused'
+    }
+  | {
+      action: 'proceed'
+      /** Path previously bound to the caller window, if openOrFocus replaced it. */
+      previousPath?: string
+    }
+
 export interface DesktopApi {
   app: {
     getVersions(): Promise<VersionInfo>
@@ -162,6 +172,7 @@ export interface DesktopApi {
     confirmClose(): Promise<void>
     setTitle(title: string): Promise<void>
     isMaximized(): Promise<boolean>
+    create(options?: { initialRoute?: string }): Promise<void>
     onCloseRequested(listener: () => void): DesktopEventUnsubscribe
     onResized(listener: () => void): DesktopEventUnsubscribe
     onMaximizedChanged(listener: (isMaximized: boolean) => void): DesktopEventUnsubscribe
@@ -196,6 +207,10 @@ export interface DesktopApi {
   }
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
+    openOrFocus(path: string): Promise<WorkspaceOpenOrFocusResult>
+    bindWindow(path: string): Promise<string>
+    unbindWindow(path?: string): Promise<void>
+    getBoundPath(): Promise<string | null>
     registerProjectRoot(path: string): Promise<string>
     clearProjectRoot(): Promise<void>
     requestProjectPathAccess(path: string): Promise<string>

@@ -30,6 +30,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       toggleMaximize: async () => undefined,
       close: async () => undefined,
       confirmClose: async () => undefined,
+      create: async () => undefined,
       setTitle: async (_title: string) => undefined,
       isMaximized: async () => false,
       onCloseRequested: () => () => undefined,
@@ -63,6 +64,10 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       saveFile: async () => null,
     },
     workspace: {
+      openOrFocus: async () => ({ action: 'proceed' as const }),
+      bindWindow: async (path: string) => path,
+      unbindWindow: async () => undefined,
+      getBoundPath: async () => null,
       isProjectDirectory: async () => false,
       registerProjectRoot: async (path: string) => path,
       clearProjectRoot: async () => undefined,

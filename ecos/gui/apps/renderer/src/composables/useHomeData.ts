@@ -53,11 +53,23 @@ export interface MonitorData {
 
 /** checklist.json 中的单个检查项 */
 export interface ChecklistItem {
+  id: string
   step: string
-  type: string
-  item: string
-  state: string
-  info?: string
+  category:
+    | 'quality_gate'
+    | 'flow'
+    | 'artifact'
+    | 'configuration'
+    | 'provenance'
+    | 'report'
+  owner: 'qor' | 'checklist'
+  policy: 'block' | 'warn'
+  state: 'pass' | 'failed' | 'warning' | 'unavailable'
+  blocked: boolean
+  title: string
+  summary: string
+  source: Record<string, unknown>
+  evidence: Array<Record<string, unknown>>
 }
 
 /** checklist.json 数据结构 */

@@ -76,6 +76,25 @@ describe('TopBar drag region layout', () => {
     expect(topBarSource).toMatch(/\.quick-dropdown-menu\s*\{[\s\S]*position:\s*fixed;/)
   })
 
+  it('adds a File menu action for opening a new window above workspace actions', () => {
+    const newWindowIndex = topBarSource.indexOf("label: 'New Window'")
+    const newWorkspaceIndex = topBarSource.indexOf("label: 'New Workspace'")
+
+    expect(newWindowIndex).toBeGreaterThan(-1)
+    expect(newWorkspaceIndex).toBeGreaterThan(newWindowIndex)
+    expect(topBarSource).toContain('appMenuActionIds.newWindow')
+    expect(topBarSource).toContain('ri-window-line')
+  })
+
+  it('binds File shortcuts for new window, new workspace, and open workspace', () => {
+    expect(topBarSource).toContain("key === 'n'")
+    expect(topBarSource).toContain("key === 'o'")
+    expect(topBarSource).toContain('appMenuActionIds.newWindow')
+    expect(topBarSource).toContain('appMenuActionIds.newProject')
+    expect(topBarSource).toContain('appMenuActionIds.openProject')
+    expect(topBarSource).toContain('isEditableKeyboardTarget')
+  })
+
   it('adds a File menu action for reconfiguring the active workspace', () => {
     expect(topBarSource).toContain('Update Workspace')
     expect(topBarSource).not.toContain('Reconfigure Workspace...')

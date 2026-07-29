@@ -34,6 +34,10 @@ export class WorkspaceSessionRegistry {
     return session ? { ...session } : null
   }
 
+  get size(): number {
+    return this.sessions.size
+  }
+
   activate(directory: string, eccWorkspaceId: string): WorkspaceSessionRecord {
     const session = {
       directory,

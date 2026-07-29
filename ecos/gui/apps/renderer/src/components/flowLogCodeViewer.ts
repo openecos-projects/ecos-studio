@@ -5,6 +5,22 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 
 export const FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX = 16
 
+export type FlowLogViewerSelectionState = {
+  selection: {
+    main: {
+      from: number
+      to: number
+      empty: boolean
+    }
+  }
+  sliceDoc: (from: number, to: number) => string
+}
+
+export type FlowLogContextMenuStyle = {
+  left: string
+  top: string
+}
+
 export function buildFlowLogViewerExtensions(): Extension[] {
   return [
     lineNumbers(),
@@ -13,7 +29,6 @@ export function buildFlowLogViewerExtensions(): Extension[] {
     }),
     keymap.of(searchKeymap),
     EditorState.readOnly.of(true),
-    EditorView.editable.of(false),
     EditorView.lineWrapping,
     EditorView.theme({
       '&': {
@@ -80,4 +95,31 @@ export function isFlowLogViewerNearTail(
   thresholdPx = FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
 ): boolean {
   return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= thresholdPx
+}
+
+export function getFlowLogViewerSelectedText(state: FlowLogViewerSelectionState): string {
+  const selection = state.selection.main
+  if (selection.empty) return ''
+  return state.sliceDoc(selection.from, selection.to)
+}
+
+export function computeFlowLogContextMenuStyle(
+  pointer: { x: number; y: number },
+  viewport: { width: number; height: number },
+  options?: {
+    menuWidthPx?: number
+    menuHeightPx?: number
+    paddingPx?: number
+  },
+): FlowLogContextMenuStyle {
+  const menuWidthPx = Math.max(1, options?.menuWidthPx ?? 124)
+  const menuHeightPx = Math.max(1, options?.menuHeightPx ?? 36)
+  const paddingPx = options?.paddingPx ?? 8
+  const maxLeft = Math.max(paddingPx, viewport.width - menuWidthPx - paddingPx)
+  const maxTop = Math.max(paddingPx, viewport.height - menuHeightPx - paddingPx)
+
+  return {
+    left: `${Math.round(Math.max(paddingPx, Math.min(pointer.x, maxLeft)))}px`,
+    top: `${Math.round(Math.max(paddingPx, Math.min(pointer.y, maxTop)))}px`,
+  }
 }

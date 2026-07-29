@@ -50,6 +50,32 @@ describe('createMainWindow', () => {
         backgroundColor: '#00000000',
       }),
     )
+    expect(windowDouble.loadFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ hash: '/' }),
+    )
+  })
+
+  it('loads a custom hash route for empty Home windows', async () => {
+    const windowDouble = {
+      loadFile: vi.fn().mockResolvedValue(undefined),
+      loadURL: vi.fn().mockResolvedValue(undefined),
+      webContents: {
+        on: vi.fn(),
+      },
+    }
+    browserWindowState.currentReturnValue = windowDouble
+    vi.stubEnv('ELECTRON_RENDERER_URL', '')
+
+    const { createMainWindow } = await import('./createMainWindow')
+    await createMainWindow({ initialRoute: '/projects' })
+
+    expect(windowDouble.loadFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ hash: '/projects' }),
+    )
+
+    vi.unstubAllEnvs()
   })
 
   it('opens DevTools when explicitly enabled for the current launch', async () => {
@@ -71,5 +97,30 @@ describe('createMainWindow', () => {
     expect(windowDouble.webContents.openDevTools).toHaveBeenCalledWith({
       mode: 'detach',
     })
+  })
+
+  it('embeds openWorkspace into the hash when launching for a second-instance path', async () => {
+    const windowDouble = {
+      loadFile: vi.fn().mockResolvedValue(undefined),
+      loadURL: vi.fn().mockResolvedValue(undefined),
+      webContents: {
+        on: vi.fn(),
+      },
+    }
+    browserWindowState.currentReturnValue = windowDouble
+    vi.stubEnv('ELECTRON_RENDERER_URL', '')
+
+    const { createMainWindow } = await import('./createMainWindow')
+    await createMainWindow({
+      initialRoute: '/',
+      openWorkspacePath: '/work/demo',
+    })
+
+    expect(windowDouble.loadFile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ hash: '/?openWorkspace=%2Fwork%2Fdemo' }),
+    )
+
+    vi.unstubAllEnvs()
   })
 })

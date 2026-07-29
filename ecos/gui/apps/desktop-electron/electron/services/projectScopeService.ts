@@ -1,6 +1,7 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path'
 import type { PdkDetectedFiles, ScannedPdkDirectory } from '@ecos-studio/shared'
+import { requireWindowScopeId } from './windowScopeContext'
 
 const REQUIRED_PROJECT_FILES = ['flow.json', 'parameters.json']
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
@@ -149,40 +150,52 @@ function getPathLeafName(path: string): string | null {
   return leafName || null
 }
 
+interface ProjectScopeRoots {
+  extraRoots: string[]
+  projectRoot: string
+}
+
 export class ProjectScopeService {
-  private activeProjectRoot: string | null = null
-  private activeExtraRoots: string[] = []
+  private readonly rootsByWindowId = new Map<number, ProjectScopeRoots>()
 
   async resolveProjectRoot(path: string): Promise<string> {
     return await canonicalizeExistingDirectory(path)
   }
 
   async getProjectRoot(): Promise<string> {
-    if (!this.activeProjectRoot) {
+    const roots = this.rootsByWindowId.get(requireWindowScopeId())
+    if (!roots) {
       throw new Error('Project root is not registered')
     }
 
-    return this.activeProjectRoot
+    return roots.projectRoot
   }
 
   async registerProjectRoot(path: string): Promise<string> {
+    const windowId = requireWindowScopeId()
     const canonicalPath = await this.resolveProjectRoot(path)
-    this.activeProjectRoot = canonicalPath
-    this.activeExtraRoots = await detectFrontendExtraRoots(canonicalPath)
+    this.rootsByWindowId.set(windowId, {
+      extraRoots: await detectFrontendExtraRoots(canonicalPath),
+      projectRoot: canonicalPath,
+    })
     return canonicalPath
   }
 
   async clearProjectRoot(): Promise<void> {
-    this.activeProjectRoot = null
-    this.activeExtraRoots = []
+    this.rootsByWindowId.delete(requireWindowScopeId())
+  }
+
+  clearWindow(windowId: number): void {
+    this.rootsByWindowId.delete(windowId)
   }
 
   async requestProjectPathAccess(path: string): Promise<string> {
-    if (!this.activeProjectRoot) {
+    const roots = this.rootsByWindowId.get(requireWindowScopeId())
+    if (!roots) {
       throw new Error('Project root is not registered')
     }
 
-    const allowedRoots = [this.activeProjectRoot, ...this.activeExtraRoots]
+    const allowedRoots = [roots.projectRoot, ...roots.extraRoots]
     for (const root of allowedRoots) {
       try {
         const canonicalPath = await canonicalizePotentialPathWithinRoot(path, root)

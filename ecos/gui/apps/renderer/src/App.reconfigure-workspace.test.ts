@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import appSource from './App.vue?raw'
 
 describe('App workspace reconfiguration wizard wiring', () => {
+  it('consumes second-instance openWorkspace query through the shared launch helper', () => {
+    expect(appSource).toContain('consumeOpenWorkspaceLaunchQuery')
+    expect(appSource).toContain('route.query.openWorkspace')
+    expect(appSource).toContain("await router.replace('/workspace')")
+    expect(appSource).toContain('delete nextQuery.openWorkspace')
+  })
+
   it('passes signoff eligibility to the visible top bar menu', () => {
     expect(appSource).toContain(
       ':signoff-package-export-enabled="signoffPackageExportEnabled"',

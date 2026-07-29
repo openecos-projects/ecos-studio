@@ -1,9 +1,11 @@
 import { app, BrowserWindow, ipcMain, protocol } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
 import { registerIpc } from './registerIpc'
+import { handleSecondInstance } from '../services/appSecondInstance'
 import { AppInfoService } from '../services/appInfoService'
 import {
   getElectronLatestMainLogFile,
@@ -11,6 +13,7 @@ import {
 } from '../services/desktopLogPaths'
 import { createEccRuntimeEnv } from '../services/eccRpc/runtimeEnv'
 import { EccRpcRuntimeService } from '../services/eccRpc/runtimeService'
+import { resolveEccSidecarLogDirectory } from '../services/eccRpc/sidecarLogDirectory'
 import { EccRpcSidecarProcess } from '../services/eccRpc/sidecarProcess'
 import {
   createFrontendRpcLaunchResolver,
@@ -19,7 +22,11 @@ import {
 import { FrontendRpcRuntimeService } from '../services/frontendRpcRuntimeService'
 import { LayoutViewerService } from '../services/layoutViewerService'
 import { configureElectronLoggerFile, electronLogger } from '../services/logger'
-import { registerApplicationMenu } from '../services/menuService'
+import {
+  applyWindowMenuState,
+  clearWindowMenuState,
+  registerApplicationMenu,
+} from '../services/menuService'
 import { ProjectScopeService } from '../services/projectScopeService'
 import { ProjectManifestService } from '../services/projectManifestService'
 import { RemoteContentService } from '../services/remoteContentService'
@@ -33,10 +40,20 @@ import {
 import { bindWindowEvents } from '../services/windowService'
 import { WorkspaceResourceService } from '../services/workspaceResourceService'
 import { WorkspaceService } from '../services/workspaceService'
+import {
+  workspaceWindowRegistry,
+  type WorkspaceWindowLike,
+} from '../services/workspaceWindowRegistry'
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+}
 
 let ipcRegistered = false
 let workspaceReplacementRecoveryComplete = false
 let workspaceReplacementRecovery: Promise<void> | null = null
+let projectScopeService: ProjectScopeService | null = null
 let services: {
   appInfoService: AppInfoService
   frontendRpcRuntimeService: FrontendRpcRuntimeService
@@ -98,7 +115,7 @@ function getDesktopServices() {
   const settingsStore = new SettingsStore({
     filePath: join(app.getPath('userData'), 'settings.json'),
   })
-  const projectScopeService = new ProjectScopeService()
+  projectScopeService = new ProjectScopeService()
   const runtimeEnv = createEccRuntimeEnv({
     appPath: app.getAppPath(),
     cwd: process.cwd(),
@@ -123,29 +140,21 @@ function getDesktopServices() {
     resourceManagerService.createRuntimeEnv(runtimeEnv, {
       platform: process.platform,
     })
-  let eccRuntimeService: EccRpcRuntimeService
-  eccRuntimeService = new EccRpcRuntimeService({
-    createSidecar: (onEvent) =>
+  const eccRuntimeService = new EccRpcRuntimeService({
+    createSidecar: (directory, onEvent) =>
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () => {
-          const directory = eccRuntimeService.activeWorkspaceDirectory
-          return directory ? join(directory, 'log') : null
-        },
+        logDirectoryProvider: () => resolveEccSidecarLogDirectory(directory),
         onEvent,
       }),
   })
-  let frontendRpcRuntimeService: FrontendRpcRuntimeService
   const frontendRpcCore = new EccRpcRuntimeService({
-    createSidecar: (onEvent) =>
+    createSidecar: (directory, onEvent) =>
       new EccRpcSidecarProcess({
         env: runtimeEnv,
         envProvider: runtimeEnvProvider,
-        logDirectoryProvider: () => {
-          const directory = frontendRpcRuntimeService.activeWorkspaceDirectory
-          return directory ? join(directory, 'log') : null
-        },
+        logDirectoryProvider: () => resolveEccSidecarLogDirectory(directory),
         onEvent,
         onNotification: (method, params) => {
           const event = frontendRuntimeEventFromNotification(method, params)
@@ -159,7 +168,7 @@ function getDesktopServices() {
         }),
       }),
   })
-  frontendRpcRuntimeService = new FrontendRpcRuntimeService({
+  const frontendRpcRuntimeService = new FrontendRpcRuntimeService({
     runtime: frontendRpcCore,
   })
   const workspaceService = new WorkspaceService({
@@ -218,7 +227,7 @@ function getDesktopServices() {
   return services
 }
 
-async function launchMainWindow(): Promise<void> {
+async function ensureDesktopBridgeReady(): Promise<void> {
   const desktopServices = getDesktopServices()
   if (!workspaceReplacementRecoveryComplete) {
     workspaceReplacementRecovery ??= desktopServices.workspaceService
@@ -234,6 +243,12 @@ async function launchMainWindow(): Promise<void> {
     registerIpc(undefined, {
       appInfoService: desktopServices.appInfoService,
       frontendRpcRuntimeService: desktopServices.frontendRpcRuntimeService,
+      createWindow: async (options) => {
+        await launchWindow({
+          initialRoute:
+            typeof options?.initialRoute === 'string' ? options.initialRoute : '/',
+        })
+      },
       eccRuntimeService: desktopServices.eccRuntimeService,
       remoteContentService: desktopServices.remoteContentService,
       projectManifestService: desktopServices.projectManifestService,
@@ -246,9 +261,27 @@ async function launchMainWindow(): Promise<void> {
     })
     ipcRegistered = true
   }
+}
 
-  const mainWindow = await createMainWindow()
+async function launchWindow(
+  options: { initialRoute?: string; openWorkspacePath?: string } = {},
+): Promise<BrowserWindow> {
+  await ensureDesktopBridgeReady()
+  const mainWindow = await createMainWindow({
+    initialRoute: options.initialRoute ?? '/',
+    openWorkspacePath: options.openWorkspacePath,
+  })
+  const windowId = mainWindow.webContents.id
   bindWindowEvents(mainWindow)
+  mainWindow.on('closed', () => {
+    workspaceWindowRegistry.unregisterByWindow(mainWindow as WorkspaceWindowLike)
+    projectScopeService?.clearWindow(windowId)
+    clearWindowMenuState(windowId)
+  })
+  mainWindow.on('focus', () => {
+    applyWindowMenuState(windowId)
+  })
+  return mainWindow
 }
 
 function handleLaunchError(error: unknown): void {
@@ -256,20 +289,56 @@ function handleLaunchError(error: unknown): void {
   app.quit()
 }
 
-app.whenReady().then(() => {
-  registerApplicationMenu()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void launchMainWindow().catch(handleLaunchError)
-    }
+if (gotSingleInstanceLock) {
+  app.on('second-instance', (_event, argv) => {
+    void runAfterAppReady(
+      () => app.whenReady(),
+      () =>
+        handleSecondInstance(argv, {
+          isWorkspacePath: async (path) => {
+            try {
+              return await getDesktopServices().workspaceService.isProjectDirectory(path)
+            } catch {
+              return false
+            }
+          },
+          launchWindow: async (options) => {
+            await launchWindow({
+              initialRoute: '/',
+              openWorkspacePath: options?.openWorkspacePath,
+            })
+          },
+          openOrFocusPath: async (path) =>
+            workspaceWindowRegistry.focusIfBound(path) ? 'focused' : 'proceed',
+        }),
+    ).catch(handleLaunchError)
   })
 
-  void launchMainWindow().catch(handleLaunchError)
-})
+  app.whenReady().then(() => {
+    registerApplicationMenu({
+      onNewWindow: () => {
+        void launchWindow().catch(handleLaunchError)
+      },
+    })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void launchWindow().catch(handleLaunchError)
+        return
+      }
+      const windows = BrowserWindow.getAllWindows()
+      const target = windows[windows.length - 1]
+      if (target) {
+        workspaceWindowRegistry.focusWindow(target as WorkspaceWindowLike)
+      }
+    })
+
+    void launchWindow().catch(handleLaunchError)
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  })
+}

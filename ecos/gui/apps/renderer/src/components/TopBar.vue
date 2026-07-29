@@ -238,6 +238,12 @@ const menus = computed<Menu[]>(() => [
     action: 'file',
     children: [
       {
+        label: 'New Window',
+        icon: 'ri-window-line',
+        shortcut: '⇧⌘N',
+        event: appMenuActionIds.newWindow,
+      },
+      {
         label: 'New Workspace',
         icon: 'ri-add-line',
         shortcut: '⌘N',
@@ -354,11 +360,44 @@ const handleClickOutside = (e: MouseEvent) => {
   }
 }
 
-/** Escape 键关闭 */
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return (
+    tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+  )
+}
+
+/** Escape 关闭菜单；File 快捷键与菜单文案一致（⇧⌘N / ⌘N / ⌘O） */
 const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
     activeMenu.value = null
     quickMenuOpen.value = false
+    return
+  }
+
+  if (e.repeat || isEditableKeyboardTarget(e.target)) return
+
+  const mod = e.metaKey || e.ctrlKey
+  if (!mod) return
+
+  const key = e.key.toLowerCase()
+  if (e.shiftKey && key === 'n') {
+    e.preventDefault()
+    activeMenu.value = null
+    emit('menu-action', appMenuActionIds.newWindow)
+    return
+  }
+  if (!e.shiftKey && key === 'n') {
+    e.preventDefault()
+    activeMenu.value = null
+    emit('menu-action', appMenuActionIds.newProject)
+    return
+  }
+  if (!e.shiftKey && key === 'o') {
+    e.preventDefault()
+    activeMenu.value = null
+    emit('menu-action', appMenuActionIds.openProject)
   }
 }
 

@@ -330,8 +330,8 @@ export class WorkspaceService {
   }
 
   async clearProjectRoot(): Promise<void> {
-    await this.closeAllProjectFileWatchers()
-    await this.logTailService.clearProjectRoot()
+    // Per-window scope only. File/log subscriptions are tracked by the IPC layer
+    // and cleaned up for the calling window (or on sender destroy).
     await this.projectScopeProvider.clearProjectRoot()
   }
 

@@ -134,8 +134,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import type { DesktopApi } from '@ecos-studio/shared'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { appMenuActionIds, type DesktopApi } from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
@@ -162,6 +162,7 @@ import type { WorkspaceConfig } from '@/types'
 import { setWindowResizing } from '@/composables/useWindowResizeState'
 import { useDesignFiles } from '@/composables/useDesignFiles'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { consumeOpenWorkspaceLaunchQuery } from '@/utils/openWorkspaceLaunchQuery'
 import {
   projectContextFromWorkspaceConfig,
   registerProjectManagedWorkspace,
@@ -207,6 +208,26 @@ const {
   workspaceSession,
 })
 const desktopApi = ref<DesktopApi | null>(getOptionalDesktopApi())
+
+watch(
+  () => Boolean(currentProject.value?.path),
+  (hasWorkspace) => {
+    void (async () => {
+      try {
+        const api = desktopApi.value ?? (await waitForDesktopApi({ timeoutMs: 5000 }))
+        desktopApi.value = api
+        await Promise.all([
+          api.menu.setActionEnabled(appMenuActionIds.reconfigureWorkspace, hasWorkspace),
+          api.menu.setActionEnabled(appMenuActionIds.manageDesignFiles, hasWorkspace),
+        ])
+      } catch (error) {
+        console.warn('[App] Failed to sync workspace menu availability:', error)
+      }
+    })()
+  },
+  { immediate: true },
+)
+
 const documentationUrl =
   'https://github.com/openecos-projects/ecos-studio/blob/main/ecos/docs/user-guide.md'
 // ---- 新建工程向导 ----
@@ -785,6 +806,10 @@ const openDocumentation = async () => {
 }
 
 const { handleMenuAction } = useAppMenuActions({
+  createWindow: async () => {
+    const api = await waitForDesktopApi()
+    await api.window.create({ initialRoute: '/' })
+  },
   navigateToWorkspace: () => {
     router.push('/workspace')
   },
@@ -901,6 +926,18 @@ onMounted(async () => {
   // 在应用启动时加载最近项目和已导入的 PDK
   await Promise.all([loadRecentProjects(), loadPdks()])
   loadVersions()
+
+  await consumeOpenWorkspaceLaunchQuery(route.query.openWorkspace, {
+    openProject,
+    replaceWorkspaceRoute: async () => {
+      await router.replace('/workspace')
+    },
+    clearOpenWorkspaceQuery: async () => {
+      const nextQuery = { ...route.query }
+      delete nextQuery.openWorkspace
+      await router.replace({ path: route.path, query: nextQuery })
+    },
+  })
 
   document.addEventListener('selectstart', handleSelectStart)
 

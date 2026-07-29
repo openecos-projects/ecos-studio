@@ -30,7 +30,11 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { registerApplicationMenu, setMenuActionEnabled } from './menuService'
+import {
+  applyWindowMenuState,
+  registerApplicationMenu,
+  setMenuActionEnabled,
+} from './menuService'
 
 type MenuItem = {
   accelerator?: string
@@ -52,6 +56,7 @@ describe('menuService', () => {
 
   it('registers a native menu that forwards supported actions to the renderer bridge', () => {
     const send = vi.fn()
+    const onNewWindow = vi.fn()
     let capturedTemplate: MenuItem[] = []
 
     getFocusedWindow.mockReturnValue({
@@ -64,10 +69,11 @@ describe('menuService', () => {
       return { items: template }
     })
 
-    registerApplicationMenu()
+    registerApplicationMenu({ onNewWindow })
 
     const fileMenu = capturedTemplate.find((item) => item.label === 'File')
     const helpMenu = capturedTemplate.find((item) => item.label === 'Help')
+    const newWindow = fileMenu?.submenu?.find((item) => item.label === 'New Window')
     const newWorkspace = fileMenu?.submenu?.find((item) => item.label === 'New Workspace')
     const reconfigureWorkspace = fileMenu?.submenu?.find(
       (item) => item.label === 'Reconfigure Workspace...',
@@ -81,14 +87,29 @@ describe('menuService', () => {
     const about = helpMenu?.submenu?.find((item) => item.label === 'About')
 
     expect(setApplicationMenu).toHaveBeenCalledTimes(1)
-    expect(newWorkspace?.accelerator).toBe('CmdOrCtrl+N')
-    expect(reconfigureWorkspace).toBeDefined()
+    expect(newWindow).toMatchObject({
+      id: desktopMenuEventIds.newWindow,
+    })
+    expect(newWindow?.accelerator).toBeUndefined()
+    expect(newWorkspace?.accelerator).toBeUndefined()
+    expect(reconfigureWorkspace).toMatchObject({
+      enabled: false,
+      id: desktopMenuEventIds.reconfigureWorkspace,
+    })
     expect(fileMenu?.submenu?.indexOf(exportSignoffPackage as MenuItem)).toBe(
       (fileMenu?.submenu?.indexOf(reconfigureWorkspace as MenuItem) ?? -2) + 1,
     )
     expect(exportSignoffPackage).toMatchObject({
       enabled: false,
       id: desktopMenuEventIds.exportSignoffPackage,
+    })
+    const designMenu = capturedTemplate.find((item) => item.label === 'Design')
+    const manageRtl = designMenu?.submenu?.find(
+      (item) => item.label === 'Manage RTL Files...',
+    )
+    expect(manageRtl).toMatchObject({
+      enabled: false,
+      id: desktopMenuEventIds.manageDesignFiles,
     })
     expect(documentation).toBeDefined()
     expect(about).toBeDefined()
@@ -101,12 +122,14 @@ describe('menuService', () => {
       }
     }
 
+    newWindow?.click?.()
     newWorkspace?.click?.()
     reconfigureWorkspace?.click?.()
     exportSignoffPackage?.click?.()
     documentation?.click?.()
     about?.click?.()
 
+    expect(onNewWindow).toHaveBeenCalledTimes(1)
     expect(send).toHaveBeenNthCalledWith(
       1,
       desktopApiEventChannels.menuAction,
@@ -143,6 +166,41 @@ describe('menuService', () => {
 
     expect(getMenuItemById).toHaveBeenCalledWith(desktopMenuEventIds.exportSignoffPackage)
     expect(menuItem.enabled).toBe(true)
+  })
+
+  it('applies per-window menu state only for the focused window', () => {
+    const exportItem = { enabled: false }
+    const reconfigureItem = { enabled: false }
+    const manageItem = { enabled: false }
+    getApplicationMenu.mockReturnValue({
+      getMenuItemById: vi.fn((id: string) => {
+        if (id === desktopMenuEventIds.exportSignoffPackage) return exportItem
+        if (id === desktopMenuEventIds.reconfigureWorkspace) return reconfigureItem
+        if (id === desktopMenuEventIds.manageDesignFiles) return manageItem
+        return undefined
+      }),
+    })
+    getFocusedWindow.mockReturnValue({ webContents: { id: 2 } })
+    getAllWindows.mockReturnValue([
+      { webContents: { id: 1 } },
+      { webContents: { id: 2 } },
+    ])
+
+    setMenuActionEnabled(desktopMenuEventIds.exportSignoffPackage, false, 1)
+    expect(exportItem.enabled).toBe(false)
+
+    setMenuActionEnabled(desktopMenuEventIds.exportSignoffPackage, true, 2)
+    setMenuActionEnabled(desktopMenuEventIds.reconfigureWorkspace, true, 2)
+    setMenuActionEnabled(desktopMenuEventIds.manageDesignFiles, true, 2)
+    expect(exportItem.enabled).toBe(true)
+    expect(reconfigureItem.enabled).toBe(true)
+    expect(manageItem.enabled).toBe(true)
+
+    getFocusedWindow.mockReturnValue({ webContents: { id: 1 } })
+    applyWindowMenuState(1)
+    expect(exportItem.enabled).toBe(false)
+    expect(reconfigureItem.enabled).toBe(false)
+    expect(manageItem.enabled).toBe(false)
   })
 
   it('safely ignores enabled-state updates when the menu or action is absent', () => {

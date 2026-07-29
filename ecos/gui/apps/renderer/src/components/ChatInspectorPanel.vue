@@ -31,6 +31,16 @@
           >
             <i class="ri-layout-column-line text-base"></i>
           </button>
+          <button
+            v-if="showStepQorAnalysis"
+            type="button"
+            @click="selectTab('analysis')"
+            :class="tabClass(activeTab === 'analysis')"
+            title="QoR Analysis"
+            aria-label="QoR Analysis"
+          >
+            <i class="ri-bar-chart-box-line text-base"></i>
+          </button>
         </div>
 
         <button
@@ -41,10 +51,14 @@
             activePanelFullscreen
               ? activeTab === 'chat'
                 ? 'Exit AI Chat full screen'
-                : 'Exit step configuration full screen'
+                : activeTab === 'inspector'
+                  ? 'Exit step configuration full screen'
+                  : 'Exit step QoR analysis full screen'
               : activeTab === 'chat'
                 ? 'View AI Chat full screen'
-                : 'View step configuration full screen'
+                : activeTab === 'inspector'
+                  ? 'View step configuration full screen'
+                  : 'View step QoR analysis full screen'
           "
           @click="toggleActivePanelFullscreen"
         >
@@ -69,6 +83,11 @@
           v-if="activeTab === 'inspector' && showStepConfigInspector"
           class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         />
+
+        <StepQorAnalysisPanel
+          v-if="activeTab === 'analysis' && showStepQorAnalysis"
+          class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        />
       </div>
     </div>
   </Teleport>
@@ -90,6 +109,7 @@ import { useRoute } from 'vue-router'
 import { StepEnum } from '@/api/type'
 import AIChatPanel from './AIChatPanel.vue'
 import StepConfigPanel from './StepConfigPanel.vue'
+import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
 
 const route = useRoute()
 const stepEnumValues = Object.values(StepEnum)
@@ -101,16 +121,29 @@ function stepFromRoutePath(): StepEnum | undefined {
 
 /** Synthesis 不提供步骤配置编辑，隐藏 Inspector 标签与面板 */
 const showStepConfigInspector = computed(() => stepFromRoutePath() !== StepEnum.SYNTHESIS)
+const showStepQorAnalysis = computed(() =>
+  [StepEnum.PLACEMENT, StepEnum.ROUTING, StepEnum.STA].includes(
+    stepFromRoutePath() ?? StepEnum.INIT,
+  ),
+)
 
-const activeTab = ref<'chat' | 'inspector'>('chat')
+const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
 const isStepConfigFullscreen = ref(false)
+const isStepQorAnalysisFullscreen = ref(false)
 
 const isAnyPanelFullscreen = computed(
-  () => isChatFullscreen.value || isStepConfigFullscreen.value,
+  () =>
+    isChatFullscreen.value ||
+    isStepConfigFullscreen.value ||
+    isStepQorAnalysisFullscreen.value,
 )
 const activePanelFullscreen = computed(() =>
-  activeTab.value === 'chat' ? isChatFullscreen.value : isStepConfigFullscreen.value,
+  activeTab.value === 'chat'
+    ? isChatFullscreen.value
+    : activeTab.value === 'inspector'
+      ? isStepConfigFullscreen.value
+      : isStepQorAnalysisFullscreen.value,
 )
 
 watch(
@@ -119,14 +152,21 @@ watch(
     if (!showStepConfigInspector.value && activeTab.value === 'inspector') {
       activeTab.value = 'chat'
     }
+    if (!showStepQorAnalysis.value && activeTab.value === 'analysis') {
+      activeTab.value = 'chat'
+    }
     if (!showStepConfigInspector.value && isStepConfigFullscreen.value) {
+      closePanelFullscreen()
+    }
+    if (!showStepQorAnalysis.value && isStepQorAnalysisFullscreen.value) {
       closePanelFullscreen()
     }
   },
 )
 
-function selectTab(tab: 'chat' | 'inspector'): void {
+function selectTab(tab: 'chat' | 'inspector' | 'analysis'): void {
   if (tab === 'inspector' && !showStepConfigInspector.value) return
+  if (tab === 'analysis' && !showStepQorAnalysis.value) return
   activeTab.value = tab
 
   if (isAnyPanelFullscreen.value) {
@@ -134,17 +174,20 @@ function selectTab(tab: 'chat' | 'inspector'): void {
   }
 }
 
-function openPanelFullscreen(panel: 'chat' | 'inspector'): void {
+function openPanelFullscreen(panel: 'chat' | 'inspector' | 'analysis'): void {
   if (panel === 'inspector' && !showStepConfigInspector.value) return
+  if (panel === 'analysis' && !showStepQorAnalysis.value) return
 
   activeTab.value = panel
   isChatFullscreen.value = panel === 'chat'
   isStepConfigFullscreen.value = panel === 'inspector'
+  isStepQorAnalysisFullscreen.value = panel === 'analysis'
 }
 
 function closePanelFullscreen(): void {
   isChatFullscreen.value = false
   isStepConfigFullscreen.value = false
+  isStepQorAnalysisFullscreen.value = false
 }
 
 function toggleActivePanelFullscreen(): void {

@@ -1,4 +1,5 @@
 export const desktopMenuEventIds = {
+  newWindow: 'new_window',
   newProject: 'new_project',
   openProject: 'open_project',
   save: 'save',
@@ -23,6 +24,7 @@ export type DesktopMenuEventId =
 export const appMenuActionIds = {
   documentation: desktopMenuEventIds.documentation,
   about: desktopMenuEventIds.about,
+  newWindow: desktopMenuEventIds.newWindow,
   newProject: desktopMenuEventIds.newProject,
   openProject: desktopMenuEventIds.openProject,
   manageDesignFiles: desktopMenuEventIds.manageDesignFiles,

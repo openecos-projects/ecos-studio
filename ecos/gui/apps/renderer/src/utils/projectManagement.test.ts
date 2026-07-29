@@ -2,35 +2,278 @@ import { describe, expect, it } from 'vitest'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
-  createSelectionState,
-  resolveProjectSelectionUpdate,
   createProjectManifestDraft,
-  createWorkspaceBranchDraft,
+  createSelectionState,
   parseWorkspaceFlowStateMap,
-  archiveWorkspaceInManifest,
-  deleteWorkspaceFromManifest,
-  nextWorkspaceId,
   registerWorkspaceInManifest,
-  serializeProjectManifest,
-  type ProjectWorkspaceManifest,
+  setQorBaselineInManifest,
+  workspaceStatusFromFlow,
+  type FlowStep,
+  type ProjectStepStatus,
 } from './projectManagement'
 import type { Project } from '@/types'
 
-const recentProject: Project = {
+const project: Project = {
   id: '/projects/gcd',
-  name: 'gcd_backend',
+  name: 'gcd',
   path: '/projects/gcd',
-  lastOpened: new Date('2026-07-02T08:00:00Z'),
-  pdk: 'ics55',
-  topModule: 'gcd',
-  frequencyTarget: 100,
-  status: 'in_progress',
+  lastOpened: new Date('2026-07-20T00:00:00Z'),
+  status: 'success',
   totalSteps: 12,
-  completedSteps: 8,
+  completedSteps: 12,
 }
 
-describe('project management model', () => {
-  it('uses the fixed project flow step order from the design plan', () => {
+const successStates = Object.fromEntries(
+  FLOW_STEPS.map((step) => [step, 'success']),
+) as Partial<Record<FlowStep, 'success'>>
+
+function metric(id: string, value: number, overrides: Record<string, unknown> = {}) {
+  const timing = id.startsWith('sta_')
+  return {
+    id,
+    display_name: id.replace(/_/g, ' '),
+    value,
+    unit: timing ? 'ns' : 'count',
+    category: timing ? 'timing' : 'routability_physical',
+    direction:
+      id.includes('wns') || id.includes('tns') || id.includes('frequency')
+        ? 'higher_is_better'
+        : id.includes('count') || id.includes('drc') || id.includes('wirelength')
+          ? 'lower_is_better'
+          : 'trend_only',
+    scope: 'design',
+    corner: null,
+    project_role: timing ? 'gate' : 'final',
+    step_role: 'primary',
+    confidence: 'high',
+    analysis_group: 'test_metrics',
+    rating: { gate: timing, score: timing, trend: true },
+    source: { kind: 'feature', path: 'feature/test.step.json', selector: '/test' },
+    ...overrides,
+  }
+}
+
+function metricsArtifact(step: string, metrics: Record<string, unknown>[]) {
+  return JSON.stringify({
+    schema_version: 3,
+    tool: 'ecc',
+    step,
+    status: 'success',
+    metrics,
+    details: [],
+    sources: [{ kind: 'feature', path: 'feature/test.step.json' }],
+    integrity: {
+      status: 'pass',
+      invalid_metric_source_ids: [],
+      invalid_detail_ids: [],
+    },
+  })
+}
+
+function summaryArtifact(
+  status: 'pass' | 'blocked' | 'incomplete' | 'unavailable',
+  gates: Record<string, unknown>[] = [],
+) {
+  return JSON.stringify({
+    schema_version: 4,
+    analysis_status: 'valid',
+    quality_status: status,
+    gates,
+    missing_metrics: [],
+  })
+}
+
+function passingGates(groups: Array<{ id: string; gate: boolean }>) {
+  return groups.map(({ id }) => ({ id, state: 'pass', blocking: true }))
+}
+
+function manifestWithWorkspace(workspaceId = 'ws_0004') {
+  return registerWorkspaceInManifest(
+    createProjectManifestDraft({
+      rootPath: '/projects/gcd',
+      name: 'gcd',
+      now: '2026-07-20T00:00:00.000Z',
+    }),
+    {
+      projectRoot: '/projects/gcd',
+      workspacePath: `/projects/gcd/${workspaceId}`,
+      startStep: 'Synth',
+      endStep: 'Harden',
+      now: '2026-07-20T00:00:00.000Z',
+    },
+  )
+}
+
+function v3Inputs(readinessStatus: 'pass' | 'incomplete' = 'pass') {
+  const staCorner = {
+    configured_role: 'MAX',
+    process_corner: 'SS',
+    voltage_v: 1.08,
+    temperature_c: 125,
+    rc_corner: 'Cworst',
+    label: 'MAX - SS - 1.08 V - 125 C - Cworst',
+  }
+  return {
+    stepMetricTexts: {
+      Synth: metricsArtifact('synthesis', [
+        metric('synthesis_cell_area', 842, { unit: 'um^2' }),
+        metric('synthesis_cell_count', 612),
+        metric('synthesis_port_count', 48),
+        metric('synthesis_wire_count', 376),
+      ]),
+      Floor: metricsArtifact('Floorplan', [
+        metric('die_area', 2400, { unit: 'um^2' }),
+        metric('core_area', 1600, { unit: 'um^2' }),
+        metric('core_utilization', 0.62, { unit: 'ratio' }),
+        metric('instance_count', 612),
+        metric('net_count', 376),
+      ]),
+      Fanout: metricsArtifact('fixFanout', [
+        metric('fanout_max', 12),
+        metric('instance_count', 618),
+        metric('net_count', 381),
+      ]),
+      Place: metricsArtifact('place', [
+        metric('place_congestion_egr_overflow_max', 9),
+        metric('place_congestion_egr_overflow_total', 37),
+        metric('place_flute_wirelength', 4955.31, { unit: 'um' }),
+        metric('place_grwl', 4932, { unit: 'um' }),
+        metric('place_hpwl', 4000.84, { unit: 'um' }),
+        metric('place_lutrudy_utilization_max', 0.005455, { unit: 'ratio' }),
+        metric('place_rudy_utilization_max', 0.005027, { unit: 'ratio' }),
+      ]),
+      CTS: metricsArtifact('CTS', [
+        metric('clock_path_max_buffer', 2),
+        metric('clock_path_min_buffer', 2),
+        metric('clock_wirelength', 310004, { unit: 'um' }),
+        metric('cts_buffer_area', 8.4, { unit: 'um^2' }),
+        metric('cts_buffer_count', 3),
+        metric('cts_clock_tree_max_level', 2),
+        metric('cts_clock_wirelength_max', 114771, { unit: 'um' }),
+        metric('cts_worst_optimized_skew_ns', 0.000144, { unit: 'ns' }),
+        metric('cts_worst_max_insertion_latency_ns', 0.176659, { unit: 'ns' }),
+        metric('cts_skew_target_unmet_count', 0),
+        metric('instance_count', 669),
+        metric('io_pin_count', 58),
+        metric('net_count', 373),
+      ]),
+      Route: metricsArtifact('route', [
+        metric('route_dr_total_patch_count', 82),
+        metric('route_dr_total_via_count', 1526),
+        metric('route_dr_total_violation_count', 0),
+        metric('route_dr_total_wirelength', 5573.534, { unit: 'um' }),
+        metric('route_la_total_demand', 11440),
+        metric('route_la_total_overflow', 4),
+        metric('route_via_count', 1526),
+        metric('route_wirelength', 5200, {
+          unit: 'um',
+          rating: { gate: false, score: true, trend: true },
+        }),
+        metric('runtime_seconds', 12.5, {
+          unit: 's',
+          project_role: 'trend',
+          step_role: 'secondary',
+          rating: { gate: false, score: false, trend: true },
+        }),
+      ]),
+      DRC: metricsArtifact('drc', [metric('drc_count', 0)]),
+      RCX: metricsArtifact('RCX', [
+        metric('rcx_missing_corner_count', 0, {
+          category: 'clock_robustness_dfm',
+          rating: { gate: true, score: false, trend: true },
+        }),
+        metric('peak_memory_mb', 256, {
+          unit: 'MB',
+          project_role: 'trend',
+          step_role: 'secondary',
+          rating: { gate: false, score: false, trend: true },
+        }),
+      ]),
+      STA: metricsArtifact('sta', [
+        metric('sta_setup_wns', 2.905, {
+          corner: 'MAX_125/Cworst',
+          corner_context: staCorner,
+        }),
+        metric('sta_setup_tns', 0, {
+          corner: 'MAX_125/Cworst',
+          corner_context: staCorner,
+        }),
+        metric('sta_hold_wns', 0.099, {
+          corner: 'MIN_m40/Cbest',
+          corner_context: {
+            ...staCorner,
+            configured_role: 'MIN',
+            process_corner: 'FF',
+            voltage_v: 1.32,
+            temperature_c: -40,
+            rc_corner: 'Cbest',
+            label: 'MIN - FF - 1.32 V - -40 C - Cbest',
+          },
+        }),
+        metric('sta_hold_tns', 0, { corner: 'MIN_m40/Cbest', corner_context: staCorner }),
+        metric('sta_frequency_mhz', 477, {
+          unit: 'MHz',
+          corner: 'MAX_125/Cworst',
+          corner_context: staCorner,
+          project_role: 'final',
+          rating: { gate: false, score: true, trend: true },
+        }),
+      ]),
+      Harden: metricsArtifact('Harden', [
+        metric('core_area', 1200, {
+          unit: 'um2',
+          category: 'area_cost',
+          direction: 'lower_is_better',
+          rating: { gate: false, score: true, trend: true },
+        }),
+        metric('die_area', 2400, {
+          unit: 'um2',
+          category: 'area_cost',
+          direction: 'lower_is_better',
+          rating: { gate: false, score: true, trend: true },
+        }),
+        metric('core_utilization', 0.62, {
+          unit: 'ratio',
+          category: 'area_cost',
+          direction: 'target_range',
+          rating: { gate: false, score: true, trend: true },
+        }),
+      ]),
+    },
+    stepSummaryTexts: {
+      Route: summaryArtifact('pass'),
+      DRC: summaryArtifact('pass'),
+      RCX: summaryArtifact(
+        readinessStatus,
+        readinessStatus === 'pass'
+          ? passingGates([
+              { id: 'rcx_corner_coverage', gate: true },
+              { id: 'rcx_parse_health', gate: true },
+            ])
+          : [{ id: 'rcx_corner_coverage', state: 'unavailable', blocking: true }],
+      ),
+      STA: summaryArtifact(
+        'pass',
+        passingGates([
+          { id: 'sta_signoff_coverage', gate: true },
+          { id: 'sta_setup_closure', gate: true },
+          { id: 'sta_hold_closure', gate: true },
+        ]),
+      ),
+      Harden: summaryArtifact('pass'),
+    },
+    stepHotspotTexts: {},
+    staTimingIssuesText: JSON.stringify({
+      schema_version: 1,
+      near_fail_slack_ns: 0.05,
+      missing_corners: [],
+      issues: [],
+    }),
+  }
+}
+
+describe('project management V3 model', () => {
+  it('uses the fixed project flow step order', () => {
     expect(FLOW_STEPS).toEqual([
       'Synth',
       'Floor',
@@ -47,1252 +290,198 @@ describe('project management model', () => {
     ])
   })
 
-  it('builds an empty project detail model until a real project manifest is available', () => {
-    const model = buildProjectManagementProject(recentProject, null)
-
-    expect(model.name).toBe('gcd_backend')
-    expect(model.path).toBe('/projects/gcd')
-    expect(model.pdk).toBe('ics55')
-    expect(model.topModule).toBe('gcd')
+  it('builds an empty model without manufacturing metric rows', () => {
+    const model = buildProjectManagementProject(project, null)
     expect(model.workspaces).toEqual([])
     expect(model.metricsRows).toEqual([])
-    expect(model.branchLinks).toEqual([])
-    expect(model.bestWorkspaceId).toBe('')
+    expect(createSelectionState(model).selectedWorkspaceId).toBe('')
   })
 
-  it('does not select a fake workspace when project data is empty', () => {
-    const model = buildProjectManagementProject(recentProject, null)
-    const selection = createSelectionState(model)
-
-    expect(selection.selectedWorkspaceId).toBe('')
-    expect(selection.selectedStep).toBe('DRC')
-  })
-
-  it('resets selection only when the active project changes', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-    })
-    manifest.workspaces.push({
-      workspace_id: 'ws_0001',
-      name: 'baseline',
-      workspace_path: '/projects/gcd/ws_0001',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:00:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-    manifest.best_workspace = { workspace_id: 'ws_0002', reason: 'Better timing' }
-    manifest.workspaces.push({
-      workspace_id: 'ws_0002',
-      name: 'branch',
-      workspace_path: '/projects/gcd/ws_0002',
-      source_workspace_id: 'ws_0001',
-      branch_from: {
-        source_workspace_id: 'ws_0001',
-        source_step: 'DRC',
-        source_output_type: 'def',
-      },
-      start_step: 'Legal',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T09:00:00.000Z',
-      updated_at: '2026-07-02T09:00:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-
-    const model = buildProjectManagementProject(recentProject, manifest)
-
-    expect(resolveProjectSelectionUpdate(null, model, '')).toEqual({
-      nextProjectKey: '/projects/gcd',
-      mode: 'reset',
-      selection: {
-        selectedWorkspaceId: 'ws_0002',
-        selectedStep: 'DRC',
-      },
-    })
-    expect(resolveProjectSelectionUpdate('/projects/gcd', model, 'ws_0001')).toEqual({
-      nextProjectKey: '/projects/gcd',
-      mode: 'keep',
-    })
-    expect(resolveProjectSelectionUpdate('/projects/gcd', model, 'ws_missing')).toEqual({
-      nextProjectKey: '/projects/gcd',
-      mode: 'reconcile-workspace',
-      nextWorkspaceId: 'ws_0002',
-    })
-    expect(resolveProjectSelectionUpdate('/projects/uart', model, 'ws_0001')).toEqual({
-      nextProjectKey: '/projects/gcd',
-      mode: 'reset',
-      selection: {
-        selectedWorkspaceId: 'ws_0002',
-        selectedStep: 'DRC',
-      },
-    })
-  })
-
-  it('uses a neutral empty project when no source project exists', () => {
-    const model = buildProjectManagementProject(null)
-
-    expect(model.name).toBe('No Project Selected')
-    expect(model.path).toBe('')
-    expect(model.workspaces).toEqual([])
-    expect(model.metricsRows).toEqual([])
-  })
-
-  it('uses the normalized project root path as the UI selection id', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-    })
-
-    const model = buildProjectManagementProject(recentProject, manifest)
-
-    expect(manifest.project_id).toBe('proj_gcd')
-    expect(recentProject.id).toBe('/projects/gcd')
-    expect(model.id).toBe('/projects/gcd')
-    expect(model.id).toBe(model.path)
-  })
-
-  it('maps project.json workspaces into lineage tree rows, status hints, metrics, and branch links', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.base_design = {
-      pdk: 'ics55',
-      top_module: 'gcd',
-      clock: 'clk',
-      rtl_list: ['/rtl/gcd.v'],
-      parameters: {
-        'Frequency max [MHz]': 100,
-      },
-    }
-    manifest.workspaces.push(
-      {
-        workspace_id: 'ws_0001',
-        name: 'baseline',
-        workspace_path: '/projects/gcd/workspaces/ws_0001',
-        source_workspace_id: null,
-        branch_from: null,
-        start_step: 'Synth',
-        end_step: 'STA',
-        status: 'success',
-        created_at: '2026-07-02T08:00:00.000Z',
-        updated_at: '2026-07-02T08:30:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {
-          wns: -0.12,
-          tns: -5.2,
-          drc_count: 3,
-        },
-        step_metrics: {},
-      },
-      {
-        workspace_id: 'ws_0002',
-        name: 'fanout_from_floor',
-        workspace_path: '/projects/gcd/workspaces/ws_0002',
-        source_workspace_id: 'ws_0001',
-        branch_from: {
-          source_workspace_id: 'ws_0001',
-          source_step: 'Floor',
-          source_output_type: 'def',
-          source_output_path: '/projects/gcd/workspaces/ws_0001/Floor/output/design.def',
-        },
-        start_step: 'Fanout',
-        end_step: 'DRC',
-        status: 'failed',
-        created_at: '2026-07-02T09:00:00.000Z',
-        updated_at: '2026-07-02T09:30:00.000Z',
-        parameter_patch: {
-          'Max fanout': {
-            from: 20,
-            to: 12,
-          },
-        },
-        metrics_summary: {
-          wns: -0.08,
-          tns: -3.1,
-          drc_count: 9,
-        },
-        step_metrics: {},
-      },
-    )
-    manifest.best_workspace = {
-      workspace_id: 'ws_0002',
-      reason: 'Timing improved before DRC cleanup',
-    }
-
-    const model = buildProjectManagementProject(recentProject, manifest)
-
-    expect(model.id).toBe('/projects/gcd')
-    expect(model.name).toBe('gcd')
-    expect(model.pdk).toBe('ics55')
-    expect(model.topModule).toBe('gcd')
-    expect(model.bestWorkspaceId).toBe('ws_0002')
-    expect(model.comparisonSummary.bestWorkspaceId).toBe('ws_0002')
-    expect(model.comparisonSummary.bestReason).toBe('Timing improved before DRC cleanup')
-    expect(model.comparisonSummary.riskLabels).toContain('DRC violations present')
-    expect(model.comparisonSummary.parameterDiffs).toContainEqual({
-      workspaceId: 'ws_0002',
-      name: 'Max fanout',
-      from: '20',
-      to: '12',
-    })
-    expect(model.comparisonSummary.metricDiffs).toContainEqual({
-      metric: 'DRC',
-      fromWorkspaceId: 'ws_0001',
-      toWorkspaceId: 'ws_0002',
-      delta: 6,
-      state: 'bad',
-    })
-    expect(model.workspaces).toHaveLength(2)
-    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
-      ['ws_0001', 0],
-      ['ws_0002', 1],
-    ])
-    expect(model.workspaces[0].flowStatusHint).toEqual({
-      state: 'success',
-      label: 'Success',
-    })
-    expect(model.workspaces[1]).toMatchObject({
-      id: 'ws_0002',
-      name: 'fanout_from_floor',
-      workspacePath: '/projects/gcd/workspaces/ws_0002',
-      description: 'from ws_0001/Floor',
-      flowStatusHint: {
-        state: 'failed',
-        step: 'DRC',
-        label: 'DRC failed',
-      },
-    })
-    expect(model.workspaces[1].steps.find((cell) => cell.step === 'Floor')?.status).toBe(
-      'reused',
-    )
-    expect(model.workspaces[1].steps.find((cell) => cell.step === 'Fanout')?.status).toBe(
-      'success',
-    )
-    expect(model.workspaces[1].steps.find((cell) => cell.step === 'STA')?.status).toBe(
-      'skipped',
-    )
-    expect(model.branchLinks).toEqual([
-      {
-        fromWorkspaceId: 'ws_0001',
-        fromStep: 'Floor',
-        toWorkspaceId: 'ws_0002',
-        toStep: 'Fanout',
-      },
-    ])
-    expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
-      workspaceId: 'ws_0002',
-      label: '9',
-      value: 9,
-      state: 'bad',
-    })
-    expect(model.dashboardSummary).toMatchObject({
-      workspaceCount: 2,
-      configuredStepCount: 19,
-      successStepCount: 18,
-      failedStepCount: 1,
-      flowSuccessRatio: 95,
-      drcCleanCount: 0,
-    })
-  })
-
-  it('builds project-level workspace and step summaries from feature and STA snapshots', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.base_design = {
-      pdk: 'ics55',
-      top_module: 'gcd',
-      parameters: {},
-    }
-    manifest.workspaces.push(
-      {
-        workspace_id: 'baseline',
-        name: 'baseline',
-        workspace_path: '/projects/gcd/baseline',
-        source_workspace_id: null,
-        branch_from: null,
-        start_step: 'Synth',
-        end_step: 'STA',
-        status: 'success',
-        created_at: '2026-07-02T08:00:00.000Z',
-        updated_at: '2026-07-02T08:30:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-      {
-        workspace_id: 'ws_0007',
-        name: 'ws_0007',
-        workspace_path: '/projects/gcd/ws_0007',
-        source_workspace_id: 'baseline',
-        branch_from: {
-          source_workspace_id: 'baseline',
-          source_step: 'Floor',
-        },
-        start_step: 'Fanout',
-        end_step: 'STA',
-        status: 'success',
-        created_at: '2026-07-02T09:00:00.000Z',
-        updated_at: '2026-07-02T09:30:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-    )
-
-    const featureInputs = {
-      baseline: {
-        files: {
-          synthesisStat: JSON.stringify({
-            design: { area: 800.5, num_cells: 340, num_wires: 361 },
-          }),
-          floorplanDb: JSON.stringify({
-            'Design Layout': { die_usage: 0.31, core_usage: 0.4, die_area: 2259 },
-            'Design Statis': { num_instances: 610, num_nets: 361 },
-            Instances: { total: { area: 920 } },
-          }),
-          placeMap: JSON.stringify({
-            Wirelength: { HPWL: 3900000, GRWL: 4553000 },
-            Congestion: { overflow: { total: { union: 7 } } },
-          }),
-          ctsStep: JSON.stringify({
-            CTS: { buffer_num: 4, buffer_area: 9.2, total_clock_wirelength: 250100 },
-          }),
-          ctsMap: JSON.stringify({
-            Wirelength: { HPWL: 4010000, GRWL: 4620000 },
-            Congestion: { overflow: { total: { union: 5 } } },
-          }),
-          routeStep: JSON.stringify({
-            route: {
-              DR: [
-                {
-                  iter: 1,
-                  total_violation_num: 12,
-                  total_wire_length: 5200,
-                  total_via_num: 1510,
-                  total_patch_num: 49,
-                },
-                {
-                  iter: 2,
-                  total_violation_num: 2,
-                  total_wire_length: 5198,
-                  total_via_num: 1506,
-                  total_patch_num: 45,
-                },
-              ],
-            },
-          }),
-          drcStep: JSON.stringify({ drc: { number: 2 } }),
-        },
-        staReports: [
-          {
-            corner: 'MAX_125/Cworst',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'max', WNS: '8.100', TNS: '0.000' }],
-            }),
-          },
-          {
-            corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'min', WNS: '0.080', TNS: '0.000' }],
-            }),
-          },
-        ],
-      },
-      ws_0007: {
-        files: {
-          synthesisStat: JSON.stringify({
-            design: { area: 758.24, num_cells: 335, num_wires: 361 },
-          }),
-          floorplanDb: JSON.stringify({
-            'Design Layout': { die_usage: 0.335, core_usage: 0.416, die_area: 2259.86 },
-            'Design Statis': { num_instances: 613, num_nets: 361 },
-            Instances: { total: { area: 919 } },
-          }),
-          placeMap: JSON.stringify({
-            Wirelength: { HPWL: 3884970, GRWL: 4553000 },
-            Congestion: { overflow: { total: { union: 4 } } },
-          }),
-          ctsStep: JSON.stringify({
-            CTS: { buffer_num: 3, buffer_area: 8.4, total_clock_wirelength: 249558 },
-          }),
-          ctsMap: JSON.stringify({
-            Wirelength: { HPWL: 3983429, GRWL: 4610000 },
-            Congestion: { overflow: { total: { union: 4 } } },
-          }),
-          routeStep: JSON.stringify({
-            route: {
-              DR: [
-                {
-                  iter: 1,
-                  total_violation_num: 10,
-                  total_wire_length: 5199.1,
-                  total_via_num: 1512,
-                  total_patch_num: 47,
-                },
-                {
-                  iter: 2,
-                  total_violation_num: 0,
-                  total_wire_length: 5196.3,
-                  total_via_num: 1502,
-                  total_patch_num: 44,
-                },
-              ],
-            },
-          }),
-          drcStep: JSON.stringify({ drc: { number: 0 } }),
-        },
-        staReports: [
-          {
-            corner: 'MAX_125/Cworst',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'max', WNS: '8.500', TNS: '0.000' }],
-            }),
-          },
-          {
-            corner: 'MIN_m40/Cbest',
-            content: JSON.stringify({
-              slack: [{ delay_type: 'min', WNS: '0.095', TNS: '0.000' }],
-            }),
-          },
-        ],
-      },
-    }
-
+  it('derives dashboard keys and step-specific Step Analysis metrics from schema v3 ids', () => {
+    const manifest = manifestWithWorkspace()
     const model = buildProjectManagementProject(
-      recentProject,
+      project,
       manifest,
-      {},
-      featureInputs,
-    )
-    const workspaceSummary = model.workspaceSummaries.find(
-      (summary) => summary.workspaceId === 'ws_0007',
+      { ws_0004: successStates },
+      { ws_0004: v3Inputs() },
     )
 
-    expect(workspaceSummary?.finalMetrics.drcCount?.value).toBe(0)
-    expect(workspaceSummary?.finalMetrics.setupWns?.value).toBe(8.5)
-    expect(workspaceSummary?.finalMetrics.holdWns?.value).toBe(0.095)
-    expect(workspaceSummary?.finalMetrics.area?.value).toBe(758.24)
-    expect(
-      workspaceSummary?.steps.find((step) => step.step === 'Route')?.metrics,
-    ).toEqual([])
-    expect(model.metricsRows.find((row) => row.id === 'drc')?.points).toContainEqual({
-      workspaceId: 'ws_0007',
-      label: '0',
+    const summary = model.workspaceSummaries[0]!
+    expect(summary.finalMetrics.setupWns).toMatchObject({ value: 2.905 })
+    expect(summary.finalMetrics.setupWns?.hint).toContain(
+      'MAX - SS - 1.08 V - 125 C - Cworst',
+    )
+    expect(summary.flowMetrics).toMatchObject({
+      totalRuntimeSec: 12.5,
+      peakMemoryMb: 256,
+    })
+    expect(model.metricsRows.find((row) => row.id === 'drc')?.points[0]).toMatchObject({
       value: 0,
       state: 'good',
     })
-
-    const staCompare = model.stepCompareSummaries.find(
-      (summary) => summary.step === 'STA',
-    )
-    expect(staCompare?.metrics).toEqual([])
-
-    const drcCompare = model.stepCompareSummaries.find(
-      (summary) => summary.step === 'DRC',
-    )
-    expect(drcCompare?.metrics).toEqual([])
-    expect(drcCompare?.missingCount).toBe(2)
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Synth')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'synthesis_cell_area',
+      'synthesis_cell_count',
+      'synthesis_port_count',
+      'synthesis_wire_count',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Floor')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'die_area',
+      'core_area',
+      'core_utilization',
+      'instance_count',
+      'net_count',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Fanout')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual(['fanout_max', 'instance_count', 'net_count'])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Place')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'place_congestion_egr_overflow_max',
+      'place_congestion_egr_overflow_total',
+      'place_flute_wirelength',
+      'place_grwl',
+      'place_hpwl',
+      'place_lutrudy_utilization_max',
+      'place_rudy_utilization_max',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'CTS')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'clock_path_max_buffer',
+      'clock_path_min_buffer',
+      'clock_wirelength',
+      'cts_buffer_area',
+      'cts_buffer_count',
+      'cts_clock_tree_max_level',
+      'cts_clock_wirelength_max',
+      'cts_worst_optimized_skew_ns',
+      'cts_worst_max_insertion_latency_ns',
+      'cts_skew_target_unmet_count',
+      'instance_count',
+      'io_pin_count',
+      'net_count',
+    ])
+    expect(
+      model.stepCompareSummaries
+        .find((item) => item.step === 'Route')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'route_dr_total_patch_count',
+      'route_dr_total_via_count',
+      'route_dr_total_violation_count',
+      'route_dr_total_wirelength',
+      'route_la_total_demand',
+      'route_la_total_overflow',
+      'route_via_count',
+      'route_wirelength',
+    ])
+    expect(
+      model.stepCompareSummaries.find((item) => item.step === 'RCX')?.metrics,
+    ).not.toContainEqual(expect.objectContaining({ id: 'peak_memory_mb' }))
+    expect(
+      model.stepCompareSummaries.find((item) => item.step === 'Harden')?.metrics,
+    ).toEqual([])
+    expect(
+      summary.analysis.steps.STA?.metrics.find(
+        (item) => item.metricName === 'sta_setup_wns',
+      )?.cornerContext?.label,
+    ).toBe('MAX - SS - 1.08 V - 125 C - Cworst')
   })
 
-  it('uses each step analysis metrics json as the Step Analysis metric source', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push(
-      {
-        workspace_id: 'baseline',
-        name: 'baseline',
-        workspace_path: '/projects/gcd/baseline',
-        source_workspace_id: null,
-        branch_from: null,
-        start_step: 'Synth',
-        end_step: 'Harden',
-        status: 'success',
-        created_at: '2026-07-02T08:00:00.000Z',
-        updated_at: '2026-07-02T08:30:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-      {
-        workspace_id: 'ws_0008',
-        name: 'ws_0008',
-        workspace_path: '/projects/gcd/ws_0008',
-        source_workspace_id: 'baseline',
-        branch_from: {
-          source_workspace_id: 'baseline',
-          source_step: 'Floor',
-        },
-        start_step: 'Fanout',
-        end_step: 'Harden',
-        status: 'success',
-        created_at: '2026-07-02T09:00:00.000Z',
-        updated_at: '2026-07-02T09:30:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-    )
-
+  it('marks a workspace not rated when RCX or STA signoff readiness is incomplete', () => {
+    const manifest = manifestWithWorkspace()
     const model = buildProjectManagementProject(
-      recentProject,
+      project,
       manifest,
-      {},
-      {
-        baseline: {
-          stepMetricTexts: {
-            Route: JSON.stringify({ Tool: 'ecc', wire_len: 5196.258, num_via: 1502 }),
-            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 0 }),
-          },
-        },
-        ws_0008: {
-          stepMetricTexts: {
-            Route: JSON.stringify({ Tool: 'ecc', wire_len: 4800.5, num_via: 1330 }),
-            DRC: JSON.stringify({ Tool: 'ecc', drc_num: 2 }),
-          },
-        },
-      },
+      { ws_0004: successStates },
+      { ws_0004: v3Inputs('incomplete') },
     )
 
-    const routeCompare = model.stepCompareSummaries.find(
-      (summary) => summary.step === 'Route',
-    )
-    expect(routeCompare?.metrics.map((metric) => metric.label)).toEqual([
-      'wire len',
-      'num via',
-    ])
-    expect(
-      routeCompare?.metrics
-        .find((metric) => metric.id === 'wire_len')
-        ?.points.map((point) => [point.workspaceId, point.value, point.label]),
-    ).toEqual([
-      ['baseline', 5196.258, '5196.258'],
-      ['ws_0008', 4800.5, '4800.5'],
-    ])
-    expect(
-      routeCompare?.metrics
-        .find((metric) => metric.id === 'num_via')
-        ?.points.map((point) => [point.workspaceId, point.value]),
-    ).toEqual([
-      ['baseline', 1502],
-      ['ws_0008', 1330],
-    ])
-
-    const drcCompare = model.stepCompareSummaries.find(
-      (summary) => summary.step === 'DRC',
-    )
-    expect(drcCompare?.metrics.map((metric) => metric.label)).toEqual(['drc num'])
-    expect(
-      drcCompare?.points.map((point) => [point.workspaceId, point.value, point.state]),
-    ).toEqual([
-      ['baseline', 0, 'good'],
-      ['ws_0008', 2, 'warn'],
-    ])
-
-    const legalCompare = model.stepCompareSummaries.find(
-      (summary) => summary.step === 'Legal',
-    )
-    expect(legalCompare?.metrics).toEqual([])
-    expect(legalCompare?.missingCount).toBe(2)
-  })
-
-  it('uses workspace home flow.json states for tree status hints and step cells when available', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push({
-      workspace_id: 'rtl_2_harden',
-      name: 'rtl_2_harden',
-      workspace_path: '/projects/gcd/rtl_2_harden',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:00:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-
-    const flowStates = parseWorkspaceFlowStateMap(
-      JSON.stringify({
-        steps: [
-          { name: 'Synthesis', state: 'Success' },
-          { name: 'Floorplan', state: 'Unstart' },
-          { name: 'fixFanout', state: 'Ongoing' },
-          { name: 'place', state: 'Invalid' },
-        ],
-      }),
-    )
-    const model = buildProjectManagementProject(recentProject, manifest, {
-      rtl_2_harden: flowStates,
-    })
-    const workspace = model.workspaces[0]
-
-    expect(workspace.steps.find((cell) => cell.step === 'Synth')?.status).toBe('success')
-    expect(workspace.steps.find((cell) => cell.step === 'Floor')?.status).toBe('unstart')
-    expect(workspace.steps.find((cell) => cell.step === 'Floor')?.label).toBe('U')
-    expect(workspace.steps.find((cell) => cell.step === 'Fanout')?.status).toBe('running')
-    expect(workspace.steps.find((cell) => cell.step === 'Place')?.status).toBe('failed')
-    expect(workspace.steps.find((cell) => cell.step === 'CTS')?.status).toBe('success')
-    expect(workspace.flowStatusHint).toEqual({
-      state: 'unstart',
-      step: 'Floor',
-      label: 'Floor unstart',
+    expect(model.qorTrendSummary.workspaces[0]).toMatchObject({
+      overallScore: null,
+      signoffReadiness: { status: 'incomplete', scoreEligible: false },
     })
   })
 
-  it('summarizes flow runtime, peak memory, and checklist states for dashboard flow metrics', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push(
-      {
-        workspace_id: 'ws_0001',
-        name: 'ws_0001',
-        workspace_path: '/projects/gcd/ws_0001',
-        source_workspace_id: null,
-        branch_from: null,
-        start_step: 'Synth',
-        end_step: 'STA',
-        status: 'success',
-        created_at: '2026-07-02T08:00:00.000Z',
-        updated_at: '2026-07-02T08:00:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-      {
-        workspace_id: 'ws_0002',
-        name: 'ws_0002',
-        workspace_path: '/projects/gcd/ws_0002',
-        source_workspace_id: 'ws_0001',
-        branch_from: {
-          source_workspace_id: 'ws_0001',
-          source_step: 'Floor',
-        },
-        start_step: 'Fanout',
-        end_step: 'STA',
-        status: 'running',
-        created_at: '2026-07-02T09:00:00.000Z',
-        updated_at: '2026-07-02T09:00:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-    )
-
-    const model = buildProjectManagementProject(
-      recentProject,
-      manifest,
-      {},
-      {
-        ws_0001: {
-          flowText: JSON.stringify({
-            steps: [
-              { name: 'Synthesis', runtime: '0:0:7', 'peak memory (mb)': 10 },
-              { name: 'Floorplan', runtime: '0:1:2', 'peak memory (mb)': 128 },
-            ],
-          }),
-          parametersText: JSON.stringify({
-            Die: { Area: 2250 },
-            Core: { Utilitization: 0.63 },
-          }),
-          checklistText: JSON.stringify({
-            checklist: [{ state: 'Passed' }, { state: 'Failed' }, { state: 'Warning' }],
-          }),
-        },
-        ws_0002: {
-          flowText: JSON.stringify({
-            steps: [
-              { name: 'fixFanout', runtime: '12.5s', 'peak memory (mb)': 512 },
-              { name: 'place', runtime: 4, 'peak memory (mb)': 256 },
-            ],
-          }),
-          parametersText: JSON.stringify({
-            Die: { Area: 2300 },
-            Core: { Utilization: 0.71 },
-          }),
-          staReports: [
-            {
-              corner: 'MAX_125/Cworst',
-              content: JSON.stringify({
-                summary: [
-                  { delay_type: 'max', freq: '870' },
-                  { delay_type: 'min', freq: 'NA' },
-                ],
-              }),
-            },
-            {
-              corner: 'MIN_m40/Cbest',
-              content: JSON.stringify({
-                summary: [
-                  { delay_type: 'max', freq: '830' },
-                  { delay_type: 'max', freq: '820' },
-                ],
-              }),
-            },
+  it('uses flow.json only for execution state', () => {
+    expect(
+      parseWorkspaceFlowStateMap(
+        JSON.stringify({
+          steps: [
+            { name: 'route', state: 'running' },
+            { name: 'sta', state: 'success' },
+            { name: 'Floorplan', state: 'reused' },
+            { name: 'future_signoff', state: 'success' },
           ],
-          checklistText: JSON.stringify({
-            checklist: [{ state: 'Passed' }, { state: 'Passed' }, { state: 'Warn' }],
-          }),
-        },
-      },
+        }),
+      ),
+    ).toEqual({ Route: 'running', STA: 'success', Floor: 'reused' })
+  })
+
+  it('uses completed flow state instead of stale manifest status for QoR workspace status', () => {
+    expect(workspaceStatusFromFlow('not_started', successStates)).toBe('success')
+    expect(workspaceStatusFromFlow('not_started', { Route: 'running' })).toBe('running')
+    expect(workspaceStatusFromFlow('success', { Route: 'failed' })).toBe('failed')
+
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: successStates },
+      { ws_0004: v3Inputs() },
+    )
+    expect(model.qorTrendSummary.workspaces[0]?.status).not.toBe('Blocked')
+  })
+
+  it('treats reused steps as completed for area scoring, gates, and Step Analysis', () => {
+    const reusedHardenStates = {
+      ...successStates,
+      Harden: 'reused',
+    } as Partial<Record<FlowStep, ProjectStepStatus>>
+    const model = buildProjectManagementProject(
+      project,
+      manifestWithWorkspace(),
+      { ws_0004: reusedHardenStates },
+      { ws_0004: v3Inputs() },
     )
 
+    expect(model.workspaces[0]?.flowStatusHint.state).toBe('success')
     expect(
-      model.workspaceSummaries.map((summary) => [
-        summary.workspaceId,
-        summary.flowMetrics.totalRuntimeSec,
-        summary.flowMetrics.peakMemoryMb,
-      ]),
-    ).toEqual([
-      ['ws_0001', 69, 128],
-      ['ws_0002', 16.5, 512],
-    ])
-    expect(model.dashboardSummary.flowMetricSummary).toMatchObject({
-      totalRuntimeSec: 85.5,
-      peakMemoryMb: 512,
-      checklistPassed: 3,
-      checklistFailed: 1,
-      checklistWarning: 2,
-      checklistTotal: 6,
+      model.workspaces[0]?.steps.find((step) => step.step === 'Harden'),
+    ).toMatchObject({ status: 'reused', canCreateWorkspace: true })
+    expect(model.qorTrendSummary.workspaces[0]).toMatchObject({
+      areaScoringStep: 'Harden',
+      gateStatus: 'pass',
     })
+    expect(model.workspaceSummaries[0]?.finalMetrics.area?.value).toBe(1200)
     expect(
-      model.dashboardSummary.flowMetricSummary.runtimePoints.map((point) => [
-        point.workspaceId,
-        point.value,
-      ]),
-    ).toEqual([
-      ['ws_0001', 69],
-      ['ws_0002', 16.5],
-    ])
-    expect(
-      model.dashboardSummary.flowMetricSummary.memoryPoints.map((point) => [
-        point.workspaceId,
-        point.value,
-      ]),
-    ).toEqual([
-      ['ws_0001', 128],
-      ['ws_0002', 512],
-    ])
-    expect(
-      model.metricsRows
-        .find((row) => row.id === 'die_area')
-        ?.points.map((point) => [point.workspaceId, point.value]),
-    ).toEqual([
-      ['ws_0001', 2250],
-      ['ws_0002', 2300],
-    ])
-    expect(
-      model.metricsRows
-        .find((row) => row.id === 'core_util')
-        ?.points.map((point) => [point.workspaceId, point.value]),
-    ).toEqual([
-      ['ws_0001', 0.63],
-      ['ws_0002', 0.71],
-    ])
-    expect(
-      model.metricsRows
-        .find((row) => row.id === 'frequency')
-        ?.points.map((point) => [point.workspaceId, point.value]),
-    ).toEqual([
-      ['ws_0001', null],
-      ['ws_0002', 820],
-    ])
-    expect(
-      model.workspaceSummaries.find((summary) => summary.workspaceId === 'ws_0002')
-        ?.finalMetrics.frequency?.value,
-    ).toBe(820)
+      model.stepCompareSummaries.find((summary) => summary.step === 'Harden'),
+    ).toMatchObject({ configuredCount: 1, successCount: 1 })
   })
 
-  it('keeps child workspaces close to their source workspace in lineage order', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    const baseWorkspace = {
-      name: '',
-      workspace_path: '',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth' as const,
-      end_step: 'Harden' as const,
-      status: 'success' as const,
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:00:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    }
-    manifest.workspaces.push(
-      {
-        ...baseWorkspace,
-        workspace_id: 'ws_0003',
-        name: 'independent',
-        workspace_path: '/projects/gcd/ws_0003',
-        created_at: '2026-07-02T11:00:00.000Z',
-      },
-      {
-        ...baseWorkspace,
-        workspace_id: 'ws_0002',
-        name: 'child',
-        workspace_path: '/projects/gcd/ws_0002',
-        source_workspace_id: 'ws_0001',
-        branch_from: {
-          source_workspace_id: 'ws_0001',
-          source_step: 'Floor',
-        },
-        start_step: 'Fanout',
-        created_at: '2026-07-02T10:00:00.000Z',
-      },
-      {
-        ...baseWorkspace,
-        workspace_id: 'ws_0001',
-        name: 'root',
-        workspace_path: '/projects/gcd/ws_0001',
-        created_at: '2026-07-02T09:00:00.000Z',
-      },
-    )
-
-    const model = buildProjectManagementProject(recentProject, manifest)
-
-    expect(model.workspaces.map((workspace) => [workspace.id, workspace.depth])).toEqual([
-      ['ws_0001', 0],
-      ['ws_0002', 1],
-      ['ws_0003', 0],
-    ])
-  })
-
-  it('creates project manifest drafts and next workspace branch paths under the project root', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push({
-      workspace_id: 'ws_0001',
-      name: 'baseline',
-      workspace_path: '/projects/gcd/workspaces/ws_0001',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'not_started',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:00:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-    const project = buildProjectManagementProject(recentProject, manifest)
-
-    expect(nextWorkspaceId(project)).toBe('ws_0002')
-    expect(nextWorkspaceId(project, ['ws_0002', 'workspace-cache'])).toBe('ws_0003')
-    expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor')).toEqual({
-      sourceWorkspaceId: 'ws_0001',
-      sourceWorkspacePath: '/projects/gcd/workspaces/ws_0001',
-      step: 'Floor',
-      targetWorkspaceId: 'ws_0002',
-      targetWorkspacePath: '/projects/gcd/ws_0002',
-      targetStartStep: 'Fanout',
-      targetEndStep: 'Harden',
-      sourceOutputType: 'def',
-      sourceOutputPath:
-        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      originDef:
-        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      originVerilog:
-        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.v.gz',
-      originSdc: '/projects/gcd/workspaces/ws_0001/origin/gcd.sdc',
-    })
-    expect(serializeProjectManifest(manifest)).toContain('"workspaces"')
-    expect(serializeProjectManifest(manifest)).not.toContain('"iterations"')
-  })
-
-  it('registers created workspaces back into project.json without adding an iteration layer', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push({
-      workspace_id: 'ws_0001',
-      name: 'baseline',
-      workspace_path: '/projects/gcd/workspaces/ws_0001',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:30:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-
-    const updated = registerWorkspaceInManifest(manifest, {
-      projectRoot: '/projects/gcd',
-      projectName: 'gcd',
-      workspacePath: '/projects/gcd/workspaces/ws_0002',
-      sourceWorkspaceId: 'ws_0001',
-      sourceStep: 'Floor',
-      sourceOutputPath: '/projects/gcd/workspaces/ws_0001/Floor/output/design.def',
-      sourceOutputType: 'def',
-      now: '2026-07-02T09:00:00.000Z',
-      config: {
-        pdk: 'ics55',
-        pdk_root: '/pdks/ics55',
-        rtl_list: ['/rtl/gcd.v'],
-        origin_verilog: '/rtl/gcd.v',
-        parameters: {
-          design: 'gcd_floor_branch',
-          top_module: 'gcd',
-          clock: 'clk',
-        },
-      },
-    })
-
-    expect(updated.workspaces).toHaveLength(2)
-    expect(updated.workspaces[1]).toMatchObject({
-      workspace_id: 'ws_0002',
-      name: 'gcd_floor_branch',
-      workspace_path: '/projects/gcd/workspaces/ws_0002',
-      source_workspace_id: 'ws_0001',
-      start_step: 'Fanout',
-      end_step: 'Harden',
-      status: 'not_started',
-    })
-    expect(updated.workspaces[1].branch_from).toMatchObject({
-      source_workspace_id: 'ws_0001',
-      source_step: 'Floor',
-      source_output_type: 'def',
-      source_output_path: '/projects/gcd/workspaces/ws_0001/Floor/output/design.def',
-    })
-    expect(updated.workspaces[1].parameter_patch).toMatchObject({
-      design: { from: undefined, to: 'gcd_floor_branch' },
-      top_module: { from: undefined, to: 'gcd' },
-      clock: { from: undefined, to: 'clk' },
-    })
-    expect(updated.base_design).toMatchObject({
-      pdk: 'ics55',
-      pdk_root: '/pdks/ics55',
-      top_module: 'gcd',
-      clock: 'clk',
-      origin_verilog: '/rtl/gcd.v',
-      rtl_list: ['/rtl/gcd.v'],
-    })
-    expect(serializeProjectManifest(updated)).not.toContain('"iterations"')
-  })
-
-  it('uses the source workspace design name when creating a branch draft', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'project_gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.base_design = {
-      pdk: 'ics55',
-      top_module: 'gcd',
-      parameters: {
-        design: 'gcd',
-      },
-    }
-    manifest.workspaces.push({
+  it('keeps baseline selection as project metadata without manifest metrics', () => {
+    const manifest = manifestWithWorkspace()
+    const updated = setQorBaselineInManifest(manifest, 'ws_0004')
+    expect(updated.qor_baseline).toEqual({
       workspace_id: 'ws_0004',
-      name: 'project_gcd_ws_0004',
-      workspace_path: '/projects/gcd/ws_0004',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:30:00.000Z',
-      parameter_patch: {
-        design: {
-          from: 'gcd',
-          to: 'project_gcd_ws_0004',
-        },
-      },
-      metrics_summary: {},
-      step_metrics: {},
+      reason: 'Selected from Project QoR Trend',
     })
-    const project = buildProjectManagementProject(recentProject, manifest)
-
-    const draft = createWorkspaceBranchDraft(project, 'ws_0004', 'Floor')
-
-    expect(draft.sourceOutputPath).toBe(
-      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.def.gz',
-    )
-    expect(draft.originDef).toBe(
-      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.def.gz',
-    )
-    expect(draft.originVerilog).toBe(
-      '/projects/gcd/ws_0004/Floorplan_ecc/output/project_gcd_ws_0004_Floorplan.v.gz',
-    )
-    expect(draft.originSdc).toBe('/projects/gcd/ws_0004/origin/project_gcd_ws_0004.sdc')
-  })
-
-  it('keeps root workspace artifact names after registering a branch design', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push({
-      workspace_id: 'ws_0001',
-      name: 'baseline',
-      workspace_path: '/projects/gcd/workspaces/ws_0001',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:30:00.000Z',
-      parameter_patch: {},
-      metrics_summary: {},
-      step_metrics: {},
-    })
-
-    const updated = registerWorkspaceInManifest(manifest, {
-      projectRoot: '/projects/gcd',
-      projectName: 'gcd',
-      workspacePath: '/projects/gcd/workspaces/ws_0002',
-      sourceWorkspaceId: 'ws_0001',
-      sourceStep: 'Floor',
-      sourceOutputPath:
-        '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-      sourceOutputType: 'def',
-      now: '2026-07-02T09:00:00.000Z',
-      config: {
-        parameters: {
-          design: 'gcd_floor_branch',
-          top_module: 'gcd',
-        },
-      },
-    })
-
-    const project = buildProjectManagementProject(recentProject, updated)
-
-    expect(updated.base_design.parameters?.design).toBeUndefined()
-    expect(
-      project.workspaces.find((workspace) => workspace.id === 'ws_0001'),
-    ).toHaveProperty('artifactDesignName', 'gcd')
-    expect(createWorkspaceBranchDraft(project, 'ws_0001', 'Floor').sourceOutputPath).toBe(
-      '/projects/gcd/workspaces/ws_0001/Floorplan_ecc/output/gcd_Floorplan.def.gz',
-    )
-  })
-
-  it('falls back to the source workspace name for branch drafts without a design patch', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'project_gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.base_design = {
-      pdk: 'ics55',
-      top_module: 'gcd',
-      parameters: {
-        design: 'gcd',
-      },
-    }
-    manifest.workspaces.push({
-      workspace_id: 'ws_0005',
-      name: 'project_gcd_ws_0004',
-      workspace_path: '/projects/gcd/ws_0005',
-      source_workspace_id: 'ws_0004',
-      branch_from: {
-        source_workspace_id: 'ws_0004',
-        source_step: 'Floor',
-        source_output_type: 'def',
-      },
-      start_step: 'Fanout',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:30:00.000Z',
-      parameter_patch: {
-        start_step: {
-          from: '',
-          to: 'Fanout',
-        },
-      },
-      metrics_summary: {},
-      step_metrics: {},
-    })
-    const project = buildProjectManagementProject(recentProject, manifest)
-
-    const draft = createWorkspaceBranchDraft(project, 'ws_0005', 'Place')
-
-    expect(draft.sourceOutputPath).toBe(
-      '/projects/gcd/ws_0005/place_dreamplace/output/project_gcd_ws_0004_place.def.gz',
-    )
-    expect(draft.originVerilog).toBe(
-      '/projects/gcd/ws_0005/place_dreamplace/output/project_gcd_ws_0004_place.v.gz',
-    )
-    expect(draft.originSdc).toBe('/projects/gcd/ws_0005/origin/project_gcd_ws_0004.sdc')
-  })
-
-  it('renders imported workspace manifests without parameter patches', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'project_gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.base_design = {
-      pdk: 'ics55',
-      top_module: 'gcd',
-      parameters: {
-        design: 'gcd',
-      },
-    }
-    manifest.workspaces.push({
-      workspace_id: 'ws_0006',
-      name: 'legacy_branch',
-      workspace_path: '/projects/gcd/ws_0006',
-      source_workspace_id: 'ws_0004',
-      branch_from: {
-        source_workspace_id: 'ws_0004',
-        source_step: 'Floor',
-        source_output_type: 'def',
-      },
-      start_step: 'Fanout',
-      end_step: 'Harden',
-      status: 'success',
-      created_at: '2026-07-02T08:00:00.000Z',
-      updated_at: '2026-07-02T08:30:00.000Z',
-      metrics_summary: {},
-      step_metrics: {},
-    } as ProjectWorkspaceManifest)
-
-    const project = buildProjectManagementProject(recentProject, manifest)
-
-    expect(project.workspaces[0]?.artifactDesignName).toBe('legacy_branch')
-    expect(createWorkspaceBranchDraft(project, 'ws_0006', 'Place').sourceOutputPath).toBe(
-      '/projects/gcd/ws_0006/place_dreamplace/output/legacy_branch_place.def.gz',
-    )
-  })
-
-  it('registers imported project-root workspaces by workspace folder name', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-
-    const updated = registerWorkspaceInManifest(manifest, {
-      projectRoot: '/projects/gcd',
-      projectName: 'gcd',
-      workspacePath: '/projects/gcd/backend_a',
-      now: '2026-07-02T09:00:00.000Z',
-      config: {
-        parameters: {
-          design: 'backend_a',
-        },
-      },
-    })
-
-    expect(updated.workspaces).toHaveLength(1)
-    expect(updated.workspaces[0]).toMatchObject({
-      workspace_id: 'backend_a',
-      name: 'backend_a',
-      workspace_path: '/projects/gcd/backend_a',
-      source_workspace_id: null,
-      branch_from: null,
-      start_step: 'Synth',
-      end_step: 'Harden',
-    })
-  })
-
-  it('archives and deletes workspaces in project.json without removing other workspaces', () => {
-    const manifest = createProjectManifestDraft({
-      rootPath: '/projects/gcd',
-      name: 'gcd',
-      now: '2026-07-02T08:00:00.000Z',
-    })
-    manifest.workspaces.push(
-      {
-        workspace_id: 'ws_0001',
-        name: 'baseline',
-        workspace_path: '/projects/gcd/ws_0001',
-        source_workspace_id: null,
-        branch_from: null,
-        start_step: 'Synth',
-        end_step: 'Harden',
-        status: 'success',
-        created_at: '2026-07-02T08:00:00.000Z',
-        updated_at: '2026-07-02T08:00:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-      {
-        workspace_id: 'ws_0002',
-        name: 'branch',
-        workspace_path: '/projects/gcd/ws_0002',
-        source_workspace_id: 'ws_0001',
-        branch_from: {
-          source_workspace_id: 'ws_0001',
-          source_step: 'Floor',
-        },
-        start_step: 'Fanout',
-        end_step: 'Harden',
-        status: 'failed',
-        created_at: '2026-07-02T09:00:00.000Z',
-        updated_at: '2026-07-02T09:00:00.000Z',
-        parameter_patch: {},
-        metrics_summary: {},
-        step_metrics: {},
-      },
-    )
-    manifest.best_workspace = { workspace_id: 'ws_0002', reason: 'experimental' }
-
-    const archived = archiveWorkspaceInManifest(
-      manifest,
-      'ws_0002',
-      '2026-07-02T10:00:00.000Z',
-    )
-    expect(
-      archived.workspaces.find((workspace) => workspace.workspace_id === 'ws_0002')
-        ?.status,
-    ).toBe('archived')
-    expect(archived.best_workspace).toBeNull()
-
-    const deleted = deleteWorkspaceFromManifest(
-      archived,
-      'ws_0002',
-      '2026-07-02T11:00:00.000Z',
-    )
-    expect(deleted.workspaces.map((workspace) => workspace.workspace_id)).toEqual([
-      'ws_0001',
-    ])
-    expect(deleted.workspaces[0].branch_from).toBeNull()
+    expect(updated.workspaces[0]).not.toHaveProperty('metrics_summary')
+    expect(updated.workspaces[0]).not.toHaveProperty('step_metrics')
   })
 })

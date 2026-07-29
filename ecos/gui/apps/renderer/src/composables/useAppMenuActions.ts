@@ -2,6 +2,7 @@ import { appMenuActionIds, type AppMenuAction } from '@ecos-studio/shared'
 import { useMenuEvents } from './useMenuEvents'
 
 interface AppMenuActionDependencies {
+  createWindow?(): Promise<void> | void
   navigateToWorkspace(): void
   openDocumentation(): Promise<void>
   openProject(): Promise<boolean | undefined>
@@ -13,6 +14,7 @@ interface AppMenuActionDependencies {
 }
 
 export function useAppMenuActions({
+  createWindow,
   navigateToWorkspace,
   openDocumentation,
   openProject,
@@ -24,6 +26,9 @@ export function useAppMenuActions({
 }: AppMenuActionDependencies) {
   const handleMenuAction = async (action: AppMenuAction) => {
     switch (action) {
+      case appMenuActionIds.newWindow:
+        await createWindow?.()
+        break
       case appMenuActionIds.newProject:
         showNewProjectWizard()
         break
@@ -55,6 +60,9 @@ export function useAppMenuActions({
   useMenuEvents({
     [appMenuActionIds.documentation]: () => {
       void handleMenuAction(appMenuActionIds.documentation)
+    },
+    [appMenuActionIds.newWindow]: () => {
+      void handleMenuAction(appMenuActionIds.newWindow)
     },
     [appMenuActionIds.newProject]: () => {
       void handleMenuAction(appMenuActionIds.newProject)

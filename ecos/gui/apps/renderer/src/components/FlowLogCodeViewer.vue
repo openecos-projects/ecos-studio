@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   buildFlowLogViewerExtensions,
+  computeFlowLogContextMenuStyle,
   FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
+  getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
+import { copyFlowLogText } from './flowLogCopy'
 
 const props = withDefaults(
   defineProps<{
@@ -23,15 +26,95 @@ const props = withDefaults(
 )
 
 const rootRef = ref<HTMLElement | null>(null)
+const flowLogContextMenuRef = ref<HTMLElement | null>(null)
+const flowLogContextMenuCopyButtonRef = ref<HTMLButtonElement | null>(null)
 const isViewerEmpty = computed(() => !props.content)
+const flowLogContextMenu = ref<{
+  text: string
+  style: { left: string; top: string }
+} | null>(null)
+const flowLogContextMenuFeedback = ref<'copied' | 'failed' | null>(null)
+const flowLogContextMenuCopying = ref(false)
+const flowLogContextMenuCopyLabel = computed(() => {
+  if (flowLogContextMenuCopying.value) return 'Copying...'
+  if (flowLogContextMenuFeedback.value === 'copied') return 'Copied'
+  if (flowLogContextMenuFeedback.value === 'failed') return 'Copy failed'
+  return 'Copy'
+})
 
 let view: EditorView | null = null
 let lastSyncedContent = ''
 let pendingContent: string | null = null
 let pendingSyncRaf: number | null = null
 let pendingTailScrollRaf: number | null = null
+let flowLogContextMenuFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearFlowLogContextMenuFeedbackTimer(): void {
+  if (flowLogContextMenuFeedbackTimer) {
+    clearTimeout(flowLogContextMenuFeedbackTimer)
+    flowLogContextMenuFeedbackTimer = null
+  }
+}
+
+function closeFlowLogContextMenu(): void {
+  clearFlowLogContextMenuFeedbackTimer()
+  flowLogContextMenu.value = null
+  flowLogContextMenuFeedback.value = null
+  flowLogContextMenuCopying.value = false
+}
+
+function onViewerContextMenu(event: MouseEvent): void {
+  if (!view) return
+
+  const selectedText = getFlowLogViewerSelectedText(view.state)
+  if (!selectedText) return
+
+  event.preventDefault()
+  clearFlowLogContextMenuFeedbackTimer()
+  flowLogContextMenuFeedback.value = null
+  flowLogContextMenuCopying.value = false
+  flowLogContextMenu.value = {
+    text: selectedText,
+    style: computeFlowLogContextMenuStyle(
+      { x: event.clientX, y: event.clientY },
+      { width: window.innerWidth, height: window.innerHeight },
+    ),
+  }
+  void nextTick(() => flowLogContextMenuCopyButtonRef.value?.focus())
+}
+
+async function copyFlowLogSelection(): Promise<void> {
+  const contextMenu = flowLogContextMenu.value
+  if (!contextMenu || flowLogContextMenuCopying.value) return
+
+  flowLogContextMenuCopying.value = true
+  const result = await copyFlowLogText(contextMenu.text)
+  flowLogContextMenuCopying.value = false
+  flowLogContextMenuFeedback.value = result.ok ? 'copied' : 'failed'
+
+  if (result.ok) {
+    clearFlowLogContextMenuFeedbackTimer()
+    flowLogContextMenuFeedbackTimer = setTimeout(() => {
+      closeFlowLogContextMenu()
+    }, 900)
+  }
+}
+
+function onFlowLogContextMenuPointerDown(event: PointerEvent): void {
+  if (!flowLogContextMenu.value) return
+  const target = event.target
+  if (target instanceof Node && flowLogContextMenuRef.value?.contains(target)) return
+  closeFlowLogContextMenu()
+}
+
+function onFlowLogContextMenuKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !flowLogContextMenu.value) return
+  event.preventDefault()
+  closeFlowLogContextMenu()
+}
 
 function destroyViewer(): void {
+  closeFlowLogContextMenu()
   if (pendingSyncRaf !== null) {
     cancelAnimationFrame(pendingSyncRaf)
     pendingSyncRaf = null
@@ -127,6 +210,10 @@ function scheduleViewerContentSync(nextContent: string): void {
 
 onMounted(() => {
   ensureViewerState()
+  document.addEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
+  document.addEventListener?.('keydown', onFlowLogContextMenuKeydown)
+  window.addEventListener?.('resize', closeFlowLogContextMenu)
+  document.addEventListener?.('scroll', closeFlowLogContextMenu, true)
 })
 
 watch(
@@ -156,6 +243,10 @@ watch(
 )
 
 onUnmounted(() => {
+  document.removeEventListener?.('pointerdown', onFlowLogContextMenuPointerDown)
+  document.removeEventListener?.('keydown', onFlowLogContextMenuKeydown)
+  window.removeEventListener?.('resize', closeFlowLogContextMenu)
+  document.removeEventListener?.('scroll', closeFlowLogContextMenu, true)
   destroyViewer()
 })
 </script>
@@ -179,10 +270,45 @@ onUnmounted(() => {
       >
       <span v-else>Select a started step or wait for the current step to emit logs.</span>
     </div>
-    <div v-else class="flow-log-viewer-editor-wrap" :class="{ 'is-live': live }">
+    <div
+      v-else
+      class="flow-log-viewer-editor-wrap"
+      :class="{ 'is-live': live }"
+      @contextmenu="onViewerContextMenu"
+    >
       <div ref="rootRef" class="flow-log-viewer-editor"></div>
       <span v-if="live" class="flow-log-terminal-cursor" aria-hidden="true"></span>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="flowLogContextMenu"
+        ref="flowLogContextMenuRef"
+        class="flow-log-context-menu"
+        :style="flowLogContextMenu.style"
+        role="menu"
+        aria-label="Selected log text actions"
+      >
+        <button
+          ref="flowLogContextMenuCopyButtonRef"
+          type="button"
+          class="flow-log-context-menu-action"
+          role="menuitem"
+          :disabled="flowLogContextMenuCopying"
+          @click="copyFlowLogSelection"
+        >
+          <i
+            :class="
+              flowLogContextMenuFeedback === 'copied'
+                ? 'ri-check-line'
+                : flowLogContextMenuFeedback === 'failed'
+                  ? 'ri-error-warning-line'
+                  : 'ri-file-copy-line'
+            "
+          ></i>
+          <span>{{ flowLogContextMenuCopyLabel }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -209,6 +335,52 @@ onUnmounted(() => {
 
 .flow-log-viewer-editor {
   overflow: hidden;
+}
+
+.flow-log-context-menu {
+  position: fixed;
+  z-index: 20020;
+  min-width: 124px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.flow-log-context-menu-action {
+  width: 100%;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-log-context-menu-action:hover:not(:disabled),
+.flow-log-context-menu-action:focus-visible {
+  outline: none;
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+}
+
+.flow-log-context-menu-action:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.flow-log-context-menu-action i {
+  width: 14px;
+  color: var(--accent-color);
+  font-size: 14px;
+  text-align: center;
 }
 
 .flow-log-terminal-cursor {

@@ -38,7 +38,32 @@ function logRendererConsoleMessage(message: string): void {
   }
 }
 
-export async function createMainWindow(): Promise<BrowserWindow> {
+export interface CreateMainWindowOptions {
+  initialRoute?: string
+  openWorkspacePath?: string
+}
+
+function resolveHashRoute(initialRoute = '/', openWorkspacePath?: string): string {
+  const trimmed = initialRoute.trim() || '/'
+  const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  if (!openWorkspacePath?.trim()) {
+    return `#${withLeadingSlash}`
+  }
+  const params = new URLSearchParams({
+    openWorkspace: openWorkspacePath.trim(),
+  })
+  const [pathname, existingQuery = ''] = withLeadingSlash.split('?')
+  const merged = new URLSearchParams(existingQuery)
+  for (const [key, value] of params.entries()) {
+    merged.set(key, value)
+  }
+  const query = merged.toString()
+  return query ? `#${pathname}?${query}` : `#${pathname}`
+}
+
+export async function createMainWindow(
+  options: CreateMainWindowOptions = {},
+): Promise<BrowserWindow> {
   const mainWindow = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -67,17 +92,20 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     })
   }
 
+  const hashRoute = resolveHashRoute(options.initialRoute, options.openWorkspacePath)
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
 
   if (rendererUrl) {
-    await mainWindow.loadURL(rendererUrl)
+    const url = new URL(rendererUrl)
+    url.hash = hashRoute.slice(1)
+    await mainWindow.loadURL(url.toString())
     if (shouldOpenDevTools()) {
       mainWindow.webContents.openDevTools({ mode: 'detach' })
     }
     return mainWindow
   }
 
-  await mainWindow.loadFile(rendererIndexPath)
+  await mainWindow.loadFile(rendererIndexPath, { hash: hashRoute.slice(1) })
   if (shouldOpenDevTools()) {
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   }

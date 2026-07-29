@@ -17,6 +17,9 @@ describe('SignoffPackageReviewDialog', () => {
     expect(source).toContain('{{ detail.location }}')
     expect(source).toContain('{{ detail.reason }}')
     expect(source).toContain(':data-kind="detail.kind"')
+    expect(source).toContain("if (kind === 'quality_gate') return 'QoR Gate'")
+    expect(source).toContain("detail.owner === 'qor' ? 'QoR' : 'Checklist'")
+    expect(source).toContain("if (kind === 'freshness') return 'Analysis Refresh'")
   })
 
   it('uses shared semantic tokens and a responsive two-column layout', () => {
@@ -30,7 +33,7 @@ describe('SignoffPackageReviewDialog', () => {
   })
 
   it('exposes accessible refresh, close, and export controls', () => {
-    expect(source).toContain('aria-label="Refresh review"')
+    expect(source).toContain('aria-label="Recheck current outputs"')
     expect(source).toContain('@click="emit(\'refresh\')"')
     expect(source).toContain('@click="emit(\'close\')"')
     expect(source).toContain('@click="emit(\'export\')"')

@@ -60,13 +60,31 @@ export interface EccSignoffReviewGroup {
   summary: string
 }
 
-export type EccSignoffReviewDetailKind = 'resource' | 'flow' | 'checklist'
+export type EccSignoffReviewDetailKind =
+  | 'flow'
+  | 'artifact'
+  | 'configuration'
+  | 'provenance'
+  | 'quality_gate'
+  | 'report'
+  | 'freshness'
+
+export interface EccSignoffReviewEvidence {
+  destination?: string
+  kind: string
+  path: string
+  selector?: string
+}
 
 export interface EccSignoffReviewDetail {
   kind: EccSignoffReviewDetailKind
   label: string
   location: string
   reason: string
+  owner: 'qor' | 'checklist'
+  policy: 'block' | 'warn'
+  state: 'pass' | 'failed' | 'warning' | 'unavailable'
+  evidence: EccSignoffReviewEvidence[]
 }
 
 export interface EccSignoffReviewRisk {
@@ -153,11 +171,13 @@ export interface EccRuntimeError {
 export type EccRuntimeEvent =
   | {
       type: 'runtime.ready'
+      workspaceDirectory?: string
     }
   | {
       logFile?: string
       text: string
       type: 'runtime.stderr'
+      workspaceDirectory?: string
     }
   | {
       code: number | null

@@ -13,6 +13,8 @@ export const DASHBOARD_METRIC_ORDER = [
   'frequency',
   'wns',
   'tns',
+  'hold_wns',
+  'hold_tns',
   'drc',
 ] as const satisfies readonly ProjectMetricId[]
 
@@ -20,6 +22,8 @@ export const BEST_WORKSPACE_PPA_METRIC_ORDER = [
   'frequency',
   'wns',
   'tns',
+  'hold_wns',
+  'hold_tns',
   'drc',
   'die_area',
   'core_util',
@@ -121,6 +125,7 @@ export function buildBestWorkspacePpaMetrics(
 export function pendingMetricPoint(workspaceId: string): ProjectMetricPoint {
   return {
     workspaceId,
+    workspaceName: workspaceId,
     label: 'N/A',
     value: null,
     state: 'pending',

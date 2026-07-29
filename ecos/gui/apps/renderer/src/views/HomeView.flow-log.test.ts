@@ -63,6 +63,22 @@ describe('HomeView floating chooser integration', () => {
     expect(homeViewSource).toContain('flow-log-viewer-shell')
   })
 
+  it('exposes a copy action with teleported tooltip feedback', () => {
+    expect(homeViewSource).toContain('flow-log-copy-btn')
+    expect(homeViewSource).toContain('flow-log-copy-tooltip')
+    expect(homeViewSource).toContain('computeFlowLogCopyTooltipStyle')
+    expect(homeViewSource).toContain('refineFlowLogCopyTooltipPosition')
+    expect(homeViewSource).toContain('canCopyFlowLogText')
+    expect(homeViewSource).toContain('onCopyFlowLogText')
+    expect(homeViewSource).toContain('copyFlowLogText')
+    expect(homeViewSource).toContain("is-copied': flowLogCopyFeedback === 'copied'")
+    expect(homeViewSource).toContain("flowLogCopyFeedback === 'failed'")
+    expect(homeViewSource).toContain(
+      "is-above': flowLogCopyTooltipStyle?.placement === 'above'",
+    )
+    expect(homeViewSource).not.toContain('is-feedback')
+  })
+
   it('exports chooser state transitions that close after selection and jump-to-live', () => {
     const createFlowLogChooserController = loadFlowLogChooserController()
     const chooser = createFlowLogChooserController('step-a')

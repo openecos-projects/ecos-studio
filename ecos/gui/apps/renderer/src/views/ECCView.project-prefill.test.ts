@@ -56,6 +56,28 @@ describe('ECCView project management handoff', () => {
     expect(loaderSource).not.toContain('origin_def:')
   })
 
+  it('still opens the workspace wizard when source workspace prefill cannot be read', () => {
+    const prefillStart = source.indexOf('const prefillWorkspaceDirectory')
+    const prefillEnd = source.indexOf(
+      'function projectManagedWizardInitialConfig',
+      prefillStart,
+    )
+    const prefillSource = source.slice(prefillStart, prefillEnd)
+    const loaderStart = source.indexOf('async function loadSourceWorkspaceInitialConfig')
+    const loaderEnd = source.indexOf('function mergeBranchInitialConfig', loaderStart)
+    const loaderSource = source.slice(loaderStart, loaderEnd)
+
+    expect(loaderSource).toContain('try {')
+    expect(loaderSource).toContain('catch (error)')
+    expect(loaderSource).toContain(
+      "console.warn('Failed to load source workspace config for wizard prefill.', error)",
+    )
+    expect(loaderSource).toContain('return undefined')
+    expect(prefillSource.indexOf('await loadSourceWorkspaceInitialConfig')).toBeLessThan(
+      prefillSource.indexOf('showWizard.value = true'),
+    )
+  })
+
   it('records project managed workspaces into project.json after the existing wizard creates them', () => {
     expect(source).toContain('registerProjectManagedWorkspace')
     expect(source).toContain('projectContextFromWorkspaceConfig')

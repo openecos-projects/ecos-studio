@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type {
   EccFlowRunRequest,
   EccFlowRunResult,
@@ -26,111 +25,39 @@ import type {
   EccWorkspaceSyncConfigResult,
 } from '@ecos-studio/shared'
 
-import { normalizeRuntimeError } from './errors'
-import { EccJsonRpcError } from './jsonRpcClient'
-import { WorkspaceSessionRegistry } from './workspaceSessions'
+import { normalizeWorkspacePath } from '../workspacePath'
+import { WorkspaceSessionNotFoundError } from './workspaceSessions'
+import {
+  EccWorkspaceRuntime,
+  type EccRpcRuntimeClient,
+  type EccRpcRuntimeSidecar,
+} from './workspaceRuntime'
 
-export interface EccRpcRuntimeClient {
-  call<T>(
-    method: string,
-    params?: Record<string, unknown>,
-    options?: { timeoutMs?: number },
-  ): Promise<T>
-}
-
-export interface EccRpcRuntimeSidecar {
-  logFile: string | null
-  shutdown(): Promise<void>
-  start(): Promise<EccRpcRuntimeClient>
-}
+export type { EccRpcRuntimeClient, EccRpcRuntimeSidecar }
 
 export interface EccRpcRuntimeServiceOptions {
-  createSidecar(onEvent: (event: EccRuntimeEvent) => void): EccRpcRuntimeSidecar
+  createSidecar(
+    directory: string | null,
+    onEvent: (event: EccRuntimeEvent) => void,
+  ): EccRpcRuntimeSidecar
   onEvent?: (event: EccRuntimeEvent) => void
-  sessions?: WorkspaceSessionRegistry
 }
 
-interface EccWorkspaceSessionResult {
-  directory: string
-  workspaceId: string
-}
-
-function isUnknownJsonRpcFieldError(error: unknown, field: string): boolean {
-  if (!(error instanceof EccJsonRpcError)) {
-    return false
-  }
-  if (error.code !== -32602) {
-    return false
-  }
-  const data = error.data
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'message' in data &&
-    data.message === `unknown field: ${field}`
-  )
-}
-
-function hasEntries(
-  value: Record<string, unknown> | undefined,
-): value is Record<string, unknown> {
-  return value !== undefined && Object.keys(value).length > 0
-}
-
-function workspaceCreatePayload(
-  request: EccWorkspaceCreateRequest,
-  options: { includeFlowConfig: boolean; includeSdc: boolean } = {
-    includeFlowConfig: true,
-    includeSdc: true,
-  },
-): Record<string, unknown> {
-  return {
-    directory: request.directory,
-    filelist: request.filelist ?? '',
-    ...(options.includeFlowConfig && hasEntries(request.flowConfig)
-      ? { flowConfig: request.flowConfig }
-      : {}),
-    originDef: request.originDef ?? '',
-    originVerilog: request.originVerilog ?? '',
-    parameters: request.parameters ?? {},
-    pdk: request.pdk ?? '',
-    pdkJson: request.pdkJson ?? null,
-    pdkRoot: request.pdkRoot ?? '',
-    rtlList: request.rtlList ?? [],
-    ...(options.includeSdc ? { sdc: request.sdc ?? '' } : {}),
-  }
-}
-
-type RuntimeOperation<T> = () => Promise<T>
-interface RuntimeOperationMetadata {
-  rerun?: boolean
-  step?: string
-}
-
-interface InFlightOperation {
-  operationId: string
-  workspaceHandle: string | undefined
-}
-
+/**
+ * Pool facade that routes ECC RPC work to one sidecar runtime per workspace
+ * directory. Cross-directory operations run in parallel; same-directory
+ * operations remain serialized inside their runtime.
+ */
 export class EccRpcRuntimeService {
-  private readonly sessions: WorkspaceSessionRegistry
-  private readonly sidecar: EccRpcRuntimeSidecar
-  private client: EccRpcRuntimeClient | null = null
-  private readonly activeRuntimeDirectories = new Set<string>()
+  private readonly runtimes = new Map<string, EccWorkspaceRuntime>()
+  private readonly handleToDirectory = new Map<string, string>()
   private readonly eventListeners = new Set<(event: EccRuntimeEvent) => void>()
-  private readonly cancelledOperationIds = new Set<string>()
-  private helloResult: EccRpcHelloResult | null = null
-  private inFlightOperation: InFlightOperation | null = null
-  private queue = Promise.resolve()
-  private ready = false
+  private controlRuntime: EccWorkspaceRuntime | null = null
 
-  constructor(private readonly options: EccRpcRuntimeServiceOptions) {
-    this.sessions = options.sessions ?? new WorkspaceSessionRegistry()
-    this.sidecar = options.createSidecar((event) => this.handleSidecarEvent(event))
-  }
+  constructor(private readonly options: EccRpcRuntimeServiceOptions) {}
 
   get activeWorkspaceDirectory(): string | null {
-    return this.sessions.active?.directory ?? null
+    return this.handleToDirectory.values().next().value ?? null
   }
 
   onEvent(listener: (event: EccRuntimeEvent) => void): () => void {
@@ -141,95 +68,16 @@ export class EccRpcRuntimeService {
   }
 
   isWorkspaceRuntimeActive(directory: string): boolean {
-    return this.activeRuntimeDirectories.has(directory)
+    const key = normalizeWorkspacePath(directory)
+    return this.runtimes.get(key)?.isActive() ?? false
   }
 
   rpcHello(): Promise<EccRpcHelloResult> {
-    return this.enqueue('rpc.hello', undefined, async () => {
-      await this.ensureStarted()
-      if (!this.helloResult) {
-        throw new Error('ECC RPC hello completed without a result.')
-      }
-      return this.helloResult
-    })
+    return this.getOrCreateControlRuntime().rpcHello()
   }
 
   rpcPing(): Promise<EccRpcPingResult> {
-    return this.enqueue('rpc.ping', undefined, async () => {
-      const client = await this.ensureStarted()
-      return await client.call<EccRpcPingResult>('rpc.ping')
-    })
-  }
-
-  rpcShutdown(): Promise<EccRpcShutdownResult> {
-    return this.shutdownRuntime()
-  }
-
-  async cancelOperation(
-    operationId?: string,
-  ): Promise<{ cancelled: boolean; operationId?: string }> {
-    const operation = this.inFlightOperation
-    if (!operation || (operationId && operation.operationId !== operationId)) {
-      return { cancelled: false, ...(operationId ? { operationId } : {}) }
-    }
-    this.cancelledOperationIds.add(operation.operationId)
-    await this.shutdownRuntime()
-    return { cancelled: true, operationId: operation.operationId }
-  }
-
-  createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
-    return this.enqueue('workspace.create', undefined, async () => {
-      const client = await this.ensureStarted()
-      const payloadOptions = {
-        includeFlowConfig: true,
-        includeSdc: true,
-      }
-      let response: EccWorkspaceSessionResult | null = null
-      while (!response) {
-        try {
-          response = await client.call<EccWorkspaceSessionResult>(
-            'workspace.create',
-            workspaceCreatePayload(request, payloadOptions),
-          )
-        } catch (error) {
-          if (
-            payloadOptions.includeFlowConfig &&
-            isUnknownJsonRpcFieldError(error, 'flowConfig')
-          ) {
-            payloadOptions.includeFlowConfig = false
-            continue
-          }
-          if (payloadOptions.includeSdc && isUnknownJsonRpcFieldError(error, 'sdc')) {
-            payloadOptions.includeSdc = false
-            continue
-          }
-          throw error
-        }
-      }
-      const session = this.sessions.activate(response.directory, response.workspaceId)
-      return {
-        directory: session.directory,
-        workspaceHandle: session.workspaceHandle,
-      }
-    })
-  }
-
-  createWorkspacePayload(
-    payload: Record<string, unknown>,
-  ): Promise<EccWorkspaceCreateResult> {
-    return this.enqueue('workspace.create', undefined, async () => {
-      const client = await this.ensureStarted()
-      const response = await client.call<EccWorkspaceSessionResult>(
-        'workspace.create',
-        payload,
-        { timeoutMs: 0 },
-      )
-      const session = this.sessions.activate(response.directory, response.workspaceId)
-      return {
-        directory: session.directory,
-        workspaceHandle: session.workspaceHandle,
-      }
-    })
+    return this.getOrCreateControlRuntime().rpcPing()
   }
 
   callRuntime<T>(
@@ -237,395 +85,227 @@ export class EccRpcRuntimeService {
     params: Record<string, unknown> = {},
     options: { timeoutMs?: number } = {},
   ): Promise<T> {
-    return this.enqueue(method, undefined, async () => {
-      const client = await this.ensureStarted()
-      return await client.call<T>(method, params, options)
+    return this.getOrCreateControlRuntime().callRuntime(method, params, options)
+  }
+
+  async rpcShutdown(): Promise<EccRpcShutdownResult> {
+    const runtimes = this.allRuntimes()
+    this.runtimes.clear()
+    this.handleToDirectory.clear()
+    this.controlRuntime = null
+    await Promise.all(runtimes.map((runtime) => runtime.shutdown()))
+    return { ok: true }
+  }
+
+  async cancelOperation(
+    operationId?: string,
+  ): Promise<{ cancelled: boolean; operationId?: string }> {
+    const runtime = this.allRuntimes().find((candidate) =>
+      candidate.hasInFlightOperation(operationId),
+    )
+    if (!runtime) {
+      return { cancelled: false, ...(operationId ? { operationId } : {}) }
+    }
+    return await runtime.cancelOperation(operationId)
+  }
+
+  createWorkspace(request: EccWorkspaceCreateRequest): Promise<EccWorkspaceCreateResult> {
+    const requestKey = normalizeWorkspacePath(request.directory)
+    const runtime = this.getOrCreateRuntime(request.directory)
+    return runtime.createWorkspace(request).then((result) => {
+      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      return result
+    })
+  }
+
+  createWorkspacePayload(
+    payload: Record<string, unknown>,
+  ): Promise<EccWorkspaceCreateResult> {
+    const directory = typeof payload.directory === 'string' ? payload.directory : ''
+    const requestKey = normalizeWorkspacePath(directory)
+    const runtime = this.getOrCreateRuntime(directory)
+    return runtime.createWorkspacePayload(payload).then((result) => {
+      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      return result
     })
   }
 
   openWorkspace(request: EccWorkspaceOpenRequest): Promise<EccWorkspaceOpenResult> {
-    return this.enqueue('workspace.open', undefined, async () => {
-      const client = await this.ensureStarted()
-      const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
-        directory: request.directory,
-      })
-      const session = this.sessions.activate(response.directory, response.workspaceId)
-      return {
-        directory: session.directory,
-        workspaceHandle: session.workspaceHandle,
+    const requestKey = normalizeWorkspacePath(request.directory)
+    const runtime = this.getOrCreateRuntime(request.directory)
+    return runtime.openWorkspace(request).then((result) => {
+      this.bindHandleToRuntime(result.workspaceHandle, requestKey, result.directory)
+      return result
+    })
+  }
+
+  async closeWorkspace(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceCloseResult> {
+    const directory = this.requireDirectory(request.workspaceHandle)
+    const runtime = this.requireRuntime(directory)
+    try {
+      return await runtime.closeWorkspace(request)
+    } finally {
+      this.handleToDirectory.delete(request.workspaceHandle)
+      if (!runtime.hasSessions()) {
+        this.removeRuntimeAliases(runtime)
+        await runtime.shutdown()
       }
-    })
+    }
   }
 
-  closeWorkspace(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceCloseResult> {
-    return this.enqueue('workspace.close', request.workspaceHandle, async () => {
-      try {
-        let session = this.sessions.require(request.workspaceHandle)
-        if (
-          session.eccWorkspaceId &&
-          !this.sessions.hasOtherEccWorkspaceReference(
-            request.workspaceHandle,
-            session.eccWorkspaceId,
-          )
-        ) {
-          const client = await this.ensureStarted()
-          session = this.sessions.require(request.workspaceHandle)
-          if (
-            session.eccWorkspaceId &&
-            !this.sessions.hasOtherEccWorkspaceReference(
-              request.workspaceHandle,
-              session.eccWorkspaceId,
-            )
-          ) {
-            await client.call('workspace.close', {
-              workspaceId: session.eccWorkspaceId,
-            })
-          }
-        }
-        return { ok: true }
-      } finally {
-        this.sessions.close(request.workspaceHandle)
-      }
-    })
+  async workspaceHome(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceHomeResult> {
+    return this.runtimeForHandle(request.workspaceHandle).workspaceHome(request)
   }
 
-  workspaceHome(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceHomeResult> {
-    return this.enqueue('workspace.home', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceHomeResult>('workspace.home', {
-        workspaceId,
-      })
-    })
+  async workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
+    return this.runtimeForHandle(request.workspaceHandle).workspaceInfo(request)
   }
 
-  workspaceInfo(request: EccWorkspaceInfoRequest): Promise<EccWorkspaceInfoResult> {
-    return this.enqueue('workspace.info', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceInfoResult>('workspace.info', {
-        id: request.id,
-        step: request.step,
-        workspaceId,
-      })
-    })
-  }
-
-  refreshConfig(
+  async refreshConfig(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceRefreshConfigResult> {
-    return this.enqueue('workspace.refresh_config', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceRefreshConfigResult>(
-        'workspace.refresh_config',
-        {
-          workspaceId,
-        },
-      )
-    })
+    return this.runtimeForHandle(request.workspaceHandle).refreshConfig(request)
   }
 
-  syncConfig(
+  async syncConfig(
     request: EccWorkspaceSyncConfigRequest,
   ): Promise<EccWorkspaceSyncConfigResult> {
-    return this.enqueue('workspace.sync_config', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceSyncConfigResult>('workspace.sync_config', {
-        configPath: request.configPath,
-        workspaceId,
-      })
-    })
+    return this.runtimeForHandle(request.workspaceHandle).syncConfig(request)
   }
 
-  resetFlow(request: EccWorkspaceHandleRequest): Promise<EccWorkspaceResetFlowResult> {
-    return this.enqueue('workspace.reset_flow', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceResetFlowResult>('workspace.reset_flow', {
-        workspaceId,
-      })
-    })
+  async resetFlow(
+    request: EccWorkspaceHandleRequest,
+  ): Promise<EccWorkspaceResetFlowResult> {
+    return this.runtimeForHandle(request.workspaceHandle).resetFlow(request)
   }
 
-  exportSignoff(
+  async exportSignoff(
     request: EccWorkspaceExportSignoffRequest,
   ): Promise<EccWorkspaceExportSignoffResult> {
-    return this.enqueue('workspace.export_signoff', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call<EccWorkspaceExportSignoffResult>(
-        'workspace.export_signoff',
-        {
-          outputPath: request.outputPath,
-          workspaceId,
-        },
-        { timeoutMs: 0 },
-      )
-    })
+    return this.runtimeForHandle(request.workspaceHandle).exportSignoff(request)
   }
 
-  inspectSignoff(
+  async inspectSignoff(
     request: EccWorkspaceHandleRequest,
   ): Promise<EccWorkspaceInspectSignoffResult> {
-    return this.enqueue(
-      'workspace.inspect_signoff',
-      request.workspaceHandle,
-      async () => {
-        const client = await this.ensureStarted()
-        const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-        return await client.call<EccWorkspaceInspectSignoffResult>(
-          'workspace.inspect_signoff',
-          { workspaceId },
-        )
-      },
-    )
+    return this.runtimeForHandle(request.workspaceHandle).inspectSignoff(request)
   }
 
-  runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
-    const rerun = Boolean(request.rerun)
-    return this.enqueue(
-      'flow.run',
-      request.workspaceHandle,
-      async () => {
-        const client = await this.ensureStarted()
-        const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-        return await client.call<EccFlowRunResult>(
-          'flow.run',
-          {
-            rerun,
-            workspaceId,
-          },
-          { timeoutMs: 0 },
-        )
-      },
-      { rerun },
-    )
+  async runFlow(request: EccFlowRunRequest): Promise<EccFlowRunResult> {
+    return this.runtimeForHandle(request.workspaceHandle).runFlow(request)
   }
 
-  runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
-    const rerun = Boolean(request.rerun)
-    return this.enqueue(
-      'flow.run_step',
-      request.workspaceHandle,
-      async () => {
-        const client = await this.ensureStarted()
-        const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-        return await client.call<EccFlowRunStepResult>(
-          'flow.run_step',
-          {
-            rerun,
-            step: request.step,
-            workspaceId,
-          },
-          { timeoutMs: 0 },
-        )
-      },
-      { rerun, step: request.step },
-    )
+  async runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
+    return this.runtimeForHandle(request.workspaceHandle).runStep(request)
   }
 
-  runStepPayload(
+  async runStepPayload(
     workspaceHandle: string,
     payload: Record<string, unknown>,
   ): Promise<EccFlowRunStepResult> {
-    const rerun = Boolean(payload.rerun)
-    return this.enqueue(
-      'flow.run_step',
-      workspaceHandle,
-      async () => {
-        const client = await this.ensureStarted()
-        const workspaceId = await this.resolveEccWorkspaceId(workspaceHandle)
-        return await client.call<EccFlowRunStepResult>(
-          'flow.run_step',
-          {
-            ...payload,
-            rerun,
-            workspaceId,
-          },
-          { timeoutMs: 0 },
-        )
-      },
-      { rerun, step: String(payload.step ?? '') },
-    )
+    return this.runtimeForHandle(workspaceHandle).runStepPayload(workspaceHandle, payload)
   }
 
-  private async ensureStarted(): Promise<EccRpcRuntimeClient> {
-    const client = await this.sidecar.start()
-    if (client !== this.client) {
-      this.client = client
-      this.ready = false
-      this.helloResult = null
-      this.sessions.clearEccWorkspaceIds()
+  private allRuntimes(): EccWorkspaceRuntime[] {
+    return [
+      ...new Set([
+        ...this.runtimes.values(),
+        ...(this.controlRuntime ? [this.controlRuntime] : []),
+      ]),
+    ]
+  }
+
+  private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {
+    const key = normalizeWorkspacePath(directory)
+    if (!key) {
+      throw new Error('Workspace directory is empty')
     }
-    if (this.ready && this.helloResult) {
-      return client
-    }
-
-    this.helloResult = await client.call<EccRpcHelloResult>('rpc.hello', {
-      version: 1,
-    })
-    this.ready = true
-    this.emit({ type: 'runtime.ready' })
-    return client
-  }
-
-  private async resolveEccWorkspaceId(workspaceHandle: string): Promise<string> {
-    const session = this.sessions.require(workspaceHandle)
-    if (session.eccWorkspaceId) {
-      return session.eccWorkspaceId
-    }
-
-    const client = this.client ?? (await this.ensureStarted())
-    const response = await client.call<EccWorkspaceSessionResult>('workspace.open', {
-      directory: session.directory,
-    })
-    this.sessions.rebind(workspaceHandle, response.workspaceId)
-    return response.workspaceId
-  }
-
-  private async shutdownRuntime(): Promise<EccRpcShutdownResult> {
-    await this.sidecar.shutdown()
-    this.client = null
-    this.ready = false
-    this.helloResult = null
-    this.sessions.clearEccWorkspaceIds()
-    return { ok: true }
-  }
-
-  private enqueue<T>(
-    method: string,
-    workspaceHandle: string | undefined,
-    operation: RuntimeOperation<T>,
-    metadata: RuntimeOperationMetadata = {},
-  ): Promise<T> {
-    const run = async (): Promise<T> => {
-      const operationId = `operation-${randomUUID()}`
-      const runtimeDirectory = this.runtimeDirectoryForHandle(workspaceHandle)
-      if (runtimeDirectory) {
-        this.activeRuntimeDirectories.add(runtimeDirectory)
-      }
-      this.inFlightOperation = {
-        operationId,
-        workspaceHandle,
-      }
-      try {
-        this.emit({
-          logFile: this.sidecar.logFile ?? undefined,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.started',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
-        const result = await operation()
-        this.emit({
-          logFile: this.sidecar.logFile ?? undefined,
-          method,
-          operationId,
-          ...metadata,
-          type: 'operation.completed',
-          workspaceDirectory: runtimeDirectory ?? undefined,
-          workspaceHandle,
-        })
-        return result
-      } catch (error) {
-        const normalized = normalizeRuntimeError(error, {
-          logFile: this.sidecar.logFile,
-          method,
-          operationId,
-          workspaceHandle,
-        })
-        if (this.cancelledOperationIds.has(operationId)) {
-          this.emit({
-            logFile: normalized.logFile,
-            method,
-            operationId,
-            ...metadata,
-            type: 'operation.cancelled',
-            workspaceDirectory: runtimeDirectory ?? undefined,
-            workspaceHandle,
-          })
-        } else {
-          this.emit({
-            logFile: normalized.logFile,
-            message: normalized.message,
-            method,
-            operationId,
-            ...metadata,
-            type: 'operation.failed',
-            workspaceDirectory: runtimeDirectory ?? undefined,
-            workspaceHandle,
-          })
-        }
-        throw normalized
-      } finally {
-        this.cancelledOperationIds.delete(operationId)
-        if (this.inFlightOperation?.operationId === operationId) {
-          this.inFlightOperation = null
-        }
-        if (runtimeDirectory) {
-          this.activeRuntimeDirectories.delete(runtimeDirectory)
-        }
-      }
-    }
-
-    const next = this.queue.then(run, run)
-    this.queue = next.then(
-      () => undefined,
-      () => undefined,
-    )
-    return next
-  }
-
-  private handleSidecarEvent(event: EccRuntimeEvent): void {
-    if (event.type === 'operation.progress') {
-      const inFlight = this.inFlightOperation
-      if (!inFlight) return
-      this.emit({
-        ...event,
-        operationId: inFlight.operationId,
-        workspaceDirectory:
-          event.workspaceDirectory ??
-          this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ??
-          undefined,
-        workspaceHandle: inFlight.workspaceHandle,
+    let runtime = this.runtimes.get(key)
+    if (!runtime) {
+      runtime = new EccWorkspaceRuntime({
+        createSidecar: (onEvent) => this.options.createSidecar(key, onEvent),
+        directory: key,
+        onEvent: (event) => this.emit(event),
       })
-      return
+      this.runtimes.set(key, runtime)
     }
-    if (event.type === 'runtime.exited') {
-      this.client = null
-      this.ready = false
-      this.helloResult = null
-      this.sessions.clearEccWorkspaceIds()
-      const inFlight = this.inFlightOperation
-      this.emit(
-        inFlight
-          ? {
-              ...event,
-              interruptedOperationId: inFlight.operationId,
-              workspaceDirectory:
-                this.runtimeDirectoryForHandle(inFlight.workspaceHandle) ?? undefined,
-              workspaceHandle: inFlight.workspaceHandle,
-            }
-          : event,
-      )
-      return
-    }
-    this.emit(event)
+    return runtime
   }
 
-  private runtimeDirectoryForHandle(workspaceHandle: string | undefined): string | null {
-    if (!workspaceHandle) {
-      return null
+  private getOrCreateControlRuntime(): EccWorkspaceRuntime {
+    if (!this.controlRuntime) {
+      this.controlRuntime = new EccWorkspaceRuntime({
+        createSidecar: (onEvent) => this.options.createSidecar(null, onEvent),
+        directory: null,
+        onEvent: (event) => this.emit(event),
+      })
     }
-    try {
-      return this.sessions.require(workspaceHandle).directory
-    } catch {
-      return null
+    return this.controlRuntime
+  }
+
+  /**
+   * Bind a GUI handle to the runtime created for `requestKey`, then alias the
+   * ECC-canonical `resultDirectory` onto the same runtime. ECC often returns a
+   * resolved realpath that differs from the request path (symlinks).
+   */
+  private bindHandleToRuntime(
+    workspaceHandle: string,
+    requestKey: string,
+    resultDirectory: string,
+  ): void {
+    const runtime = this.runtimes.get(requestKey)
+    if (!runtime) {
+      throw new Error(`ECC workspace runtime not found for directory: ${requestKey}`)
     }
+
+    const resultKey = normalizeWorkspacePath(resultDirectory) || requestKey
+    if (resultKey === requestKey) {
+      this.handleToDirectory.set(workspaceHandle, requestKey)
+      return
+    }
+
+    const existing = this.runtimes.get(resultKey)
+    if (existing && existing !== runtime) {
+      this.handleToDirectory.set(workspaceHandle, requestKey)
+      return
+    }
+
+    this.runtimes.set(resultKey, runtime)
+    this.runtimes.set(requestKey, runtime)
+    runtime.rebindDirectory(resultKey)
+    this.handleToDirectory.set(workspaceHandle, resultKey)
+  }
+
+  private removeRuntimeAliases(runtime: EccWorkspaceRuntime): void {
+    for (const [key, value] of this.runtimes) {
+      if (value === runtime) {
+        this.runtimes.delete(key)
+      }
+    }
+  }
+
+  private requireDirectory(workspaceHandle: string): string {
+    const directory = this.handleToDirectory.get(workspaceHandle)
+    if (!directory) {
+      throw new WorkspaceSessionNotFoundError(workspaceHandle)
+    }
+    return directory
+  }
+
+  private requireRuntime(directory: string): EccWorkspaceRuntime {
+    const runtime = this.runtimes.get(directory)
+    if (!runtime) {
+      throw new Error(`ECC workspace runtime not found for directory: ${directory}`)
+    }
+    return runtime
+  }
+
+  private runtimeForHandle(workspaceHandle: string): EccWorkspaceRuntime {
+    return this.requireRuntime(this.requireDirectory(workspaceHandle))
   }
 
   private emit(event: EccRuntimeEvent): void {

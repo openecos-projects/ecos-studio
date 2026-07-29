@@ -291,6 +291,8 @@
               @select-analysis-tab="handleAnalysisTabSelection"
               @select-step="selectStep"
               @select-workspace="selectWorkspace"
+              @export-report="exportQorTrendReport"
+              @set-baseline="setQorBaseline"
             />
           </div>
         </main>
@@ -533,6 +535,8 @@ import {
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
   parseProjectManifest,
+  serializeProjectManifest,
+  setQorBaselineInManifest,
   type FlowStep,
   type ProjectFlowStatusHint,
   type ProjectManifest,
@@ -543,12 +547,13 @@ import {
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
-import { readOptionalProjectTextFile } from '@/utils/projectFiles'
+import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
 import {
   loadProjectHistory,
   rememberProjectHistoryEntry,
   removeProjectHistoryEntry,
 } from '@/utils/projectHistory'
+import { serializeProjectQorTrendReport } from '@/utils/projectQorTrend'
 
 type BranchDraft = WorkspaceBranchDraft
 
@@ -759,6 +764,72 @@ function handleAnalysisTabSelection(tab: 'dashboard' | 'step') {
     return
   }
   selectedAnalysisTab.value = tab
+}
+
+async function exportQorTrendReport() {
+  const project = selectedProject.value
+  if (!project.path) return
+
+  try {
+    await writeProjectTextFile(
+      'qor_trend.json',
+      serializeProjectQorTrendReport(project.qorTrendSummary, {
+        projectId: project.id,
+        projectName: project.name,
+        projectPath: project.path,
+      }),
+      { projectPath: project.path },
+    )
+    showToast({
+      severity: 'success',
+      summary: 'QoR report exported',
+      detail: 'qor_trend.json was written to the project root.',
+    })
+  } catch (error) {
+    console.warn('Failed to export QoR trend report.', error)
+    showToast({
+      severity: 'warn',
+      summary: 'QoR report not exported',
+      detail: 'qor_trend.json could not be written.',
+    })
+  }
+}
+
+async function setQorBaseline(payload: { workspaceId: string }) {
+  const project = selectedProject.value
+  if (!project.path) return
+
+  try {
+    const manifest =
+      projectManifests.value[project.path] ?? (await readProjectManifest(project.path))
+    const updated = setQorBaselineInManifest(
+      manifest,
+      payload.workspaceId,
+      'Selected from Dashboard QoR Overview',
+    )
+    if (updated === manifest) {
+      throw new Error(
+        `Workspace ${payload.workspaceId} is not registered in project.json.`,
+      )
+    }
+    await writeProjectTextFile('project.json', serializeProjectManifest(updated), {
+      projectPath: project.path,
+    })
+    await applyProjectManifestForProject(updated, project.path)
+    selectedWorkspaceId.value = payload.workspaceId
+    showToast({
+      severity: 'success',
+      summary: 'QoR baseline updated',
+      detail: `${payload.workspaceId} is now the project QoR baseline.`,
+    })
+  } catch (error) {
+    console.warn('Failed to update QoR baseline.', error)
+    showToast({
+      severity: 'warn',
+      summary: 'QoR baseline not updated',
+      detail: 'project.json could not be updated.',
+    })
+  }
 }
 
 function toggleDialogMaximized() {

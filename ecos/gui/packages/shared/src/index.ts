@@ -39,6 +39,7 @@ export type {
   ScannedRtlDirectory,
   VersionInfo,
   WorkspaceDirectoryReplacement,
+  WorkspaceOpenOrFocusResult,
 } from './contracts/desktopApi.ts'
 export type {
   EccFlowRunRequest,

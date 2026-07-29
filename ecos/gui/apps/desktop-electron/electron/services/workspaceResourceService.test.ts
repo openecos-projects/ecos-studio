@@ -83,11 +83,7 @@ describe('WorkspaceResourceService', () => {
     })
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.json'), '{}', 'utf8')
     await writeFile(join(root, 'place_ecc', 'output', 'gcd_place.png'), 'png', 'utf8')
-    await writeFile(
-      join(root, 'place_ecc', 'analysis', 'place_metrics.json'),
-      '{}',
-      'utf8',
-    )
+    await writeFile(join(root, 'place_ecc', 'analysis', 'qor_metrics.json'), '{}', 'utf8')
 
     const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
     const index = await service.getIndex()
@@ -632,7 +628,7 @@ describe('WorkspaceResourceService', () => {
     })
     await writeJson(join(root, 'home', 'home.json'), {})
     await writeFile(
-      join(root, 'Synthesis_yosys', 'analysis', 'Synthesis_metrics.json'),
+      join(root, 'Synthesis_yosys', 'analysis', 'qor_metrics.json'),
       '{}',
       'utf8',
     )
@@ -660,7 +656,7 @@ describe('WorkspaceResourceService', () => {
       id: 'analysis',
       response: 'available',
       info: {
-        metrics: join(root, 'Synthesis_yosys', 'analysis', 'Synthesis_metrics.json'),
+        metrics: join(root, 'Synthesis_yosys', 'analysis', 'qor_metrics.json'),
         'data summary': join(root, 'Synthesis_yosys', 'feature', 'Synthesis_stat.json'),
         'step report': {
           stat: join(root, 'Synthesis_yosys', 'report', 'Synthesis_stat.json'),

@@ -21,6 +21,7 @@ describe('useAppMenuActions', () => {
       | Partial<
           Record<
             | typeof appMenuActionIds.documentation
+            | typeof appMenuActionIds.newWindow
             | typeof appMenuActionIds.newProject
             | typeof appMenuActionIds.openProject
             | typeof appMenuActionIds.reconfigureWorkspace
@@ -36,6 +37,7 @@ describe('useAppMenuActions', () => {
     })
 
     const showNewProjectWizard = vi.fn()
+    const createWindow = vi.fn().mockResolvedValue(undefined)
     const openProject = vi.fn().mockResolvedValue(true)
     const openDocumentation = vi.fn().mockResolvedValue(undefined)
     const navigateToWorkspace = vi.fn()
@@ -44,6 +46,7 @@ describe('useAppMenuActions', () => {
     const exportSignoffPackage = vi.fn()
 
     const { handleMenuAction } = useAppMenuActions({
+      createWindow,
       navigateToWorkspace,
       openDocumentation,
       openProject,
@@ -55,6 +58,11 @@ describe('useAppMenuActions', () => {
 
     expect(useMenuEvents).toHaveBeenCalledTimes(1)
     expect(registeredHandlers).toBeDefined()
+
+    registeredHandlers?.[appMenuActionIds.newWindow]?.()
+    await Promise.resolve()
+
+    expect(createWindow).toHaveBeenCalledTimes(1)
 
     registeredHandlers?.[appMenuActionIds.newProject]?.()
     await Promise.resolve()

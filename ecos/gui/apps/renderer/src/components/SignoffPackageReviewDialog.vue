@@ -12,7 +12,7 @@
     <div class="signoff-package-review-content">
       <div v-if="loading" class="signoff-package-review-loading" role="status">
         <i class="ri-loader-4-line animate-spin" aria-hidden="true" />
-        <span>Checking signoff package resources...</span>
+        <span>Rechecking current signoff outputs...</span>
       </div>
 
       <div v-else-if="error" class="signoff-package-review-error" role="alert">
@@ -30,8 +30,8 @@
           <button
             type="button"
             class="signoff-package-review-refresh"
-            title="Refresh review"
-            aria-label="Refresh review"
+            title="Recheck current outputs"
+            aria-label="Recheck current outputs"
             @click="emit('refresh')"
           >
             <i class="ri-refresh-line" aria-hidden="true" />
@@ -90,6 +90,13 @@
                       <span :data-kind="detail.kind">{{
                         detailKindLabel(detail.kind)
                       }}</span>
+                      <span
+                        class="signoff-package-review-policy"
+                        :data-policy="detail.policy"
+                      >
+                        {{ detail.owner === 'qor' ? 'QoR' : 'Checklist' }} ·
+                        {{ detail.policy === 'block' ? 'Blocking' : 'Attention' }}
+                      </span>
                       <strong>{{ detail.label }}</strong>
                     </dt>
                     <dd>
@@ -142,6 +149,7 @@
 
 <script setup lang="ts">
 import type {
+  EccSignoffReviewDetail,
   EccSignoffReviewStatus,
   EccWorkspaceInspectSignoffResult,
 } from '@ecos-studio/shared'
@@ -183,19 +191,19 @@ function statusSummary(status: EccSignoffReviewStatus): string {
   return 'Resolve the blocking resources before exporting this package.'
 }
 
-function detailKindLabel(kind: 'resource' | 'flow' | 'checklist'): string {
-  if (kind === 'resource') return 'Resource'
+function detailKindLabel(kind: EccSignoffReviewDetail['kind']): string {
   if (kind === 'flow') return 'Flow'
+  if (kind === 'quality_gate') return 'QoR Gate'
+  if (kind === 'artifact') return 'Artifact'
+  if (kind === 'configuration') return 'Configuration'
+  if (kind === 'provenance') return 'Provenance'
+  if (kind === 'report') return 'Report'
+  if (kind === 'freshness') return 'Analysis Refresh'
   return 'Checklist'
 }
 
-function detailKey(detail: {
-  kind: string
-  label: string
-  location: string
-  reason: string
-}): string {
-  return `${detail.kind}-${detail.label}-${detail.location}-${detail.reason}`
+function detailKey(detail: EccSignoffReviewDetail): string {
+  return `${detail.kind}-${detail.owner}-${detail.policy}-${detail.label}-${detail.location}-${detail.reason}`
 }
 </script>
 
@@ -435,12 +443,33 @@ function detailKey(detail: {
   padding: 0 5px;
 }
 
+.signoff-package-review-details .signoff-package-review-policy {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.signoff-package-review-details .signoff-package-review-policy[data-policy='block'] {
+  background: color-mix(in srgb, var(--danger-bg) 68%, transparent);
+  color: var(--danger-color);
+}
+
 .signoff-package-review-details [data-kind='flow'] {
   background: color-mix(in srgb, var(--danger-bg) 70%, transparent);
   color: var(--danger-color);
 }
 
-.signoff-package-review-details [data-kind='checklist'] {
+.signoff-package-review-details [data-kind='artifact'],
+.signoff-package-review-details [data-kind='report'] {
+  background: color-mix(in srgb, var(--warn-bg) 70%, transparent);
+  color: var(--warn-color);
+}
+
+.signoff-package-review-details [data-kind='quality_gate'] {
+  background: color-mix(in srgb, var(--danger-bg) 60%, transparent);
+  color: var(--danger-color);
+}
+
+.signoff-package-review-details [data-kind='freshness'] {
   background: color-mix(in srgb, var(--warn-bg) 70%, transparent);
   color: var(--warn-color);
 }

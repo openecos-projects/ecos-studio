@@ -103,6 +103,7 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
       confirmClose: vi.fn(),
       setTitle: vi.fn(),
       isMaximized: vi.fn(),
+      create: vi.fn(),
       onCloseRequested: vi.fn(),
       onResized: vi.fn(),
       onMaximizedChanged: vi.fn(),
@@ -132,6 +133,10 @@ function createDesktopApiMock(overrides: Partial<DesktopApi> = {}): DesktopApi {
     },
     workspace: {
       isProjectDirectory: vi.fn(),
+      openOrFocus: vi.fn(async () => ({ action: 'proceed' as const })),
+      bindWindow: vi.fn(async (path: string) => path),
+      unbindWindow: vi.fn(async () => undefined),
+      getBoundPath: vi.fn(async () => null),
       registerProjectRoot: vi.fn(async (path: string) => path),
       clearProjectRoot: vi.fn(),
       requestProjectPathAccess: vi.fn(),
@@ -326,6 +331,140 @@ describe('useWorkspace openProject', () => {
     expect(settingsData.get('current_project_path')).toBe('/work/old')
   })
 
+  it('focuses another window instead of loading a workspace already open elsewhere', async () => {
+    const workspace = useWorkspace()
+    vi.mocked(desktopApi.workspace.openOrFocus).mockResolvedValueOnce({
+      action: 'focused',
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/demo',
+        name: 'demo',
+        path: '/work/demo',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.openOrFocus).toHaveBeenCalledWith('/work/demo')
+    expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.bindWindow).not.toHaveBeenCalled()
+    expect(workspace.currentProject.value).toBeNull()
+  })
+
+  it('restores the previous registry binding when a workspace switch fails', async () => {
+    const workspace = useWorkspace()
+    workspace.currentProject.value = {
+      id: '/work/a',
+      name: 'a',
+      path: '/work/a',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    settingsData.set('current_project_path', '/work/a')
+    activeProjectRoot = '/work/a'
+
+    vi.mocked(desktopApi.workspace.openOrFocus).mockResolvedValueOnce({
+      action: 'proceed',
+      previousPath: '/work/a',
+    })
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'failed',
+      data: {},
+      message: ['boom'],
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/b',
+        name: 'b',
+        path: '/work/b',
+        lastOpened: new Date('2026-01-02T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(false)
+
+    expect(desktopApi.workspace.unbindWindow).toHaveBeenCalledWith('/work/b')
+    expect(desktopApi.workspace.bindWindow).toHaveBeenCalledWith('/work/a')
+    expect(workspace.currentProject.value?.path).toBe('/work/a')
+  })
+
+  it('does not close the current workspace when newProject affinity focuses another window', async () => {
+    const workspace = useWorkspace()
+    workspace.currentProject.value = {
+      id: '/work/a',
+      name: 'a',
+      path: '/work/a',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    settingsData.set('current_project_path', '/work/a')
+
+    vi.mocked(desktopApi.workspace.openOrFocus).mockResolvedValueOnce({
+      action: 'focused',
+    })
+
+    await expect(
+      workspace.newProject({
+        directory: '/work/taken',
+        pdk: 'ics55',
+        pdk_root: '/pdk/ics55',
+        parameters: {
+          design: 'taken',
+          top_module: 'top',
+          clock: 'clk',
+        },
+        origin_def: '',
+        origin_verilog: '',
+        rtl_list: [],
+      }),
+    ).resolves.toBe(false)
+
+    expect(createWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(desktopApi.workspace.clearProjectRoot).not.toHaveBeenCalled()
+    expect(workspace.currentProject.value?.path).toBe('/work/a')
+    expect(settingsData.get('current_project_path')).toBe('/work/a')
+  })
+
+  it('does not clear another window current_project_path hint when closing a different path', async () => {
+    const workspace = useWorkspace()
+    workspace.currentProject.value = {
+      id: '/work/a',
+      name: 'a',
+      path: '/work/a',
+      lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+    }
+    settingsData.set('current_project_path', '/work/b')
+
+    await workspace.closeProject()
+
+    expect(settingsData.get('current_project_path')).toBe('/work/b')
+    expect(workspace.currentProject.value).toBeNull()
+  })
+
+  it('binds the window after a successful open and unbinds on close', async () => {
+    const workspace = useWorkspace()
+    loadWorkspaceApiMock.mockResolvedValueOnce({
+      response: 'success',
+      data: {
+        directory: '/work/demo',
+        workspace_handle: 'workspace-demo',
+      },
+    })
+
+    await expect(
+      workspace.openProject({
+        id: '/work/demo',
+        name: 'demo',
+        path: '/work/demo',
+        lastOpened: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ).resolves.toBe(true)
+
+    expect(desktopApi.workspace.bindWindow).toHaveBeenCalledWith('/work/demo')
+
+    await workspace.closeProject()
+
+    expect(desktopApi.workspace.unbindWindow).toHaveBeenCalledWith('/work/demo')
+  })
+
   it('stops before loading when the selected directory is not an ECOS workspace', async () => {
     const workspace = useWorkspace()
 
@@ -336,6 +475,27 @@ describe('useWorkspace openProject', () => {
     expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
     expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
     expect(desktopApi.workspace.isProjectDirectory).toHaveBeenCalledWith('/work/not-ecos')
+    expect(workspace.currentProject.value).toBeNull()
+  })
+
+  it('rejects a quiet programmatic open for a non-workspace path without loading', async () => {
+    const workspace = useWorkspace()
+
+    vi.mocked(desktopApi.workspace.isProjectDirectory).mockResolvedValueOnce(false)
+
+    expect(
+      await workspace.openProject(
+        {
+          id: '/work/not-ecos',
+          name: 'not-ecos',
+          path: '/work/not-ecos',
+          lastOpened: new Date(),
+        },
+        { quiet: true },
+      ),
+    ).toBe(false)
+    expect(loadWorkspaceApiMock).not.toHaveBeenCalled()
+    expect(waitForRuntimeReadyMock).not.toHaveBeenCalled()
     expect(workspace.currentProject.value).toBeNull()
   })
 
