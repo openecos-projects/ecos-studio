@@ -8,7 +8,7 @@
       <header class="disassembly-toolbar">
         <div class="disassembly-title">
           <strong :title="path">{{ fileName(path) }}</strong>
-          <span :title="sourcePath || path">{{ sourcePath || path }}</span>
+          <span :title="path">{{ path }}</span>
         </div>
         <div class="disassembly-actions">
           <label class="address-field" title="Instruction address">
@@ -39,6 +39,15 @@
             @click="void loadDisassembly()"
           >
             <i :class="loading ? 'ri-loader-4-line spin' : 'ri-refresh-line'"></i>
+          </button>
+          <button
+            v-if="closable"
+            type="button"
+            class="icon-action"
+            title="Close disassembly"
+            @click="emit('close')"
+          >
+            <i class="ri-close-line"></i>
           </button>
         </div>
       </header>
@@ -78,9 +87,13 @@ import {
 
 const props = defineProps<{
   path: string
-  sourcePath?: string
   targetAddress?: string
   targetToken?: number
+  closable?: boolean
+}>()
+
+const emit = defineEmits<{
+  close: []
 }>()
 
 const { currentProject } = useWorkspace()
