@@ -54,7 +54,25 @@ build_chip_viewer() {
 }
 
 build_geometry_snapshot() {
-  cmake --build "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build" \
+  local ecc_tools_dir="$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools"
+  local python_executable="$REPO_ROOT/ecc/.venv/bin/python"
+  local python_include_dir
+  local python_numpy_include_dir
+
+  python_include_dir="$($python_executable -c 'import sysconfig; print(sysconfig.get_path("platinclude"))')"
+  python_numpy_include_dir="$($python_executable -c 'import numpy; print(numpy.get_include())')"
+
+  # scikit-build configures the editable extension with a temporary Python
+  # environment.  That directory disappears after installation, so refresh
+  # CMake's Python discovery against ECC's persistent virtual environment
+  # before building the standalone geometry snapshot.
+  cmake -S "$ecc_tools_dir" -B "$ecc_tools_dir/build" \
+    -DPython_EXECUTABLE="$python_executable" \
+    -DPYTHON_EXECUTABLE="$python_executable" \
+    -DPython_INCLUDE_DIR="$python_include_dir" \
+    -DPython_NumPy_INCLUDE_DIR="$python_numpy_include_dir"
+
+  cmake --build "$ecc_tools_dir/build" \
     --target ecc_geometry_snapshot \
     --parallel "$(nproc)"
 }
