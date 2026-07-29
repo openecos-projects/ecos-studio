@@ -55,7 +55,8 @@ build_chip_viewer() {
 
 build_geometry_snapshot() {
   cmake --build "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build" \
-    --target ecc_geometry_snapshot
+    --target ecc_geometry_snapshot \
+    --parallel "$(nproc)"
 }
 
 resolve_geometry_snapshot_binary() {
