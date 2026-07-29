@@ -929,6 +929,46 @@ pub fn layer_summaries_from_shapes_and_metadata(
     summaries
 }
 
+/// Builds the physical-layer catalog from the technology metadata exported by
+/// IDB.  Geometry contributes only the live-shape count for each catalog
+/// entry; it does not decide which physical layers exist.
+pub fn layer_catalog_from_metadata_and_shapes(
+    metadata: &[LayerMetadata],
+    shapes: &[ShapeRecord],
+) -> Vec<LayerSummary> {
+    let mut counts = BTreeMap::<u16, usize>::new();
+    for shape in shapes {
+        if shape.state != ShapeState::Alive as u8 {
+            continue;
+        }
+        *counts.entry(shape.layer_id).or_insert(0) += 1;
+    }
+
+    let mut catalog = metadata
+        .iter()
+        .map(|metadata| LayerSummary {
+            layer_id: metadata.layer_id,
+            shape_count: counts.get(&metadata.layer_id).copied().unwrap_or(0),
+            order: metadata.order,
+            name: metadata.name.clone(),
+            layer_type: metadata.layer_type.clone(),
+            direction: metadata.direction.clone(),
+            width: metadata.width,
+            pitch_x: metadata.pitch_x,
+            pitch_y: metadata.pitch_y,
+            min_spacing: metadata.min_spacing,
+            min_area: metadata.min_area,
+            min_step: metadata.min_step,
+            cut_spacing: metadata.cut_spacing,
+            enclosure_below: metadata.enclosure_below.clone(),
+            enclosure_above: metadata.enclosure_above.clone(),
+            lef58_rule_count: metadata.lef58_rule_count,
+        })
+        .collect::<Vec<_>>();
+    catalog.sort_by_key(|layer| (layer.order, layer.layer_id));
+    catalog
+}
+
 fn layer_summary_defaults(layer_id: u16) -> LayerSummary {
     LayerSummary {
         layer_id,
@@ -1442,6 +1482,16 @@ impl ChipViewDb {
         )
     }
 
+    /// Returns the physical-layer catalog defined by the IDB-derived layer
+    /// metadata side file.  Empty or unknown geometry layers are deliberately
+    /// excluded so UI controls cannot infer technology from rendered shapes.
+    pub fn layer_catalog(&self) -> Vec<LayerSummary> {
+        layer_catalog_from_metadata_and_shapes(
+            self.snapshot.layer_metadata(),
+            self.snapshot.shapes(),
+        )
+    }
+
     pub fn site_metadata(&self) -> &[SiteMetadata] {
         self.snapshot.site_metadata()
     }
@@ -1800,6 +1850,36 @@ mod tests {
         assert_eq!(summaries[1].min_area, 400);
         assert_eq!(summaries[1].min_step, 50);
         assert_eq!(summaries[1].lef58_rule_count, 5);
+    }
+
+    #[test]
+    fn layer_catalog_uses_idb_metadata_even_without_geometry() {
+        let catalog = layer_catalog_from_metadata_and_shapes(
+            &[
+                chipgeom_reader::LayerMetadata {
+                    layer_id: 3,
+                    order: 9,
+                    name: "M3".to_string(),
+                    layer_type: "routing".to_string(),
+                    ..chipgeom_reader::LayerMetadata::default()
+                },
+                chipgeom_reader::LayerMetadata {
+                    layer_id: 7,
+                    order: 11,
+                    name: "V7".to_string(),
+                    layer_type: "cut".to_string(),
+                    ..chipgeom_reader::LayerMetadata::default()
+                },
+            ],
+            &[shape(1, 3), shape(2, 1)],
+        );
+
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0].layer_id, 3);
+        assert_eq!(catalog[0].shape_count, 1);
+        assert_eq!(catalog[1].layer_id, 7);
+        assert_eq!(catalog[1].shape_count, 0);
+        assert!(catalog.iter().all(|layer| layer.layer_id != 1));
     }
 
     #[test]

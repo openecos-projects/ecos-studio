@@ -1300,6 +1300,14 @@ impl LoadedViewer {
 
     fn sidebar_physical_layers_section(&mut self, ui: &mut egui::Ui, max_height: f32) {
         section_heading(ui, "PHYSICAL LAYERS");
+        if self.layers.is_empty() {
+            ui.label(
+                egui::RichText::new("IDB layer metadata is unavailable for this snapshot.")
+                    .small()
+                    .color(ecos_text_secondary()),
+            );
+            return;
+        }
         ui.horizontal(|ui| {
             if ui.small_button("All").clicked() {
                 set_layer_visibility(&mut self.layers, true);
@@ -1696,6 +1704,15 @@ impl LoadedViewer {
             .iter()
             .map(|layer| (layer.layer_id, layer.style))
             .collect();
+        let mut all_layers = all_layers;
+        all_layers.entry(LAYOUT_GEOMETRY_LAYER).or_insert_with(|| {
+            LayerStyle::default_for_metadata_with_type(
+                LAYOUT_GEOMETRY_LAYER,
+                "LAYOUT",
+                "layout",
+                self.layers.len(),
+            )
+        });
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
             .iter()
@@ -3188,7 +3205,7 @@ fn context_style(mut style: LayerStyle, frame_alpha: u8, line_width_px: u8) -> L
 }
 
 fn layer_ui_states(db: &ChipViewDb, visibility: &BTreeMap<LayerId, bool>) -> Vec<LayerUiState> {
-    db.layer_summaries()
+    db.layer_catalog()
         .into_iter()
         .enumerate()
         .map(|(index, summary)| {
