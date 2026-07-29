@@ -555,6 +555,94 @@ describe('ResourceManagerService', () => {
     })
   })
 
+  it('marks the RISC-V toolchain invalid when objdump is missing', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const riscvRoot = join(toolsDir, 'riscv-toolchain', '2026.06.06')
+    await mkdir(join(riscvRoot, 'bin'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+
+    const presentExecutables = [
+      'riscv64-unknown-elf-gcc',
+      'riscv64-unknown-elf-ld',
+      'riscv64-unknown-elf-objcopy',
+    ]
+    for (const executable of presentExecutables) {
+      await writeFile(join(riscvRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
+      await chmod(join(riscvRoot, 'bin', executable), 0o755)
+    }
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        schema_version: 2,
+        tools: [
+          {
+            name: 'riscv-toolchain',
+            display_name: 'RISC-V GCC & Binutils Toolchain',
+            description: 'RISC-V compiler and binary utilities',
+            category: 'toolchain',
+            homepage: 'https://github.com/riscv-collab/riscv-gnu-toolchain',
+            versions: [
+              {
+                version: '2026.06.06',
+                platforms: {
+                  'all-platform': {
+                    url: 'https://example.com/riscv-toolchain.tar.xz',
+                    sha256: 'a'.repeat(64),
+                    size: 1024,
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        pdks: [],
+      }),
+      'utf8',
+    )
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:riscv-toolchain': {
+            type: 'tool',
+            name: 'riscv-toolchain',
+            version: '2026.06.06',
+            path: riscvRoot,
+            executable: 'bin/riscv64-unknown-elf-gcc',
+            detected_executables: presentExecutables.map(
+              (executable) => `bin/${executable}`,
+            ),
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      registryUrl: `file://${registryPath}`,
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    await expect(service.getResource('tool:riscv-toolchain')).resolves.toMatchObject({
+      id: 'tool:riscv-toolchain',
+      status: 'invalid',
+      active: false,
+      error:
+        'Installed resource is missing required files: bin/riscv64-unknown-elf-objdump',
+      health: expect.objectContaining({
+        status: 'invalid',
+        missing_markers: ['bin/riscv64-unknown-elf-objdump'],
+      }),
+    })
+  })
+
   it('builds a runtime env from active healthy Resource Manager resources', async () => {
     const root = await createTempDir('ecos-resources-')
     const resourcesDir = join(root, 'state', 'resources')
@@ -595,6 +683,15 @@ describe('ResourceManagerService', () => {
       '#!/bin/sh\n',
       'utf8',
     )
+    for (const executable of [
+      'riscv64-unknown-elf-gcc',
+      'riscv64-unknown-elf-ld',
+      'riscv64-unknown-elf-objdump',
+      'riscv64-unknown-elf-objcopy',
+    ]) {
+      await writeFile(join(riscvRoot, 'bin', executable), '#!/bin/sh\n', 'utf8')
+      await chmod(join(riscvRoot, 'bin', executable), 0o755)
+    }
     await writeFile(
       join(eccFeExamplesRoot, 'examples', 'cl3', 'filelist.cpu.f'),
       'cl3_verilog/cpu_top.sv\n',

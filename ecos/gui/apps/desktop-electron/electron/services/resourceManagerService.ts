@@ -2957,6 +2957,14 @@ function requiredToolMarkers(normalizedName: string): string[] {
   if (normalizedName === 'verilator') {
     return ['bin/verilator', 'bin/verilator_bin', 'share/verilator/include/verilated.cpp']
   }
+  if (normalizedName === 'riscv-toolchain') {
+    return [
+      'bin/riscv64-unknown-elf-gcc',
+      'bin/riscv64-unknown-elf-ld',
+      'bin/riscv64-unknown-elf-objdump',
+      'bin/riscv64-unknown-elf-objcopy',
+    ]
+  }
   if (normalizedName === 'ecc-fe') {
     return ['bin/ecc-fe', 'fecompiler']
   }
