@@ -66,7 +66,7 @@ const specRows = computed<[string, string][]>(() => {
     ['Workspace', contract.directory],
     ['Project Root', contract.project_context.project_root],
     ['Project Name', contract.project_context.project_name],
-    ['Workspace Name', contract.project_context.project_name],
+    ['Workspace Name', parameters.design],
     ['Flow', `${contract.flow_config.start_step} to ${contract.flow_config.end_step}`],
     ['Flow Steps', contract.flow_config.steps.join(' to ')],
     ['RTL', contract.rtl_list[0] ?? '-'],

@@ -25,6 +25,10 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).not.toContain('<dl')
   })
 
+  it('uses the design name as the displayed workspace name', () => {
+    expect(source).toContain("['Workspace Name', parameters.design]")
+  })
+
   it('keeps the specification selectable and permits retrying a failed setup id', () => {
     expect(source).toContain('class="selectable w-full')
     expect(source).toContain('if (!setupId) {')
