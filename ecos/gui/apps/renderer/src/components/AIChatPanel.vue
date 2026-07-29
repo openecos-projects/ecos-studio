@@ -133,6 +133,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     workspaceSetupContract.value = event.workspaceSetup
     workspaceSetupMessage.value = event.text ?? ''
+    scrollWorkspaceSetupIntoView()
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
@@ -151,6 +152,12 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
 
 function agentErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function scrollWorkspaceSetupIntoView(): void {
+  nextTick(() => {
+    requestAnimationFrame(() => scrollToBottom(false))
+  })
 }
 
 // Near-bottom 阈值（像素）

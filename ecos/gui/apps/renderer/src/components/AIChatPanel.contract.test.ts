@@ -21,6 +21,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('workspace_create_result:')
     expect(source).not.toContain('Workspace creation was not completed.')
     expect(source).toContain('workspaceSetupMessage.value = event.text')
+    expect(source).toContain('scrollWorkspaceSetupIntoView()')
     expect(source).not.toContain(
       "if (event.text) messageStore.addAssistantMessage(event.text, 'done')",
     )
