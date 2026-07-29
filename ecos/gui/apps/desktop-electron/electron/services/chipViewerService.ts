@@ -232,9 +232,13 @@ type SnapshotBuildReason =
   | { detail: string; kind: 'invalid-manifest' }
   | { kind: 'stale'; source: SnapshotSourcePath }
 
-function defaultExecFile(file: string, args: string[]): Promise<ExecFileResult> {
+function defaultExecFile(
+  file: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<ExecFileResult> {
   return new Promise((resolve, reject) => {
-    execFileCallback(file, args, { encoding: 'utf8' }, (error, stdout, stderr) => {
+    execFileCallback(file, args, { encoding: 'utf8', env }, (error, stdout, stderr) => {
       if (error) {
         reject(Object.assign(error, { stderr, stdout }))
         return
@@ -651,7 +655,11 @@ export class ChipViewerService {
     this.env = options.env ?? process.env
     this.closeLogFile = options.closeLogFile ?? closeSync
     this.ensureDirectory = options.ensureDirectory ?? defaultEnsureDirectory
-    this.execFile = options.execFile ?? defaultExecFile
+    // Snapshot and image generation use native ECC binaries. They need the
+    // same packaged runtime-library environment as the ECC sidecar, including
+    // LD_LIBRARY_PATH for ecc_tools_bin.
+    this.execFile =
+      options.execFile ?? ((file, args) => defaultExecFile(file, args, this.env))
     this.fileExists = options.fileExists ?? existsSync
     this.getFileModifiedTime = options.getFileModifiedTime ?? defaultGetFileModifiedTime
     this.isPackaged = options.isPackaged

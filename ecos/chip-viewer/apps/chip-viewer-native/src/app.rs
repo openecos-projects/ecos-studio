@@ -2091,6 +2091,14 @@ impl LoadedViewer {
     }
 
     fn begin_edit_drag(&mut self, pos: egui::Pos2, world: Rect32, canvas: egui::Rect) -> bool {
+        if !can_start_edit_command(
+            self.draft.is_some(),
+            self.pending_edit.is_some(),
+            self.pending_session_action.is_some(),
+        ) {
+            self.last_edit_result = Some("wait for the current edit to finish".to_string());
+            return false;
+        }
         let Some(shape_id) = self.selected else {
             return false;
         };
@@ -4473,6 +4481,14 @@ fn should_use_view_tiles_for_state(
     // Highlights and selection are rendered as exact overlays on top of the
     // tile summary. Draft/edit mode still needs the exact base geometry.
     zoom <= 0.35 && viewport_area >= world_area.saturating_mul(6)
+}
+
+fn can_start_edit_command(
+    has_draft: bool,
+    has_pending_edit: bool,
+    has_pending_session_action: bool,
+) -> bool {
+    !has_draft && !has_pending_edit && !has_pending_session_action
 }
 
 fn edit_poll_repaint_interval(has_pending_command: bool) -> Option<Duration> {
@@ -7214,6 +7230,14 @@ mod tests {
             Some(std::time::Duration::from_millis(100))
         );
         assert_eq!(edit_poll_repaint_interval(false), None);
+    }
+
+    #[test]
+    fn pending_edit_or_session_action_blocks_a_new_edit_command() {
+        assert!(can_start_edit_command(false, false, false));
+        assert!(!can_start_edit_command(true, false, false));
+        assert!(!can_start_edit_command(false, true, false));
+        assert!(!can_start_edit_command(false, false, true));
     }
 
     #[test]
