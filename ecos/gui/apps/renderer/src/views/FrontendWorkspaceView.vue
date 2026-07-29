@@ -1653,6 +1653,7 @@
                           <th>Cycles</th>
                           <th>Outcome</th>
                           <th>Difftest</th>
+                          <th>Code</th>
                           <th>RC</th>
                           <th>Wave</th>
                           <th>Image</th>
@@ -1701,9 +1702,36 @@
                             <span class="path-pill">{{ caseTermination(testCase) }}</span>
                           </td>
                           <td>
-                            <span class="path-pill">{{
+                            <button
+                              v-if="
+                                caseDifftestPc(testCase) && testCase.program?.disassembly
+                              "
+                              type="button"
+                              class="path-pill path-button difftest-jump"
+                              :title="`Open disassembly at ${caseDifftestPc(testCase)}`"
+                              @click.stop="
+                                openDisassembly(testCase, caseDifftestPc(testCase))
+                              "
+                            >
+                              <i class="ri-focus-3-line"></i>
+                              {{ caseDifftestStatus(testCase) }}
+                              <small>{{ caseDifftestPc(testCase) }}</small>
+                            </button>
+                            <span v-else class="path-pill">{{
                               caseDifftestStatus(testCase)
                             }}</span>
+                          </td>
+                          <td>
+                            <button
+                              v-if="testCase.program?.disassembly"
+                              type="button"
+                              class="case-icon-action"
+                              :title="`Open ${testCase.name} disassembly`"
+                              @click.stop="openDisassembly(testCase)"
+                            >
+                              <i class="ri-code-s-slash-line"></i>
+                            </button>
+                            <span v-else class="path-pill">-</span>
                           </td>
                           <td>{{ testCase.returncode ?? '-' }}</td>
                           <td>
@@ -1733,12 +1761,35 @@
                   <section class="sim-terminal-card">
                     <header class="sim-terminal-head">
                       <div>
-                        <span>Simulation Terminal</span>
+                        <span>{{
+                          simCaseViewMode === 'disassembly'
+                            ? 'Disassembly'
+                            : 'Simulation Terminal'
+                        }}</span>
                         <strong>{{ simTerminalTitle }}</strong>
                       </div>
                       <div class="sim-terminal-actions">
+                        <div class="sim-view-switch" aria-label="Case detail view">
+                          <button
+                            type="button"
+                            :class="{ active: simCaseViewMode === 'terminal' }"
+                            title="Simulation terminal"
+                            @click="simCaseViewMode = 'terminal'"
+                          >
+                            <i class="ri-terminal-box-line"></i>
+                          </button>
+                          <button
+                            type="button"
+                            :class="{ active: simCaseViewMode === 'disassembly' }"
+                            title="Disassembly"
+                            :disabled="!selectedDisassemblyPath"
+                            @click="selectedCase && openDisassembly(selectedCase)"
+                          >
+                            <i class="ri-code-s-slash-line"></i>
+                          </button>
+                        </div>
                         <select
-                          v-if="simTerminalLogs.length"
+                          v-if="simCaseViewMode === 'terminal' && simTerminalLogs.length"
                           v-model="selectedLogPath"
                           class="log-select compact"
                           @change="loadSelectedLog"
@@ -1752,6 +1803,7 @@
                           </option>
                         </select>
                         <button
+                          v-if="simCaseViewMode === 'terminal'"
                           type="button"
                           class="icon-action compact"
                           :disabled="logLoading || !selectedLogPath"
@@ -1768,7 +1820,12 @@
                       </div>
                     </header>
                     <div
-                      v-if="selectedCase && !selectedCase.ok && selectedCase.failure"
+                      v-if="
+                        simCaseViewMode === 'terminal' &&
+                        selectedCase &&
+                        !selectedCase.ok &&
+                        selectedCase.failure
+                      "
                       class="sim-failure-summary"
                     >
                       <strong>{{
@@ -1779,7 +1836,18 @@
                         selectedCase.failure.first_error
                       }}</span>
                     </div>
-                    <pre class="sim-terminal-output">{{ simTerminalContent }}</pre>
+                    <pre
+                      v-if="simCaseViewMode === 'terminal'"
+                      class="sim-terminal-output"
+                      >{{ simTerminalContent }}</pre
+                    >
+                    <FrontendDisassemblyViewer
+                      v-else
+                      :path="selectedDisassemblyPath"
+                      :source-path="selectedProgramSourcePath"
+                      :target-address="disassemblyTarget.address"
+                      :target-token="disassemblyTarget.token"
+                    />
                   </section>
                 </SplitterPanel>
               </Splitter>
@@ -1804,6 +1872,7 @@
                         <th>Cycles</th>
                         <th>Outcome</th>
                         <th>Difftest</th>
+                        <th>Code</th>
                         <th>RC</th>
                         <th>Wave</th>
                         <th>Image</th>
@@ -1852,9 +1921,36 @@
                           <span class="path-pill">{{ caseTermination(testCase) }}</span>
                         </td>
                         <td>
-                          <span class="path-pill">{{
+                          <button
+                            v-if="
+                              caseDifftestPc(testCase) && testCase.program?.disassembly
+                            "
+                            type="button"
+                            class="path-pill path-button difftest-jump"
+                            :title="`Open disassembly at ${caseDifftestPc(testCase)}`"
+                            @click.stop="
+                              openDisassembly(testCase, caseDifftestPc(testCase))
+                            "
+                          >
+                            <i class="ri-focus-3-line"></i>
+                            {{ caseDifftestStatus(testCase) }}
+                            <small>{{ caseDifftestPc(testCase) }}</small>
+                          </button>
+                          <span v-else class="path-pill">{{
                             caseDifftestStatus(testCase)
                           }}</span>
+                        </td>
+                        <td>
+                          <button
+                            v-if="testCase.program?.disassembly"
+                            type="button"
+                            class="case-icon-action"
+                            :title="`Open ${testCase.name} disassembly`"
+                            @click.stop="openDisassembly(testCase)"
+                          >
+                            <i class="ri-code-s-slash-line"></i>
+                          </button>
+                          <span v-else class="path-pill">-</span>
                         </td>
                         <td>{{ testCase.returncode ?? '-' }}</td>
                         <td>
@@ -2023,6 +2119,7 @@ import {
   type SimSuite,
 } from '@/utils/simRunContext'
 import { getDesktopApi } from '@/platform/desktop'
+import FrontendDisassemblyViewer from '@/components/frontend/FrontendDisassemblyViewer.vue'
 import FrontendSrcWorkspace from '@/components/frontend/FrontendSrcWorkspace.vue'
 import FrontendWaveWorkspace from '@/components/frontend/FrontendWaveWorkspace.vue'
 import Splitter from 'primevue/splitter'
@@ -2050,6 +2147,13 @@ interface SimCase {
   run_log?: string
   wave?: string
   run_id?: string
+  program?: {
+    source?: string
+    elf?: string
+    binary?: string
+    image?: string
+    disassembly?: string
+  }
   validation?: {
     type?: string
     required_markers?: string[]
@@ -2478,6 +2582,8 @@ const error = ref('')
 const detail = ref<FrontendStepDetail | null>(null)
 const activeTab = ref<TabId>('summary')
 const selectedCase = ref<SimCase | null>(null)
+const simCaseViewMode = ref<'terminal' | 'disassembly'>('terminal')
+const disassemblyTarget = ref({ address: '', token: 0 })
 const selectedLogPath = ref('')
 const logContent = ref('')
 const activeSource = ref<FrontendSourceSelection | null>(null)
@@ -2736,6 +2842,12 @@ const shouldShowSimTerminal = computed(
     (runBusy.value || cases.value.length > 0 || textViewFiles.value.length > 0),
 )
 const simTerminalLogs = computed(() => textViewFiles.value)
+const selectedDisassemblyPath = computed(
+  () => selectedCase.value?.program?.disassembly || '',
+)
+const selectedProgramSourcePath = computed(
+  () => selectedCase.value?.program?.source || '',
+)
 const simTerminalTitle = computed(() => {
   if (runBusy.value) return `Running ${runningSimSuiteLabel.value}`
   if (selectedCase.value?.name)
@@ -4295,12 +4407,24 @@ function caseDifftestStatus(testCase: SimCase): string {
   )
 }
 
+function caseDifftestPc(testCase: SimCase): string {
+  const difftest = testCase.metrics?.difftest
+  return String(
+    difftest?.first_mismatch?.pc || difftest?.last_pc || difftest?.last_npc || '',
+  )
+}
+
 function signedNumber(value: unknown): string {
   const numeric = numberValue(value)
   return numeric > 0 ? `+${numeric}` : String(numeric)
 }
 
 function selectCase(testCase: SimCase): void {
+  activateCase(testCase)
+  simCaseViewMode.value = 'terminal'
+}
+
+function activateCase(testCase: SimCase): void {
   selectedCase.value = testCase
   selectedLogPath.value =
     testCase.log ||
@@ -4309,6 +4433,16 @@ function selectCase(testCase: SimCase): void {
     availableLogs.value[0]?.path ||
     ''
   void loadSelectedLog()
+}
+
+function openDisassembly(testCase: SimCase, address = ''): void {
+  if (!testCase.program?.disassembly) return
+  activateCase(testCase)
+  simCaseViewMode.value = 'disassembly'
+  disassemblyTarget.value = {
+    address,
+    token: disassemblyTarget.value.token + 1,
+  }
 }
 
 function openStepLog(): void {
@@ -5327,6 +5461,8 @@ watch(
     detail.value = null
     logContent.value = ''
     selectedCase.value = null
+    simCaseViewMode.value = 'terminal'
+    disassemblyTarget.value = { address: '', token: 0 }
     selectedLogPath.value = ''
     activeTab.value = defaultTabForCurrentStep()
     if (!isGlobalSrcView.value) {
@@ -7980,6 +8116,39 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.sim-view-switch {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 5px;
+  background: #111827;
+}
+
+.sim-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.sim-view-switch button.active {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.24);
+  color: #e5e7eb;
+}
+
+.sim-view-switch button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 .sim-terminal-actions .log-select {
   max-width: 240px;
   border-color: rgba(148, 163, 184, 0.34);
@@ -8121,6 +8290,42 @@ button:disabled {
   border-radius: 999px;
   background: var(--bg-secondary);
   color: var(--accent-color);
+}
+
+.difftest-jump {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  max-width: 190px;
+}
+
+.difftest-jump i {
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.difftest-jump small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 8px;
+  text-overflow: ellipsis;
+}
+
+.case-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--accent-color);
+  cursor: pointer;
+}
+
+.case-icon-action:hover {
+  border-color: var(--accent-color);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
 }
 
 .wave-header {
