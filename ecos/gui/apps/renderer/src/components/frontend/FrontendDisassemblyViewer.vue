@@ -83,12 +83,14 @@ import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import {
   findDisassemblyAddressLine,
   normalizeDisassemblyAddress,
+  stripSourceFromDisassembly,
 } from '@/utils/disassembly'
 
 const props = defineProps<{
   path: string
   targetAddress?: string
   targetToken?: number
+  reloadToken?: number
   closable?: boolean
 }>()
 
@@ -134,7 +136,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => props.path,
+  () => [props.path, props.reloadToken],
   () => void loadDisassembly(),
 )
 
@@ -217,8 +219,9 @@ async function loadDisassembly(): Promise<void> {
     })
     if (token !== loadToken) return
     if (result === null) throw new Error('Disassembly file is not readable.')
-    content.value = result
-    setEditorContent(result)
+    const pureDisassembly = stripSourceFromDisassembly(result)
+    content.value = pureDisassembly
+    setEditorContent(pureDisassembly)
     await nextTick()
     applyExternalTarget()
   } catch (err) {

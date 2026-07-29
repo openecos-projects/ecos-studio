@@ -1978,6 +1978,7 @@
                 <aside v-if="disassemblyPanelOpen" class="sim-disassembly-pane">
                   <FrontendDisassemblyViewer
                     :path="selectedDisassemblyPath"
+                    :reload-token="disassemblyReloadToken"
                     :target-address="disassemblyTarget.address"
                     :target-token="disassemblyTarget.token"
                     closable
@@ -2592,6 +2593,7 @@ const detail = ref<FrontendStepDetail | null>(null)
 const activeTab = ref<TabId>('summary')
 const selectedCase = ref<SimCase | null>(null)
 const disassemblyPanelOpen = ref(false)
+const disassemblyReloadToken = ref(0)
 const disassemblyTarget = ref({ address: '', token: 0 })
 const selectedLogPath = ref('')
 const logContent = ref('')
@@ -3958,6 +3960,7 @@ async function refresh(): Promise<void> {
     detail.value = null
   } finally {
     loading.value = false
+    if (disassemblyPanelOpen.value) disassemblyReloadToken.value += 1
   }
 }
 
