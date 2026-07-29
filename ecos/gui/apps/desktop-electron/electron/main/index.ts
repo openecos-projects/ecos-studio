@@ -256,6 +256,7 @@ async function ensureDesktopBridgeReady(): Promise<void> {
       layoutViewerService: desktopServices.layoutViewerService,
       settingsStore: desktopServices.settingsStore,
       shellService: desktopServices.shellService,
+      surferProtocolService: desktopServices.surferProtocolService,
       workspaceResourceService: desktopServices.workspaceResourceService,
       workspaceService: desktopServices.workspaceService,
     })

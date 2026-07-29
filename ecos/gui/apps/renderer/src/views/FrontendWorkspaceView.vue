@@ -4648,7 +4648,7 @@ async function loadCurrentWaveform(): Promise<void> {
   }
 
   try {
-    const waveformUrl = surferWaveformUrl(wave.path)
+    const waveformUrl = await getDesktopApi().workspace.authorizeWaveform(wave.path)
     const response = await fetch(waveformUrl, { method: 'HEAD' })
     if (token !== waveformLoadToken) return
     if (!response.ok) {
@@ -4671,11 +4671,6 @@ async function loadCurrentWaveform(): Promise<void> {
       waveformError.value = err instanceof Error ? err.message : String(err)
     }
   }
-}
-
-function surferWaveformUrl(path: string): string {
-  const name = encodeURIComponent(fileName(path))
-  return `ecos-surfer://viewer/waveform/${name}?path=${encodeURIComponent(path)}`
 }
 
 function requestSurferReady(frame: HTMLIFrameElement | null): void {

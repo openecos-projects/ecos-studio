@@ -157,6 +157,8 @@ const desktopApi: DesktopApi = {
       invokeDesktop(desktopApiIpcChannels.workspaceClearProjectRoot),
     requestProjectPathAccess: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRequestProjectPathAccess, path),
+    authorizeWaveform: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceAuthorizeWaveform, path),
     readProjectTextFile: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceReadProjectTextFile, path),
     readOptionalProjectTextFile: (path) =>

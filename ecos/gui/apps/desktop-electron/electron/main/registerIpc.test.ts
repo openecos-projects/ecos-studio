@@ -127,6 +127,9 @@ function registerHandlers() {
       readParameters: vi.fn(),
       resolveStepInfo: vi.fn(),
     },
+    surferProtocolService: {
+      authorizeWaveform: vi.fn(),
+    },
     resourceManagerService: {
       activatePdk: vi.fn(),
       cancelResource: vi.fn(),
@@ -740,6 +743,9 @@ describe('registerIpc', () => {
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
     )
+    services.surferProtocolService.authorizeWaveform.mockResolvedValue(
+      'ecos-surfer://viewer/waveform/wave.vcd?token=test-token',
+    )
     services.workspaceService.prepareProjectDirectoryReplacement.mockResolvedValue({
       id: 'replacement-ws-0001',
       targetPath: '/tmp/project/ws_0001',
@@ -810,6 +816,12 @@ describe('registerIpc', () => {
         '/tmp/project/home.json',
       ),
     ).resolves.toBe('/tmp/project/home.json')
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceAuthorizeWaveform)?.(
+        event,
+        '/tmp/project/output/wave.vcd',
+      ),
+    ).resolves.toBe('ecos-surfer://viewer/waveform/wave.vcd?token=test-token')
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceReadProjectTextFile)?.(
         event,

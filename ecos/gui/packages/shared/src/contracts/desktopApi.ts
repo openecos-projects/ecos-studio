@@ -214,6 +214,7 @@ export interface DesktopApi {
     registerProjectRoot(path: string): Promise<string>
     clearProjectRoot(): Promise<void>
     requestProjectPathAccess(path: string): Promise<string>
+    authorizeWaveform(path: string): Promise<string>
     readProjectTextFile(path: string): Promise<string>
     readOptionalProjectTextFile(path: string): Promise<string | null>
     readProjectTextFileTail(path: string, maxChars: number): Promise<string | null>

@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs'
 import { access, readFile, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { basename, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
@@ -13,6 +14,8 @@ const SURFER_ALLOWED_ASSETS = new Map([
   ['sw.js', 'application/javascript; charset=utf-8'],
 ])
 const WAVEFORM_EXTENSIONS = new Set(['.fst', '.ghw', '.vcd'])
+const WAVEFORM_GRANT_TTL_MS = 5 * 60 * 1000
+const MAX_WAVEFORM_GRANTS = 256
 
 interface ProjectScopeProvider {
   requestProjectPathAccess(path: string): Promise<string>
@@ -71,6 +74,10 @@ export class SurferProtocolService {
   private readonly surferAssetsPath: string
   private readonly surferAssetsPathProvider?: SurferAssetsPathProvider
   private readonly assetCache = new Map<string, Buffer>()
+  private readonly waveformGrants = new Map<
+    string,
+    { canonicalPath: string; expiresAt: number }
+  >()
   private registered = false
 
   constructor(options: SurferProtocolServiceOptions) {
@@ -83,6 +90,17 @@ export class SurferProtocolService {
     if (this.registered) return
     protocol.handle(SURFER_SCHEME, async (request) => await this.handleRequest(request))
     this.registered = true
+  }
+
+  async authorizeWaveform(path: string): Promise<string> {
+    const canonicalPath = await this.resolveWaveformFile(path)
+    this.pruneWaveformGrants()
+    const token = randomUUID()
+    this.waveformGrants.set(token, {
+      canonicalPath,
+      expiresAt: Date.now() + WAVEFORM_GRANT_TTL_MS,
+    })
+    return surferWaveformUrl(canonicalPath, token)
   }
 
   private async handleRequest(request: Request): Promise<Response> {
@@ -312,8 +330,13 @@ export class SurferProtocolService {
   }
 
   private async waveformResponse(request: Request, url: URL): Promise<Response> {
-    const requestedPath = url.searchParams.get('path') || ''
-    const canonicalPath = await this.resolveWaveformFile(requestedPath)
+    const token = url.searchParams.get('token') || ''
+    const grant = this.waveformGrants.get(token)
+    if (!grant || grant.expiresAt <= Date.now()) {
+      if (token) this.waveformGrants.delete(token)
+      throw new Error('Waveform access grant is invalid or expired.')
+    }
+    const canonicalPath = grant.canonicalPath
     const fileStats = await stat(canonicalPath)
     const headers = this.headers('application/octet-stream')
     headers.set('Content-Length', String(fileStats.size))
@@ -328,6 +351,18 @@ export class SurferProtocolService {
 
     const body = Readable.toWeb(createReadStream(canonicalPath)) as ReadableStream
     return new Response(body, { headers })
+  }
+
+  private pruneWaveformGrants(): void {
+    const now = Date.now()
+    for (const [token, grant] of this.waveformGrants) {
+      if (grant.expiresAt <= now) this.waveformGrants.delete(token)
+    }
+    while (this.waveformGrants.size >= MAX_WAVEFORM_GRANTS) {
+      const oldestToken = this.waveformGrants.keys().next().value
+      if (typeof oldestToken !== 'string') break
+      this.waveformGrants.delete(oldestToken)
+    }
   }
 
   private async resolveWaveformFile(path: string): Promise<string> {
@@ -380,9 +415,9 @@ export function surferViewerUrl(): string {
   return `${SURFER_SCHEME}://viewer/`
 }
 
-export function surferWaveformUrl(path: string): string {
+export function surferWaveformUrl(path: string, token: string): string {
   const name = encodeURIComponent(basename(path))
-  return `${SURFER_SCHEME}://viewer/waveform/${name}?path=${encodeURIComponent(path)}`
+  return `${SURFER_SCHEME}://viewer/waveform/${name}?token=${encodeURIComponent(token)}`
 }
 
 export function resolveSurferAssetsPath(

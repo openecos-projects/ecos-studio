@@ -60,6 +60,7 @@ async function loadDesktopBridge() {
       setActionEnabled(action: string, enabled: boolean): Promise<void>
     }
     workspace: {
+      authorizeWaveform(path: string): Promise<unknown>
       readProjectTextFile(path: string): Promise<unknown>
       listProjectDirectory(path: string): Promise<unknown>
       prepareProjectDirectoryReplacement(path: string): Promise<unknown>
@@ -101,6 +102,7 @@ describe('preload desktop bridge contract', () => {
           flow: expect.objectContaining({ runStep: expect.any(Function) }),
         }),
         workspace: expect.objectContaining({
+          authorizeWaveform: expect.any(Function),
           readProjectTextFile: expect.any(Function),
         }),
       }),
@@ -180,6 +182,20 @@ describe('preload desktop bridge contract', () => {
       7,
       desktopApiIpcChannels.workspaceRetainProjectDirectoryReplacement,
       replacement.id,
+    )
+  })
+
+  it('requests a scoped waveform URL through the desktop bridge', async () => {
+    const bridge = await loadDesktopBridge()
+    const waveformUrl = 'ecos-surfer://viewer/waveform/wave.vcd?token=test-token'
+    ipcRenderer.invoke.mockResolvedValueOnce(waveformUrl)
+
+    await expect(
+      bridge.workspace.authorizeWaveform('/work/demo/output/wave.vcd'),
+    ).resolves.toBe(waveformUrl)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      desktopApiIpcChannels.workspaceAuthorizeWaveform,
+      '/work/demo/output/wave.vcd',
     )
   })
 

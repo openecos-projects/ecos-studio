@@ -6,8 +6,9 @@ import {
   resolveSurferAssetsPath,
   SurferProtocolService,
   surferViewerUrl,
-  surferWaveformUrl,
 } from './surferProtocolService'
+import { ProjectScopeService } from './projectScopeService'
+import { runWithWindowScope } from './windowScopeContext'
 
 const tempDirectories: string[] = []
 
@@ -170,7 +171,8 @@ describe('SurferProtocolService', () => {
     })
 
     service.register(harness.protocol)
-    const response = await harness.request(surferWaveformUrl(waveform), {
+    const waveformUrl = await service.authorizeWaveform(waveform)
+    const response = await harness.request(waveformUrl, {
       method: 'HEAD',
     })
 
@@ -179,6 +181,36 @@ describe('SurferProtocolService', () => {
       String('$date today $end\n'.length),
     )
     expect(requestProjectPathAccess).toHaveBeenCalledWith(waveform)
+    expect(waveformUrl).not.toContain(encodeURIComponent(waveform))
+    const waveformResponse = await harness.request(waveformUrl)
+    await expect(waveformResponse.text()).resolves.toBe('$date today $end\n')
+  })
+
+  it('authorizes in the IPC window scope and serves outside that async context', async () => {
+    const surferAssetsPath = await createSurferAssets()
+    const projectRoot = await createTempDir('ecos-wave-scoped-project-')
+    const waveform = join(projectRoot, 'trace.vcd')
+    await writeFile(waveform, '$date today $end\n')
+    const projectScopeProvider = new ProjectScopeService()
+    await runWithWindowScope(17, async () => {
+      await projectScopeProvider.registerProjectRoot(projectRoot)
+    })
+    const harness = createProtocolHarness()
+    const service = new SurferProtocolService({
+      projectScopeProvider,
+      surferAssetsPath,
+    })
+
+    service.register(harness.protocol)
+    const waveformUrl = await runWithWindowScope(17, async () => {
+      return await service.authorizeWaveform(waveform)
+    })
+    const response = await harness.request(waveformUrl, { method: 'HEAD' })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Length')).toBe(
+      String('$date today $end\n'.length),
+    )
   })
 
   it('resolves Resource Manager and development Surfer asset locations', () => {

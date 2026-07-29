@@ -27,6 +27,7 @@ export const desktopApiIpcChannels = {
   workspaceRegisterProjectRoot: 'workspace:register-project-root',
   workspaceClearProjectRoot: 'workspace:clear-project-root',
   workspaceRequestProjectPathAccess: 'workspace:request-project-path-access',
+  workspaceAuthorizeWaveform: 'workspace:authorize-waveform',
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',
   workspaceReadOptionalProjectTextFile: 'workspace:read-optional-project-text-file',
   workspaceReadProjectTextFileTail: 'workspace:read-project-text-file-tail',

@@ -174,6 +174,9 @@ export interface DesktopBridgeServices {
     writeProjectTextFile(path: string, content: string): Promise<void>
     listProjectDirectory(path: string): Promise<DesktopProjectDirectoryEntry[]>
   }
+  surferProtocolService: {
+    authorizeWaveform(path: string): Promise<string>
+  }
   layoutViewerService: {
     open(request: LayoutViewerOpenRequest): Promise<LayoutViewerOpenResult>
   }
@@ -997,6 +1000,10 @@ export function registerIpc(
       return await services.workspaceService.requestProjectPathAccess(path as string)
     },
   )
+
+  handle(desktopApiIpcChannels.workspaceAuthorizeWaveform, async (_event, path) => {
+    return await services.surferProtocolService.authorizeWaveform(path as string)
+  })
 
   handle(desktopApiIpcChannels.workspaceReadProjectTextFile, async (_event, path) => {
     return await services.workspaceService.readProjectTextFile(path as string)
