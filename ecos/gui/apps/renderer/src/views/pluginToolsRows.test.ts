@@ -6,6 +6,7 @@ import {
   formatResourceSize,
   formatResourceSizeMb,
   managedInstallLocation,
+  isEdaToolRow,
   primaryActionForRow,
   resourceToRow,
   removalActionForRow,
@@ -43,6 +44,31 @@ function resource(overrides: Partial<ResourceItem>): ResourceItem {
 }
 
 describe('pluginToolsRows', () => {
+  it('maps standalone Verilator into EDA tools with Lint and Sim flow tags', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'tool:verilator',
+        type: 'tool',
+        name: 'verilator',
+        display_name: 'Verilator',
+        description: 'Pinned Verilator 5.050 SystemVerilog simulator',
+        category: 'simulation',
+        available_versions: ['5.050'],
+        size: 6413405,
+      }),
+      undefined,
+    )
+
+    expect(row).toMatchObject({
+      id: 'tool:verilator',
+      icon: 'V',
+      version: 'v5.050',
+      flowTags: ['Lint', 'Sim'],
+      isFrontendTool: true,
+    })
+    expect(isEdaToolRow(row)).toBe(true)
+  })
+
   it('maps an available registry PDK to an installable row', () => {
     const row = resourceToRow(resource({}), undefined)
 

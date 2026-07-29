@@ -354,10 +354,13 @@ export class ResourceManagerService {
     const env = { ...baseEnv }
     const manifest = await this.readRuntimeManifest()
     const toolBinDirs: string[] = []
+    const preferredToolBinDirs: string[] = []
     let activeYosysRoot: string | null = null
     let activeSurferRoot: string | null = null
     const frontendResourceRoots: string[] = []
     let activeSocRoot: string | null = null
+    let standaloneVerilator: { executable: string; resourceRoot: string } | null = null
+    let bundledVerilator: { executable: string; resourceRoot: string } | null = null
 
     for (const entry of Object.values(manifest.installed)) {
       if (!isToolEntry(entry) || !entry.active) continue
@@ -425,8 +428,16 @@ export class ResourceManagerService {
       }
       const verilatorExecutable = runtimeTools.get('verilator')
       if (verilatorExecutable) {
-        env.ECOS_VERILATOR = verilatorExecutable
-        env.VERILATOR_ROOT = join(entry.path, 'share', 'verilator')
+        const candidate = {
+          executable: verilatorExecutable,
+          resourceRoot: join(entry.path, 'share', 'verilator'),
+        }
+        if (toolKind === 'verilator') {
+          standaloneVerilator = candidate
+          preferredToolBinDirs.push(dirname(verilatorExecutable))
+        } else {
+          bundledVerilator = candidate
+        }
       }
       const eccFeExecutable = runtimeTools.get('ecc-fe')
       if (eccFeExecutable) {
@@ -445,7 +456,17 @@ export class ResourceManagerService {
 
     if (toolBinDirs.length > 0) {
       const pathKey = pathKeyForRuntimeEnv(env)
-      env[pathKey] = mergeRuntimePath(env[pathKey] ?? '', toolBinDirs, options.platform)
+      env[pathKey] = mergeRuntimePath(
+        env[pathKey] ?? '',
+        [...preferredToolBinDirs, ...toolBinDirs],
+        options.platform,
+      )
+    }
+
+    const activeVerilator = standaloneVerilator ?? bundledVerilator
+    if (activeVerilator) {
+      env.ECOS_VERILATOR = activeVerilator.executable
+      env.VERILATOR_ROOT = activeVerilator.resourceRoot
     }
 
     if (activeYosysRoot) {
@@ -2933,6 +2954,9 @@ async function checkToolEntryHealth(
 }
 
 function requiredToolMarkers(normalizedName: string): string[] {
+  if (normalizedName === 'verilator') {
+    return ['bin/verilator', 'bin/verilator_bin', 'share/verilator/include/verilated.cpp']
+  }
   if (normalizedName === 'ecc-fe') {
     return ['bin/ecc-fe', 'fecompiler']
   }

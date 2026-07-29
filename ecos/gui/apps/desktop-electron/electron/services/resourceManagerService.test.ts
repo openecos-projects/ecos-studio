@@ -228,6 +228,20 @@ async function createInstalledEccFeRoot(root: string): Promise<void> {
   await writeFile(join(root, 'fecompiler', '__init__.py'), '', 'utf8')
 }
 
+async function createInstalledVerilatorRoot(root: string): Promise<void> {
+  await mkdir(join(root, 'bin'), { recursive: true })
+  await mkdir(join(root, 'share', 'verilator', 'include'), { recursive: true })
+  await writeFile(join(root, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+  await writeFile(join(root, 'bin', 'verilator_bin'), '#!/bin/sh\n', 'utf8')
+  await writeFile(
+    join(root, 'share', 'verilator', 'include', 'verilated.cpp'),
+    '// fixture\n',
+    'utf8',
+  )
+  await chmod(join(root, 'bin', 'verilator'), 0o755)
+  await chmod(join(root, 'bin', 'verilator_bin'), 0o755)
+}
+
 async function createInstalledEccFeSocRoot(root: string): Promise<void> {
   await mkdir(join(root, 'driver'), { recursive: true })
   await writeFile(join(root, 'manifest.json'), '{"id":"ysyx-am-soc"}\n', 'utf8')
@@ -549,7 +563,7 @@ describe('ResourceManagerService', () => {
     const packagedBin = join(root, 'packaged', 'binaries')
     const yosysRoot = join(toolsDir, 'yosys', '2026-05-13')
     const slangRoot = join(toolsDir, 'slang', '10.0')
-    const verilatorRoot = join(toolsDir, 'verilator', '5.046')
+    const verilatorRoot = join(toolsDir, 'verilator', '5.050')
     const eccFeRoot = join(toolsDir, 'ecc-fe', '0.1.0-alpha.0-ecos')
     const eccFeSocRoot = join(toolsDir, 'ecc-fe-soc-ysyx-am', '0.1.0-alpha.0-ecos')
     const eccFeExamplesRoot = join(toolsDir, 'ecc-fe-examples', '0.1.0-alpha.0-ecos')
@@ -561,7 +575,7 @@ describe('ResourceManagerService', () => {
     const ics55Root = join(pdksDir, 'ics55', '1.10.100')
     await mkdir(join(yosysRoot, 'bin'), { recursive: true })
     await mkdir(join(slangRoot, 'bin'), { recursive: true })
-    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await createInstalledVerilatorRoot(verilatorRoot)
     await createInstalledEccFeRoot(eccFeRoot)
     await createInstalledEccFeSocRoot(eccFeSocRoot)
     await mkdir(join(eccFeExamplesRoot, 'examples', 'cl3', 'cl3_verilog'), {
@@ -576,7 +590,6 @@ describe('ResourceManagerService', () => {
     await writeFile(join(yosysRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(yosysRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(join(slangRoot, 'bin', 'slang'), '#!/bin/sh\n', 'utf8')
-    await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
     await writeFile(
       join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'),
       '#!/bin/sh\n',
@@ -609,7 +622,6 @@ describe('ResourceManagerService', () => {
     await chmod(join(yosysRoot, 'bin', 'yosys'), 0o755)
     await chmod(join(yosysRoot, 'bin', 'verilator'), 0o755)
     await chmod(join(slangRoot, 'bin', 'slang'), 0o755)
-    await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
     await chmod(join(riscvRoot, 'bin', 'riscv32-unknown-elf-gcc'), 0o755)
     await chmod(join(duplicateRoot, 'bin', 'duplicate'), 0o755)
     await chmod(join(inactiveRoot, 'bin', 'inactive'), 0o755)
@@ -649,7 +661,7 @@ describe('ResourceManagerService', () => {
           'tool:verilator': {
             type: 'tool',
             name: 'verilator',
-            version: '5.046',
+            version: '5.050',
             path: verilatorRoot,
             executable: 'bin/verilator',
             active: true,
@@ -764,10 +776,10 @@ describe('ResourceManagerService', () => {
     expect(env).not.toBe(baseEnv)
     expect(env.PATH?.split(':')).toEqual([
       packagedBin,
+      join(verilatorRoot, 'bin'),
       join(yosysRoot, 'bin'),
       join(duplicateRoot, 'bin'),
       join(slangRoot, 'bin'),
-      join(verilatorRoot, 'bin'),
       join(eccFeRoot, 'bin'),
       join(riscvRoot, 'bin'),
       '/usr/bin',
@@ -841,6 +853,113 @@ describe('ResourceManagerService', () => {
     expect(env.ECOS_VERILATOR).not.toBe(join(ossRoot, 'bin', 'yosys'))
     expect(env.VERILATOR_ROOT).toBe(join(ossRoot, 'share', 'verilator'))
     expect(env.PATH?.split(':')).toEqual([join(ossRoot, 'bin'), '/usr/bin'])
+  })
+
+  it('prefers standalone Verilator regardless of Resource Manager manifest order', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const ossRoot = join(toolsDir, 'yosys', '2026-05-13')
+    const verilatorRoot = join(toolsDir, 'verilator', '5.050')
+    await mkdir(join(ossRoot, 'bin'), { recursive: true })
+    await mkdir(join(ossRoot, 'share', 'verilator'), { recursive: true })
+    await createInstalledVerilatorRoot(verilatorRoot)
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(ossRoot, 'bin', 'yosys'), '#!/bin/sh\n', 'utf8')
+    await writeFile(join(ossRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(ossRoot, 'bin', 'yosys'), 0o755)
+    await chmod(join(ossRoot, 'bin', 'verilator'), 0o755)
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:verilator': {
+            type: 'tool',
+            name: 'verilator',
+            version: '5.050',
+            path: verilatorRoot,
+            executable: 'bin/verilator',
+            detected_executables: ['bin/verilator', 'bin/verilator_bin'],
+            active: true,
+            managed: true,
+          },
+          'tool:yosys': {
+            type: 'tool',
+            name: 'yosys',
+            version: '2026-05-13',
+            path: ossRoot,
+            executable: 'bin/yosys',
+            detected_executables: ['bin/yosys', 'bin/verilator'],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    const env = await service.createRuntimeEnv(
+      { PATH: '/usr/bin' },
+      { platform: 'linux' },
+    )
+
+    expect(env.ECOS_VERILATOR).toBe(join(verilatorRoot, 'bin', 'verilator'))
+    expect(env.VERILATOR_ROOT).toBe(join(verilatorRoot, 'share', 'verilator'))
+    expect(env.PATH?.split(':')).toEqual([
+      join(verilatorRoot, 'bin'),
+      join(ossRoot, 'bin'),
+      '/usr/bin',
+    ])
+  })
+
+  it('skips incomplete standalone Verilator resources at runtime', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const resourcesDir = join(root, 'state', 'resources')
+    const toolsDir = join(root, 'data', 'tools')
+    const verilatorRoot = join(toolsDir, 'verilator', '5.050')
+    await mkdir(join(verilatorRoot, 'bin'), { recursive: true })
+    await mkdir(resourcesDir, { recursive: true })
+    await writeFile(join(verilatorRoot, 'bin', 'verilator'), '#!/bin/sh\n', 'utf8')
+    await chmod(join(verilatorRoot, 'bin', 'verilator'), 0o755)
+    await writeFile(
+      join(resourcesDir, 'manifest.json'),
+      JSON.stringify({
+        schema_version: 1,
+        installed: {
+          'tool:verilator': {
+            type: 'tool',
+            name: 'verilator',
+            version: '5.050',
+            path: verilatorRoot,
+            executable: 'bin/verilator',
+            detected_executables: ['bin/verilator'],
+            active: true,
+            managed: true,
+          },
+        },
+      }),
+      'utf8',
+    )
+    const service = new ResourceManagerService({
+      resourcesDir,
+      toolsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+    })
+
+    const env = await service.createRuntimeEnv(
+      { PATH: '/usr/bin' },
+      { platform: 'linux' },
+    )
+
+    expect(env.ECOS_VERILATOR).toBeUndefined()
+    expect(env.VERILATOR_ROOT).toBeUndefined()
+    expect(env.PATH).toBe('/usr/bin')
   })
 
   it('recovers runtime tools when an old manifest points at the wrong executable path', async () => {
