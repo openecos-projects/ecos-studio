@@ -114,6 +114,7 @@ const runtimeBackendTitle = ref('Preparing your workspace')
 const runtimeBackendSubtitle = ref(
   'First load or restoring your project may take a moment',
 )
+const lastWorkspaceCreationError = ref('')
 
 // Toast 实例（在首次组件上下文调用时初始化）
 let _toast: ReturnType<typeof useToast> | null = null
@@ -802,6 +803,7 @@ export function useWorkspace() {
    * @param config 项目配置（来自向导）
    */
   const newProject = async (config?: WorkspaceConfig) => {
+    lastWorkspaceCreationError.value = ''
     let sessionId: string | null = null
     let replacement: WorkspaceDirectoryReplacement | null = null
     let committedReplacement = false
@@ -844,6 +846,8 @@ export function useWorkspace() {
       selectedPath = normalizePath(selectedPath)
       const createAffinity = await resolveWorkspaceWindowAffinity(selectedPath)
       if (createAffinity.action === 'focused') {
+        lastWorkspaceCreationError.value =
+          'The workspace is already open in another window.'
         return false
       }
       claimedCreatePath = selectedPath
@@ -858,6 +862,8 @@ export function useWorkspace() {
         if (reclaim.action === 'focused') {
           claimedCreatePath = null
           previousCreatePath = null
+          lastWorkspaceCreationError.value =
+            'The workspace is already open in another window.'
           return false
         }
         claimedCreatePath = selectedPath
@@ -896,6 +902,8 @@ export function useWorkspace() {
           if (replacementAffinity.action === 'focused') {
             claimedCreatePath = null
             previousCreatePath = null
+            lastWorkspaceCreationError.value =
+              'The workspace is already open in another window.'
             return false
           }
           claimedCreatePath = selectedPath
@@ -911,6 +919,8 @@ export function useWorkspace() {
       if (!(await ensureApiReady({ keepLoading: true }))) {
         workspaceLifecycle.failSession(session.sessionId)
         await restoreReplacement()
+        lastWorkspaceCreationError.value =
+          'The desktop runtime is unavailable. Restart the application and try again.'
         return false
       }
 
@@ -992,6 +1002,8 @@ export function useWorkspace() {
       }
       if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
         await restoreReplacement()
+        lastWorkspaceCreationError.value =
+          'The workspace creation request was superseded.'
         return false
       }
       if (response.response === 'success') {
@@ -999,6 +1011,8 @@ export function useWorkspace() {
         const canonicalProjectRoot = await registerProjectRoot(resolvedPath)
         if (!workspaceLifecycle.isCurrentSession(session.sessionId)) {
           await restoreReplacement()
+          lastWorkspaceCreationError.value =
+            'The workspace creation request was superseded.'
           return false
         }
         if (!canonicalProjectRoot) {
@@ -1010,6 +1024,8 @@ export function useWorkspace() {
             detail:
               'The project directory could not be registered for local file access.',
           })
+          lastWorkspaceCreationError.value =
+            'The project directory could not be registered for local file access.'
           return false
         }
 
@@ -1065,11 +1081,13 @@ export function useWorkspace() {
       } else {
         await restoreReplacement()
         workspaceLifecycle.failSession(session.sessionId)
+        const error = response.message?.join('; ') || 'Unknown error'
+        lastWorkspaceCreationError.value = error
         console.error('Failed to create project:', response.message)
         showToast({
           severity: 'error',
           summary: 'Failed to Create Project',
-          detail: response.message?.join('; ') || 'Unknown error',
+          detail: error,
         })
         return false
       }
@@ -1082,6 +1100,8 @@ export function useWorkspace() {
         }
       }
       if (sessionId) workspaceLifecycle.failSession(sessionId)
+      lastWorkspaceCreationError.value =
+        error instanceof Error ? error.message : String(error)
       console.error('New project error:', error)
       showToast({
         severity: 'error',
@@ -1473,6 +1493,7 @@ export function useWorkspace() {
     runtimeBackendTitle,
     runtimeBackendSubtitle,
     ensureApiReady,
+    lastWorkspaceCreationError,
     // Toast
     showToast,
   }

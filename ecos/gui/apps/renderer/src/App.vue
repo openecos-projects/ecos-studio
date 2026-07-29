@@ -193,6 +193,7 @@ const {
   workspaceSession,
   openProject,
   newProject,
+  lastWorkspaceCreationError,
   closeProject,
   runtimeBackendConnecting,
   runtimeBackendTitle,
@@ -253,9 +254,9 @@ const workspaceWizardTitle = computed(() => {
 async function createWorkspaceFromAgent(
   config: WorkspaceConfig,
   contract: DesktopAgentWorkspaceSetupContract,
-): Promise<boolean> {
+): Promise<import('@/composables/agentWorkspaceSetup').AgentWorkspaceCreationResult> {
   const success = await newProject(config)
-  if (!success) return false
+  if (!success) return { created: false, error: lastWorkspaceCreationError.value }
   const workspacePath = currentProject.value?.path
   if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
   const api = desktopApi.value ?? (await waitForDesktopApi())
@@ -268,7 +269,7 @@ async function createWorkspaceFromAgent(
   await router.push('/workspace')
   await nextTick()
   void runAllFlow()
-  return true
+  return { created: true }
 }
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)

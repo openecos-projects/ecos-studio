@@ -255,14 +255,43 @@ async function createWorkspaceFromAgent(
   if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
   isWorkspaceCreationPending.value = true
   try {
-    const created = await createAgentWorkspace(config, contract)
-    if (!created)
-      messageStore.addAssistantMessage('Workspace creation was not completed.', 'error')
+    const result = await createAgentWorkspace(config, contract)
+    if (result.created) {
+      await reportWorkspaceCreationResult(contract.setup_id, 'succeeded', '')
+    } else {
+      workspaceCreateSetupId.value = undefined
+      await reportWorkspaceCreationResult(
+        contract.setup_id,
+        'failed',
+        result.error || 'The workspace could not be created.',
+      )
+    }
   } catch (error) {
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
+    workspaceCreateSetupId.value = undefined
+    const reason = agentErrorMessage(error)
+    try {
+      await reportWorkspaceCreationResult(contract.setup_id, 'failed', reason)
+    } catch {
+      messageStore.addAssistantMessage(reason, 'error')
+    }
   } finally {
     isWorkspaceCreationPending.value = false
   }
+}
+
+async function reportWorkspaceCreationResult(
+  setupId: string,
+  status: 'succeeded' | 'failed',
+  error: string,
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId) throw new Error('Flow Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId,
+  })
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {

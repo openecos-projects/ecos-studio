@@ -62,7 +62,8 @@ textarea,
 [contenteditable='true'],
 pre,
 code,
-.selectable {
+.selectable,
+.selectable * {
   -webkit-user-select: text;
   user-select: text;
 }

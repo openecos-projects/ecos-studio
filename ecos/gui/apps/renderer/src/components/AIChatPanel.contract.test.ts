@@ -18,5 +18,7 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('if (!message || !agent')
     expect(source).toContain("event.type === 'workspace_create'")
     expect(source).toContain('isWorkspaceCreationPending')
+    expect(source).toContain('workspace_create_result:')
+    expect(source).not.toContain('Workspace creation was not completed.')
   })
 })

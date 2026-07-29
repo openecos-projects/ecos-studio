@@ -10,4 +10,9 @@ describe('agent workspace creation', () => {
     expect(contractWrite).toBeLessThan(flowStart)
     expect(source).toContain('api.workspace.writeProjectTextFile')
   })
+
+  it('returns the workspace creation failure reason to the chat host', () => {
+    expect(source).toContain('lastWorkspaceCreationError.value')
+    expect(source).toContain('created: false')
+  })
 })

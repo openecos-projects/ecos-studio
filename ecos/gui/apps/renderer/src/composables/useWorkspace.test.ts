@@ -2757,6 +2757,8 @@ describe('useWorkspace openProject', () => {
       }),
     ).resolves.toBe(false)
 
+    expect(workspace.lastWorkspaceCreationError.value).toBe('creation failed')
+
     expect(desktopApi.workspace.restoreProjectDirectoryReplacement).toHaveBeenCalledWith(
       replacement.id,
     )

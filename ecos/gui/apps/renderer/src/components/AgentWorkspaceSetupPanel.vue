@@ -8,7 +8,7 @@
       <span class="text-xs text-(--text-secondary)">{{ executionState }}</span>
     </div>
     <table
-      class="w-full table-fixed border-collapse text-left text-xs text-(--text-secondary)"
+      class="selectable w-full table-fixed border-collapse text-left text-xs text-(--text-secondary)"
     >
       <thead>
         <tr class="border-b border-(--border-color)">
@@ -91,12 +91,11 @@ const specRows = computed<[string, string][]>(() => {
 watch(
   [() => props.contract, () => props.createSetupId],
   ([contract, setupId]) => {
-    if (
-      !contract ||
-      !setupId ||
-      setupId !== contract.setup_id ||
-      submittedSetupId.value === setupId
-    )
+    if (!setupId) {
+      submittedSetupId.value = ''
+      return
+    }
+    if (!contract || setupId !== contract.setup_id || submittedSetupId.value === setupId)
       return
     submittedSetupId.value = setupId
     emit('createWorkspace', workspaceConfig(contract), contract)

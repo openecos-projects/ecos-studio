@@ -363,7 +363,7 @@
       </div>
 
       <!-- 文本消息 -->
-      <div v-else class="px-4 py-2 pr-8">
+      <div v-else class="selectable px-4 py-2 pr-8">
         <!-- 加载状态 -->
         <div
           v-if="message.status === 'loading' && !message.content"

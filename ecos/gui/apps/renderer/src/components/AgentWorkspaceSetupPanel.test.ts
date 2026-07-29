@@ -24,4 +24,10 @@ describe('AgentWorkspaceSetupPanel', () => {
       expect(source).toContain(`['${field}'`)
     expect(source).not.toContain('<dl')
   })
+
+  it('keeps the specification selectable and permits retrying a failed setup id', () => {
+    expect(source).toContain('class="selectable w-full')
+    expect(source).toContain('if (!setupId) {')
+    expect(source).toContain("submittedSetupId.value = ''")
+  })
 })
