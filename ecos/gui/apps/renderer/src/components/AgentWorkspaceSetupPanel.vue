@@ -7,26 +7,28 @@
       <h3 class="text-sm font-semibold text-(--text-primary)">{{ contract.title }}</h3>
       <span class="text-xs text-(--text-secondary)">{{ executionState }}</span>
     </div>
-    <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-(--text-secondary)">
-      <div>
-        <dt>Workspace</dt>
-        <dd class="break-all text-(--text-primary)">{{ contract.directory }}</dd>
-      </div>
-      <div>
-        <dt>Flow</dt>
-        <dd class="text-(--text-primary)">
-          {{ contract.flow_config.start_step }} to {{ contract.flow_config.end_step }}
-        </dd>
-      </div>
-      <div>
-        <dt>RTL</dt>
-        <dd class="break-all text-(--text-primary)">{{ contract.rtl_list[0] }}</dd>
-      </div>
-      <div>
-        <dt>PDK</dt>
-        <dd class="break-all text-(--text-primary)">{{ contract.pdk_root }}</dd>
-      </div>
-    </dl>
+    <table
+      class="w-full table-fixed border-collapse text-left text-xs text-(--text-secondary)"
+    >
+      <thead>
+        <tr class="border-b border-(--border-color)">
+          <th scope="col" class="w-40 py-2 font-medium">Key</th>
+          <th scope="col" class="py-2 font-medium">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          v-for="[key, value] in specRows"
+          :key="key"
+          class="border-b border-(--border-color)/60"
+        >
+          <th scope="row" class="py-2 pr-3 align-top font-medium text-(--text-secondary)">
+            {{ key }}
+          </th>
+          <td class="py-2 break-all text-(--text-primary)">{{ value }}</td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 </template>
 
@@ -49,6 +51,42 @@ const executionState = computed(() =>
     ? 'Creating and running'
     : 'Awaiting confirmation',
 )
+const specRows = computed<[string, string][]>(() => {
+  const contract = props.contract
+  if (!contract) return []
+  const parameters = contract.parameters
+  return [
+    ['Workspace', contract.directory],
+    ['Project Root', contract.project_context.project_root],
+    ['Project Name', contract.project_context.project_name],
+    ['Workspace Name', contract.project_context.project_name],
+    ['Flow', `${contract.flow_config.start_step} to ${contract.flow_config.end_step}`],
+    ['Flow Steps', contract.flow_config.steps.join(' to ')],
+    ['RTL', contract.rtl_list[0] ?? '-'],
+    ['Filelist', contract.filelist ?? '-'],
+    ['SDC', contract.sdc ?? '-'],
+    ['Design Input Mode', contract.design_input_mode],
+    ['PDK', contract.pdk],
+    ['PDK Root', contract.pdk_root],
+    ['PDK Config Mode', contract.pdk_config_mode],
+    ['Design', parameters.design],
+    ['Top Module', parameters.top_module],
+    ['Clock', parameters.clock],
+    ['Frequency Max (MHz)', String(parameters.frequency_max)],
+    ['Max Fanout', String(parameters.max_fanout)],
+    ['Die Area Mode', parameters.die_area_mode],
+    ['Utilization', optionalValue(parameters.utilitization)],
+    ['Margin', String(parameters.margin)],
+    ['Die Width', optionalValue(parameters.die_width)],
+    ['Die Height', optionalValue(parameters.die_height)],
+    ['Target Density', String(parameters.target_density)],
+    ['Target Overflow', String(parameters.target_overflow)],
+    ['Description', optionalValue(parameters.description)],
+    ['Requires GUI Review', String(contract.requires_gui_review)],
+    ['Setup ID', contract.setup_id],
+    ['Schema Version', contract.schema_version],
+  ]
+})
 
 watch(
   [() => props.contract, () => props.createSetupId],
@@ -83,5 +121,9 @@ function workspaceConfig(contract: DesktopAgentWorkspaceSetupContract): Workspac
     rtl_list: [...contract.rtl_list],
     sdc: contract.sdc,
   }
+}
+
+function optionalValue(value: string | number | undefined): string {
+  return value === undefined || value === '' ? '-' : String(value)
 }
 </script>
