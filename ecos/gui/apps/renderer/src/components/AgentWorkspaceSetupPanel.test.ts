@@ -30,4 +30,12 @@ describe('AgentWorkspaceSetupPanel', () => {
     expect(source).toContain('if (!setupId) {')
     expect(source).toContain("submittedSetupId.value = ''")
   })
+
+  it('renders the confirmation after the resolved specification', () => {
+    expect(source).toContain('confirmationText?: string')
+    expect(source).toContain('{{ confirmationText }}')
+    expect(source.indexOf('</table>')).toBeLessThan(
+      source.indexOf('{{ confirmationText }}'),
+    )
+  })
 })

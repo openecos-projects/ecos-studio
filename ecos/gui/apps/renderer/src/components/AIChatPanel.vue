@@ -32,6 +32,7 @@
         />
         <AgentWorkspaceSetupPanel
           :contract="workspaceSetupContract"
+          :confirmation-text="workspaceSetupMessage"
           :create-setup-id="workspaceCreateSetupId"
           @create-workspace="createWorkspaceFromAgent"
         />
@@ -84,6 +85,7 @@ const agentSessionId = ref<string | null>(null)
 const isAgentRequestPending = ref(false)
 const isWorkspaceCreationPending = ref(false)
 const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
+const workspaceSetupMessage = ref('')
 const workspaceCreateSetupId = ref<string>()
 let unsubscribeAgentEvents: (() => void) | undefined
 
@@ -130,7 +132,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   }
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     workspaceSetupContract.value = event.workspaceSetup
-    if (event.text) messageStore.addAssistantMessage(event.text, 'done')
+    workspaceSetupMessage.value = event.text ?? ''
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {

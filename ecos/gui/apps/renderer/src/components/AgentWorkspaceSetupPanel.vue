@@ -29,6 +29,12 @@
         </tr>
       </tbody>
     </table>
+    <p
+      v-if="confirmationText"
+      class="selectable mt-4 text-xs leading-5 whitespace-pre-line text-(--text-primary)"
+    >
+      {{ confirmationText }}
+    </p>
   </section>
 </template>
 
@@ -39,6 +45,7 @@ import type { WorkspaceConfig } from '@/types'
 
 const props = defineProps<{
   contract?: DesktopAgentWorkspaceSetupContract
+  confirmationText?: string
   createSetupId?: string
 }>()
 const emit = defineEmits<{
