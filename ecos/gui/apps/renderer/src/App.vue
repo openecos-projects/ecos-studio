@@ -134,8 +134,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, provide, watch } from 'vue'
-import { appMenuActionIds, type DesktopApi } from '@ecos-studio/shared'
+import { ref, onMounted, onUnmounted, computed, nextTick, provide, watch } from 'vue'
+import {
+  appMenuActionIds,
+  type DesktopAgentWorkspaceSetupContract,
+  type DesktopApi,
+} from '@ecos-studio/shared'
 import { useRouter, useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/themeStore'
 import { useAppMenuActions } from '@/composables/useAppMenuActions'
@@ -145,6 +149,7 @@ import { registerHomeWorkspaceRerun } from '@/composables/homeFlowRerun'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
+import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -196,6 +201,7 @@ const {
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
+const { runAllFlow } = useFlowRunner()
 const { showManageDialog, openManageDialog } = useDesignFiles()
 const {
   closeSignoffPackageReview,
@@ -244,11 +250,24 @@ const workspaceWizardTitle = computed(() => {
   return reconfigureWorkspacePath.value ? 'Update Workspace' : 'New Workspace'
 })
 
-async function createWorkspaceFromAgent(config: WorkspaceConfig): Promise<boolean> {
+async function createWorkspaceFromAgent(
+  config: WorkspaceConfig,
+  contract: DesktopAgentWorkspaceSetupContract,
+): Promise<boolean> {
   const success = await newProject(config)
   if (!success) return false
+  const workspacePath = currentProject.value?.path
+  if (!workspacePath) throw new Error('Workspace creation did not return a project path.')
+  const api = desktopApi.value ?? (await waitForDesktopApi())
+  desktopApi.value = api
+  await api.workspace.writeProjectTextFile(
+    `${normalizeLocalPath(workspacePath)}/home/workspace_setup_contract.v2.json`,
+    `${JSON.stringify(contract, null, 2)}\n`,
+  )
   await syncProjectManagedWorkspace(config)
   await router.push('/workspace')
+  await nextTick()
+  void runAllFlow()
   return true
 }
 

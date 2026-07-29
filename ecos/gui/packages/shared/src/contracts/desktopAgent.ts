@@ -26,7 +26,6 @@ export interface DesktopAgentStartSessionResponse {
 export interface DesktopAgentSendMessageRequest extends DesktopAgentProviderRequest {
   message: string
   sessionId: string
-  workspaceSetupResponse?: DesktopAgentWorkspaceSetupStepResponse
 }
 
 export interface DesktopAgentSendMessageResponse {
@@ -100,6 +99,9 @@ export interface DesktopAgentWorkspaceSetupParameters {
 }
 
 export interface DesktopAgentWorkspaceSetupContract {
+  design_input_mode: 'rtl'
+  directory: string
+  filelist?: string
   flow_config: {
     end_step: string
     start_step: string
@@ -107,35 +109,26 @@ export interface DesktopAgentWorkspaceSetupContract {
   }
   parameters: DesktopAgentWorkspaceSetupParameters
   pdk: 'ics55'
+  pdk_config: {
+    cell_lef: string[]
+    liberty: string[]
+    mode: 'default'
+    tech_lef: string[]
+  }
+  pdk_config_mode: 'default'
+  pdk_root: string
+  project_context: {
+    mode: 'create'
+    project_json_path: string
+    project_name: string
+    project_root: string
+  }
   requires_gui_review: true
-  schema_version: 'flow-agent.workspace_setup_contract.v1'
+  rtl_list: string[]
+  schema_version: 'flow-agent.workspace_setup_contract.v2'
   setup_id: string
-  suggested_workspace_name?: string
+  sdc?: string
   title: string
-}
-
-export type DesktopAgentWorkspaceSetupStep =
-  | 'project'
-  | 'basic'
-  | 'flow'
-  | 'design_files'
-  | 'pdk'
-  | 'spec'
-
-export type DesktopAgentWorkspaceSetupHostStep = 'project' | 'design_files' | 'pdk'
-
-export interface DesktopAgentWorkspaceSetupStepRequest {
-  authority: 'agent_text' | 'gui_native'
-  defaults: Record<string, unknown>
-  schema_version: 'flow-agent.workspace_setup_step_request.v1'
-  setup_id: string
-  step: DesktopAgentWorkspaceSetupStep
-}
-
-export interface DesktopAgentWorkspaceSetupStepResponse {
-  schema_version: 'flow-agent.workspace_setup_step_response.v1'
-  setup_id: string
-  step: DesktopAgentWorkspaceSetupHostStep
 }
 
 export type DesktopAgentEventType =
@@ -145,7 +138,6 @@ export type DesktopAgentEventType =
   | 'tool'
   | 'contract'
   | 'workspace_setup'
-  | 'workspace_setup_step'
   | 'workspace_create'
   | 'error'
 
@@ -157,5 +149,4 @@ export interface DesktopAgentEvent {
   type: DesktopAgentEventType
   workspaceCreateSetupId?: string
   workspaceSetup?: DesktopAgentWorkspaceSetupContract
-  workspaceSetupStep?: DesktopAgentWorkspaceSetupStepRequest
 }

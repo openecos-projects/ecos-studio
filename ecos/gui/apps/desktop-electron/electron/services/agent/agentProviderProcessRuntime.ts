@@ -4,7 +4,6 @@ import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
   DesktopAgentExecutionContract,
-  DesktopAgentWorkspaceSetupStepRequest,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
@@ -314,7 +313,6 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'tool',
   'contract',
   'workspace_setup',
-  'workspace_setup_step',
   'workspace_create',
   'error',
 ])
@@ -327,11 +325,9 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   }
   const contract = readExecutionContract(record.contract)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
-  const workspaceSetupStep = readWorkspaceSetupStepRequest(record.workspaceSetupStep)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
-  if (type === 'workspace_setup_step' && !workspaceSetupStep) return null
   if (type === 'workspace_create' && !workspaceCreateSetupId) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
@@ -343,7 +339,6 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(sessionId ? { sessionId } : {}),
     ...(text ? { text } : {}),
     ...(workspaceSetup ? { workspaceSetup } : {}),
-    ...(workspaceSetupStep ? { workspaceSetupStep } : {}),
     ...(workspaceCreateSetupId ? { workspaceCreateSetupId } : {}),
     type: type as DesktopAgentEventType,
   }
@@ -369,113 +364,56 @@ function readWorkspaceSetupContract(
 ): DesktopAgentWorkspaceSetupContract | null {
   const record = readRecord(value)
   if (
-    record.schema_version !== 'flow-agent.workspace_setup_contract.v1' ||
+    record.schema_version !== 'flow-agent.workspace_setup_contract.v2' ||
     record.pdk !== 'ics55' ||
     record.requires_gui_review !== true ||
     !readEventText(record.title)
   ) {
     return null
   }
-  const suggestedWorkspaceName = readOptionalIdentifier(record.suggested_workspace_name)
-  if (record.suggested_workspace_name != null && !suggestedWorkspaceName) return null
   const parameters = readWorkspaceSetupParameters(record.parameters)
   const flowConfig = readWorkspaceSetupFlowConfig(record.flow_config)
   const setupId = readOptionalIdentifier(record.setup_id)
-  if (!parameters || !flowConfig || !setupId) return null
+  const directory = readWorkspaceSetupPath(record.directory)
+  const pdkRoot = readWorkspaceSetupPath(record.pdk_root)
+  const rtlList = readWorkspaceSetupPathList(record.rtl_list)
+  const filelist = readOptionalWorkspaceSetupPath(record.filelist)
+  const sdc = readOptionalWorkspaceSetupPath(record.sdc)
+  const pdkConfig = readWorkspaceSetupPdkConfig(record.pdk_config)
+  const projectContext = readWorkspaceSetupProjectContext(record.project_context)
+  if (
+    !parameters ||
+    !flowConfig ||
+    !setupId ||
+    !directory ||
+    !pdkRoot ||
+    !rtlList ||
+    filelist === null ||
+    sdc === null ||
+    !pdkConfig ||
+    !projectContext ||
+    record.design_input_mode !== 'rtl' ||
+    record.pdk_config_mode !== 'default'
+  )
+    return null
   return {
+    design_input_mode: 'rtl',
+    directory,
+    ...(filelist ? { filelist } : {}),
     flow_config: flowConfig,
     parameters,
     pdk: 'ics55',
+    pdk_config: pdkConfig,
+    pdk_config_mode: 'default',
+    pdk_root: pdkRoot,
+    project_context: projectContext,
     requires_gui_review: true,
-    schema_version: 'flow-agent.workspace_setup_contract.v1',
+    rtl_list: rtlList,
+    schema_version: 'flow-agent.workspace_setup_contract.v2',
     setup_id: setupId,
-    ...(suggestedWorkspaceName
-      ? { suggested_workspace_name: suggestedWorkspaceName }
-      : {}),
+    ...(sdc ? { sdc } : {}),
     title: readEventText(record.title) as string,
   }
-}
-
-function readWorkspaceSetupStepRequest(
-  value: unknown,
-): DesktopAgentWorkspaceSetupStepRequest | null {
-  const record = readRecord(value)
-  const setupId = readOptionalIdentifier(record.setup_id)
-  const step = record.step
-  const defaults = readRecord(record.defaults)
-  if (
-    record.schema_version !== 'flow-agent.workspace_setup_step_request.v1' ||
-    !setupId ||
-    (step !== 'project' &&
-      step !== 'basic' &&
-      step !== 'flow' &&
-      step !== 'design_files' &&
-      step !== 'pdk' &&
-      step !== 'spec') ||
-    (record.authority !== 'gui_native' && record.authority !== 'agent_text') ||
-    (record.authority === 'gui_native' &&
-      step !== 'project' &&
-      step !== 'design_files' &&
-      step !== 'pdk') ||
-    (record.authority === 'agent_text' &&
-      step !== 'basic' &&
-      step !== 'flow' &&
-      step !== 'spec')
-  ) {
-    return null
-  }
-  if (!readWorkspaceSetupStepDefaults(step, defaults)) return null
-  return {
-    authority: record.authority,
-    defaults,
-    schema_version: 'flow-agent.workspace_setup_step_request.v1',
-    setup_id: setupId,
-    step,
-  }
-}
-
-function readWorkspaceSetupStepDefaults(
-  step: DesktopAgentWorkspaceSetupStepRequest['step'],
-  defaults: Record<string, unknown>,
-): boolean {
-  if (step === 'project')
-    return (
-      hasOnlyKeys(defaults, ['project_name']) &&
-      readWorkspaceSetupText(defaults.project_name) !== null
-    )
-  if (step === 'basic')
-    return (
-      hasOnlyKeys(defaults, ['description', 'workspace_name']) &&
-      readWorkspaceSetupDescription(defaults.description) !== null &&
-      readWorkspaceSetupText(defaults.workspace_name) !== null
-    )
-  if (step === 'flow')
-    return (
-      hasOnlyKeys(defaults, ['flow_end', 'flow_start']) &&
-      isWorkspaceSetupFlowStep(defaults.flow_start) &&
-      isWorkspaceSetupFlowStep(defaults.flow_end)
-    )
-  if (step === 'design_files')
-    return (
-      hasOnlyKeys(defaults, ['flow_start']) &&
-      isWorkspaceSetupFlowStep(defaults.flow_start)
-    )
-  if (step === 'pdk') return hasOnlyKeys(defaults, ['pdk']) && defaults.pdk === 'ics55'
-  return (
-    hasOnlyKeys(defaults, ['clock', 'design', 'frequency_max', 'top_module']) &&
-    readWorkspaceSetupText(defaults.clock) !== null &&
-    readWorkspaceSetupText(defaults.design) !== null &&
-    readFiniteNumber(defaults.frequency_max, 1, 10_000) !== null &&
-    readWorkspaceSetupText(defaults.top_module) !== null
-  )
-}
-
-function hasOnlyKeys(record: Record<string, unknown>, keys: string[]): boolean {
-  return Object.keys(record).length === keys.length && keys.every((key) => key in record)
-}
-
-function isWorkspaceSetupFlowStep(value: unknown): boolean {
-  return typeof value === 'string' && workspaceSetupFlowSteps.includes(value)
 }
 
 function readWorkspaceSetupParameters(
@@ -490,8 +428,8 @@ function readWorkspaceSetupParameters(
   const frequency = readFiniteNumber(record.frequency_max, 1, 10_000)
   const margin = readFiniteNumber(record.margin, 0, 1_000_000)
   const maxFanout = readFiniteNumber(record.max_fanout, 1, 1_000_000)
-  const density = readFiniteNumber(record.target_density, 0.1, 1)
-  const overflow = readFiniteNumber(record.target_overflow, Number.MIN_VALUE, 1)
+  const density = readFiniteNumber(record.target_density, 0.01, 1)
+  const overflow = readFiniteNumber(record.target_overflow, 0, 1)
   if (
     design === null ||
     topModule === null ||
@@ -526,7 +464,7 @@ function readWorkspaceSetupParameters(
           top_module: topModule,
         }
   }
-  const utilization = readFiniteNumber(record.utilitization, 0.1, 0.95)
+  const utilization = readFiniteNumber(record.utilitization, 0.01, 1)
   return utilization === null
     ? null
     : {
@@ -562,6 +500,60 @@ function readWorkspaceSetupFlowConfig(
     return null
   }
   return { end_step: end, start_step: start, steps }
+}
+
+function readWorkspaceSetupPath(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 4096 &&
+    !value.includes('\0')
+    ? value
+    : null
+}
+
+function readOptionalWorkspaceSetupPath(value: unknown): string | undefined | null {
+  if (value == null) return undefined
+  return readWorkspaceSetupPath(value)
+}
+
+function readWorkspaceSetupPathList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length !== 1) return null
+  const paths = value.map(readWorkspaceSetupPath)
+  return paths.every((path): path is string => path !== null) ? paths : null
+}
+
+function readWorkspaceSetupPdkConfig(
+  value: unknown,
+): DesktopAgentWorkspaceSetupContract['pdk_config'] | null {
+  const record = readRecord(value)
+  if (
+    record.mode !== 'default' ||
+    !Array.isArray(record.tech_lef) ||
+    !Array.isArray(record.cell_lef) ||
+    !Array.isArray(record.liberty) ||
+    record.tech_lef.length !== 0 ||
+    record.cell_lef.length !== 0 ||
+    record.liberty.length !== 0
+  )
+    return null
+  return { cell_lef: [], liberty: [], mode: 'default', tech_lef: [] }
+}
+
+function readWorkspaceSetupProjectContext(
+  value: unknown,
+): DesktopAgentWorkspaceSetupContract['project_context'] | null {
+  const record = readRecord(value)
+  const projectName = readWorkspaceSetupText(record.project_name)
+  const projectRoot = readWorkspaceSetupPath(record.project_root)
+  const projectJsonPath = readWorkspaceSetupPath(record.project_json_path)
+  if (record.mode !== 'create' || !projectName || !projectRoot || !projectJsonPath)
+    return null
+  return {
+    mode: 'create',
+    project_json_path: projectJsonPath,
+    project_name: projectName,
+    project_root: projectRoot,
+  }
 }
 
 function readOptionalIdentifier(value: unknown): string | null {

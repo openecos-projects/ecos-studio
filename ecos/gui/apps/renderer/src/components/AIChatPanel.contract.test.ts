@@ -14,9 +14,8 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain('openWorkspaceSetup?.(event.workspaceSetup)')
   })
 
-  it('returns GUI-native steps through the typed setup response', () => {
-    expect(source).toContain('workspaceSetupResponse')
-    expect(source).toContain("event.type === 'workspace_setup_step'")
+  it('allows empty optional-path answers and executes only after confirmation', () => {
+    expect(source).not.toContain('if (!message || !agent')
     expect(source).toContain("event.type === 'workspace_create'")
     expect(source).toContain('isWorkspaceCreationPending')
   })

@@ -33,9 +33,6 @@
         <AgentWorkspaceSetupPanel
           :contract="workspaceSetupContract"
           :create-setup-id="workspaceCreateSetupId"
-          :disabled="isAgentRequestPending || isWorkspaceCreationPending"
-          :request="workspaceSetupStep"
-          @complete-host-step="sendWorkspaceSetupResponse"
           @create-workspace="createWorkspaceFromAgent"
         />
       </div>
@@ -69,10 +66,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
 import { storeToRefs } from 'pinia'
-import type {
-  DesktopAgentEvent,
-  DesktopAgentWorkspaceSetupStepResponse,
-} from '@ecos-studio/shared'
+import type { DesktopAgentEvent } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
 import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import { useMessageStore } from '../stores/messageStore'
@@ -90,7 +84,6 @@ const agentSessionId = ref<string | null>(null)
 const isAgentRequestPending = ref(false)
 const isWorkspaceCreationPending = ref(false)
 const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
-const workspaceSetupStep = ref<DesktopAgentEvent['workspaceSetupStep']>()
 const workspaceCreateSetupId = ref<string>()
 let unsubscribeAgentEvents: (() => void) | undefined
 
@@ -138,10 +131,6 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   if (event.type === 'workspace_setup' && event.workspaceSetup) {
     workspaceSetupContract.value = event.workspaceSetup
     if (event.text) messageStore.addAssistantMessage(event.text, 'done')
-    return
-  }
-  if (event.type === 'workspace_setup_step' && event.workspaceSetupStep) {
-    workspaceSetupStep.value = event.workspaceSetupStep
     return
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
@@ -241,7 +230,7 @@ const handleSubmit = async () => {
   const desktopApi = getOptionalDesktopApi()
   const agent = desktopApi?.agent
   const sessionId = agentSessionId.value
-  if (!message || !agent || !sessionId || isAgentRequestPending.value) return
+  if (!agent || !sessionId || isAgentRequestPending.value) return
 
   if (message) messageStore.addMessage(message)
   inputValue.value = ''
@@ -259,35 +248,14 @@ const handleSubmit = async () => {
   }
 }
 
-async function sendWorkspaceSetupResponse(
-  workspaceSetupResponse: DesktopAgentWorkspaceSetupStepResponse,
-): Promise<void> {
-  const desktopApi = getOptionalDesktopApi()
-  const agent = desktopApi?.agent
-  const sessionId = agentSessionId.value
-  if (!agent || !sessionId || isAgentRequestPending.value) return
-  isAgentRequestPending.value = true
-  try {
-    await agent.sendMessage({
-      message: '',
-      providerId: AGENT_PROVIDER_ID,
-      sessionId,
-      workspaceSetupResponse,
-    })
-  } catch (error) {
-    messageStore.addAssistantMessage(agentErrorMessage(error), 'error')
-  } finally {
-    isAgentRequestPending.value = false
-  }
-}
-
 async function createWorkspaceFromAgent(
   config: import('@/types').WorkspaceConfig,
+  contract: import('@ecos-studio/shared').DesktopAgentWorkspaceSetupContract,
 ): Promise<void> {
   if (!createAgentWorkspace || isWorkspaceCreationPending.value) return
   isWorkspaceCreationPending.value = true
   try {
-    const created = await createAgentWorkspace(config)
+    const created = await createAgentWorkspace(config, contract)
     if (!created)
       messageStore.addAssistantMessage('Workspace creation was not completed.', 'error')
   } catch (error) {
