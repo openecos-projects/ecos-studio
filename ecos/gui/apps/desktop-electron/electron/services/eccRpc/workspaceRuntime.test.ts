@@ -325,7 +325,7 @@ describe('EccWorkspaceRuntime', () => {
   })
 
   it('maps atomic candidate reruns through the stored ECC workspace id', async () => {
-    const { client, service } = createService()
+    const { client, events, service } = createService()
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
@@ -354,6 +354,15 @@ describe('EccWorkspaceRuntime', () => {
       },
       options: { timeoutMs: 0 },
     })
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        executionScope: 'full_flow',
+        method: 'candidate.rerun',
+        rerun: true,
+        type: 'operation.completed',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    )
   })
 
   it('exports signoff through the stored ECC workspace id and preserves the output path', async () => {

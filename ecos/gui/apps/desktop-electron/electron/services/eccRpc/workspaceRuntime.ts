@@ -125,6 +125,7 @@ function workspaceCreatePayload(
 
 type RuntimeOperation<T> = () => Promise<T>
 interface RuntimeOperationMetadata {
+  executionScope?: 'single_step' | 'full_flow'
   rerun?: boolean
 }
 
@@ -480,21 +481,26 @@ export class EccWorkspaceRuntime {
   }
 
   runCandidateRerun(request: EccCandidateRerunRequest): Promise<unknown> {
-    return this.enqueue('candidate.rerun', request.workspaceHandle, async () => {
-      const client = await this.ensureStarted()
-      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
-      return await client.call(
-        'candidate.rerun',
-        {
-          candidateId: request.candidateId,
-          executionScope: request.executionScope,
-          patch: request.patch,
-          targetStep: request.targetStep,
-          workspaceId,
-        },
-        { timeoutMs: 0 },
-      )
-    })
+    return this.enqueue(
+      'candidate.rerun',
+      request.workspaceHandle,
+      async () => {
+        const client = await this.ensureStarted()
+        const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+        return await client.call(
+          'candidate.rerun',
+          {
+            candidateId: request.candidateId,
+            executionScope: request.executionScope,
+            patch: request.patch,
+            targetStep: request.targetStep,
+            workspaceId,
+          },
+          { timeoutMs: 0 },
+        )
+      },
+      { executionScope: request.executionScope, rerun: true },
+    )
   }
 
   async shutdown(): Promise<EccRpcShutdownResult> {

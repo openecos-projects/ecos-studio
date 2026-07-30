@@ -126,6 +126,66 @@ describe('createRuntimeEventClient desktop ECC events', () => {
     )
   })
 
+  it('maps full-flow candidate reruns onto flow lifecycle notifications', async () => {
+    const listeners: Array<(event: EccRuntimeEvent) => void> = []
+    setWindow({
+      ecosDesktop: {
+        ecc: {
+          events: {
+            onEvent: (listener: (event: EccRuntimeEvent) => void) => {
+              listeners.push(listener)
+              return () => undefined
+            },
+          },
+        },
+      },
+    })
+
+    const { createRuntimeEventClient } = await import('./runtimeEvents')
+    const client = createRuntimeEventClient('workspace-handle-1')
+    const allHandler = vi.fn()
+    client.onAll(allHandler)
+    client.connect()
+
+    listeners[0]({
+      executionScope: 'full_flow',
+      method: 'candidate.rerun',
+      operationId: 'operation-rerun',
+      rerun: true,
+      type: 'operation.started',
+      workspaceHandle: 'workspace-handle-1',
+    } as EccRuntimeEvent)
+    listeners[0]({
+      executionScope: 'full_flow',
+      method: 'candidate.rerun',
+      operationId: 'operation-rerun',
+      rerun: true,
+      type: 'operation.completed',
+      workspaceHandle: 'workspace-handle-1',
+    } as EccRuntimeEvent)
+
+    expect(allHandler).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          rerun: true,
+          type: 'message',
+        }),
+      }),
+    )
+    expect(allHandler).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cmd: 'rtl2gds',
+          rerun: true,
+          type: 'task_complete',
+        }),
+      }),
+    )
+  })
+
   it('ignores operation events for another workspace handle', async () => {
     const listeners: Array<(event: EccRuntimeEvent) => void> = []
     setWindow({
