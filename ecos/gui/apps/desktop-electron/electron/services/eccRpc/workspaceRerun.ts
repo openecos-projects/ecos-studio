@@ -268,6 +268,7 @@ function isWorkspaceArtifactReference(value: string): boolean {
 async function createStagingRoot(targetWorkspace: string): Promise<string> {
   const parent = dirname(targetWorkspace)
   const stagingRoot = join(parent, `.${basename(targetWorkspace)}.${randomUUID()}`)
+  await mkdir(parent, { recursive: true })
   await mkdir(stagingRoot)
   return stagingRoot
 }
