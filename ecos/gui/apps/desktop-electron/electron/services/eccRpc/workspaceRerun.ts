@@ -14,8 +14,6 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 
 interface WorkspaceRerunRuntime {
-  closeWorkspace(request: { workspaceHandle: string }): Promise<unknown>
-  openWorkspace(request: { directory: string }): Promise<{ workspaceHandle: string }>
   runCandidateRerun(request: {
     candidateId: string
     executionScope: 'single_step' | 'full_flow'
@@ -161,19 +159,15 @@ export async function prepareWorkspaceRerun(
 export async function executeWorkspaceRerun(
   contract: DesktopAgentWorkspaceRerunContract,
   runtime: WorkspaceRerunRuntime,
+  workspaceHandle: string,
 ): Promise<void> {
-  const opened = await runtime.openWorkspace({ directory: contract.target_workspace })
-  try {
-    await runtime.runCandidateRerun({
-      candidateId: contract.rerun_id,
-      executionScope: contract.execution_scope,
-      patch: contract.parameter_patch,
-      targetStep: contract.target_step,
-      workspaceHandle: opened.workspaceHandle,
-    })
-  } finally {
-    await runtime.closeWorkspace({ workspaceHandle: opened.workspaceHandle })
-  }
+  await runtime.runCandidateRerun({
+    candidateId: contract.rerun_id,
+    executionScope: contract.execution_scope,
+    patch: contract.parameter_patch,
+    targetStep: contract.target_step,
+    workspaceHandle,
+  })
 }
 
 async function verifyWorkspaceRerunContract(

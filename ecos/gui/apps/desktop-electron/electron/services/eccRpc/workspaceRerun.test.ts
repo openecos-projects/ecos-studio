@@ -84,26 +84,21 @@ describe('prepareWorkspaceRerun', () => {
     ).resolves.toContain(contract.rerun_id)
   })
 
-  it('executes the frozen contract through the single ECC candidate rerun RPC', async () => {
+  it('executes the frozen contract through the target GUI workspace handle', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
     const runtime = {
-      closeWorkspace: vi.fn().mockResolvedValue({ ok: true }),
-      openWorkspace: vi.fn().mockResolvedValue({ workspaceHandle: 'rerun-handle' }),
       runCandidateRerun: vi.fn().mockResolvedValue({}),
     }
 
-    await executeWorkspaceRerun(contract, runtime)
+    await executeWorkspaceRerun(contract, runtime, 'target-gui-handle')
 
     expect(runtime.runCandidateRerun).toHaveBeenCalledWith({
       candidateId: contract.rerun_id,
       executionScope: contract.execution_scope,
       patch: contract.parameter_patch,
       targetStep: contract.target_step,
-      workspaceHandle: 'rerun-handle',
-    })
-    expect(runtime.closeWorkspace).toHaveBeenCalledWith({
-      workspaceHandle: 'rerun-handle',
+      workspaceHandle: 'target-gui-handle',
     })
   })
 

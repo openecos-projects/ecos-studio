@@ -793,6 +793,19 @@ export function registerIpc(
     return typeof result.directory === 'string' ? result.directory : null
   }
 
+  const workspaceHandleForSender = (
+    sender: IpcMainInvokeEvent['sender'],
+    directory: string,
+  ): string | null => {
+    const normalizedDirectory = normalizeWorkspacePath(directory)
+    for (const [workspaceHandle, subscription] of workspaceHandleSubscriptions) {
+      if (subscription.sender === sender && subscription.directory === normalizedDirectory) {
+        return workspaceHandle
+      }
+    }
+    return null
+  }
+
   handle(desktopApiIpcChannels.appGetVersions, async () => {
     return await services.appInfoService.getVersions()
   })
@@ -911,8 +924,12 @@ export function registerIpc(
     ) {
       throw new Error('Workspace rerun target is not bound to this window.')
     }
+    const workspaceHandle = workspaceHandleForSender(event.sender, targetWorkspace)
+    if (!workspaceHandle) {
+      throw new Error('Workspace rerun target is not active in this window.')
+    }
     pendingWorkspaceRerunExecutions.delete(token)
-    await executeWorkspaceRerun(pending.contract, services.eccRuntimeService)
+    await executeWorkspaceRerun(pending.contract, services.eccRuntimeService, workspaceHandle)
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {

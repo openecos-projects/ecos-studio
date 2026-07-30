@@ -413,7 +413,7 @@ describe('registerIpc', () => {
     expect(prepareWorkspaceRerunMock).toHaveBeenCalledWith(contract)
   })
 
-  it('executes a prepared rerun only after its owner binds the target workspace', async () => {
+  it('executes a prepared rerun through the target workspace handle owned by its window', async () => {
     let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
     const agentRuntimeService = {
       onEvent: vi.fn((listener) => {
@@ -481,6 +481,14 @@ describe('registerIpc', () => {
       ok: false,
     })
     workspaceWindowRegistry.register(contract.target_workspace, window)
+    services.eccRuntimeService.openWorkspace.mockResolvedValue({
+      directory: contract.target_workspace,
+      workspaceHandle: 'target-gui-handle',
+    })
+    await handlers.get(desktopApiIpcChannels.eccWorkspaceOpen)?.(
+      { sender: owner },
+      { directory: contract.target_workspace },
+    )
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun)?.(
         { sender: owner },
@@ -491,6 +499,7 @@ describe('registerIpc', () => {
     expect(executeWorkspaceRerunMock).toHaveBeenCalledWith(
       contract,
       services.eccRuntimeService,
+      'target-gui-handle',
     )
   })
 
