@@ -317,8 +317,8 @@ describe('AgentProviderProcessRuntime', () => {
             rerun_id: 'gcd_rerun_place',
             schema_version: 'flow-agent.workspace_rerun_contract.v1',
             source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
-            source_flow_json_sha256: 'a'.repeat(64),
-            source_stage_artifact_sha256: 'b'.repeat(64),
+            source_flow_json_sha256: `sha256:${'a'.repeat(64)}`,
+            source_stage_artifact_sha256: `sha256:${'b'.repeat(64)}`,
             source_workspace: '/runs/gcd',
             target_step: 'place',
             target_workspace: '/runs/gcd_rerun_place',
@@ -331,7 +331,11 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).toHaveBeenCalledWith({
       providerId: 'local',
       type: 'workspace_rerun',
-      workspaceRerun: expect.objectContaining({ rerun_id: 'gcd_rerun_place' }),
+      workspaceRerun: expect.objectContaining({
+        rerun_id: 'gcd_rerun_place',
+        source_flow_json_sha256: 'a'.repeat(64),
+        source_stage_artifact_sha256: 'b'.repeat(64),
+      }),
     })
   })
 

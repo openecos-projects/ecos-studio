@@ -378,6 +378,8 @@ function readWorkspaceRerunContract(
   const sourceStageArtifact = readWorkspaceRerunArtifactReference(
     record.source_stage_artifact,
   )
+  const sourceFlowJsonSha256 = readSha256(record.source_flow_json_sha256)
+  const sourceStageArtifactSha256 = readSha256(record.source_stage_artifact_sha256)
   if (
     record.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
     record.requires_gui_review !== true ||
@@ -390,8 +392,8 @@ function readWorkspaceRerunContract(
     (executionScope !== 'single_step' && executionScope !== 'full_flow') ||
     !patch ||
     !sourceStageArtifact ||
-    !readSha256(record.source_flow_json_sha256) ||
-    !readSha256(record.source_stage_artifact_sha256)
+    !sourceFlowJsonSha256 ||
+    !sourceStageArtifactSha256
   ) {
     return null
   }
@@ -403,8 +405,8 @@ function readWorkspaceRerunContract(
     rerun_id: rerunId,
     schema_version: 'flow-agent.workspace_rerun_contract.v1',
     source_stage_artifact: sourceStageArtifact,
-    source_flow_json_sha256: record.source_flow_json_sha256,
-    source_stage_artifact_sha256: record.source_stage_artifact_sha256,
+    source_flow_json_sha256: sourceFlowJsonSha256,
+    source_stage_artifact_sha256: sourceStageArtifactSha256,
     source_workspace: sourceWorkspace,
     target_step: targetStep,
     target_workspace: targetWorkspace,
@@ -568,8 +570,10 @@ function readWorkspaceRerunPath(value: unknown): string | null {
   return path && path.startsWith('/') ? path : null
 }
 
-function readSha256(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+function readSha256(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const digest = value.startsWith('sha256:') ? value.slice('sha256:'.length) : value
+  return /^[a-f0-9]{64}$/.test(digest) ? digest : null
 }
 
 function readWorkspaceRerunArtifactReference(value: unknown): string | null {
