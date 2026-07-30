@@ -444,6 +444,84 @@ describe('ChipViewerService', () => {
     )
   })
 
+  it('releases the ECC edit session when the viewer exits before opening another step', async () => {
+    const devBinaries = devChipViewerPaths()
+    const layoutEditBegin = vi
+      .fn()
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: EDIT_SESSION_ID,
+        geometryManifestPath: GEOMETRY_MANIFEST,
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-1',
+      })
+      .mockResolvedValueOnce({
+        dirty: false,
+        editSessionId: 'layout-edit-2',
+        geometryManifestPath: GEOMETRY_MANIFEST,
+        geometryRevision: 0,
+        revision: 0,
+        sourceFingerprint: 'source-2',
+      })
+    const layoutEditDiscard = vi.fn(async () => ({
+      discarded: true,
+      dirty: false,
+      editSessionId: EDIT_SESSION_ID,
+    }))
+    const { layoutEditRuntime, service, spawnedProcess, watchDirectory } = createService({
+      existingPaths: [
+        devBinaries.cargoManifest,
+        devBinaries.snapshot,
+        devBinaries.viewer,
+        GEOMETRY_MANIFEST,
+      ],
+      files: {
+        [DB_CONFIG_PATH]: dbConfig(),
+      },
+      layoutEditRuntime: {
+        layoutEditApply: vi.fn(),
+        layoutEditBegin,
+        layoutEditDiscard,
+        layoutEditSave: vi.fn(),
+        openWorkspace: vi.fn(async () => ({
+          directory: PROJECT_ROOT,
+          workspaceHandle: 'workspace-handle-1',
+        })),
+      },
+    })
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: STEP_NAME,
+    })
+    spawnedProcess.emit('exit', 0, null)
+
+    await vi.waitFor(() => {
+      expect(layoutEditRuntime.layoutEditDiscard).toHaveBeenCalledWith({
+        editSessionId: EDIT_SESSION_ID,
+        workspaceHandle: 'workspace-handle-1',
+      })
+    })
+    expect(watchDirectory.mock.results[0]?.value.close).toHaveBeenCalledTimes(1)
+
+    await service.open({
+      mode: 'edit',
+      projectPath: PROJECT_ROOT,
+      step: 'FixFanout',
+    })
+
+    expect(layoutEditBegin).toHaveBeenNthCalledWith(1, {
+      step: STEP_NAME,
+      workspaceHandle: 'workspace-handle-1',
+    })
+    expect(layoutEditBegin).toHaveBeenNthCalledWith(2, {
+      step: 'FixFanout',
+      workspaceHandle: 'workspace-handle-1',
+    })
+  })
+
   it('launches the native viewer with sanitized environment and diagnostic logs', async () => {
     const devBinaries = devChipViewerPaths()
     const { closeLogFile, openLogFile, service, spawnProcess } = createService({
@@ -584,7 +662,7 @@ describe('ChipViewerService', () => {
       }, 0)
       return child
     })
-    const { service } = createService({
+    const { layoutEditRuntime, service } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
         devBinaries.snapshot,
@@ -601,6 +679,7 @@ describe('ChipViewerService', () => {
     let message = ''
     try {
       await service.open({
+        mode: 'edit',
         projectPath: PROJECT_ROOT,
         step: STEP_NAME,
       })
@@ -617,6 +696,10 @@ describe('ChipViewerService', () => {
     expect(message).toContain('stdout log: /viewer-logs/')
     expect(message).toContain('stderr log: /viewer-logs/')
     expect(child.unref).not.toHaveBeenCalled()
+    expect(layoutEditRuntime.layoutEditDiscard).toHaveBeenCalledWith({
+      editSessionId: EDIT_SESSION_ID,
+      workspaceHandle: 'workspace-handle-1',
+    })
   })
 
   it('reports a missing Linux display environment before spawning the viewer', async () => {

@@ -791,12 +791,12 @@ export class ChipViewerService {
           manifestPath: viewerManifestPath,
         },
         mode === 'edit' && editCommandDirectory
-          ? () => this.stopEditCommandBridge(editCommandDirectory)
+          ? () => this.releaseLayoutEditBridgeAfterViewerExit(editCommandDirectory)
           : undefined,
       )
     } catch (error) {
       if (mode === 'edit' && editCommandDirectory) {
-        this.stopEditCommandBridge(editCommandDirectory)
+        await this.releaseLayoutEditBridge(editCommandDirectory).catch(() => undefined)
       }
       throw error
     }
@@ -1081,6 +1081,25 @@ export class ChipViewerService {
         this.processedEditCommands.delete(commandPath)
       }
     }
+  }
+
+  private releaseLayoutEditBridgeAfterViewerExit(editCommandDirectory: string): void {
+    // A detached native viewer cannot await cleanup. Start it before handling a
+    // later open request so the workspace runtime serializes discard before begin.
+    void this.releaseLayoutEditBridge(editCommandDirectory).catch(() => undefined)
+  }
+
+  private async releaseLayoutEditBridge(editCommandDirectory: string): Promise<void> {
+    const layoutEdit = this.layoutEditContexts.get(editCommandDirectory)
+    this.stopEditCommandBridge(editCommandDirectory)
+    if (!layoutEdit || !this.layoutEditRuntime) {
+      return
+    }
+
+    await this.layoutEditRuntime.layoutEditDiscard({
+      editSessionId: layoutEdit.editSessionId,
+      workspaceHandle: layoutEdit.workspaceHandle,
+    })
   }
 
   private async handleEditCommandFile(

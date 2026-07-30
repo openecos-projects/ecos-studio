@@ -22,6 +22,9 @@ const SNAPSHOT_REFRESH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const FOCUS_VIEWPORT_FILL: f32 = 0.45;
 const MIN_SHAPE_SCREEN_SIZE: f32 = 2.0;
 const LAYOUT_GEOMETRY_LAYER: LayerId = 0;
+const LAYOUT_GEOMETRY_RGB: [u8; 3] = [148, 148, 148];
+const LAYOUT_GEOMETRY_MAX_FILL_ALPHA: u8 = 48;
+const LAYOUT_GEOMETRY_MAX_FRAME_ALPHA: u8 = 128;
 const PATTERN_MIN_SIZE_PX: f32 = 20.0;
 const MAX_PATTERN_OPS_PER_SHAPE: usize = 96;
 const MAX_SELECTION_ENDPOINT_LINES: usize = 6;
@@ -1705,14 +1708,7 @@ impl LoadedViewer {
             .map(|layer| (layer.layer_id, layer.style))
             .collect();
         let mut all_layers = all_layers;
-        all_layers.entry(LAYOUT_GEOMETRY_LAYER).or_insert_with(|| {
-            LayerStyle::default_for_metadata_with_type(
-                LAYOUT_GEOMETRY_LAYER,
-                "LAYOUT",
-                "layout",
-                self.layers.len(),
-            )
-        });
+        all_layers.insert(LAYOUT_GEOMETRY_LAYER, layout_geometry_layer_style());
         let visible_layers: BTreeMap<LayerId, LayerStyle> = self
             .layers
             .iter()
@@ -2658,7 +2654,7 @@ impl LoadedViewer {
             .db
             .owner_for_shape(shape)
             .and_then(|owner| OwnerType::from_raw(owner.owner_type));
-        let layer_visible = if owner_uses_layer_visibility(owner_type) {
+        let layer_visible = if shape_uses_layer_visibility(shape, owner_type) {
             self.layers
                 .iter()
                 .find(|layer| layer.layer_id == shape.layer_id)
@@ -3110,7 +3106,7 @@ fn overview_tile_color(style: LayerStyle, shape_count: u32) -> egui::Color32 {
 }
 
 fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
-    match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
+    let style = match owner.and_then(|owner| OwnerType::from_raw(owner.owner_type)) {
         Some(OwnerType::Die | OwnerType::Core) => context_style(style, 170, 2),
         Some(OwnerType::Row) => context_style(style, 46, 1),
         Some(OwnerType::TrackGrid) => context_style(style, 82, 1),
@@ -3151,7 +3147,54 @@ fn style_for_shape(style: LayerStyle, owner: Option<&OwnerRef>) -> LayerStyle {
             owner_texture_style(style, 48, 190, FillPattern::HorizontalHatch, 1)
         }
         _ => style,
+    };
+
+    if style.layer_id == LAYOUT_GEOMETRY_LAYER {
+        transparent_gray_layout_style(style)
+    } else {
+        style
     }
+}
+
+fn layout_geometry_layer_style() -> LayerStyle {
+    LayerStyle {
+        layer_id: LAYOUT_GEOMETRY_LAYER,
+        visible: true,
+        rgba: [
+            LAYOUT_GEOMETRY_RGB[0],
+            LAYOUT_GEOMETRY_RGB[1],
+            LAYOUT_GEOMETRY_RGB[2],
+            LAYOUT_GEOMETRY_MAX_FILL_ALPHA,
+        ],
+        frame_rgba: [
+            LAYOUT_GEOMETRY_RGB[0],
+            LAYOUT_GEOMETRY_RGB[1],
+            LAYOUT_GEOMETRY_RGB[2],
+            LAYOUT_GEOMETRY_MAX_FRAME_ALPHA,
+        ],
+        fill_alpha: LAYOUT_GEOMETRY_MAX_FILL_ALPHA,
+        frame_alpha: LAYOUT_GEOMETRY_MAX_FRAME_ALPHA,
+        fill_pattern: FillPattern::Hollow,
+        line_width_px: 1,
+    }
+}
+
+fn transparent_gray_layout_style(mut style: LayerStyle) -> LayerStyle {
+    style.rgba = [
+        LAYOUT_GEOMETRY_RGB[0],
+        LAYOUT_GEOMETRY_RGB[1],
+        LAYOUT_GEOMETRY_RGB[2],
+        style.fill_alpha.min(LAYOUT_GEOMETRY_MAX_FILL_ALPHA),
+    ];
+    style.frame_rgba = [
+        LAYOUT_GEOMETRY_RGB[0],
+        LAYOUT_GEOMETRY_RGB[1],
+        LAYOUT_GEOMETRY_RGB[2],
+        style.frame_alpha.min(LAYOUT_GEOMETRY_MAX_FRAME_ALPHA),
+    ];
+    style.fill_alpha = style.rgba[3];
+    style.frame_alpha = style.frame_rgba[3];
+    style
 }
 
 fn io_pin_texture_style(mut style: LayerStyle) -> LayerStyle {
@@ -4070,12 +4113,23 @@ fn parameterized_grid_stroke(
     }
 
     match owner_type {
-        OwnerType::TrackGrid => {
-            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 196, 184, 82))
-        }
+        OwnerType::TrackGrid => egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(
+                LAYOUT_GEOMETRY_RGB[0],
+                LAYOUT_GEOMETRY_RGB[1],
+                LAYOUT_GEOMETRY_RGB[2],
+                82,
+            ),
+        ),
         OwnerType::GCellGrid => egui::Stroke::new(
             2.0,
-            egui::Color32::from_rgba_unmultiplied(228, 176, 72, 104),
+            egui::Color32::from_rgba_unmultiplied(
+                LAYOUT_GEOMETRY_RGB[0],
+                LAYOUT_GEOMETRY_RGB[1],
+                LAYOUT_GEOMETRY_RGB[2],
+                104,
+            ),
         ),
         _ => egui::Stroke::new(1.0, ecos_text_secondary()),
     }
@@ -4823,8 +4877,18 @@ fn owner_uses_layer_visibility(owner_type: Option<OwnerType>) -> bool {
     )
 }
 
+fn shape_uses_layer_visibility(shape: &ShapeRecord, owner_type: Option<OwnerType>) -> bool {
+    shape.layer_id != LAYOUT_GEOMETRY_LAYER && owner_uses_layer_visibility(owner_type)
+}
+
 fn object_visibility_needs_layout_layer(visibility: ObjectVisibility) -> bool {
-    visibility.instances || visibility.boundaries || visibility.placement || visibility.regions
+    visibility.instances
+        || visibility.boundaries
+        || visibility.placement
+        || visibility.tracks
+        || visibility.gcells
+        || visibility.obstructions
+        || visibility.regions
 }
 
 fn is_renderable_shape(shape: &chipgeom_format::ShapeRecord) -> bool {
@@ -5228,12 +5292,7 @@ fn render_query_layer_ids(layers: &[LayerUiState], visibility: ObjectVisibility)
         .map(|layer| layer.layer_id)
         .collect();
     if object_visibility_needs_layout_layer(visibility) {
-        ids.extend(
-            layers
-                .iter()
-                .filter(|layer| layer.layer_id == 0)
-                .map(|layer| layer.layer_id),
-        );
+        ids.insert(LAYOUT_GEOMETRY_LAYER);
     }
     ids.into_iter().collect()
 }
@@ -5245,7 +5304,7 @@ fn visible_style_for_shape<'a>(
     all_layers: &'a BTreeMap<LayerId, LayerStyle>,
 ) -> Option<&'a LayerStyle> {
     let owner_type = owner.and_then(|owner| OwnerType::from_raw(owner.owner_type));
-    if owner_uses_layer_visibility(owner_type) {
+    if shape_uses_layer_visibility(shape, owner_type) {
         visible_layers.get(&shape.layer_id)
     } else {
         all_layers
@@ -6682,6 +6741,31 @@ mod tests {
     }
 
     #[test]
+    fn layout_geometry_layer_uses_transparent_gray_styles() {
+        let layout = layout_geometry_layer_style();
+        assert_eq!(layout.rgba, [148, 148, 148, 48]);
+        assert_eq!(layout.frame_rgba, [148, 148, 148, 128]);
+
+        let instance = OwnerRef {
+            owner_type: OwnerType::InstanceBBox as u8,
+            ..OwnerRef::default()
+        };
+        let instance_style = style_for_shape(layout, Some(&instance));
+        assert_eq!(instance_style.rgba, [148, 148, 148, 48]);
+        assert_eq!(instance_style.frame_rgba, [148, 148, 148, 128]);
+        assert_eq!(instance_style.fill_pattern, FillPattern::Solid);
+
+        let die = OwnerRef {
+            owner_type: OwnerType::Die as u8,
+            ..OwnerRef::default()
+        };
+        let die_style = style_for_shape(layout, Some(&die));
+        assert_eq!(die_style.rgba, [148, 148, 148, 0]);
+        assert_eq!(die_style.frame_rgba, [148, 148, 148, 128]);
+        assert_eq!(die_style.fill_pattern, FillPattern::Hollow);
+    }
+
+    #[test]
     fn shape_label_overlays_fit_centered_names_inside_rectangles() {
         let world = Rect32 {
             lx: 0,
@@ -6863,6 +6947,32 @@ mod tests {
         assert!(owner_uses_layer_visibility(Some(OwnerType::IoPinPortShape)));
         assert!(owner_uses_layer_visibility(Some(OwnerType::Via)));
         assert!(owner_uses_layer_visibility(None));
+
+        let layout_shape = ShapeRecord {
+            layer_id: LAYOUT_GEOMETRY_LAYER,
+            ..ShapeRecord::default()
+        };
+        assert!(!shape_uses_layer_visibility(
+            &layout_shape,
+            Some(OwnerType::GCellGrid)
+        ));
+        assert!(!shape_uses_layer_visibility(
+            &layout_shape,
+            Some(OwnerType::TrackGrid)
+        ));
+        assert!(!shape_uses_layer_visibility(
+            &layout_shape,
+            Some(OwnerType::Blockage)
+        ));
+
+        let physical_shape = ShapeRecord {
+            layer_id: 7,
+            ..ShapeRecord::default()
+        };
+        assert!(shape_uses_layer_visibility(
+            &physical_shape,
+            Some(OwnerType::TrackGrid)
+        ));
     }
 
     #[test]
@@ -7060,6 +7170,25 @@ mod tests {
     }
 
     #[test]
+    fn unbound_parameterized_grids_use_transparent_gray_layout_color() {
+        let grid = GridMetadata::default();
+
+        let track_stroke = parameterized_grid_stroke(&grid, &[], OwnerType::TrackGrid);
+        assert_eq!(track_stroke.width, 1.0);
+        assert_eq!(
+            track_stroke.color,
+            egui::Color32::from_rgba_unmultiplied(148, 148, 148, 82)
+        );
+
+        let gcell_stroke = parameterized_grid_stroke(&grid, &[], OwnerType::GCellGrid);
+        assert_eq!(gcell_stroke.width, 2.0);
+        assert_eq!(
+            gcell_stroke.color,
+            egui::Color32::from_rgba_unmultiplied(148, 148, 148, 104)
+        );
+    }
+
+    #[test]
     fn layer_visibility_helpers_show_hide_and_invert_layers() {
         let mut layers = vec![
             layer_state(1, true),
@@ -7179,6 +7308,27 @@ mod tests {
 
         layers[0].visible = true;
         assert_eq!(render_query_layer_ids(&layers, visibility), vec![0, 7]);
+
+        let idb_only_layers = vec![layer_state(7, true), layer_state(8, false)];
+        assert_eq!(
+            render_query_layer_ids(&idb_only_layers, ObjectVisibility::default()),
+            vec![0, 7]
+        );
+
+        for category in [
+            DrawingCategory::Tracks,
+            DrawingCategory::GCells,
+            DrawingCategory::Obstructions,
+            DrawingCategory::Regions,
+        ] {
+            let mut visibility = ObjectVisibility::default();
+            visibility.set_all_visible(false);
+            visibility.set_category_visible(category, true);
+            assert_eq!(
+                render_query_layer_ids(&idb_only_layers, visibility),
+                vec![0, 7]
+            );
+        }
     }
 
     #[test]
