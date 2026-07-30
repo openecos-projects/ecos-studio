@@ -158,6 +158,50 @@ describe('AgentProviderProcessRuntime', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 
+  it('forwards execution contracts with every resolved parameter field', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          contract: {
+            fields: Array.from({ length: 25 }, (_, index) => ({
+              label: `parameter_${index}`,
+              value: String(index),
+            })),
+            schema_version: 'flow-agent.resolved_execution_contract.v1',
+            title: 'Frozen workspace rerun contract',
+          },
+          type: 'contract',
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: expect.objectContaining({
+          fields: expect.arrayContaining([{ label: 'parameter_24', value: '24' }]),
+        }),
+        type: 'contract',
+      }),
+    )
+  })
+
   it('forwards validated workspace setup contracts from provider stdout', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

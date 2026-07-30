@@ -696,7 +696,7 @@ function readExecutionContract(value: unknown): DesktopAgentExecutionContract | 
     !readEventText(record.title) ||
     !Array.isArray(record.fields) ||
     record.fields.length === 0 ||
-    record.fields.length > 16
+    record.fields.length > 32
   ) {
     return null
   }
