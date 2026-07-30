@@ -329,24 +329,30 @@ describe('EccWorkspaceRuntime', () => {
     client.responses.push(
       { capabilities: [], eccVersion: '0.1.0', version: 1 },
       { directory: '/work/demo', workspaceId: 'workspace-1' },
-      { execution_scope: 'full_flow', target_step: 'place' },
+      { end_step: 'CTS', execution_scope: 'full_flow', target_step: 'place' },
     )
 
     const workspace = await service.openWorkspace({ directory: '/work/demo' })
     await expect(
       service.runCandidateRerun({
         candidateId: 'gcd-rerun-place',
+        endStep: 'CTS',
         executionScope: 'full_flow',
         patch: [{ knob_id: 'place.target_density', value: 0.55 }],
         targetStep: 'place',
         workspaceHandle: workspace.workspaceHandle,
       }),
-    ).resolves.toEqual({ execution_scope: 'full_flow', target_step: 'place' })
+    ).resolves.toEqual({
+      end_step: 'CTS',
+      execution_scope: 'full_flow',
+      target_step: 'place',
+    })
 
     expect(client.calls.at(-1)).toEqual({
       method: 'candidate.rerun',
       params: {
         candidateId: 'gcd-rerun-place',
+        endStep: 'CTS',
         executionScope: 'full_flow',
         patch: [{ knob_id: 'place.target_density', value: 0.55 }],
         targetStep: 'place',

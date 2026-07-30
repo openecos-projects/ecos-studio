@@ -373,6 +373,7 @@ function readWorkspaceRerunContract(
   const rerunId = readOptionalIdentifier(record.rerun_id)
   const designId = readOptionalIdentifier(record.design_id)
   const targetStep = record.target_step
+  const endStep = record.end_step
   const executionScope = record.execution_scope
   const patch = readWorkspaceRerunPatch(record.parameter_patch)
   const sourceStageArtifact = readWorkspaceRerunArtifactReference(
@@ -389,7 +390,12 @@ function readWorkspaceRerunContract(
     !designId ||
     typeof targetStep !== 'string' ||
     !workspaceSetupFlowSteps.includes(targetStep) ||
+    typeof endStep !== 'string' ||
+    !workspaceSetupFlowSteps.includes(endStep) ||
     (executionScope !== 'single_step' && executionScope !== 'full_flow') ||
+    (executionScope === 'single_step' && endStep !== targetStep) ||
+    workspaceSetupFlowSteps.indexOf(endStep) <
+      workspaceSetupFlowSteps.indexOf(targetStep) ||
     !patch ||
     !sourceStageArtifact ||
     !sourceFlowJsonSha256 ||
@@ -399,6 +405,7 @@ function readWorkspaceRerunContract(
   }
   return {
     design_id: designId,
+    end_step: endStep,
     execution_scope: executionScope,
     parameter_patch: patch,
     requires_gui_review: true,

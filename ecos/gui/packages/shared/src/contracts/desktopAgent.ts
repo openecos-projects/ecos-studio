@@ -146,6 +146,7 @@ export interface DesktopAgentWorkspaceRerunParameterPatch {
 
 export interface DesktopAgentWorkspaceRerunContract {
   design_id: string
+  end_step: string
   execution_scope: 'single_step' | 'full_flow'
   parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
   requires_gui_review: true

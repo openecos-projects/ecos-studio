@@ -212,6 +212,7 @@ export interface DesktopBridgeServices {
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
     runCandidateRerun(request: {
       candidateId: string
+      endStep: string
       executionScope: 'single_step' | 'full_flow'
       patch: Array<{ knob_id: string; value: unknown }>
       targetStep: string

@@ -16,6 +16,7 @@ import type { DesktopAgentWorkspaceRerunContract } from '@ecos-studio/shared'
 interface WorkspaceRerunRuntime {
   runCandidateRerun(request: {
     candidateId: string
+    endStep: string
     executionScope: 'single_step' | 'full_flow'
     patch: Array<{ knob_id: string; value: unknown }>
     targetStep: string
@@ -164,6 +165,7 @@ export async function executeWorkspaceRerun(
 ): Promise<void> {
   await runtime.runCandidateRerun({
     candidateId: contract.rerun_id,
+    endStep: contract.end_step,
     executionScope: contract.execution_scope,
     patch: contract.parameter_patch,
     targetStep: contract.target_step,
@@ -178,6 +180,7 @@ async function verifyWorkspaceRerunContract(
     contract.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
     contract.requires_gui_review !== true ||
     !FLOW_STEPS.has(contract.target_step) ||
+    !FLOW_STEPS.has(contract.end_step) ||
     !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(contract.design_id) ||
     !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(contract.rerun_id) ||
     !/^[a-f0-9]{64}$/.test(contract.source_flow_json_sha256) ||
@@ -188,7 +191,8 @@ async function verifyWorkspaceRerunContract(
     !hasValidParameterPatch(contract.parameter_patch) ||
     !hasAuthorizedParameterPatch(contract.target_step, contract.parameter_patch) ||
     (contract.execution_scope !== 'single_step' &&
-      contract.execution_scope !== 'full_flow')
+      contract.execution_scope !== 'full_flow') ||
+    !isValidRerunRange(contract.target_step, contract.end_step, contract.execution_scope)
   ) {
     throw new Error('Workspace rerun contract is invalid.')
   }
@@ -225,6 +229,14 @@ async function verifyWorkspaceRerunContract(
   if (sha256(flowText) !== contract.source_flow_json_sha256) {
     throw new Error('Workspace rerun source flow evidence is stale.')
   }
+  if (
+    contract.execution_scope === 'full_flow' &&
+    sourceFlowEndStep(flowText) !== contract.end_step
+  ) {
+    throw new Error(
+      'Workspace rerun full-flow end step does not match the source workspace flow.',
+    )
+  }
   const targetTool = completedStepTool(flowText, contract.target_step)
   if (!targetTool) {
     throw new Error('Workspace rerun target step is not completed in the source flow.')
@@ -250,6 +262,24 @@ async function verifyWorkspaceRerunContract(
     throw new Error('Workspace rerun source artifact evidence is stale.')
   }
   return { sourceWorkspace, targetWorkspace }
+}
+
+function isValidRerunRange(
+  targetStep: string,
+  endStep: string,
+  executionScope: 'single_step' | 'full_flow',
+): boolean {
+  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
+    targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
+  )
+  const endIndex = FLOW_STEP_SEQUENCE.indexOf(
+    endStep as (typeof FLOW_STEP_SEQUENCE)[number],
+  )
+  return (
+    targetIndex >= 0 &&
+    endIndex >= targetIndex &&
+    (executionScope === 'full_flow' || targetStep === endStep)
+  )
 }
 
 function isWorkspaceArtifactReference(value: string): boolean {
@@ -424,6 +454,20 @@ function completedStepTool(flowText: string, targetStep: string): string | null 
   } catch {
     return null
   }
+}
+
+function sourceFlowEndStep(flowText: string): string | null {
+  try {
+    const flow = JSON.parse(flowText) as { steps?: unknown }
+    if (!Array.isArray(flow.steps)) return null
+    for (let index = flow.steps.length - 1; index >= 0; index -= 1) {
+      const name = (flow.steps[index] as { name?: unknown })?.name
+      if (typeof name === 'string' && FLOW_STEPS.has(name)) return name
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 async function invalidateWorkspaceRerunSuffix(

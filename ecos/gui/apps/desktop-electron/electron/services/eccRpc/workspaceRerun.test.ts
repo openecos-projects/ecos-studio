@@ -67,6 +67,7 @@ function contractFor(
 ): DesktopAgentWorkspaceRerunContract {
   return {
     design_id: 'gcd',
+    end_step: 'place',
     execution_scope: 'single_step',
     parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
     requires_gui_review: true,
@@ -137,6 +138,7 @@ describe('prepareWorkspaceRerun', () => {
     expect(runtime.runCandidateRerun).toHaveBeenCalledWith({
       candidateId: contract.rerun_id,
       executionScope: contract.execution_scope,
+      endStep: contract.end_step,
       patch: contract.parameter_patch,
       targetStep: contract.target_step,
       workspaceHandle: 'target-gui-handle',
@@ -163,6 +165,19 @@ describe('prepareWorkspaceRerun', () => {
 
     await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
       'does not match the completed stage',
+    )
+  })
+
+  it('rejects a full-flow end step that differs from the source workspace flow', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = {
+      ...contractFor(source, flow, artifact),
+      end_step: 'CTS',
+      execution_scope: 'full_flow' as const,
+    }
+
+    await expect(prepareWorkspaceRerun(contract)).rejects.toThrow(
+      'full-flow end step does not match the source workspace flow',
     )
   })
 

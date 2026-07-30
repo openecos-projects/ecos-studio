@@ -311,6 +311,7 @@ describe('AgentProviderProcessRuntime', () => {
           type: 'workspace_rerun',
           workspaceRerun: {
             design_id: 'gcd',
+            end_step: 'place',
             execution_scope: 'single_step',
             parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
             requires_gui_review: true,
@@ -333,6 +334,7 @@ describe('AgentProviderProcessRuntime', () => {
       type: 'workspace_rerun',
       workspaceRerun: expect.objectContaining({
         rerun_id: 'gcd_rerun_place',
+        end_step: 'place',
         source_flow_json_sha256: 'a'.repeat(64),
         source_stage_artifact_sha256: 'b'.repeat(64),
       }),
