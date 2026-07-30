@@ -26,16 +26,24 @@ async function writeSourceWorkspace(): Promise<{
   temporaryRoots.push(root)
   const source = join(root, 'gcd')
   const flow = JSON.stringify({
-    steps: [{ name: 'place', state: 'Success', tool: 'dreamplace' }],
+    steps: [
+      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'place', state: 'Success', tool: 'dreamplace' },
+      { name: 'CTS', state: 'Success', tool: 'ecc' },
+    ],
   })
   const artifact = Buffer.from('place-def')
   await mkdir(join(source, 'home'), { recursive: true })
+  await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
+  await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
+  await writeFile(join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'), 'checkpoint')
   await writeFile(
     join(source, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
     artifact,
   )
+  await writeFile(join(source, 'CTS_ecc', 'output', 'gcd_CTS.def.gz'), 'stale')
   return { artifact, flow, root, source }
 }
 
@@ -65,7 +73,7 @@ function contractFor(
 }
 
 describe('prepareWorkspaceRerun', () => {
-  it('copies only verified evidence and persists the frozen rerun contract', async () => {
+  it('creates the target workspace and persists the frozen rerun contract', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
 
@@ -75,13 +83,39 @@ describe('prepareWorkspaceRerun', () => {
 
     await expect(
       readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
-    ).resolves.toBe(flow)
+    ).resolves.toContain('"state": "Unstart"')
     await expect(
       readFile(
         `${contract.target_workspace}/home/flow_agent_workspace_rerun_contract.v1.json`,
         'utf8',
       ),
     ).resolves.toContain(contract.rerun_id)
+  })
+
+  it('preserves the predecessor checkpoint and invalidates the rerun suffix', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+
+    await prepareWorkspaceRerun(contract)
+
+    await expect(
+      readFile(`${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`, 'utf8'),
+    ).resolves.toBe('checkpoint')
+    await expect(
+      readFile(`${contract.target_workspace}/place_dreamplace/output/gcd_place.def.gz`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      readFile(`${contract.target_workspace}/CTS_ecc/output/gcd_CTS.def.gz`, 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const targetFlow = JSON.parse(
+      await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
+    ) as { steps: Array<{ name: string; state: string; runtime?: string }> }
+    expect(targetFlow.steps).toEqual([
+      { name: 'fixFanout', state: 'Success', tool: 'ecc' },
+      { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
+      { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
+    ])
   })
 
   it('executes the frozen contract through the target GUI workspace handle', async () => {

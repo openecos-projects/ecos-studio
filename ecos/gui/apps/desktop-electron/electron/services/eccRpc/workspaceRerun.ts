@@ -23,7 +23,7 @@ interface WorkspaceRerunRuntime {
   }): Promise<unknown>
 }
 
-const FLOW_STEPS = new Set([
+const FLOW_STEP_SEQUENCE = [
   'Synthesis',
   'Floorplan',
   'fixFanout',
@@ -36,8 +36,10 @@ const FLOW_STEPS = new Set([
   'RCX',
   'sta',
   'Harden',
-])
+] as const
+const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
+const RERUN_ARTIFACT_DIRECTORIES = ['output', 'data', 'feature', 'analysis', 'report', 'log']
 
 const AUTHORIZED_KNOBS = {
   place: new Set([
@@ -133,6 +135,7 @@ export async function prepareWorkspaceRerun(
       force: false,
       recursive: true,
     })
+    await invalidateWorkspaceRerunSuffix(stagedWorkspace, contract.target_step)
     const stagedHome = await resolvePathWithinWorkspace(
       stagedWorkspace,
       join(stagedWorkspace, 'home'),
@@ -422,6 +425,94 @@ function completedStepTool(flowText: string, targetStep: string): string | null 
     return typeof tool === 'string' && /^[A-Za-z0-9_-]+$/.test(tool) ? tool : null
   } catch {
     return null
+  }
+}
+
+async function invalidateWorkspaceRerunSuffix(
+  workspace: string,
+  targetStep: string,
+): Promise<void> {
+  const home = await resolvePathWithinWorkspace(workspace, join(workspace, 'home'), 'rerun home')
+  const flowPath = await resolvePathWithinWorkspace(workspace, join(home, 'flow.json'), 'rerun flow')
+  const flow = parseWorkspaceFlow(await readFile(flowPath, 'utf8'))
+  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(targetStep as (typeof FLOW_STEP_SEQUENCE)[number])
+  for (const step of flow.steps) {
+    const stepIndex = FLOW_STEP_SEQUENCE.indexOf(step.name as (typeof FLOW_STEP_SEQUENCE)[number])
+    if (stepIndex < targetIndex) continue
+    await clearWorkspaceStepArtifacts(workspace, step)
+    step.state = 'Unstart'
+    step.runtime = ''
+  }
+  await writeFile(flowPath, `${JSON.stringify(flow.data, null, 2)}\n`, 'utf8')
+}
+
+async function clearWorkspaceStepArtifacts(
+  workspace: string,
+  step: WorkspaceFlowStep,
+): Promise<void> {
+  const stageDirectory = join(workspace, `${step.name}_${step.tool}`)
+  try {
+    const stats = await lstat(stageDirectory)
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(`Workspace rerun stage directory is invalid: ${step.name}`)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await mkdir(stageDirectory, { recursive: true })
+  }
+  const resolvedStage = await realpath(stageDirectory)
+  if (!isWithinWorkspace(workspace, resolvedStage)) {
+    throw new Error(`Workspace rerun stage directory is outside the workspace root: ${step.name}`)
+  }
+  for (const name of RERUN_ARTIFACT_DIRECTORIES) {
+    const directory = join(resolvedStage, name)
+    try {
+      const stats = await lstat(directory)
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error(`Workspace rerun artifact directory is invalid: ${step.name}`)
+      }
+      await rm(directory, { force: true, recursive: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    await mkdir(directory)
+  }
+}
+
+interface WorkspaceFlowStep {
+  name: string
+  tool: string
+  state: string
+  runtime?: string
+}
+
+function parseWorkspaceFlow(flowText: string): {
+  data: { steps: WorkspaceFlowStep[] }
+  steps: WorkspaceFlowStep[]
+} {
+  try {
+    const data = JSON.parse(flowText) as { steps?: unknown }
+    if (!Array.isArray(data.steps)) throw new Error('steps are missing')
+    const steps = data.steps.map((value) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !FLOW_STEPS.has((value as { name?: unknown }).name as string) ||
+        typeof (value as { tool?: unknown }).tool !== 'string' ||
+        !/^[A-Za-z0-9_-]+$/.test((value as { tool: string }).tool) ||
+        typeof (value as { state?: unknown }).state !== 'string'
+      ) {
+        throw new Error('step is invalid')
+      }
+      return value as WorkspaceFlowStep
+    })
+    if (new Set(steps.map((step) => step.name)).size !== steps.length) {
+      throw new Error('step names are duplicated')
+    }
+    data.steps = steps
+    return { data: data as { steps: WorkspaceFlowStep[] }, steps }
+  } catch (error) {
+    throw new Error(`Workspace rerun flow is invalid: ${(error as Error).message}`)
   }
 }
 
