@@ -15,6 +15,19 @@ ensure_ecc_tools_python_extension() {
   uv run python -c "$import_check"
 }
 
+ensure_ecc_dreamplace_native_extensions() {
+  # DreamPlace C++ operators link against the installed PyTorch ABI.  An
+  # editable install can retain operators built for an older Torch release.
+  local import_check='from dreamplace.ops.rc_timing.rc_timing import RCTiming; import dreamplace.NonLinearPlace; print(RCTiming)'
+
+  if uv run python -c "$import_check"; then
+    return
+  fi
+
+  uv sync --reinstall-package ecc-dreamplace --no-build-isolation-package ecc-dreamplace
+  uv run python -c "$import_check"
+}
+
 build_ecc() {
   cd "$REPO_ROOT/ecc"
 
@@ -35,14 +48,18 @@ build_ecc() {
     nix develop "$REPO_ROOT" --command bash -lc \
       '
         import_check="from ecc_tools_bin import ecc_py; print(ecc_py.__file__)"
+        dreamplace_import_check="from dreamplace.ops.rc_timing.rc_timing import RCTiming; import dreamplace.NonLinearPlace; print(RCTiming)"
         uv run python -c "$import_check" || uv sync --reinstall-package ecc-tools-bin --no-build-isolation-package ecc-tools-bin
         uv run python -c "$import_check"
+        uv run python -c "$dreamplace_import_check" || uv sync --reinstall-package ecc-dreamplace --no-build-isolation-package ecc-dreamplace
+        uv run python -c "$dreamplace_import_check"
         uv run pyinstaller ecc.spec --clean --noconfirm
       '
     return
   fi
 
   ensure_ecc_tools_python_extension
+  ensure_ecc_dreamplace_native_extensions
   uv run pyinstaller ecc.spec --clean --noconfirm
 }
 
