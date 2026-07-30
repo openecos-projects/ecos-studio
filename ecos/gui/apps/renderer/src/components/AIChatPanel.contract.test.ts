@@ -29,10 +29,17 @@ describe('AIChatPanel flow contracts', () => {
 
   it('executes a validated workspace rerun only after the host prepares its target', () => {
     expect(source).toContain("event.type === 'workspace_rerun'")
+    expect(source).toContain(
+      'event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`',
+    )
     expect(source).toContain('prepareFlowAgentRerun')
     expect(source).toContain('event.workspaceRerunToken')
     expect(source).toContain('prepareRerun({ token })')
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
+    expect(source).toContain("'Preparing isolated rerun workspace.'")
+    expect(source).toContain("'Opening isolated rerun workspace.'")
+    expect(source).toContain("'Starting rerun execution.'")
+    expect(source).toContain('`Rerun failed: ${reason}`')
   })
 })

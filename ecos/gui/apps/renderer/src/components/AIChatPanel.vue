@@ -150,6 +150,10 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
+    messageStore.addAssistantMessage(
+      event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
+      'done',
+    )
     void executeWorkspaceRerun(event.workspaceRerun, event.workspaceRerunToken)
     return
   }
@@ -323,11 +327,22 @@ async function executeWorkspaceRerun(
   const desktopApi = getOptionalDesktopApi()
   const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
   const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
-  if (!desktopApi || !prepareRerun || !executeRerun || isWorkspaceRerunPending.value)
+  if (!desktopApi || !prepareRerun || !executeRerun) {
+    messageStore.addAssistantMessage(
+      'Rerun is unavailable in this desktop session.',
+      'error',
+    )
     return
+  }
+  if (isWorkspaceRerunPending.value) {
+    messageStore.addAssistantMessage('A rerun is already in progress.', 'error')
+    return
+  }
   isWorkspaceRerunPending.value = true
   try {
+    messageStore.addAssistantMessage('Preparing isolated rerun workspace.', 'done')
     const prepared = await prepareRerun({ token })
+    messageStore.addAssistantMessage('Opening isolated rerun workspace.', 'done')
     const opened = await openProject({
       id: prepared.directory,
       lastOpened: new Date(),
@@ -336,10 +351,13 @@ async function executeWorkspaceRerun(
     })
     if (!opened) throw new Error('The rerun workspace could not be opened.')
     await router.push({ name: ':step', params: { step: contract.target_step } })
+    messageStore.addAssistantMessage('Starting rerun execution.', 'done')
     await executeRerun({ token: prepared.executionToken })
+    messageStore.addAssistantMessage(`Rerun ${contract.rerun_id} completed.`, 'done')
     await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '')
   } catch (error) {
     const reason = agentErrorMessage(error)
+    messageStore.addAssistantMessage(`Rerun failed: ${reason}`, 'error')
     try {
       await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason)
     } catch {
