@@ -874,7 +874,6 @@ export function registerIpc(
     if (!pending || pending.sender !== event.sender) {
       throw new Error('Workspace rerun authorization is invalid.')
     }
-    pendingWorkspaceReruns.delete(token)
     const caller = BrowserWindow.fromWebContents(event.sender)
     if (!caller) throw new Error('Caller window is not available')
     const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(
@@ -887,6 +886,7 @@ export function registerIpc(
     ) {
       throw new Error('Workspace rerun source is not bound to this window.')
     }
+    pendingWorkspaceReruns.delete(token)
     const prepared = await prepareWorkspaceRerun(pending.contract)
     const executionToken = randomUUID()
     pendingWorkspaceRerunExecutions.set(executionToken, pending)

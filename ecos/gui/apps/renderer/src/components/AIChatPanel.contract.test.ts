@@ -34,8 +34,13 @@ describe('AIChatPanel flow contracts', () => {
     )
     expect(source).toContain('prepareFlowAgentRerun')
     expect(source).toContain('event.workspaceRerunToken')
+    expect(source).toContain('path: contract.source_workspace')
+    expect(source).toContain(
+      'await desktopApi.workspace.bindWindow(contract.source_workspace)',
+    )
     expect(source).toContain('prepareRerun({ token })')
     expect(source).toContain('workspace_rerun_result:')
+    expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
     expect(source).toContain("'Preparing isolated rerun workspace.'")
     expect(source).toContain("'Opening isolated rerun workspace.'")
