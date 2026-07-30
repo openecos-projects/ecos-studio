@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -30,6 +30,7 @@ async function writeSourceWorkspace(): Promise<{
       { name: 'fixFanout', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Success', tool: 'dreamplace' },
       { name: 'CTS', state: 'Success', tool: 'ecc' },
+      { name: 'legalization', state: 'Success', tool: 'dreamplace' },
     ],
   })
   const artifact = Buffer.from('place-def')
@@ -37,6 +38,7 @@ async function writeSourceWorkspace(): Promise<{
   await mkdir(join(source, 'fixFanout_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'place_dreamplace', 'output'), { recursive: true })
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
+  await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
   await writeFile(join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'), 'checkpoint')
   await writeFile(
@@ -44,6 +46,13 @@ async function writeSourceWorkspace(): Promise<{
     artifact,
   )
   await writeFile(join(source, 'CTS_ecc', 'output', 'gcd_CTS.def.gz'), 'stale')
+  await writeFile(
+    join(source, 'legalization_dreamplace', 'output', 'gcd_legalization.def.gz'),
+    'stale',
+  )
+  for (const directory of ['place_dreamplace', 'CTS_ecc', 'legalization_dreamplace']) {
+    await writeFile(join(source, directory, 'subflow.json'), '{"state":"Success"}\n')
+  }
   return { artifact, flow, root, source }
 }
 
@@ -92,7 +101,7 @@ describe('prepareWorkspaceRerun', () => {
     ).resolves.toContain(contract.rerun_id)
   })
 
-  it('preserves the predecessor checkpoint and invalidates the rerun suffix', async () => {
+  it('preserves the predecessor checkpoint and empties the rerun suffix', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)
 
@@ -101,12 +110,9 @@ describe('prepareWorkspaceRerun', () => {
     await expect(
       readFile(`${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`, 'utf8'),
     ).resolves.toBe('checkpoint')
-    await expect(
-      readFile(`${contract.target_workspace}/place_dreamplace/output/gcd_place.def.gz`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(
-      readFile(`${contract.target_workspace}/CTS_ecc/output/gcd_CTS.def.gz`, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(`${contract.target_workspace}/place_dreamplace`)).resolves.toEqual([])
+    await expect(readdir(`${contract.target_workspace}/CTS_ecc`)).resolves.toEqual([])
+    await expect(readdir(`${contract.target_workspace}/legalization_dreamplace`)).resolves.toEqual([])
 
     const targetFlow = JSON.parse(
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),
@@ -115,6 +121,7 @@ describe('prepareWorkspaceRerun', () => {
       { name: 'fixFanout', state: 'Success', tool: 'ecc' },
       { name: 'place', state: 'Unstart', tool: 'dreamplace', runtime: '' },
       { name: 'CTS', state: 'Unstart', tool: 'ecc', runtime: '' },
+      { name: 'legalization', state: 'Unstart', tool: 'dreamplace', runtime: '' },
     ])
   })
 

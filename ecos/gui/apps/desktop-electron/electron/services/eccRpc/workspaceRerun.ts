@@ -39,8 +39,6 @@ const FLOW_STEP_SEQUENCE = [
 ] as const
 const FLOW_STEPS: Set<string> = new Set(FLOW_STEP_SEQUENCE)
 const STAGE_OUTPUT_SUFFIXES = ['.def.gz', '.v.gz', '.gds']
-const RERUN_ARTIFACT_DIRECTORIES = ['output', 'data', 'feature', 'analysis', 'report', 'log']
-
 const AUTHORIZED_KNOBS = {
   place: new Set([
     'place.target_density',
@@ -439,14 +437,14 @@ async function invalidateWorkspaceRerunSuffix(
   for (const step of flow.steps) {
     const stepIndex = FLOW_STEP_SEQUENCE.indexOf(step.name as (typeof FLOW_STEP_SEQUENCE)[number])
     if (stepIndex < targetIndex) continue
-    await clearWorkspaceStepArtifacts(workspace, step)
+    await emptyWorkspaceStepDirectory(workspace, step)
     step.state = 'Unstart'
     step.runtime = ''
   }
   await writeFile(flowPath, `${JSON.stringify(flow.data, null, 2)}\n`, 'utf8')
 }
 
-async function clearWorkspaceStepArtifacts(
+async function emptyWorkspaceStepDirectory(
   workspace: string,
   step: WorkspaceFlowStep,
 ): Promise<void> {
@@ -464,19 +462,8 @@ async function clearWorkspaceStepArtifacts(
   if (!isWithinWorkspace(workspace, resolvedStage)) {
     throw new Error(`Workspace rerun stage directory is outside the workspace root: ${step.name}`)
   }
-  for (const name of RERUN_ARTIFACT_DIRECTORIES) {
-    const directory = join(resolvedStage, name)
-    try {
-      const stats = await lstat(directory)
-      if (stats.isSymbolicLink() || !stats.isDirectory()) {
-        throw new Error(`Workspace rerun artifact directory is invalid: ${step.name}`)
-      }
-      await rm(directory, { force: true, recursive: true })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    await mkdir(directory)
-  }
+  await rm(resolvedStage, { force: true, recursive: true })
+  await mkdir(stageDirectory)
 }
 
 interface WorkspaceFlowStep {
