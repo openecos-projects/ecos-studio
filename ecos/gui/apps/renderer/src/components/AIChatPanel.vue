@@ -36,6 +36,12 @@
           :create-setup-id="workspaceCreateSetupId"
           @create-workspace="createWorkspaceFromAgent"
         />
+        <AgentExecutionContractPanel
+          :confirmation-text="workspaceRerunMessage"
+          :execution-state="workspaceRerunExecutionState"
+          :rows="workspaceRerunRows"
+          :title="workspaceRerunContract?.title ?? ''"
+        />
       </div>
     </div>
 
@@ -65,11 +71,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
+import {
+  computed,
+  ref,
+  watch,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  inject,
+} from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type { DesktopAgentEvent } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
+import AgentExecutionContractPanel from './AgentExecutionContractPanel.vue'
 import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import { useMessageStore } from '../stores/messageStore'
 import { getOptionalDesktopApi } from '@/platform/desktop'
@@ -92,6 +108,17 @@ const isWorkspaceRerunPending = ref(false)
 const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
 const workspaceSetupMessage = ref('')
 const workspaceCreateSetupId = ref<string>()
+const workspaceRerunContract = ref<NonNullable<DesktopAgentEvent['contract']>>()
+const workspaceRerunMessage = ref('')
+const workspaceRerunRows = computed<[string, string][]>(
+  () =>
+    workspaceRerunContract.value?.fields.map(({ label, value }) => [label, value]) ?? [],
+)
+const workspaceRerunExecutionState = computed(() =>
+  isWorkspaceRerunPending.value
+    ? 'Rerunning in isolated workspace'
+    : 'Awaiting confirmation',
+)
 let unsubscribeAgentEvents: (() => void) | undefined
 
 onMounted(() => {
@@ -132,6 +159,11 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   }
 
   if (event.type === 'contract' && event.contract) {
+    if (event.contract.presentation === 'workspace_rerun') {
+      workspaceRerunContract.value = event.contract
+      workspaceRerunMessage.value = event.text ?? ''
+      return
+    }
     messageStore.addExecutionContract(event.contract)
     return
   }

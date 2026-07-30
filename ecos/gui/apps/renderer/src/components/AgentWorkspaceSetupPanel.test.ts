@@ -10,8 +10,8 @@ describe('AgentWorkspaceSetupPanel', () => {
   })
 
   it('renders the complete resolved specification in a two-column table', () => {
-    expect(source).toContain('<table')
-    expect(source).toContain('v-for="[key, value] in specRows"')
+    expect(source).toContain('AgentExecutionContractPanel')
+    expect(source).toContain(':rows="specRows"')
     for (const field of [
       'Workspace',
       'Flow',
@@ -30,16 +30,13 @@ describe('AgentWorkspaceSetupPanel', () => {
   })
 
   it('keeps the specification selectable and permits retrying a failed setup id', () => {
-    expect(source).toContain('class="selectable w-full')
+    expect(source).toContain('AgentExecutionContractPanel')
     expect(source).toContain('if (!setupId) {')
     expect(source).toContain("submittedSetupId.value = ''")
   })
 
   it('renders the confirmation after the resolved specification', () => {
     expect(source).toContain('confirmationText?: string')
-    expect(source).toContain('{{ confirmationText }}')
-    expect(source.indexOf('</table>')).toBeLessThan(
-      source.indexOf('{{ confirmationText }}'),
-    )
+    expect(source).toContain(':confirmation-text="confirmationText"')
   })
 })

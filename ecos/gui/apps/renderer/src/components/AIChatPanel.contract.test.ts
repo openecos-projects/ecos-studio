@@ -7,6 +7,14 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('addExecutionContract(event.contract)')
   })
 
+  it('renders frozen rerun specifications in the same key-value table as workspace setup', () => {
+    expect(source).toContain("event.contract.presentation === 'workspace_rerun'")
+    expect(source).toContain('workspaceRerunContract.value = event.contract')
+    expect(source).toContain('AgentExecutionContractPanel')
+    expect(source).toContain(':rows="workspaceRerunRows"')
+    expect(source).toContain('workspaceRerunExecutionState')
+  })
+
   it('keeps workspace setup inside chat instead of reopening the native wizard', () => {
     expect(source).toContain("event.type === 'workspace_setup'")
     expect(source).toContain('AgentWorkspaceSetupPanel')

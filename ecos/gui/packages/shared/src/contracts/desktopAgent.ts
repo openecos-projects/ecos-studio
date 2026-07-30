@@ -78,6 +78,7 @@ export interface DesktopAgentContractField {
 
 export interface DesktopAgentExecutionContract {
   fields: DesktopAgentContractField[]
+  presentation?: 'workspace_rerun'
   schema_version: 'flow-agent.resolved_execution_contract.v1'
   title: string
 }

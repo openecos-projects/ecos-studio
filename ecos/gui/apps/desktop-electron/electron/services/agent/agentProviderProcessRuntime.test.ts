@@ -183,6 +183,7 @@ describe('AgentProviderProcessRuntime', () => {
               label: `parameter_${index}`,
               value: String(index),
             })),
+            presentation: 'workspace_rerun',
             schema_version: 'flow-agent.resolved_execution_contract.v1',
             title: 'Frozen workspace rerun contract',
           },
@@ -196,6 +197,7 @@ describe('AgentProviderProcessRuntime', () => {
       expect.objectContaining({
         contract: expect.objectContaining({
           fields: expect.arrayContaining([{ label: 'parameter_24', value: '24' }]),
+          presentation: 'workspace_rerun',
         }),
         type: 'contract',
       }),

@@ -691,12 +691,19 @@ function readFiniteNumber(
 
 function readExecutionContract(value: unknown): DesktopAgentExecutionContract | null {
   const record = readRecord(value)
+  const presentation =
+    record.presentation === undefined
+      ? undefined
+      : record.presentation === 'workspace_rerun'
+        ? 'workspace_rerun'
+        : null
   if (
     record.schema_version !== 'flow-agent.resolved_execution_contract.v1' ||
     !readEventText(record.title) ||
     !Array.isArray(record.fields) ||
     record.fields.length === 0 ||
-    record.fields.length > 32
+    record.fields.length > 32 ||
+    presentation === null
   ) {
     return null
   }
@@ -711,6 +718,7 @@ function readExecutionContract(value: unknown): DesktopAgentExecutionContract | 
 
   return {
     fields: fields as DesktopAgentExecutionContract['fields'],
+    ...(presentation ? { presentation } : {}),
     schema_version: 'flow-agent.resolved_execution_contract.v1',
     title: readEventText(record.title) as string,
   }
