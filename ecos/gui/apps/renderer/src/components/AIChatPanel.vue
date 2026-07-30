@@ -372,20 +372,6 @@ async function executeWorkspaceRerun(
   }
   isWorkspaceRerunPending.value = true
   try {
-    const sourceOpened = await openProject(
-      {
-        id: contract.source_workspace,
-        lastOpened: new Date(),
-        name: contract.design_id,
-        path: contract.source_workspace,
-      },
-      { quiet: true },
-    )
-    if (!sourceOpened) {
-      throw new Error(
-        `The frozen source workspace could not be opened: ${contract.source_workspace}`,
-      )
-    }
     await desktopApi.workspace.bindWindow(contract.source_workspace)
     messageStore.addAssistantMessage('Preparing isolated rerun workspace.', 'done')
     const prepared = await prepareRerun({ token })
