@@ -36,6 +36,9 @@ import type {
 } from './desktopShell.ts'
 import type {
   DesktopAgentEvent,
+  DesktopAgentWorkspaceRerunExecuteRequest,
+  DesktopAgentWorkspaceRerunPrepareRequest,
+  DesktopAgentWorkspaceRerunPrepareResult,
   DesktopAgentSendMessageRequest,
   DesktopAgentSendMessageResponse,
   DesktopAgentStartRequest,
@@ -219,6 +222,12 @@ export interface DesktopApi {
   workspace: {
     isProjectDirectory(path: string): Promise<boolean>
     openOrFocus(path: string): Promise<WorkspaceOpenOrFocusResult>
+    prepareFlowAgentRerun?(
+      request: DesktopAgentWorkspaceRerunPrepareRequest,
+    ): Promise<DesktopAgentWorkspaceRerunPrepareResult>
+    executeFlowAgentRerun?(
+      request: DesktopAgentWorkspaceRerunExecuteRequest,
+    ): Promise<void>
     bindWindow(path: string): Promise<string>
     unbindWindow(path?: string): Promise<void>
     getBoundPath(): Promise<string | null>

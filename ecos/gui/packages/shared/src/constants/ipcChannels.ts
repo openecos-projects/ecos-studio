@@ -8,6 +8,8 @@ export const desktopApiIpcChannels = {
   windowIsMaximized: 'window:is-maximized',
   windowCreate: 'window:create',
   workspaceOpenOrFocus: 'workspace:open-or-focus',
+  workspacePrepareFlowAgentRerun: 'workspace:prepare-flow-agent-rerun',
+  workspaceExecuteFlowAgentRerun: 'workspace:execute-flow-agent-rerun',
   workspaceBindWindow: 'workspace:bind-window',
   workspaceUnbindWindow: 'workspace:unbind-window',
   workspaceGetBoundPath: 'workspace:get-bound-path',

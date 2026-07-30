@@ -131,6 +131,46 @@ export interface DesktopAgentWorkspaceSetupContract {
   title: string
 }
 
+export type DesktopAgentWorkspaceRerunParameterValue =
+  | boolean
+  | number
+  | string
+  | number[]
+  | string[]
+
+export interface DesktopAgentWorkspaceRerunParameterPatch {
+  knob_id: string
+  value: DesktopAgentWorkspaceRerunParameterValue
+}
+
+export interface DesktopAgentWorkspaceRerunContract {
+  design_id: string
+  execution_scope: 'single_step' | 'full_flow'
+  parameter_patch: DesktopAgentWorkspaceRerunParameterPatch[]
+  requires_gui_review: true
+  rerun_id: string
+  schema_version: 'flow-agent.workspace_rerun_contract.v1'
+  source_stage_artifact: string
+  source_flow_json_sha256: string
+  source_stage_artifact_sha256: string
+  source_workspace: string
+  target_step: string
+  target_workspace: string
+}
+
+export interface DesktopAgentWorkspaceRerunPrepareResult {
+  directory: string
+  executionToken: string
+}
+
+export interface DesktopAgentWorkspaceRerunPrepareRequest {
+  token: string
+}
+
+export interface DesktopAgentWorkspaceRerunExecuteRequest {
+  token: string
+}
+
 export type DesktopAgentEventType =
   | 'status'
   | 'session'
@@ -139,6 +179,7 @@ export type DesktopAgentEventType =
   | 'contract'
   | 'workspace_setup'
   | 'workspace_create'
+  | 'workspace_rerun'
   | 'error'
 
 export interface DesktopAgentEvent {
@@ -148,5 +189,7 @@ export interface DesktopAgentEvent {
   text?: string
   type: DesktopAgentEventType
   workspaceCreateSetupId?: string
+  workspaceRerun?: DesktopAgentWorkspaceRerunContract
+  workspaceRerunToken?: string
   workspaceSetup?: DesktopAgentWorkspaceSetupContract
 }

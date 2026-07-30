@@ -72,6 +72,16 @@ vi.mock('../services/menuService', () => ({
   setMenuActionEnabled,
 }))
 
+const { executeWorkspaceRerunMock, prepareWorkspaceRerunMock } = vi.hoisted(() => ({
+  executeWorkspaceRerunMock: vi.fn(),
+  prepareWorkspaceRerunMock: vi.fn(),
+}))
+
+vi.mock('../services/eccRpc/workspaceRerun', () => ({
+  executeWorkspaceRerun: executeWorkspaceRerunMock,
+  prepareWorkspaceRerun: prepareWorkspaceRerunMock,
+}))
+
 import { registerIpc, type DesktopBridgeServices } from './registerIpc'
 import { workspaceWindowRegistry } from '../services/workspaceWindowRegistry'
 
@@ -157,6 +167,7 @@ function registerHandlers(
       rpcHello: vi.fn(),
       rpcPing: vi.fn(),
       rpcShutdown: vi.fn(),
+      runCandidateRerun: vi.fn(),
       runFlow: vi.fn(),
       runStep: vi.fn(),
       syncConfig: vi.fn(),
@@ -209,6 +220,8 @@ describe('registerIpc', () => {
     getAllWindows.mockReturnValue([])
     electronLogger.warn.mockReset()
     openExternal.mockReset()
+    executeWorkspaceRerunMock.mockReset()
+    prepareWorkspaceRerunMock.mockReset()
     showOpenDialog.mockReset()
     showSaveDialog.mockReset()
     mkdirMock.mockReset()
@@ -236,6 +249,184 @@ describe('registerIpc', () => {
 
     expect(Array.from(handlers.keys()).sort()).toEqual(
       Object.values(desktopApiIpcChannels).sort(),
+    )
+  })
+
+  it('rejects a renderer-supplied rerun contract without a main-process token', async () => {
+    const { handlers, services } = registerHandlers()
+    const handler = handlers.get(desktopApiIpcChannels.workspacePrepareFlowAgentRerun)
+
+    await expect(
+      handler?.(
+        { sender: { id: 'web-contents' } },
+        {
+          design_id: 'gcd',
+          execution_scope: 'single_step',
+          parameter_patch: [],
+          requires_gui_review: true,
+          rerun_id: 'gcd_rerun_place',
+          schema_version: 'flow-agent.workspace_rerun_contract.v1',
+          source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+          source_flow_json_sha256: 'a'.repeat(64),
+          source_stage_artifact_sha256: 'b'.repeat(64),
+          source_workspace: '/runs/gcd',
+          target_step: 'place',
+          target_workspace: '/runs/gcd_rerun_place',
+        },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace rerun token is invalid.' },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('binds rerun tokens to the agent window and its source workspace', async () => {
+    let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
+    const agentRuntimeService = {
+      onEvent: vi.fn((listener) => {
+        emitAgentEvent = listener
+        return () => undefined
+      }),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const window = {
+      focus: vi.fn(),
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+    }
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register('/runs/other', window)
+    const owner = {
+      id: 101,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const session = { providerId: 'flow_agent', sessionId: 'gui-session-1' }
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: owner },
+      session,
+    )
+    emitAgentEvent?.({
+      ...session,
+      type: 'workspace_rerun',
+      workspaceRerun: {
+        design_id: 'gcd',
+        execution_scope: 'single_step',
+        parameter_patch: [],
+        requires_gui_review: true,
+        rerun_id: 'gcd_rerun_place',
+        schema_version: 'flow-agent.workspace_rerun_contract.v1',
+        source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+        source_flow_json_sha256: 'a'.repeat(64),
+        source_stage_artifact_sha256: 'b'.repeat(64),
+        source_workspace: '/runs/gcd',
+        target_step: 'place',
+        target_workspace: '/runs/gcd_rerun_place',
+      },
+    })
+    const forwarded = owner.send.mock.calls[0]?.[1] as { workspaceRerunToken?: string }
+    const handler = handlers.get(desktopApiIpcChannels.workspacePrepareFlowAgentRerun)
+
+    await expect(
+      handler?.({ sender: { id: 102 } }, { token: forwarded.workspaceRerunToken }),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace rerun authorization is invalid.' },
+      ok: false,
+    })
+    await expect(
+      handler?.({ sender: owner }, { token: forwarded.workspaceRerunToken }),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace rerun source is not bound to this window.' },
+      ok: false,
+    })
+    expect(services.eccRuntimeService.openWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('executes a prepared rerun only after its owner binds the target workspace', async () => {
+    let emitAgentEvent: ((event: Record<string, unknown>) => void) | undefined
+    const agentRuntimeService = {
+      onEvent: vi.fn((listener) => {
+        emitAgentEvent = listener
+        return () => undefined
+      }),
+      sendMessage: vi.fn(),
+      start: vi.fn(),
+      startSession: vi.fn(async (request) => ({ sessionId: request.sessionId })),
+    } as unknown as DesktopBridgeServices['agentRuntimeService']
+    const { handlers, services } = registerHandlers(agentRuntimeService)
+    const window = {
+      focus: vi.fn(),
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+    }
+    const owner = {
+      id: 101,
+      isDestroyed: vi.fn(() => false),
+      once: vi.fn(),
+      send: vi.fn(),
+    }
+    const session = { providerId: 'flow_agent', sessionId: 'gui-session-1' }
+    const contract = {
+      design_id: 'gcd',
+      execution_scope: 'full_flow' as const,
+      parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+      requires_gui_review: true as const,
+      rerun_id: 'gcd_rerun_place',
+      schema_version: 'flow-agent.workspace_rerun_contract.v1' as const,
+      source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+      source_flow_json_sha256: 'a'.repeat(64),
+      source_stage_artifact_sha256: 'b'.repeat(64),
+      source_workspace: '/runs/gcd',
+      target_step: 'place',
+      target_workspace: '/runs/gcd_rerun_place',
+    }
+    fromWebContents.mockReturnValue(window)
+    workspaceWindowRegistry.register(contract.source_workspace, window)
+    prepareWorkspaceRerunMock.mockResolvedValue({ directory: contract.target_workspace })
+    await handlers.get(desktopApiIpcChannels.agentStartSession)?.(
+      { sender: owner },
+      session,
+    )
+    emitAgentEvent?.({ ...session, type: 'workspace_rerun', workspaceRerun: contract })
+
+    const forwarded = owner.send.mock.calls[0]?.[1]
+    if (!forwarded || typeof forwarded !== 'object') {
+      throw new Error('Workspace rerun event was not forwarded.')
+    }
+    const rerunToken = (forwarded as { workspaceRerunToken: string }).workspaceRerunToken
+    const prepared = (await handlers.get(
+      desktopApiIpcChannels.workspacePrepareFlowAgentRerun,
+    )?.({ sender: owner }, { token: rerunToken })) as { executionToken: string }
+
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun)?.(
+        { sender: owner },
+        { token: prepared.executionToken },
+      ),
+    ).resolves.toMatchObject({
+      error: { message: 'Workspace rerun target is not bound to this window.' },
+      ok: false,
+    })
+    workspaceWindowRegistry.register(contract.target_workspace, window)
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun)?.(
+        { sender: owner },
+        { token: prepared.executionToken },
+      ),
+    ).resolves.toBeUndefined()
+
+    expect(executeWorkspaceRerunMock).toHaveBeenCalledWith(
+      contract,
+      services.eccRuntimeService,
     )
   })
 

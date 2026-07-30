@@ -66,6 +66,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type { DesktopAgentEvent } from '@ecos-studio/shared'
 import MessageItem from './MessageItem.vue'
@@ -73,17 +74,21 @@ import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import { useMessageStore } from '../stores/messageStore'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import { useWorkspace } from '@/composables/useWorkspace'
 
 const AGENT_PROVIDER_ID = 'flow_agent'
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
+const router = useRouter()
+const { openProject } = useWorkspace()
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const agentSessionId = ref<string | null>(null)
 const isAgentRequestPending = ref(false)
 const isWorkspaceCreationPending = ref(false)
+const isWorkspaceRerunPending = ref(false)
 const workspaceSetupContract = ref<DesktopAgentEvent['workspaceSetup']>()
 const workspaceSetupMessage = ref('')
 const workspaceCreateSetupId = ref<string>()
@@ -138,6 +143,14 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
   }
   if (event.type === 'workspace_create' && event.workspaceCreateSetupId) {
     workspaceCreateSetupId.value = event.workspaceCreateSetupId
+    return
+  }
+  if (
+    event.type === 'workspace_rerun' &&
+    event.workspaceRerun &&
+    event.workspaceRerunToken
+  ) {
+    void executeWorkspaceRerun(event.workspaceRerun, event.workspaceRerunToken)
     return
   }
   if (!event.text) return
@@ -298,6 +311,55 @@ async function reportWorkspaceCreationResult(
   if (!agent || !sessionId) throw new Error('Flow Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
+    providerId: AGENT_PROVIDER_ID,
+    sessionId,
+  })
+}
+
+async function executeWorkspaceRerun(
+  contract: NonNullable<DesktopAgentEvent['workspaceRerun']>,
+  token: string,
+): Promise<void> {
+  const desktopApi = getOptionalDesktopApi()
+  const prepareRerun = desktopApi?.workspace.prepareFlowAgentRerun
+  const executeRerun = desktopApi?.workspace.executeFlowAgentRerun
+  if (!desktopApi || !prepareRerun || !executeRerun || isWorkspaceRerunPending.value)
+    return
+  isWorkspaceRerunPending.value = true
+  try {
+    const prepared = await prepareRerun({ token })
+    const opened = await openProject({
+      id: prepared.directory,
+      lastOpened: new Date(),
+      name: contract.rerun_id,
+      path: prepared.directory,
+    })
+    if (!opened) throw new Error('The rerun workspace could not be opened.')
+    await router.push({ name: ':step', params: { step: contract.target_step } })
+    await executeRerun({ token: prepared.executionToken })
+    await reportWorkspaceRerunResult(contract.rerun_id, 'succeeded', '')
+  } catch (error) {
+    const reason = agentErrorMessage(error)
+    try {
+      await reportWorkspaceRerunResult(contract.rerun_id, 'failed', reason)
+    } catch {
+      messageStore.addAssistantMessage(reason, 'error')
+    }
+  } finally {
+    isWorkspaceRerunPending.value = false
+  }
+}
+
+async function reportWorkspaceRerunResult(
+  rerunId: string,
+  status: 'succeeded' | 'failed',
+  error: string,
+): Promise<void> {
+  const agent = getOptionalDesktopApi()?.agent
+  const sessionId = agentSessionId.value
+  if (!agent || !sessionId) throw new Error('Flow Agent session is unavailable.')
+  await agent.sendMessage({
+    message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
     sessionId,
   })

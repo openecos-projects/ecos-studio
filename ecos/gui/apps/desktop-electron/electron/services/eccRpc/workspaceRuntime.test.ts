@@ -324,6 +324,38 @@ describe('EccWorkspaceRuntime', () => {
     })
   })
 
+  it('maps atomic candidate reruns through the stored ECC workspace id', async () => {
+    const { client, service } = createService()
+    client.responses.push(
+      { capabilities: [], eccVersion: '0.1.0', version: 1 },
+      { directory: '/work/demo', workspaceId: 'workspace-1' },
+      { execution_scope: 'full_flow', target_step: 'place' },
+    )
+
+    const workspace = await service.openWorkspace({ directory: '/work/demo' })
+    await expect(
+      service.runCandidateRerun({
+        candidateId: 'gcd-rerun-place',
+        executionScope: 'full_flow',
+        patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+        targetStep: 'place',
+        workspaceHandle: workspace.workspaceHandle,
+      }),
+    ).resolves.toEqual({ execution_scope: 'full_flow', target_step: 'place' })
+
+    expect(client.calls.at(-1)).toEqual({
+      method: 'candidate.rerun',
+      params: {
+        candidateId: 'gcd-rerun-place',
+        executionScope: 'full_flow',
+        patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+        targetStep: 'place',
+        workspaceId: 'workspace-1',
+      },
+      options: { timeoutMs: 0 },
+    })
+  })
+
   it('exports signoff through the stored ECC workspace id and preserves the output path', async () => {
     const { client, service } = createService()
     client.responses.push(

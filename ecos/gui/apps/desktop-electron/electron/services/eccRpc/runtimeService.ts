@@ -37,6 +37,7 @@ import { normalizeWorkspacePath } from '../workspacePath'
 import { WorkspaceSessionNotFoundError } from './workspaceSessions'
 import {
   EccWorkspaceRuntime,
+  type EccCandidateRerunRequest,
   type EccRpcRuntimeClient,
   type EccRpcRuntimeSidecar,
 } from './workspaceRuntime'
@@ -194,6 +195,10 @@ export class EccRpcRuntimeService {
 
   async runStep(request: EccFlowRunStepRequest): Promise<EccFlowRunStepResult> {
     return this.runtimeForHandle(request.workspaceHandle).runStep(request)
+  }
+
+  async runCandidateRerun(request: EccCandidateRerunRequest): Promise<unknown> {
+    return await this.runtimeForHandle(request.workspaceHandle).runCandidateRerun(request)
   }
 
   private getOrCreateRuntime(directory: string): EccWorkspaceRuntime {

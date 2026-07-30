@@ -6,6 +6,7 @@ import {
   type IpcMain,
   type IpcMainInvokeEvent,
 } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
@@ -37,6 +38,7 @@ import {
   type ChipViewerOpenRequest,
   type ChipViewerOpenResult,
   type DesktopAgentEvent,
+  type DesktopAgentWorkspaceRerunContract,
   type DesktopAgentSendMessageRequest,
   type DesktopAgentStartRequest,
   type DesktopAgentStartSessionRequest,
@@ -78,6 +80,10 @@ import {
   workspaceWindowRegistry,
   type WorkspaceWindowLike,
 } from '../services/workspaceWindowRegistry'
+import {
+  executeWorkspaceRerun,
+  prepareWorkspaceRerun,
+} from '../services/eccRpc/workspaceRerun'
 
 export type IpcMainLike = Pick<IpcMain, 'handle'>
 
@@ -204,8 +210,17 @@ export interface DesktopBridgeServices {
     createWorkspace(request: EccWorkspaceCreateRequest): Promise<unknown>
     exportSignoff(request: EccWorkspaceExportSignoffRequest): Promise<unknown>
     inspectSignoff(request: EccWorkspaceHandleRequest): Promise<unknown>
+    runCandidateRerun(request: {
+      candidateId: string
+      executionScope: 'single_step' | 'full_flow'
+      patch: Array<{ knob_id: string; value: unknown }>
+      targetStep: string
+      workspaceHandle: string
+    }): Promise<unknown>
     onEvent(listener: (event: EccRuntimeEvent) => void): () => void
-    openWorkspace(request: EccWorkspaceOpenRequest): Promise<unknown>
+    openWorkspace(
+      request: EccWorkspaceOpenRequest,
+    ): Promise<{ directory: string; workspaceHandle: string }>
     refreshConfig(request: EccWorkspaceHandleRequest): Promise<unknown>
     resetFlow(request: EccWorkspaceHandleRequest): Promise<unknown>
     rpcHello(): Promise<unknown>
@@ -515,6 +530,20 @@ export function registerIpc(
       onDestroyed: () => void
     }
   >()
+  const pendingWorkspaceReruns = new Map<
+    string,
+    {
+      contract: DesktopAgentWorkspaceRerunContract
+      sender: IpcMainInvokeEvent['sender']
+    }
+  >()
+  const pendingWorkspaceRerunExecutions = new Map<
+    string,
+    {
+      contract: DesktopAgentWorkspaceRerunContract
+      sender: IpcMainInvokeEvent['sender']
+    }
+  >()
   /** Last runtime.ready per directory, replayed when a handle subscribes after ensureStarted. */
   const lastReadyByDirectory = new Map<string, EccRuntimeEvent>()
 
@@ -624,7 +653,20 @@ export function registerIpc(
     const subscription = agentSessionSubscriptions.get(
       agentSessionKey(payload.providerId, payload.sessionId),
     )
-    if (subscription) sendAgentEventToSender(subscription.sender, payload)
+    if (!subscription) return
+    if (payload.type !== 'workspace_rerun' || !payload.workspaceRerun) {
+      sendAgentEventToSender(subscription.sender, payload)
+      return
+    }
+    const token = randomUUID()
+    pendingWorkspaceReruns.set(token, {
+      contract: payload.workspaceRerun,
+      sender: subscription.sender,
+    })
+    sendAgentEventToSender(subscription.sender, {
+      ...payload,
+      workspaceRerunToken: token,
+    })
   })
 
   const unwatchProjectFile = async (subscriptionId: string): Promise<void> => {
@@ -824,6 +866,53 @@ export function registerIpc(
       }
       return { action: 'proceed' }
     })
+  })
+
+  handle(desktopApiIpcChannels.workspacePrepareFlowAgentRerun, async (event, request) => {
+    const token = readWorkspaceRerunToken(request)
+    const pending = pendingWorkspaceReruns.get(token)
+    if (!pending || pending.sender !== event.sender) {
+      throw new Error('Workspace rerun authorization is invalid.')
+    }
+    pendingWorkspaceReruns.delete(token)
+    const caller = BrowserWindow.fromWebContents(event.sender)
+    if (!caller) throw new Error('Caller window is not available')
+    const sourceWorkspace = workspaceWindowRegistry.getPathForWindow(
+      caller as WorkspaceWindowLike,
+    )
+    if (
+      !sourceWorkspace ||
+      normalizeWorkspacePath(sourceWorkspace) !==
+        normalizeWorkspacePath(pending.contract.source_workspace)
+    ) {
+      throw new Error('Workspace rerun source is not bound to this window.')
+    }
+    const prepared = await prepareWorkspaceRerun(pending.contract)
+    const executionToken = randomUUID()
+    pendingWorkspaceRerunExecutions.set(executionToken, pending)
+    return { ...prepared, executionToken }
+  })
+
+  handle(desktopApiIpcChannels.workspaceExecuteFlowAgentRerun, async (event, request) => {
+    const token = readWorkspaceRerunToken(request)
+    const pending = pendingWorkspaceRerunExecutions.get(token)
+    if (!pending || pending.sender !== event.sender) {
+      throw new Error('Workspace rerun execution authorization is invalid.')
+    }
+    const caller = BrowserWindow.fromWebContents(event.sender)
+    if (!caller) throw new Error('Caller window is not available')
+    const targetWorkspace = workspaceWindowRegistry.getPathForWindow(
+      caller as WorkspaceWindowLike,
+    )
+    if (
+      !targetWorkspace ||
+      normalizeWorkspacePath(targetWorkspace) !==
+        normalizeWorkspacePath(pending.contract.target_workspace)
+    ) {
+      throw new Error('Workspace rerun target is not bound to this window.')
+    }
+    pendingWorkspaceRerunExecutions.delete(token)
+    await executeWorkspaceRerun(pending.contract, services.eccRuntimeService)
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {
@@ -1481,6 +1570,17 @@ function readAgentSendMessageRequest(value: unknown): DesktopAgentSendMessageReq
     providerId: readAgentProviderId(record),
     sessionId: readAgentSessionId(record.sessionId),
   }
+}
+
+function readWorkspaceRerunToken(value: unknown): string {
+  if (
+    !isRecord(value) ||
+    typeof value.token !== 'string' ||
+    !/^[a-f0-9-]{36}$/.test(value.token)
+  ) {
+    throw new Error('Workspace rerun token is invalid.')
+  }
+  return value.token
 }
 
 function readAgentRecord(value: unknown): Record<string, unknown> {

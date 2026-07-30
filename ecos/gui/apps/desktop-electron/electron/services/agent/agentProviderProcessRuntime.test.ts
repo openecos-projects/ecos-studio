@@ -242,6 +242,53 @@ describe('AgentProviderProcessRuntime', () => {
     )
   })
 
+  it('forwards validated workspace rerun contracts from provider stdout', () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'local-provider',
+        manifestPath: '/plugins/local/agent-provider.json',
+        pluginRoot: '/plugins/local',
+        providerId: 'local',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+    const listener = vi.fn()
+    runtime.onEvent(listener)
+
+    void runtime.getStatus({ providerId: 'local' })
+    harness.children[0].stdout.emit(
+      'data',
+      `${JSON.stringify({
+        event: {
+          type: 'workspace_rerun',
+          workspaceRerun: {
+            design_id: 'gcd',
+            execution_scope: 'single_step',
+            parameter_patch: [{ knob_id: 'place.target_density', value: 0.55 }],
+            requires_gui_review: true,
+            rerun_id: 'gcd_rerun_place',
+            schema_version: 'flow-agent.workspace_rerun_contract.v1',
+            source_stage_artifact: 'place_dreamplace/output/gcd_place.def.gz',
+            source_flow_json_sha256: 'a'.repeat(64),
+            source_stage_artifact_sha256: 'b'.repeat(64),
+            source_workspace: '/runs/gcd',
+            target_step: 'place',
+            target_workspace: '/runs/gcd_rerun_place',
+          },
+        },
+        type: 'event',
+      })}\n`,
+    )
+
+    expect(listener).toHaveBeenCalledWith({
+      providerId: 'local',
+      type: 'workspace_rerun',
+      workspaceRerun: expect.objectContaining({ rerun_id: 'gcd_rerun_place' }),
+    })
+  })
+
   it('rejects pending requests when the provider process exits', async () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

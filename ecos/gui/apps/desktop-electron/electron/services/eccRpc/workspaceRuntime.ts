@@ -64,6 +64,14 @@ export interface EccWorkspaceRuntimeOptions {
   sessions?: WorkspaceSessionRegistry
 }
 
+export interface EccCandidateRerunRequest {
+  candidateId: string
+  executionScope: 'single_step' | 'full_flow'
+  patch: Array<{ knob_id: string; value: unknown }>
+  targetStep: string
+  workspaceHandle: string
+}
+
 interface EccWorkspaceSessionResult {
   directory: string
   workspaceId: string
@@ -469,6 +477,24 @@ export class EccWorkspaceRuntime {
       },
       { rerun },
     )
+  }
+
+  runCandidateRerun(request: EccCandidateRerunRequest): Promise<unknown> {
+    return this.enqueue('candidate.rerun', request.workspaceHandle, async () => {
+      const client = await this.ensureStarted()
+      const workspaceId = await this.resolveEccWorkspaceId(request.workspaceHandle)
+      return await client.call(
+        'candidate.rerun',
+        {
+          candidateId: request.candidateId,
+          executionScope: request.executionScope,
+          patch: request.patch,
+          targetStep: request.targetStep,
+          workspaceId,
+        },
+        { timeoutMs: 0 },
+      )
+    })
   }
 
   async shutdown(): Promise<EccRpcShutdownResult> {

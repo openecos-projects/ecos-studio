@@ -4,6 +4,7 @@ import type {
   DesktopAgentEventType,
   DesktopAgentEvent,
   DesktopAgentExecutionContract,
+  DesktopAgentWorkspaceRerunContract,
   DesktopAgentWorkspaceSetupContract,
   DesktopAgentListSessionsRequest,
   DesktopAgentListSessionsResponse,
@@ -314,6 +315,7 @@ const agentEventTypes = new Set<DesktopAgentEventType>([
   'contract',
   'workspace_setup',
   'workspace_create',
+  'workspace_rerun',
   'error',
 ])
 
@@ -326,9 +328,11 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
   const contract = readExecutionContract(record.contract)
   const workspaceSetup = readWorkspaceSetupContract(record.workspaceSetup)
   const workspaceCreateSetupId = readOptionalIdentifier(record.workspaceCreateSetupId)
+  const workspaceRerun = readWorkspaceRerunContract(record.workspaceRerun)
   if (type === 'contract' && !contract) return null
   if (type === 'workspace_setup' && !workspaceSetup) return null
   if (type === 'workspace_create' && !workspaceCreateSetupId) return null
+  if (type === 'workspace_rerun' && !workspaceRerun) return null
   const providerId = readEventText(record.providerId)
   const sessionId = readEventText(record.sessionId)
   const text = readEventText(record.text)
@@ -340,6 +344,7 @@ function readDesktopAgentEvent(value: unknown): DesktopAgentEvent | null {
     ...(text ? { text } : {}),
     ...(workspaceSetup ? { workspaceSetup } : {}),
     ...(workspaceCreateSetupId ? { workspaceCreateSetupId } : {}),
+    ...(workspaceRerun ? { workspaceRerun } : {}),
     type: type as DesktopAgentEventType,
   }
 }
@@ -358,6 +363,53 @@ const workspaceSetupFlowSteps = [
   'sta',
   'Harden',
 ]
+
+function readWorkspaceRerunContract(
+  value: unknown,
+): DesktopAgentWorkspaceRerunContract | null {
+  const record = readRecord(value)
+  const sourceWorkspace = readWorkspaceRerunPath(record.source_workspace)
+  const targetWorkspace = readWorkspaceRerunPath(record.target_workspace)
+  const rerunId = readOptionalIdentifier(record.rerun_id)
+  const designId = readOptionalIdentifier(record.design_id)
+  const targetStep = record.target_step
+  const executionScope = record.execution_scope
+  const patch = readWorkspaceRerunPatch(record.parameter_patch)
+  const sourceStageArtifact = readWorkspaceRerunArtifactReference(
+    record.source_stage_artifact,
+  )
+  if (
+    record.schema_version !== 'flow-agent.workspace_rerun_contract.v1' ||
+    record.requires_gui_review !== true ||
+    !sourceWorkspace ||
+    !targetWorkspace ||
+    !rerunId ||
+    !designId ||
+    typeof targetStep !== 'string' ||
+    !workspaceSetupFlowSteps.includes(targetStep) ||
+    (executionScope !== 'single_step' && executionScope !== 'full_flow') ||
+    !patch ||
+    !sourceStageArtifact ||
+    !readSha256(record.source_flow_json_sha256) ||
+    !readSha256(record.source_stage_artifact_sha256)
+  ) {
+    return null
+  }
+  return {
+    design_id: designId,
+    execution_scope: executionScope,
+    parameter_patch: patch,
+    requires_gui_review: true,
+    rerun_id: rerunId,
+    schema_version: 'flow-agent.workspace_rerun_contract.v1',
+    source_stage_artifact: sourceStageArtifact,
+    source_flow_json_sha256: record.source_flow_json_sha256,
+    source_stage_artifact_sha256: record.source_stage_artifact_sha256,
+    source_workspace: sourceWorkspace,
+    target_step: targetStep,
+    target_workspace: targetWorkspace,
+  }
+}
 
 function readWorkspaceSetupContract(
   value: unknown,
@@ -509,6 +561,59 @@ function readWorkspaceSetupPath(value: unknown): string | null {
     !value.includes('\0')
     ? value
     : null
+}
+
+function readWorkspaceRerunPath(value: unknown): string | null {
+  const path = readWorkspaceSetupPath(value)
+  return path && path.startsWith('/') ? path : null
+}
+
+function readSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+}
+
+function readWorkspaceRerunArtifactReference(value: unknown): string | null {
+  if (typeof value !== 'string' || !value || value.length > 1024) return null
+  const segments = value.split('/')
+  return segments.every((segment) => segment && segment !== '.' && segment !== '..')
+    ? value
+    : null
+}
+
+function readWorkspaceRerunPatch(
+  value: unknown,
+): DesktopAgentWorkspaceRerunContract['parameter_patch'] | null {
+  if (!Array.isArray(value) || value.length > 16) return null
+  const patch = value.map((item) => {
+    const record = readRecord(item)
+    const knobId = record.knob_id
+    const patchValue = record.value
+    if (
+      typeof knobId !== 'string' ||
+      !/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(knobId) ||
+      !isWorkspaceRerunParameterValue(patchValue)
+    ) {
+      return null
+    }
+    return { knob_id: knobId, value: patchValue }
+  })
+  if (patch.some((item) => item === null)) return null
+  const normalized = patch as DesktopAgentWorkspaceRerunContract['parameter_patch']
+  return new Set(normalized.map((item) => item.knob_id)).size === normalized.length
+    ? normalized
+    : null
+}
+
+function isWorkspaceRerunParameterValue(
+  value: unknown,
+): value is DesktopAgentWorkspaceRerunContract['parameter_patch'][number]['value'] {
+  if (typeof value === 'boolean' || typeof value === 'string') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (!Array.isArray(value) || value.length === 0 || value.length > 128) return false
+  return value.every(
+    (item) =>
+      (typeof item === 'number' && Number.isFinite(item)) || typeof item === 'string',
+  )
 }
 
 function readOptionalWorkspaceSetupPath(value: unknown): string | undefined | null {

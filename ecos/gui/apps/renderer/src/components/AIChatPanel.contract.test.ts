@@ -26,4 +26,13 @@ describe('AIChatPanel flow contracts', () => {
       "if (event.text) messageStore.addAssistantMessage(event.text, 'done')",
     )
   })
+
+  it('executes a validated workspace rerun only after the host prepares its target', () => {
+    expect(source).toContain("event.type === 'workspace_rerun'")
+    expect(source).toContain('prepareFlowAgentRerun')
+    expect(source).toContain('event.workspaceRerunToken')
+    expect(source).toContain('prepareRerun({ token })')
+    expect(source).toContain('workspace_rerun_result:')
+    expect(source).toContain('executeRerun({ token: prepared.executionToken })')
+  })
 })
