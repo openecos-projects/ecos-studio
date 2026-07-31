@@ -70,48 +70,6 @@ build_chip_viewer() {
     -p chip-viewer-native
 }
 
-build_geometry_snapshot() {
-  local ecc_tools_dir="$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools"
-  local python_executable="$REPO_ROOT/ecc/.venv/bin/python"
-  local python_include_dir
-  local python_numpy_include_dir
-
-  python_include_dir="$($python_executable -c 'import sysconfig; print(sysconfig.get_path("platinclude"))')"
-  python_numpy_include_dir="$($python_executable -c 'import numpy; print(numpy.get_include())')"
-
-  # scikit-build configures the editable extension with a temporary Python
-  # environment.  That directory disappears after installation, so refresh
-  # CMake's Python discovery against ECC's persistent virtual environment
-  # before building the standalone geometry snapshot.
-  cmake -S "$ecc_tools_dir" -B "$ecc_tools_dir/build" \
-    -DPython_EXECUTABLE="$python_executable" \
-    -DPYTHON_EXECUTABLE="$python_executable" \
-    -DPython_INCLUDE_DIR="$python_include_dir" \
-    -DPython_NumPy_INCLUDE_DIR="$python_numpy_include_dir"
-
-  cmake --build "$ecc_tools_dir/build" \
-    --target ecc_geometry_snapshot \
-    --parallel "$(nproc)"
-}
-
-resolve_geometry_snapshot_binary() {
-  local candidates=(
-    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build/src/apps/geometry_snapshot/ecc-geometry-snapshot"
-    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/bin/ecc-geometry-snapshot"
-    "$REPO_ROOT/ecc/chipcompiler/thirdparty/ecc-tools/build/bin/ecc-geometry-snapshot"
-  )
-
-  for candidate in "${candidates[@]}"; do
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  printf 'ecc-geometry-snapshot binary was not found after build\n' >&2
-  return 1
-}
-
 validate_packaged_binaries() {
   local binary_dir="$REPO_ROOT/ecos/gui/apps/desktop-electron/resources/binaries"
   local missing=0
@@ -119,7 +77,6 @@ validate_packaged_binaries() {
   local required_files=(
     "$binary_dir/ecc"
     "$binary_dir/chip-viewer-native"
-    "$binary_dir/ecc-geometry-snapshot"
   )
 
   for required_file in "${required_files[@]}"; do
@@ -141,12 +98,10 @@ validate_packaged_binaries() {
 
 build_ecc
 build_chip_viewer
-build_geometry_snapshot
 
 cd "$REPO_ROOT"
 rm -rf ecos/gui/apps/desktop-electron/resources
 mkdir -p ecos/gui/apps/desktop-electron/resources/binaries
 cp -r ecc/dist/ecc/* ecos/gui/apps/desktop-electron/resources/binaries
 cp ecos/chip-viewer/target/release/chip-viewer-native ecos/gui/apps/desktop-electron/resources/binaries
-cp "$(resolve_geometry_snapshot_binary)" ecos/gui/apps/desktop-electron/resources/binaries
 validate_packaged_binaries
