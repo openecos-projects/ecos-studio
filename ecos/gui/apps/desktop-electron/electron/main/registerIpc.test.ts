@@ -968,7 +968,6 @@ describe('registerIpc', () => {
     const request = {
       mode: 'edit',
       projectPath: '/tmp/project',
-      rebuildGeometry: true,
       step: 'Floorplan',
     }
     services.chipViewerService.open.mockResolvedValue({

@@ -28,8 +28,7 @@ import {
 } from '@ecos-studio/shared'
 
 const BUILD_HINT =
-  'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build ecc-geometry-snapshot in ecc/chipcompiler/thirdparty/ecc-tools and the ECC CLI package.'
-const DB_CONFIG_RELATIVE_PATH = 'config/db_default_config.json'
+  'Build them with: cd ecos/chip-viewer && cargo build --release -p chip-viewer-native; then build the ECC CLI package.'
 const GEOMETRY_SCHEMA_VERSION = 1
 const VIEWER_STARTUP_HEALTH_CHECK_MS = 800
 const REQUIRED_GEOMETRY_MANIFEST_FILE_KEYS = [
@@ -110,7 +109,6 @@ const defaultSpawnProcess: SpawnProcess = (file, args, options) =>
 
 interface ChipViewerBinaries {
   eccPath: string
-  snapshotPath: string
   viewerPath: string
 }
 
@@ -195,15 +193,9 @@ interface SnapshotInputs {
   editCommandDirectory: string
   editResultDirectory: string
   gdsPath: string
-  geometryDir: string
   imagePath: string
   manifestPath: string
   workspaceStepDirectory: string
-}
-
-interface DbGeometryConfig {
-  lefPaths: string[]
-  techLefPath: string
 }
 
 type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
@@ -225,12 +217,6 @@ interface ViewerLaunchContext {
   stdoutLogPath: string
   viewerPath: string
 }
-
-type SnapshotBuildReason =
-  | { kind: 'forced' }
-  | { kind: 'missing-manifest' }
-  | { detail: string; kind: 'invalid-manifest' }
-  | { kind: 'stale'; source: SnapshotSourcePath }
 
 function defaultExecFile(
   file: string,
@@ -401,108 +387,12 @@ function geometryDeltaMessage(geometryDelta: Record<string, unknown>): string {
     : 'geometry updated'
 }
 
-function stringValue(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
-
-function stringArrayValue(record: Record<string, unknown>, key: string): string[] {
-  const value = record[key]
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '')
-    : []
-}
-
-function parseDbGeometryConfig(raw: string, path: string): DbGeometryConfig {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    throw new Error(`Failed to parse geometry DB config: ${path}`)
-  }
-
-  if (!isRecord(parsed) || !isRecord(parsed.INPUT)) {
-    throw new Error(`Geometry DB config is missing INPUT: ${path}`)
-  }
-
-  const techLefPath = stringValue(parsed.INPUT, 'tech_lef_path')
-  const lefPaths = stringArrayValue(parsed.INPUT, 'lef_paths')
-  if (!techLefPath || lefPaths.length === 0) {
-    throw new Error('Geometry snapshot requires tech LEF and LEF paths')
-  }
-
-  return {
-    lefPaths,
-    techLefPath,
-  }
-}
-
-function snapshotInputPaths(
-  dbConfig: DbGeometryConfig,
-): { label: string; path: string }[] {
-  return [
-    { label: 'tech LEF', path: dbConfig.techLefPath },
-    ...dbConfig.lefPaths.map((path) => ({ label: 'LEF', path })),
-  ]
-}
-
-function snapshotSourcePaths(
-  dbConfig: DbGeometryConfig,
-  dbConfigPath: string,
-  snapshotInputs: SnapshotInputs,
-): SnapshotSourcePath[] {
+function savedGeometrySourcePaths(snapshotInputs: SnapshotInputs): SnapshotSourcePath[] {
   return [
     { label: 'DEF', path: snapshotInputs.defPath },
-    { label: 'geometry DB config', path: dbConfigPath },
-    ...snapshotInputPaths(dbConfig),
+    { label: 'DB', path: snapshotInputs.dbPath },
+    { label: 'GDS', path: snapshotInputs.gdsPath },
   ]
-}
-
-function snapshotBuildReasonText(reason: SnapshotBuildReason): string {
-  if (reason.kind === 'forced') {
-    return 'forced rebuild'
-  }
-  if (reason.kind === 'missing-manifest') {
-    return 'creating missing snapshot'
-  }
-  if (reason.kind === 'invalid-manifest') {
-    return `rebuilding invalid snapshot; ${reason.detail}`
-  }
-  return `rebuilding stale snapshot; stale source: ${reason.source.label} ${reason.source.path}`
-}
-
-function stringDetail(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function processFailureDetails(error: unknown): string[] {
-  const details: string[] = []
-  if (error instanceof Error && error.message.trim()) {
-    details.push(error.message.trim())
-  } else if (error !== undefined && error !== null) {
-    details.push(String(error))
-  }
-
-  if (isRecord(error)) {
-    const stderr = stringDetail(error.stderr)
-    const stdout = stringDetail(error.stdout)
-    const code = error.code
-    const signal = error.signal
-    if (stderr) {
-      details.push(`stderr: ${stderr}`)
-    }
-    if (stdout) {
-      details.push(`stdout: ${stdout}`)
-    }
-    if (code !== undefined) {
-      details.push(`exit code: ${String(code)}`)
-    }
-    if (signal !== undefined) {
-      details.push(`signal: ${String(signal)}`)
-    }
-  }
-
-  return details
 }
 
 function isPathInside(rootPath: string, targetPath: string): boolean {
@@ -682,58 +572,9 @@ export class ChipViewerService {
   async open(request: ChipViewerOpenRequest): Promise<ChipViewerOpenResult> {
     const projectPath = normalizeLocalPath(request.projectPath)
     const mode = normalizeChipViewerMode(request.mode)
-    const binaries = this.resolveBinaries()
     const snapshotInputs = await this.resolveSnapshotInputs(projectPath, request.step)
-    const dbConfigPath = join(projectPath, DB_CONFIG_RELATIVE_PATH)
-    let dbConfig: DbGeometryConfig | null = null
-    const readDbConfig = async () => {
-      if (!this.fileExists(dbConfigPath)) {
-        throw new Error(`Geometry DB config does not exist: ${dbConfigPath}`)
-      }
-
-      const config = parseDbGeometryConfig(
-        await this.readTextFile(dbConfigPath),
-        dbConfigPath,
-      )
-      this.validateSnapshotInputs(config)
-      return config
-    }
-
-    let buildReason: SnapshotBuildReason | null = request.rebuildGeometry
-      ? { kind: 'forced' }
-      : null
-    if (!buildReason && !this.fileExists(snapshotInputs.manifestPath)) {
-      buildReason = { kind: 'missing-manifest' }
-    }
-    if (!buildReason) {
-      const invalidManifest = await this.findInvalidSnapshotManifest(
-        snapshotInputs.manifestPath,
-      )
-      if (invalidManifest) {
-        buildReason = { detail: invalidManifest, kind: 'invalid-manifest' }
-      }
-    }
-    if (!buildReason) {
-      dbConfig = await readDbConfig()
-      const staleSource = await this.findStaleSnapshotSource(
-        snapshotInputs.manifestPath,
-        snapshotSourcePaths(dbConfig, dbConfigPath, snapshotInputs),
-      )
-      if (staleSource) {
-        buildReason = { kind: 'stale', source: staleSource }
-      }
-    }
-
-    if (buildReason) {
-      dbConfig ??= await readDbConfig()
-      await this.generateSnapshot(
-        binaries.snapshotPath,
-        this.snapshotArgs(dbConfig, snapshotInputs, 'snapshot'),
-        snapshotInputs,
-        request.step,
-        buildReason,
-      )
-    }
+    await this.requireSavedGeometry(snapshotInputs, request.step)
+    const binaries = this.resolveBinaries()
 
     let viewerManifestPath = snapshotInputs.manifestPath
     let editCommandDirectory: string | undefined
@@ -885,7 +726,6 @@ export class ChipViewerService {
       editCommandDirectory: join(editDirectory, 'commands'),
       editResultDirectory: join(editDirectory, 'results'),
       gdsPath,
-      geometryDir,
       imagePath,
       manifestPath: join(geometryDir, 'geometry.manifest'),
       workspaceStepDirectory,
@@ -1005,24 +845,6 @@ export class ChipViewerService {
       child.once('exit', onExit)
       timer = setTimeout(resolveOnce, Math.max(0, this.viewerStartupCheckMs))
     })
-  }
-
-  private snapshotArgs(
-    dbConfig: DbGeometryConfig,
-    snapshotInputs: SnapshotInputs,
-    mode: 'snapshot',
-  ): string[] {
-    return [
-      '--tech-lef',
-      dbConfig.techLefPath,
-      ...dbConfig.lefPaths.flatMap((lefPath) => ['--lef', lefPath]),
-      '--def',
-      snapshotInputs.defPath,
-      '--out',
-      snapshotInputs.geometryDir,
-      '--mode',
-      mode,
-    ]
   }
 
   private async beginLayoutEdit(
@@ -1498,26 +1320,19 @@ export class ChipViewerService {
   private resolvePackagedBinaries(): PackagedBinaryResolution {
     const binaryDir = this.resourcesPath ? join(this.resourcesPath, 'binaries') : ''
     const eccPath = join(binaryDir, executableName('ecc', this.platform))
-    const snapshotPath = join(
-      binaryDir,
-      executableName('ecc-geometry-snapshot', this.platform),
-    )
     const viewerPath = join(
       binaryDir,
       executableName('chip-viewer-native', this.platform),
     )
     const runtimePayloadPaths = packagedRuntimePayloadPaths(binaryDir, this.platform)
 
-    const missingPaths = [
-      eccPath,
-      snapshotPath,
-      viewerPath,
-      ...runtimePayloadPaths,
-    ].filter((path) => !this.fileExists(path))
+    const missingPaths = [eccPath, viewerPath, ...runtimePayloadPaths].filter(
+      (path) => !this.fileExists(path),
+    )
 
     if (missingPaths.length === 0) {
       return {
-        binaries: { eccPath, snapshotPath, viewerPath },
+        binaries: { eccPath, viewerPath },
         missingPaths: [],
       }
     }
@@ -1530,11 +1345,10 @@ export class ChipViewerService {
 
   private resolvePathBinaries(): ChipViewerBinaries {
     const eccPath = this.resolveCommandFromPath('ecc')
-    const snapshotPath = this.resolveCommandFromPath('ecc-geometry-snapshot')
     const viewerPath = this.resolveCommandFromPath('chip-viewer-native')
 
-    if (eccPath && snapshotPath && viewerPath) {
-      return { eccPath, snapshotPath, viewerPath }
+    if (eccPath && viewerPath) {
+      return { eccPath, viewerPath }
     }
 
     throw new Error('Chip viewer binaries were not found on PATH.')
@@ -1561,18 +1375,10 @@ export class ChipViewerService {
     } catch {
       return this.resolvePathBinaries()
     }
-    const snapshotWrapperPath = join(
-      repoRoot,
-      'ecos/scripts/ecc-geometry-snapshot-wrapper.sh',
-    )
     const eccWrapperPath = join(repoRoot, 'ecos/scripts/ecc-wrapper.sh')
     const viewerWrapperPath = join(repoRoot, 'ecos/scripts/chip-viewer-native-wrapper.sh')
 
-    if (
-      !this.fileExists(eccWrapperPath) ||
-      !this.fileExists(snapshotWrapperPath) ||
-      !this.fileExists(viewerWrapperPath)
-    ) {
+    if (!this.fileExists(eccWrapperPath) || !this.fileExists(viewerWrapperPath)) {
       throw new Error(
         `Chip viewer wrappers were not found under ${join(repoRoot, 'ecos/scripts')}. ${BUILD_HINT}`,
       )
@@ -1580,7 +1386,6 @@ export class ChipViewerService {
 
     return {
       eccPath: eccWrapperPath,
-      snapshotPath: snapshotWrapperPath,
       viewerPath: viewerWrapperPath,
     }
   }
@@ -1686,54 +1491,35 @@ export class ChipViewerService {
     return null
   }
 
-  private async generateSnapshot(
-    snapshotPath: string,
-    args: string[],
+  private async requireSavedGeometry(
     snapshotInputs: SnapshotInputs,
     step: string,
-    reason: SnapshotBuildReason,
   ): Promise<void> {
-    try {
-      const result = await this.execFile(snapshotPath, args)
-      if (!this.fileExists(snapshotInputs.manifestPath)) {
-        throw Object.assign(
-          new Error(
-            `Snapshot command completed but did not create manifest: ${snapshotInputs.manifestPath}`,
-          ),
-          result,
-        )
-      }
-      const invalidManifest = await this.findInvalidSnapshotManifest(
-        snapshotInputs.manifestPath,
+    const unavailable = (reason: string): never => {
+      throw new Error(
+        `No saved layout data is available for ${step}: ${reason}. Run this step again to generate layout data before opening Chip Viewer.`,
       )
-      if (invalidManifest) {
-        throw Object.assign(
-          new Error(
-            `Snapshot command completed but wrote an invalid manifest: ${invalidManifest}`,
-          ),
-          result,
-        )
-      }
-    } catch (error) {
-      const details = [
-        `Geometry snapshot generation failed while ${snapshotBuildReasonText(
-          reason,
-        )} for step ${step}.`,
-        `Snapshot binary: ${snapshotPath}`,
-        `DEF: ${snapshotInputs.defPath}`,
-        `Output: ${snapshotInputs.geometryDir}`,
-        `Manifest: ${snapshotInputs.manifestPath}`,
-        ...processFailureDetails(error),
-      ]
-      throw new Error(details.join('\n'))
     }
-  }
 
-  private validateSnapshotInputs(dbConfig: DbGeometryConfig): void {
-    for (const input of snapshotInputPaths(dbConfig)) {
-      if (!this.fileExists(input.path)) {
-        throw new Error(`Geometry snapshot ${input.label} does not exist: ${input.path}`)
-      }
+    if (!this.fileExists(snapshotInputs.manifestPath)) {
+      unavailable('geometry manifest is missing')
+    }
+
+    const invalidManifest = await this.findInvalidSnapshotManifest(
+      snapshotInputs.manifestPath,
+    )
+    if (invalidManifest) {
+      unavailable(invalidManifest)
+    }
+
+    const staleSource = await this.findStaleSnapshotSource(
+      snapshotInputs.manifestPath,
+      savedGeometrySourcePaths(snapshotInputs),
+    )
+    if (staleSource) {
+      unavailable(
+        `geometry manifest is older than ${staleSource.label}: ${staleSource.path}`,
+      )
     }
   }
 }

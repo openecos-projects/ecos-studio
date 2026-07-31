@@ -10,7 +10,6 @@ DRY_RUN=false
 
 REQUIRED_ENTRIES=(
   "resources/binaries/chip-viewer-native"
-  "resources/binaries/ecc-geometry-snapshot"
   "resources/binaries/ecc"
   "resources/binaries/_internal/ecc_tools_bin"
   "resources/binaries/_internal/ecc_tools_bin/lib"
@@ -29,7 +28,7 @@ Usage: chip-viewer-appimage-smoke.sh [options]
 
 Inspect the ECOS Studio AppImage and fail if required chip viewer runtime
 payload files are missing.
-Required payload includes chip-viewer-native, ecc-geometry-snapshot, ecc,
+Required payload includes chip-viewer-native, ecc,
 and the packaged ecc_tools_bin runtime libraries.
 
 Options:

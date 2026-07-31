@@ -84,9 +84,7 @@ describe('drawing area chip viewer launch logic', () => {
   })
 
   it('uses different loading copy for read-only and edit launches', () => {
-    expect(chipViewerLoadingMessage('view')).toBe('Preparing Chip Viewer geometry...')
-    expect(chipViewerLoadingMessage('edit')).toBe(
-      'Preparing Chip Viewer edit geometry...',
-    )
+    expect(chipViewerLoadingMessage('view')).toBe('Opening saved Chip Viewer layout...')
+    expect(chipViewerLoadingMessage('edit')).toBe('Opening editable saved layout...')
   })
 })

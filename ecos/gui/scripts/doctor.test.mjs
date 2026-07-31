@@ -37,7 +37,6 @@ describe('runGuiDoctor', () => {
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [
@@ -97,7 +96,6 @@ describe('runGuiDoctor', () => {
       existingPaths: [
         join(cwd, 'node_modules/.modules.yaml'),
         join(cwd, 'apps/desktop-electron/resources/binaries/ecc'),
-        join(cwd, 'apps/desktop-electron/resources/binaries/ecc-geometry-snapshot'),
         join(cwd, 'apps/desktop-electron/resources/binaries/chip-viewer-native'),
       ],
       commands: [['pnpm --version', { stdout: '11.0.9\n' }]],
@@ -141,8 +139,7 @@ describe('runGuiDoctor', () => {
         expect.objectContaining({
           name: 'native resources',
           status: 'error',
-          message:
-            'Missing native resources: ecc, ecc-geometry-snapshot, chip-viewer-native',
+          message: 'Missing native resources: ecc, chip-viewer-native',
         }),
       ]),
     )

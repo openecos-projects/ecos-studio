@@ -2,8 +2,8 @@ import type { ChipViewerOpenRequest } from '@ecos-studio/shared'
 
 export type ChipViewerMode = NonNullable<ChipViewerOpenRequest['mode']>
 
-export const CHIP_VIEWER_LOADING_MESSAGE = 'Preparing Chip Viewer geometry...'
-export const CHIP_VIEWER_EDIT_LOADING_MESSAGE = 'Preparing Chip Viewer edit geometry...'
+export const CHIP_VIEWER_LOADING_MESSAGE = 'Opening saved Chip Viewer layout...'
+export const CHIP_VIEWER_EDIT_LOADING_MESSAGE = 'Opening editable saved layout...'
 
 export interface ChipViewerAvailability {
   isDesktopRuntime: boolean

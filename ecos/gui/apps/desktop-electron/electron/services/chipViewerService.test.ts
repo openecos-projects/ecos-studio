@@ -37,10 +37,6 @@ const EDIT_SESSION_ID = 'layout-edit-1'
 const EDIT_BRIDGE_ID = 'bridge-1'
 const EDIT_SESSION_COMMAND_DIR = join(EDIT_COMMAND_DIR, EDIT_SESSION_ID, EDIT_BRIDGE_ID)
 const EDIT_SESSION_RESULT_DIR = join(EDIT_RESULT_DIR, EDIT_SESSION_ID, EDIT_BRIDGE_ID)
-const DB_CONFIG_PATH = join(PROJECT_ROOT, 'config', 'db_default_config.json')
-const TECH_LEF = '/pdk/prtech/tech.lef'
-const LEF_A = '/pdk/std/a.lef'
-const LEF_B = '/pdk/std/b.lef'
 const DEFAULT_MANIFEST_FILE_PATHS = [
   GEOMETRY_META,
   GEOMETRY_SHAPES,
@@ -51,15 +47,6 @@ const DEFAULT_MANIFEST_FILE_PATHS = [
   GEOMETRY_SIDMAP,
   GEOMETRY_VIEW,
 ]
-
-function dbConfig() {
-  return JSON.stringify({
-    INPUT: {
-      lef_paths: [LEF_A, LEF_B],
-      tech_lef_path: TECH_LEF,
-    },
-  })
-}
 
 function geometryManifest(overrides: Record<string, string> = {}) {
   const entries = [
@@ -90,7 +77,6 @@ function devChipViewerPaths() {
   return {
     cargoManifest: join(REPO_ROOT, 'ecos/chip-viewer/Cargo.toml'),
     ecc: join(REPO_ROOT, 'ecos/scripts/ecc-wrapper.sh'),
-    snapshot: join(REPO_ROOT, 'ecos/scripts/ecc-geometry-snapshot-wrapper.sh'),
     viewer: join(REPO_ROOT, 'ecos/scripts/chip-viewer-native-wrapper.sh'),
   }
 }
@@ -115,7 +101,6 @@ function createService(options: {
   files?: Record<string, string>
   getFileModifiedTime?: (path: string) => Promise<number | null>
   includeDefaultDefPath?: boolean
-  includeDefaultGeometryInputPaths?: boolean
   isPackaged?: boolean
   layoutEditRuntime?: NonNullable<ChipViewerServiceOptions['layoutEditRuntime']>
   modifiedTimes?: Record<string, number>
@@ -130,9 +115,6 @@ function createService(options: {
   const devPaths = devChipViewerPaths()
   const existingPaths = new Set([
     ...(options.includeDefaultDefPath === false ? [] : [DEF_PATH]),
-    ...(options.includeDefaultGeometryInputPaths === false
-      ? []
-      : [TECH_LEF, LEF_A, LEF_B]),
     ...(options.isPackaged ? [] : [devPaths.ecc]),
     ...(options.existingPaths ?? []),
     ...files.keys(),
@@ -144,21 +126,7 @@ function createService(options: {
     }
   }
   const modifiedTimes = new Map(Object.entries(options.modifiedTimes ?? {}))
-  const execFile =
-    options.execFile ??
-    vi.fn(async (_file: string, args: string[]) => {
-      if (args.includes('--mode') && args.includes('snapshot')) {
-        existingPaths.add(GEOMETRY_MANIFEST)
-        files.set(GEOMETRY_MANIFEST, geometryManifest())
-        for (const path of DEFAULT_MANIFEST_FILE_PATHS) {
-          existingPaths.add(path)
-        }
-      }
-      return {
-        stderr: '',
-        stdout: '',
-      }
-    })
+  const execFile = options.execFile ?? vi.fn(async () => ({ stderr: '', stdout: '' }))
   const spawnedProcess = createSpawnedViewerProcess()
   const unref = spawnedProcess.unref
   const spawnProcess = options.spawnProcess ?? vi.fn(() => spawnedProcess)
@@ -298,15 +266,8 @@ describe('ChipViewerService', () => {
   it('rejects unsupported viewer modes before spawning the native process', async () => {
     const devBinaries = devChipViewerPaths()
     const { service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
     })
 
     await expect(
@@ -319,84 +280,23 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
-  it('builds a missing geometry snapshot and launches the dev native viewer', async () => {
+  it('reports missing saved geometry without launching the native viewer', async () => {
     const devBinaries = devChipViewerPaths()
-    const {
-      ensureDirectory,
-      execFile,
-      service,
-      spawnProcess,
-      unref,
-      watchDirectory,
-      workspaceResourceService,
-    } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+    const { execFile, service, spawnProcess } = createService({
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer],
     })
 
-    const result = await service.open({
-      mode: 'edit',
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(workspaceResourceService.resolveStepInfo).toHaveBeenCalledWith({
-      id: 'layout',
-      step: STEP_NAME,
-    })
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
-    expect(spawnProcess).toHaveBeenCalledWith(
-      devBinaries.viewer,
-      [
-        '--manifest',
-        GEOMETRY_MANIFEST,
-        '--mode',
-        'edit',
-        '--edit-command-dir',
-        EDIT_SESSION_COMMAND_DIR,
-        '--edit-result-dir',
-        EDIT_SESSION_RESULT_DIR,
-      ],
-      expect.objectContaining({
-        detached: true,
-        stdio: ['ignore', expect.any(Number), expect.any(Number)],
+    await expect(
+      service.open({
+        mode: 'edit',
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
       }),
+    ).rejects.toThrow(
+      `No saved layout data is available for ${STEP_NAME}: geometry manifest is missing. Run this step again to generate layout data before opening Chip Viewer.`,
     )
-    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_SESSION_COMMAND_DIR)
-    expect(ensureDirectory).toHaveBeenCalledWith(EDIT_SESSION_RESULT_DIR)
-    expect(watchDirectory).toHaveBeenCalledWith(
-      EDIT_SESSION_COMMAND_DIR,
-      expect.any(Function),
-    )
-    expect(unref).toHaveBeenCalledTimes(1)
-    expect(result).toEqual({
-      editCommandDirectory: EDIT_SESSION_COMMAND_DIR,
-      editResultDirectory: EDIT_SESSION_RESULT_DIR,
-      geometryManifestPath: GEOMETRY_MANIFEST,
-      spawned: true,
-      workspaceStepDirectory: STEP_DIRECTORY,
-    })
-    expect(result.editCommandDirectory).not.toContain(`${GEOMETRY_DIR}/`)
-    expect(result.editResultDirectory).not.toContain(`${GEOMETRY_DIR}/`)
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('restores the dirty state when reopening an ECC edit session', async () => {
@@ -410,15 +310,8 @@ describe('ChipViewerService', () => {
       sourceFingerprint: 'source-1',
     }))
     const { service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
       layoutEditRuntime: {
         layoutEditApply: vi.fn(),
         layoutEditBegin,
@@ -470,15 +363,8 @@ describe('ChipViewerService', () => {
       editSessionId: EDIT_SESSION_ID,
     }))
     const { layoutEditRuntime, service, spawnedProcess, watchDirectory } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
       layoutEditRuntime: {
         layoutEditApply: vi.fn(),
         layoutEditBegin,
@@ -532,15 +418,8 @@ describe('ChipViewerService', () => {
         NODE_OPTIONS: '--require /tmp/node-hook.js',
         PATH: '/usr/bin',
       },
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
     })
 
     await service.open({
@@ -565,15 +444,12 @@ describe('ChipViewerService', () => {
     const { service, spawnProcess } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
-        devBinaries.snapshot,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
         DRC_DATA_PATH,
         DRC_STATIS_PATH,
       ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      files: {},
     })
 
     await service.open({
@@ -605,15 +481,12 @@ describe('ChipViewerService', () => {
     const { service, spawnProcess } = createService({
       existingPaths: [
         devBinaries.cargoManifest,
-        devBinaries.snapshot,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
         DRC_DATA_PATH,
         DRC_STATIS_PATH,
       ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      files: {},
       stepInfoResult: {
         id: 'layout',
         info: {
@@ -663,15 +536,8 @@ describe('ChipViewerService', () => {
       return child
     })
     const { layoutEditRuntime, service } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
       spawnProcess,
       viewerStartupCheckMs: 50,
     })
@@ -708,15 +574,8 @@ describe('ChipViewerService', () => {
       env: {
         PATH: '/usr/bin',
       },
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
     })
 
     await expect(
@@ -728,18 +587,10 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
-  it('reuses an existing geometry manifest unless rebuild is requested', async () => {
+  it('launches an existing saved geometry manifest without invoking ECC', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
     })
 
     await service.open({
@@ -755,212 +606,91 @@ describe('ChipViewerService', () => {
     )
   })
 
-  it('regenerates an existing geometry snapshot when the manifest schema is unsupported', async () => {
+  it('rejects a saved geometry manifest with an unsupported schema', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
       files: {
-        [DB_CONFIG_PATH]: dbConfig(),
         [GEOMETRY_MANIFEST]: geometryManifest({
           schema_version: '99',
         }),
       },
     })
 
-    await service.open({
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
-    expect(spawnProcess).toHaveBeenCalledWith(
-      devBinaries.viewer,
-      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
-      expect.any(Object),
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `No saved layout data is available for ${STEP_NAME}: manifest schema_version 99 is unsupported; expected 1. Run this step again to generate layout data before opening Chip Viewer.`,
     )
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
-  it('regenerates an existing geometry snapshot when optional dirty metrics are invalid', async () => {
+  it('rejects a saved geometry manifest with invalid dirty metrics', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
       files: {
-        [DB_CONFIG_PATH]: dbConfig(),
         [GEOMETRY_MANIFEST]: geometryManifest({
           dirty_lod_tile_count: 'not-a-number',
         }),
       },
     })
 
-    await service.open({
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `No saved layout data is available for ${STEP_NAME}: manifest dirty_lod_tile_count is not a non-negative integer: not-a-number. Run this step again to generate layout data before opening Chip Viewer.`,
+    )
+    expect(execFile).not.toHaveBeenCalled()
   })
 
-  it('regenerates an existing geometry snapshot when manifest side files are missing', async () => {
+  it('rejects a saved geometry manifest with missing side files', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
       files: {
-        [DB_CONFIG_PATH]: dbConfig(),
         [GEOMETRY_MANIFEST]: geometryManifest(),
       },
     })
 
-    await service.open({
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `No saved layout data is available for ${STEP_NAME}: manifest meta file does not exist: ${GEOMETRY_META}. Run this step again to generate layout data before opening Chip Viewer.`,
+    )
+    expect(execFile).not.toHaveBeenCalled()
   })
 
-  it('regenerates an existing geometry snapshot when the source DEF is newer', async () => {
+  it('rejects stale saved geometry when the source DEF is newer', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
       modifiedTimes: {
-        [DB_CONFIG_PATH]: 200,
         [DEF_PATH]: 300,
         [GEOMETRY_MANIFEST]: 250,
       },
     })
 
-    await service.open({
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
-    expect(spawnProcess).toHaveBeenCalledWith(
-      devBinaries.viewer,
-      ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
-      expect.any(Object),
+    await expect(
+      service.open({
+        projectPath: PROJECT_ROOT,
+        step: STEP_NAME,
+      }),
+    ).rejects.toThrow(
+      `No saved layout data is available for ${STEP_NAME}: geometry manifest is older than DEF: ${DEF_PATH}. Run this step again to generate layout data before opening Chip Viewer.`,
     )
-  })
-
-  it('regenerates an existing geometry snapshot when a LEF input is newer', async () => {
-    const devBinaries = devChipViewerPaths()
-    const { execFile, service } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-        TECH_LEF,
-        LEF_A,
-        LEF_B,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-      modifiedTimes: {
-        [DB_CONFIG_PATH]: 200,
-        [DEF_PATH]: 200,
-        [GEOMETRY_MANIFEST]: 250,
-        [TECH_LEF]: 200,
-        [LEF_A]: 400,
-        [LEF_B]: 200,
-      },
-    })
-
-    await service.open({
-      projectPath: PROJECT_ROOT,
-      step: STEP_NAME,
-    })
-
-    expect(execFile).toHaveBeenCalledWith(devBinaries.snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
+    expect(execFile).not.toHaveBeenCalled()
+    expect(spawnProcess).not.toHaveBeenCalled()
   })
 
   it('bridges an instance move through the ECC edit session without publishing artifacts', async () => {
@@ -974,14 +704,8 @@ describe('ChipViewerService', () => {
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
         execFile,
-        existingPaths: [
-          devBinaries.cargoManifest,
-          devBinaries.snapshot,
-          devBinaries.viewer,
-          GEOMETRY_MANIFEST,
-        ],
+        existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
         files: {
-          [DB_CONFIG_PATH]: dbConfig(),
           [commandPath]: JSON.stringify({
             command_id: 42,
             expected_version: 3,
@@ -1043,14 +767,8 @@ describe('ChipViewerService', () => {
     const resultPath = join(EDIT_SESSION_RESULT_DIR, `result-${unsafeCommandId}.json`)
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
-        existingPaths: [
-          devBinaries.cargoManifest,
-          devBinaries.snapshot,
-          devBinaries.viewer,
-          GEOMETRY_MANIFEST,
-        ],
+        existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
         files: {
-          [DB_CONFIG_PATH]: dbConfig(),
           [commandPath]: JSON.stringify({
             command_id: unsafeCommandId,
             expected_version: 3,
@@ -1101,14 +819,12 @@ describe('ChipViewerService', () => {
       execFile,
       existingPaths: [
         devBinaries.cargoManifest,
-        devBinaries.snapshot,
         devBinaries.viewer,
         GEOMETRY_MANIFEST,
         DB_PATH,
         GDS_PATH,
       ],
       files: {
-        [DB_CONFIG_PATH]: dbConfig(),
         [commandPath]: JSON.stringify({ action: 'save', command_id: 43 }),
       },
     })
@@ -1160,13 +876,11 @@ describe('ChipViewerService', () => {
         execFile,
         existingPaths: [
           devBinaries.cargoManifest,
-          devBinaries.snapshot,
           devBinaries.viewer,
           GEOMETRY_MANIFEST,
           GDS_PATH,
         ],
         files: {
-          [DB_CONFIG_PATH]: dbConfig(),
           [commandPath]: JSON.stringify({ action: 'save', command_id: 44 }),
         },
       })
@@ -1229,14 +943,8 @@ describe('ChipViewerService', () => {
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
         execFile,
-        existingPaths: [
-          devBinaries.cargoManifest,
-          devBinaries.snapshot,
-          devBinaries.viewer,
-          GEOMETRY_MANIFEST,
-        ],
+        existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
         files: {
-          [DB_CONFIG_PATH]: dbConfig(),
           [commandPath]: JSON.stringify({ action: 'discard', command_id: 44 }),
         },
         layoutEditRuntime: {
@@ -1302,15 +1010,8 @@ describe('ChipViewerService', () => {
         sourceFingerprint: 'source-1',
       })
     const { service, watchDirectory } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
       layoutEditRuntime: {
         layoutEditApply: vi.fn(),
         layoutEditBegin,
@@ -1351,14 +1052,8 @@ describe('ChipViewerService', () => {
     const temporaryResultPath = `${resultPath}.tmp`
     const { layoutEditRuntime, renameFile, service, watchDirectory, writeTextFile } =
       createService({
-        existingPaths: [
-          devBinaries.cargoManifest,
-          devBinaries.snapshot,
-          devBinaries.viewer,
-          GEOMETRY_MANIFEST,
-        ],
+        existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
         files: {
-          [DB_CONFIG_PATH]: dbConfig(),
           [commandPath]: JSON.stringify({
             command_id: 42,
             expected_version: 3,
@@ -1389,88 +1084,11 @@ describe('ChipViewerService', () => {
     })
   })
 
-  it('throws a clear error when the db config has no LEF inputs', async () => {
-    const devBinaries = devChipViewerPaths()
-    const { service } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: JSON.stringify({ INPUT: {} }),
-      },
-    })
-
-    await expect(
-      service.open({
-        projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
-        step: STEP_NAME,
-      }),
-    ).rejects.toThrow('Geometry snapshot requires tech LEF and LEF paths')
-  })
-
-  it('throws a clear error when the geometry DB config file is missing', async () => {
-    const devBinaries = devChipViewerPaths()
-    const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-    })
-
-    await expect(
-      service.open({
-        projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
-        step: STEP_NAME,
-      }),
-    ).rejects.toThrow(`Geometry DB config does not exist: ${DB_CONFIG_PATH}`)
-    expect(execFile).not.toHaveBeenCalled()
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
-  it('throws a clear error when a configured LEF input is missing', async () => {
-    const devBinaries = devChipViewerPaths()
-    const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        TECH_LEF,
-        LEF_B,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-      includeDefaultGeometryInputPaths: false,
-    })
-
-    await expect(
-      service.open({
-        projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
-        step: STEP_NAME,
-      }),
-    ).rejects.toThrow(`Geometry snapshot LEF does not exist: ${LEF_A}`)
-    expect(execFile).not.toHaveBeenCalled()
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
   it('rejects unavailable workspace step resources before launching the viewer', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer, GEOMETRY_MANIFEST],
+      files: {},
       stepInfoResult: {
         id: 'layout',
         info: {
@@ -1493,24 +1111,16 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
-  it('rejects a missing workspace DEF before generating geometry', async () => {
+  it('rejects a missing workspace DEF before opening the viewer', async () => {
     const devBinaries = devChipViewerPaths()
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [devBinaries.cargoManifest, devBinaries.viewer],
       includeDefaultDefPath: false,
     })
 
     await expect(
       service.open({
         projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
         step: STEP_NAME,
       }),
     ).rejects.toThrow(`Workspace step DEF does not exist: ${DEF_PATH}`)
@@ -1518,248 +1128,25 @@ describe('ChipViewerService', () => {
     expect(spawnProcess).not.toHaveBeenCalled()
   })
 
-  it('reports snapshot subprocess stderr when generating a missing snapshot fails', async () => {
-    const devBinaries = devChipViewerPaths()
-    const execFile = vi.fn(async () => {
-      throw Object.assign(new Error('snapshot exited with status 1'), {
-        code: 1,
-        stderr: 'failed to read LEF /pdk/std/a.lef',
-        stdout: 'loading technology',
-      })
-    })
-    const { service, spawnProcess } = createService({
-      execFile,
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-    })
-
-    let message = ''
-    try {
-      await service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      })
-      throw new Error('expected snapshot generation to fail')
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
-
-    expect(message).toContain(
-      `Geometry snapshot generation failed while creating missing snapshot for step ${STEP_NAME}.`,
-    )
-    expect(message).toContain(`Snapshot binary: ${devBinaries.snapshot}`)
-    expect(message).toContain(`DEF: ${DEF_PATH}`)
-    expect(message).toContain(`Output: ${GEOMETRY_DIR}`)
-    expect(message).toContain('stderr: failed to read LEF /pdk/std/a.lef')
-    expect(message).toContain('stdout: loading technology')
-    expect(message).toContain('exit code: 1')
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
-  it('reports a missing manifest when snapshot generation exits successfully without output', async () => {
-    const devBinaries = devChipViewerPaths()
-    const execFile = vi.fn(async () => ({
-      stderr: '',
-      stdout: 'completed without writing files',
-    }))
-    const { service, spawnProcess } = createService({
-      execFile,
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-    })
-
-    let message = ''
-    try {
-      await service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      })
-      throw new Error('expected missing manifest to fail')
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
-
-    expect(message).toContain(
-      `Snapshot command completed but did not create manifest: ${GEOMETRY_MANIFEST}`,
-    )
-    expect(message).toContain('stdout: completed without writing files')
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
-  it('reports an invalid manifest when snapshot generation exits successfully with incomplete output', async () => {
-    const devBinaries = devChipViewerPaths()
-    const execFile = vi.fn(async () => ({
-      stderr: '',
-      stdout: 'completed with incomplete files',
-    }))
-    const { service, spawnProcess } = createService({
-      execFile,
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-        [GEOMETRY_MANIFEST]: geometryManifest(),
-      },
-      modifiedTimes: {
-        [GEOMETRY_MANIFEST]: 10,
-        [LEF_A]: 20,
-      },
-    })
-
-    let message = ''
-    try {
-      await service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      })
-      throw new Error('expected invalid generated manifest to fail')
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
-
-    expect(message).toContain(
-      'Snapshot command completed but wrote an invalid manifest: manifest meta file does not exist',
-    )
-    expect(message).toContain('stdout: completed with incomplete files')
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
-  it('reports the stale source when snapshot regeneration fails', async () => {
-    const devBinaries = devChipViewerPaths()
-    const execFile = vi.fn(async () => {
-      throw Object.assign(new Error('snapshot rebuild failed'), {
-        stderr: 'DEF/LEF mismatch',
-      })
-    })
-    const { service, spawnProcess } = createService({
-      execFile,
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
-      modifiedTimes: {
-        [GEOMETRY_MANIFEST]: 250,
-        [LEF_A]: 400,
-      },
-    })
-
-    let message = ''
-    try {
-      await service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      })
-      throw new Error('expected stale snapshot regeneration to fail')
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
-
-    expect(message).toContain(
-      `Geometry snapshot generation failed while rebuilding stale snapshot; stale source: LEF ${LEF_A} for step ${STEP_NAME}.`,
-    )
-    expect(message).toContain('stderr: DEF/LEF mismatch')
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
-  it('reports the invalid manifest reason when snapshot regeneration fails', async () => {
-    const devBinaries = devChipViewerPaths()
-    const execFile = vi.fn(async () => {
-      throw Object.assign(new Error('snapshot rebuild failed'), {
-        stderr: 'failed after manifest validation',
-      })
-    })
-    const { service, spawnProcess } = createService({
-      execFile,
-      existingPaths: [
-        devBinaries.cargoManifest,
-        devBinaries.snapshot,
-        devBinaries.viewer,
-        GEOMETRY_MANIFEST,
-      ],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-        [GEOMETRY_MANIFEST]: geometryManifest({
-          schema_version: '99',
-        }),
-      },
-    })
-
-    let message = ''
-    try {
-      await service.open({
-        projectPath: PROJECT_ROOT,
-        step: STEP_NAME,
-      })
-      throw new Error('expected invalid manifest regeneration to fail')
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error)
-    }
-
-    expect(message).toContain(
-      'Geometry snapshot generation failed while rebuilding invalid snapshot; manifest schema_version 99 is unsupported; expected 1',
-    )
-    expect(message).toContain('stderr: failed after manifest validation')
-    expect(spawnProcess).not.toHaveBeenCalled()
-  })
-
   it('launches packaged chip viewer binaries from electron resources', async () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
     const ecc = join(binaryDir, 'ecc')
-    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
     const eccToolsLibDir = join(eccToolsPackageDir, 'lib')
     const { execFile, service, spawnProcess } = createService({
-      existingPaths: [ecc, snapshot, viewer, eccToolsPackageDir, eccToolsLibDir],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [ecc, viewer, eccToolsPackageDir, eccToolsLibDir, GEOMETRY_MANIFEST],
       isPackaged: true,
       resourcesPath,
     })
 
     await service.open({
       projectPath: PROJECT_ROOT,
-      rebuildGeometry: true,
       step: STEP_NAME,
     })
 
-    expect(execFile).toHaveBeenCalledWith(snapshot, [
-      '--tech-lef',
-      TECH_LEF,
-      '--lef',
-      LEF_A,
-      '--lef',
-      LEF_B,
-      '--def',
-      DEF_PATH,
-      '--out',
-      GEOMETRY_DIR,
-      '--mode',
-      'snapshot',
-    ])
+    expect(execFile).not.toHaveBeenCalled()
     expect(spawnProcess).toHaveBeenCalledWith(
       viewer,
       ['--manifest', GEOMETRY_MANIFEST, '--mode', 'view'],
@@ -1774,7 +1161,6 @@ describe('ChipViewerService', () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
     const ecc = join(binaryDir, 'ecc')
-    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const eccToolsPackageDir = join(binaryDir, '_internal', 'ecc_tools_bin')
     const eccToolsLibDir = join(eccToolsPackageDir, 'lib')
@@ -1782,10 +1168,7 @@ describe('ChipViewerService', () => {
       env: {
         PATH: '',
       },
-      existingPaths: [ecc, snapshot, viewer, eccToolsPackageDir],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [ecc, viewer, eccToolsPackageDir, GEOMETRY_MANIFEST],
       isPackaged: true,
       resourcesPath,
     })
@@ -1793,7 +1176,6 @@ describe('ChipViewerService', () => {
     await expect(
       service.open({
         projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
         step: STEP_NAME,
       }),
     ).rejects.toThrow(
@@ -1806,16 +1188,12 @@ describe('ChipViewerService', () => {
     const resourcesPath = '/opt/ECOS Studio/resources'
     const binaryDir = join(resourcesPath, 'binaries')
     const ecc = join(binaryDir, 'ecc')
-    const snapshot = join(binaryDir, 'ecc-geometry-snapshot')
     const viewer = join(binaryDir, 'chip-viewer-native')
     const { service } = createService({
       env: {
         PATH: '',
       },
-      existingPaths: [],
-      files: {
-        [DB_CONFIG_PATH]: dbConfig(),
-      },
+      existingPaths: [GEOMETRY_MANIFEST],
       isPackaged: true,
       resourcesPath,
     })
@@ -1823,11 +1201,10 @@ describe('ChipViewerService', () => {
     await expect(
       service.open({
         projectPath: PROJECT_ROOT,
-        rebuildGeometry: true,
         step: STEP_NAME,
       }),
     ).rejects.toThrow(
-      `Packaged chip viewer binaries are incomplete. Missing: ${ecc}, ${snapshot}, ${viewer}`,
+      `Packaged chip viewer binaries are incomplete. Missing: ${ecc}, ${viewer}`,
     )
   })
 })

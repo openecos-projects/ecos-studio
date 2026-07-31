@@ -135,7 +135,6 @@ export interface ChipViewerOpenRequest {
   projectPath: string
   step: string
   mode?: 'view' | 'edit'
-  rebuildGeometry?: boolean
 }
 
 export interface ChipViewerOpenResult {

@@ -15,10 +15,6 @@ describe('development wrappers', () => {
     const chipViewerPath = join(repoRoot, 'ecos', 'chip-viewer')
     const eccWrapperPath = join(scriptsPath, 'ecc-wrapper.sh')
     const chipViewerWrapperPath = join(scriptsPath, 'chip-viewer-native-wrapper.sh')
-    const geometrySnapshotWrapperPath = join(
-      scriptsPath,
-      'ecc-geometry-snapshot-wrapper.sh',
-    )
 
     mkdirSync(join(repoRoot, 'ecc'), { recursive: true })
     mkdirSync(appPath, { recursive: true })
@@ -29,7 +25,6 @@ describe('development wrappers', () => {
     writeFileSync(join(chipViewerPath, 'Cargo.toml'), '[workspace]\n')
     writeFileSync(eccWrapperPath, '#!/usr/bin/env bash\n')
     writeFileSync(chipViewerWrapperPath, '#!/usr/bin/env bash\n')
-    writeFileSync(geometrySnapshotWrapperPath, '#!/usr/bin/env bash\n')
 
     const env = createEccRuntimeEnv({
       appPath,
@@ -47,11 +42,7 @@ describe('development wrappers', () => {
     expect(env.PATH).toBe(`${runtimeBin}:/usr/bin`)
     expect(readFileSync(eccShimPath, 'utf8')).toContain(`exec "${eccWrapperPath}" "$@"`)
 
-    let chipManifestWritten = false
-    const chipExecFile = vi.fn(async () => {
-      chipManifestWritten = true
-      return { stderr: '', stdout: '' }
-    })
+    const chipExecFile = vi.fn(async () => ({ stderr: '', stdout: '' }))
     const chipViewerChild = new EventEmitter() as EventEmitter & {
       unref: () => void
     }
@@ -90,9 +81,6 @@ describe('development wrappers', () => {
       'view=epochs/1/geometry.view.bin',
       '',
     ].join('\n')
-    const chipDbConfigPath = '/project/config/db_default_config.json'
-    const chipTechLefPath = '/pdk/tech.lef'
-    const chipLefPath = '/pdk/std.lef'
     const chipService = new ChipViewerService({
       appPath,
       closeLogFile: vi.fn(),
@@ -102,10 +90,9 @@ describe('development wrappers', () => {
       },
       execFile: chipExecFile,
       fileExists: (path) =>
-        [chipDefPath, chipDbConfigPath, chipTechLefPath, chipLefPath].includes(path) ||
-        (chipManifestWritten && path === chipManifestPath) ||
-        (chipManifestWritten && chipGeometryFiles.includes(path)) ||
+        [chipDefPath, chipManifestPath, ...chipGeometryFiles].includes(path) ||
         existsSync(path),
+      getFileModifiedTime: async (path) => (path === chipManifestPath ? 100 : null),
       isPackaged: false,
       openLogFile: vi.fn(() => 11),
       platform: 'linux',
@@ -113,12 +100,7 @@ describe('development wrappers', () => {
         if (path === chipManifestPath) {
           return chipGeometryManifest
         }
-        return JSON.stringify({
-          INPUT: {
-            lef_paths: [chipLefPath],
-            tech_lef_path: chipTechLefPath,
-          },
-        })
+        throw new Error(`unexpected read: ${path}`)
       },
       spawnProcess: chipSpawnProcess,
       viewerLogDirectory: join(userDataPath, 'logs', 'chip-viewer'),
@@ -142,14 +124,10 @@ describe('development wrappers', () => {
 
     await chipService.open({
       projectPath: '/project',
-      rebuildGeometry: true,
       step: 'Floorplan',
     })
 
-    expect(chipExecFile).toHaveBeenCalledWith(
-      geometrySnapshotWrapperPath,
-      expect.arrayContaining(['--tech-lef', chipTechLefPath, '--def', chipDefPath]),
-    )
+    expect(chipExecFile).not.toHaveBeenCalled()
     expect(chipSpawnProcess).toHaveBeenCalledWith(
       chipViewerWrapperPath,
       ['--manifest', chipManifestPath, '--mode', 'view'],

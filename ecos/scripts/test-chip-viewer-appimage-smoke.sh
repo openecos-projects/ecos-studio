@@ -10,7 +10,7 @@ if [ ! -f "$SMOKE_SCRIPT" ]; then
 fi
 
 help_output="$(bash "$SMOKE_SCRIPT" --help)"
-for expected in "--appimage" "--out" "--dry-run" "ecc-geometry-snapshot" "AppImage"; do
+for expected in "--appimage" "--out" "--dry-run" "chip-viewer-native" "AppImage"; do
   if [[ "$help_output" != *"$expected"* ]]; then
     echo "missing help text: $expected" >&2
     exit 1
