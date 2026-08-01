@@ -1,4 +1,4 @@
-export type ResourceType = 'tool' | 'pdk'
+export type ResourceType = 'tool' | 'pdk' | 'mpc'
 
 export type ResourceStatus =
   | 'available'

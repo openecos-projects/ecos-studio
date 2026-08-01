@@ -57,6 +57,33 @@ describe('pluginToolsRows', () => {
     })
   })
 
+  it('maps an MPC source project without treating it as an EDA tool', () => {
+    const row = resourceToRow(
+      resource({
+        id: 'mpc:mpc-frame',
+        type: 'mpc',
+        name: 'mpc-frame',
+        display_name: 'MPC Frame',
+        description: 'Multi-project chip frame template.',
+        category: 'mpc',
+        managed_root: '/home/user/.local/share/ecos-studio/mpcs',
+        platform: 'all-platform',
+        size: 470085,
+      }),
+      undefined,
+    )
+
+    expect(row).toMatchObject({
+      id: 'mpc:mpc-frame',
+      type: 'mpc',
+      icon: 'MPC',
+      accent: '#3f7cac',
+      statusKind: 'available',
+      sizeLabel: '< 1 MB',
+    })
+    expect(canImportLocalResource(row)).toBe(false)
+  })
+
   it('maps active managed PDK to installed row', () => {
     const row = resourceToRow(
       resource({

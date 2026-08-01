@@ -65,7 +65,7 @@ function resourceIdForTool(name: string): string {
 }
 
 function resourceNameFromId(resourceId: string): string {
-  return resourceId.replace(/^(tool|pdk):/, '')
+  return resourceId.replace(/^(tool|pdk|mpc):/, '')
 }
 
 export function resourceToToolInfo(resource: ResourceInfo): ToolInfo {

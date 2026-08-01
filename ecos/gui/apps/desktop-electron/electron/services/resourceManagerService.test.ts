@@ -170,6 +170,43 @@ function localYosysEntry(localYosys: string): Record<string, unknown> {
   }
 }
 
+async function writeMpcRegistry(
+  registryPath: string,
+  archive: { path: string; sha256: string; size: number },
+): Promise<void> {
+  await writeFile(
+    registryPath,
+    JSON.stringify({
+      schema_version: 2,
+      tools: [],
+      pdks: [],
+      mpcs: [
+        {
+          id: 'mpc-frame',
+          display_name: 'MPC Frame',
+          description: 'Multi-project chip frame template.',
+          category: 'mpc',
+          homepage: 'https://github.com/openecos-projects/mpc-frame',
+          versions: [
+            {
+              version: 'test-commit',
+              platforms: {
+                'all-platform': {
+                  url: `file://${archive.path}`,
+                  sha256: archive.sha256,
+                  size: archive.size,
+                  strip_prefix: 'mpc-frame-test-commit',
+                },
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  )
+}
+
 describe('ResourceManagerService', () => {
   afterEach(async () => {
     await Promise.all(
@@ -177,6 +214,103 @@ describe('ResourceManagerService', () => {
         .splice(0)
         .map((directory) => rm(directory, { force: true, recursive: true })),
     )
+  })
+
+  it('includes the built-in mpc-frame archive resource with the default registry', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const service = new ResourceManagerService({
+      cacheDir: join(root, 'cache'),
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }),
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+      pdksDir: join(root, 'data', 'pdks'),
+      mpcsDir: join(root, 'data', 'mpcs'),
+    })
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      type: 'mpc',
+      name: 'mpc-frame',
+      category: 'mpc',
+      status: 'available',
+      available_versions: ['cc47470b72537'],
+      source: 'registry',
+      actions: ['install'],
+      homepage: 'https://github.com/openecos-projects/mpc-frame',
+    })
+  })
+
+  it('installs and uninstalls an MPC source archive through the resource manager', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const registryPath = join(root, 'registry.json')
+    const archive = await createFixtureArchive(root)
+    const mpcsDir = join(root, 'data', 'mpcs')
+    await writeMpcRegistry(registryPath, archive)
+    const extract = vi.fn(async (_archivePath: string, destination: string) => {
+      await mkdir(destination, { recursive: true })
+      await writeFile(
+        join(destination, 'FrameTop.sv'),
+        'module FrameTop; endmodule\n',
+        'utf8',
+      )
+    })
+    const progress: string[] = []
+    const service = new ResourceManagerService({
+      archiveExtractor: extract,
+      cacheDir: join(root, 'cache'),
+      mpcsDir,
+      pdksDir: join(root, 'data', 'pdks'),
+      registryUrl: `file://${registryPath}`,
+      resourcesDir: join(root, 'state', 'resources'),
+      sha256Verifier: vi.fn(async () => true),
+      toolsDir: join(root, 'data', 'tools'),
+    })
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      type: 'mpc',
+      category: 'mpc',
+      status: 'available',
+      managed_root: mpcsDir,
+      actions: ['install'],
+    })
+    await expect(
+      service.installResource('mpc:mpc-frame', undefined, (event) => {
+        progress.push(event.phase)
+      }),
+    ).resolves.toEqual({
+      status: 'started',
+      resource_id: 'mpc:mpc-frame',
+      version: 'test-commit',
+    })
+
+    expect(extract).toHaveBeenCalledTimes(1)
+    expect(progress).toEqual(
+      expect.arrayContaining(['downloading', 'verifying', 'extracting', 'done']),
+    )
+    await expect(
+      readFile(join(mpcsDir, 'mpc-frame', 'test-commit', 'FrameTop.sv'), 'utf8'),
+    ).resolves.toContain('module FrameTop')
+    const manifest = JSON.parse(
+      await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
+    ) as { mpcs_dir: string; schema_version: number }
+    expect(manifest).toMatchObject({ schema_version: 2, mpcs_dir: mpcsDir })
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'installed',
+      installed_version: 'test-commit',
+      path: join(mpcsDir, 'mpc-frame', 'test-commit'),
+      actions: ['uninstall'],
+      health: expect.objectContaining({ managed: true, source: 'registry' }),
+    })
+
+    await expect(service.uninstallResource('mpc:mpc-frame')).resolves.toEqual({
+      status: 'uninstalled',
+      resource_id: 'mpc:mpc-frame',
+    })
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'available',
+      actions: ['install'],
+    })
   })
 
   it('lists registry resources and imported PDKs from the desktop manifest', async () => {

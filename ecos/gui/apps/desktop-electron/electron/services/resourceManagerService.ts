@@ -30,7 +30,7 @@ const ALL_PLATFORM = 'all-platform'
 const COMMAND_ERROR_OUTPUT_LIMIT = 2048
 const PDK_RESOURCE_FILE_EXTENSIONS = ['.lef', '.lib', '.liberty']
 
-type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry
+type ResourceInventoryEntry = ToolInventoryEntry | PdkInventoryEntry | MpcInventoryEntry
 type ArchiveExtractor = (
   archivePath: string,
   destination: string,
@@ -95,11 +95,50 @@ interface RegistryPdk {
   versions: RegistryPdkVersion[]
 }
 
+interface RegistryMpcVersion {
+  version: string
+  platforms: Record<string, PlatformAsset>
+}
+
+interface RegistryMpc {
+  id: string
+  display_name: string
+  description?: string
+  category?: string
+  homepage?: string
+  versions: RegistryMpcVersion[]
+}
+
 interface ResourceRegistry {
   schema_version: number
   tools: RegistryTool[]
   pdks: RegistryPdk[]
+  mpcs: RegistryMpc[]
 }
+
+const BUILTIN_MPCS: RegistryMpc[] = [
+  {
+    id: 'mpc-frame',
+    display_name: 'MPC Frame',
+    description: 'Multi-project chip frame template and reference SoC design.',
+    category: 'mpc',
+    homepage: 'https://github.com/openecos-projects/mpc-frame',
+    versions: [
+      {
+        version: 'cc47470b72537',
+        platforms: {
+          [ALL_PLATFORM]: {
+            url: 'https://codeload.github.com/openecos-projects/mpc-frame/tar.gz/cc47470b72537ba3f0726468f5d5e27d317d9706',
+            sha256: 'b6042bf6e0322cb1e532973a3811a06067e92fca808cb657c81cf7ad16399594',
+            size: 470085,
+            strip_prefix: 'mpc-frame-cc47470b72537ba3f0726468f5d5e27d317d9706',
+            post_install: [],
+          },
+        },
+      },
+    ],
+  },
+]
 
 interface ToolInventoryEntry {
   type: 'tool'
@@ -136,11 +175,26 @@ interface PdkInventoryEntry {
   health: string
 }
 
+interface MpcInventoryEntry {
+  type: 'mpc'
+  id: string
+  name: string
+  version: string
+  sha256: string
+  source: string
+  source_url: string
+  path: string
+  installed_at: string
+  managed: boolean
+  health: string
+}
+
 interface ResourceManifest {
   schema_version: number
   resources_dir: string
   tools_dir: string
   pdks_dir: string
+  mpcs_dir: string
   installed: Record<string, ResourceInventoryEntry>
 }
 
@@ -166,6 +220,7 @@ export interface ResourceManagerServiceOptions {
   commandRunner?: CommandRunner
   fetchImpl?: typeof fetch
   pdksDir?: string
+  mpcsDir?: string
   registryUrl?: string
   resourcesDir?: string
   sha256Verifier?: Sha256Verifier
@@ -182,6 +237,7 @@ export class ResourceManagerService {
   private readonly commandRunner: CommandRunner
   private readonly fetchImpl: typeof fetch
   private readonly manifestPath: string
+  private readonly mpcsDir: string
   private readonly pdksDir: string
   private readonly registryUrl: string
   private readonly resourcesDir: string
@@ -197,6 +253,7 @@ export class ResourceManagerService {
       options.resourcesDir ?? join(xdgStateHome(), 'ecos-studio', 'resources')
     this.toolsDir = options.toolsDir ?? join(xdgDataHome(), 'ecos-studio', 'tools')
     this.pdksDir = options.pdksDir ?? join(xdgDataHome(), 'ecos-studio', 'pdks')
+    this.mpcsDir = options.mpcsDir ?? join(xdgDataHome(), 'ecos-studio', 'mpcs')
     this.cacheDir = options.cacheDir ?? join(xdgCacheHome(), 'ecos-studio')
     this.manifestPath = join(this.resourcesDir, 'manifest.json')
     this.registryUrl =
@@ -212,6 +269,7 @@ export class ResourceManagerService {
     const manifest = await this.readManifest()
     const installedTools = getInstalledTools(manifest)
     const installedPdks = getInstalledPdks(manifest)
+    const installedMpcs = getInstalledMpcs(manifest)
     const resources: ResourceInfo[] = []
 
     for (const tool of state.registry?.tools ?? []) {
@@ -221,6 +279,10 @@ export class ResourceManagerService {
       const local = installedPdks[pdk.id]
       if (!local) resources.push(this.registryPdkToResource(pdk))
     }
+    for (const mpc of state.registry?.mpcs ?? []) {
+      const local = installedMpcs[mpc.id]
+      if (!local) resources.push(this.registryMpcToResource(mpc))
+    }
     for (const [name, entry] of Object.entries(installedTools)) {
       if (!resources.some((resource) => resource.id === `tool:${name}`)) {
         resources.push(this.installedToolToResource(name, entry))
@@ -229,6 +291,11 @@ export class ResourceManagerService {
     for (const [id, entry] of Object.entries(installedPdks)) {
       resources.push(
         this.pdkEntryToResource(entry, this.findRegistryPdk(state.registry, id)),
+      )
+    }
+    for (const [id, entry] of Object.entries(installedMpcs)) {
+      resources.push(
+        this.mpcEntryToResource(entry, this.findRegistryMpc(state.registry, id)),
       )
     }
 
@@ -328,6 +395,14 @@ export class ResourceManagerService {
         listener,
       )
     }
+    if (resourceId.startsWith('mpc:')) {
+      return await this.installMpc(
+        resourceId.slice('mpc:'.length),
+        version,
+        'install',
+        listener,
+      )
+    }
     throw new Error(`Install is not implemented for ${resourceId}`)
   }
 
@@ -351,6 +426,14 @@ export class ResourceManagerService {
         listener,
       )
     }
+    if (resourceId.startsWith('mpc:')) {
+      return await this.installMpc(
+        resourceId.slice('mpc:'.length),
+        undefined,
+        'update',
+        listener,
+      )
+    }
     throw new Error(`Update is not implemented for ${resourceId}`)
   }
 
@@ -367,6 +450,10 @@ export class ResourceManagerService {
     if (!resourceId.startsWith('tool:')) {
       if (resourceId.startsWith('pdk:')) {
         await this.removeManagedPdk(resourceId.slice('pdk:'.length))
+        return { status: 'uninstalled', resource_id: resourceId }
+      }
+      if (resourceId.startsWith('mpc:')) {
+        await this.removeManagedMpc(resourceId.slice('mpc:'.length))
         return { status: 'uninstalled', resource_id: resourceId }
       }
       throw new Error(`Unsupported resource id: ${resourceId}`)
@@ -988,6 +1075,165 @@ export class ResourceManagerService {
     }
   }
 
+  private async installMpc(
+    mpcId: string,
+    requestedVersion: string | undefined,
+    action: ResourceAction,
+    listener?: (event: ResourceJob) => void,
+  ): Promise<ResourceOperationResult> {
+    const resourceId = `mpc:${mpcId}`
+    if (this.activeJobs.has(resourceId)) {
+      throw new Error(`Job already active for ${resourceId}`)
+    }
+    const controller = new AbortController()
+    this.activeJobs.set(resourceId, { action, controller, listener })
+    let tempArchive = ''
+    let tempExtract = ''
+
+    try {
+      const state = await this.fetchRegistry()
+      const mpc = state.registry?.mpcs.find((candidate) => candidate.id === mpcId)
+      if (!mpc) throw new Error(`MPC '${mpcId}' not found in registry`)
+      const versionEntry = requestedVersion
+        ? mpc.versions.find((candidate) => candidate.version === requestedVersion)
+        : mpc.versions[0]
+      if (!versionEntry) throw new Error(`Version not found for ${mpcId}`)
+      const { platform, asset } = selectPlatformAsset(versionEntry)
+      if (!asset) throw new Error(`No asset for ${mpcId} on ${platform}`)
+      const version = versionEntry.version
+      const displayName = mpc.display_name || mpcId
+      const destination = join(this.mpcsDir, mpcId, version)
+      tempArchive = join(
+        this.resourcesDir,
+        'downloads',
+        `${mpcId}-${version}-${randomUUID()}.archive`,
+      )
+      tempExtract = join(this.mpcsDir, mpcId, `.extract-${version}-${randomUUID()}`)
+
+      await mkdir(dirname(tempArchive), { recursive: true })
+      electronLogger.info(
+        '[resources] %s %s v%s on %s',
+        action === 'update' ? 'Updating' : 'Installing',
+        resourceId,
+        version,
+        platform,
+      )
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'downloading',
+        progress: 0,
+        message: `Downloading ${displayName} v${version}...`,
+      })
+      await downloadAsset(
+        asset.url,
+        tempArchive,
+        this.fetchImpl,
+        asset.size,
+        (progress) => {
+          const totalLabel =
+            progress.totalBytes === null ? '?' : formatBytes(progress.totalBytes)
+          this.publish(listener, {
+            resource_id: resourceId,
+            action,
+            phase: 'downloading',
+            progress: progress.progress,
+            message: `Downloading ${displayName} v${version} (${formatBytes(progress.downloadedBytes)} / ${totalLabel})...`,
+          })
+        },
+        controller.signal,
+      )
+      throwIfAborted(controller.signal)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'verifying',
+        progress: 0,
+        message: 'Verifying SHA256...',
+      })
+      const verified = await this.sha256Verifier(tempArchive, asset.sha256)
+      if (!verified) {
+        throw new Error(`SHA256 verification failed for ${mpcId}`)
+      }
+      throwIfAborted(controller.signal)
+      await rm(tempExtract, { force: true, recursive: true })
+      await this.withExtractProgress(
+        resourceId,
+        action,
+        displayName,
+        listener,
+        async () => {
+          await this.archiveExtractor(tempArchive, tempExtract, asset.strip_prefix)
+        },
+      )
+      throwIfAborted(controller.signal)
+      await rm(destination, { force: true, recursive: true })
+      await mkdir(dirname(destination), { recursive: true })
+      await rename(tempExtract, destination)
+      throwIfAborted(controller.signal)
+
+      const manifest = await this.readManifest()
+      manifest.installed[resourceId] = {
+        type: 'mpc',
+        id: mpcId,
+        name: displayName,
+        version,
+        sha256: asset.sha256,
+        source: 'registry',
+        source_url: asset.url,
+        path: destination,
+        installed_at: utcNowIso(),
+        managed: true,
+        health: 'ok',
+      }
+      await this.writeManifest(manifest)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'done',
+        progress: 1,
+        message: `${displayName} v${version} installed successfully`,
+      })
+      electronLogger.info(
+        '[resources] Installed %s v%s at %s',
+        resourceId,
+        version,
+        destination,
+      )
+      return { status: 'started', resource_id: resourceId, version }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (isAbortError(error) || controller.signal.aborted) {
+        const cancelMessage = `Cancelled download for ${resourceId}`
+        electronLogger.info('[resources] Cancelled %s', resourceId)
+        this.publish(listener, {
+          resource_id: resourceId,
+          action,
+          phase: 'cancelled',
+          progress: 0,
+          message: cancelMessage,
+          error: cancelMessage,
+        })
+        throw new Error(cancelMessage, { cause: error })
+      }
+      electronLogger.error('[resources] Failed to install %s: %s', resourceId, message)
+      this.publish(listener, {
+        resource_id: resourceId,
+        action,
+        phase: 'error',
+        progress: 0,
+        message,
+        error: message,
+      })
+      throw error
+    } finally {
+      this.activeJobs.delete(resourceId)
+      if (tempArchive) await rm(tempArchive, { force: true }).catch(() => undefined)
+      if (tempExtract)
+        await rm(tempExtract, { force: true, recursive: true }).catch(() => undefined)
+    }
+  }
+
   private async runPostInstallSteps(
     resourceId: string,
     action: ResourceAction,
@@ -1062,6 +1308,20 @@ export class ResourceManagerService {
     await this.writeManifest(manifest)
   }
 
+  private async removeManagedMpc(mpcId: string): Promise<void> {
+    const manifest = await this.readManifest()
+    const entry = manifest.installed[`mpc:${mpcId}`]
+    if (!isMpcEntry(entry)) {
+      throw new Error(`MPC '${mpcId}' is not installed`)
+    }
+    if (!entry.managed) {
+      throw new Error(`MPC '${mpcId}' is unmanaged and cannot be uninstalled`)
+    }
+    await rm(entry.path, { force: true, recursive: true })
+    delete manifest.installed[`mpc:${mpcId}`]
+    await this.writeManifest(manifest)
+  }
+
   private async fetchRegistry(force = false): Promise<RegistryState> {
     if (this.registryMemory && !force) {
       return { registry: this.registryMemory, diagnostics: [] }
@@ -1078,7 +1338,10 @@ export class ResourceManagerService {
 
     const diagnostics: string[] = []
     try {
-      const registry = await readRegistryFromUrl(this.registryUrl, this.fetchImpl)
+      const registry = withBuiltinMpcs(
+        await readRegistryFromUrl(this.registryUrl, this.fetchImpl),
+        this.registryUrl,
+      )
       await mkdir(dirname(cacheFile), { recursive: true })
       await writeFile(cacheFile, JSON.stringify(registry, null, 2), 'utf8')
       this.registryMemory = registry
@@ -1088,19 +1351,28 @@ export class ResourceManagerService {
     }
 
     try {
-      const registry = parseRegistry(JSON.parse(await readFile(cacheFile, 'utf8')))
+      const registry = withBuiltinMpcs(
+        parseRegistry(JSON.parse(await readFile(cacheFile, 'utf8'))),
+        this.registryUrl,
+      )
       this.registryMemory = registry
       diagnostics.push('Using cached registry data (may be outdated)')
       return { registry, diagnostics }
     } catch {
       diagnostics.push('No registry data available')
-      return { registry: null, diagnostics }
+      return {
+        registry: createBuiltInMpcRegistry(this.registryUrl),
+        diagnostics,
+      }
     }
   }
 
   private async readCachedRegistry(cacheFile: string): Promise<RegistryCacheResult> {
     try {
-      const registry = parseRegistry(JSON.parse(await readFile(cacheFile, 'utf8')))
+      const registry = withBuiltinMpcs(
+        parseRegistry(JSON.parse(await readFile(cacheFile, 'utf8'))),
+        this.registryUrl,
+      )
       this.registryMemory = registry
       return {
         registry,
@@ -1115,7 +1387,10 @@ export class ResourceManagerService {
     if (this.registryRefreshPromise) return
     this.registryRefreshPromise = (async () => {
       try {
-        const registry = await readRegistryFromUrl(this.registryUrl, this.fetchImpl)
+        const registry = withBuiltinMpcs(
+          await readRegistryFromUrl(this.registryUrl, this.fetchImpl),
+          this.registryUrl,
+        )
         await mkdir(dirname(cacheFile), { recursive: true })
         await writeFile(cacheFile, JSON.stringify(registry, null, 2), 'utf8')
         this.registryMemory = registry
@@ -1137,6 +1412,7 @@ export class ResourceManagerService {
         this.resourcesDir,
         this.toolsDir,
         this.pdksDir,
+        this.mpcsDir,
       )
     } catch {
       return this.emptyManifest()
@@ -1150,6 +1426,7 @@ export class ResourceManagerService {
         this.resourcesDir,
         this.toolsDir,
         this.pdksDir,
+        this.mpcsDir,
       )
     } catch (error) {
       if (!isFileNotFoundError(error)) {
@@ -1163,9 +1440,11 @@ export class ResourceManagerService {
   }
 
   private async writeManifest(manifest: ResourceManifest): Promise<void> {
+    manifest.schema_version = Math.max(manifest.schema_version, 2)
     manifest.resources_dir = this.resourcesDir
     manifest.tools_dir = this.toolsDir
     manifest.pdks_dir = this.pdksDir
+    manifest.mpcs_dir = this.mpcsDir
     await mkdir(dirname(this.manifestPath), { recursive: true })
     const tempPath = `${this.manifestPath}.${process.pid}.${Date.now()}.tmp`
     await writeFile(tempPath, JSON.stringify(manifest, null, 2), 'utf8')
@@ -1178,6 +1457,7 @@ export class ResourceManagerService {
       resources_dir: this.resourcesDir,
       tools_dir: this.toolsDir,
       pdks_dir: this.pdksDir,
+      mpcs_dir: this.mpcsDir,
       installed: {},
     }
   }
@@ -1294,6 +1574,37 @@ export class ResourceManagerService {
     }
   }
 
+  private registryMpcToResource(mpc: RegistryMpc): ResourceInfo {
+    const latest = mpc.versions[0]
+    const { platform, asset } = latest
+      ? selectPlatformAsset(latest)
+      : { platform: currentPlatform(), asset: null }
+    const resourceId = `mpc:${mpc.id}`
+    const isActive = this.activeJobs.has(resourceId)
+    return {
+      id: resourceId,
+      type: 'mpc',
+      name: mpc.id,
+      display_name: mpc.display_name,
+      description: mpc.description ?? '',
+      category: mpc.category ?? 'mpc',
+      status: isActive ? 'installing' : 'available',
+      installed_version: null,
+      available_versions: mpc.versions.map((version) => version.version),
+      active_version: null,
+      active: false,
+      path: null,
+      managed_root: this.mpcsDir,
+      platform,
+      size: asset?.size ?? null,
+      source: 'registry',
+      homepage: mpc.homepage ?? '',
+      actions: isActive ? [] : ['install'],
+      health: {},
+      error: null,
+    }
+  }
+
   private pdkEntryToResource(
     entry: PdkInventoryEntry,
     registryPdk?: RegistryPdk,
@@ -1346,11 +1657,68 @@ export class ResourceManagerService {
     }
   }
 
+  private mpcEntryToResource(
+    entry: MpcInventoryEntry,
+    registryMpc?: RegistryMpc,
+  ): ResourceInfo {
+    const resourceId = `mpc:${entry.id}`
+    const hasUpdate =
+      entry.managed &&
+      entry.health === 'ok' &&
+      Boolean(entry.version) &&
+      Boolean(registryMpc?.versions[0]?.version) &&
+      registryMpc?.versions[0]?.version !== entry.version
+    const status: ResourceStatus = this.activeJobs.has(resourceId)
+      ? 'installing'
+      : entry.health === 'missing'
+        ? 'missing'
+        : entry.health === 'invalid'
+          ? 'invalid'
+          : hasUpdate
+            ? 'update_available'
+            : 'installed'
+    const actions: ResourceAction[] = []
+    if (status !== 'installing') {
+      if (hasUpdate) actions.push('update')
+      actions.push(entry.managed ? 'uninstall' : 'remove_reference')
+    }
+
+    return {
+      id: resourceId,
+      type: 'mpc',
+      name: entry.id,
+      display_name: entry.name || registryMpc?.display_name || entry.id,
+      description: registryMpc?.description ?? '',
+      category: registryMpc?.category ?? 'mpc',
+      status,
+      installed_version: entry.version || null,
+      available_versions: registryMpc?.versions.map((version) => version.version) ?? [],
+      active_version: null,
+      active: false,
+      path: entry.path,
+      managed_root: entry.managed ? this.mpcsDir : null,
+      platform: null,
+      size: null,
+      source: entry.source || 'local',
+      homepage: registryMpc?.homepage ?? '',
+      actions,
+      health: mpcHealth(entry),
+      error: null,
+    }
+  }
+
   private findRegistryPdk(
     registry: ResourceRegistry | null,
     pdkId: string,
   ): RegistryPdk | undefined {
     return registry?.pdks.find((pdk) => pdk.id === pdkId)
+  }
+
+  private findRegistryMpc(
+    registry: ResourceRegistry | null,
+    mpcId: string,
+  ): RegistryMpc | undefined {
+    return registry?.mpcs.find((mpc) => mpc.id === mpcId)
   }
 
   private async withExtractProgress(
@@ -1430,7 +1798,9 @@ function currentPlatform(): string {
   return `${process.platform}-${machine}`
 }
 
-function selectPlatformAsset(version: RegistryToolVersion | RegistryPdkVersion): {
+function selectPlatformAsset(
+  version: RegistryToolVersion | RegistryPdkVersion | RegistryMpcVersion,
+): {
   platform: string
   asset: PlatformAsset | null
 } {
@@ -1453,7 +1823,33 @@ function parseRegistry(value: unknown): ResourceRegistry {
     schema_version: 2,
     tools: Array.isArray(record.tools) ? record.tools.map(parseRegistryTool) : [],
     pdks: Array.isArray(record.pdks) ? record.pdks.map(parseRegistryPdk) : [],
+    mpcs: Array.isArray(record.mpcs) ? record.mpcs.map(parseRegistryMpc) : [],
   }
+}
+
+function withBuiltinMpcs(
+  registry: ResourceRegistry,
+  registryUrl: string,
+): ResourceRegistry {
+  if (registryUrl !== DEFAULT_REGISTRY_URL) return registry
+  const mpcs = new Map(registry.mpcs.map((mpc) => [mpc.id, mpc]))
+  for (const mpc of BUILTIN_MPCS) {
+    if (!mpcs.has(mpc.id)) mpcs.set(mpc.id, mpc)
+  }
+  return { ...registry, mpcs: Array.from(mpcs.values()) }
+}
+
+function createBuiltInMpcRegistry(registryUrl: string): ResourceRegistry | null {
+  if (registryUrl !== DEFAULT_REGISTRY_URL) return null
+  return withBuiltinMpcs(
+    {
+      schema_version: 2,
+      tools: [],
+      pdks: [],
+      mpcs: [],
+    },
+    registryUrl,
+  )
 }
 
 function parseRegistryTool(value: unknown): RegistryTool {
@@ -1500,6 +1896,28 @@ function parseRegistryPdkVersion(value: unknown): RegistryPdkVersion {
   }
 }
 
+function parseRegistryMpc(value: unknown): RegistryMpc {
+  const record = readRecord(value)
+  return {
+    id: readString(record.id),
+    display_name: readString(record.display_name) || readString(record.id),
+    description: readString(record.description),
+    category: readString(record.category) || 'mpc',
+    homepage: readString(record.homepage),
+    versions: Array.isArray(record.versions)
+      ? record.versions.map(parseRegistryMpcVersion)
+      : [],
+  }
+}
+
+function parseRegistryMpcVersion(value: unknown): RegistryMpcVersion {
+  const record = readRecord(value)
+  return {
+    version: readString(record.version),
+    platforms: parsePlatformAssets(record.platforms),
+  }
+}
+
 function parsePlatformAssets(value: unknown): Record<string, PlatformAsset> {
   const assets: Record<string, PlatformAsset> = {}
   for (const [platform, assetValue] of Object.entries(readRecord(value))) {
@@ -1535,6 +1953,7 @@ function parseManifest(
   resourcesDir: string,
   toolsDir: string,
   pdksDir: string,
+  mpcsDir: string,
 ): ResourceManifest {
   const record = readRecord(value)
   const installed: Record<string, ResourceInventoryEntry> = {}
@@ -1547,6 +1966,7 @@ function parseManifest(
     resources_dir: readString(record.resources_dir) || resourcesDir,
     tools_dir: readString(record.tools_dir) || toolsDir,
     pdks_dir: readString(record.pdks_dir) || pdksDir,
+    mpcs_dir: readString(record.mpcs_dir) || mpcsDir,
     installed,
   }
 }
@@ -1587,6 +2007,21 @@ function parseInventoryEntry(value: unknown): ResourceInventoryEntry | null {
       },
       imported_at: readString(record.imported_at),
       active: record.active === true,
+      managed: record.managed === true,
+      health: readString(record.health) || 'ok',
+    }
+  }
+  if (record.type === 'mpc') {
+    return {
+      type: 'mpc',
+      id: readString(record.id),
+      name: readString(record.name),
+      version: readString(record.version),
+      sha256: readString(record.sha256),
+      source: readString(record.source),
+      source_url: readString(record.source_url),
+      path: readString(record.path),
+      installed_at: readString(record.installed_at),
       managed: record.managed === true,
       health: readString(record.health) || 'ok',
     }
@@ -1708,6 +2143,14 @@ function getInstalledPdks(manifest: ResourceManifest): Record<string, PdkInvento
   return entries
 }
 
+function getInstalledMpcs(manifest: ResourceManifest): Record<string, MpcInventoryEntry> {
+  const entries: Record<string, MpcInventoryEntry> = {}
+  for (const [resourceId, entry] of Object.entries(manifest.installed)) {
+    if (isMpcEntry(entry)) entries[resourceId.replace(/^mpc:/, '')] = entry
+  }
+  return entries
+}
+
 function isToolEntry(entry: unknown): entry is ToolInventoryEntry {
   return readRecord(entry).type === 'tool'
 }
@@ -1716,7 +2159,11 @@ function isPdkEntry(entry: unknown): entry is PdkInventoryEntry {
   return readRecord(entry).type === 'pdk'
 }
 
-function resourceNameFromId(resourceId: string, prefix: 'tool' | 'pdk'): string {
+function isMpcEntry(entry: unknown): entry is MpcInventoryEntry {
+  return readRecord(entry).type === 'mpc'
+}
+
+function resourceNameFromId(resourceId: string, prefix: 'tool' | 'pdk' | 'mpc'): string {
   const expectedPrefix = `${prefix}:`
   if (!resourceId.startsWith(expectedPrefix)) {
     throw new Error(`Expected ${prefix} resource id, got ${resourceId}`)
@@ -1741,6 +2188,18 @@ function pdkHealth(entry: PdkInventoryEntry): Record<string, unknown> {
     detected_file_list: entry.detected_files,
     detected_file_groups: entry.detected_file_groups,
     imported_at: entry.imported_at,
+    managed: entry.managed,
+    version: entry.version,
+    sha256: entry.sha256,
+    source: entry.source,
+    source_url: entry.source_url,
+  }
+}
+
+function mpcHealth(entry: MpcInventoryEntry): Record<string, unknown> {
+  return {
+    status: entry.health,
+    installed_at: entry.installed_at,
     managed: entry.managed,
     version: entry.version,
     sha256: entry.sha256,

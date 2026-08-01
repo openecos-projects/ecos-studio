@@ -31,7 +31,7 @@
 
       <header class="manager-header">
         <h1 id="resource-manager-title">Resource Manager</h1>
-        <p>Discover, install, and manage EDA tools and PDKs</p>
+        <p>Discover, install, and manage EDA tools, PDKs, and MPC projects</p>
       </header>
 
       <div class="manager-grid">
@@ -437,7 +437,7 @@ import {
 } from './pluginToolsRows'
 import type { ResourceRow } from './pluginToolsRows'
 
-type CategoryFilter = 'all' | 'tools' | 'pdks' | 'installed'
+type CategoryFilter = 'all' | 'tools' | 'pdks' | 'mpc' | 'installed'
 type StatusFilter = 'all' | 'available' | 'installed' | 'updates'
 
 const router = useRouter()
@@ -478,6 +478,7 @@ const filteredRows = computed(() => {
   return resourceRows.value.filter((row) => {
     if (categoryFilter.value === 'tools' && row.type !== 'tool') return false
     if (categoryFilter.value === 'pdks' && row.type !== 'pdk') return false
+    if (categoryFilter.value === 'mpc' && row.type !== 'mpc') return false
     if (categoryFilter.value === 'installed' && !isInstalledLike(row)) return false
 
     if (statusFilter.value === 'available' && row.statusKind !== 'available') return false
@@ -527,6 +528,12 @@ const sidebarItems = computed(() => [
     label: 'PDKs',
     icon: 'ri-cpu-line',
     count: resourceRows.value.filter((row) => row.type === 'pdk').length,
+  },
+  {
+    id: 'mpc' as const,
+    label: 'MPC',
+    icon: 'ri-layout-grid-line',
+    count: resourceRows.value.filter((row) => row.type === 'mpc').length,
   },
   {
     id: 'installed' as const,
