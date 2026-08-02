@@ -106,6 +106,22 @@ export interface ProjectManifestMpc {
   installed_version: string
   path: string
   spec_path: string
+  design: ProjectManifestMpcDesign
+  core_template: Record<string, unknown>
+}
+
+export interface ProjectManifestMpcDesign {
+  index: number
+  design_name: string
+  directory?: string
+}
+
+export interface ProjectManifestMpcCandidate {
+  resource_id: string
+  display_name: string
+  installed_version: string
+  path: string
+  spec_path: string
 }
 
 export interface ProjectManifest {
@@ -924,7 +940,7 @@ export function parseProjectManifest(content: string): ProjectManifest {
 
 export function projectMpcOptionFromResource(
   resource: ResourceInfo,
-): ProjectManifestMpc | null {
+): ProjectManifestMpcCandidate | null {
   if (
     resource.type !== 'mpc' ||
     (resource.status !== 'installed' && resource.status !== 'update_available') ||
@@ -963,6 +979,8 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
   const installedVersion = optionalString(source.installed_version)
   const mpcPath = optionalString(source.path)
   const specPath = optionalString(source.spec_path)
+  const design = recordValue(source.design)
+  const coreTemplate = recordValue(source.core_template)
   if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
     throw new Error('Invalid project manifest MPC resource_id.')
   }
@@ -975,6 +993,17 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
   if (normalizedSpecPath !== `${normalizedPath}/spec/spec.json.in`) {
     throw new Error('Invalid project manifest MPC spec_path.')
   }
+  if (
+    !design ||
+    !Number.isInteger(design.index) ||
+    (design.index as number) < 0 ||
+    !optionalString(design.design_name)
+  ) {
+    throw new Error('Invalid project manifest MPC design.')
+  }
+  if (!coreTemplate) {
+    throw new Error('Invalid project manifest MPC core_template.')
+  }
 
   return {
     resource_id: resourceId,
@@ -982,6 +1011,14 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
     installed_version: installedVersion,
     path: normalizedPath,
     spec_path: normalizedSpecPath,
+    design: {
+      index: design.index as number,
+      design_name: optionalString(design.design_name),
+      ...(optionalString(design.directory)
+        ? { directory: optionalString(design.directory) }
+        : {}),
+    },
+    core_template: coreTemplate,
   }
 }
 
@@ -2028,6 +2065,12 @@ function formatMetricValue(
 
 function optionalString(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 function labelForStepStatus(status: ProjectStepStatus): string {

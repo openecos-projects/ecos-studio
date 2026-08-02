@@ -345,6 +345,13 @@ function validateProjectManifestMpc(value: unknown): void {
       'Project manifest MPC spec_path must reference spec/spec.json.in below MPC path',
     )
   }
+  const design = requireRecord(mpc.design, 'Project manifest MPC design')
+  if (!Number.isInteger(design.index) || (design.index as number) < 0) {
+    throw new Error('Project manifest MPC design index must be a non-negative integer')
+  }
+  requireString(design.design_name, 'Project manifest MPC design design_name')
+  requireOptionalString(design.directory, 'Project manifest MPC design directory')
+  requireRecord(mpc.core_template, 'Project manifest MPC core_template')
 }
 
 function normalizeMpcPath(path: string): string {

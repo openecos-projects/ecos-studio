@@ -14,6 +14,7 @@ import type {
   ResourceInstallRequest,
   ResourceJob,
   ResourceList,
+  MpcSpecReadResult,
   ResourceOperationResult,
 } from './resources.ts'
 import type { RemoteContentApi } from './remoteContent.ts'
@@ -263,6 +264,7 @@ export interface DesktopApi {
   resources: {
     list(): Promise<ResourceList>
     get(resourceId: string): Promise<ResourceInfo>
+    readMpcSpec(resourceId: string): Promise<MpcSpecReadResult>
     install(request: ResourceInstallRequest): Promise<ResourceOperationResult>
     update(resourceId: string): Promise<ResourceOperationResult>
     cancel(resourceId: string): Promise<ResourceOperationResult>

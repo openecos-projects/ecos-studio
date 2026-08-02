@@ -131,6 +131,7 @@ function registerHandlers() {
       activatePdk: vi.fn(),
       cancelResource: vi.fn(),
       getResource: vi.fn(),
+      readMpcSpec: vi.fn(),
       importLocalPath: vi.fn(),
       importPdkPath: vi.fn(),
       installResource: vi.fn(),
@@ -295,6 +296,12 @@ describe('registerIpc', () => {
       status: 'cancelled',
       resource_id: 'tool:yosys',
     })
+    services.resourceManagerService.readMpcSpec.mockResolvedValue({
+      resource_id: 'mpc:mpc-frame',
+      installed_version: '0.1.0',
+      spec_path: '/tmp/mpc/spec/spec.json.in',
+      spec: { designs: [] },
+    })
     services.resourceManagerService.importPdkPath.mockResolvedValue(
       resources.resources[0],
     )
@@ -314,6 +321,14 @@ describe('registerIpc', () => {
       status: 'started',
       resource_id: 'tool:yosys',
       version: '0.61',
+    })
+    await expect(
+      handlers.get(desktopApiIpcChannels.resourcesReadMpcSpec)?.(event, 'mpc:mpc-frame'),
+    ).resolves.toEqual({
+      resource_id: 'mpc:mpc-frame',
+      installed_version: '0.1.0',
+      spec_path: '/tmp/mpc/spec/spec.json.in',
+      spec: { designs: [] },
     })
     await expect(
       handlers.get(desktopApiIpcChannels.resourcesImportPdkPath)?.(event, {
@@ -338,6 +353,9 @@ describe('registerIpc', () => {
       'tool:yosys',
       '0.61',
       expect.any(Function),
+    )
+    expect(services.resourceManagerService.readMpcSpec).toHaveBeenCalledWith(
+      'mpc:mpc-frame',
     )
     expect(services.resourceManagerService.importPdkPath).toHaveBeenCalledWith('/tmp/pdk')
     expect(services.resourceManagerService.importLocalPath).toHaveBeenCalledWith(

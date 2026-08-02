@@ -1439,6 +1439,11 @@
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.32);
 }
 
+.new-project-dialog {
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+
 .modal-close {
   top: 18px;
   right: 18px;

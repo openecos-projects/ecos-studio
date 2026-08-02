@@ -282,6 +282,8 @@ const desktopApi: DesktopApi = {
   resources: {
     list: () => invokeDesktop(desktopApiIpcChannels.resourcesList),
     get: (resourceId) => invokeDesktop(desktopApiIpcChannels.resourcesGet, resourceId),
+    readMpcSpec: (resourceId) =>
+      invokeDesktop(desktopApiIpcChannels.resourcesReadMpcSpec, resourceId),
     install: (request: ResourceInstallRequest) =>
       invokeDesktop(desktopApiIpcChannels.resourcesInstall, request),
     update: (resourceId) =>

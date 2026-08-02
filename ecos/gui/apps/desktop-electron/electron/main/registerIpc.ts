@@ -177,6 +177,7 @@ export interface DesktopBridgeServices {
   resourceManagerService: {
     listResources(): Promise<unknown>
     getResource(resourceId: string): Promise<unknown>
+    readMpcSpec(resourceId: string): Promise<unknown>
     installResource(
       resourceId: string,
       version?: string,
@@ -1146,6 +1147,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.resourcesGet, async (_event, resourceId) => {
     return await services.resourceManagerService.getResource(resourceId as string)
+  })
+
+  handle(desktopApiIpcChannels.resourcesReadMpcSpec, async (_event, resourceId) => {
+    return await services.resourceManagerService.readMpcSpec(resourceId as string)
   })
 
   handle(desktopApiIpcChannels.resourcesInstall, async (event, request) => {

@@ -61,6 +61,7 @@ export const desktopApiIpcChannels = {
   workspaceResourcesResolveStepInfo: 'workspace-resources:resolve-step-info',
   resourcesList: 'resources:list',
   resourcesGet: 'resources:get',
+  resourcesReadMpcSpec: 'resources:read-mpc-spec',
   resourcesInstall: 'resources:install',
   resourcesUpdate: 'resources:update',
   resourcesCancel: 'resources:cancel',

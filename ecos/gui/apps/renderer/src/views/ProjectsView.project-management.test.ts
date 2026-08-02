@@ -369,6 +369,10 @@ describe('ProjectsView project management surface', () => {
     expect(source).toContain('Managed MPC')
     expect(source).toContain('listResourcesApi')
     expect(source).toContain('projectMpcOptionFromResource')
+    expect(source).toContain('readMpcSpecApi')
+    expect(source).toContain('parseMpcSpecDesigns')
+    expect(source).toContain('MpcCoreTemplatePreview')
+    expect(source).toContain('selectedProjectMpcDesignIndex')
     expect(source).toContain('selectProjectStorageLocation')
     expect(source).toContain('createProjectFolderDraft')
     expect(source).toContain('mutateProjectManifest')
@@ -381,6 +385,9 @@ describe('ProjectsView project management surface', () => {
     expect(createSource).not.toContain('workspacePath')
     expect(createSource).not.toContain("workspaces', 'ws_0001'")
     expect(createSource).toContain('mpc: selectedProjectMpc.value')
+    expect(createSource).toContain(
+      'Select a valid MPC design before creating the project.',
+    )
   })
 
   it('renders an empty state instead of generated demo workspace data', () => {

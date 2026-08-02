@@ -70,6 +70,14 @@ export interface ProjectManifestMpc {
   installed_version: string
   path: string
   spec_path: string
+  design: ProjectManifestMpcDesign
+  core_template: Record<string, unknown>
+}
+
+export interface ProjectManifestMpcDesign {
+  index: number
+  design_name: string
+  directory?: string
 }
 
 export interface ProjectManifest {
@@ -576,6 +584,8 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
   const installedVersion = optionalString(source.installed_version)
   const mpcPath = optionalString(source.path)
   const specPath = optionalString(source.spec_path)
+  const design = recordValue(source.design)
+  const coreTemplate = recordValue(source.core_template)
   if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
     throw new Error(
       'Invalid project manifest: mpc.resource_id must be an MPC resource id.',
@@ -595,6 +605,19 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
       'Invalid project manifest: mpc.spec_path must reference spec/spec.json.in below mpc.path.',
     )
   }
+  if (
+    !design ||
+    !Number.isInteger(design.index) ||
+    (design.index as number) < 0 ||
+    !optionalString(design.design_name)
+  ) {
+    throw new Error(
+      'Invalid project manifest: mpc.design requires a non-negative index and design_name.',
+    )
+  }
+  if (!coreTemplate) {
+    throw new Error('Invalid project manifest: mpc.core_template must be an object.')
+  }
 
   return {
     resource_id: resourceId,
@@ -602,6 +625,14 @@ function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null 
     installed_version: installedVersion,
     path: normalizedPath,
     spec_path: normalizedSpecPath,
+    design: {
+      index: design.index as number,
+      design_name: optionalString(design.design_name),
+      ...(optionalString(design.directory)
+        ? { directory: optionalString(design.directory) }
+        : {}),
+    },
+    core_template: coreTemplate,
   }
 }
 

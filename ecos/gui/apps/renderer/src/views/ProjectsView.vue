@@ -477,7 +477,7 @@
     <div v-if="showNewProjectDialog" class="project-modal-scrim" role="presentation">
       <section
         ref="newProjectDialog"
-        class="project-modal-dialog"
+        class="project-modal-dialog new-project-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-project-title"
@@ -540,6 +540,31 @@
         <p v-else-if="projectMpcs.length === 0" class="modal-help">
           No eligible managed MPCs are installed.
         </p>
+        <p v-if="isLoadingProjectMpcSpec" class="modal-help">
+          Loading MPC design specification...
+        </p>
+        <p v-else-if="projectMpcSpecError" class="modal-error">
+          {{ projectMpcSpecError }}
+        </p>
+        <template v-else-if="selectedProjectMpcCandidate && selectedProjectMpcDesign">
+          <label v-if="projectMpcDesigns.length > 1" class="form-field">
+            <span>MPC Design</span>
+            <select v-model="selectedProjectMpcDesignIndex">
+              <option
+                v-for="design in projectMpcDesigns"
+                :key="design.index"
+                :value="design.index"
+              >
+                {{ design.designName }}
+              </option>
+            </select>
+          </label>
+          <MpcCoreTemplatePreview
+            :core-template="selectedProjectMpcDesign.coreTemplate"
+            :design-name="selectedProjectMpcDesign.designName"
+            :directory="selectedProjectMpcDesign.directory"
+          />
+        </template>
 
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
         <p v-if="projectRootError" class="modal-error">{{ projectRootError }}</p>
@@ -737,18 +762,20 @@ import { useRouter } from 'vue-router'
 import type { Project, ProjectStatus } from '../types'
 import { useWorkspace } from '../composables/useWorkspace'
 import ProjectAnalysisPanel from './project-management/ProjectAnalysisPanel.vue'
+import MpcCoreTemplatePreview from '@/components/MpcCoreTemplatePreview.vue'
 import { previewList } from './project-management/projectListPreview'
 import {
   readProjectWorkspaceAnalysisInputs,
   readProjectWorkspaceFlowStates,
 } from './project-management/projectWorkspaceAnalysisData'
 import { waitForDesktopApi } from '@/platform/desktop'
-import { listResourcesApi } from '@/api/plugin'
+import { listResourcesApi, readMpcSpecApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
+  type ProjectManifestMpcCandidate,
   projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
@@ -766,6 +793,11 @@ import {
   type ProjectWorkspaceFlowStatesById,
   type WorkspaceBranchDraft,
 } from '@/utils/projectManagement'
+import {
+  createProjectManifestMpcSnapshot,
+  parseMpcSpecDesigns,
+  type MpcSpecDesign,
+} from '@/utils/mpcSpec'
 import { readOptionalProjectTextFile, writeProjectTextFile } from '@/utils/projectFiles'
 import {
   loadProjectHistory,
@@ -816,9 +848,13 @@ const projectRootDraft = ref({
   directory: '',
   mpcId: '',
 })
-const projectMpcs = ref<ProjectManifestMpc[]>([])
+const projectMpcs = ref<ProjectManifestMpcCandidate[]>([])
 const isLoadingProjectMpcs = ref(false)
 const projectMpcLoadError = ref('')
+const projectMpcDesigns = ref<MpcSpecDesign[]>([])
+const selectedProjectMpcDesignIndex = ref<number | null>(null)
+const isLoadingProjectMpcSpec = ref(false)
+const projectMpcSpecError = ref('')
 const newProjectDialog = ref<HTMLElement | null>(null)
 const workspaceDraftDialog = ref<HTMLElement | null>(null)
 const deleteWorkspaceDialog = ref<HTMLElement | null>(null)
@@ -974,16 +1010,36 @@ const projectManifestPreview = computed(() => {
   if (!root) return '<project_root>/project.json'
   return `${root}/project.json`
 })
-const selectedProjectMpc = computed<ProjectManifestMpc | null>(() => {
+const selectedProjectMpcCandidate = computed<ProjectManifestMpcCandidate | null>(() => {
   return (
     projectMpcs.value.find((mpc) => mpc.resource_id === projectRootDraft.value.mpcId) ??
     null
   )
 })
+const selectedProjectMpcDesign = computed<MpcSpecDesign | null>(() => {
+  return (
+    projectMpcDesigns.value.find(
+      (design) => design.index === selectedProjectMpcDesignIndex.value,
+    ) ?? null
+  )
+})
+const selectedProjectMpc = computed<ProjectManifestMpc | null>(() => {
+  const candidate = selectedProjectMpcCandidate.value
+  const design = selectedProjectMpcDesign.value
+  return candidate && design ? createProjectManifestMpcSnapshot(candidate, design) : null
+})
 
 let activeProjectKey: string | null = null
 let projectManifestRefreshQueue = Promise.resolve()
 let projectMpcLoadGeneration = 0
+let projectMpcSpecLoadGeneration = 0
+
+watch(
+  () => projectRootDraft.value.mpcId,
+  (resourceId) => {
+    void loadProjectMpcSpec(resourceId)
+  },
+)
 
 watch(
   selectedProject,
@@ -1665,14 +1721,17 @@ function openNewProjectDialog() {
   }
   projectMpcs.value = []
   projectMpcLoadError.value = ''
+  resetProjectMpcSpec()
   showNewProjectDialog.value = true
   void loadProjectMpcs(++projectMpcLoadGeneration)
 }
 
 function closeNewProjectDialog() {
   projectMpcLoadGeneration += 1
+  projectMpcSpecLoadGeneration += 1
   showNewProjectDialog.value = false
   projectRootError.value = ''
+  resetProjectMpcSpec()
 }
 
 async function loadProjectMpcs(generation: number): Promise<void> {
@@ -1691,6 +1750,52 @@ async function loadProjectMpcs(generation: number): Promise<void> {
   } finally {
     if (generation === projectMpcLoadGeneration) {
       isLoadingProjectMpcs.value = false
+    }
+  }
+}
+
+function resetProjectMpcSpec() {
+  projectMpcDesigns.value = []
+  selectedProjectMpcDesignIndex.value = null
+  isLoadingProjectMpcSpec.value = false
+  projectMpcSpecError.value = ''
+}
+
+async function loadProjectMpcSpec(resourceId: string): Promise<void> {
+  const generation = ++projectMpcSpecLoadGeneration
+  resetProjectMpcSpec()
+  if (!resourceId) return
+
+  const candidate = projectMpcs.value.find((mpc) => mpc.resource_id === resourceId)
+  if (!candidate) {
+    projectMpcSpecError.value = 'The selected MPC is no longer available.'
+    return
+  }
+
+  isLoadingProjectMpcSpec.value = true
+  try {
+    const result = await readMpcSpecApi(resourceId)
+    if (generation !== projectMpcSpecLoadGeneration) return
+    if (
+      result.resource_id !== candidate.resource_id ||
+      result.installed_version !== candidate.installed_version ||
+      normalizePath(result.spec_path) !== normalizePath(candidate.spec_path)
+    ) {
+      throw new Error('The selected MPC changed while its specification was loading.')
+    }
+    const designs = parseMpcSpecDesigns(result.spec)
+    projectMpcDesigns.value = designs
+    selectedProjectMpcDesignIndex.value = designs[0].index
+  } catch (error) {
+    if (generation !== projectMpcSpecLoadGeneration) return
+    console.warn('Failed to load MPC design specification.', error)
+    projectMpcSpecError.value =
+      error instanceof Error
+        ? error.message
+        : 'Unable to read the selected MPC specification.'
+  } finally {
+    if (generation === projectMpcSpecLoadGeneration) {
+      isLoadingProjectMpcSpec.value = false
     }
   }
 }
@@ -1717,8 +1822,15 @@ async function createProjectFolderDraft() {
     return
   }
 
+  if (projectRootDraft.value.mpcId && isLoadingProjectMpcSpec.value) {
+    projectRootError.value = 'Wait for the selected MPC specification to load.'
+    return
+  }
+
   if (projectRootDraft.value.mpcId && !selectedProjectMpc.value) {
-    projectRootError.value = 'The selected MPC is no longer available.'
+    projectRootError.value =
+      projectMpcSpecError.value ||
+      'Select a valid MPC design before creating the project.'
     return
   }
 

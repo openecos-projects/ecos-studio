@@ -17,6 +17,8 @@ describe('project manifest parsing', () => {
         installed_version: '0.1.0',
         path: '/work/resources/mpcs/mpc-frame/0.1.0/',
         spec_path: '/work/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+        design: { index: 0, design_name: 'frame' },
+        core_template: { minimum_area: 100, maximum_area: 500 },
       },
     })
 
@@ -26,6 +28,8 @@ describe('project manifest parsing', () => {
       installed_version: '0.1.0',
       path: '/work/resources/mpcs/mpc-frame/0.1.0',
       spec_path: '/work/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+      design: { index: 0, design_name: 'frame' },
+      core_template: { minimum_area: 100, maximum_area: 500 },
     })
   })
 
@@ -54,10 +58,38 @@ describe('project manifest parsing', () => {
             installed_version: '0.1.0',
             path: '/work/resources/mpcs/mpc-frame/0.1.0',
             spec_path: '/work/resources/mpcs/mpc-frame/0.1.0/spec.json.in',
+            design: { index: 0, design_name: 'frame' },
+            core_template: { minimum_area: 100, maximum_area: 500 },
           },
         }),
       ),
     ).toThrow('mpc.spec_path must reference spec/spec.json.in')
+  })
+
+  it('rejects a non-null MPC association without a selected design snapshot', () => {
+    expect(() =>
+      parseProjectManifest(
+        JSON.stringify({
+          schema_version: 1,
+          project_id: 'proj_gcd',
+          name: 'gcd',
+          root_path: '/work/gcd',
+          created_at: '2026-07-01T00:00:00.000Z',
+          updated_at: '2026-07-01T00:00:00.000Z',
+          base_design: { rtl_list: [] },
+          objectives: { primary: 'timing', directions: {} },
+          workspaces: [],
+          best_workspace: null,
+          mpc: {
+            resource_id: 'mpc:mpc-frame',
+            display_name: 'MPC Frame',
+            installed_version: '0.1.0',
+            path: '/work/resources/mpcs/mpc-frame/0.1.0',
+            spec_path: '/work/resources/mpcs/mpc-frame/0.1.0/spec/spec.json.in',
+          },
+        }),
+      ),
+    ).toThrow('mpc.design requires a non-negative index and design_name')
   })
 
   it('preserves unknown fields while normalizing a manifest mutation', () => {

@@ -21,6 +21,7 @@ import type {
   ResourceInfo,
   ResourceJob,
   ResourceList,
+  MpcSpecReadResult,
   ResourceOperationResult,
   ResourceStatus,
 } from '@ecos-studio/shared'
@@ -313,6 +314,39 @@ export class ResourceManagerService {
       throw new Error(`Resource '${resourceId}' not found`)
     }
     return resource
+  }
+
+  async readMpcSpec(resourceId: string): Promise<MpcSpecReadResult> {
+    const mpcId = resourceNameFromId(resourceId, 'mpc')
+    const manifest = await this.readManifest()
+    const entry = manifest.installed[resourceId]
+    if (!isMpcEntry(entry)) {
+      throw new Error(`MPC '${mpcId}' is not installed`)
+    }
+    if (!entry.managed || entry.health !== 'ok') {
+      throw new Error(`MPC '${mpcId}' is not a healthy managed resource`)
+    }
+
+    const expectedPath = resolve(this.mpcsDir, mpcId, entry.version)
+    const mpcPath = resolve(entry.path)
+    if (entry.id !== mpcId || mpcPath !== expectedPath) {
+      throw new Error(`MPC '${mpcId}' has an invalid managed path`)
+    }
+
+    const specPath = resolveInside(mpcPath, 'spec/spec.json.in')
+    let spec: unknown
+    try {
+      spec = JSON.parse(await readFile(specPath, 'utf8'))
+    } catch (error) {
+      throw new Error(`Unable to read MPC spec at ${specPath}`, { cause: error })
+    }
+
+    return {
+      resource_id: resourceId,
+      installed_version: entry.version,
+      spec_path: specPath,
+      spec,
+    }
   }
 
   async createRuntimeEnv(

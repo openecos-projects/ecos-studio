@@ -70,6 +70,19 @@ describe('NewProjectWizard RTL browsing', () => {
     expect(selectSource).toContain('await applyProjectDefaultsForProject(projectRoot)')
   })
 
+  it('loads the selected project MPC snapshot and applies die-area bounds only in Width / Height mode', () => {
+    expect(source).toContain('projectMpc')
+    expect(source).toContain('projectManifestError')
+    expect(source).toContain('isLoadingProjectManifest')
+    expect(source).toContain('validateMpcDieArea')
+    expect(source).toContain('config.value.mpc = projectMpc.value')
+    expect(source).toContain("dieAreaMode.value === 'width_height'")
+    expect(source).toContain('!mpcDieAreaValidation.value.error')
+    expect(source).toContain(
+      'MPC die-area bounds are checked after the flow runs for this mode.',
+    )
+  })
+
   it('can lock the workspace directory when reconfiguring an existing workspace', () => {
     expect(source).toContain('title?: string')
     expect(source).toContain('wizardTitle')

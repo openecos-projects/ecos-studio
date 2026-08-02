@@ -206,6 +206,9 @@ const desktopBridge = {
     get: async () => {
       throw new Error('not found')
     },
+    readMpcSpec: async () => {
+      throw new Error('not found')
+    },
     install: async (request) => ({
       status: 'started',
       resource_id: request.resourceId,

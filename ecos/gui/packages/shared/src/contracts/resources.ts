@@ -64,6 +64,13 @@ export interface ResourceOperationResult {
   version?: string
 }
 
+export interface MpcSpecReadResult {
+  resource_id: string
+  installed_version: string
+  spec_path: string
+  spec: unknown
+}
+
 export interface ResourceImportPdkRequest {
   path: string
 }

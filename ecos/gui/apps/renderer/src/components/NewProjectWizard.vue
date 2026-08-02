@@ -100,6 +100,14 @@
                 </header>
 
                 <div
+                  v-if="projectManifestError"
+                  role="alert"
+                  class="mb-5 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300"
+                >
+                  {{ projectManifestError }}
+                </div>
+
+                <div
                   class="rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
                 >
                   <div
@@ -1104,6 +1112,13 @@
                   </p>
                 </header>
 
+                <p
+                  v-if="isLoadingProjectManifest"
+                  class="mb-5 text-sm text-(--text-secondary)"
+                >
+                  Loading project constraints...
+                </p>
+
                 <div
                   class="space-y-5 rounded-xl border border-(--border-color) bg-(--bg-secondary)/20 p-5"
                 >
@@ -1176,6 +1191,15 @@
                   <div
                     class="rounded-xl border border-(--border-color) bg-(--bg-primary)/65 p-4"
                   >
+                    <div
+                      v-if="projectMpc"
+                      class="mb-4 rounded-lg border border-(--accent-color)/30 bg-(--accent-color)/8 px-3 py-2.5"
+                    >
+                      <p class="text-xs font-semibold text-(--text-primary)">
+                        MPC core template: {{ projectMpc.display_name }} /
+                        {{ projectMpc.design.design_name }}
+                      </p>
+                    </div>
                     <div class="mb-4 flex items-center justify-between gap-3">
                       <h3 class="text-sm font-bold text-(--text-primary)">Die Area</h3>
                       <div
@@ -1208,37 +1232,63 @@
                       </div>
                     </div>
 
-                    <div
-                      v-if="dieAreaMode === 'width_height'"
-                      class="grid gap-5 md:grid-cols-2"
-                    >
-                      <div>
-                        <label
-                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                          >Width</label
-                        >
-                        <input
-                          v-model.number="config.parameters.die_width"
-                          type="number"
-                          min="1"
-                          step="1"
-                          class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                        />
+                    <template v-if="dieAreaMode === 'width_height'">
+                      <div class="grid gap-5 md:grid-cols-2">
+                        <div>
+                          <label
+                            class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                            >Width</label
+                          >
+                          <input
+                            v-model.number="config.parameters.die_width"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
+                          />
+                        </div>
+                        <div>
+                          <label
+                            class="mb-2 block text-sm font-semibold text-(--text-primary)"
+                            >Height</label
+                          >
+                          <input
+                            v-model.number="config.parameters.die_height"
+                            type="number"
+                            min="1"
+                            step="1"
+                            class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label
-                          class="mb-2 block text-sm font-semibold text-(--text-primary)"
-                          >Height</label
+
+                      <div
+                        v-if="dieAreaMode === 'width_height' && projectMpc"
+                        class="mt-4 space-y-1 text-xs text-(--text-secondary)"
+                      >
+                        <p>
+                          MPC die-area bounds: min
+                          {{
+                            mpcDieAreaValidation.constraint.minimumArea ??
+                            'not specified'
+                          }}, max
+                          {{
+                            mpcDieAreaValidation.constraint.maximumArea ??
+                            'not specified'
+                          }}.
+                        </p>
+                        <p v-if="mpcDieAreaValidation.area !== null">
+                          Current die area: {{ mpcDieAreaValidation.area }}.
+                        </p>
+                        <p
+                          v-if="mpcDieAreaValidation.error"
+                          role="alert"
+                          class="font-medium text-red-600 dark:text-red-300"
                         >
-                        <input
-                          v-model.number="config.parameters.die_height"
-                          type="number"
-                          min="1"
-                          step="1"
-                          class="w-full rounded-lg border border-(--border-color) bg-(--bg-secondary)/35 px-3 py-2.5 text-sm text-(--text-primary) outline-none focus:border-(--accent-color)"
-                        />
+                          {{ mpcDieAreaValidation.error }}
+                        </p>
                       </div>
-                    </div>
+                    </template>
 
                     <div v-else class="grid gap-5 md:grid-cols-2">
                       <div>
@@ -1269,6 +1319,12 @@
                         />
                       </div>
                     </div>
+                    <p
+                      v-if="dieAreaMode === 'utilitization_margin' && projectMpc"
+                      class="mt-4 text-xs text-(--text-secondary)"
+                    >
+                      MPC die-area bounds are checked after the flow runs for this mode.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1344,7 +1400,12 @@ import { useWorkspace } from '../composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { loadProjectHistory } from '@/utils/projectHistory'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
-import { parseProjectManifest, type ProjectManifest } from '@/utils/projectManagement'
+import {
+  parseProjectManifest,
+  type ProjectManifest,
+  type ProjectManifestMpc,
+} from '@/utils/projectManagement'
+import { validateMpcDieArea } from '@/utils/mpcWorkspace'
 import {
   isHdlFilePath,
   type DesktopFileDialogOptions,
@@ -1541,6 +1602,18 @@ const projectContext = ref<ProjectContext>(
 )
 
 const config = ref<WorkspaceConfig>(createInitialConfig(props.initialConfig))
+const projectMpc = ref<ProjectManifestMpc | null>(null)
+const projectManifestError = ref('')
+const isLoadingProjectManifest = ref(false)
+let projectManifestLoadGeneration = 0
+const mpcDieAreaValidation = computed(() =>
+  validateMpcDieArea(
+    projectMpc.value,
+    dieAreaMode.value,
+    config.value.parameters.die_width,
+    config.value.parameters.die_height,
+  ),
+)
 const sourceContext = computed<SourceContext | null>(() => {
   const context = props.initialConfig?.source_context
   if (!context?.workspaceId && !context?.workspacePath && !context?.step) return null
@@ -1648,6 +1721,7 @@ function createInitialConfig(
     pdk_config:
       initialConfig?.pdk_config ?? source_config?.pdk_config ?? defaultPdkConfig,
     pdk_json: initialConfig?.pdk_json ?? source_config?.pdk_json ?? '',
+    mpc: initialConfig?.mpc ?? source_config?.mpc ?? null,
     project_context: initialConfig?.project_context ?? projectContext.value,
     source_context: initialConfig?.source_context,
     source_config,
@@ -1715,16 +1789,11 @@ async function readProjectManifestForProject(
 ): Promise<ProjectManifest | null> {
   const root = normalizePath(projectRoot)
   if (!root) return null
-  try {
-    const manifestText = await readOptionalProjectTextFile('project.json', {
-      projectPath: root,
-    })
-    if (!manifestText) return null
-    return parseProjectManifest(manifestText)
-  } catch (error) {
-    console.warn('Failed to read project manifest for New Workspace defaults.', error)
-    return null
-  }
+  const manifestText = await readOptionalProjectTextFile('project.json', {
+    projectPath: root,
+  })
+  if (!manifestText) return null
+  return parseProjectManifest(manifestText)
 }
 
 const SYSTEM_PARAMETER_DEFAULTS: Record<string, number> = {
@@ -2144,13 +2213,33 @@ async function loadProjectHistoryEntries() {
 }
 
 async function applyProjectDefaultsForProject(projectRoot: string) {
-  const manifest = await readProjectManifestForProject(projectRoot)
+  const loadGeneration = ++projectManifestLoadGeneration
+  projectMpc.value = null
+  projectManifestError.value = ''
+  isLoadingProjectManifest.value = true
+
+  let manifest: ProjectManifest | null = null
+  try {
+    manifest = await readProjectManifestForProject(projectRoot)
+  } catch (error) {
+    if (loadGeneration !== projectManifestLoadGeneration) return
+    console.warn('Failed to read project manifest for New Workspace defaults.', error)
+    projectManifestError.value =
+      "The selected project's project.json could not be read. Resolve it before creating a workspace."
+    isLoadingProjectManifest.value = false
+    syncWorkspaceConfig()
+    return
+  }
+  if (loadGeneration !== projectManifestLoadGeneration) return
+
   if (!lockWorkspaceDirectory.value && !workspaceNameTouched.value) {
     workspaceName.value = nextWorkspaceNameForProject(manifest)
   }
   if (manifest) {
     applyProjectManifestDefaults(manifest)
   }
+  projectMpc.value = manifest?.mpc ?? null
+  isLoadingProjectManifest.value = false
   syncWorkspaceConfig()
 }
 
@@ -2402,10 +2491,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function setProjectMode(mode: ProjectMode) {
   projectContext.value.mode = mode
   if (mode === 'create') {
+    projectManifestLoadGeneration += 1
+    projectMpc.value = null
+    projectManifestError.value = ''
+    isLoadingProjectManifest.value = false
     projectContext.value.project_root = joinPath(
       projectParentPath.value,
       projectContext.value.project_name,
     )
+    syncWorkspaceConfig()
   }
   if (mode === 'select') {
     void applyProjectDefaultsForProject(projectContext.value.project_root)
@@ -2829,9 +2923,15 @@ function specReady() {
     Number(params.frequency_max) > 0 &&
     Number(params.max_fanout) > 0
 
-  if (!hasCoreFields) return false
+  if (!hasCoreFields || projectManifestError.value || isLoadingProjectManifest.value) {
+    return false
+  }
   if (dieAreaMode.value === 'width_height') {
-    return Number(params.die_width) > 0 && Number(params.die_height) > 0
+    return (
+      Number(params.die_width) > 0 &&
+      Number(params.die_height) > 0 &&
+      !mpcDieAreaValidation.value.error
+    )
   }
   return Number(params.utilitization) > 0 && Number(params.margin) >= 0
 }
@@ -2854,6 +2954,7 @@ function syncWorkspaceConfig() {
     cell_lef: pdkSelections.value.cell_lef,
     liberty: pdkSelections.value.liberty,
   }
+  config.value.mpc = projectMpc.value
   config.value.project_context = {
     ...projectContext.value,
   }

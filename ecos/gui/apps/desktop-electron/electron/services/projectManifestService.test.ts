@@ -118,6 +118,8 @@ describe('ProjectManifestService', () => {
           installed_version: '0.1.0',
           path: mpcPath,
           spec_path: `${mpcPath}/spec/spec.json.in`,
+          design: { index: 0, design_name: 'frame' },
+          core_template: { minimum_area: 100, maximum_area: 500 },
         },
       },
     })
@@ -128,6 +130,8 @@ describe('ProjectManifestService', () => {
       installed_version: '0.1.0',
       path: mpcPath,
       spec_path: `${mpcPath}/spec/spec.json.in`,
+      design: { index: 0, design_name: 'frame' },
+      core_template: { minimum_area: 100, maximum_area: 500 },
     })
   })
 
@@ -186,6 +190,8 @@ describe('ProjectManifestService', () => {
             installed_version: '0.1.0',
             path: '/resources/mpcs/mpc-frame/0.1.0',
             spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec.json.in',
+            design: { index: 0, design_name: 'frame' },
+            core_template: { minimum_area: 100, maximum_area: 500 },
           },
         },
       }),
