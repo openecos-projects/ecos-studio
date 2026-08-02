@@ -176,6 +176,7 @@ export type {
   ProjectManifestDraftInput,
   ProjectManifestFlowStep,
   ProjectManifestMetricSummary,
+  ProjectManifestMpc,
   ProjectManifestMutation,
   ProjectManifestMutationRequest,
   ProjectManifestMutationResult,

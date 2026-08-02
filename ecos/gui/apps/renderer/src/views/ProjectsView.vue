@@ -520,6 +520,27 @@
           </div>
         </label>
 
+        <label class="form-field">
+          <span>Managed MPC</span>
+          <select v-model="projectRootDraft.mpcId" :disabled="isLoadingProjectMpcs">
+            <option value="">No MPC</option>
+            <option
+              v-for="mpc in projectMpcs"
+              :key="mpc.resource_id"
+              :value="mpc.resource_id"
+            >
+              {{ mpc.display_name }} ({{ mpc.installed_version }})
+            </option>
+          </select>
+        </label>
+        <p v-if="isLoadingProjectMpcs" class="modal-help">Loading managed MPCs...</p>
+        <p v-else-if="projectMpcLoadError" class="modal-help">
+          Managed MPCs could not be loaded. You can still create this project without one.
+        </p>
+        <p v-else-if="projectMpcs.length === 0" class="modal-help">
+          No eligible managed MPCs are installed.
+        </p>
+
         <p class="modal-help">Project manifest: {{ projectManifestPreview }}</p>
         <p v-if="projectRootError" class="modal-error">{{ projectRootError }}</p>
 
@@ -722,11 +743,13 @@ import {
   readProjectWorkspaceFlowStates,
 } from './project-management/projectWorkspaceAnalysisData'
 import { waitForDesktopApi } from '@/platform/desktop'
+import { listResourcesApi } from '@/api/plugin'
 import { mutateProjectManifest } from '@/api/projectManifest'
 import {
   FLOW_STEPS,
   buildProjectManagementProject,
   createWorkspaceBranchDraft,
+  projectMpcOptionFromResource,
   resolveProjectSelectionUpdate,
   nextWorkspaceId,
   parseProjectManifest,
@@ -735,6 +758,7 @@ import {
   type FlowStep,
   type ProjectFlowStatusHint,
   type ProjectManifest,
+  type ProjectManifestMpc,
   type ProjectManagementProject,
   type ProjectStepStatus,
   type ProjectWorkspace,
@@ -790,7 +814,11 @@ const projectRootError = ref('')
 const projectRootDraft = ref({
   name: '',
   directory: '',
+  mpcId: '',
 })
+const projectMpcs = ref<ProjectManifestMpc[]>([])
+const isLoadingProjectMpcs = ref(false)
+const projectMpcLoadError = ref('')
 const newProjectDialog = ref<HTMLElement | null>(null)
 const workspaceDraftDialog = ref<HTMLElement | null>(null)
 const deleteWorkspaceDialog = ref<HTMLElement | null>(null)
@@ -946,9 +974,16 @@ const projectManifestPreview = computed(() => {
   if (!root) return '<project_root>/project.json'
   return `${root}/project.json`
 })
+const selectedProjectMpc = computed<ProjectManifestMpc | null>(() => {
+  return (
+    projectMpcs.value.find((mpc) => mpc.resource_id === projectRootDraft.value.mpcId) ??
+    null
+  )
+})
 
 let activeProjectKey: string | null = null
 let projectManifestRefreshQueue = Promise.resolve()
+let projectMpcLoadGeneration = 0
 
 watch(
   selectedProject,
@@ -1626,13 +1661,38 @@ function openNewProjectDialog() {
   projectRootDraft.value = {
     name: '',
     directory: '',
+    mpcId: '',
   }
+  projectMpcs.value = []
+  projectMpcLoadError.value = ''
   showNewProjectDialog.value = true
+  void loadProjectMpcs(++projectMpcLoadGeneration)
 }
 
 function closeNewProjectDialog() {
+  projectMpcLoadGeneration += 1
   showNewProjectDialog.value = false
   projectRootError.value = ''
+}
+
+async function loadProjectMpcs(generation: number): Promise<void> {
+  isLoadingProjectMpcs.value = true
+  try {
+    const resources = await listResourcesApi()
+    if (generation !== projectMpcLoadGeneration) return
+    projectMpcs.value = resources.flatMap((resource) => {
+      const mpc = projectMpcOptionFromResource(resource)
+      return mpc ? [mpc] : []
+    })
+  } catch (error) {
+    console.warn('Failed to load managed MPC resources.', error)
+    if (generation !== projectMpcLoadGeneration) return
+    projectMpcLoadError.value = 'Unable to load managed MPC resources.'
+  } finally {
+    if (generation === projectMpcLoadGeneration) {
+      isLoadingProjectMpcs.value = false
+    }
+  }
 }
 
 async function selectProjectStorageLocation() {
@@ -1657,6 +1717,11 @@ async function createProjectFolderDraft() {
     return
   }
 
+  if (projectRootDraft.value.mpcId && !selectedProjectMpc.value) {
+    projectRootError.value = 'The selected MPC is no longer available.'
+    return
+  }
+
   const projectRoot = await registerProjectRootForProjectManagement(directory)
   if (!projectRoot) {
     projectRootError.value = 'Project Storage Location could not be registered.'
@@ -1673,6 +1738,7 @@ async function createProjectFolderDraft() {
   const manifest = await mutateProjectManifest(projectRoot, {
     type: 'create',
     name,
+    mpc: selectedProjectMpc.value,
   })
   await applyProjectManifestForProject(manifest, projectRoot)
   selectedProjectId.value = projectRoot

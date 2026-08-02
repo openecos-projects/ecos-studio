@@ -173,6 +173,7 @@ function localYosysEntry(localYosys: string): Record<string, unknown> {
 async function writeMpcRegistry(
   registryPath: string,
   archive: { path: string; sha256: string; size: number },
+  version = '0.1.0',
 ): Promise<void> {
   await writeFile(
     registryPath,
@@ -189,13 +190,13 @@ async function writeMpcRegistry(
           homepage: 'https://github.com/openecos-projects/mpc-frame',
           versions: [
             {
-              version: 'test-commit',
+              version,
               platforms: {
                 'all-platform': {
                   url: `file://${archive.path}`,
                   sha256: archive.sha256,
                   size: archive.size,
-                  strip_prefix: 'mpc-frame-test-commit',
+                  strip_prefix: `mpc-frame-${version}`,
                 },
               },
             },
@@ -234,10 +235,58 @@ describe('ResourceManagerService', () => {
       name: 'mpc-frame',
       category: 'mpc',
       status: 'available',
-      available_versions: ['cc47470b72537'],
+      available_versions: ['0.1.0'],
       source: 'registry',
       actions: ['install'],
       homepage: 'https://github.com/openecos-projects/mpc-frame',
+    })
+  })
+
+  it('prefers a default-registry MPC over the built-in fallback', async () => {
+    const root = await createTempDir('ecos-resources-')
+    const service = new ResourceManagerService({
+      cacheDir: join(root, 'cache'),
+      fetchImpl: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              schema_version: 2,
+              tools: [],
+              pdks: [],
+              mpcs: [
+                {
+                  id: 'mpc-frame',
+                  display_name: 'MPC Frame',
+                  description: 'Registry-managed MPC frame.',
+                  category: 'mpc',
+                  homepage: 'https://github.com/openecos-projects/mpc-frame',
+                  versions: [
+                    {
+                      version: '0.1.1',
+                      platforms: {
+                        'all-platform': {
+                          url: 'https://example.com/mpc-frame-0.1.1.tar.gz',
+                          sha256: 'a'.repeat(64),
+                          size: 123,
+                          strip_prefix: 'mpc-frame-0.1.1',
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            }),
+          ),
+      ),
+      mpcsDir: join(root, 'data', 'mpcs'),
+      pdksDir: join(root, 'data', 'pdks'),
+      resourcesDir: join(root, 'state', 'resources'),
+      toolsDir: join(root, 'data', 'tools'),
+    })
+
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      available_versions: ['0.1.1'],
+      description: 'Registry-managed MPC frame.',
     })
   })
 
@@ -281,7 +330,7 @@ describe('ResourceManagerService', () => {
     ).resolves.toEqual({
       status: 'started',
       resource_id: 'mpc:mpc-frame',
-      version: 'test-commit',
+      version: '0.1.0',
     })
 
     expect(extract).toHaveBeenCalledTimes(1)
@@ -289,7 +338,7 @@ describe('ResourceManagerService', () => {
       expect.arrayContaining(['downloading', 'verifying', 'extracting', 'done']),
     )
     await expect(
-      readFile(join(mpcsDir, 'mpc-frame', 'test-commit', 'FrameTop.sv'), 'utf8'),
+      readFile(join(mpcsDir, 'mpc-frame', '0.1.0', 'FrameTop.sv'), 'utf8'),
     ).resolves.toContain('module FrameTop')
     const manifest = JSON.parse(
       await readFile(join(root, 'state', 'resources', 'manifest.json'), 'utf8'),
@@ -297,11 +346,27 @@ describe('ResourceManagerService', () => {
     expect(manifest).toMatchObject({ schema_version: 2, mpcs_dir: mpcsDir })
     await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
       status: 'installed',
-      installed_version: 'test-commit',
-      path: join(mpcsDir, 'mpc-frame', 'test-commit'),
+      installed_version: '0.1.0',
+      path: join(mpcsDir, 'mpc-frame', '0.1.0'),
       actions: ['uninstall'],
       health: expect.objectContaining({ managed: true, source: 'registry' }),
     })
+
+    await writeMpcRegistry(registryPath, archive, '0.1.1')
+    await service.refreshRegistry()
+    await expect(service.getResource('mpc:mpc-frame')).resolves.toMatchObject({
+      status: 'update_available',
+      available_versions: ['0.1.1'],
+      actions: ['update', 'uninstall'],
+    })
+    await expect(service.updateResource('mpc:mpc-frame')).resolves.toEqual({
+      status: 'started',
+      resource_id: 'mpc:mpc-frame',
+      version: '0.1.1',
+    })
+    await expect(
+      readFile(join(mpcsDir, 'mpc-frame', '0.1.1', 'FrameTop.sv'), 'utf8'),
+    ).resolves.toContain('module FrameTop')
 
     await expect(service.uninstallResource('mpc:mpc-frame')).resolves.toEqual({
       status: 'uninstalled',

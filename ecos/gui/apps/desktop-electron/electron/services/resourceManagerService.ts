@@ -125,10 +125,10 @@ const BUILTIN_MPCS: RegistryMpc[] = [
     homepage: 'https://github.com/openecos-projects/mpc-frame',
     versions: [
       {
-        version: 'cc47470b72537',
+        version: '0.1.0',
         platforms: {
           [ALL_PLATFORM]: {
-            url: 'https://codeload.github.com/openecos-projects/mpc-frame/tar.gz/cc47470b72537ba3f0726468f5d5e27d317d9706',
+            url: 'https://github.com/openecos-projects/mpc-frame/archive/cc47470b72537ba3f0726468f5d5e27d317d9706.tar.gz',
             sha256: 'b6042bf6e0322cb1e532973a3811a06067e92fca808cb657c81cf7ad16399594',
             size: 470085,
             strip_prefix: 'mpc-frame-cc47470b72537ba3f0726468f5d5e27d317d9706',

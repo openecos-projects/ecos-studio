@@ -364,8 +364,11 @@ describe('ProjectsView project management surface', () => {
     expect(continueSource).toContain('endStep: branchDraft.value.targetEndStep')
   })
 
-  it('lets New Project create only the project root manifest', () => {
+  it('lets New Project create a root manifest with an optional managed MPC association', () => {
     expect(source).toContain('Project Storage Location')
+    expect(source).toContain('Managed MPC')
+    expect(source).toContain('listResourcesApi')
+    expect(source).toContain('projectMpcOptionFromResource')
     expect(source).toContain('selectProjectStorageLocation')
     expect(source).toContain('createProjectFolderDraft')
     expect(source).toContain('mutateProjectManifest')
@@ -377,6 +380,7 @@ describe('ProjectsView project management surface', () => {
     expect(createSource).not.toContain("path: '/ecc'")
     expect(createSource).not.toContain('workspacePath')
     expect(createSource).not.toContain("workspaces', 'ws_0001'")
+    expect(createSource).toContain('mpc: selectedProjectMpc.value')
   })
 
   it('renders an empty state instead of generated demo workspace data', () => {

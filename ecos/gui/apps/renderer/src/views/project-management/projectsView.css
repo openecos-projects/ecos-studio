@@ -1480,7 +1480,8 @@
   font-weight: 750;
 }
 
-.form-field input {
+.form-field input,
+.form-field select {
   height: 36px;
   padding: 0 11px;
   font-size: 13px;

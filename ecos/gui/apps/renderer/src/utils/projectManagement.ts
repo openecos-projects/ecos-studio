@@ -1,3 +1,4 @@
+import type { ResourceInfo } from '@ecos-studio/shared'
 import type { Project } from '@/types'
 import {
   buildProjectQorTrendSummary,
@@ -99,6 +100,14 @@ export interface ProjectWorkspaceManifest {
   parameter_patch: Record<string, unknown>
 }
 
+export interface ProjectManifestMpc {
+  resource_id: string
+  display_name: string
+  installed_version: string
+  path: string
+  spec_path: string
+}
+
 export interface ProjectManifest {
   schema_version: 1
   project_id: string
@@ -113,6 +122,7 @@ export interface ProjectManifest {
     directions: Record<string, 'maximize' | 'minimize'>
   }
   workspaces: ProjectWorkspaceManifest[]
+  mpc: ProjectManifestMpc | null
   best_workspace: {
     workspace_id: string
     reason: string
@@ -327,6 +337,7 @@ export interface ProjectSelectionState {
 export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
+  mpc?: ProjectManifestMpc | null
   now?: string
 }
 
@@ -889,6 +900,7 @@ export function createProjectManifestDraft(
       },
     },
     workspaces: [],
+    mpc: normalizeProjectManifestMpc(input.mpc),
     best_workspace: null,
     qor_baseline: null,
   }
@@ -905,8 +917,77 @@ export function parseProjectManifest(content: string): ProjectManifest {
   }
   return {
     ...parsed,
+    mpc: normalizeProjectManifestMpc(parsed.mpc),
     qor_baseline: parsed.qor_baseline ?? null,
   }
+}
+
+export function projectMpcOptionFromResource(
+  resource: ResourceInfo,
+): ProjectManifestMpc | null {
+  if (
+    resource.type !== 'mpc' ||
+    (resource.status !== 'installed' && resource.status !== 'update_available') ||
+    resource.health.status !== 'ok' ||
+    resource.health.managed !== true ||
+    !resource.id.startsWith('mpc:') ||
+    !resource.path ||
+    !resource.installed_version
+  ) {
+    return null
+  }
+
+  const path = normalizePath(resource.path.trim())
+  const displayName = resource.display_name.trim() || resource.name
+  const installedVersion = resource.installed_version.trim()
+  if (!path || !displayName || !installedVersion) return null
+
+  return {
+    resource_id: resource.id,
+    display_name: displayName,
+    installed_version: installedVersion,
+    path,
+    spec_path: joinPath(path, 'spec', 'spec.json.in'),
+  }
+}
+
+function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid project manifest MPC.')
+  }
+
+  const source = value as Record<string, unknown>
+  const resourceId = optionalString(source.resource_id)
+  const displayName = optionalString(source.display_name)
+  const installedVersion = optionalString(source.installed_version)
+  const mpcPath = optionalString(source.path)
+  const specPath = optionalString(source.spec_path)
+  if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
+    throw new Error('Invalid project manifest MPC resource_id.')
+  }
+  if (!displayName || !installedVersion || !mpcPath || !specPath) {
+    throw new Error('Invalid project manifest MPC fields.')
+  }
+
+  const normalizedPath = normalizeProjectManifestMpcPath(mpcPath)
+  const normalizedSpecPath = normalizeProjectManifestMpcPath(specPath)
+  if (normalizedSpecPath !== `${normalizedPath}/spec/spec.json.in`) {
+    throw new Error('Invalid project manifest MPC spec_path.')
+  }
+
+  return {
+    resource_id: resourceId,
+    display_name: displayName,
+    installed_version: installedVersion,
+    path: normalizedPath,
+    spec_path: normalizedSpecPath,
+  }
+}
+
+function normalizeProjectManifestMpcPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.length <= 1 ? normalized : normalized.replace(/\/+$/g, '')
 }
 
 export function parseWorkspaceFlowStateMap(

@@ -64,6 +64,14 @@ export interface ProjectManifestWorkspace {
   step_metrics: Record<string, Record<string, unknown>>
 }
 
+export interface ProjectManifestMpc {
+  resource_id: string
+  display_name: string
+  installed_version: string
+  path: string
+  spec_path: string
+}
+
 export interface ProjectManifest {
   schema_version: 1
   project_id: string
@@ -78,6 +86,7 @@ export interface ProjectManifest {
     directions: Record<string, 'maximize' | 'minimize'>
   }
   workspaces: ProjectManifestWorkspace[]
+  mpc: ProjectManifestMpc | null
   best_workspace: {
     workspace_id: string
     reason: string
@@ -87,6 +96,7 @@ export interface ProjectManifest {
 export interface ProjectManifestDraftInput {
   rootPath: string
   name: string
+  mpc?: ProjectManifestMpc | null
   now?: string
 }
 
@@ -125,7 +135,7 @@ export interface ProjectManifestResolvedReplacementBackupInput {
 }
 
 export type ProjectManifestMutation =
-  | { type: 'create'; name: string }
+  | { type: 'create'; name: string; mpc?: ProjectManifestMpc | null }
   | { input: ProjectManifestWorkspaceRegistrationInput; type: 'register-workspace' }
   | { type: 'archive-workspace'; workspaceId: string }
   | {
@@ -207,6 +217,7 @@ export function createProjectManifestDraft(
       },
     },
     workspaces: [],
+    mpc: normalizeProjectManifestMpc(input.mpc),
     best_workspace: null,
   }
 }
@@ -256,6 +267,7 @@ export function parseProjectManifest(content: string): ProjectManifest {
     workspaces: source.workspaces.map((workspace, index) =>
       normalizeWorkspace(workspace, index, createdAt),
     ),
+    mpc: normalizeProjectManifestMpc(source.mpc),
     best_workspace: normalizeBestWorkspace(source.best_workspace),
   }
 }
@@ -267,7 +279,11 @@ export function applyProjectManifestMutation(
 ): ProjectManifest {
   switch (mutation.type) {
     case 'create':
-      return createProjectManifestDraft({ name: mutation.name, rootPath: projectRoot })
+      return createProjectManifestDraft({
+        name: mutation.name,
+        rootPath: projectRoot,
+        mpc: mutation.mpc,
+      })
     case 'register-workspace': {
       const manifest =
         currentManifest ??
@@ -545,6 +561,47 @@ function normalizeWorkspace(
     parameter_patch: recordValue(source.parameter_patch) ?? {},
     metrics_summary: recordValue(source.metrics_summary) ?? {},
     step_metrics: normalizeStepMetrics(source.step_metrics),
+  }
+}
+
+function normalizeProjectManifestMpc(value: unknown): ProjectManifestMpc | null {
+  if (value === undefined || value === null) return null
+  const source = recordValue(value)
+  if (!source) {
+    throw new Error('Invalid project manifest: mpc must be an object or null.')
+  }
+
+  const resourceId = optionalString(source.resource_id)
+  const displayName = optionalString(source.display_name)
+  const installedVersion = optionalString(source.installed_version)
+  const mpcPath = optionalString(source.path)
+  const specPath = optionalString(source.spec_path)
+  if (!resourceId || !resourceId.startsWith('mpc:') || resourceId.length === 4) {
+    throw new Error(
+      'Invalid project manifest: mpc.resource_id must be an MPC resource id.',
+    )
+  }
+  if (!displayName || !installedVersion || !mpcPath || !specPath) {
+    throw new Error(
+      'Invalid project manifest: mpc requires display_name, installed_version, path, and spec_path.',
+    )
+  }
+
+  const normalizedPath = normalizeProjectManifestPath(mpcPath)
+  const normalizedSpecPath = normalizeProjectManifestPath(specPath)
+  const expectedSpecPath = `${normalizedPath}/spec/spec.json.in`
+  if (normalizedSpecPath !== expectedSpecPath) {
+    throw new Error(
+      'Invalid project manifest: mpc.spec_path must reference spec/spec.json.in below mpc.path.',
+    )
+  }
+
+  return {
+    resource_id: resourceId,
+    display_name: displayName,
+    installed_version: installedVersion,
+    path: normalizedPath,
+    spec_path: normalizedSpecPath,
   }
 }
 

@@ -102,6 +102,35 @@ describe('ProjectManifestService', () => {
     ).toEqual([])
   })
 
+  it('writes the selected MPC association when creating a project manifest', async () => {
+    const projectRoot = await createTemporaryProject()
+    const service = createService(projectRoot)
+    const mpcPath = '/resources/mpcs/mpc-frame/0.1.0'
+
+    const result = await service.mutate({
+      projectRoot,
+      mutation: {
+        type: 'create',
+        name: 'gcd',
+        mpc: {
+          resource_id: 'mpc:mpc-frame',
+          display_name: 'MPC Frame',
+          installed_version: '0.1.0',
+          path: mpcPath,
+          spec_path: `${mpcPath}/spec/spec.json.in`,
+        },
+      },
+    })
+
+    expect(parseProjectManifest(result.content).mpc).toEqual({
+      resource_id: 'mpc:mpc-frame',
+      display_name: 'MPC Frame',
+      installed_version: '0.1.0',
+      path: mpcPath,
+      spec_path: `${mpcPath}/spec/spec.json.in`,
+    })
+  })
+
   it('does not overwrite a malformed manifest when a mutation cannot be parsed', async () => {
     const projectRoot = await createTemporaryProject()
     const manifestPath = join(projectRoot, 'project.json')
@@ -144,6 +173,23 @@ describe('ProjectManifestService', () => {
         } as never,
       }),
     ).rejects.toThrow('Project manifest workspace registration input must be an object')
+
+    await expect(
+      service.mutate({
+        projectRoot,
+        mutation: {
+          type: 'create',
+          name: 'gcd',
+          mpc: {
+            resource_id: 'mpc:mpc-frame',
+            display_name: 'MPC Frame',
+            installed_version: '0.1.0',
+            path: '/resources/mpcs/mpc-frame/0.1.0',
+            spec_path: '/resources/mpcs/mpc-frame/0.1.0/spec.json.in',
+          },
+        },
+      }),
+    ).rejects.toThrow('MPC spec_path must reference spec/spec.json.in')
 
     await expect(
       readFile(join(projectRoot, 'project.json'), 'utf8'),
