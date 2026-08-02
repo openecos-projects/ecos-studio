@@ -5,8 +5,9 @@
 Allow the New Project wizard to read the installed MPC resource's
 `spec/spec.json.in`, let a user select one entry from `designs`, show the
 selected `core_template` as structured information, and persist an immutable
-copy in `project.json`. The saved template will be consumed by a later
-workspace-creation feature; that feature is outside this change.
+copy in `project.json`. A new workspace created beneath that project uses
+the snapshot to validate explicit Die area and saves the same MPC data into
+its `home/parameters.json`.
 
 MPC is optional. A generic project has `mpc: null` and stores no design or
 core-template data.
@@ -20,13 +21,18 @@ Included:
 - Modular preview of the selected design's `core_template`.
 - Saving the selected design identity and complete `core_template` JSON value
   in the project manifest at creation time.
+- Applying an MPC project's Die-area bounds in the New Workspace wizard when
+  the user enters explicit width and height.
+- Persisting the full MPC snapshot in the newly created workspace's
+  `home/parameters.json`.
 - Validation and tests across the Electron, shared-manifest, and renderer
   layers.
 
 Excluded:
 
-- Copying the template into workspace `parameters`.
 - Applying template values to physical-design tools.
+- Running the deferred MPC area validation for Utilitization / Margin mode;
+  the flow implementation will report that error later.
 - Editing or synthesizing MPC specifications.
 - Compatibility handling for project manifests created before this MPC feature.
 
@@ -71,6 +77,14 @@ stale or forged path.
 6. Project creation submits the selected resource association, design identity,
    and exact parsed `core_template`. The shared manifest layer validates and
    serializes the data into `project.json`.
+7. When a new or branch workspace is opened from Project Management, the
+   existing New Workspace wizard reads that project's manifest and retains the
+   MPC snapshot as workspace-creation context. It never rereads the installed
+   MPC resource.
+8. In Spec Setting, explicit Die width and height are multiplied and compared
+   with the selected template's area limits. On successful creation, the
+   complete manifest `mpc` record is added to the parameters sent to ECC, which
+   writes it to `home/parameters.json`.
 
 The renderer receives a resource identifier, never a caller-controlled source
 path. The desktop service alone constructs the path under the managed MPC
@@ -109,6 +123,77 @@ For a project without MPC, the manifest remains `"mpc": null`; no `design` or
 Since MPC association is new functionality, old non-null `mpc` manifest data
 without `design` and `core_template` is invalid rather than being upgraded or
 silently accepted.
+
+## Workspace Die Constraints and Parameters
+
+The current New Workspace wizard already loads `project.json` to apply project
+defaults. It will additionally derive a read-only MPC constraint context from
+`manifest.mpc`. The context is present only for a project with a valid
+non-null MPC snapshot and is cleared whenever the selected project changes.
+
+### Width / Height mode
+
+For `Width / Height`, the wizard computes:
+
+```
+die_area = die_width * die_height
+```
+
+Each finite positive constraint in `core_template.minimum_area` and
+`core_template.maximum_area` is applied independently. The UI displays the
+current area and every applicable bound immediately below the Die inputs. A
+value below the minimum or above the maximum produces an inline error that
+states the current value and permitted range. The wizard cannot advance from
+Spec Setting or create the workspace until the user supplies an in-range area.
+
+If both constraints exist but the minimum is greater than the maximum, the
+template is invalid for explicit Die sizing. The wizard reports this as an MPC
+configuration error and blocks creation in this mode. Missing or non-numeric
+area fields simply do not impose that bound.
+
+### Utilitization / Margin mode
+
+This mode remains available. Its final Die area depends on layout information
+that does not exist at workspace-creation time, so it receives no pre-create
+area comparison and does not block creation. The Spec Setting panel states
+that MPC area limits will be checked during the later flow run.
+
+### Workspace Parameters Contract
+
+Before invoking `workspace.create`, the renderer extends the existing backend
+parameters with the project manifest's exact MPC snapshot:
+
+```json
+{
+  "MPC": {
+    "resource_id": "mpc:mpc-frame",
+    "display_name": "MPC Frame",
+    "installed_version": "0.1.0",
+    "path": "/managed/mpcs/mpc-frame/0.1.0",
+    "spec_path": "/managed/mpcs/mpc-frame/0.1.0/spec/spec.json.in",
+    "design": {
+      "index": 0,
+      "design_name": "example-design",
+      "directory": "example-design"
+    },
+    "core_template": {}
+  }
+}
+```
+
+ECC already writes the `parameters` supplied to `workspace.create` into
+`home/parameters.json`; passing the snapshot in this request avoids a second,
+post-create file write and ensures only successful workspace creation produces
+the workspace copy. Future Home functionality reads `parameters.MPC` directly,
+without following a project path or downloading an MPC resource.
+
+Projects without MPC do not include an `MPC` key in workspace parameters.
+Existing-workspace reconfiguration is also outside this behavior: this applies
+when creating a new or branch workspace beneath a project.
+
+If a project manifest declares a non-null MPC but cannot be parsed as the
+required snapshot contract, the New Workspace wizard reports a blocking MPC
+configuration error rather than treating the project as unconstrained.
 
 ## Wizard Behavior
 
@@ -149,6 +234,11 @@ the MPC choice and create a generic project normally.
 - New Project view tests cover loading, design switching, state reset on MPC
   change, invalid-spec errors, and the exact snapshot submitted to project
   creation.
+- New Workspace wizard tests cover in-range, below-minimum, above-maximum, and
+  invalid-range Width / Height inputs, plus the non-blocking Utilitization /
+  Margin branch and generic projects.
+- Workspace creation tests prove the full `MPC` record is included in ECC
+  parameters for an MPC project and omitted otherwise.
 
 ## Acceptance Criteria
 
@@ -162,3 +252,9 @@ the MPC choice and create a generic project normally.
    data.
 5. A corrupt, missing, or structurally invalid MPC spec cannot create a project
    with that MPC, while generic project creation remains available.
+6. A new or branch workspace from an MPC project cannot proceed with explicit
+   Die width and height outside its template's area bounds.
+7. The Utilitization / Margin option remains usable and defers MPC area
+   validation to a later flow execution.
+8. A successfully created MPC workspace stores the full selected MPC snapshot
+   at `home/parameters.json` under the `MPC` key; a generic workspace omits it.
