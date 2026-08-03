@@ -182,6 +182,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     event.workspaceRerun &&
     event.workspaceRerunToken
   ) {
+    scrollWorkspaceSetupIntoView()
     messageStore.addAssistantMessage(
       event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`,
       'done',

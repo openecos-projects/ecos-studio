@@ -289,9 +289,15 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         "",
         "1",
         "set place.routability_opt to 0,set target_overflow to 0.1",
-        "2",
     ):
         _send(provider, session_id, message)
+
+    assert events[-2]["type"] == "message"
+    assert "Updated parameter values" in str(events[-2]["text"])
+    assert "| place.routability_opt | false |" in str(events[-2]["text"])
+    assert "| place.target_overflow | 0.1 |" in str(events[-2]["text"])
+
+    _send(provider, session_id, "2")
 
     assert events[-1]["type"] == "contract"
     assert "Confirm and start" in str(events[-1]["text"])

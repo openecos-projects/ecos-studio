@@ -23,6 +23,7 @@ from ecos_agent.messages import (
     operation_prompt,
     optional_file_prompt,
     pdk_prompt,
+    rerun_parameter_review,
     rerun_parameter_prompt,
     rerun_scope_prompt,
     project_root_prompt,
@@ -581,6 +582,16 @@ class EcosAgentProvider:
                 )
                 return
             session.rerun_parameter_patch = [item.model_dump(mode="json") for item in proposal.parameter_patch]
+            if session.rerun_parameter_patch:
+                effective_values = dict(parameter_values)
+                effective_values.update(
+                    {item["knob_id"]: item["value"] for item in session.rerun_parameter_patch}
+                )
+                self._emit(
+                    session,
+                    "message",
+                    rerun_parameter_review(session.language, tuple(sorted(effective_values.items()))),
+                )
         session.phase = "rerun_scope"
         self._emit(session, "message", rerun_scope_prompt(session.language))
 

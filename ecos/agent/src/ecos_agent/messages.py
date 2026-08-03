@@ -172,6 +172,19 @@ def rerun_parameter_prompt(
         if language == "zh"
         else "Describe the parameter change and value, or submit an empty input for no change."
     )
+    return "\n".join([_rerun_parameter_table(language, title, parameter_values), prompt])
+
+
+def rerun_parameter_review(
+    language: str, parameter_values: tuple[tuple[str, object], ...]
+) -> str:
+    title = "已更新的参数值：" if language == "zh" else "Updated parameter values:"
+    return _rerun_parameter_table(language, title, parameter_values)
+
+
+def _rerun_parameter_table(
+    language: str, title: str, parameter_values: tuple[tuple[str, object], ...]
+) -> str:
     rows = (
         ["| 参数名 | 当前值 |", "| --- | --- |"]
         if language == "zh"
@@ -180,7 +193,7 @@ def rerun_parameter_prompt(
     rows.extend(
         f"| {knob_id} | {_parameter_value(value)} |" for knob_id, value in parameter_values
     )
-    return "\n".join([title, *rows, prompt])
+    return "\n".join([title, *rows])
 
 
 def rerun_scope_prompt(language: str) -> str:

@@ -37,6 +37,9 @@ describe('AIChatPanel flow contracts', () => {
 
   it('prepares a validated workspace rerun without replacing the visible source workspace', () => {
     expect(source).toContain("event.type === 'workspace_rerun'")
+    expect(source).toMatch(
+      /event\.type === 'workspace_rerun'[\s\S]*workspaceRerunToken[\s\S]*scrollWorkspaceSetupIntoView\(\)[\s\S]*void executeWorkspaceRerun/,
+    )
     expect(source).toContain(
       'event.text ?? `Rerun ${event.workspaceRerun.rerun_id} accepted.`',
     )
