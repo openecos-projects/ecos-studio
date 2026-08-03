@@ -48,6 +48,8 @@ class CodexAppServerProposalProvider:
             (
                 "Return one JSON object matching flow-agent.gui_workspace_setup_proposal.v1. "
                 "Interpret only a correction to the supplied GUI workspace specification. "
+                "When numeric_field is supplied, interpret only that field and return null for every other "
+                "optional field. "
                 "Use read-only search and file reading only inside filesystem_roots. "
                 "Never modify files, return shell commands, select an ECC command, or grant execution authority."
             ),

@@ -67,9 +67,18 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     project_root.mkdir()
     rtl, filelist, sdc, pdk = _write_workspace_inputs(tmp_path)
     events: list[dict[str, object]] = []
+    parser_contexts: list[dict[str, object]] = []
+
+    def parse_workspace_setup(context: dict[str, object]) -> GuiWorkspaceSetupProposal:
+        parser_contexts.append(context)
+        callback = context["_progress_callback"]
+        assert callable(callback)
+        callback("Codex is analyzing the bounded numeric request.")
+        return _proposal(target_overflow=0.1)
+
     provider = EcosAgentProvider(
         emit=events.append,
-        workspace_setup_parser=lambda _context: _proposal(),
+        workspace_setup_parser=parse_workspace_setup,
         workspace_path_recommender=lambda _context: _proposal(),
     )
 
@@ -89,7 +98,7 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         "",
         "",
         "",
-        "",
+        "target overflow is 0.1",
     ):
         _send(provider, session_id, message)
 
@@ -98,11 +107,36 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     assert "execute" not in provider.__dict__
     assert setup["schema_version"] == "flow-agent.workspace_setup_contract.v2"
     assert setup["directory"] == str(project_root / "gcd")
+    assert setup["parameters"]["target_overflow"] == 0.1
+    assert parser_contexts[0]["numeric_field"] == "target_overflow"
+    assert parser_contexts[0]["numeric_bounds"] == {"lower": 0, "upper": 1}
+    assert all(event["type"] != "error" for event in events)
+    assert any(event["type"] == "tool" for event in events)
 
     _send(provider, session_id, "1")
 
     assert events[-1]["type"] == "workspace_create"
     assert events[-1]["providerId"] == "ecos_agent"
+
+
+def test_numeric_semantic_fallback_fails_closed_when_codex_times_out(tmp_path: Path) -> None:
+    events: list[dict[str, object]] = []
+
+    def mock_codex_timeout(_context: dict[str, object]) -> None:
+        raise CodexProviderError("mock timeout", failure_class="timeout")
+
+    provider = EcosAgentProvider(emit=events.append, workspace_setup_parser=mock_codex_timeout)
+    session_id = provider.start_session({})["sessionId"]
+    session = provider.sessions[session_id]
+    session.phase = "workspace_overflow"
+    session.workspace_inputs.project_root = str(tmp_path)
+
+    _send(provider, session_id, "target overflow is 0.1")
+
+    assert session.phase == "workspace_overflow"
+    assert events[-2]["type"] == "message"
+    assert "Unable to interpret" in str(events[-2]["text"])
+    assert not any(event["type"] == "workspace_setup" for event in events)
 
 
 def test_rerun_accepts_a_user_supplied_workspace_root(tmp_path: Path, monkeypatch) -> None:

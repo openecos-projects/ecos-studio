@@ -89,6 +89,13 @@ PROVIDER_ID = "ecos_agent"
 _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
+_NUMERIC_FIELDS = {
+    "Frequency Max (MHz)": "frequency_mhz",
+    "Max Fanout": "max_fanout",
+    "Die Area Utilization": "utilitization",
+    "Placement Target Density": "target_density",
+    "Placement Target Overflow": "target_overflow",
+}
 
 
 @dataclass
@@ -674,8 +681,37 @@ class EcosAgentProvider:
         current = _number_default(session.workspace_setup, label)
         try:
             return parse_number(message, label=label, lower=lower, upper=upper, default=current)
-        except ValueError as exc:
-            self._emit(session, "message", invalid_value(session.language, label, str(exc)))
+        except ValueError:
+            pass
+        try:
+            field = _NUMERIC_FIELDS[label]
+            proposal = GuiWorkspaceSetupProposal.model_validate(
+                self.workspace_setup_parser(
+                    {
+                        "schema_version": "flow-agent.gui_workspace_setup_context.v2",
+                        "stage": "numeric",
+                        "numeric_field": field,
+                        "numeric_label": label,
+                        "numeric_bounds": {"lower": lower, "upper": upper},
+                        "default_value": current,
+                        "natural_language_choice": message,
+                        "recommended_defaults": session.workspace_setup.model_dump(mode="json"),
+                        "workspace_inputs": _workspace_inputs_payload(session.workspace_inputs),
+                        "filesystem_roots": list(workspace_search_roots(session.workspace_inputs.project_root)),
+                        "_progress_callback": lambda text: self._emit(session, "tool", text),
+                    }
+                )
+            )
+            value = getattr(proposal, field)
+            if value is None:
+                raise ValueError("Codex did not provide a value for this field")
+            return parse_number(str(value), label=label, lower=lower, upper=upper, default=current)
+        except (CodexProviderError, ValueError):
+            self._emit(
+                session,
+                "message",
+                invalid_value(session.language, label, "Unable to interpret a valid in-range value"),
+            )
             self._emit(session, "message", number_prompt(session.language, label, current, lower, upper))
             return None
 
