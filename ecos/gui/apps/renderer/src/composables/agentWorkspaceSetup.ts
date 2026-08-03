@@ -5,6 +5,7 @@ import type { WorkspaceConfig } from '@/types'
 export interface AgentWorkspaceCreationResult {
   created: boolean
   error?: string
+  workspacePath?: string
 }
 
 export const agentWorkspaceSetupKey: InjectionKey<

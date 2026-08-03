@@ -149,7 +149,6 @@ import { registerHomeWorkspaceRerun } from '@/composables/homeFlowRerun'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { usePdkManager } from '@/composables/usePdkManager'
 import { useVersion } from '@/composables/useVersion'
-import { useFlowRunner } from '@/composables/useFlowRunner'
 import {
   getOptionalDesktopApi,
   hasDesktopApi,
@@ -202,7 +201,6 @@ const {
 const { loadPdks } = usePdkManager()
 const { loadVersions } = useVersion()
 const { showToast } = useWorkspace()
-const { runAllFlow } = useFlowRunner()
 const { showManageDialog, openManageDialog } = useDesignFiles()
 const {
   closeSignoffPackageReview,
@@ -268,8 +266,7 @@ async function createWorkspaceFromAgent(
   await syncProjectManagedWorkspace(config)
   await router.push('/workspace')
   await nextTick()
-  void runAllFlow()
-  return { created: true }
+  return { created: true, workspacePath }
 }
 
 provide(agentWorkspaceSetupKey, createWorkspaceFromAgent)

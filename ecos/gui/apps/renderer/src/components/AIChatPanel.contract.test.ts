@@ -36,6 +36,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain(
       "if (event.text) messageStore.addAssistantMessage(event.text, 'done')",
     )
+    expect(source).toMatch(
+      /await agentFlowProgress\.start\(result\.workspacePath\)[\s\S]*void runAllFlow\(\)\.finally\(agentFlowProgress\.stop\)/,
+    )
   })
 
   it('prepares a validated workspace rerun without replacing the visible source workspace', () => {
@@ -56,6 +59,9 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).toContain('prepareRerun({ token })')
     expect(source).toContain('workspace_rerun_result:')
     expect(source).toContain('await desktopApi.workspace.bindWindow(prepared.directory)')
+    expect(source).toMatch(
+      /await agentFlowProgress\.start\(prepared\.directory\)[\s\S]*await executeRerun/,
+    )
     expect(source).toContain('executeRerun({ token: prepared.executionToken })')
     expect(source).toContain("'Preparing isolated rerun workspace.'")
     expect(source).toContain("'Opening isolated rerun workspace.'")

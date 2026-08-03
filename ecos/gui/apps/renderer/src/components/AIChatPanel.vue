@@ -90,6 +90,8 @@ import AgentWorkspaceSetupPanel from './AgentWorkspaceSetupPanel.vue'
 import { useMessageStore } from '../stores/messageStore'
 import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
+import { useAgentFlowProgress } from '@/composables/useAgentFlowProgress'
+import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useWorkspace } from '@/composables/useWorkspace'
 
 const AGENT_PROVIDER_ID = 'ecos_agent'
@@ -98,6 +100,10 @@ const { messages } = storeToRefs(messageStore)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
 const router = useRouter()
 const { openProject } = useWorkspace()
+const { runAllFlow } = useFlowRunner()
+const agentFlowProgress = useAgentFlowProgress((message) =>
+  messageStore.addAssistantMessage(message, 'done'),
+)
 
 const inputValue = ref('')
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
@@ -127,6 +133,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   unsubscribeAgentEvents?.()
+  agentFlowProgress.stop()
 })
 
 async function connectAgent(): Promise<void> {
@@ -317,6 +324,9 @@ async function createWorkspaceFromAgent(
   try {
     const result = await createAgentWorkspace(config, contract)
     if (result.created) {
+      if (!result.workspacePath) throw new Error('Workspace creation did not return a project path.')
+      await agentFlowProgress.start(result.workspacePath)
+      void runAllFlow().finally(agentFlowProgress.stop)
       await reportWorkspaceCreationResult(contract.setup_id, 'succeeded', '')
     } else {
       workspaceCreateSetupId.value = undefined
@@ -387,6 +397,7 @@ async function executeWorkspaceRerun(
     if (!opened) throw new Error('The rerun workspace could not be opened.')
     await desktopApi.workspace.bindWindow(prepared.directory)
     await router.push({ name: ':step', params: { step: contract.target_step } })
+    await agentFlowProgress.start(prepared.directory)
     messageStore.addAssistantMessage('Starting rerun execution.', 'done')
     await executeRerun({ token: prepared.executionToken })
     messageStore.addAssistantMessage(`Rerun ${contract.rerun_id} completed.`, 'done')
@@ -400,6 +411,7 @@ async function executeWorkspaceRerun(
       messageStore.addAssistantMessage(reason, 'error')
     }
   } finally {
+    agentFlowProgress.stop()
     isWorkspaceRerunPending.value = false
   }
 }
