@@ -24,6 +24,7 @@ from ecos_agent.messages import (
     rerun_parameter_prompt,
     rerun_scope_prompt,
     rerun_stage_prompt,
+    rerun_workspace_prompt,
     rtl_prompt,
     workspace_confirmation_prompt,
     workspace_execution_started,
@@ -31,7 +32,6 @@ from ecos_agent.messages import (
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunParameterProposal,
-    GuiWorkspaceRerunPathProposal,
     GuiWorkspaceRerunResolver,
 )
 from ecos_agent.workspace_setup import (
@@ -165,22 +165,6 @@ def _propose_gui_workspace_rerun_patch(
         provider.close()
 
 
-def _propose_gui_workspace_rerun_path(context: dict[str, Any]) -> GuiWorkspaceRerunPathProposal:
-    progress_callback, request_context = _gui_workspace_request_context(context)
-    roots = request_context.get("filesystem_roots")
-    if not isinstance(roots, list) or not roots or not all(isinstance(root, str) for root in roots):
-        raise CodexProviderError("GUI rerun search roots are missing", failure_class="missing_input")
-    provider = create_required_codex_provider(
-        cwd=Path(roots[0]), runtime_workspace_roots=roots, progress_callback=progress_callback
-    )
-    try:
-        return GuiWorkspaceRerunPathProposal.model_validate(
-            provider.propose_gui_workspace_rerun_path(request_context)
-        )
-    finally:
-        provider.close()
-
-
 def _gui_workspace_request_context(
     context: Mapping[str, Any],
 ) -> tuple[Callable[[str], None] | None, dict[str, Any]]:
@@ -265,12 +249,6 @@ def _path_was_explicitly_provided(message: str, path: str) -> bool:
     return False
 
 
-def _rerun_workspace_recommendation(language: str) -> str:
-    if language == "zh":
-        return "已找到可用于重跑的 workspace。"
-    return "A workspace is available for rerun."
-
-
 def _workspace_rerun_execution_contract(
     contract: GuiWorkspaceRerunContract,
     language: str,
@@ -341,6 +319,9 @@ def _prompt_for_phase(session: _Session) -> str:
     prompts = {
         "operation": operation_prompt(session.language),
         "rerun_design": rerun_design_prompt(session.language),
+        "rerun_workspace": rerun_workspace_prompt(
+            session.language, session.rerun_workspace_path
+        ),
         "rerun_stage": rerun_stage_prompt(
             session.language,
             () if session.rerun_discovery is None else session.rerun_discovery.allowed_stages,

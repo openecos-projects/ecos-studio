@@ -28,9 +28,9 @@ uv run python -m ecos_agent.provider
 - `1` Run flow: collect and validate the existing workspace, design, RTL,
   constraints, PDK, and physical-design fields. After explicit confirmation,
   ECOS Studio creates the workspace and runs its existing ECC lifecycle.
-- `2` Rerun step: enter a design name. Codex searches only the parent of the
-  current ECOS workspace, then recommends a completed source workspace that
-  is locally verified before stage selection. The remaining parameter, scope,
+- `2` Rerun step: enter a design name, then confirm the current GUI workspace
+  path or enter another source workspace path. The path is locally verified
+  before stage selection. The remaining parameter, scope,
   and frozen-contract flow is unchanged.
 
 The provider always sends typed, review-required contracts. Codex is limited

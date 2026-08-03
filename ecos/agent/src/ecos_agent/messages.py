@@ -144,6 +144,20 @@ def rerun_design_prompt(language: str) -> str:
     )
 
 
+def rerun_workspace_prompt(language: str, default_path: str | None) -> str:
+    if default_path:
+        return _prompt(
+            language,
+            f"重跑源 workspace 路径是什么？留空使用当前 GUI workspace：{default_path}；也可输入其他已有路径。",
+            f"What is the source workspace path? Submit an empty input to use the current GUI workspace: {default_path}; or enter another existing path.",
+        )
+    return _prompt(
+        language,
+        "请输入已有的重跑源 workspace 路径。",
+        "Enter an existing source workspace path for rerun.",
+    )
+
+
 def rerun_stage_prompt(language: str, stages: tuple[str, ...]) -> str:
     title = "选择重跑起始阶段：" if language == "zh" else "Choose the rerun start stage:"
     return "\n".join([title, *(f"{index}. {stage}" for index, stage in enumerate(stages, 1))])
@@ -188,10 +202,6 @@ def source_run_prompt(language: str, run_ids: tuple[str, ...]) -> str:
 
 def confirmation_menu(language: str) -> str:
     return _prompt(language, "请选择：\n1. 确认并开始运行\n2. 取消", "Choose:\n1. Confirm and start\n2. Cancel")
-
-
-def no_source_run_message(language: str) -> str:
-    return _prompt(language, "没有可用的冻结源 run。", "No frozen source runs are available.")
 
 
 def numbered_choice(value: str, options: tuple[str, ...]) -> str | None:

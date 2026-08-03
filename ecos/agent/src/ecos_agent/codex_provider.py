@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterable, Mapping
 from ecos_agent.codex_rpc import CodexProviderError, _JsonLineRpcProcessClient, _read_nested_string
 from ecos_agent.contracts import GUI_WORKSPACE_FLOW_STEPS, GuiWorkspaceSetupProposal
 from ecos_agent.ecc_contracts import ECCParameterPatchItem
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal, GuiWorkspaceRerunPathProposal
+from ecos_agent.workspace_rerun import GuiWorkspaceRerunParameterProposal
 
 
 class CodexAppServerProposalProvider:
@@ -84,27 +84,12 @@ class CodexAppServerProposalProvider:
             GuiWorkspaceRerunParameterProposal,
         )
 
-    def propose_gui_workspace_rerun_path(self, context: dict[str, Any]) -> dict[str, Any]:
-        return self._proposal(
-            context,
-            (
-                "Return one JSON object matching flow-agent.gui_workspace_rerun_path_proposal.v1. "
-                "Find one completed ECOS source workspace for design_name only inside filesystem_roots. "
-                "Return null when no matching workspace is found. Never modify files, return shell commands, "
-                "or grant execution authority."
-            ),
-            _gui_workspace_rerun_path_output_schema(),
-            GuiWorkspaceRerunPathProposal,
-        )
-
     def _proposal(
         self,
         context: dict[str, Any],
         system: str,
         output_schema: dict[str, Any],
-        model: type[GuiWorkspaceSetupProposal]
-        | type[GuiWorkspaceRerunParameterProposal]
-        | type[GuiWorkspaceRerunPathProposal],
+        model: type[GuiWorkspaceSetupProposal] | type[GuiWorkspaceRerunParameterProposal],
     ) -> dict[str, Any]:
         try:
             return model.model_validate(
@@ -337,22 +322,6 @@ def _gui_workspace_rerun_patch_output_schema(allowed_knobs: list[str]) -> dict[s
                     },
                 },
             },
-            "summary": {"type": "string", "minLength": 1, "maxLength": 512},
-        },
-    }
-
-
-def _gui_workspace_rerun_path_output_schema() -> dict[str, Any]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["schema_version", "source_workspace", "summary"],
-        "properties": {
-            "schema_version": {
-                "type": "string",
-                "const": "flow-agent.gui_workspace_rerun_path_proposal.v1",
-            },
-            "source_workspace": {"type": ["string", "null"], "maxLength": 4096},
             "summary": {"type": "string", "minLength": 1, "maxLength": 512},
         },
     }
