@@ -221,8 +221,8 @@ def create_required_codex_provider(
 
 def _resolve_codex_bin(candidate: str | None, env: Mapping[str, str]) -> str:
     if candidate:
-        path = Path(candidate)
-        resolved = shutil.which(candidate, path=env.get("PATH"))
+        path = Path(candidate).expanduser()
+        resolved = shutil.which(str(path), path=env.get("PATH"))
         if resolved:
             return resolved
         if path.is_file() and os.access(path, os.X_OK):

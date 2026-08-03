@@ -3,5 +3,8 @@
   "displayName": "ECOS Agent",
   "command": "uv",
   "args": ["run", "python", "-m", "ecos_agent.provider"],
+  "environment": {
+    "ECOS_AGENT_CODEX_BIN": "~/.nvm/versions/node/v20.20.2/bin/codex"
+  },
   "protocolVersion": 1
 }

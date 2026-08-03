@@ -8,6 +8,7 @@ export interface AgentProviderManifest {
   args?: string[]
   command: string
   displayName?: string
+  environment?: Record<string, string>
   providerId: string
   protocolVersion: number
 }
@@ -87,6 +88,7 @@ function validateAgentProviderManifest(
   const displayName = readOptionalString(record.displayName)
   const protocolVersion = record.protocolVersion
   const args = readStringArray(record.args)
+  const environment = readEnvironment(record.environment, manifestPath)
 
   if (!providerId) {
     throw new Error(`Agent provider manifest is missing providerId: ${manifestPath}`)
@@ -104,9 +106,35 @@ function validateAgentProviderManifest(
     ...(args ? { args } : {}),
     command,
     ...(displayName ? { displayName } : {}),
+    ...(environment ? { environment } : {}),
     providerId,
     protocolVersion,
   }
+}
+
+function readEnvironment(
+  value: unknown,
+  manifestPath: string,
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      `Agent provider manifest environment must be an object: ${manifestPath}`,
+    )
+  }
+
+  const environment: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
+      typeof item !== 'string' ||
+      !item.trim()
+    ) {
+      throw new Error(`Agent provider manifest environment is invalid: ${manifestPath}`)
+    }
+    environment[key] = item
+  }
+  return Object.keys(environment).length > 0 ? environment : undefined
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

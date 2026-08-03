@@ -68,7 +68,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private stdoutBuffer = ''
 
   constructor(options: AgentProviderProcessRuntimeOptions) {
-    this.env = options.env ?? process.env
+    this.env = { ...(options.env ?? process.env), ...options.manifest.environment }
     this.manifest = options.manifest
     this.spawnImpl = options.spawn ?? spawnChild
   }

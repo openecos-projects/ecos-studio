@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -22,6 +21,7 @@ from ecos_agent.messages import (
     pdk_prompt,
     project_root_prompt,
     rerun_design_prompt,
+    rerun_workspace_root_prompt,
     rerun_parameter_prompt,
     rerun_scope_prompt,
     rerun_stage_prompt,
@@ -118,12 +118,10 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
     session.phase = "confirmation"
 
 
-def _rerun_resolver(provider: Any) -> GuiWorkspaceRerunResolver:
-    if provider.workspace_rerun_resolver is None:
-        provider.workspace_rerun_resolver = GuiWorkspaceRerunResolver(
-            provider.workspace_root or _workspace_root_from_environment()
-        )
-    return provider.workspace_rerun_resolver
+def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
+    if session.rerun_resolver is None:
+        raise ValueError("Rerun workspace root has not been provided")
+    return session.rerun_resolver
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
@@ -326,6 +324,7 @@ def _rerun_completion_message(language: str) -> str:
 def _prompt_for_phase(session: _Session) -> str:
     prompts = {
         "operation": operation_prompt(session.language),
+        "rerun_workspace_root": rerun_workspace_root_prompt(session.language),
         "rerun_design": rerun_design_prompt(session.language),
         "rerun_stage": rerun_stage_prompt(
             session.language,
@@ -381,16 +380,6 @@ def _recommended_path(session: _Session, field: str) -> str:
 
 def _flow_steps() -> list[str]:
     return list(GUI_WORKSPACE_FLOW_STEPS)
-
-
-def _workspace_root_from_environment() -> Path:
-    value = os.environ.get("ECOS_AGENT_WORKSPACE_ROOT")
-    if not value:
-        raise ValueError("ECOS_AGENT_WORKSPACE_ROOT is required for workspace rerun")
-    root = Path(value).expanduser()
-    if not root.is_dir():
-        raise ValueError("ECOS_AGENT_WORKSPACE_ROOT must be an existing directory")
-    return root
 
 
 def _operation_choice(message: str) -> str | None:

@@ -90,6 +90,31 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('passes trusted manifest environment to the provider process', () => {
+    const harness = createSpawnHarness()
+    const env = { HOME: '/home/tester', PATH: '/tools/bin' }
+    const runtime = new AgentProviderProcessRuntime({
+      env,
+      manifest: {
+        command: 'ecos-agent-provider',
+        environment: { ECOS_AGENT_CODEX_BIN: '~/.nvm/versions/node/v20.20.2/bin/codex' },
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    void runtime.getStatus({ providerId: 'ecos_agent' })
+
+    expect(harness.spawn).toHaveBeenCalledWith('ecos-agent-provider', [], {
+      cwd: '/plugins/ecos-agent',
+      env: { ...env, ECOS_AGENT_CODEX_BIN: '~/.nvm/versions/node/v20.20.2/bin/codex' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  })
+
   it('forwards provider events from process stdout through AgentRuntimeManager', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

@@ -1,10 +1,9 @@
 import json
 from pathlib import Path
 
-from ecos_agent.codex_provider import CodexProviderError
+from ecos_agent.codex_provider import CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
-from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver
 
 
 def _proposal(**overrides: object) -> GuiWorkspaceSetupProposal:
@@ -53,6 +52,16 @@ def _write_workspace_inputs(root: Path) -> tuple[Path, Path, Path, Path]:
     return rtl, filelist, sdc, pdk
 
 
+def test_codex_bin_expands_the_user_home_directory(tmp_path: Path, monkeypatch) -> None:
+    codex = tmp_path / "bin" / "codex"
+    codex.parent.mkdir()
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert _resolve_codex_bin("~/bin/codex", {"PATH": ""}) == str(codex)
+
+
 def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None:
     project_root = tmp_path / "projects"
     project_root.mkdir()
@@ -62,7 +71,6 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
         emit=events.append,
         workspace_setup_parser=lambda _context: _proposal(),
         workspace_path_recommender=lambda _context: _proposal(),
-        workspace_root=project_root,
     )
 
     session_id = provider.start_session({})["sessionId"]
@@ -97,8 +105,35 @@ def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None
     assert events[-1]["providerId"] == "ecos_agent"
 
 
-def test_rerun_requires_an_explicit_workspace_root(monkeypatch) -> None:
+def test_rerun_accepts_a_user_supplied_workspace_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("ECOS_AGENT_WORKSPACE_ROOT", raising=False)
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+
+    session_id = provider.start_session({})["sessionId"]
+    _send(provider, session_id, "2")
+    _send(provider, session_id, str(tmp_path))
+
+    assert provider.sessions[session_id].phase == "rerun_design"
+    assert "design name" in str(events[-1]["text"])
+
+
+def test_rerun_rejects_a_missing_user_supplied_workspace_root(tmp_path: Path) -> None:
+    events: list[dict[str, object]] = []
+    provider = EcosAgentProvider(emit=events.append)
+
+    session_id = provider.start_session({})["sessionId"]
+    _send(provider, session_id, "2")
+    _send(provider, session_id, str(tmp_path / "missing"))
+
+    assert provider.sessions[session_id].phase == "rerun_workspace_root"
+    assert events[-2]["type"] == "message"
+    assert "Rerun Workspace Root" in str(events[-2]["text"])
+    assert not any(event["type"] == "workspace_rerun" for event in events)
+
+
+def test_rerun_does_not_read_the_workspace_root_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("ECOS_AGENT_WORKSPACE_ROOT", "/not-used")
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(emit=events.append)
 
@@ -106,9 +141,9 @@ def test_rerun_requires_an_explicit_workspace_root(monkeypatch) -> None:
     _send(provider, session_id, "2")
     _send(provider, session_id, "gcd")
 
-    assert provider.sessions[session_id].phase == "rerun_design"
-    assert events[-2]["type"] == "error"
-    assert "ECOS_AGENT_WORKSPACE_ROOT is required" in events[-2]["text"]
+    assert provider.sessions[session_id].phase == "rerun_workspace_root"
+    assert events[-1]["type"] == "message"
+    assert "contains the ECOS workspaces" in str(events[-1]["text"])
     assert not any(event["type"] == "workspace_rerun" for event in events)
 
 
@@ -129,7 +164,6 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     events: list[dict[str, object]] = []
     provider = EcosAgentProvider(
         emit=events.append,
-        workspace_rerun_resolver=GuiWorkspaceRerunResolver(tmp_path),
         rerun_parameter_parser=lambda _context: {
             "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
             "parameter_patch": [{"knob_id": "place.target_density", "value": 0.55}],
@@ -138,7 +172,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     )
 
     session_id = provider.start_session({})["sessionId"]
-    for message in ("2", "gcd", "1", "reduce density", "2", "1"):
+    for message in ("2", str(tmp_path), "gcd", "1", "reduce density", "2", "1"):
         _send(provider, session_id, message)
 
     messages = [event["text"] for event in events if event["type"] == "message"]
@@ -180,11 +214,10 @@ def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:
 
     provider = EcosAgentProvider(
         emit=events.append,
-        workspace_rerun_resolver=GuiWorkspaceRerunResolver(tmp_path),
         rerun_parameter_parser=mock_codex_timeout,
     )
     session_id = provider.start_session({})["sessionId"]
-    for message in ("2", "gcd", "1", "reduce density"):
+    for message in ("2", str(tmp_path), "gcd", "1", "reduce density"):
         _send(provider, session_id, message)
 
     assert provider.sessions[session_id].phase == "rerun_parameter"
