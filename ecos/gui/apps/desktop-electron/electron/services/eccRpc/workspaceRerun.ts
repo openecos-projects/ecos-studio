@@ -476,12 +476,24 @@ async function invalidateWorkspaceRerunSuffix(
   workspace: string,
   targetStep: string,
 ): Promise<void> {
-  const home = await resolvePathWithinWorkspace(workspace, join(workspace, 'home'), 'rerun home')
-  const flowPath = await resolvePathWithinWorkspace(workspace, join(home, 'flow.json'), 'rerun flow')
+  const home = await resolvePathWithinWorkspace(
+    workspace,
+    join(workspace, 'home'),
+    'rerun home',
+  )
+  const flowPath = await resolvePathWithinWorkspace(
+    workspace,
+    join(home, 'flow.json'),
+    'rerun flow',
+  )
   const flow = parseWorkspaceFlow(await readFile(flowPath, 'utf8'))
-  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(targetStep as (typeof FLOW_STEP_SEQUENCE)[number])
+  const targetIndex = FLOW_STEP_SEQUENCE.indexOf(
+    targetStep as (typeof FLOW_STEP_SEQUENCE)[number],
+  )
   for (const step of flow.steps) {
-    const stepIndex = FLOW_STEP_SEQUENCE.indexOf(step.name as (typeof FLOW_STEP_SEQUENCE)[number])
+    const stepIndex = FLOW_STEP_SEQUENCE.indexOf(
+      step.name as (typeof FLOW_STEP_SEQUENCE)[number],
+    )
     if (stepIndex < targetIndex) continue
     await emptyWorkspaceStepDirectory(workspace, step)
     step.state = 'Unstart'
@@ -506,7 +518,9 @@ async function emptyWorkspaceStepDirectory(
   }
   const resolvedStage = await realpath(stageDirectory)
   if (!isWithinWorkspace(workspace, resolvedStage)) {
-    throw new Error(`Workspace rerun stage directory is outside the workspace root: ${step.name}`)
+    throw new Error(
+      `Workspace rerun stage directory is outside the workspace root: ${step.name}`,
+    )
   }
   await rm(resolvedStage, { force: true, recursive: true })
   await mkdir(stageDirectory)

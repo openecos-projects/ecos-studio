@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -40,7 +48,10 @@ async function writeSourceWorkspace(): Promise<{
   await mkdir(join(source, 'CTS_ecc', 'output'), { recursive: true })
   await mkdir(join(source, 'legalization_dreamplace', 'output'), { recursive: true })
   await writeFile(join(source, 'home', 'flow.json'), flow)
-  await writeFile(join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'), 'checkpoint')
+  await writeFile(
+    join(source, 'fixFanout_ecc', 'output', 'gcd_fixFanout.def.gz'),
+    'checkpoint',
+  )
   await writeFile(
     join(source, 'place_dreamplace', 'output', 'gcd_place.def.gz'),
     artifact,
@@ -120,11 +131,18 @@ describe('prepareWorkspaceRerun', () => {
     await prepareWorkspaceRerun(contract)
 
     await expect(
-      readFile(`${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`, 'utf8'),
+      readFile(
+        `${contract.target_workspace}/fixFanout_ecc/output/gcd_fixFanout.def.gz`,
+        'utf8',
+      ),
     ).resolves.toBe('checkpoint')
-    await expect(readdir(`${contract.target_workspace}/place_dreamplace`)).resolves.toEqual([])
+    await expect(
+      readdir(`${contract.target_workspace}/place_dreamplace`),
+    ).resolves.toEqual([])
     await expect(readdir(`${contract.target_workspace}/CTS_ecc`)).resolves.toEqual([])
-    await expect(readdir(`${contract.target_workspace}/legalization_dreamplace`)).resolves.toEqual([])
+    await expect(
+      readdir(`${contract.target_workspace}/legalization_dreamplace`),
+    ).resolves.toEqual([])
 
     const targetFlow = JSON.parse(
       await readFile(`${contract.target_workspace}/home/flow.json`, 'utf8'),

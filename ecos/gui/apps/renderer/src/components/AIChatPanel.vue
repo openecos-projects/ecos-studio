@@ -324,7 +324,8 @@ async function createWorkspaceFromAgent(
   try {
     const result = await createAgentWorkspace(config, contract)
     if (result.created) {
-      if (!result.workspacePath) throw new Error('Workspace creation did not return a project path.')
+      if (!result.workspacePath)
+        throw new Error('Workspace creation did not return a project path.')
       await agentFlowProgress.start(result.workspacePath)
       void runAllFlow().finally(agentFlowProgress.stop)
       await reportWorkspaceCreationResult(contract.setup_id, 'succeeded', '')

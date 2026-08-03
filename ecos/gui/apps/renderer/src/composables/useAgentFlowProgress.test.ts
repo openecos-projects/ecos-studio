@@ -81,6 +81,8 @@ describe('useAgentFlowProgress', () => {
     testState.readError = new Error('unavailable')
 
     await expect(progress.start('/runs/gcd')).resolves.toBeUndefined()
-    expect(messages).toEqual(['Live flow progress is unavailable. Execution will continue.'])
+    expect(messages).toEqual([
+      'Live flow progress is unavailable. Execution will continue.',
+    ])
   })
 })

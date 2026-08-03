@@ -10,8 +10,7 @@ interface FlowState {
   steps?: unknown
 }
 
-const PRIMARY_ARTIFACT_PATTERN =
-  /\.(?:def|v|verilog|gds|spef)(?:\.gz)?$/i
+const PRIMARY_ARTIFACT_PATTERN = /\.(?:def|v|verilog|gds|spef)(?:\.gz)?$/i
 
 function flowSteps(content: string | null): FlowStep[] {
   if (!content) return []
@@ -44,13 +43,20 @@ export function useAgentFlowProgress(report: (message: string) => void) {
   let unwatch: (() => void) | null = null
   let states = new Map<string, string>()
 
-  async function primaryArtifacts(workspacePath: string, step: FlowStep): Promise<string[]> {
+  async function primaryArtifacts(
+    workspacePath: string,
+    step: FlowStep,
+  ): Promise<string[]> {
     const api = getOptionalDesktopApi()
     if (!api) return []
     try {
-      const entries = await api.workspace.listProjectDirectory(outputDirectory(workspacePath, step))
+      const entries = await api.workspace.listProjectDirectory(
+        outputDirectory(workspacePath, step),
+      )
       return entries
-        .filter((entry) => entry.type === 'file' && PRIMARY_ARTIFACT_PATTERN.test(entry.name))
+        .filter(
+          (entry) => entry.type === 'file' && PRIMARY_ARTIFACT_PATTERN.test(entry.name),
+        )
         .map((entry) => entry.path)
     } catch {
       return []
