@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from ecos_agent.codex_provider import CodexProviderError, _resolve_codex_bin
+from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 
@@ -60,6 +60,38 @@ def test_codex_bin_expands_the_user_home_directory(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("HOME", str(tmp_path))
 
     assert _resolve_codex_bin("~/bin/codex", {"PATH": ""}) == str(codex)
+
+
+def test_codex_rerun_parameter_prompt_requires_boolean_and_multi_knob_interpretation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    codex = tmp_path / "codex"
+    codex.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    codex.chmod(0o755)
+    provider = CodexAppServerProposalProvider(codex_bin=str(codex), cwd=tmp_path)
+    prompts: list[str] = []
+
+    def capture_proposal(
+        _context: dict[str, object], system: str, _schema: dict[str, object], _model: object
+    ) -> dict[str, object]:
+        prompts.append(system)
+        return {
+            "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
+            "parameter_patch": [],
+            "summary": "No change.",
+        }
+
+    monkeypatch.setattr(provider, "_proposal", capture_proposal)
+    provider.propose_gui_workspace_rerun_patch(
+        {
+            "allowed_knobs": ["place.routability_opt", "place.target_overflow"],
+            "boolean_knobs": ["place.routability_opt"],
+        }
+    )
+
+    assert "every requested applicable parameter change" in prompts[0]
+    assert "unqualified knob name" in prompts[0]
+    assert "numeric 0 as false and 1 as true" in prompts[0]
 
 
 def test_run_flow_only_emits_a_frozen_workspace_contract(tmp_path: Path) -> None:
@@ -227,19 +259,39 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     (output / "gcd_place.def.gz").write_bytes(b"def")
     config = workspace / "config"
     config.mkdir()
-    (config / "dreamplace.json").write_text('{"target_density": 0.2}', encoding="utf-8")
+    (config / "dreamplace.json").write_text(
+        '{"target_density": 0.2, "routability_opt_flag": true, "stop_overflow": 0.0}',
+        encoding="utf-8",
+    )
     events: list[dict[str, object]] = []
+    parser_contexts: list[dict[str, object]] = []
+
+    def parse_rerun_parameter(context: dict[str, object]) -> dict[str, object]:
+        parser_contexts.append(context)
+        return {
+            "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
+            "parameter_patch": [
+                {"knob_id": "place.routability_opt", "value": 0},
+                {"knob_id": "place.target_overflow", "value": 0.1},
+            ],
+            "summary": "Disable routability optimization and set target overflow.",
+        }
+
     provider = EcosAgentProvider(
         emit=events.append,
-        rerun_parameter_parser=lambda _context: {
-            "schema_version": "flow-agent.gui_workspace_rerun_parameter_proposal.v1",
-            "parameter_patch": [{"knob_id": "place.target_density", "value": 0.55}],
-            "summary": "Reduce density.",
-        },
+        rerun_parameter_parser=parse_rerun_parameter,
     )
 
     session_id = provider.start_session({"directory": str(workspace)})["sessionId"]
-    for message in ("2", "gcd", "", "1", "reduce density", "2", "1"):
+    for message in (
+        "2",
+        "gcd",
+        "",
+        "1",
+        "set place.routability_opt to 0,set target_overflow to 0.1",
+        "2",
+        "1",
+    ):
         _send(provider, session_id, message)
 
     rerun = events[-1]["workspaceRerun"]
@@ -247,7 +299,14 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     assert rerun["schema_version"] == "flow-agent.workspace_rerun_contract.v1"
     assert rerun["execution_scope"] == "full_flow"
     assert rerun["end_step"] == "place"
-    assert rerun["parameter_patch"] == [{"knob_id": "place.target_density", "value": 0.55}]
+    assert parser_contexts[0]["natural_language_request"] == (
+        "set place.routability_opt to 0,set target_overflow to 0.1"
+    )
+    assert parser_contexts[0]["boolean_knobs"] == ["place.routability_opt"]
+    assert rerun["parameter_patch"] == [
+        {"knob_id": "place.routability_opt", "value": False},
+        {"knob_id": "place.target_overflow", "value": 0.1},
+    ]
 
     _send(
         provider,

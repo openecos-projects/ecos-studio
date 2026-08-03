@@ -41,7 +41,7 @@ _ZERO_BASED_INTEGER_KNOBS = frozenset(
         "legalization.cell_padding_x",
     }
 )
-_BOOLEAN_KNOBS = frozenset(
+BOOLEAN_RERUN_KNOBS = frozenset(
     {
         "place.routability_opt",
         "cts.force_branch_buffer",
@@ -137,6 +137,23 @@ class GuiWorkspaceRerunParameterProposal(BaseModel):
     )
     parameter_patch: list[ECCParameterPatchItem] = Field(default_factory=list, max_length=16)
     summary: str = Field(min_length=1, max_length=512)
+
+    @field_validator("parameter_patch", mode="before")
+    @classmethod
+    def normalize_boolean_values(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [
+            {**item, "value": bool(item["value"])}
+            if (
+                isinstance(item, dict)
+                and item.get("knob_id") in BOOLEAN_RERUN_KNOBS
+                and type(item.get("value")) is int
+                and item["value"] in {0, 1}
+            )
+            else item
+            for item in value
+        ]
 
 
 class GuiWorkspaceRerunResolver:
@@ -364,7 +381,7 @@ def _validate_value(item: ECCParameterPatchItem) -> None:
     elif item.knob_id in _INTEGER_KNOBS:
         if type(value) is not int or value < 1:
             raise ValueError(f"{item.knob_id} must be an integer >= 1")
-    elif item.knob_id in _BOOLEAN_KNOBS:
+    elif item.knob_id in BOOLEAN_RERUN_KNOBS:
         if type(value) is not bool:
             raise ValueError(f"{item.knob_id} must be a boolean")
     elif item.knob_id == "cts.routing_layer":

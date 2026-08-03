@@ -73,11 +73,20 @@ class CodexAppServerProposalProvider:
         allowed_knobs = context.get("allowed_knobs")
         if not isinstance(allowed_knobs, list) or not all(isinstance(item, str) for item in allowed_knobs):
             raise CodexProviderError("GUI rerun request has no allowed knobs", failure_class="missing_input")
+        boolean_knobs = context.get("boolean_knobs")
+        if (
+            not isinstance(boolean_knobs, list)
+            or not all(isinstance(item, str) and item in allowed_knobs for item in boolean_knobs)
+        ):
+            raise CodexProviderError("GUI rerun request has invalid boolean knobs", failure_class="missing_input")
         return self._proposal(
             context,
             (
                 "Return one JSON object matching flow-agent.gui_workspace_rerun_parameter_proposal.v1. "
-                "Use only knob_id values from allowed_knobs. Never return paths, shell commands, ECC commands, "
+                "Return every requested applicable parameter change as one separate parameter_patch item. "
+                "Use only knob_id values from allowed_knobs; resolve an unqualified knob name only when it has "
+                "one unique match in allowed_knobs. For knob_id values in boolean_knobs, interpret numeric 0 as "
+                "false and 1 as true, then return JSON booleans. Never return paths, shell commands, ECC commands, "
                 "tool calls, stage changes, workspace names, or execution instructions."
             ),
             _gui_workspace_rerun_patch_output_schema(allowed_knobs),

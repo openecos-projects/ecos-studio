@@ -53,6 +53,7 @@ from ecos_agent.workspace_setup import (
     workspace_setup_contract,
 )
 from ecos_agent.workspace_rerun import (
+    BOOLEAN_RERUN_KNOBS,
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunDiscovery,
     GuiWorkspaceRerunParameterProposal,
@@ -552,13 +553,15 @@ class EcosAgentProvider:
                 )
                 if not parameter_values:
                     raise ValueError("No config-backed parameters are available for this rerun stage")
+                allowed_knobs = [knob_id for knob_id, _ in parameter_values]
                 proposal = GuiWorkspaceRerunParameterProposal.model_validate(
                     self.rerun_parameter_parser(
                         {
                             "schema_version": "flow-agent.gui_workspace_rerun_parameter_context.v1",
                             "natural_language_request": message,
                             "target_step": stage,
-                            "allowed_knobs": [knob_id for knob_id, _ in parameter_values],
+                            "allowed_knobs": allowed_knobs,
+                            "boolean_knobs": sorted(set(allowed_knobs) & BOOLEAN_RERUN_KNOBS),
                             "workspace": str(discovery.source.workspace_path),
                             "_progress_callback": lambda text: self._emit(session, "tool", text),
                         }
