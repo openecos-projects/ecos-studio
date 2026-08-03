@@ -290,9 +290,17 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         "1",
         "set place.routability_opt to 0,set target_overflow to 0.1",
         "2",
-        "1",
     ):
         _send(provider, session_id, message)
+
+    assert events[-1]["type"] == "contract"
+    assert "Confirm and start" in str(events[-1]["text"])
+    assert not any(
+        event["type"] == "message" and "Confirm and start" in str(event.get("text"))
+        for event in events
+    )
+
+    _send(provider, session_id, "1")
 
     rerun = events[-1]["workspaceRerun"]
     assert events[-1]["type"] == "workspace_rerun"

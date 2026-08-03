@@ -12,7 +12,6 @@ from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.messages import (
     cancellation_message,
     confirmation_menu,
-    contract_ready_message,
     design_name_prompt,
     default_value_prompt,
     flow_end_prompt,
@@ -609,12 +608,11 @@ class EcosAgentProvider:
         self._emit(
             session,
             "contract",
-            contract_ready_message(session.language),
+            confirmation_menu(session.language),
             _workspace_rerun_execution_contract(
                 session.workspace_rerun_contract, session.language, parameter_values
             ),
         )
-        self._emit(session, "message", confirmation_menu(session.language))
 
     def _show_workspace_contract(self, session: _Session) -> None:
         session.workspace_setup_id = session.workspace_setup_id or uuid.uuid4().hex
