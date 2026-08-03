@@ -1,65 +1,96 @@
 # ECOS Agent
 
-`ecos_agent` is the in-tree, GUI-only provider for ECOS Studio. It accepts
-only the numeric GUI workflows `1` (run flow) and `2` (rerun step).
+`ecos_agent` 是 ECOS Studio 内置的 GUI Flow Agent provider。它只支持两类
+受控操作：运行完整物理设计流程，以及从已完成流程的特定阶段重跑。
 
-## Prerequisites
+Agent 不直接执行 shell 命令，也不直接修改流程状态。ECOS Studio 负责
+workspace、用户确认和固定 ECC RPC 调用；每次执行都有明确的输入、合同和
+结果。
 
-- In a source checkout: Python 3.11+ and `uv`.
-- An authenticated Codex CLI installed by the user. The provider discovers
-  `codex` on the application `PATH`, or uses an explicit user environment
-  variable `ECOS_AGENT_CODEX_BIN`.
+## 使用前准备
 
-The packaged desktop application includes the ECOS Agent Python runtime. It
-does not include Codex, credentials, or an authenticated session. The
-provider validates the Codex CLI when the GUI starts an Agent session and
-fails closed when it is unavailable.
+打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
+登录状态或任何凭据**。使用 Agent 前，请自行安装并完成 Codex CLI 认证。
 
-## Install and Start
+- 确保在启动 ECOS Studio 的用户环境中可以直接运行 `codex`。
+- 如 Codex 不在 `PATH` 中，可在用户环境中设置
+  `ECOS_AGENT_CODEX_BIN` 为 Codex 可执行文件路径。
+- Agent 启动时会检查 Codex CLI。检查失败时不会创建 workspace，也不会启动
+  ECC 流程。
+
+## 在 ECOS Studio 中使用
+
+打开桌面应用后，进入 Agent 聊天面板，按提示选择操作：`1` 为运行完整流程，
+`2` 为从特定阶段重跑。Agent 会在关键位置显示待确认的结构化合同；确认前不会
+执行流程。
+
+### 1. 运行完整流程
+
+此功能用于从 RTL 开始创建 workspace 并执行完整 ECC 流程。
+
+1. 在 Agent 聊天面板输入 `1`。
+2. 依次填写项目根目录、流程终止阶段、设计名、RTL 文件、可选 filelist/SDC、
+   PDK 路径、顶层模块、时钟与物理设计参数。
+3. 检查 Agent 展示的 workspace 设置合同。需要修改时，可以用自然语言说明
+   需要调整的字段。
+4. 选择确认执行。ECOS Studio 创建 workspace，并通过固定 ECC RPC 启动完整流程。
+5. 只有 ECC 返回终态成功后，Agent 才会报告该次 workspace 创建和流程执行成功；
+   失败会报告失败原因，不会将未完成流程标记为成功。
+
+### 2. 从特定阶段重跑
+
+此功能用于基于已有 workspace 的可验证产物，从指定阶段开始在隔离 workspace
+中重跑。原始 workspace 不会被覆盖。
+
+1. 在 Agent 聊天面板输入 `2`。
+2. 输入设计名，并确认当前 GUI workspace 或填写已有 source workspace 路径。
+3. Agent 从该 workspace 的流程记录和产物中发现允许重跑的阶段；只能选择有
+   完成证据的阶段。
+4. 选择目标阶段，描述需要调整的参数，并选择单阶段执行或继续执行到流程终点。
+5. 检查冻结的重跑合同，包括源/目标 workspace、目标阶段、终止阶段、参数补丁和
+   执行范围。
+6. 选择确认执行。ECOS Studio 创建隔离重跑 workspace，并通过固定 ECC RPC
+   执行合同中的重跑动作。
+
+## Codex CLI 在哪里发挥作用
+
+Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流程执行权限。
+
+- 在完整流程中，它可在已确认的项目根目录内推荐 RTL、filelist、SDC 等候选路径，
+  并将自然语言修改建议转换为待验证的 workspace 设置提案。
+- 在特定阶段重跑中，它可将自然语言参数请求转换为受允许参数集合约束的候选补丁。
+- Codex 的建议必须经过本地校验并展示给用户确认。它不能执行 shell/ECC 命令、
+  不能自行选择没有证据的阶段、不能创建或覆盖 workspace，也不能宣称流程成功。
+
+项目根目录和重跑 source workspace 是 Codex 可读取建议的边界。Codex 不可用、
+超时或返回不符合合同的内容时，当前操作会失败关闭，ECC 不会被调用。
+
+## 常见问题
+
+**Agent 无法启动，提示需要 Codex CLI**
+
+确认 Codex CLI 已安装并完成认证，且桌面应用继承的环境能够找到 `codex`。如通过
+图形化启动器打开应用导致 `PATH` 不完整，请在用户环境中设置
+`ECOS_AGENT_CODEX_BIN` 后重新启动 ECOS Studio。
+
+**为什么不能任意选择重跑阶段？**
+
+重跑只能基于 source workspace 中已有的流程状态和产物证据。这样可以保证输入
+可追溯、目标 workspace 隔离，并避免跳过必需前置步骤。
+
+## 开发者入口
+
+仅在开发或调试 provider 时需要本节。桌面打包版无需安装 `uv` 或本机 Python。
 
 ```bash
 cd ecos/agent
 uv sync --locked
-```
-
-During desktop development, ECOS Studio discovers this in-tree provider
-automatically. Its manifest uses `uv run --locked`, so the source runtime is
-reproducible from `uv.lock`. To exercise the newline-JSON provider protocol
-directly, run:
-
-```bash
 uv run python -m ecos_agent.provider
 ```
 
-## Workflows
-
-- `1` Run flow: collect and validate the existing workspace, design, RTL,
-  constraints, PDK, and physical-design fields. After explicit confirmation,
-  ECOS Studio creates the workspace and runs its existing ECC lifecycle.
-- `2` Rerun step: enter a design name, then confirm the current GUI workspace
-  path or enter another source workspace path. The path is locally verified
-  before stage selection. The remaining parameter, scope,
-  and frozen-contract flow is unchanged.
-
-The provider always sends typed, review-required contracts. Codex is limited
-to read-only proposal generation; ECOS Studio validates contracts, creates or
-switches workspaces, and invokes fixed ECC RPC methods. Missing Codex, timeout,
-or invalid structured output fails closed without invoking ECC.
-
-`ECOS_AGENT_PROVIDER_ROOTS` may register additional local provider roots for
-development. Each root is trusted executable code; do not configure paths from
-untrusted sources. Invalid or inaccessible optional manifests are ignored so
-they cannot disable the bundled provider.
-
-## Verify
+开发态 manifest 使用 `uv run --locked`；打包构建会将 provider 生成为独立的
+`ecos-agent` 可执行文件，并随 Electron 资源一起发布。
 
 ```bash
 uv run pytest -q
 ```
-
-The tests inject mock Codex proposal functions. They verify frozen setup and
-rerun contracts, authorized workspace discovery, and fail-closed Codex timeout
-handling without running EDA.
-
-No PDK, RTL, benchmark, optimization result, or real EDA execution is included
-in this component.
