@@ -11,10 +11,12 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).not.toContain('hasLayoutInspectorContent')
   })
 
-  it('keeps the drawing and thumbnail column beside chat', () => {
+  it('keeps the drawing and thumbnail column in the shared workbench', () => {
     expect(source).toContain('<DrawingArea />')
     expect(source).toContain('<ThumbnailGallery />')
-    expect(source).toContain('<ChatInspectorPanel />')
+    expect(source).toContain('<WorkspaceWorkbench')
+    expect(source).toContain('useSubflow')
+    expect(source).not.toContain('<ChatInspectorPanel />')
   })
 
   it('does not render project labels above the workspace step canvas', () => {

@@ -1,42 +1,47 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
-import DrawingArea from '../components/DrawingArea.vue'
-import ChatInspectorPanel from '../components/ChatInspectorPanel.vue'
-import ThumbnailGallery from '../components/ThumbnailGallery.vue'
+import DrawingArea from '@/components/DrawingArea.vue'
+import ThumbnailGallery from '@/components/ThumbnailGallery.vue'
+import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
+import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
+import { useDashboardOverview } from '@/composables/useDashboardOverview'
+import { useSubflow } from '@/composables/useSubflow'
+
+const { currentStepTitle, isLoading, subflowSteps } = useSubflow()
+const { reports } = useDashboardOverview()
 
 let isResizing = false
 
-const handleMouseDown = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  const gutter = target.closest('.p-splitter-gutter')
-  if (gutter) {
-    isResizing = true
-    document.body.classList.add('splitter-resizing')
+const flowNodes = computed<FlowStatusNode[]>(() =>
+  subflowSteps.value.map((step) => ({
+    id: step.id,
+    label: step.name,
+    status: flowNodeStatus(step.status),
+    runtime: step.duration ?? '',
+    peakMemoryMb: step.peakMemory ?? null,
+    detail: step.description,
+  })),
+)
+const flowTitle = computed(() => `${currentStepTitle.value} subflow`)
 
-    const splitter = gutter.closest('.p-splitter')
-    if (splitter?.classList.contains('p-splitter-vertical')) {
-      document.body.classList.add('splitter-resizing-vertical')
-    }
-
-    // Clear any selection (Linux WebKitGTK)
-    window.getSelection()?.removeAllRanges()
-  }
+function handleMouseDown(event: MouseEvent): void {
+  const target = event.target as HTMLElement
+  if (!target.closest('.p-splitter-gutter')) return
+  isResizing = true
+  document.body.classList.add('splitter-resizing')
+  window.getSelection()?.removeAllRanges()
 }
 
-const handleMouseUp = () => {
-  if (isResizing) {
-    isResizing = false
-  }
+function handleMouseUp(): void {
+  if (!isResizing) return
+  isResizing = false
   document.body.classList.remove('splitter-resizing')
-  document.body.classList.remove('splitter-resizing-vertical')
 }
 
-const handleVisibilityChange = () => {
-  if (document.visibilityState !== 'visible') {
-    handleMouseUp()
-  }
+function handleVisibilityChange(): void {
+  if (document.visibilityState !== 'visible') handleMouseUp()
 }
 
 onMounted(() => {
@@ -58,132 +63,72 @@ onUnmounted(() => {
   handleMouseUp()
 })
 </script>
+
 <template>
-  <div class="editor-view">
-    <Splitter class="h-full min-w-0 flex-1 border-none">
-      <SplitterPanel :size="75" :minSize="35" class="flex min-w-0 flex-col">
-        <Splitter layout="vertical" class="h-full border-none">
-          <SplitterPanel :size="70" :minSize="30" class="flex flex-col">
+  <WorkspaceWorkbench
+    :flow-title="flowTitle"
+    :loading="isLoading"
+    :nodes="flowNodes"
+    :reports="reports"
+  >
+    <template #left>
+      <div class="step-presentation">
+        <Splitter layout="vertical" class="step-presentation-splitter" :gutter-size="4">
+          <SplitterPanel :size="72" :min-size="30" class="step-presentation-main">
             <DrawingArea />
           </SplitterPanel>
-          <SplitterPanel :size="30" class="flex flex-col">
+          <SplitterPanel :size="28" class="step-presentation-thumbnails">
             <ThumbnailGallery />
           </SplitterPanel>
         </Splitter>
-      </SplitterPanel>
-
-      <SplitterPanel
-        :size="25"
-        :minSize="25"
-        class="chat-panel max-w-full min-w-0 overflow-hidden"
-      >
-        <ChatInspectorPanel />
-      </SplitterPanel>
-    </Splitter>
-  </div>
+      </div>
+    </template>
+  </WorkspaceWorkbench>
 </template>
+
 <style scoped>
-.editor-view {
+.step-presentation {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  max-width: 100%;
   height: 100%;
-}
-
-:deep(.p-splitter) {
-  display: flex;
-  flex-wrap: nowrap;
-  min-width: 0;
   min-height: 0;
+  min-width: 0;
+}
+
+.step-presentation-splitter {
   background: transparent;
-  border: none;
-  /* layout only; avoid paint containment on panels (conflicts with wide tables + scrollbars in WebKitGTK) */
-  contain: layout;
+  border: 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
 }
 
-:deep(.p-splitter.p-splitter-vertical) {
-  flex-direction: column;
-}
-
-/*
- * index.css 对 .p-splitterpanel 使用了 contain: layout style paint；
- * 在部分 WebKit/GTK 下与宽图/替换元素组合时，会误参与祖先的 min-content 宽度。
- * 在此用更高优先级只保留 style containment，避免横向把整行撑出视口。
- */
 :deep(.p-splitterpanel) {
   display: flex;
-  flex-grow: 1;
-  min-width: 0;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
-  contain: style;
-}
-
-:deep(.p-splitterpanel-nested) {
-  display: flex;
 }
 
 :deep(.p-splitterpanel > *) {
   flex: 1 1 auto;
-  min-width: 0;
   min-height: 0;
-}
-
-:deep(.p-splitterpanel .p-splitter) {
-  flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
-  border: 0 none;
 }
 
 :deep(.p-splitter-gutter) {
   background: var(--border-color);
-  transition: background-color 0.15s ease-out;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* Fewer repaints */
-  will-change: background-color;
 }
 
 :deep(.p-splitter-gutter:hover) {
   background: var(--accent-color);
-  opacity: 0.5;
 }
 
 :deep(.p-splitter-gutter-handle) {
-  display: none !important;
-  /* Hide default large handle */
+  display: none;
 }
 
-/* Horizontal splitter gutter */
-:deep(.p-splitter-horizontal > .p-splitter-gutter) {
-  width: 2px !important;
-  cursor: col-resize;
-}
-
-/* Vertical splitter gutter */
 :deep(.p-splitter-vertical > .p-splitter-gutter) {
-  height: 2px !important;
   cursor: row-resize;
-}
-
-/*
- * Right Chat/Inspector: PrimeVue sets flex-basis; theme often uses flex:1 with flex-shrink 1.
- * Wide Floorplan tables have huge min-content and shrink this column; !important prevents flex-shrink.
- */
-:deep(.p-splitterpanel.chat-panel) {
-  box-sizing: border-box;
-  flex-grow: 0 !important;
-  flex-shrink: 0 !important;
-}
-
-/* Fill column width; avoid subtree content width affecting parent flex */
-:deep(.chat-panel.p-splitterpanel > *) {
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
+  height: 4px;
 }
 </style>
