@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { runAfterAppReady } from './appReady'
 import { createMainWindow } from './createMainWindow'
 import { configureGpuMode } from './gpuMode'
@@ -190,7 +190,10 @@ async function ensureDesktopBridgeReady(): Promise<void> {
   }
 
   if (!ipcRegistered) {
-    const agentRuntimeService = await createAgentRuntimeFromEnvironment()
+    const agentRuntimeService = await createAgentRuntimeFromEnvironment(
+      process.env,
+      app.isPackaged ? undefined : resolve(app.getAppPath(), '..', '..', '..', 'agent'),
+    )
     registerIpc(undefined, {
       agentRuntimeService: agentRuntimeService ?? undefined,
       appInfoService: desktopServices.appInfoService,

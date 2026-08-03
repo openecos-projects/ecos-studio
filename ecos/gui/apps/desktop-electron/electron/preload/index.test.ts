@@ -202,7 +202,7 @@ describe('preload desktop bridge contract', () => {
   it('routes agent requests and events through shared IPC channels', async () => {
     const bridge = await loadDesktopBridge()
     const session = {
-      providerId: 'flow_agent',
+      providerId: 'ecos_agent',
       sessionId: 'gui-session-1',
     }
     const listener = vi.fn()

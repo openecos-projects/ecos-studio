@@ -1,0 +1,7 @@
+{
+  "providerId": "ecos_agent",
+  "displayName": "ECOS Agent",
+  "command": "uv",
+  "args": ["run", "python", "-m", "ecos_agent.provider"],
+  "protocolVersion": 1
+}

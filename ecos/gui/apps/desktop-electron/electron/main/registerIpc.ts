@@ -800,7 +800,10 @@ export function registerIpc(
   ): string | null => {
     const normalizedDirectory = normalizeWorkspacePath(directory)
     for (const [workspaceHandle, subscription] of workspaceHandleSubscriptions) {
-      if (subscription.sender === sender && subscription.directory === normalizedDirectory) {
+      if (
+        subscription.sender === sender &&
+        subscription.directory === normalizedDirectory
+      ) {
         return workspaceHandle
       }
     }
@@ -930,7 +933,11 @@ export function registerIpc(
       throw new Error('Workspace rerun target is not active in this window.')
     }
     pendingWorkspaceRerunExecutions.delete(token)
-    await executeWorkspaceRerun(pending.contract, services.eccRuntimeService, workspaceHandle)
+    await executeWorkspaceRerun(
+      pending.contract,
+      services.eccRuntimeService,
+      workspaceHandle,
+    )
   })
 
   handle(desktopApiIpcChannels.workspaceBindWindow, async (event, path) => {
@@ -1559,7 +1566,7 @@ export function registerIpc(
 function requireAgentRuntime(services: DesktopBridgeServices): AgentProviderRuntime {
   if (!services.agentRuntimeService) {
     throw new Error(
-      'No agent provider is configured. Set ECOS_AGENT_PROVIDER_ROOTS before starting ECOS Studio.',
+      'No ECOS Agent provider is available. Check the in-tree agent or ECOS_AGENT_PROVIDER_ROOTS.',
     )
   }
   return services.agentRuntimeService

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentRuntimeManager } from './agentRuntimeManager'
 import { createAgentRuntimeFromEnvironment } from './agentProviderRuntimeFactory'
 
-describe('Flow Agent provider runtime factory', () => {
+describe('ECOS Agent provider runtime factory', () => {
   it('stays disabled until an explicit provider root is configured', async () => {
     await expect(createAgentRuntimeFromEnvironment({})).resolves.toBeNull()
   })
@@ -18,7 +18,7 @@ describe('Flow Agent provider runtime factory', () => {
         JSON.stringify({
           command: 'uv',
           protocolVersion: 1,
-          providerId: 'flow_agent',
+          providerId: 'ecos_agent',
         }),
       )
 
@@ -29,6 +29,47 @@ describe('Flow Agent provider runtime factory', () => {
       expect(runtime).toBeInstanceOf(AgentRuntimeManager)
     } finally {
       await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('loads the in-tree provider when no extension root is configured', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ecos-agent-'))
+    try {
+      await writeFile(
+        path.join(root, 'agent-provider.json'),
+        JSON.stringify({
+          command: 'uv',
+          protocolVersion: 1,
+          providerId: 'ecos_agent',
+        }),
+      )
+
+      await expect(createAgentRuntimeFromEnvironment({}, root)).resolves.toBeInstanceOf(
+        AgentRuntimeManager,
+      )
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  it('keeps the in-tree manifest when an extension repeats its provider ID', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ecos-agent-'))
+    const extension = await mkdtemp(path.join(tmpdir(), 'ecos-agent-extension-'))
+    try {
+      const manifest = JSON.stringify({
+        command: 'uv',
+        protocolVersion: 1,
+        providerId: 'ecos_agent',
+      })
+      await writeFile(path.join(root, 'agent-provider.json'), manifest)
+      await writeFile(path.join(extension, 'agent-provider.json'), manifest)
+
+      await expect(
+        createAgentRuntimeFromEnvironment({ ECOS_AGENT_PROVIDER_ROOTS: extension }, root),
+      ).resolves.toBeInstanceOf(AgentRuntimeManager)
+    } finally {
+      await rm(root, { force: true, recursive: true })
+      await rm(extension, { force: true, recursive: true })
     }
   })
 })

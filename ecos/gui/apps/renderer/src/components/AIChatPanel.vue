@@ -92,7 +92,7 @@ import { getOptionalDesktopApi } from '@/platform/desktop'
 import { agentWorkspaceSetupKey } from '@/composables/agentWorkspaceSetup'
 import { useWorkspace } from '@/composables/useWorkspace'
 
-const AGENT_PROVIDER_ID = 'flow_agent'
+const AGENT_PROVIDER_ID = 'ecos_agent'
 const messageStore = useMessageStore()
 const { messages } = storeToRefs(messageStore)
 const createAgentWorkspace = inject(agentWorkspaceSetupKey)
@@ -344,7 +344,7 @@ async function reportWorkspaceCreationResult(
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('Flow Agent session is unavailable.')
+  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_create_result:${JSON.stringify({ setup_id: setupId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
@@ -409,7 +409,7 @@ async function reportWorkspaceRerunResult(
 ): Promise<void> {
   const agent = getOptionalDesktopApi()?.agent
   const sessionId = agentSessionId.value
-  if (!agent || !sessionId) throw new Error('Flow Agent session is unavailable.')
+  if (!agent || !sessionId) throw new Error('ECOS Agent session is unavailable.')
   await agent.sendMessage({
     message: `workspace_rerun_result:${JSON.stringify({ rerun_id: rerunId, status, error })}`,
     providerId: AGENT_PROVIDER_ID,
