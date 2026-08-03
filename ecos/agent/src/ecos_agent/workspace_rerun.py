@@ -139,6 +139,26 @@ class GuiWorkspaceRerunParameterProposal(BaseModel):
     summary: str = Field(min_length=1, max_length=512)
 
 
+class GuiWorkspaceRerunPathProposal(BaseModel):
+    """Untrusted Codex recommendation of one completed source workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["flow-agent.gui_workspace_rerun_path_proposal.v1"]
+    source_workspace: str | None
+    summary: str = Field(min_length=1, max_length=512)
+
+    @field_validator("source_workspace")
+    @classmethod
+    def validate_source_workspace(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or "\x00" in value or len(value) > 4096:
+            raise ValueError("rerun source workspace is invalid")
+        return value
+
+
 class GuiWorkspaceRerunResolver:
     """Derive GUI rerun contracts from completed ECOS workspace evidence."""
 

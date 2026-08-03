@@ -29,7 +29,6 @@ from ecos_agent.messages import (
     rerun_scope_prompt,
     project_root_prompt,
     rerun_design_prompt,
-    rerun_workspace_root_prompt,
     rerun_stage_prompt,
     rtl_prompt,
     welcome_message,
@@ -57,6 +56,7 @@ from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunDiscovery,
     GuiWorkspaceRerunParameterProposal,
+    GuiWorkspaceRerunPathProposal,
     GuiWorkspaceRerunResolver,
 )
 from ecos_agent.provider_support import (
@@ -72,6 +72,7 @@ from ecos_agent.provider_support import (
     _prompt_for_phase,
     _propose_gui_workspace_path_discovery,
     _propose_gui_workspace_rerun_patch,
+    _propose_gui_workspace_rerun_path,
     _propose_gui_workspace_setup,
     _recommended_path,
     _rerun_resolver,
@@ -89,6 +90,7 @@ PROVIDER_ID = "ecos_agent"
 _WorkspaceSetupParser = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _WorkspacePathRecommender = Callable[[dict[str, Any]], GuiWorkspaceSetupProposal | dict[str, Any]]
 _RerunParameterParser = Callable[[dict[str, Any]], GuiWorkspaceRerunParameterProposal | dict[str, Any]]
+_RerunWorkspaceRecommender = Callable[[dict[str, Any]], GuiWorkspaceRerunPathProposal | dict[str, Any]]
 _NUMERIC_FIELDS = {
     "Frequency Max (MHz)": "frequency_mhz",
     "Max Fanout": "max_fanout",
@@ -107,6 +109,7 @@ class _Session:
     design_id: str | None = None
     rerun_stage: str | None = None
     rerun_resolver: GuiWorkspaceRerunResolver | None = None
+    rerun_search_root: Path | None = None
     rerun_discovery: GuiWorkspaceRerunDiscovery | None = None
     rerun_parameter_patch: list[dict[str, Any]] = field(default_factory=list)
     workspace_rerun_contract: GuiWorkspaceRerunContract | None = None
@@ -127,11 +130,13 @@ class EcosAgentProvider:
         workspace_setup_parser: _WorkspaceSetupParser | None = None,
         workspace_path_recommender: _WorkspacePathRecommender | None = None,
         rerun_parameter_parser: _RerunParameterParser | None = None,
+        rerun_workspace_recommender: _RerunWorkspaceRecommender | None = None,
     ) -> None:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
+        self.rerun_workspace_recommender = rerun_workspace_recommender or _propose_gui_workspace_rerun_path
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
 
@@ -141,6 +146,7 @@ class EcosAgentProvider:
     def start_session(self, request: Mapping[str, Any]) -> dict[str, str]:
         session_id = _optional_text(request.get("sessionId")) or uuid.uuid4().hex
         session = self.sessions.setdefault(session_id, _Session(session_id=session_id))
+        session.rerun_search_root = _rerun_search_root(request.get("directory"))
         self._emit_status(session, "ready")
         self._emit(session, "message", welcome_message())
         return {"sessionId": session_id}
@@ -193,7 +199,6 @@ class EcosAgentProvider:
     def _handle_input(self, session: _Session, message: str) -> None:
         handlers = {
             "operation": self._select_operation,
-            "rerun_workspace_root": self._select_rerun_workspace_root,
             "rerun_design": self._select_rerun_design,
             "rerun_stage": self._select_rerun_stage,
             "rerun_parameter": self._select_rerun_parameter,
@@ -231,8 +236,8 @@ class EcosAgentProvider:
             self._emit(session, "message", project_root_prompt(session.language))
             return
         if choice == "2":
-            session.phase = "rerun_workspace_root"
-            self._emit(session, "message", rerun_workspace_root_prompt(session.language))
+            session.phase = "rerun_design"
+            self._emit(session, "message", rerun_design_prompt(session.language))
             return
         self._emit(session, "message", invalid_choice(session.language))
         self._emit(session, "message", operation_prompt(session.language))
@@ -250,18 +255,6 @@ class EcosAgentProvider:
         session.path_recommendations = {"pdk": pdk_paths[0]} if pdk_paths else {}
         session.phase = "workspace_flow_end"
         self._emit(session, "message", flow_end_prompt(session.language))
-
-    def _select_rerun_workspace_root(self, session: _Session, message: str) -> None:
-        try:
-            root = normalize_path(message, label="Rerun Workspace Root", require_directory=True)
-        except ValueError as exc:
-            self._repeat_invalid(
-                session, "Rerun Workspace Root", str(exc), rerun_workspace_root_prompt
-            )
-            return
-        session.rerun_resolver = GuiWorkspaceRerunResolver(Path(root))
-        session.phase = "rerun_design"
-        self._emit(session, "message", rerun_design_prompt(session.language))
 
     def _select_flow_end(self, session: _Session, message: str) -> None:
         if message == "0":
@@ -471,18 +464,38 @@ class EcosAgentProvider:
 
     def _select_rerun_design(self, session: _Session, message: str) -> None:
         design = message.strip()
-        try:
-            resolver = _rerun_resolver(session)
-        except ValueError as exc:
-            self._emit(session, "error", str(exc))
+        root = session.rerun_search_root
+        if root is None:
+            self._emit(session, "error", "Open an ECOS workspace before choosing a rerun design.")
             self._emit(session, "message", rerun_design_prompt(session.language))
             return
         try:
+            proposal = GuiWorkspaceRerunPathProposal.model_validate(
+                self.rerun_workspace_recommender(
+                    {
+                        "schema_version": "flow-agent.gui_workspace_rerun_path_context.v1",
+                        "design_name": design,
+                        "filesystem_roots": [str(root)],
+                        "_progress_callback": lambda text: self._emit(session, "tool", text),
+                    }
+                )
+            )
+            if proposal.source_workspace is None:
+                raise ValueError("Codex did not recommend a source workspace")
+            source = Path(proposal.source_workspace).expanduser().resolve()
+            if not source.is_relative_to(root):
+                raise ValueError("recommended workspace is outside the authorized search root")
+            resolver = GuiWorkspaceRerunResolver(source.parent)
             discovery = resolver.discover(design)
+        except CodexProviderError as exc:
+            self._emit(session, "error", f"Unable to recommend a rerun workspace: {exc}")
+            self._emit(session, "message", rerun_design_prompt(session.language))
+            return
         except ValueError:
             self._reset(session)
             self._emit(session, "error", no_source_run_message(session.language))
             return
+        session.rerun_resolver = resolver
         session.design_id = design
         session.rerun_discovery = discovery
         session.phase = "rerun_stage"
@@ -838,6 +851,17 @@ class EcosAgentProvider:
         session.path_recommendations = {}
         session.workspace_setup_id = None
         session.workspace_contract = None
+
+
+def _rerun_search_root(value: object) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    directory = Path(value).expanduser().resolve()
+    if not directory.is_dir():
+        return None
+    return directory.parent if (directory / "home" / "flow.json").is_file() else directory
+
+
 def main() -> int:
     from ecos_agent.protocol import EcosAgentProtocolServer
 

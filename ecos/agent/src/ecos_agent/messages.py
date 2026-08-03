@@ -144,14 +144,6 @@ def rerun_design_prompt(language: str) -> str:
     )
 
 
-def rerun_workspace_root_prompt(language: str) -> str:
-    return _prompt(
-        language,
-        "请输入保存已有 ECOS workspace 的根目录。",
-        "Enter the existing directory that contains the ECOS workspaces to rerun.",
-    )
-
-
 def rerun_stage_prompt(language: str, stages: tuple[str, ...]) -> str:
     title = "选择重跑起始阶段：" if language == "zh" else "Choose the rerun start stage:"
     return "\n".join([title, *(f"{index}. {stage}" for index, stage in enumerate(stages, 1))])

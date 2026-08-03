@@ -21,7 +21,6 @@ from ecos_agent.messages import (
     pdk_prompt,
     project_root_prompt,
     rerun_design_prompt,
-    rerun_workspace_root_prompt,
     rerun_parameter_prompt,
     rerun_scope_prompt,
     rerun_stage_prompt,
@@ -32,6 +31,7 @@ from ecos_agent.messages import (
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunParameterProposal,
+    GuiWorkspaceRerunPathProposal,
     GuiWorkspaceRerunResolver,
 )
 from ecos_agent.workspace_setup import (
@@ -120,7 +120,7 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
 
 def _rerun_resolver(session: Any) -> GuiWorkspaceRerunResolver:
     if session.rerun_resolver is None:
-        raise ValueError("Rerun workspace root has not been provided")
+        raise ValueError("Rerun workspace recommendation is missing")
     return session.rerun_resolver
 
 
@@ -160,6 +160,22 @@ def _propose_gui_workspace_rerun_patch(
     try:
         return GuiWorkspaceRerunParameterProposal.model_validate(
             provider.propose_gui_workspace_rerun_patch(request_context)
+        )
+    finally:
+        provider.close()
+
+
+def _propose_gui_workspace_rerun_path(context: dict[str, Any]) -> GuiWorkspaceRerunPathProposal:
+    progress_callback, request_context = _gui_workspace_request_context(context)
+    roots = request_context.get("filesystem_roots")
+    if not isinstance(roots, list) or not roots or not all(isinstance(root, str) for root in roots):
+        raise CodexProviderError("GUI rerun search roots are missing", failure_class="missing_input")
+    provider = create_required_codex_provider(
+        cwd=Path(roots[0]), runtime_workspace_roots=roots, progress_callback=progress_callback
+    )
+    try:
+        return GuiWorkspaceRerunPathProposal.model_validate(
+            provider.propose_gui_workspace_rerun_path(request_context)
         )
     finally:
         provider.close()
@@ -324,7 +340,6 @@ def _rerun_completion_message(language: str) -> str:
 def _prompt_for_phase(session: _Session) -> str:
     prompts = {
         "operation": operation_prompt(session.language),
-        "rerun_workspace_root": rerun_workspace_root_prompt(session.language),
         "rerun_design": rerun_design_prompt(session.language),
         "rerun_stage": rerun_stage_prompt(
             session.language,

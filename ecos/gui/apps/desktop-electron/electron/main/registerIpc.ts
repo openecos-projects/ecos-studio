@@ -1489,6 +1489,9 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.agentStartSession, async (event, request) => {
     const agentRequest = readAgentStartSessionRequest(request)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const directory = window ? workspaceWindowRegistry.getPathForWindow(window) : null
+    if (directory) agentRequest.directory = directory
     trackAgentSession(event.sender, agentRequest)
     return await requireAgentRuntime(services).startSession(agentRequest)
   })

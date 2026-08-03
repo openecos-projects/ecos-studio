@@ -314,6 +314,10 @@ describe('registerIpc', () => {
       { sender: owner },
       session,
     )
+    expect(agentRuntimeService?.startSession).toHaveBeenCalledWith({
+      ...session,
+      directory: '/runs/other',
+    })
     emitAgentEvent?.({
       ...session,
       type: 'workspace_rerun',
