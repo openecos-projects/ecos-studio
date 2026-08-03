@@ -25,10 +25,21 @@ export async function discoverAgentProviderManifests(
   const seenManifestPaths = new Set<string>()
 
   for (const root of roots) {
-    for (const manifestPath of await manifestPathsForRoot(root)) {
+    let manifestPaths: string[]
+    try {
+      manifestPaths = await manifestPathsForRoot(root)
+    } catch {
+      continue
+    }
+    for (const manifestPath of manifestPaths) {
       if (seenManifestPaths.has(manifestPath)) continue
       seenManifestPaths.add(manifestPath)
-      const manifest = await readAgentProviderManifest(manifestPath)
+      let manifest: ResolvedAgentProviderManifest | null
+      try {
+        manifest = await readAgentProviderManifest(manifestPath)
+      } catch {
+        continue
+      }
       if (manifest) {
         manifests.push(manifest)
       }

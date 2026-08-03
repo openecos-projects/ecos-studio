@@ -6,6 +6,7 @@ from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
 from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
+from ecos_agent.workspace_setup import workspace_search_roots
 
 
 def _proposal(**overrides: object) -> GuiWorkspaceSetupProposal:
@@ -62,6 +63,34 @@ def test_codex_bin_expands_the_user_home_directory(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("HOME", str(tmp_path))
 
     assert _resolve_codex_bin("~/bin/codex", {"PATH": ""}) == str(codex)
+
+
+def test_source_manifest_uses_the_user_codex_environment() -> None:
+    manifest_path = Path(__file__).parents[1] / "agent-provider.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["command"] == "uv"
+    assert "ECOS_AGENT_CODEX_BIN" not in manifest.get("environment", {})
+
+
+def test_start_fails_closed_when_codex_cli_is_unavailable(monkeypatch) -> None:
+    monkeypatch.delenv("ECOS_AGENT_CODEX_BIN", raising=False)
+    monkeypatch.setenv("PATH", "")
+    provider = EcosAgentProvider(emit=lambda _event: None)
+
+    try:
+        provider.start()
+    except CodexProviderError as exc:
+        assert exc.failure_class == "missing_input"
+    else:
+        raise AssertionError("Agent start must reject an unavailable Codex CLI")
+
+
+def test_workspace_search_roots_do_not_include_project_siblings(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    assert workspace_search_roots(str(project_root)) == (str(project_root),)
 
 
 def test_codex_rerun_parameter_prompt_requires_boolean_and_multi_knob_interpretation(

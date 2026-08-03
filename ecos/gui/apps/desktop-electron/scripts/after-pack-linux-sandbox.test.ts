@@ -25,6 +25,25 @@ async function writeNonRpcEcc(appOutDir: string): Promise<void> {
   await chmod(eccPath, 0o755)
 }
 
+async function writePackagedAgent(appOutDir: string): Promise<void> {
+  const agentDir = join(appOutDir, 'resources', 'agent')
+  const agentPath = join(agentDir, 'ecos-agent')
+  await mkdir(agentDir, { recursive: true })
+  await writeFile(
+    agentPath,
+    '#!/bin/sh\n[ "$1" = --version ] || exit 64\nprintf "ecos-agent 0.1.0\\n"\n',
+  )
+  await writeFile(
+    join(agentDir, 'agent-provider.json'),
+    JSON.stringify({
+      command: './ecos-agent',
+      protocolVersion: 1,
+      providerId: 'ecos_agent',
+    }),
+  )
+  await chmod(agentPath, 0o755)
+}
+
 afterEach(async () => {
   await Promise.all(
     tempDirs.map(async (dir) => {
@@ -43,6 +62,7 @@ describe('afterPackLinuxSandbox', () => {
     const executablePath = join(appOutDir, 'ecos-studio')
     await writeFile(executablePath, 'binary-placeholder')
     await writeRpcCapableEcc(appOutDir)
+    await writePackagedAgent(appOutDir)
 
     await afterPackLinuxSandbox({
       appOutDir,
@@ -87,6 +107,7 @@ describe('afterPackLinuxSandbox', () => {
     tempDirs.push(appOutDir)
     await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
     await writeNonRpcEcc(appOutDir)
+    await writePackagedAgent(appOutDir)
 
     await expect(
       afterPackLinuxSandbox({
@@ -100,6 +121,24 @@ describe('afterPackLinuxSandbox', () => {
         },
       }),
     ).rejects.toThrow('Packaged ECC RPC sidecar validation failed')
+  })
+
+  it('rejects Linux packaging when the bundled Agent provider is absent', async () => {
+    const appOutDir = await mkdtemp(join(tmpdir(), 'ecos-after-pack-'))
+    tempDirs.push(appOutDir)
+    await writeFile(join(appOutDir, 'ecos-studio'), 'binary-placeholder')
+    await writeRpcCapableEcc(appOutDir)
+
+    await expect(
+      afterPackLinuxSandbox({
+        appOutDir,
+        electronPlatformName: 'linux',
+        packager: {
+          appInfo: { productFilename: 'ecos-studio' },
+          executableName: 'ecos-studio',
+        },
+      }),
+    ).rejects.toThrow('Packaged ECOS Agent validation failed')
   })
 
   it('skips non-Linux targets', async () => {

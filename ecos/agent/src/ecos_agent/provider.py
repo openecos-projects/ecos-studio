@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from ecos_agent.codex_provider import CodexProviderError
+from ecos_agent.codex_provider import CodexProviderError, validate_required_codex_cli
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
 from ecos_agent.messages import (
     cancellation_message,
@@ -135,6 +135,7 @@ class EcosAgentProvider:
         self.stopped = False
 
     def start(self, _request: Mapping[str, Any] | None = None) -> None:
+        validate_required_codex_cli()
         self.stopped = False
 
     def start_session(self, request: Mapping[str, Any]) -> dict[str, str]:

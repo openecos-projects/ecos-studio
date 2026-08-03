@@ -58,6 +58,10 @@ interface PendingRequest {
   resolve(value: unknown): void
 }
 
+const MAX_STDERR_DIAGNOSTIC_LENGTH = 4096
+const SENSITIVE_STDERR_PATTERN =
+  /\b(?:api[ _-]?key|authorization|password|secret|token)\b/i
+
 export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private readonly env: NodeJS.ProcessEnv
   private readonly eventFanout = new RuntimeEventFanout<DesktopAgentEvent>()
@@ -65,6 +69,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private readonly pendingRequests = new Map<string, PendingRequest>()
   private readonly spawnImpl: SpawnLike
   private child: ReturnType<SpawnLike> | null = null
+  private stderrTail = ''
   private stdoutBuffer = ''
 
   constructor(options: AgentProviderProcessRuntimeOptions) {
@@ -170,6 +175,7 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
   private ensureChild(): ReturnType<SpawnLike> {
     if (this.child) return this.child
 
+    this.stderrTail = ''
     this.stdoutBuffer = ''
     const child = this.spawnImpl(this.manifest.command, this.manifest.args ?? [], {
       cwd: this.manifest.pluginRoot,
@@ -182,8 +188,11 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       if (this.child !== child) return
       this.handleStdout(dataToString(data))
     })
-    child.stderr?.on('data', () => {
-      // Drain diagnostics so provider stderr cannot fill its pipe and block stdout responses.
+    child.stderr?.on('data', (data: unknown) => {
+      if (this.child !== child) return
+      this.stderrTail = `${this.stderrTail}${dataToString(data)}`.slice(
+        -MAX_STDERR_DIAGNOSTIC_LENGTH,
+      )
     })
     child.stdin?.once('error', (error) => {
       if (this.child !== child) return
@@ -205,7 +214,10 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
       const message = signal
         ? `Agent provider ${this.manifest.providerId} exited with signal ${signal}`
         : `Agent provider ${this.manifest.providerId} exited with code ${code ?? 'unknown'}`
-      this.handleChildFailure(child, new Error(message))
+      this.handleChildFailure(
+        child,
+        new Error(withStderrDiagnostic(message, this.stderrTail)),
+      )
     })
 
     return child
@@ -289,12 +301,22 @@ export class AgentProviderProcessRuntime implements AgentProviderRuntime {
     if (this.child !== child) return
     this.rejectPending(error)
     this.child = null
+    this.stderrTail = ''
     this.stdoutBuffer = ''
   }
 }
 
 function dataToString(data: unknown): string {
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
+}
+
+function withStderrDiagnostic(message: string, stderr: string): string {
+  const diagnostic = stderr.trim().replace(/\s+/g, ' ')
+  if (!diagnostic) return message
+  if (SENSITIVE_STDERR_PATTERN.test(diagnostic)) {
+    return `${message}: provider diagnostic redacted`
+  }
+  return `${message}: ${diagnostic}`
 }
 
 function errorMessage(error: string | { message?: string }): string {

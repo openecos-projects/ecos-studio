@@ -115,6 +115,27 @@ describe('AgentProviderProcessRuntime', () => {
     })
   })
 
+  it('includes a bounded provider stderr diagnostic when the process exits', async () => {
+    const harness = createSpawnHarness()
+    const runtime = new AgentProviderProcessRuntime({
+      manifest: {
+        command: 'ecos-agent',
+        manifestPath: '/plugins/ecos-agent/agent-provider.json',
+        pluginRoot: '/plugins/ecos-agent',
+        providerId: 'ecos_agent',
+        protocolVersion: supportedAgentProviderProtocolVersion,
+      },
+      spawn: harness.spawn,
+    })
+
+    const response = runtime.getStatus({ providerId: 'ecos_agent' })
+    const child = harness.children[0]
+    child.stderr.emit('data', 'Codex CLI is required for ECOS Agent\n')
+    child.emit('close', 127, null)
+
+    await expect(response).rejects.toThrow('Codex CLI is required for ECOS Agent')
+  })
+
   it('forwards provider events from process stdout through AgentRuntimeManager', () => {
     const harness = createSpawnHarness()
     const runtime = new AgentProviderProcessRuntime({

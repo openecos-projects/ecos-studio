@@ -230,6 +230,11 @@ def create_required_codex_provider(
     )
 
 
+def validate_required_codex_cli(env: Mapping[str, str] | None = None) -> str:
+    environment = os.environ if env is None else env
+    return _resolve_codex_bin(environment.get("ECOS_AGENT_CODEX_BIN"), environment)
+
+
 def _resolve_codex_bin(candidate: str | None, env: Mapping[str, str]) -> str:
     if candidate:
         path = Path(candidate).expanduser()

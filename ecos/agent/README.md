@@ -5,9 +5,15 @@ only the numeric GUI workflows `1` (run flow) and `2` (rerun step).
 
 ## Prerequisites
 
-- Python 3.11+, `uv`, and an authenticated Codex CLI at the path configured in
-  `agent-provider.json`.
-- This source-checkout example does not support Electron packaging.
+- In a source checkout: Python 3.11+ and `uv`.
+- An authenticated Codex CLI installed by the user. The provider discovers
+  `codex` on the application `PATH`, or uses an explicit user environment
+  variable `ECOS_AGENT_CODEX_BIN`.
+
+The packaged desktop application includes the ECOS Agent Python runtime. It
+does not include Codex, credentials, or an authenticated session. The
+provider validates the Codex CLI when the GUI starts an Agent session and
+fails closed when it is unavailable.
 
 ## Install and Start
 
@@ -17,7 +23,9 @@ uv sync --locked
 ```
 
 During desktop development, ECOS Studio discovers this in-tree provider
-automatically. To exercise the newline-JSON provider protocol directly, run:
+automatically. Its manifest uses `uv run --locked`, so the source runtime is
+reproducible from `uv.lock`. To exercise the newline-JSON provider protocol
+directly, run:
 
 ```bash
 uv run python -m ecos_agent.provider
@@ -37,6 +45,11 @@ The provider always sends typed, review-required contracts. Codex is limited
 to read-only proposal generation; ECOS Studio validates contracts, creates or
 switches workspaces, and invokes fixed ECC RPC methods. Missing Codex, timeout,
 or invalid structured output fails closed without invoking ECC.
+
+`ECOS_AGENT_PROVIDER_ROOTS` may register additional local provider roots for
+development. Each root is trusted executable code; do not configure paths from
+untrusted sources. Invalid or inaccessible optional manifests are ignored so
+they cannot disable the bundled provider.
 
 ## Verify
 

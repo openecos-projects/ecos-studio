@@ -36,8 +36,12 @@ describe('AIChatPanel flow contracts', () => {
     expect(source).not.toContain(
       "if (event.text) messageStore.addAssistantMessage(event.text, 'done')",
     )
+    expect(source).toContain('const flowResult = await runAllFlow()')
+    expect(source).toContain(
+      "throw new Error('Flow execution did not complete successfully.')",
+    )
     expect(source).toMatch(
-      /await agentFlowProgress\.start\(result\.workspacePath\)[\s\S]*void runAllFlow\(\)\.finally\(agentFlowProgress\.stop\)/,
+      /const flowResult = await runAllFlow\(\)[\s\S]*await reportWorkspaceCreationResult\(contract\.setup_id, 'succeeded', ''\)/,
     )
   })
 

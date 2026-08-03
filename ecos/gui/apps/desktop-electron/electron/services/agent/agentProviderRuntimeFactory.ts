@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import path from 'node:path'
 import { AgentProviderProcessRuntime } from './agentProviderProcessRuntime'
 import { discoverAgentProviderManifests } from './agentProviderPlugin'
@@ -41,6 +42,14 @@ function configuredProviderRoots(
         .split(path.delimiter)
         .map((root) => root.trim())
         .filter(Boolean)
+        .map(resolveProviderRoot)
     : []
-  return builtInProviderRoot ? [builtInProviderRoot, ...configured] : configured
+  return builtInProviderRoot
+    ? [resolveProviderRoot(builtInProviderRoot), ...configured]
+    : configured
+}
+
+function resolveProviderRoot(root: string): string {
+  const expanded = root === '~' ? homedir() : root.replace(/^~(?=[/\\])/, homedir())
+  return path.resolve(expanded)
 }

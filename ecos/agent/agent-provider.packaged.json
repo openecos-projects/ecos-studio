@@ -1,0 +1,6 @@
+{
+  "providerId": "ecos_agent",
+  "displayName": "ECOS Agent",
+  "command": "./ecos-agent",
+  "protocolVersion": 1
+}

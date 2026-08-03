@@ -161,9 +161,9 @@ def parse_number(value: str, *, label: str, lower: float, upper: float, default:
     return number
 
 
-def workspace_search_roots(project_root: str) -> tuple[str, str]:
+def workspace_search_roots(project_root: str) -> tuple[str, ...]:
     root = Path(normalize_path(project_root, label="Project Root", require_directory=True))
-    return str(root), str(root.parent)
+    return (str(root),)
 
 
 def discover_design_file_candidates(design_name: str, roots: Iterable[str | Path]) -> dict[str, list[str]]:

@@ -154,7 +154,7 @@ def _propose_gui_workspace_rerun_patch(
         raise CodexProviderError("GUI rerun workspace is unavailable", failure_class="missing_input")
     provider = create_required_codex_provider(
         cwd=source,
-        runtime_workspace_roots=(source, source.parent),
+        runtime_workspace_roots=(source,),
         progress_callback=progress_callback,
     )
     try:
@@ -202,7 +202,7 @@ def _workspace_inputs_payload(inputs: WorkspaceInputs) -> dict[str, str]:
 
 
 def _validated_path_recommendations(
-    proposal: GuiWorkspaceSetupProposal, roots: tuple[str, str]
+    proposal: GuiWorkspaceSetupProposal, roots: tuple[str, ...]
 ) -> dict[str, str]:
     recommendations = {
         "rtl": _validated_recommendation(proposal.rtl_path, "RTL path", (".v", ".sv"), roots),
@@ -213,7 +213,7 @@ def _validated_path_recommendations(
 
 
 def _validated_recommendation(
-    value: str | None, label: str, suffixes: tuple[str, ...], roots: tuple[str, str]
+    value: str | None, label: str, suffixes: tuple[str, ...], roots: tuple[str, ...]
 ) -> str | None:
     if value is None:
         return None
@@ -225,7 +225,7 @@ def _validated_recommendation(
 
 
 def _validate_workspace_input_roots(
-    proposal: GuiWorkspaceSetupProposal, inputs: WorkspaceInputs, roots: tuple[str, str], message: str
+    proposal: GuiWorkspaceSetupProposal, inputs: WorkspaceInputs, roots: tuple[str, ...], message: str
 ) -> None:
     path_updates = {
         "project_root": inputs.project_root,
