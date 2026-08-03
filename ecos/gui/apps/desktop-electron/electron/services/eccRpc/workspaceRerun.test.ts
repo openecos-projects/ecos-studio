@@ -102,6 +102,17 @@ describe('prepareWorkspaceRerun', () => {
     ).resolves.toContain(contract.rerun_id)
   })
 
+  it('accepts a numbered isolated rerun target', async () => {
+    const { artifact, flow, source } = await writeSourceWorkspace()
+    const contract = contractFor(source, flow, artifact)
+    contract.target_workspace = `${contract.target_workspace}_0001`
+    contract.rerun_id = 'gcd_rerun_place_0001'
+
+    await expect(prepareWorkspaceRerun(contract)).resolves.toEqual({
+      directory: contract.target_workspace,
+    })
+  })
+
   it('preserves the predecessor checkpoint and empties the rerun suffix', async () => {
     const { artifact, flow, source } = await writeSourceWorkspace()
     const contract = contractFor(source, flow, artifact)

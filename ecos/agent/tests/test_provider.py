@@ -3,7 +3,9 @@ from pathlib import Path
 
 from ecos_agent.codex_provider import CodexAppServerProposalProvider, CodexProviderError, _resolve_codex_bin
 from ecos_agent.contracts import GuiWorkspaceSetupProposal
+from ecos_agent.ecc_contracts import ECCStepName
 from ecos_agent.provider import EcosAgentProvider, PROVIDER_ID
+from ecos_agent.workspace_rerun import GuiWorkspaceRerunResolver, GuiWorkspaceRerunSource
 
 
 def _proposal(**overrides: object) -> GuiWorkspaceSetupProposal:
@@ -329,6 +331,26 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
     )
 
     assert provider.sessions[session_id].phase == "operation"
+
+
+def test_rerun_allocates_a_numbered_target_when_the_default_exists(tmp_path: Path) -> None:
+    workspace = tmp_path / "gcd"
+    workspace.mkdir()
+    (tmp_path / "gcd_rerun_place").mkdir()
+    source = GuiWorkspaceRerunSource(
+        workspace_path=workspace,
+        design_id="gcd",
+        flow_json_sha256="0" * 64,
+        end_step=ECCStepName.PLACEMENT,
+        allowed_stages=("place",),
+        stage_artifact_ref={"place": "place_dreamplace/output/gcd_place.def.gz"},
+        stage_artifact_sha256={"place": "1" * 64},
+    )
+
+    contract = GuiWorkspaceRerunResolver(tmp_path).freeze(source, "place", [], "single_step")
+
+    assert contract.target_workspace == str(tmp_path / "gcd_rerun_place_0001")
+    assert contract.rerun_id == "gcd_rerun_place_0001"
 
 
 def test_rerun_fails_closed_when_mock_codex_times_out(tmp_path: Path) -> None:

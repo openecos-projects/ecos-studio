@@ -202,9 +202,11 @@ async function verifyWorkspaceRerunContract(
     dirname(sourceWorkspace),
     `${basename(sourceWorkspace)}_rerun_${contract.target_step.toLowerCase()}`,
   )
+  const targetSuffix = targetWorkspace.slice(expectedTarget.length)
   if (
-    targetWorkspace !== expectedTarget ||
-    contract.rerun_id !== basename(expectedTarget) ||
+    !targetWorkspace.startsWith(expectedTarget) ||
+    (targetSuffix && !/^_\d{4}$/.test(targetSuffix)) ||
+    contract.rerun_id !== basename(targetWorkspace) ||
     relative(dirname(sourceWorkspace), targetWorkspace).startsWith('..')
   ) {
     throw new Error('Workspace rerun target is outside the source workspace parent.')

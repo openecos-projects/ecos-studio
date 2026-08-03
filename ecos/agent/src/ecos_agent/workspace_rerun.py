@@ -210,11 +210,7 @@ class GuiWorkspaceRerunResolver:
             raise ValueError(f"{target_step} is not an allowed completed stage")
         if execution_scope not in _RERUN_SCOPES:
             raise ValueError("rerun execution scope is invalid")
-        target = source.workspace_path.with_name(
-            f"{source.workspace_path.name}_rerun_{target_step.lower()}"
-        )
-        if target.exists():
-            raise ValueError(f"rerun target already exists: {target}")
+        target = self._next_rerun_target(source.workspace_path, target_step)
         patch = self._validate_patch(target_step, parameter_patch)
         return GuiWorkspaceRerunContract(
             source_workspace=str(source.workspace_path),
@@ -233,6 +229,17 @@ class GuiWorkspaceRerunResolver:
             source_stage_artifact_sha256=source.stage_artifact_sha256[target_step],
             parameter_patch=[] if patch is None else patch.items,
         )
+
+    @staticmethod
+    def _next_rerun_target(source_workspace: Path, target_step: str) -> Path:
+        base = source_workspace.with_name(
+            f"{source_workspace.name}_rerun_{target_step.lower()}"
+        )
+        for index in range(10_000):
+            target = base if index == 0 else base.with_name(f"{base.name}_{index:04d}")
+            if not target.exists():
+                return target
+        raise ValueError(f"no available rerun target for: {base}")
 
     def parameter_values(
         self, source: GuiWorkspaceRerunSource, target_step: str
