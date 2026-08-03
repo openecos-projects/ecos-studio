@@ -485,8 +485,8 @@ class EcosAgentProvider:
             source = Path(proposal.source_workspace).expanduser().resolve()
             if not source.is_relative_to(root):
                 raise ValueError("recommended workspace is outside the authorized search root")
-            resolver = GuiWorkspaceRerunResolver(source.parent)
-            discovery = resolver.discover(design)
+            resolver = GuiWorkspaceRerunResolver(root)
+            discovery = resolver.discover_workspace(source, design)
         except CodexProviderError as exc:
             self._emit(session, "error", f"Unable to recommend a rerun workspace: {exc}")
             self._emit(session, "message", rerun_design_prompt(session.language))

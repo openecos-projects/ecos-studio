@@ -148,7 +148,7 @@ def test_numeric_semantic_fallback_fails_closed_when_codex_times_out(tmp_path: P
 
 
 def test_rerun_asks_design_then_uses_a_codex_workspace_recommendation(tmp_path: Path) -> None:
-    workspace = tmp_path / "gcd"
+    workspace = tmp_path / "source-workspace"
     flow = workspace / "home" / "flow.json"
     flow.parent.mkdir(parents=True)
     flow.write_text(

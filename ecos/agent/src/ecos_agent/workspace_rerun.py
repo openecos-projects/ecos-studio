@@ -167,6 +167,18 @@ class GuiWorkspaceRerunResolver:
 
     def discover(self, design_id: str) -> GuiWorkspaceRerunDiscovery:
         source = self._find_workspace(design_id)
+        return self.discover_workspace(source, design_id)
+
+    def discover_workspace(
+        self, workspace_path: Path, design_id: str
+    ) -> GuiWorkspaceRerunDiscovery:
+        source = workspace_path.resolve()
+        if (
+            not source.is_relative_to(self.workspace_root)
+            or not source.is_dir()
+            or not (source / "home" / "flow.json").is_file()
+        ):
+            raise ValueError("recommended source workspace is invalid")
         flow_path = source / "home" / "flow.json"
         flow = self._read_flow(flow_path)
         end_step = self._flow_end_step(flow)
