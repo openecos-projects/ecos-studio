@@ -162,6 +162,7 @@ function handleAgentEvent(event: DesktopAgentEvent): void {
     if (event.contract.presentation === 'workspace_rerun') {
       workspaceRerunContract.value = event.contract
       workspaceRerunMessage.value = event.text ?? ''
+      scrollWorkspaceSetupIntoView()
       return
     }
     messageStore.addExecutionContract(event.contract)

@@ -10,6 +10,9 @@ describe('AIChatPanel flow contracts', () => {
   it('renders frozen rerun specifications in the same key-value table as workspace setup', () => {
     expect(source).toContain("event.contract.presentation === 'workspace_rerun'")
     expect(source).toContain('workspaceRerunContract.value = event.contract')
+    expect(source).toMatch(
+      /if \(event\.contract\.presentation === 'workspace_rerun'\) \{\s*workspaceRerunContract\.value = event\.contract\s*workspaceRerunMessage\.value = event\.text \?\? ''\s*scrollWorkspaceSetupIntoView\(\)\s*return\s*\}/,
+    )
     expect(source).toContain('AgentExecutionContractPanel')
     expect(source).toContain(':rows="workspaceRerunRows"')
     expect(source).toContain('workspaceRerunExecutionState')

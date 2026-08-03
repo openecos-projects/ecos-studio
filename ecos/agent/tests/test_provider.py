@@ -293,7 +293,7 @@ def test_rerun_freezes_evidence_before_requesting_gui_execution(tmp_path: Path) 
         _send(provider, session_id, message)
 
     assert events[-2]["type"] == "message"
-    assert "Updated parameter values" in str(events[-2]["text"])
+    assert "Parameters available for this stage" in str(events[-2]["text"])
     assert "| place.routability_opt | false |" in str(events[-2]["text"])
     assert "| place.target_overflow | 0.1 |" in str(events[-2]["text"])
 
