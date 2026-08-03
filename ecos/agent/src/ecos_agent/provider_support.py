@@ -32,6 +32,7 @@ from ecos_agent.messages import (
 from ecos_agent.workspace_rerun import (
     GuiWorkspaceRerunContract,
     GuiWorkspaceRerunParameterProposal,
+    GuiWorkspaceRerunResolver,
 )
 from ecos_agent.workspace_setup import (
     WorkspaceInputs,
@@ -109,12 +110,20 @@ def _handle_workspace_rerun_result(provider: Any, session: Any, message: str) ->
         return
     _, status, error = result
     if status == "succeeded":
-        provider._emit(session, "message", _rerun_completion_message(session.language, contract.target_workspace))
+        provider._emit(session, "message", _rerun_completion_message(session.language))
         provider._reset(session)
         return
     provider._emit(session, "error", f"Workspace rerun failed: {error}")
     provider._emit(session, "message", confirmation_menu(session.language))
     session.phase = "confirmation"
+
+
+def _rerun_resolver(provider: Any) -> GuiWorkspaceRerunResolver:
+    if provider.workspace_rerun_resolver is None:
+        provider.workspace_rerun_resolver = GuiWorkspaceRerunResolver(
+            provider.workspace_root or _workspace_root_from_environment()
+        )
+    return provider.workspace_rerun_resolver
 
 
 def _propose_gui_workspace_setup(context: dict[str, Any]) -> GuiWorkspaceSetupProposal:
@@ -242,10 +251,10 @@ def _path_was_explicitly_provided(message: str, path: str) -> bool:
     return False
 
 
-def _rerun_workspace_recommendation(language: str, workspace: Path) -> str:
+def _rerun_workspace_recommendation(language: str) -> str:
     if language == "zh":
-        return f"已找到推荐 workspace：{workspace}"
-    return f"Recommended workspace found: {workspace}"
+        return "已找到可用于重跑的 workspace。"
+    return "A workspace is available for rerun."
 
 
 def _workspace_rerun_execution_contract(
@@ -308,10 +317,10 @@ def _workspace_rerun_execution_contract(
     }
 
 
-def _rerun_completion_message(language: str, target_workspace: str) -> str:
+def _rerun_completion_message(language: str) -> str:
     if language == "zh":
-        return f"GUI 已切换到重跑 workspace：{target_workspace}"
-    return f"The GUI switched to the rerun workspace: {target_workspace}"
+        return "GUI 已切换到重跑 workspace。"
+    return "The GUI switched to the rerun workspace."
 
 
 def _prompt_for_phase(session: _Session) -> str:
@@ -377,7 +386,7 @@ def _flow_steps() -> list[str]:
 def _workspace_root_from_environment() -> Path:
     value = os.environ.get("ECOS_AGENT_WORKSPACE_ROOT")
     if not value:
-        return Path.cwd()
+        raise ValueError("ECOS_AGENT_WORKSPACE_ROOT is required for workspace rerun")
     root = Path(value).expanduser()
     if not root.is_dir():
         raise ValueError("ECOS_AGENT_WORKSPACE_ROOT must be an existing directory")

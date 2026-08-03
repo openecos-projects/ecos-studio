@@ -73,6 +73,7 @@ from ecos_agent.provider_support import (
     _propose_gui_workspace_rerun_patch,
     _propose_gui_workspace_setup,
     _recommended_path,
+    _rerun_resolver,
     _required_message,
     _rerun_workspace_recommendation,
     _validate_workspace_input_roots,
@@ -80,7 +81,6 @@ from ecos_agent.provider_support import (
     _workspace_creation_result,
     _workspace_inputs_payload,
     _workspace_rerun_execution_contract,
-    _workspace_root_from_environment,
 )
 
 
@@ -124,9 +124,8 @@ class EcosAgentProvider:
         self.emit = emit
         self.workspace_setup_parser = workspace_setup_parser or _propose_gui_workspace_setup
         self.workspace_path_recommender = workspace_path_recommender or _propose_gui_workspace_path_discovery
-        self.workspace_rerun_resolver = workspace_rerun_resolver or GuiWorkspaceRerunResolver(
-            workspace_root or _workspace_root_from_environment()
-        )
+        self.workspace_rerun_resolver = workspace_rerun_resolver
+        self.workspace_root = workspace_root
         self.rerun_parameter_parser = rerun_parameter_parser or _propose_gui_workspace_rerun_patch
         self.sessions: dict[str, _Session] = {}
         self.stopped = False
@@ -455,7 +454,13 @@ class EcosAgentProvider:
     def _select_rerun_design(self, session: _Session, message: str) -> None:
         design = message.strip()
         try:
-            discovery = self.workspace_rerun_resolver.discover(design)
+            resolver = _rerun_resolver(self)
+        except ValueError as exc:
+            self._emit(session, "error", str(exc))
+            self._emit(session, "message", rerun_design_prompt(session.language))
+            return
+        try:
+            discovery = resolver.discover(design)
         except ValueError:
             self._reset(session)
             self._emit(session, "error", no_source_run_message(session.language))
@@ -466,11 +471,12 @@ class EcosAgentProvider:
         self._emit(
             session,
             "message",
-            _rerun_workspace_recommendation(session.language, discovery.source.workspace_path),
+            _rerun_workspace_recommendation(session.language),
         )
         self._emit(session, "message", rerun_stage_prompt(session.language, discovery.allowed_stages))
 
     def _select_rerun_stage(self, session: _Session, message: str) -> None:
+        resolver = _rerun_resolver(self)
         discovery = session.rerun_discovery
         stage = None if discovery is None else numbered_choice(message, discovery.allowed_stages)
         if stage is None:
@@ -488,11 +494,12 @@ class EcosAgentProvider:
             "message",
             rerun_parameter_prompt(
                 session.language,
-                self.workspace_rerun_resolver.parameter_values(discovery.source, stage),
+                resolver.parameter_values(discovery.source, stage),
             ),
         )
 
     def _select_rerun_parameter(self, session: _Session, message: str) -> None:
+        resolver = _rerun_resolver(self)
         discovery = session.rerun_discovery
         stage = session.rerun_stage
         if discovery is None or stage is None:
@@ -503,7 +510,7 @@ class EcosAgentProvider:
             session.rerun_parameter_patch = []
         else:
             try:
-                parameter_values = self.workspace_rerun_resolver.parameter_values(
+                parameter_values = resolver.parameter_values(
                     discovery.source, stage
                 )
                 if not parameter_values:
@@ -520,7 +527,7 @@ class EcosAgentProvider:
                         }
                     )
                 )
-                self.workspace_rerun_resolver._validate_patch(
+                resolver._validate_patch(
                     stage, [item.model_dump(mode="json") for item in proposal.parameter_patch]
                 )
             except (CodexProviderError, ValueError) as exc:
@@ -530,7 +537,7 @@ class EcosAgentProvider:
                     "message",
                     rerun_parameter_prompt(
                         session.language,
-                        self.workspace_rerun_resolver.parameter_values(discovery.source, stage),
+                        resolver.parameter_values(discovery.source, stage),
                     ),
                 )
                 return
@@ -539,13 +546,14 @@ class EcosAgentProvider:
         self._emit(session, "message", rerun_scope_prompt(session.language))
 
     def _select_rerun_scope(self, session: _Session, message: str) -> None:
+        resolver = _rerun_resolver(self)
         scope = numbered_choice(message, ("single_step", "full_flow"))
         if scope is None or session.rerun_discovery is None or session.rerun_stage is None:
             self._emit(session, "message", invalid_choice(session.language))
             self._emit(session, "message", rerun_scope_prompt(session.language))
             return
         try:
-            session.workspace_rerun_contract = self.workspace_rerun_resolver.freeze(
+            session.workspace_rerun_contract = resolver.freeze(
                 session.rerun_discovery.source,
                 session.rerun_stage,
                 session.rerun_parameter_patch,
@@ -555,7 +563,7 @@ class EcosAgentProvider:
             self._emit(session, "error", f"Unable to resolve the rerun contract: {exc}")
             return
         session.phase = "confirmation"
-        parameter_values = self.workspace_rerun_resolver.parameter_values(
+        parameter_values = resolver.parameter_values(
             session.rerun_discovery.source, session.rerun_stage
         )
         self._emit(
