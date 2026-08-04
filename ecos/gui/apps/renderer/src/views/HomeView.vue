@@ -486,36 +486,57 @@ function sourcePath(value: Record<string, unknown>): string {
 
 .dashboard-section::before {
   background:
-    radial-gradient(
-        circle at 0 0,
-        transparent 0 7px,
-        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
-        transparent 9.5px
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
       )
-      top left / 19px 19px no-repeat,
-    radial-gradient(
-        circle at 100% 0,
-        transparent 0 7px,
-        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
-        transparent 9.5px
+      top left / 23px 2px no-repeat,
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
       )
-      top right / 19px 19px no-repeat,
-    radial-gradient(
-        circle at 0 100%,
-        transparent 0 7px,
-        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
-        transparent 9.5px
+      top left / 2px 23px no-repeat,
+    linear-gradient(
+        270deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
       )
-      bottom left / 19px 19px no-repeat,
-    radial-gradient(
-        circle at 100% 100%,
-        transparent 0 7px,
-        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
-        transparent 9.5px
+      top right / 23px 2px no-repeat,
+    linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
       )
-      bottom right / 19px 19px no-repeat;
+      top right / 2px 23px no-repeat,
+    linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom left / 23px 2px no-repeat,
+    linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom left / 2px 23px no-repeat,
+    linear-gradient(
+        270deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom right / 23px 2px no-repeat,
+    linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--success-color) 90%, transparent) 0 16px,
+        transparent 16px
+      )
+      bottom right / 2px 23px no-repeat;
   content: '';
-  inset: 3px;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--success-color) 48%, transparent));
+  inset: -1px;
   pointer-events: none;
   position: absolute;
   z-index: 2;

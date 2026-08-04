@@ -13,4 +13,12 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('maximizable')
     expect(homeViewSource).toContain('class="dashboard-image-preview"')
   })
+
+  it('uses the legacy green bracket corners around each dashboard card', () => {
+    expect(homeViewSource).toContain('.dashboard-section::before')
+    expect(homeViewSource).toContain('top left / 23px 2px no-repeat')
+    expect(homeViewSource).toContain('bottom right / 2px 23px no-repeat')
+    expect(homeViewSource).toContain('filter: drop-shadow')
+    expect(homeViewSource).not.toContain('radial-gradient(\n        circle at 0 0')
+  })
 })
