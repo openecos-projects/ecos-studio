@@ -21,4 +21,9 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain('ri-file-copy-line')
     expect(source).toContain('ri-fullscreen-line')
   })
+
+  it('does not reserve header space for aggregate status counts', () => {
+    expect(source).not.toContain('flow-status-counts')
+    expect(source).not.toContain('flowStatusSummary')
+  })
 })

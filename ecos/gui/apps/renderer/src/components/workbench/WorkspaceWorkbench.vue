@@ -5,6 +5,7 @@
         <slot name="left" />
       </SplitterPanel>
       <SplitterPanel :size="40" :min-size="25" class="workspace-workbench-right">
+        <div ref="chatToolbarTarget" class="workspace-workbench-chat-toolbar" />
         <FlowStatusStrip
           class="workspace-workbench-flow-status"
           :loading="loading"
@@ -17,13 +18,17 @@
         </FlowStatusStrip>
         <slot name="right-log" />
         <FlowReportPanel :reports="reports" />
-        <ChatInspectorPanel class="workspace-workbench-inspector" />
+        <ChatInspectorPanel
+          class="workspace-workbench-inspector"
+          :toolbar-target="chatToolbarTarget"
+        />
       </SplitterPanel>
     </Splitter>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
@@ -32,6 +37,8 @@ import FlowReportPanel from './FlowReportPanel.vue'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
 import type { FlowStatusNode } from './flowStatus'
+
+const chatToolbarTarget = ref<HTMLElement | null>(null)
 
 withDefaults(
   defineProps<{
@@ -122,19 +129,22 @@ withDefaults(
   flex: 1 1 auto;
 }
 
-.workspace-workbench-right > * {
-  flex-shrink: 0;
-}
-
+.workspace-workbench-right > .workspace-workbench-chat-toolbar,
 .workspace-workbench-flow-status {
   flex: 0 0 auto;
   position: relative;
   z-index: 1;
 }
 
+.workspace-workbench-right > .workspace-workbench-chat-toolbar {
+  background: var(--bg-primary);
+  min-height: 40px;
+}
+
 .workspace-workbench-right > .workspace-workbench-inspector {
-  flex: 1 1 0;
+  flex: 0 0 clamp(184px, 30vh, 280px);
   height: auto !important;
-  min-height: 0;
+  margin-top: auto;
+  min-height: 184px;
 }
 </style>

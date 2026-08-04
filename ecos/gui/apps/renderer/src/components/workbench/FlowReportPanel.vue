@@ -223,7 +223,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .flow-report-panel {
   display: grid;
-  flex: 0 0 auto;
+  flex: 1 1 180px;
   gap: 7px;
   max-height: min(38vh, 360px);
   min-height: 0;

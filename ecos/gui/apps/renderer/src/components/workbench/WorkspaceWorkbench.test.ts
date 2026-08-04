@@ -11,6 +11,7 @@ describe('WorkspaceWorkbench shared right panel', () => {
   })
 
   it('owns flow status, reports, and the existing inspector/chat panel once', () => {
+    expect(source).toContain('workspace-workbench-chat-toolbar')
     expect(source).toContain('workspace-workbench-flow-status')
     expect(source).toContain('FlowRunControl')
     expect(source).toContain('<template #actions>')
@@ -21,8 +22,9 @@ describe('WorkspaceWorkbench shared right panel', () => {
 
   it('keeps status and flow information above the only flexible chat region', () => {
     expect(source).toContain('height: 100%')
-    expect(source).toContain('flex-shrink: 0')
-    expect(source).toContain('flex: 1 1 0')
+    expect(source).toContain(':toolbar-target="chatToolbarTarget"')
+    expect(source).toContain('flex: 0 0 clamp(184px, 30vh, 280px)')
+    expect(source).toContain('margin-top: auto')
     expect(source).toContain('height: auto !important')
   })
 })

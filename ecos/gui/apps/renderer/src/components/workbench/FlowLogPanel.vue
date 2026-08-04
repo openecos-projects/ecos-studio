@@ -167,7 +167,7 @@ onBeforeUnmount(() => {
 .flow-log-panel {
   border-bottom: 1px solid var(--border-color);
   display: flex;
-  flex: 0 0 min(28vh, 220px);
+  flex: 0 1 min(28vh, 220px);
   flex-direction: column;
   min-height: 124px;
   min-width: 0;

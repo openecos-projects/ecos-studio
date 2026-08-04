@@ -6,46 +6,25 @@
         <span>{{ title }}</span>
         <span v-if="loading" class="flow-status-refreshing">Updating</span>
       </div>
-      <div class="flow-status-header-actions">
-        <div class="flow-status-counts" aria-label="Flow status summary">
-          <span title="Succeeded"
-            ><i class="ri-checkbox-circle-fill is-succeeded" />{{
-              summary.succeeded
-            }}</span
-          >
-          <span title="Running"
-            ><i class="ri-loader-4-line is-running" />{{ summary.running }}</span
-          >
-          <span title="Failed"
-            ><i class="ri-close-circle-fill is-failed" />{{ summary.failed }}</span
-          >
-          <span title="Queued"
-            ><i class="ri-time-line is-queued" />{{ summary.queued }}</span
-          >
-        </div>
-        <div class="flow-status-card-actions">
-          <button
-            type="button"
-            :title="copied ? 'Copied' : 'Copy flow status'"
-            :aria-label="copied ? 'Copied flow status' : 'Copy flow status'"
-            :disabled="!selectedNode"
-            @click="copyStatus"
-          >
-            <i
-              :class="copied ? 'ri-check-line' : 'ri-file-copy-line'"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            title="Open flow status"
-            aria-label="Open flow status"
-            :disabled="!selectedNode"
-            @click="dialogVisible = true"
-          >
-            <i class="ri-fullscreen-line" aria-hidden="true" />
-          </button>
-        </div>
+      <div class="flow-status-card-actions">
+        <button
+          type="button"
+          :title="copied ? 'Copied' : 'Copy flow status'"
+          :aria-label="copied ? 'Copied flow status' : 'Copy flow status'"
+          :disabled="!selectedNode"
+          @click="copyStatus"
+        >
+          <i :class="copied ? 'ri-check-line' : 'ri-file-copy-line'" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          title="Open flow status"
+          aria-label="Open flow status"
+          :disabled="!selectedNode"
+          @click="dialogVisible = true"
+        >
+          <i class="ri-fullscreen-line" aria-hidden="true" />
+        </button>
       </div>
     </header>
 
@@ -128,7 +107,6 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import {
-  flowStatusSummary,
   formatPeakMemory,
   initialSelectedNodeId,
   statusIcon,
@@ -152,7 +130,6 @@ const emit = defineEmits<{
 const selectedId = ref<string | null>(initialSelectedNodeId(props.nodes))
 const dialogVisible = ref(false)
 const copied = ref(false)
-const summary = computed(() => flowStatusSummary(props.nodes))
 const selectedNode = computed(
   () => props.nodes.find((node) => node.id === selectedId.value) ?? null,
 )
@@ -225,9 +202,6 @@ onBeforeUnmount(() => {
 }
 
 .flow-status-heading,
-.flow-status-header-actions,
-.flow-status-counts,
-.flow-status-counts span,
 .flow-status-card-actions,
 .flow-status-detail-title {
   align-items: center;
@@ -242,12 +216,8 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.flow-status-header-actions {
-  flex: 0 0 auto;
-  gap: 7px;
-}
-
 .flow-status-card-actions {
+  flex: 0 0 auto;
   gap: 2px;
 }
 
@@ -285,18 +255,6 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.flow-status-counts {
-  color: var(--text-secondary);
-  flex: 0 0 auto;
-  font-size: 10px;
-  gap: 7px;
-}
-
-.flow-status-counts span {
-  gap: 2px;
-}
-
-.flow-status-counts i,
 .flow-status-detail-title i {
   font-size: 13px;
 }

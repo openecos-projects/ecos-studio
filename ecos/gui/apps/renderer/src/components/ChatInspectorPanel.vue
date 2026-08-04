@@ -10,67 +10,74 @@
         },
       ]"
     >
-      <div
-        class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
+      <Teleport
+        :to="props.toolbarTarget ?? 'body'"
+        :disabled="!props.toolbarTarget || isAnyPanelFullscreen"
       >
-        <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
+        <div
+          class="chat-inspector-topbar flex h-10 shrink-0 items-center gap-2 border-b border-(--border-color) px-3"
+        >
+          <div class="chat-inspector-tabs flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              @click="selectTab('chat')"
+              :class="tabClass(activeTab === 'chat')"
+              title="AI Chat"
+            >
+              <i class="ri-chat-3-line text-base"></i>
+            </button>
+            <button
+              v-if="showStepConfigInspector"
+              type="button"
+              @click="selectTab('inspector')"
+              :class="tabClass(activeTab === 'inspector')"
+              title="Configuration"
+            >
+              <i class="ri-layout-column-line text-base"></i>
+            </button>
+            <button
+              v-if="showStepQorAnalysis"
+              type="button"
+              @click="selectTab('analysis')"
+              :class="tabClass(activeTab === 'analysis')"
+              title="QoR Analysis"
+              aria-label="QoR Analysis"
+            >
+              <i class="ri-bar-chart-box-line text-base"></i>
+            </button>
+          </div>
+
           <button
             type="button"
-            @click="selectTab('chat')"
-            :class="tabClass(activeTab === 'chat')"
-            title="AI Chat"
+            class="chat-inspector-fullscreen-toggle"
+            :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
+            :aria-label="
+              activePanelFullscreen
+                ? activeTab === 'chat'
+                  ? 'Exit AI Chat full screen'
+                  : activeTab === 'inspector'
+                    ? 'Exit step configuration full screen'
+                    : 'Exit step QoR analysis full screen'
+                : activeTab === 'chat'
+                  ? 'View AI Chat full screen'
+                  : activeTab === 'inspector'
+                    ? 'View step configuration full screen'
+                    : 'View step QoR analysis full screen'
+            "
+            @click="toggleActivePanelFullscreen"
           >
-            <i class="ri-chat-3-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepConfigInspector"
-            type="button"
-            @click="selectTab('inspector')"
-            :class="tabClass(activeTab === 'inspector')"
-            title="Configuration"
-          >
-            <i class="ri-layout-column-line text-base"></i>
-          </button>
-          <button
-            v-if="showStepQorAnalysis"
-            type="button"
-            @click="selectTab('analysis')"
-            :class="tabClass(activeTab === 'analysis')"
-            title="QoR Analysis"
-            aria-label="QoR Analysis"
-          >
-            <i class="ri-bar-chart-box-line text-base"></i>
+            <i
+              :class="
+                activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+              "
+            ></i>
           </button>
         </div>
+      </Teleport>
 
-        <button
-          type="button"
-          class="chat-inspector-fullscreen-toggle"
-          :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
-          :aria-label="
-            activePanelFullscreen
-              ? activeTab === 'chat'
-                ? 'Exit AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'Exit step configuration full screen'
-                  : 'Exit step QoR analysis full screen'
-              : activeTab === 'chat'
-                ? 'View AI Chat full screen'
-                : activeTab === 'inspector'
-                  ? 'View step configuration full screen'
-                  : 'View step QoR analysis full screen'
-          "
-          @click="toggleActivePanelFullscreen"
-        >
-          <i
-            :class="
-              activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
-            "
-          ></i>
-        </button>
-      </div>
-
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        class="chat-inspector-content flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         <!-- KeepAlive：避免 v-if 销毁聊天导致 blob 图重新加载/裂图；状态与滚动由子组件 onActivated 恢复 -->
         <KeepAlive>
           <AIChatPanel
@@ -110,6 +117,10 @@ import { StepEnum } from '@/api/type'
 import AIChatPanel from './AIChatPanel.vue'
 import StepConfigPanel from './StepConfigPanel.vue'
 import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
+
+const props = defineProps<{
+  toolbarTarget?: HTMLElement | null
+}>()
 
 const route = useRoute()
 const stepEnumValues = Object.values(StepEnum)
@@ -249,6 +260,10 @@ function tabClass(active: boolean) {
 
 .chat-inspector-tabs {
   flex: 1 1 auto;
+}
+
+.chat-inspector-content {
+  flex: 1 1 0;
 }
 
 .chat-inspector-fullscreen-toggle {

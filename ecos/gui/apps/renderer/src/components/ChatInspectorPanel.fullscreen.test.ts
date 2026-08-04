@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import aiChatSource from './AIChatPanel.vue?raw'
 import chatInspectorSource from './ChatInspectorPanel.vue?raw'
 import messageItemSource from './MessageItem.vue?raw'
 
@@ -23,6 +24,16 @@ describe('ChatInspectorPanel fullscreen controls', () => {
     expect(chatInspectorSource).toContain('StepEnum.ROUTING')
     expect(chatInspectorSource).toContain('StepEnum.STA')
     expect(chatInspectorSource).toContain("selectTab('analysis')")
+  })
+
+  it('can place chat controls in the workbench topbar while keeping the panel content below', () => {
+    expect(chatInspectorSource).toContain('toolbarTarget')
+    expect(chatInspectorSource).toContain(
+      ':disabled="!props.toolbarTarget || isAnyPanelFullscreen"',
+    )
+    expect(chatInspectorSource).toContain('chat-inspector-content')
+    expect(aiChatSource).toContain('<textarea')
+    expect(aiChatSource).toContain('shrink-0 border-t')
   })
 
   it('keeps the outer panel open when an inner chat lightbox consumes Escape', () => {
