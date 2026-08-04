@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildFlowLogViewerExtensions,
   computeFlowLogContextMenuStyle,
+  flowLogVerticalScrollbarGeometry,
   getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
@@ -50,6 +51,7 @@ function loadFlowLogCodeViewerComponent(vue: typeof import('vue')) {
         buildFlowLogViewerExtensions,
         computeFlowLogContextMenuStyle,
         FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX: 16,
+        flowLogVerticalScrollbarGeometry,
         getFlowLogViewerSelectedText,
         isFlowLogViewerNearTail,
       }
@@ -658,12 +660,44 @@ describe('flowLogCodeViewer helpers', () => {
     ).toBe(false)
   })
 
+  it('calculates a visible draggable thumb from the log scroll metrics', () => {
+    expect(
+      flowLogVerticalScrollbarGeometry({
+        scrollHeight: 1200,
+        scrollTop: 480,
+        clientHeight: 240,
+      }),
+    ).toEqual({
+      maxScrollTop: 960,
+      thumbHeight: 48,
+      thumbOffset: 96,
+    })
+
+    expect(
+      flowLogVerticalScrollbarGeometry({
+        scrollHeight: 180,
+        scrollTop: 0,
+        clientHeight: 180,
+      }),
+    ).toEqual({
+      maxScrollTop: 0,
+      thumbHeight: 180,
+      thumbOffset: 0,
+    })
+  })
+
   it('keeps the viewer full-height while reducing empty-state framing', () => {
     expect(flowLogCodeViewerSource).toContain('flow-log-viewer-shell')
     expect(flowLogCodeViewerSource).toContain('flow-log-viewer-editor')
   })
 
-  it('always exposes a vertical scrollbar on the CodeMirror log viewport', () => {
+  it('exposes a fixed, draggable vertical scrollbar beside the log viewport', () => {
+    expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar')
+    expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar-thumb')
+    expect(flowLogCodeViewerSource).toContain('@pointerdown="onFlowLogScrollbarPointerDown"')
+    expect(flowLogCodeViewerSource).toContain('flowLogVerticalScrollbarGeometry(view.scrollDOM)')
+    expect(flowLogCodeViewerSource).toContain('width: 20px')
+    expect(flowLogCodeViewerSource).toContain('background: rgba(166, 166, 176, 0.66)')
     expect(flowLogCodeViewerSource).toContain(':deep(.cm-scroller)')
     expect(flowLogCodeViewerSource).toContain('overflow-y: scroll')
     expect(flowLogCodeViewerSource).toContain('scrollbar-gutter: stable')

@@ -108,7 +108,9 @@ const selectedContent = computed(() =>
 const logTitle = computed(() => {
   const node = props.selectedNode
   if (!node) return 'Flow log'
-  return `${node.label} · Runtime ${node.runtime || '--'} · Peak memory ${formatPeakMemory(
+  const tool = selectedSegment.value?.tool.trim()
+  const stepAndTool = tool ? `${node.label} · ${tool}` : node.label
+  return `${stepAndTool} · Runtime ${node.runtime || '--'} · Peak memory ${formatPeakMemory(
     node.peakMemoryMb,
   )}`
 })

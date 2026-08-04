@@ -4,6 +4,7 @@ import { search, searchKeymap } from '@codemirror/search'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 
 export const FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX = 16
+export const FLOW_LOG_SCROLLBAR_MIN_THUMB_PX = 32
 
 export type FlowLogViewerSelectionState = {
   selection: {
@@ -19,6 +20,12 @@ export type FlowLogViewerSelectionState = {
 export type FlowLogContextMenuStyle = {
   left: string
   top: string
+}
+
+export type FlowLogVerticalScrollbarGeometry = {
+  maxScrollTop: number
+  thumbHeight: number
+  thumbOffset: number
 }
 
 export function buildFlowLogViewerExtensions(): Extension[] {
@@ -95,6 +102,32 @@ export function isFlowLogViewerNearTail(
   thresholdPx = FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
 ): boolean {
   return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= thresholdPx
+}
+
+export function flowLogVerticalScrollbarGeometry(metrics: {
+  scrollHeight: number
+  scrollTop: number
+  clientHeight: number
+}): FlowLogVerticalScrollbarGeometry {
+  const viewportHeight = Math.max(0, metrics.clientHeight)
+  const scrollHeight = Math.max(viewportHeight, metrics.scrollHeight)
+  const maxScrollTop = Math.max(0, scrollHeight - viewportHeight)
+  const thumbHeight =
+    viewportHeight === 0
+      ? 0
+      : Math.max(
+          Math.min(FLOW_LOG_SCROLLBAR_MIN_THUMB_PX, viewportHeight),
+          (viewportHeight / scrollHeight) * viewportHeight,
+        )
+  const thumbTravel = Math.max(0, viewportHeight - thumbHeight)
+  const normalizedScrollTop = Math.max(0, Math.min(metrics.scrollTop, maxScrollTop))
+
+  return {
+    maxScrollTop,
+    thumbHeight,
+    thumbOffset:
+      maxScrollTop === 0 ? 0 : (normalizedScrollTop / maxScrollTop) * thumbTravel,
+  }
 }
 
 export function getFlowLogViewerSelectedText(state: FlowLogViewerSelectionState): string {

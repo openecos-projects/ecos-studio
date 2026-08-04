@@ -6,6 +6,7 @@ import {
   buildFlowLogViewerExtensions,
   computeFlowLogContextMenuStyle,
   FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
+  flowLogVerticalScrollbarGeometry,
   getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
@@ -28,6 +29,7 @@ const props = withDefaults(
 const rootRef = ref<HTMLElement | null>(null)
 const flowLogContextMenuRef = ref<HTMLElement | null>(null)
 const flowLogContextMenuCopyButtonRef = ref<HTMLButtonElement | null>(null)
+const flowLogVerticalScrollbarRef = ref<HTMLElement | null>(null)
 const isViewerEmpty = computed(() => !props.content)
 const flowLogContextMenu = ref<{
   text: string
@@ -48,6 +50,14 @@ let pendingContent: string | null = null
 let pendingSyncRaf: number | null = null
 let pendingTailScrollRaf: number | null = null
 let flowLogContextMenuFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+let flowLogScrollbarResizeObserver: ResizeObserver | null = null
+let flowLogScrollbarDrag: { pointerId: number; pointerOffsetY: number } | null = null
+const flowLogVerticalScrollbar = ref({
+  maxScrollTop: 0,
+  thumbHeight: 0,
+  thumbOffset: 0,
+})
+const isFlowLogScrollbarDragging = ref(false)
 
 function clearFlowLogContextMenuFeedbackTimer(): void {
   if (flowLogContextMenuFeedbackTimer) {
@@ -113,6 +123,92 @@ function onFlowLogContextMenuKeydown(event: KeyboardEvent): void {
   closeFlowLogContextMenu()
 }
 
+function syncFlowLogVerticalScrollbar(): void {
+  if (!view) return
+  flowLogVerticalScrollbar.value = flowLogVerticalScrollbarGeometry(view.scrollDOM)
+}
+
+function clearFlowLogScrollbarBindings(): void {
+  if (view) {
+    view.scrollDOM.removeEventListener?.('scroll', syncFlowLogVerticalScrollbar)
+  }
+  flowLogScrollbarResizeObserver?.disconnect()
+  flowLogScrollbarResizeObserver = null
+  flowLogScrollbarDrag = null
+  isFlowLogScrollbarDragging.value = false
+  flowLogVerticalScrollbar.value = {
+    maxScrollTop: 0,
+    thumbHeight: 0,
+    thumbOffset: 0,
+  }
+}
+
+function bindFlowLogScrollbar(): void {
+  if (!view) return
+  const scrollDOM = view.scrollDOM
+  scrollDOM.addEventListener?.('scroll', syncFlowLogVerticalScrollbar, { passive: true })
+  if (typeof ResizeObserver !== 'undefined') {
+    flowLogScrollbarResizeObserver = new ResizeObserver(syncFlowLogVerticalScrollbar)
+    flowLogScrollbarResizeObserver.observe(scrollDOM)
+  }
+  syncFlowLogVerticalScrollbar()
+}
+
+function setFlowLogScrollFromPointer(event: PointerEvent): void {
+  const scrollDOM = view?.scrollDOM
+  const scrollbar = flowLogVerticalScrollbarRef.value
+  const drag = flowLogScrollbarDrag
+  if (!scrollDOM || !scrollbar || !drag) return
+
+  const bounds = scrollbar.getBoundingClientRect()
+  const thumbTravel = Math.max(0, bounds.height - flowLogVerticalScrollbar.value.thumbHeight)
+  if (thumbTravel === 0 || flowLogVerticalScrollbar.value.maxScrollTop === 0) return
+
+  const thumbOffset = Math.max(
+    0,
+    Math.min(thumbTravel, event.clientY - bounds.top - drag.pointerOffsetY),
+  )
+  scrollDOM.scrollTop =
+    (thumbOffset / thumbTravel) * flowLogVerticalScrollbar.value.maxScrollTop
+  syncFlowLogVerticalScrollbar()
+}
+
+function onFlowLogScrollbarPointerDown(event: PointerEvent): void {
+  const scrollbar = flowLogVerticalScrollbarRef.value
+  if (!view || !scrollbar || flowLogVerticalScrollbar.value.thumbHeight === 0) return
+
+  event.preventDefault()
+  const bounds = scrollbar.getBoundingClientRect()
+  const position = event.clientY - bounds.top
+  const thumbStart = flowLogVerticalScrollbar.value.thumbOffset
+  const thumbEnd = thumbStart + flowLogVerticalScrollbar.value.thumbHeight
+  flowLogScrollbarDrag = {
+    pointerId: event.pointerId,
+    pointerOffsetY:
+      position >= thumbStart && position <= thumbEnd
+        ? position - thumbStart
+        : flowLogVerticalScrollbar.value.thumbHeight / 2,
+  }
+  isFlowLogScrollbarDragging.value = true
+  scrollbar.setPointerCapture?.(event.pointerId)
+  setFlowLogScrollFromPointer(event)
+}
+
+function onFlowLogScrollbarPointerMove(event: PointerEvent): void {
+  if (flowLogScrollbarDrag?.pointerId !== event.pointerId) return
+  setFlowLogScrollFromPointer(event)
+}
+
+function stopFlowLogScrollbarDrag(event?: PointerEvent): void {
+  if (event && flowLogScrollbarDrag?.pointerId !== event.pointerId) return
+  const scrollbar = flowLogVerticalScrollbarRef.value
+  if (event && scrollbar?.hasPointerCapture?.(event.pointerId)) {
+    scrollbar.releasePointerCapture?.(event.pointerId)
+  }
+  flowLogScrollbarDrag = null
+  isFlowLogScrollbarDragging.value = false
+}
+
 function destroyViewer(): void {
   closeFlowLogContextMenu()
   if (pendingSyncRaf !== null) {
@@ -123,6 +219,7 @@ function destroyViewer(): void {
     cancelAnimationFrame(pendingTailScrollRaf)
     pendingTailScrollRaf = null
   }
+  clearFlowLogScrollbarBindings()
   view?.destroy()
   view = null
   lastSyncedContent = ''
@@ -132,6 +229,7 @@ function scrollViewerToTail(): void {
   if (!view) return
   const scrollDOM = view.scrollDOM
   scrollDOM.scrollTop = Math.max(0, scrollDOM.scrollHeight - scrollDOM.clientHeight)
+  syncFlowLogVerticalScrollbar()
 }
 
 function scheduleScrollViewerToTail(): void {
@@ -160,6 +258,7 @@ function ensureViewerState(): void {
     }),
   })
   lastSyncedContent = props.content
+  bindFlowLogScrollbar()
   if (props.live) {
     scheduleScrollViewerToTail()
   }
@@ -189,6 +288,7 @@ function syncViewerContent(nextContent: string): void {
 
   view.dispatch({ changes })
   lastSyncedContent = nextContent
+  syncFlowLogVerticalScrollbar()
 
   if (shouldFollowTail) {
     scheduleScrollViewerToTail()
@@ -277,6 +377,24 @@ onUnmounted(() => {
       @contextmenu="onViewerContextMenu"
     >
       <div ref="rootRef" class="flow-log-viewer-editor"></div>
+      <div
+        ref="flowLogVerticalScrollbarRef"
+        class="flow-log-vertical-scrollbar"
+        :class="{ 'is-dragging': isFlowLogScrollbarDragging }"
+        title="Scroll log vertically"
+        @pointercancel="stopFlowLogScrollbarDrag"
+        @pointerdown="onFlowLogScrollbarPointerDown"
+        @pointermove="onFlowLogScrollbarPointerMove"
+        @pointerup="stopFlowLogScrollbarDrag"
+      >
+        <span
+          class="flow-log-vertical-scrollbar-thumb"
+          :style="{
+            height: `${flowLogVerticalScrollbar.thumbHeight}px`,
+            transform: `translateY(${flowLogVerticalScrollbar.thumbOffset}px)`,
+          }"
+        ></span>
+      </div>
       <span v-if="live" class="flow-log-terminal-cursor" aria-hidden="true"></span>
     </div>
     <Teleport to="body">
@@ -335,6 +453,40 @@ onUnmounted(() => {
 
 .flow-log-viewer-editor {
   overflow: hidden;
+}
+
+.flow-log-vertical-scrollbar {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  border-left: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+
+.flow-log-vertical-scrollbar.is-dragging {
+  cursor: grabbing;
+}
+
+.flow-log-vertical-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  right: 4px;
+  left: 4px;
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(166, 166, 176, 0.66);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.36);
+}
+
+.flow-log-vertical-scrollbar:hover .flow-log-vertical-scrollbar-thumb,
+.flow-log-vertical-scrollbar.is-dragging .flow-log-vertical-scrollbar-thumb {
+  background: rgba(196, 196, 208, 0.88);
 }
 
 :deep(.cm-scroller) {
@@ -420,7 +572,7 @@ onUnmounted(() => {
 
 .flow-log-terminal-cursor {
   position: absolute;
-  right: 18px;
+  right: 28px;
   bottom: 14px;
   width: 7px;
   height: 15px;

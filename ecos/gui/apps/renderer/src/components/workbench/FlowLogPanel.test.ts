@@ -12,6 +12,8 @@ describe('FlowLogPanel embedded controls', () => {
   it('uses the selected flow node to switch logs and render its concise runtime title', () => {
     expect(source).toContain('selectedNode: FlowStatusNode | null')
     expect(source).toContain('selectSegmentForNode')
+    expect(source).toContain('selectedSegment.value?.tool.trim()')
+    expect(source).toContain('const stepAndTool')
     expect(source).toContain('Peak memory')
     expect(source).not.toContain('aria-label="Select a flow step log"')
     expect(source).not.toContain('v-model="selectedKey"')
