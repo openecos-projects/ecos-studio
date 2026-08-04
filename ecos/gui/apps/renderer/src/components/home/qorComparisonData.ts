@@ -1,7 +1,4 @@
-import {
-  FLOW_STEPS,
-  type FlowStep,
-} from '@/utils/projectManagement'
+import { FLOW_STEPS, type FlowStep } from '@/utils/projectManagement'
 import type { ProjectQorWorkspaceComparison } from '@/utils/projectQorTrend'
 
 export interface HomeQorComparisonStep {
@@ -18,6 +15,32 @@ export interface HomeQorComparisonSummary {
   unchangedCount: number
   comparableCount: number
   steps: HomeQorComparisonStep[]
+}
+
+export type HomeQorComparisonTone = 'improvement' | 'regression' | 'neutral'
+
+export interface HomeQorDetailStep {
+  step: FlowStep
+  label: string
+  order: number
+  improvedCount: number
+  regressedCount: number
+  unchangedCount: number
+  metrics: ProjectQorWorkspaceComparison['metrics']
+}
+
+export interface HomeQorDetailModel {
+  baseline: {
+    workspaceName: string
+    score: number | null
+  }
+  current: {
+    workspaceName: string
+    score: number | null
+  }
+  scoreState: HomeQorComparisonTone
+  summary: HomeQorComparisonSummary
+  steps: HomeQorDetailStep[]
 }
 
 const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
@@ -39,6 +62,21 @@ const FLOW_STEP_BY_DASHBOARD_LABEL: Record<string, FlowStep> = {
   rcx: 'RCX',
   sta: 'STA',
   harden: 'Harden',
+}
+
+const FLOW_STEP_LABELS: Record<FlowStep, string> = {
+  Synth: 'Synthesis',
+  Floor: 'Floorplan',
+  Fanout: 'FixFanout',
+  Place: 'Place',
+  CTS: 'CTS',
+  Legal: 'Legalization',
+  Route: 'Route',
+  DRC: 'DRC',
+  Filler: 'Filler',
+  RCX: 'RCX',
+  STA: 'STA',
+  Harden: 'Harden',
 }
 
 export function homeQorFlowStepForLabel(label: string): FlowStep | null {
@@ -87,4 +125,62 @@ export function summarizeHomeQorComparison(
       steps,
     },
   )
+}
+
+export function buildHomeQorDetailModel(
+  comparison: ProjectQorWorkspaceComparison | null,
+): HomeQorDetailModel | null {
+  if (!comparison) return null
+
+  const summary = summarizeHomeQorComparison(comparison)
+  const metricsByStep = new Map<FlowStep, ProjectQorWorkspaceComparison['metrics']>()
+  for (const metric of comparison.metrics) {
+    const metrics = metricsByStep.get(metric.step) ?? []
+    metrics.push(metric)
+    metricsByStep.set(metric.step, metrics)
+  }
+
+  const steps = FLOW_STEPS.flatMap((step, index) => {
+    const metrics = metricsByStep.get(step)
+    if (!metrics?.length) return []
+
+    const counts = summary.steps.find((candidate) => candidate.step === step)
+    return [
+      {
+        step,
+        label: FLOW_STEP_LABELS[step],
+        order: index + 1,
+        improvedCount: counts?.improvedCount ?? 0,
+        regressedCount: counts?.regressedCount ?? 0,
+        unchangedCount: counts?.unchangedCount ?? 0,
+        metrics: [...metrics].sort((left, right) =>
+          left.displayName.localeCompare(right.displayName),
+        ),
+      },
+    ]
+  })
+
+  return {
+    baseline: {
+      workspaceName: comparison.baselineWorkspaceName ?? 'Baseline workspace',
+      score: comparison.baselineScore,
+    },
+    current: {
+      workspaceName: comparison.workspaceName,
+      score: comparison.score,
+    },
+    scoreState: scoreComparisonState(comparison.score, comparison.baselineScore),
+    summary,
+    steps,
+  }
+}
+
+function scoreComparisonState(
+  currentScore: number | null,
+  baselineScore: number | null,
+): HomeQorComparisonTone {
+  if (currentScore === null || baselineScore === null) return 'neutral'
+  if (currentScore > baselineScore) return 'improvement'
+  if (currentScore < baselineScore) return 'regression'
+  return 'neutral'
 }

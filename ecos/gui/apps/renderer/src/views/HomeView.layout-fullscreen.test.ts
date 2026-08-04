@@ -120,6 +120,33 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
   })
 
+  it('renders each QoR step as a single aligned metric comparison card', () => {
+    expect(homeViewSource).toContain('header="QoR Comparison"')
+    expect(homeViewSource).toContain('class="qor-detail-waterfall"')
+    expect(homeViewSource).toContain('buildHomeQorDetailModel')
+    expect(homeViewSource).toContain('qorDetail.baseline.workspaceName')
+    expect(homeViewSource).toContain('qorDetail.current.workspaceName')
+    expect(homeViewSource).toContain('metric.baselineValue')
+    expect(homeViewSource).toContain('metric.currentValue')
+    expect(homeViewSource).toContain('class="qor-detail-card qor-detail-step-card"')
+    expect(homeViewSource).toContain('class="qor-detail-metric-heading"')
+    expect(homeViewSource).toContain('Metric</dt>')
+    expect(homeViewSource).toContain('Baseline</dd>')
+    expect(homeViewSource).toContain('Current</dd>')
+    expect(homeViewSource).toContain('Trend</p>')
+    expect(homeViewSource).toContain('minmax(180px, 1.4fr) minmax(118px, 0.8fr)')
+    expect(homeViewSource).toContain('overflow-y: auto')
+    expect(homeViewSource).toContain('flex: 0 0 auto')
+    expect(homeViewSource).toContain(
+      '.qor-detail-dialog.p-dialog-maximized .p-dialog-content',
+    )
+    expect(homeViewSource).toContain('flex: 1 1 auto')
+    expect(homeViewSource).toContain('height: auto')
+    expect(homeViewSource).toContain('qorMetricComparisonLabel(metric)')
+    expect(homeViewSource).toContain('void openQorDetails()')
+    expect(homeViewSource).toContain('await refreshQorComparison()')
+  })
+
   it('uses readable summary text and semantic status colors', () => {
     expect(homeViewSource).toContain('.status-card .dashboard-section-header h2')
     expect(homeViewSource).toContain('font-size: 13px')

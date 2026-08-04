@@ -293,6 +293,17 @@ export interface ProjectQorWorkspaceComparisonDelta extends ProjectQorDelta {
   unit?: string
 }
 
+/**
+ * A paired metric is retained for the detail view even when its QoR rule is
+ * informational only. The dashboard verdict continues to use `deltas`, which
+ * contains only directional (higher/lower is better) metrics.
+ */
+export interface ProjectQorWorkspaceComparisonMetric extends ProjectQorWorkspaceComparisonDelta {
+  polarity: ProjectQorMetricRecord['polarity']
+  baselinePolarity: ProjectQorMetricRecord['polarity']
+  isDirectional: boolean
+}
+
 export interface ProjectQorWorkspaceComparison {
   workspaceId: string
   workspaceName: string
@@ -302,6 +313,7 @@ export interface ProjectQorWorkspaceComparison {
   baselineScore: number | null
   isBaselineWorkspace: boolean
   available: boolean
+  metrics: ProjectQorWorkspaceComparisonMetric[]
   deltas: ProjectQorWorkspaceComparisonDelta[]
 }
 
@@ -1226,8 +1238,8 @@ export function buildProjectQorScoreDetail(
 
 /**
  * Projects use an explicit baseline when one is selected in project.json. Build the
- * current workspace's complete directional comparison from that same source, including
- * equal metrics which are intentionally omitted from the trend's alert lists.
+ * current workspace's complete paired-metric comparison from that same source. The
+ * directional subset feeds dashboard verdicts; the full set feeds the per-step detail.
  */
 export function buildProjectQorWorkspaceComparison(
   summary: ProjectQorTrendSummary,
@@ -1251,6 +1263,7 @@ export function buildProjectQorWorkspaceComparison(
       baselineScore: baseline?.overallScore ?? null,
       isBaselineWorkspace: false,
       available: false,
+      metrics: [],
       deltas: [],
     }
   }
@@ -1266,6 +1279,7 @@ export function buildProjectQorWorkspaceComparison(
       baselineScore: baseline?.overallScore ?? null,
       isBaselineWorkspace,
       available: false,
+      metrics: [],
       deltas: [],
     }
   }
@@ -1273,28 +1287,33 @@ export function buildProjectQorWorkspaceComparison(
   const baselineRecords = recordsByComparisonKey(
     baseline.comparisonRecords ?? baseline.records,
   )
-  const deltas = Array.from(
+  const metrics = Array.from(
     recordsByComparisonKey(workspace.comparisonRecords ?? workspace.records).values(),
   ).flatMap((record) => {
-    // Only metrics with an explicit good/bad direction contribute to the verdict.
-    if (record.polarity !== 'lower_is_better' && record.polarity !== 'higher_is_better') {
-      return []
-    }
     const baselineRecord = baselineRecords.get(comparisonRecordKey(record))
-    if (!baselineRecord || baselineRecord.polarity !== record.polarity) return []
+    if (!baselineRecord) return []
+    const isDirectional =
+      baselineRecord.polarity === record.polarity &&
+      (record.polarity === 'lower_is_better' || record.polarity === 'higher_is_better')
+    const delta = buildDelta(
+      record,
+      baselineRecord,
+      workspace.workspaceName || workspace.workspaceId,
+      baseline.workspaceName || baseline.workspaceId,
+    )
     return [
       {
-        ...buildDelta(
-          record,
-          baselineRecord,
-          workspace.workspaceName || workspace.workspaceId,
-          baseline.workspaceName || baseline.workspaceId,
-        ),
+        ...delta,
+        state: isDirectional ? delta.state : 'neutral',
         step: record.step,
         unit: record.unit,
+        polarity: record.polarity,
+        baselinePolarity: baselineRecord.polarity,
+        isDirectional,
       },
     ]
   })
+  const deltas = metrics.filter((metric) => metric.isDirectional)
 
   return {
     workspaceId: workspace.workspaceId,
@@ -1305,6 +1324,7 @@ export function buildProjectQorWorkspaceComparison(
     baselineScore: baseline.overallScore,
     isBaselineWorkspace: false,
     available: true,
+    metrics: metrics.sort(compareDeltaMagnitude),
     deltas: deltas.sort(compareDeltaMagnitude),
   }
 }

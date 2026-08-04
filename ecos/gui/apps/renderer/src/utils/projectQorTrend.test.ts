@@ -188,6 +188,16 @@ describe('project QoR trend V3 model', () => {
         expect.objectContaining({ metricName: 'runtime_seconds' }),
       ]),
     )
+    expect(comparison.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'Route',
+          metricName: 'runtime_seconds',
+          isDirectional: false,
+          state: 'neutral',
+        }),
+      ]),
+    )
   })
 
   it('compares every directional metric in its original flow step', () => {
