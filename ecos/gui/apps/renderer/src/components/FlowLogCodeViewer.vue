@@ -339,9 +339,10 @@ onUnmounted(() => {
 
 :deep(.cm-scroller) {
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
   scrollbar-color: var(--border-color) transparent;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
 }
 

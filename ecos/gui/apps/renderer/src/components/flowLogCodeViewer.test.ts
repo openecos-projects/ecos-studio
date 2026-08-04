@@ -663,10 +663,11 @@ describe('flowLogCodeViewer helpers', () => {
     expect(flowLogCodeViewerSource).toContain('flow-log-viewer-editor')
   })
 
-  it('keeps a stable vertical scrollbar on the CodeMirror log viewport', () => {
+  it('always exposes a vertical scrollbar on the CodeMirror log viewport', () => {
     expect(flowLogCodeViewerSource).toContain(':deep(.cm-scroller)')
-    expect(flowLogCodeViewerSource).toContain('overflow-y: auto')
-    expect(flowLogCodeViewerSource).toContain('scrollbar-gutter: stable')
+    expect(flowLogCodeViewerSource).toContain('overflow-y: scroll')
+    expect(flowLogCodeViewerSource).toContain('scrollbar-gutter: stable both-edges')
+    expect(flowLogCodeViewerSource).toContain('overscroll-behavior: contain')
   })
 
   it('renders a blinking terminal cursor while live log content is visible', () => {
