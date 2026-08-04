@@ -238,22 +238,28 @@
               </div>
               <span class="dashboard-muted">{{ analysisCharts.length }} images</span>
             </header>
-            <div v-if="analysisCharts.length" class="snapshot-grid">
-              <button
-                v-for="chart in analysisCharts"
-                :key="chart.label"
-                type="button"
-                :title="chart.label"
-                @click="preview = { label: chart.label, url: chart.imageBlobUrl }"
+            <div v-if="analysisCharts.length" class="snapshot-grid" aria-label="Analysis snapshots">
+              <div
+                v-for="(chart, index) in dataSnapshotCells"
+                :key="chart?.label ?? `snapshot-empty-${index}`"
+                class="snapshot-grid-cell"
+                :class="{ 'is-empty': !chart }"
               >
-                <img
-                  v-if="chart.imageBlobUrl"
-                  :src="chart.imageBlobUrl"
-                  :alt="chart.label"
-                />
-                <i v-else class="ri-image-2-line" aria-hidden="true" />
-                <span>{{ chart.label }}</span>
-              </button>
+                <button
+                  v-if="chart"
+                  type="button"
+                  :title="chart.label"
+                  @click="preview = { label: chart.label, url: chart.imageBlobUrl }"
+                >
+                  <img
+                    v-if="chart.imageBlobUrl"
+                    :src="chart.imageBlobUrl"
+                    :alt="chart.label"
+                  />
+                  <i v-else class="ri-image-2-line" aria-hidden="true" />
+                  <span>{{ chart.label }}</span>
+                </button>
+              </div>
             </div>
             <div v-else class="dashboard-empty">
               <i class="ri-gallery-line" /><span>No analysis snapshots</span>
@@ -410,6 +416,14 @@ const showPorts = ref(false)
 const showChecklist = ref(false)
 const showQor = ref(false)
 const preview = ref<{ label: string; url: string } | null>(null)
+const DATA_SNAPSHOT_ROWS = 4
+const DATA_SNAPSHOT_COLUMNS = 6
+const dataSnapshotCells = computed(() =>
+  Array.from(
+    { length: DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS },
+    (_, index) => analysisCharts.value[index] ?? null,
+  ),
+)
 const previewVisible = computed({
   get: () => preview.value !== null,
   set: (visible: boolean) => {
@@ -939,43 +953,73 @@ function sourcePath(value: Record<string, unknown>): string {
 .snapshot-grid {
   display: grid;
   flex: 1;
-  gap: 6px;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
   min-height: 0;
-  overflow: auto;
   padding: 7px;
 }
-.snapshot-grid button {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
+
+.snapshot-grid-cell {
+  border-bottom: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  min-height: 0;
+  min-width: 0;
+}
+
+.snapshot-grid-cell:nth-child(6n) {
+  border-right: 0;
+}
+
+.snapshot-grid-cell:nth-child(n + 19) {
+  border-bottom: 0;
+}
+
+.snapshot-grid-cell button {
+  align-items: stretch;
+  background: transparent;
+  border: 0;
   color: var(--text-secondary);
   cursor: pointer;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  min-height: 82px;
-  min-width: 0;
-  overflow: hidden;
-  padding: 0;
-}
-.snapshot-grid button:hover {
-  border-color: var(--accent-color);
-}
-.snapshot-grid img {
   height: 100%;
   min-height: 0;
-  object-fit: cover;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6% 7% 4%;
   width: 100%;
 }
-.snapshot-grid i {
+
+.snapshot-grid-cell button:hover,
+.snapshot-grid-cell button:focus-visible {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+  outline: none;
+}
+
+.snapshot-grid-cell img {
+  align-self: stretch;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  display: block;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+
+.snapshot-grid-cell i {
   align-self: center;
   font-size: 18px;
 }
-.snapshot-grid span {
-  border-top: 1px solid var(--border-color);
+
+.snapshot-grid-cell span {
+  align-self: end;
   font-size: 8px;
+  line-height: 1.2;
+  max-width: 100%;
   overflow: hidden;
-  padding: 3px;
+  padding-top: 4%;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

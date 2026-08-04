@@ -14,6 +14,16 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('class="dashboard-image-preview"')
   })
 
+  it('lays Data Snapshot out as a responsive 4-by-6 thumbnail grid', () => {
+    expect(homeViewSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
+    expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 6')
+    expect(homeViewSource).toContain('grid-template-columns: repeat(6, minmax(0, 1fr))')
+    expect(homeViewSource).toContain('grid-template-rows: repeat(4, minmax(0, 1fr))')
+    expect(homeViewSource).toContain('border-right: 1px dashed')
+    expect(homeViewSource).toContain('border-bottom: 1px dashed')
+    expect(homeViewSource).toContain('object-fit: contain')
+  })
+
   it('uses the legacy green bracket corners around each dashboard card', () => {
     expect(homeViewSource).toContain('.dashboard-section::before')
     expect(homeViewSource).toContain('top left / 23px 2px no-repeat')
