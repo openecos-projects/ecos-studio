@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { WorkspaceResourceIndex } from '@ecos-studio/shared'
+import type { WorkspaceResourceIndex, WorkspaceStepResource } from '@ecos-studio/shared'
 import {
   dashboardMetricSourceStepIndexes,
   checklistPieSlices,
@@ -7,6 +7,7 @@ import {
   dashboardMetrics,
   formatDashboardMetric,
   instanceMetricsFromDbFeature,
+  latestSuccessfulGeometryStep,
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
   qorStatusSummary,
@@ -181,6 +182,55 @@ describe('dashboard data presentation', () => {
         { name: 'Harden', state: 'Success' },
       ]),
     ).toEqual([0, 2, 3, 4])
+  })
+
+  it('finds the final completed geometry artifact for the Harden ChipView fallback', () => {
+    const step = (
+      name: string,
+      state: string,
+      geometryExists: boolean,
+    ): WorkspaceStepResource => ({
+      name,
+      tool: 'ecc',
+      state,
+      runtime: '',
+      directory: `/workspace/${name}_ecc`,
+      info: {},
+      resources: {
+        output: {
+          geometryManifest: {
+            exists: geometryExists,
+            kind: 'output',
+            path: `/workspace/${name}_ecc/output/geometry/geometry.manifest`,
+          },
+        },
+        data: {},
+        feature: {},
+        report: {},
+        log: {},
+        script: {},
+        analysis: {},
+        subflow: {},
+        checklist: {},
+        config: {},
+      },
+    })
+
+    expect(
+      latestSuccessfulGeometryStep([
+        step('Route', 'Success', true),
+        step('RCX', 'Success', true),
+        step('STA', 'Success', false),
+        step('Harden', 'Success', false),
+      ])?.name,
+    ).toBe('RCX')
+    expect(
+      latestSuccessfulGeometryStep([
+        step('Route', 'Success', true),
+        step('Harden', 'Success', true),
+      ])?.name,
+    ).toBe('Harden')
+    expect(latestSuccessfulGeometryStep([step('Harden', 'Success', false)])).toBeNull()
   })
 
   it('understands both supported summary schemas', () => {

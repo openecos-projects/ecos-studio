@@ -22,6 +22,14 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain("buildChipViewerOpenRequest(projectPath, stage.path, 'view')")
   })
 
+  it('uses the latest saved geometry step when Harden completes the flow', () => {
+    expect(homeViewSource).toContain('latestSuccessfulGeometryStep')
+    expect(homeViewSource).toContain(
+      "latestCompletedStage.label.trim().toLowerCase() !== 'harden'",
+    )
+    expect(homeViewSource).toContain('dashboardResourceIndex.value?.flow.steps')
+  })
+
   it('lays Data Snapshot out as a responsive 4-by-6 thumbnail grid', () => {
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 6')

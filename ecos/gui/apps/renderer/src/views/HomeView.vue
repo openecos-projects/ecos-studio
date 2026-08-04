@@ -402,6 +402,7 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
+  latestSuccessfulGeometryStep,
   qorPieSlices,
   qorStatusSummary,
 } from '@/components/home/dashboardData'
@@ -431,7 +432,12 @@ const {
   flowLogSegments,
   layoutBlobUrl,
 } = useHomeData()
-const { keyMetrics, mpcConstraints, qorSteps } = useDashboardOverview()
+const {
+  index: dashboardResourceIndex,
+  keyMetrics,
+  mpcConstraints,
+  qorSteps,
+} = useDashboardOverview()
 
 const showPorts = ref(false)
 const showChecklist = ref(false)
@@ -466,12 +472,28 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
-const layoutOutputStage = computed(() =>
-  [...flowStages.value]
+const layoutOutputStage = computed(() => {
+  const latestCompletedStage = [...flowStages.value]
     .reverse()
-    .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded') ??
-  null,
-)
+    .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded')
+  if (!latestCompletedStage || latestCompletedStage.label.trim().toLowerCase() !== 'harden') {
+    return latestCompletedStage ?? null
+  }
+
+  const geometryStep = latestSuccessfulGeometryStep(
+    dashboardResourceIndex.value?.flow.steps ?? [],
+  )
+  if (!geometryStep) return null
+  return (
+    [...flowStages.value]
+      .reverse()
+      .find(
+        (stage) =>
+          stage.group === 'run' &&
+          stage.path.trim().toLowerCase() === geometryStep.name.trim().toLowerCase(),
+      ) ?? null
+  )
+})
 const layoutTitle = computed(() => {
   const stage = layoutOutputStage.value
   return `ChipView - ${stage?.label ?? '--'} - ${stage?.tool || '--'}`

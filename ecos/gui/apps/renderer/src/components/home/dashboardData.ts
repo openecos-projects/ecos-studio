@@ -321,6 +321,27 @@ export function dashboardMetricSourceStepIndexes(
   return indexes
 }
 
+/**
+ * Finds the most recent completed flow step with saved Chip Viewer geometry.
+ * Harden is an aggregation step, so Home falls back to this source instead of
+ * asking Chip Viewer to render Harden when it is the final completed step.
+ */
+export function latestSuccessfulGeometryStep(
+  steps: readonly WorkspaceStepResource[],
+): WorkspaceStepResource | null {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    if (
+      step &&
+      isSuccessfulDashboardStep(step) &&
+      step.resources.output.geometryManifest?.exists
+    ) {
+      return step
+    }
+  }
+  return null
+}
+
 function isSuccessfulDashboardStep(step: Pick<WorkspaceStepResource, 'state'>): boolean {
   switch (step.state.trim().toLowerCase()) {
     case 'success':
