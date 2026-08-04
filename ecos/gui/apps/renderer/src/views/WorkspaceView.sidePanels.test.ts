@@ -41,4 +41,12 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).toContain(':selected-node="currentStepLogNode"')
     expect(source).toContain(':ensure-content="ensureFlowLogSegmentContentLoaded"')
   })
+
+  it('keeps Step splitter styles out of the shared right-side workbench', () => {
+    expect(source).toContain('.step-presentation-splitter :deep(.p-splitterpanel > *)')
+    expect(source).toContain(
+      '.step-presentation-splitter :deep(.p-splitter-vertical > .p-splitter-gutter)',
+    )
+    expect(source).not.toContain('\n:deep(.p-splitterpanel > *)')
+  })
 })

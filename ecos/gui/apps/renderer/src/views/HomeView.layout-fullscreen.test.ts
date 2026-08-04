@@ -5,7 +5,7 @@ describe('HomeView workspace dashboard layout', () => {
   it('places the dashboard and the shared workbench in the same view', () => {
     expect(homeViewSource).toContain('<WorkspaceWorkbench')
     expect(homeViewSource).toContain('class="home-dashboard"')
-    expect(homeViewSource).toContain('grid-template-rows: minmax(180px, 2fr)')
+    expect(homeViewSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
   })
 
   it('keeps layout and data snapshot previews accessible through modal dialogs', () => {

@@ -47,31 +47,43 @@
             </button>
           </div>
 
-          <button
-            type="button"
-            class="chat-inspector-fullscreen-toggle"
-            :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
-            :aria-label="
-              activePanelFullscreen
-                ? activeTab === 'chat'
-                  ? 'Exit AI Chat full screen'
-                  : activeTab === 'inspector'
-                    ? 'Exit step configuration full screen'
-                    : 'Exit step QoR analysis full screen'
-                : activeTab === 'chat'
-                  ? 'View AI Chat full screen'
-                  : activeTab === 'inspector'
-                    ? 'View step configuration full screen'
-                    : 'View step QoR analysis full screen'
-            "
-            @click="toggleActivePanelFullscreen"
-          >
-            <i
-              :class="
-                activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+          <div class="chat-inspector-actions">
+            <button
+              type="button"
+              class="chat-inspector-action-button chat-inspector-clear-button"
+              title="Clear all information"
+              aria-label="Clear all information"
+              :disabled="messages.length === 0"
+              @click="clearInformationConfirmationVisible = true"
+            >
+              <i class="ri-delete-bin-line" aria-hidden="true"></i>
+            </button>
+            <button
+              type="button"
+              class="chat-inspector-action-button chat-inspector-fullscreen-toggle"
+              :title="activePanelFullscreen ? 'Exit full screen' : 'Full screen'"
+              :aria-label="
+                activePanelFullscreen
+                  ? activeTab === 'chat'
+                    ? 'Exit AI Chat full screen'
+                    : activeTab === 'inspector'
+                      ? 'Exit step configuration full screen'
+                      : 'Exit step QoR analysis full screen'
+                  : activeTab === 'chat'
+                    ? 'View AI Chat full screen'
+                    : activeTab === 'inspector'
+                      ? 'View step configuration full screen'
+                      : 'View step QoR analysis full screen'
               "
-            ></i>
-          </button>
+              @click="toggleActivePanelFullscreen"
+            >
+              <i
+                :class="
+                  activePanelFullscreen ? 'ri-fullscreen-exit-line' : 'ri-fullscreen-line'
+                "
+              ></i>
+            </button>
+          </div>
         </div>
       </Teleport>
 
@@ -99,6 +111,35 @@
     </div>
   </Teleport>
 
+  <Dialog
+    v-model:visible="clearInformationConfirmationVisible"
+    modal
+    header="Clear all information?"
+    :style="{ width: 'min(420px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <p class="clear-information-dialog-copy">
+      This removes all chat messages, reports, and layout cards from the information area.
+      Flow Status and Flow Step Log will be kept.
+    </p>
+    <div class="clear-information-dialog-actions">
+      <button
+        type="button"
+        class="clear-information-dialog-button"
+        @click="clearInformationConfirmationVisible = false"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        class="clear-information-dialog-button is-danger"
+        @click="confirmClearInformation"
+      >
+        Clear all
+      </button>
+    </div>
+  </Dialog>
+
   <Teleport to="body">
     <Transition name="panel-fullscreen-backdrop">
       <div
@@ -112,8 +153,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import Dialog from 'primevue/dialog'
 import { useRoute } from 'vue-router'
 import { StepEnum } from '@/api/type'
+import { useMessageStore } from '@/stores/messageStore'
 import AIChatPanel from './AIChatPanel.vue'
 import StepConfigPanel from './StepConfigPanel.vue'
 import StepQorAnalysisPanel from './StepQorAnalysisPanel.vue'
@@ -142,6 +186,9 @@ const activeTab = ref<'chat' | 'inspector' | 'analysis'>('chat')
 const isChatFullscreen = ref(false)
 const isStepConfigFullscreen = ref(false)
 const isStepQorAnalysisFullscreen = ref(false)
+const clearInformationConfirmationVisible = ref(false)
+const messageStore = useMessageStore()
+const { messages } = storeToRefs(messageStore)
 
 const isAnyPanelFullscreen = computed(
   () =>
@@ -209,6 +256,11 @@ function toggleActivePanelFullscreen(): void {
   openPanelFullscreen(activeTab.value)
 }
 
+function confirmClearInformation(): void {
+  messageStore.clearMessages()
+  clearInformationConfirmationVisible.value = false
+}
+
 function onFullscreenKeydown(event: KeyboardEvent): void {
   if (event.defaultPrevented) return
   if (event.key !== 'Escape' || !isAnyPanelFullscreen.value) return
@@ -262,11 +314,18 @@ function tabClass(active: boolean) {
   flex: 1 1 auto;
 }
 
+.chat-inspector-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
 .chat-inspector-content {
   flex: 1 1 0;
 }
 
-.chat-inspector-fullscreen-toggle {
+.chat-inspector-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -285,15 +344,56 @@ function tabClass(active: boolean) {
     transform 0.16s ease;
 }
 
-.chat-inspector-fullscreen-toggle:hover {
+.chat-inspector-action-button:hover:not(:disabled) {
   color: var(--accent-color);
   border-color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
   transform: translateY(-1px);
 }
 
-.chat-inspector-fullscreen-toggle:active {
+.chat-inspector-action-button:active:not(:disabled) {
   transform: translateY(0);
+}
+
+.chat-inspector-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.clear-information-dialog-copy {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.clear-information-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.clear-information-dialog-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  min-width: 76px;
+  padding: 7px 10px;
+}
+
+.clear-information-dialog-button:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.clear-information-dialog-button.is-danger {
+  background: var(--danger-color);
+  border-color: var(--danger-color);
+  color: #fff;
 }
 
 .panel-fullscreen-overlay {

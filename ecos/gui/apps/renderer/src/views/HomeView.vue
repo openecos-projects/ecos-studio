@@ -624,7 +624,7 @@ async function openLayoutChipViewer(): Promise<void> {
   box-sizing: border-box;
   display: grid;
   gap: 8px;
-  grid-template-rows: minmax(180px, 2fr) minmax(156px, 1.2fr) minmax(180px, 2fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   height: 100%;
   min-height: 0;
   min-width: 0;

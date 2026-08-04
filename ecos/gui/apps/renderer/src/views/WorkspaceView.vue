@@ -136,32 +136,32 @@ onUnmounted(() => {
   width: 100%;
 }
 
-:deep(.p-splitterpanel) {
+.step-presentation-splitter :deep(.p-splitterpanel) {
   display: flex;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
-:deep(.p-splitterpanel > *) {
+.step-presentation-splitter :deep(.p-splitterpanel > *) {
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
 }
 
-:deep(.p-splitter-gutter) {
+.step-presentation-splitter :deep(.p-splitter-gutter) {
   background: var(--border-color);
 }
 
-:deep(.p-splitter-gutter:hover) {
+.step-presentation-splitter :deep(.p-splitter-gutter:hover) {
   background: var(--accent-color);
 }
 
-:deep(.p-splitter-gutter-handle) {
+.step-presentation-splitter :deep(.p-splitter-gutter-handle) {
   display: none;
 }
 
-:deep(.p-splitter-vertical > .p-splitter-gutter) {
+.step-presentation-splitter :deep(.p-splitter-vertical > .p-splitter-gutter) {
   cursor: row-resize;
   height: 4px;
 }
