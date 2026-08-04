@@ -86,39 +86,19 @@
             </button>
           </section>
 
-          <section class="dashboard-section layout-card">
+          <section class="dashboard-section key-metrics-card">
             <header class="dashboard-section-header">
               <div>
-                <i class="ri-layout-masonry-line" aria-hidden="true" />
-                <h2>{{ layoutTitle }}</h2>
+                <i class="ri-speed-up-line" aria-hidden="true" />
+                <h2>Key Metrics</h2>
               </div>
-              <button
-                type="button"
-                class="dashboard-icon-button"
-                :disabled="!canOpenLayoutChipViewer"
-                title="Open ChipView"
-                aria-label="Open ChipView"
-                @click="openLayoutChipViewer"
-              >
-                <i
-                  class="ri-cpu-line"
-                  :class="{ 'animate-pulse': layoutChipViewerBusy }"
-                  aria-hidden="true"
-                />
-              </button>
             </header>
-            <button
-              v-if="layoutPreviewUrl"
-              type="button"
-              class="layout-preview"
-              title="Open layout preview"
-              @click="preview = { label: 'Layout preview', url: layoutPreviewUrl }"
-            >
-              <img :src="layoutPreviewUrl" alt="Latest layout preview" />
-            </button>
-            <div v-else class="dashboard-empty">
-              <i class="ri-image-2-line" /><span>Waiting for layout data</span>
-            </div>
+            <dl class="key-metrics-grid">
+              <div v-for="metric in keyMetrics" :key="metric.id">
+                <dt>{{ metric.label }}</dt>
+                <dd>{{ formatDashboardMetric(metric) }}</dd>
+              </div>
+            </dl>
           </section>
         </div>
 
@@ -228,21 +208,6 @@
         </div>
 
         <div class="home-dashboard-row home-dashboard-bottom">
-          <section class="dashboard-section key-metrics-card">
-            <header class="dashboard-section-header">
-              <div>
-                <i class="ri-speed-up-line" aria-hidden="true" />
-                <h2>Key Metrics</h2>
-              </div>
-            </header>
-            <dl class="key-metrics-grid">
-              <div v-for="metric in keyMetrics" :key="metric.id">
-                <dt>{{ metric.label }}</dt>
-                <dd>{{ formatDashboardMetric(metric) }}</dd>
-              </div>
-            </dl>
-          </section>
-
           <section class="dashboard-section snapshot-card">
             <header class="dashboard-section-header">
               <div>
@@ -276,6 +241,41 @@
             </div>
             <div v-else class="dashboard-empty">
               <i class="ri-gallery-line" /><span>No analysis snapshots</span>
+            </div>
+          </section>
+
+          <section class="dashboard-section layout-card">
+            <header class="dashboard-section-header">
+              <div>
+                <i class="ri-layout-masonry-line" aria-hidden="true" />
+                <h2>{{ layoutTitle }}</h2>
+              </div>
+              <button
+                type="button"
+                class="dashboard-icon-button"
+                :disabled="!canOpenLayoutChipViewer"
+                title="Open ChipView"
+                aria-label="Open ChipView"
+                @click="openLayoutChipViewer"
+              >
+                <i
+                  class="ri-cpu-line"
+                  :class="{ 'animate-pulse': layoutChipViewerBusy }"
+                  aria-hidden="true"
+                />
+              </button>
+            </header>
+            <button
+              v-if="layoutPreviewUrl"
+              type="button"
+              class="layout-preview"
+              title="Open layout preview"
+              @click="preview = { label: 'Layout preview', url: layoutPreviewUrl }"
+            >
+              <img :src="layoutPreviewUrl" alt="Latest layout preview" />
+            </button>
+            <div v-else class="dashboard-empty">
+              <i class="ri-image-2-line" /><span>Waiting for layout data</span>
             </div>
           </section>
         </div>
@@ -724,9 +724,12 @@ async function openLayoutChipViewer(): Promise<void> {
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
 }
 
-.home-dashboard-middle,
-.home-dashboard-bottom {
+.home-dashboard-middle {
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.home-dashboard-bottom {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
 }
 
 .dashboard-section {

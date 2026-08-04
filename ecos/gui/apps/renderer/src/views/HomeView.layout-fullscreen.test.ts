@@ -8,6 +8,22 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('grid-template-rows: repeat(3, minmax(0, 1fr))')
   })
 
+  it('places Key Metrics in the wide first-row slot and ChipView at the third-row right', () => {
+    const topRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-top')
+    const middleRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-middle')
+    const bottomRowStart = homeViewSource.indexOf('home-dashboard-row home-dashboard-bottom')
+    const topRow = homeViewSource.slice(topRowStart, middleRowStart)
+    const bottomRow = homeViewSource.slice(bottomRowStart)
+
+    expect(topRow).toContain('class="dashboard-section key-metrics-card"')
+    expect(topRow).not.toContain('class="dashboard-section layout-card"')
+    expect(bottomRow.indexOf('snapshot-card')).toBeLessThan(bottomRow.indexOf('layout-card'))
+    expect(bottomRow).toContain('class="dashboard-section layout-card"')
+    expect(homeViewSource).toContain(
+      '.home-dashboard-bottom {\n  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);',
+    )
+  })
+
   it('keeps layout and data snapshot previews accessible through modal dialogs', () => {
     expect(homeViewSource).toContain("preview = { label: 'Layout preview'")
     expect(homeViewSource).toContain('maximizable')
