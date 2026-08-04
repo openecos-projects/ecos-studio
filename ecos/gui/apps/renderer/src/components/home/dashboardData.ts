@@ -143,28 +143,22 @@ export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
   return 'unavailable'
 }
 
-/** Counts are only taken from the declared V4 quality gates, never inferred. */
-export function qorGateCounts(value: unknown): Pick<
+/** A summary is one analyzed step result, independent of its optional gate list. */
+export function qorSummaryCounts(value: unknown): Pick<
   DashboardQorStep,
   'blockedCount' | 'passCount' | 'totalCount'
 > {
   const summary = record(value)
-  const gates = summary?.gates
-  if (summary?.schema_version !== 4 || !Array.isArray(gates)) {
+  const declaredStatus = stringValue(summary?.quality_status || summary?.status).toLowerCase()
+  if (!declaredStatus) {
     return { blockedCount: 0, passCount: 0, totalCount: 0 }
   }
-
-  return gates.reduce(
-    (counts, gate) => {
-      const state = stringValue(record(gate)?.state).toLowerCase()
-      if (!state) return counts
-      counts.totalCount += 1
-      if (state === 'pass') counts.passCount += 1
-      if (state === 'failed' || state === 'blocked') counts.blockedCount += 1
-      return counts
-    },
-    { blockedCount: 0, passCount: 0, totalCount: 0 },
-  )
+  const status = qorSummaryStatus(summary)
+  return {
+    blockedCount: status === 'blocked' ? 1 : 0,
+    passCount: status === 'pass' ? 1 : 0,
+    totalCount: 1,
+  }
 }
 
 export function qorPieSlices(steps: readonly DashboardQorStep[]): DashboardPieSlice[] {

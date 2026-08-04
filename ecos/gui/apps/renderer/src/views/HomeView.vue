@@ -147,20 +147,20 @@
               </div>
               <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
                 <div>
-                  <strong class="status-summary-title">Gate summary</strong>
+                  <strong class="status-summary-title">QoR summary</strong>
                 </div>
                 <dl class="status-count-list">
                   <div class="is-pass">
                     <dt>Pass</dt>
-                    <dd>{{ qorGateSummary.passCount }}</dd>
+                    <dd>{{ qorStepSummary.passCount }}</dd>
                   </div>
                   <div class="is-blocked">
                     <dt>Blocked</dt>
-                    <dd>{{ qorGateSummary.blockedCount }}</dd>
+                    <dd>{{ qorStepSummary.blockedCount }}</dd>
                   </div>
                   <div>
                     <dt>Total</dt>
-                    <dd>{{ qorGateSummary.totalCount }}</dd>
+                    <dd>{{ qorStepSummary.totalCount }}</dd>
                   </div>
                 </dl>
                 <button
@@ -603,7 +603,7 @@ const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const qorSlices = computed(() => qorPieSlices(qorSteps.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
 const qorSummary = computed(() => qorStatusSummary(qorSteps.value))
-const qorGateSummary = computed(() =>
+const qorStepSummary = computed(() =>
   qorSteps.value.reduce(
     (summary, step) => ({
       blockedCount: summary.blockedCount + step.blockedCount,
@@ -624,12 +624,12 @@ const checklistCenterSecondary = computed(() =>
   checklistSummary.value.total ? 'passing' : 'no data',
 )
 const qorCenterPrimary = computed(() =>
-  qorGateSummary.value.totalCount
-    ? `${qorGateSummary.value.passCount}/${qorGateSummary.value.totalCount}`
+  qorStepSummary.value.totalCount
+    ? `${qorStepSummary.value.passCount}/${qorStepSummary.value.totalCount}`
     : '--',
 )
 const qorCenterSecondary = computed(() =>
-  qorGateSummary.value.totalCount ? 'gates' : 'no data',
+  qorStepSummary.value.totalCount ? 'steps' : 'no data',
 )
 const checklistTitle = computed(() => {
   if (!checklistSummary.value.total) return 'Checklist pending'

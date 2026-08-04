@@ -110,7 +110,7 @@ describe('useDashboardOverview db feature metrics', () => {
         return JSON.stringify({
           schema_version: 4,
           quality_status: 'pass',
-          gates: [{ state: 'pass' }, { state: 'failed' }, { state: 'unavailable' }],
+          gates: [],
         })
       }
       if (path === DB_FEATURE_PATH) {
@@ -145,9 +145,9 @@ describe('useDashboardOverview db feature metrics', () => {
     expect(metric('std-cell-area')?.value).toBe(803.04)
     expect(metric('io-pad-number')?.value).toBe(54)
     expect(overview.qorSteps.value[0]).toMatchObject({
-      blockedCount: 1,
+      blockedCount: 0,
       passCount: 1,
-      totalCount: 3,
+      totalCount: 1,
     })
     expect(testState.readOptionalProjectTextFile).toHaveBeenCalledWith(DB_FEATURE_PATH)
   })

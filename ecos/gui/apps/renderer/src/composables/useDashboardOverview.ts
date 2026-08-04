@@ -11,7 +11,7 @@ import {
   instanceMetricsFromDbFeature,
   metricsFromAnalysis,
   mpcConstraintsFromParameters,
-  qorGateCounts,
+  qorSummaryCounts,
   qorStepsFromIndex,
   qorSummaryStatus,
   synthesisMetricsFromStat,
@@ -161,7 +161,7 @@ export function useDashboardOverview() {
               status = qorSummaryStatus(summary)
               return {
                 metrics,
-                step: { ...step, ...qorGateCounts(summary), status },
+                step: { ...step, ...qorSummaryCounts(summary), status },
               }
             } catch {
               status = 'incomplete'

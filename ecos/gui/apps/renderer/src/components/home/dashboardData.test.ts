@@ -8,7 +8,7 @@ import {
   formatDashboardMetric,
   instanceMetricsFromDbFeature,
   mpcConstraintsFromParameters,
-  qorGateCounts,
+  qorSummaryCounts,
   qorStepsFromIndex,
   qorStatusSummary,
   qorSummaryStatus,
@@ -196,20 +196,23 @@ describe('dashboard data presentation', () => {
     expect(qorSummaryStatus({ status: 'unknown' })).toBe('unavailable')
   })
 
-  it('counts only declared QoR quality gates for the dashboard', () => {
-    expect(
-      qorGateCounts({
-        schema_version: 4,
-        gates: [
-          { state: 'pass' },
-          { state: 'failed' },
-          { state: 'unavailable' },
-          { state: 'blocked' },
-          {},
-        ],
-      }),
-    ).toEqual({ blockedCount: 2, passCount: 1, totalCount: 4 })
-    expect(qorGateCounts({ schema_version: 3, gates: [{ state: 'pass' }] })).toEqual({
+  it('counts each declared QoR summary status as one analyzed step', () => {
+    expect(qorSummaryCounts({ schema_version: 4, quality_status: 'pass', gates: [] })).toEqual({
+      blockedCount: 0,
+      passCount: 1,
+      totalCount: 1,
+    })
+    expect(qorSummaryCounts({ schema_version: 4, quality_status: 'blocked' })).toEqual({
+      blockedCount: 1,
+      passCount: 0,
+      totalCount: 1,
+    })
+    expect(qorSummaryCounts({ schema_version: 3, status: 'pass' })).toEqual({
+      blockedCount: 0,
+      passCount: 1,
+      totalCount: 1,
+    })
+    expect(qorSummaryCounts({ schema_version: 4, gates: [] })).toEqual({
       blockedCount: 0,
       passCount: 0,
       totalCount: 0,

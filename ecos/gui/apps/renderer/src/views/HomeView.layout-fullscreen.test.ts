@@ -89,7 +89,7 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('step.passCount')
     expect(homeViewSource).toContain('step.blockedCount')
     expect(homeViewSource).toContain('step.totalCount')
-    expect(homeViewSource).toContain('qorGateSummary.passCount')
+    expect(homeViewSource).toContain('qorStepSummary.passCount')
     expect(homeViewSource).not.toContain('qor-step-runtime')
     expect(homeViewSource).not.toContain('step.metricCount')
     expect(homeViewSource).toContain('overflow: hidden')
