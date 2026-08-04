@@ -1,4 +1,4 @@
-import type { ResourceInfo } from '@ecos-studio/shared'
+import { ensureProjectQorBaseline, type ResourceInfo } from '@ecos-studio/shared'
 import type { Project } from '@/types'
 import {
   buildProjectQorTrendSummary,
@@ -147,6 +147,13 @@ export interface ProjectManifest {
     workspace_id: string
     reason: string
   } | null
+}
+
+export type ProjectQorBaselineSource = 'selected' | 'default'
+
+export interface ProjectQorBaselineResolution {
+  workspaceId: string
+  source: ProjectQorBaselineSource
 }
 
 export interface ProjectStepCell {
@@ -437,6 +444,81 @@ const RUNTIME_STEP_ARTIFACTS: Record<
   Harden: { directory: 'Harden_ecc', outputName: 'Harden' },
 }
 
+/**
+ * Build the project-wide QoR trend from the manifest and the workspace artifacts. This
+ * is shared by Project Management and Home so both surfaces use exactly the same
+ * baseline, scoring, lineage ordering, and comparable-metric rules.
+ */
+export function buildProjectQorTrendForManifest(
+  manifest: ProjectManifest,
+  workspaceFlowStates: ProjectWorkspaceFlowStatesById = {},
+  workspaceAnalysisInputs: ProjectWorkspaceAnalysisInputsById = {},
+  options: { baselineWorkspaceId?: string | null } = {},
+): ProjectQorTrendSummary {
+  const sortedWorkspaces = sortWorkspacesByLineage(manifest.workspaces).map(
+    (item) => item.workspace,
+  )
+  return buildProjectQorTrendSummary(
+    sortedWorkspaces.map((workspace) => ({
+      workspaceId: workspace.workspace_id,
+      workspaceName: workspaceDisplayName(workspace),
+      workspacePath: workspace.workspace_path,
+      createdAt: workspace.created_at,
+      status: workspaceStatusFromFlow(
+        workspace.status,
+        workspaceFlowStates[workspace.workspace_id] ?? {},
+      ),
+      branchFrom: workspace.branch_from,
+      stepMetricTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
+      stepSummaryTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
+      stepHotspotTexts:
+        workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
+      staTimingIssuesText:
+        workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
+      stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
+    })),
+    {
+      baselineWorkspaceId:
+        options.baselineWorkspaceId ?? manifest.qor_baseline?.workspace_id ?? null,
+    },
+  )
+}
+
+/** Resolve the baseline Home stores in project.json when older projects omit one. */
+export function resolveProjectQorBaselineWorkspace(
+  manifest: ProjectManifest,
+  currentWorkspaceId: string,
+): ProjectQorBaselineResolution | null {
+  const selectedId = manifest.qor_baseline?.workspace_id
+  if (
+    selectedId &&
+    manifest.workspaces.some(
+      (workspace) =>
+        workspace.workspace_id === selectedId && workspace.status !== 'archived',
+    )
+  ) {
+    return { workspaceId: selectedId, source: 'selected' }
+  }
+
+  const defaultWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id !== currentWorkspaceId && workspace.status !== 'archived',
+  )
+  if (defaultWorkspace) {
+    return { workspaceId: defaultWorkspace.workspace_id, source: 'default' }
+  }
+
+  const currentWorkspace = manifest.workspaces.find(
+    (workspace) =>
+      workspace.workspace_id === currentWorkspaceId && workspace.status !== 'archived',
+  )
+  return currentWorkspace
+    ? { workspaceId: currentWorkspace.workspace_id, source: 'default' }
+    : null
+}
+
 export function buildProjectManagementProject(
   project?: Project | null,
   manifest?: ProjectManifest | null,
@@ -467,30 +549,10 @@ export function buildProjectManagementProject(
     )
   })
   const qorTrendSummary = manifest
-    ? buildProjectQorTrendSummary(
-        sortedWorkspaces.map((workspace) => ({
-          workspaceId: workspace.workspace_id,
-          workspaceName: workspaceDisplayName(workspace),
-          workspacePath: workspace.workspace_path,
-          createdAt: workspace.created_at,
-          status: workspaceStatusFromFlow(
-            workspace.status,
-            workspaceFlowStates[workspace.workspace_id] ?? {},
-          ),
-          branchFrom: workspace.branch_from,
-          stepMetricTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepMetricTexts ?? {},
-          stepSummaryTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepSummaryTexts ?? {},
-          stepHotspotTexts:
-            workspaceAnalysisInputs[workspace.workspace_id]?.stepHotspotTexts ?? {},
-          staTimingIssuesText:
-            workspaceAnalysisInputs[workspace.workspace_id]?.staTimingIssuesText ?? null,
-          stepStatuses: workspaceFlowStates[workspace.workspace_id] ?? {},
-        })),
-        {
-          baselineWorkspaceId: manifest.qor_baseline?.workspace_id ?? null,
-        },
+    ? buildProjectQorTrendForManifest(
+        manifest,
+        workspaceFlowStates,
+        workspaceAnalysisInputs,
       )
     : buildProjectQorTrendSummary([])
   const snapshots = buildProjectAnalysisSnapshots(
@@ -1171,6 +1233,7 @@ export function registerWorkspaceInManifest(
         item.workspace_id === existingWorkspace.workspace_id ? workspace : item,
       )
     : [...manifest.workspaces, workspace]
+  const qorBaseline = ensureProjectQorBaseline(manifest.qor_baseline, workspaces)
 
   return {
     ...manifest,
@@ -1181,6 +1244,7 @@ export function registerWorkspaceInManifest(
       includeDesignParameter: !sourceWorkspaceId && !branchFrom,
     }),
     workspaces,
+    qor_baseline: qorBaseline,
   }
 }
 
@@ -1189,6 +1253,11 @@ export function archiveWorkspaceInManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
+  const workspaces = manifest.workspaces.map((workspace) =>
+    workspace.workspace_id === workspaceId
+      ? { ...workspace, status: 'archived' as const, updated_at: now }
+      : workspace,
+  )
   return {
     ...manifest,
     updated_at: now,
@@ -1196,17 +1265,8 @@ export function archiveWorkspaceInManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    qor_baseline:
-      manifest.qor_baseline?.workspace_id === workspaceId ? null : manifest.qor_baseline,
-    workspaces: manifest.workspaces.map((workspace) =>
-      workspace.workspace_id === workspaceId
-        ? {
-            ...workspace,
-            status: 'archived',
-            updated_at: now,
-          }
-        : workspace,
-    ),
+    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    workspaces,
   }
 }
 
@@ -1217,7 +1277,7 @@ export function setQorBaselineInManifest(
   now = new Date().toISOString(),
 ): ProjectManifest {
   const hasWorkspace = manifest.workspaces.some(
-    (workspace) => workspace.workspace_id === workspaceId,
+    (workspace) => workspace.workspace_id === workspaceId && workspace.status !== 'archived',
   )
   if (!hasWorkspace) return manifest
 
@@ -1236,6 +1296,27 @@ export function deleteWorkspaceFromManifest(
   workspaceId: string,
   now = new Date().toISOString(),
 ): ProjectManifest {
+  const workspaces = manifest.workspaces
+    .filter((workspace) => workspace.workspace_id !== workspaceId)
+    .map((workspace) => {
+      const clearsSource =
+        workspace.source_workspace_id === workspaceId ||
+        workspace.branch_from?.source_workspace_id === workspaceId
+      if (!clearsSource) return workspace
+
+      return {
+        ...workspace,
+        source_workspace_id:
+          workspace.source_workspace_id === workspaceId
+            ? null
+            : workspace.source_workspace_id,
+        branch_from:
+          workspace.branch_from?.source_workspace_id === workspaceId
+            ? null
+            : workspace.branch_from,
+        updated_at: now,
+      }
+    })
   return {
     ...manifest,
     updated_at: now,
@@ -1243,29 +1324,8 @@ export function deleteWorkspaceFromManifest(
       manifest.best_workspace?.workspace_id === workspaceId
         ? null
         : manifest.best_workspace,
-    qor_baseline:
-      manifest.qor_baseline?.workspace_id === workspaceId ? null : manifest.qor_baseline,
-    workspaces: manifest.workspaces
-      .filter((workspace) => workspace.workspace_id !== workspaceId)
-      .map((workspace) => {
-        const clearsSource =
-          workspace.source_workspace_id === workspaceId ||
-          workspace.branch_from?.source_workspace_id === workspaceId
-        if (!clearsSource) return workspace
-
-        return {
-          ...workspace,
-          source_workspace_id:
-            workspace.source_workspace_id === workspaceId
-              ? null
-              : workspace.source_workspace_id,
-          branch_from:
-            workspace.branch_from?.source_workspace_id === workspaceId
-              ? null
-              : workspace.branch_from,
-          updated_at: now,
-        }
-      }),
+    qor_baseline: ensureProjectQorBaseline(manifest.qor_baseline, workspaces),
+    workspaces,
   }
 }
 

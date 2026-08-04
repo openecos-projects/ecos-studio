@@ -211,6 +211,7 @@ export interface DesktopApi {
     unbindWindow(path?: string): Promise<void>
     getBoundPath(): Promise<string | null>
     registerProjectRoot(path: string): Promise<string>
+    registerProjectReadRoot(path: string): Promise<string>
     clearProjectRoot(): Promise<void>
     requestProjectPathAccess(path: string): Promise<string>
     readProjectTextFile(path: string): Promise<string>

@@ -39,6 +39,7 @@ export interface ProjectScopeProvider {
   getProjectRoot(): Promise<string>
   isProjectDirectory(path: string): Promise<boolean>
   requestProjectPathAccess(path: string): Promise<string>
+  registerProjectReadRoot(path: string): Promise<string>
   registerProjectRoot(path: string): Promise<string>
   scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
 }
@@ -327,6 +328,10 @@ export class WorkspaceService {
 
   async registerProjectRoot(path: string): Promise<string> {
     return await this.projectScopeProvider.registerProjectRoot(path)
+  }
+
+  async registerProjectReadRoot(path: string): Promise<string> {
+    return await this.projectScopeProvider.registerProjectReadRoot(path)
   }
 
   async clearProjectRoot(): Promise<void> {

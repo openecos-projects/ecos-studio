@@ -22,6 +22,7 @@ export const desktopApiIpcChannels = {
   dialogSaveFile: 'dialog:save-file',
   workspaceIsProjectDirectory: 'workspace:is-project-directory',
   workspaceRegisterProjectRoot: 'workspace:register-project-root',
+  workspaceRegisterProjectReadRoot: 'workspace:register-project-read-root',
   workspaceClearProjectRoot: 'workspace:clear-project-root',
   workspaceRequestProjectPathAccess: 'workspace:request-project-path-access',
   workspaceReadProjectTextFile: 'workspace:read-project-text-file',

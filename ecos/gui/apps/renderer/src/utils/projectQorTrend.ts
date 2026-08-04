@@ -203,6 +203,8 @@ export interface ProjectQorTrendWorkspaceSummary {
   areaScoringStep: FlowStep | null
   dimensionScores: Partial<Record<QorDimension, number>>
   records: ProjectQorMetricRecord[]
+  /** Full per-step records used for baseline comparison counts in Home. */
+  comparisonRecords?: ProjectQorMetricRecord[]
   blockingIssues: ProjectQorBlockingIssue[]
   hotspots: ProjectQorHotspot[]
   timingConstraints: ProjectQorTimingConstraints
@@ -279,6 +281,28 @@ export interface ProjectQorDelta {
   absoluteDelta: number
   relativeDeltaPct: number | null
   state: 'improvement' | 'regression' | 'neutral'
+}
+
+/**
+ * A current-workspace view of the project's explicit-baseline comparison. The project
+ * trend keeps only changes in its top-level lists; Home also needs unchanged metrics to
+ * present a meaningful per-step comparison denominator.
+ */
+export interface ProjectQorWorkspaceComparisonDelta extends ProjectQorDelta {
+  step: FlowStep
+  unit?: string
+}
+
+export interface ProjectQorWorkspaceComparison {
+  workspaceId: string
+  workspaceName: string
+  score: number | null
+  baselineWorkspaceId: string | null
+  baselineWorkspaceName: string | null
+  baselineScore: number | null
+  isBaselineWorkspace: boolean
+  available: boolean
+  deltas: ProjectQorWorkspaceComparisonDelta[]
 }
 
 export interface ProjectQorRegression extends ProjectQorDelta {
@@ -420,6 +444,9 @@ const QOR_FLOW_STEPS: FlowStep[] = [
   'STA',
   'Harden',
 ]
+
+/** The 0-100 QoR score line that separates the Home pass and fail presentation. */
+export const QOR_SCORE_THRESHOLD = 60
 
 const QOR_DIMENSIONS: QorDimension[] = [
   'timing',
@@ -1197,6 +1224,91 @@ export function buildProjectQorScoreDetail(
   }
 }
 
+/**
+ * Projects use an explicit baseline when one is selected in project.json. Build the
+ * current workspace's complete directional comparison from that same source, including
+ * equal metrics which are intentionally omitted from the trend's alert lists.
+ */
+export function buildProjectQorWorkspaceComparison(
+  summary: ProjectQorTrendSummary,
+  workspaceId: string,
+): ProjectQorWorkspaceComparison {
+  const workspace =
+    summary.workspaces.find((candidate) => candidate.workspaceId === workspaceId) ?? null
+  const baseline = summary.baselineWorkspaceId
+    ? (summary.workspaces.find(
+        (candidate) => candidate.workspaceId === summary.baselineWorkspaceId,
+      ) ?? null)
+    : null
+
+  if (!workspace) {
+    return {
+      workspaceId,
+      workspaceName: workspaceId,
+      score: null,
+      baselineWorkspaceId: baseline?.workspaceId ?? null,
+      baselineWorkspaceName: baseline?.workspaceName ?? null,
+      baselineScore: baseline?.overallScore ?? null,
+      isBaselineWorkspace: false,
+      available: false,
+      deltas: [],
+    }
+  }
+
+  const isBaselineWorkspace = workspace.workspaceId === baseline?.workspaceId
+  if (!baseline || isBaselineWorkspace) {
+    return {
+      workspaceId: workspace.workspaceId,
+      workspaceName: workspace.workspaceName,
+      score: workspace.overallScore,
+      baselineWorkspaceId: baseline?.workspaceId ?? null,
+      baselineWorkspaceName: baseline?.workspaceName ?? null,
+      baselineScore: baseline?.overallScore ?? null,
+      isBaselineWorkspace,
+      available: false,
+      deltas: [],
+    }
+  }
+
+  const baselineRecords = recordsByComparisonKey(
+    baseline.comparisonRecords ?? baseline.records,
+  )
+  const deltas = Array.from(
+    recordsByComparisonKey(workspace.comparisonRecords ?? workspace.records).values(),
+  ).flatMap((record) => {
+    // Only metrics with an explicit good/bad direction contribute to the verdict.
+    if (record.polarity !== 'lower_is_better' && record.polarity !== 'higher_is_better') {
+      return []
+    }
+    const baselineRecord = baselineRecords.get(comparisonRecordKey(record))
+    if (!baselineRecord || baselineRecord.polarity !== record.polarity) return []
+    return [
+      {
+        ...buildDelta(
+          record,
+          baselineRecord,
+          workspace.workspaceName || workspace.workspaceId,
+          baseline.workspaceName || baseline.workspaceId,
+        ),
+        step: record.step,
+        unit: record.unit,
+      },
+    ]
+  })
+
+  return {
+    workspaceId: workspace.workspaceId,
+    workspaceName: workspace.workspaceName,
+    score: workspace.overallScore,
+    baselineWorkspaceId: baseline.workspaceId,
+    baselineWorkspaceName: baseline.workspaceName || baseline.workspaceId,
+    baselineScore: baseline.overallScore,
+    isBaselineWorkspace: false,
+    available: true,
+    deltas: deltas.sort(compareDeltaMagnitude),
+  }
+}
+
 export function buildProjectQorTrendReport(
   summary: ProjectQorTrendSummary,
   metadata: ProjectQorTrendReportMetadata = {},
@@ -1544,6 +1656,7 @@ function buildWorkspaceSummary(
     areaScoringStep,
     dimensionScores,
     records: projectRecords,
+    comparisonRecords: records,
     blockingIssues,
     hotspots,
     timingConstraints,
@@ -2598,6 +2711,21 @@ function recordsByMetric(
     recordsByMetric.set(projectRecordKey(record), record)
   }
   return recordsByMetric
+}
+
+function recordsByComparisonKey(
+  records: ProjectQorMetricRecord[],
+): Map<string, ProjectQorMetricRecord> {
+  const recordsByKey = new Map<string, ProjectQorMetricRecord>()
+  for (const record of records) {
+    if (record.value === null) continue
+    recordsByKey.set(comparisonRecordKey(record), record)
+  }
+  return recordsByKey
+}
+
+function comparisonRecordKey(record: ProjectQorMetricRecord): string {
+  return [record.step, projectRecordKey(record)].join('\u0000')
 }
 
 function projectRecordKey(record: ProjectQorMetricRecord): string {

@@ -159,6 +159,7 @@ export {
   archiveWorkspaceInManifest,
   createProjectManifestDraft,
   deleteWorkspaceFromManifest,
+  ensureProjectQorBaseline,
   parseProjectManifest,
   projectManifestFlowSteps,
   recordReplacementBackupInManifest,

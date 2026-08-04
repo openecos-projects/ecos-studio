@@ -60,6 +60,47 @@ describe('ProjectScopeService', () => {
     })
   })
 
+  it('adds the workspace parent as a read root without replacing the active root', async () => {
+    const projectRoot = await createTempDir('ecos-parent-project-root-')
+    const workspaceRoot = join(projectRoot, 'ws_0004')
+    const siblingWorkspace = join(projectRoot, 'ws_0001')
+    const manifestPath = join(projectRoot, 'project.json')
+    const siblingFlowPath = join(siblingWorkspace, 'home', 'flow.json')
+    await mkdir(join(workspaceRoot, 'home'), { recursive: true })
+    await mkdir(join(siblingWorkspace, 'home'), { recursive: true })
+    await writeFile(manifestPath, '{}')
+    await writeFile(siblingFlowPath, '{"steps":[]}')
+
+    const service = new ProjectScopeService()
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.registerProjectReadRoot(projectRoot)).resolves.toBe(
+        projectRoot,
+      )
+
+      await expect(service.getProjectRoot()).resolves.toBe(workspaceRoot)
+      await expect(service.requestProjectPathAccess(manifestPath)).resolves.toBe(
+        manifestPath,
+      )
+      await expect(service.requestProjectPathAccess(siblingFlowPath)).resolves.toBe(
+        siblingFlowPath,
+      )
+    })
+  })
+
+  it('rejects a read root that is not the active workspace parent', async () => {
+    const workspaceRoot = await createTempDir('ecos-active-project-root-')
+    const unrelatedRoot = await createTempDir('ecos-unrelated-project-root-')
+    const service = new ProjectScopeService()
+
+    await runWithWindowScope(1, async () => {
+      await service.registerProjectRoot(workspaceRoot)
+      await expect(service.registerProjectReadRoot(unrelatedRoot)).rejects.toThrow(
+        'Project read root must be the active workspace root or its parent directory',
+      )
+    })
+  })
+
   it('rejects paths that escape the active project root via symlinks', async () => {
     const root = await createTempDir('ecos-project-root-')
     const outside = await createTempDir('ecos-project-outside-')

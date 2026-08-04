@@ -143,6 +143,8 @@ const desktopApi: DesktopApi = {
     getBoundPath: () => invokeDesktop(desktopApiIpcChannels.workspaceGetBoundPath),
     registerProjectRoot: (path) =>
       invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectRoot, path),
+    registerProjectReadRoot: (path) =>
+      invokeDesktop(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, path),
     clearProjectRoot: () =>
       invokeDesktop(desktopApiIpcChannels.workspaceClearProjectRoot),
     requestProjectPathAccess: (path) =>

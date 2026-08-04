@@ -129,6 +129,7 @@ export interface DesktopBridgeServices {
       },
       listener: (event: DesktopProjectLogTailEvent) => void,
     ): Promise<string>
+    registerProjectReadRoot(path: string): Promise<string>
     registerProjectRoot(path: string): Promise<string>
     requestProjectPathAccess(path: string): Promise<string>
     scanPdkDirectory(path: string): Promise<ScannedPdkDirectory>
@@ -848,6 +849,10 @@ export function registerIpc(
 
   handle(desktopApiIpcChannels.workspaceRegisterProjectRoot, async (_event, path) => {
     return await services.workspaceService.registerProjectRoot(path as string)
+  })
+
+  handle(desktopApiIpcChannels.workspaceRegisterProjectReadRoot, async (_event, path) => {
+    return await services.workspaceService.registerProjectReadRoot(path as string)
   })
 
   handle(desktopApiIpcChannels.workspaceClearProjectRoot, async (event) => {

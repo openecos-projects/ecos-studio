@@ -97,6 +97,7 @@ function registerHandlers() {
       readOptionalProjectTextFileUpdate: vi.fn(),
       readProjectTextFile: vi.fn(),
       readProjectTextFileTail: vi.fn(),
+      registerProjectReadRoot: vi.fn(),
       registerProjectRoot: vi.fn(),
       listProjectDirectory: vi.fn(),
       requestProjectPathAccess: vi.fn(),
@@ -611,6 +612,7 @@ describe('registerIpc', () => {
       Uint8Array.from([0x45, 0x43, 0x4f, 0x53]),
     )
     services.workspaceService.registerProjectRoot.mockResolvedValue('/tmp/project')
+    services.workspaceService.registerProjectReadRoot.mockResolvedValue('/tmp/project')
     services.workspaceService.requestProjectPathAccess.mockResolvedValue(
       '/tmp/project/home.json',
     )
@@ -673,6 +675,12 @@ describe('registerIpc', () => {
     ).resolves.toBe(true)
     await expect(
       handlers.get(desktopApiIpcChannels.workspaceRegisterProjectRoot)?.(
+        event,
+        '/tmp/project',
+      ),
+    ).resolves.toBe('/tmp/project')
+    await expect(
+      handlers.get(desktopApiIpcChannels.workspaceRegisterProjectReadRoot)?.(
         event,
         '/tmp/project',
       ),

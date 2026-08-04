@@ -65,6 +65,7 @@ function createDesktopBridge(getVersions: DesktopApi['app']['getVersions']) {
       getBoundPath: async () => null,
       isProjectDirectory: async () => false,
       registerProjectRoot: async (path: string) => path,
+      registerProjectReadRoot: async (path: string) => path,
       clearProjectRoot: async () => undefined,
       requestProjectPathAccess: async (path: string) => path,
       readProjectTextFile: async () => '',

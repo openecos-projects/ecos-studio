@@ -137,30 +137,41 @@
               <div><h2>Quality of Results</h2></div>
             </header>
             <div class="qor-overview">
-              <div class="qor-pie-wrap">
-                <StatusPieChart
-                  label="QoR status distribution"
-                  :slices="qorSlices"
-                  :center-primary="qorCenterPrimary"
-                  :center-secondary="qorCenterSecondary"
-                />
+              <div class="qor-visual-column">
+                <div class="qor-score-hero" :class="`is-${qorScoreTone}`">
+                  <span>QoR score</span>
+                  <div>
+                    <strong>{{ qorScoreValue }}</strong>
+                    <small v-if="qorScoreValue !== 'N/A'">/ 100</small>
+                  </div>
+                  <em>{{ qorScoreStatusLabel }}</em>
+                </div>
+                <div class="qor-pie-wrap">
+                  <StatusPieChart
+                    label="QoR status distribution"
+                    :slices="qorSlices"
+                    :center-primary="qorCenterPrimary"
+                    :center-secondary="qorCenterSecondary"
+                  />
+                </div>
               </div>
               <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
                 <div>
-                  <strong class="status-summary-title">QoR summary</strong>
+                  <strong class="status-summary-title">QoR comparison</strong>
+                  <p>{{ qorSummaryLabel }}</p>
                 </div>
                 <dl class="status-count-list">
                   <div class="is-pass">
-                    <dt>Pass</dt>
-                    <dd>{{ qorStepSummary.passCount }}</dd>
+                    <dt>Improved</dt>
+                    <dd>{{ qorComparisonSummary.improvedCount }}</dd>
                   </div>
                   <div class="is-blocked">
-                    <dt>Blocked</dt>
-                    <dd>{{ qorStepSummary.blockedCount }}</dd>
+                    <dt>Regressed</dt>
+                    <dd>{{ qorComparisonSummary.regressedCount }}</dd>
                   </div>
                   <div>
-                    <dt>Total</dt>
-                    <dd>{{ qorStepSummary.totalCount }}</dd>
+                    <dt>Compared</dt>
+                    <dd>{{ qorComparisonSummary.comparableCount }}</dd>
                   </div>
                 </dl>
                 <button
@@ -173,7 +184,11 @@
                 </button>
               </div>
               <div class="qor-step-list">
-                <section v-for="step in qorSteps" :key="step.id" class="qor-step-row">
+                <section
+                  v-for="step in qorDashboardSteps"
+                  :key="step.id"
+                  class="qor-step-row"
+                >
                   <button
                     type="button"
                     class="qor-step-link"
@@ -182,19 +197,28 @@
                   >
                     <span
                       class="qor-step-status"
-                      :class="`is-${step.status}`"
+                      :class="`is-${step.comparisonState}`"
                       aria-hidden="true"
                     />
                     <strong>{{ step.label }}</strong>
                     <i class="ri-arrow-right-up-line" aria-hidden="true" />
                   </button>
                   <dl class="qor-step-counts">
-                    <div class="is-pass"><dt>Pass</dt><dd>{{ step.passCount }}</dd></div>
-                    <div class="is-blocked"><dt>Blocked</dt><dd>{{ step.blockedCount }}</dd></div>
-                    <div><dt>Total</dt><dd>{{ step.totalCount }}</dd></div>
+                    <div class="is-improved">
+                      <dt>Improved</dt>
+                      <dd>{{ step.improvedCount }}</dd>
+                    </div>
+                    <div class="is-regressed">
+                      <dt>Regressed</dt>
+                      <dd>{{ step.regressedCount }}</dd>
+                    </div>
+                    <div>
+                      <dt>Compared</dt>
+                      <dd>{{ step.comparableCount }}</dd>
+                    </div>
                   </dl>
                 </section>
-                <div v-if="!qorSteps.length" class="dashboard-empty compact">
+                <div v-if="!qorDashboardSteps.length" class="dashboard-empty compact">
                   No QoR analysis yet
                 </div>
               </div>
@@ -261,7 +285,11 @@
               </div>
               <span class="dashboard-muted">{{ analysisCharts.length }} images</span>
             </header>
-            <div v-if="analysisCharts.length" class="snapshot-grid" aria-label="Analysis snapshots">
+            <div
+              v-if="analysisCharts.length"
+              class="snapshot-grid"
+              aria-label="Analysis snapshots"
+            >
               <div
                 v-for="(chart, index) in dataSnapshotCells"
                 :key="chart?.label ?? `snapshot-empty-${index}`"
@@ -288,7 +316,6 @@
               <i class="ri-gallery-line" /><span>No analysis snapshots</span>
             </div>
           </section>
-
         </div>
       </main>
     </template>
@@ -366,23 +393,25 @@
     :style="{ width: 'min(1000px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <div v-if="qorSteps.length" class="qor-waterfall">
+    <div v-if="qorComparisonState.comparison?.deltas.length" class="qor-waterfall">
       <section
-        v-for="(step, index) in qorSteps"
-        :key="step.id"
-        :class="`is-${step.status}`"
+        v-for="(delta, index) in qorComparisonState.comparison.deltas"
+        :key="`${delta.step}:${delta.metricName}:${index}`"
+        :class="`is-${delta.state}`"
       >
         <span class="qor-waterfall-index">{{ index + 1 }}</span>
         <div>
-          <strong>{{ step.label }}</strong
-          ><span>{{ step.runtime || '--' }}</span>
+          <strong>{{ delta.step }} · {{ delta.displayName }}</strong
+          ><span>{{ delta.metricName }}</span>
         </div>
-        <span>{{ step.status }}</span
-        ><span>{{ step.reportCount }} reports</span>
-        <p v-if="step.missing.length">Missing: {{ step.missing.join(', ') }}</p>
+        <span>Current {{ formatQorValue(delta.currentValue, delta.unit) }}</span>
+        <span>Baseline {{ formatQorValue(delta.baselineValue, delta.unit) }}</span>
+        <p :class="`is-${delta.state}`">
+          {{ qorDeltaLabel(delta) }}
+        </p>
       </section>
     </div>
-    <p v-else class="dialog-empty">No per-step QoR analysis is available.</p>
+    <p v-else class="dialog-empty">{{ qorDetailsEmptyLabel }}</p>
   </Dialog>
 
   <Dialog
@@ -414,18 +443,22 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
-  qorPieSlices,
-  qorStatusSummary,
 } from '@/components/home/dashboardData'
+import {
+  homeQorFlowStepForLabel,
+  summarizeHomeQorComparison,
+} from '@/components/home/qorComparisonData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeData } from '@/composables/useHomeData'
+import { useHomeQorComparison } from '@/composables/useHomeQorComparison'
 import { useParameters } from '@/composables/useParameters'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
 import { readProjectBlobUrl } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
+import { QOR_SCORE_THRESHOLD } from '@/utils/projectQorTrend'
 import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
@@ -452,6 +485,7 @@ const {
   mpcConstraints,
   qorSteps,
 } = useDashboardOverview()
+const { state: qorComparisonState } = useHomeQorComparison()
 
 const showPorts = ref(false)
 const showChecklist = ref(false)
@@ -493,8 +527,9 @@ const layoutOutputStage = computed(() => {
   return (
     [...flowStages.value]
       .reverse()
-      .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded') ??
-    null
+      .find(
+        (stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded',
+      ) ?? null
   )
 })
 const layoutRenderStage = computed(() => {
@@ -570,7 +605,9 @@ async function loadLayoutPreviewImage(
   try {
     const authorizedPath = await resolveProjectPathAccess(image.path)
     if (!authorizedPath) throw new Error(`Cannot access layout preview: ${image.path}`)
-    const nextBlobUrl = await readProjectBlobUrl(authorizedPath, { mimeType: 'image/png' })
+    const nextBlobUrl = await readProjectBlobUrl(authorizedPath, {
+      mimeType: 'image/png',
+    })
     if (token !== layoutPreviewLoadToken) {
       if (nextBlobUrl.startsWith('blob:')) URL.revokeObjectURL(nextBlobUrl)
       return
@@ -600,21 +637,15 @@ onBeforeUnmount(() => {
   clearLayoutPreviewBlobUrl()
 })
 const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
-const qorSlices = computed(() => qorPieSlices(qorSteps.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
-const qorSummary = computed(() => qorStatusSummary(qorSteps.value))
-const qorStepSummary = computed(() =>
-  qorSteps.value.reduce(
-    (summary, step) => ({
-      blockedCount: summary.blockedCount + step.blockedCount,
-      passCount: summary.passCount + step.passCount,
-      totalCount: summary.totalCount + step.totalCount,
-    }),
-    { blockedCount: 0, passCount: 0, totalCount: 0 },
-  ),
+const qorComparisonSummary = computed(() =>
+  summarizeHomeQorComparison(qorComparisonState.value.comparison),
 )
 const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
-const qorStatusTone = computed(() => statusTone(qorSummary.value))
+const qorStatusTone = computed<'pass' | 'warning' | 'blocked' | 'unavailable'>(() => {
+  if (qorComparisonState.value.status !== 'available') return 'unavailable'
+  return qorComparisonSummary.value.regressedCount > 0 ? 'blocked' : 'pass'
+})
 const checklistCenterPrimary = computed(() =>
   checklistSummary.value.passingPercent === null
     ? '--'
@@ -623,14 +654,104 @@ const checklistCenterPrimary = computed(() =>
 const checklistCenterSecondary = computed(() =>
   checklistSummary.value.total ? 'passing' : 'no data',
 )
+const qorSlices = computed(() => {
+  if (qorComparisonState.value.status !== 'available') return []
+  return [
+    {
+      id: 'improved',
+      label: 'Improved',
+      value: qorComparisonSummary.value.improvedCount,
+      tone: 'good' as const,
+    },
+    {
+      id: 'regressed',
+      label: 'Regressed',
+      value: qorComparisonSummary.value.regressedCount,
+      tone: 'bad' as const,
+    },
+  ].filter((slice) => slice.value > 0)
+})
 const qorCenterPrimary = computed(() =>
-  qorStepSummary.value.totalCount
-    ? `${qorStepSummary.value.passCount}/${qorStepSummary.value.totalCount}`
+  qorComparisonState.value.status === 'available'
+    ? `${qorComparisonSummary.value.improvedCount}:${qorComparisonSummary.value.regressedCount}`
     : '--',
 )
 const qorCenterSecondary = computed(() =>
-  qorStepSummary.value.totalCount ? 'steps' : 'no data',
+  qorComparisonState.value.status === 'available'
+    ? 'improved / regressed'
+    : 'no baseline',
 )
+const qorScoreValue = computed(() => {
+  return formatQorScore(qorComparisonState.value.comparison?.score)
+})
+const qorScoreTone = computed<'pass' | 'fail' | 'unrated'>(() => {
+  const score = qorComparisonState.value.comparison?.score
+  if (score === null || score === undefined) return 'unrated'
+  return score >= QOR_SCORE_THRESHOLD ? 'pass' : 'fail'
+})
+const qorScoreStatusLabel = computed(() => {
+  if (qorScoreTone.value === 'unrated') return 'Not rated'
+  return qorScoreTone.value === 'pass'
+    ? `PASS >= ${QOR_SCORE_THRESHOLD}`
+    : `FAIL < ${QOR_SCORE_THRESHOLD}`
+})
+const qorSummaryLabel = computed(() => {
+  const state = qorComparisonState.value
+  if (state.status === 'loading') return 'Loading project comparison...'
+  if (state.status === 'baseline') {
+    return `Baseline: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+      state.comparison?.baselineScore,
+    )} / 100`
+  }
+  if (state.status === 'available') {
+    const label = state.baselineSource === 'default' ? 'Default baseline' : 'Baseline'
+    return `${label}: ${state.baselineWorkspaceName ?? '--'} · ${formatQorScore(
+      state.comparison?.baselineScore,
+    )} / 100`
+  }
+  if (state.status === 'no-baseline') return 'No baseline workspace is selected'
+  if (state.status === 'no-project') return 'Project comparison is unavailable'
+  return 'Baseline artifacts are not available for comparison'
+})
+const qorDashboardSteps = computed(() => {
+  const comparisonByStep = new Map(
+    qorComparisonSummary.value.steps.map((step) => [step.step, step]),
+  )
+  const comparisonReady = qorComparisonState.value.status === 'available'
+  return qorSteps.value.map((step) => {
+    const comparisonStep = homeQorFlowStepForLabel(step.label)
+      ? comparisonByStep.get(homeQorFlowStepForLabel(step.label)!)
+      : null
+    const improvedCount = comparisonReady ? (comparisonStep?.improvedCount ?? 0) : 0
+    const regressedCount = comparisonReady ? (comparisonStep?.regressedCount ?? 0) : 0
+    const comparableCount = comparisonReady ? (comparisonStep?.comparableCount ?? 0) : 0
+    return {
+      ...step,
+      improvedCount,
+      regressedCount,
+      comparableCount,
+      comparisonState: !comparisonReady
+        ? 'unavailable'
+        : regressedCount > 0
+          ? 'regressed'
+          : improvedCount > 0
+            ? 'improved'
+            : 'neutral',
+    }
+  })
+})
+const qorDetailsEmptyLabel = computed(() => {
+  if (qorComparisonState.value.status === 'baseline') {
+    return 'This workspace is the project baseline.'
+  }
+  if (qorComparisonState.value.status === 'no-baseline') {
+    return 'No baseline workspace is selected for this project.'
+  }
+  if (qorComparisonState.value.status === 'available') {
+    return 'No directional QoR metrics can be compared with the baseline.'
+  }
+  return 'Project QoR comparison is not available.'
+})
 const checklistTitle = computed(() => {
   if (!checklistSummary.value.total) return 'Checklist pending'
   if (checklistSummary.value.blocked) return 'Sign-off blocked'
@@ -675,6 +796,30 @@ function valueOrDash(value: number | null): string {
 
 function sourcePath(value: Record<string, unknown>): string {
   return typeof value.path === 'string' ? value.path : '--'
+}
+
+function formatQorValue(value: number, unit?: string): string {
+  const formatted = Number.isInteger(value) ? String(value) : value.toFixed(3)
+  return unit ? `${formatted} ${unit}` : formatted
+}
+
+function formatQorScore(score: number | null | undefined): string {
+  if (score === null || score === undefined) return 'N/A'
+  return Number.isInteger(score) ? String(score) : score.toFixed(1)
+}
+
+function qorDeltaLabel(delta: {
+  absoluteDelta: number
+  relativeDeltaPct: number | null
+  state: 'improvement' | 'regression' | 'neutral'
+  unit?: string
+}): string {
+  if (delta.state === 'neutral') return 'Unchanged'
+  const direction = delta.state === 'improvement' ? 'Improved' : 'Regressed'
+  const amount = formatQorValue(Math.abs(delta.absoluteDelta), delta.unit)
+  const percent =
+    delta.relativeDeltaPct === null ? '' : ` (${Math.abs(delta.relativeDeltaPct)}%)`
+  return `${direction} by ${amount}${percent}`
 }
 
 function statusTone(summary: {
@@ -1021,7 +1166,7 @@ async function openLayoutChipViewer(): Promise<void> {
 }
 
 .status-card-content > .status-pie,
-.qor-pie-wrap {
+.qor-visual-column {
   align-self: stretch;
   border-right: 1px solid var(--border-color);
   height: 100%;
@@ -1029,6 +1174,69 @@ async function openLayoutChipViewer(): Promise<void> {
   min-width: 0;
   overflow: hidden;
   padding: 8px;
+}
+
+.qor-visual-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 0;
+}
+
+.qor-score-hero {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  justify-content: center;
+  min-height: 54px;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.qor-score-hero > span,
+.qor-score-hero em {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.qor-score-hero > div {
+  align-items: baseline;
+  display: flex;
+  gap: 3px;
+}
+
+.qor-score-hero strong {
+  color: var(--text-primary);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.qor-score-hero small {
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.qor-score-hero.is-pass strong,
+.qor-score-hero.is-pass em {
+  color: var(--success-color);
+}
+
+.qor-score-hero.is-fail strong,
+.qor-score-hero.is-fail em {
+  color: var(--danger-color);
+}
+
+.qor-pie-wrap {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 8px 8px;
 }
 
 .status-summary-content,
@@ -1140,18 +1348,15 @@ async function openLayoutChipViewer(): Promise<void> {
   height: 6px;
   width: 6px;
 }
-.qor-step-status.is-pass {
+.qor-step-status.is-improved {
   background: var(--success-color);
 }
-.qor-step-status.is-incomplete {
-  background: var(--warn-color);
-}
-.qor-step-status.is-blocked {
+.qor-step-status.is-regressed {
   background: var(--danger-color);
 }
 
 .qor-overview {
-  grid-template-columns: minmax(104px, 0.34fr) minmax(132px, 0.55fr) minmax(0, 1fr);
+  grid-template-columns: minmax(112px, 0.34fr) minmax(160px, 0.62fr) minmax(0, 1fr);
 }
 
 .qor-summary-content {
@@ -1237,10 +1442,10 @@ async function openLayoutChipViewer(): Promise<void> {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
-.qor-step-counts .is-pass dd {
+.qor-step-counts .is-improved dd {
   color: var(--success-color);
 }
-.qor-step-counts .is-blocked dd {
+.qor-step-counts .is-regressed dd {
   color: var(--danger-color);
 }
 
@@ -1396,13 +1601,10 @@ async function openLayoutChipViewer(): Promise<void> {
   min-width: 0;
   padding: 9px;
 }
-.qor-waterfall section.is-pass {
+.qor-waterfall section.is-improvement {
   border-left-color: var(--success-color);
 }
-.qor-waterfall section.is-incomplete {
-  border-left-color: var(--warn-color);
-}
-.qor-waterfall section.is-blocked {
+.qor-waterfall section.is-regression {
   border-left-color: var(--danger-color);
 }
 .qor-waterfall-index {
@@ -1421,10 +1623,16 @@ async function openLayoutChipViewer(): Promise<void> {
   font-size: 10px;
 }
 .qor-waterfall p {
-  color: var(--warn-color);
+  color: var(--text-secondary);
   font-size: 10px;
   grid-column: 2 / -1;
   margin: 0;
+}
+.qor-waterfall p.is-improvement {
+  color: var(--success-color);
+}
+.qor-waterfall p.is-regression {
+  color: var(--danger-color);
 }
 .dashboard-image-preview {
   display: block;
@@ -1451,7 +1659,7 @@ async function openLayoutChipViewer(): Promise<void> {
 
 @media (max-width: 720px) {
   .qor-overview {
-    grid-template-columns: minmax(78px, 0.32fr) minmax(112px, 0.55fr) minmax(0, 1fr);
+    grid-template-columns: minmax(78px, 0.32fr) minmax(122px, 0.55fr) minmax(0, 1fr);
   }
   .status-summary-content,
   .qor-summary-content,

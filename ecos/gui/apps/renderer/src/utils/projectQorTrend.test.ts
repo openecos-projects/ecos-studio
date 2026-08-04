@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProjectQorScoreDetail,
   buildProjectQorTrendSummary,
+  buildProjectQorWorkspaceComparison,
   hasCurrentQorSummaryText,
   normalizeQorHotspots,
   normalizeQorMetrics,
   normalizeQorSummaryBlockingIssues,
+  QOR_SCORE_THRESHOLD,
   qorSummaryStatus,
   serializeProjectQorTrendReport,
   type ProjectQorWorkspaceInput,
@@ -81,6 +83,187 @@ describe('normalizeQorHotspots', () => {
 })
 
 describe('project QoR trend V3 model', () => {
+  it('uses 60 as the QoR pass threshold', () => {
+    expect(QOR_SCORE_THRESHOLD).toBe(60)
+  })
+
+  it('builds complete current-workspace baseline counts without QoR telemetry', () => {
+    const summary = buildProjectQorTrendSummary(
+      [
+        workspace('baseline', {
+          Route: v3Metrics('Route', [
+            metric('route_wirelength', 5200, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+            metric('route_via_count', 1526, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+            metric('runtime_seconds', 120, {
+              category: 'runtime',
+              direction: 'trend_only',
+              scope: 'run',
+              analysisGroup: 'runtime',
+              rating: trendRating(),
+            }),
+          ]),
+          DRC: v3Metrics('DRC', [
+            metric('drc_count', 0, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'drc',
+            }),
+          ]),
+        }),
+        workspace('ws_0004', {
+          Route: v3Metrics('Route', [
+            metric('route_wirelength', 5000, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+            metric('route_via_count', 1526, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+            metric('runtime_seconds', 85, {
+              category: 'runtime',
+              direction: 'trend_only',
+              scope: 'run',
+              analysisGroup: 'runtime',
+              rating: trendRating(),
+            }),
+          ]),
+          DRC: v3Metrics('DRC', [
+            metric('drc_count', 1, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'drc',
+            }),
+          ]),
+        }),
+      ],
+      { baselineWorkspaceId: 'baseline' },
+    )
+
+    const comparison = buildProjectQorWorkspaceComparison(summary, 'ws_0004')
+
+    expect(comparison).toMatchObject({
+      available: true,
+      baselineWorkspaceName: 'baseline',
+      baselineScore: expect.any(Number),
+      score: expect.any(Number),
+    })
+    expect(comparison.deltas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'Route',
+          metricName: 'route_wirelength',
+          state: 'improvement',
+        }),
+        expect.objectContaining({
+          step: 'Route',
+          metricName: 'route_via_count',
+          state: 'neutral',
+        }),
+        expect.objectContaining({
+          step: 'DRC',
+          metricName: 'drc_count',
+          state: 'regression',
+        }),
+      ]),
+    )
+    expect(comparison.deltas).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ metricName: 'runtime_seconds' }),
+      ]),
+    )
+  })
+
+  it('compares every directional metric in its original flow step', () => {
+    const summary = buildProjectQorTrendSummary(
+      [
+        workspace('baseline', {
+          Route: v3Metrics('Route', [
+            metric('shared_directional_metric', 10, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+          ]),
+          RCX: v3Metrics('RCX', [
+            metric('rcx_missing_corner_count', 2, {
+              category: 'clock_robustness_dfm',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'rcx_quality',
+            }),
+          ]),
+        }),
+        workspace('ws_0004', {
+          Route: v3Metrics('Route', [
+            metric('shared_directional_metric', 8, {
+              category: 'routability_physical',
+              direction: 'lower_is_better',
+              scope: 'route',
+              analysisGroup: 'route_quality',
+            }),
+          ]),
+          RCX: v3Metrics('RCX', [
+            metric('rcx_missing_corner_count', 1, {
+              category: 'clock_robustness_dfm',
+              direction: 'lower_is_better',
+              scope: 'signoff',
+              analysisGroup: 'rcx_quality',
+            }),
+          ]),
+        }),
+      ],
+      { baselineWorkspaceId: 'baseline' },
+    )
+
+    const comparison = buildProjectQorWorkspaceComparison(summary, 'ws_0004')
+
+    expect(comparison.deltas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          step: 'Route',
+          metricName: 'shared_directional_metric',
+          state: 'improvement',
+        }),
+        expect.objectContaining({
+          step: 'RCX',
+          metricName: 'rcx_missing_corner_count',
+          state: 'improvement',
+        }),
+      ]),
+    )
+  })
+
+  it('identifies the selected baseline without fabricating deltas', () => {
+    const summary = buildProjectQorTrendSummary(
+      [workspace('baseline', {}), workspace('ws_0004', {})],
+      { baselineWorkspaceId: 'baseline' },
+    )
+
+    expect(buildProjectQorWorkspaceComparison(summary, 'baseline')).toMatchObject({
+      isBaselineWorkspace: true,
+      available: false,
+      deltas: [],
+    })
+  })
+
   it('accepts only complete schema V3 records with feature provenance', () => {
     const valid = v3Metrics('Route', [
       metric('route_wirelength', 4200, {
