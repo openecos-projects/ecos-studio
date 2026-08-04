@@ -1508,11 +1508,13 @@
                       <em>{{ lintRules.length }}</em>
                     </header>
                     <div class="lint-side-list">
-                      <div
+                      <button
                         v-for="rule in lintRules"
                         :key="String(rule.code)"
+                        type="button"
                         class="lint-rule-row"
                         :class="{ error: numberValue(rule.errors) > 0 }"
+                        @click="openLintRule(rule)"
                       >
                         <div>
                           <strong>{{ rule.code }}</strong>
@@ -1523,7 +1525,7 @@
                           {{ numberLabel(rule.warnings) }}W</em
                         >
                         <small v-if="rule.example">{{ rule.example }}</small>
-                      </div>
+                      </button>
                       <div v-if="lintRules.length === 0" class="empty-panel compact">
                         <i class="ri-checkbox-circle-line"></i>
                         <span>No lint rule hit.</span>
@@ -2118,7 +2120,10 @@ import {
 import { CMDEnum, InfoEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { runStepApi } from '@/api/flow'
 import { loadFrontendStepDetailApi } from '@/api/frontendDetail'
-import { resolveReviewStructuralStatus } from '@/views/frontendReviewPresentation'
+import {
+  resolveReviewStructuralStatus,
+  selectLintRuleDiagnostic,
+} from '@/views/frontendReviewPresentation'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
@@ -5128,6 +5133,19 @@ function openLintDiagnostic(diagnostic: LintDiagnostic): void {
   consoleCollapsed.value = false
 }
 
+function openLintRule(rule: LintRule): void {
+  const diagnostic = selectLintRuleDiagnostic(
+    String(rule.code || ''),
+    lintDiagnostics.value,
+  )
+  if (diagnostic) {
+    openLintDiagnostic(diagnostic)
+    return
+  }
+  consoleTab.value = 'problems'
+  consoleCollapsed.value = false
+}
+
 function reviewIssueSource(issue: Partial<RtlReviewIssue>): string {
   const evidence = issue.evidence || {}
   return firstText(
@@ -7471,6 +7489,14 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px 10px;
+  width: 100%;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.lint-rule-row:hover {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.07);
 }
 
 .lint-rule-row div,

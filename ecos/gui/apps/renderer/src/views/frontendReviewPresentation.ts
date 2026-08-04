@@ -10,6 +10,38 @@ export function resolveReviewStructuralStatus(
   return status || 'not_run'
 }
 
+interface LintRuleDiagnosticLike {
+  code?: unknown
+  source?: unknown
+  ownership?: unknown
+  actionable?: unknown
+}
+
+export function selectLintRuleDiagnostic<T extends LintRuleDiagnosticLike>(
+  ruleCode: string,
+  diagnostics: readonly T[],
+): T | null {
+  const normalizedCode = ruleCode.trim().toUpperCase()
+  if (!normalizedCode) return null
+
+  const matches = diagnostics.filter(
+    (diagnostic) =>
+      String(diagnostic.code || '')
+        .trim()
+        .toUpperCase() === normalizedCode,
+  )
+  return (
+    matches.find(
+      (diagnostic) =>
+        diagnostic.actionable === true ||
+        String(diagnostic.ownership || '').toLowerCase() === 'cpu',
+    ) ??
+    matches.find((diagnostic) => Boolean(String(diagnostic.source || '').trim())) ??
+    matches[0] ??
+    null
+  )
+}
+
 function hasOnlyToolLimitErrors(value: unknown): boolean {
   if (!Array.isArray(value)) return false
   const errors = value.filter(

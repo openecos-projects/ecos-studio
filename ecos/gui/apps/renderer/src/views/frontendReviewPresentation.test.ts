@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveReviewStructuralStatus } from './frontendReviewPresentation'
+import {
+  resolveReviewStructuralStatus,
+  selectLintRuleDiagnostic,
+} from './frontendReviewPresentation'
 
 describe('frontend review presentation', () => {
   it('presents legacy tool frontend limitations as tool limited', () => {
@@ -39,5 +42,37 @@ describe('frontend review presentation', () => {
     expect(resolveReviewStructuralStatus({ status: 'success' })).toBe('success')
     expect(resolveReviewStructuralStatus({ status: 'tool_limited' })).toBe('tool_limited')
     expect(resolveReviewStructuralStatus(null)).toBe('not_run')
+  })
+
+  it('selects an actionable CPU diagnostic when opening a lint rule', () => {
+    const socDiagnostic = {
+      code: 'UNUSEDSIGNAL',
+      source: '/resources/ysyxSoCFull.v',
+      ownership: 'soc',
+      actionable: false,
+    }
+    const cpuDiagnostic = {
+      code: 'UNUSEDSIGNAL',
+      source: '/project/CL3Issue.sv',
+      ownership: 'cpu',
+      actionable: true,
+    }
+
+    expect(selectLintRuleDiagnostic('unusedsignal', [socDiagnostic, cpuDiagnostic])).toBe(
+      cpuDiagnostic,
+    )
+  })
+
+  it('falls back to a located diagnostic when a lint rule has no CPU hit', () => {
+    const locatedDiagnostic = {
+      code: 'PROCASSINIT',
+      source: '/resources/ysyxSoCFull.v',
+      ownership: 'soc',
+    }
+
+    expect(selectLintRuleDiagnostic('PROCASSINIT', [locatedDiagnostic])).toBe(
+      locatedDiagnostic,
+    )
+    expect(selectLintRuleDiagnostic('BLKSEQ', [locatedDiagnostic])).toBeNull()
   })
 })
