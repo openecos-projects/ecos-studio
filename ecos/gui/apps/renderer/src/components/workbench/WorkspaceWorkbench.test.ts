@@ -11,11 +11,18 @@ describe('WorkspaceWorkbench shared right panel', () => {
   })
 
   it('owns flow status, reports, and the existing inspector/chat panel once', () => {
-    expect(source).toContain('<FlowStatusStrip')
+    expect(source).toContain('workspace-workbench-flow-status')
     expect(source).toContain('FlowRunControl')
     expect(source).toContain('<template #actions>')
     expect(source).toContain('<slot name="right-log"')
     expect(source).toContain('<FlowReportPanel')
     expect(source).toContain('<ChatInspectorPanel')
+  })
+
+  it('keeps status and flow information above the only flexible chat region', () => {
+    expect(source).toContain('height: 100%')
+    expect(source).toContain('flex-shrink: 0')
+    expect(source).toContain('flex: 1 1 0')
+    expect(source).toContain('height: auto !important')
   })
 })

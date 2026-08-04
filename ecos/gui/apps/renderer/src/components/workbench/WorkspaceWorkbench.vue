@@ -5,7 +5,12 @@
         <slot name="left" />
       </SplitterPanel>
       <SplitterPanel :size="40" :min-size="25" class="workspace-workbench-right">
-        <FlowStatusStrip :loading="loading" :nodes="nodes" :title="flowTitle">
+        <FlowStatusStrip
+          class="workspace-workbench-flow-status"
+          :loading="loading"
+          :nodes="nodes"
+          :title="flowTitle"
+        >
           <template #actions>
             <FlowRunControl />
           </template>
@@ -52,6 +57,7 @@ withDefaults(
   background: transparent;
   border: 0;
   display: flex;
+  height: 100%;
   min-height: 0;
   min-width: 0;
   width: 100%;
@@ -97,10 +103,13 @@ withDefaults(
 
 .workspace-workbench-left,
 .workspace-workbench-right {
+  align-items: stretch;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .workspace-workbench-left > *,
@@ -113,7 +122,19 @@ withDefaults(
   flex: 1 1 auto;
 }
 
-.workspace-workbench-inspector {
-  flex: 1 1 auto;
+.workspace-workbench-right > * {
+  flex-shrink: 0;
+}
+
+.workspace-workbench-flow-status {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-workbench-right > .workspace-workbench-inspector {
+  flex: 1 1 0;
+  height: auto !important;
+  min-height: 0;
 }
 </style>
