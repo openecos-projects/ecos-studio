@@ -10,13 +10,13 @@ describe('WorkspaceWorkbench shared right panel', () => {
     expect(source).toContain(':min-size="25"')
   })
 
-  it('owns flow status, reports, and the existing inspector/chat panel once', () => {
+  it('keeps flow status, log slot, and the existing inspector/chat panel once', () => {
     expect(source).toContain('workspace-workbench-chat-toolbar')
     expect(source).toContain('workspace-workbench-flow-status')
     expect(source).toContain('FlowRunControl')
     expect(source).toContain('<template #actions>')
     expect(source).toContain('<slot name="right-log"')
-    expect(source).toContain('<FlowReportPanel')
+    expect(source).not.toContain('FlowReportPanel')
     expect(source).toContain('<ChatInspectorPanel')
   })
 

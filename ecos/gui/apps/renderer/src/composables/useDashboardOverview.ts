@@ -7,7 +7,6 @@ import {
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
   qorSummaryStatus,
-  reportFilesFromIndex,
   type DashboardQorStep,
 } from '@/components/home/dashboardData'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -40,7 +39,6 @@ export function useDashboardOverview() {
 
   const parameters = computed(() => index.value?.parameters ?? null)
   const mpcConstraints = computed(() => mpcConstraintsFromParameters(parameters.value))
-  const reports = computed(() => (index.value ? reportFilesFromIndex(index.value) : []))
   const keyMetrics = computed(() =>
     dashboardMetrics(parameters.value, metricValues.value),
   )
@@ -132,7 +130,6 @@ export function useDashboardOverview() {
     loading,
     mpcConstraints,
     qorSteps,
-    reports,
     reload: load,
   }
 }

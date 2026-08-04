@@ -1,10 +1,5 @@
 <template>
-  <WorkspaceWorkbench
-    flow-title="Flow status"
-    :loading="flowLoading"
-    :nodes="flowNodes"
-    :reports="reports"
-  >
+  <WorkspaceWorkbench flow-title="Flow status" :loading="flowLoading" :nodes="flowNodes">
     <template #left>
       <main class="home-dashboard" aria-label="Workspace dashboard">
         <div
@@ -378,7 +373,7 @@ const {
   flowLogSegments,
   layoutBlobUrl,
 } = useHomeData()
-const { keyMetrics, mpcConstraints, qorSteps, reports } = useDashboardOverview()
+const { keyMetrics, mpcConstraints, qorSteps } = useDashboardOverview()
 
 const showPorts = ref(false)
 const showChecklist = ref(false)

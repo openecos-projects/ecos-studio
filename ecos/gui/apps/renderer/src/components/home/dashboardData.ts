@@ -34,13 +34,6 @@ export interface DashboardQorStep {
   status: 'pass' | 'blocked' | 'incomplete' | 'unavailable'
 }
 
-export interface DashboardReport {
-  id: string
-  label: string
-  path: string
-  stepLabel: string
-}
-
 export interface DashboardMetric {
   id: string
   label: string
@@ -140,20 +133,6 @@ export function qorPieSlices(steps: readonly DashboardQorStep[]): DashboardPieSl
     },
   ]
   return slices.filter((slice) => slice.value > 0)
-}
-
-export function reportFilesFromIndex(index: WorkspaceResourceIndex): DashboardReport[] {
-  return index.flow.steps.flatMap((step) => {
-    const files = flattenReportFiles(step.resources.report)
-    return files
-      .filter((file) => file.exists)
-      .map((file) => ({
-        id: `${step.name}:${file.path}`,
-        label: file.path.split('/').pop() || 'Report',
-        path: file.path,
-        stepLabel: step.name,
-      }))
-  })
 }
 
 function flattenReportFiles(

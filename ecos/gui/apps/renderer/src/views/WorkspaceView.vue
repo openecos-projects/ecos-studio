@@ -6,11 +6,9 @@ import DrawingArea from '@/components/DrawingArea.vue'
 import ThumbnailGallery from '@/components/ThumbnailGallery.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
-import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useSubflow } from '@/composables/useSubflow'
 
 const { currentStepTitle, isLoading, subflowSteps } = useSubflow()
-const { reports } = useDashboardOverview()
 
 let isResizing = false
 
@@ -65,12 +63,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <WorkspaceWorkbench
-    :flow-title="flowTitle"
-    :loading="isLoading"
-    :nodes="flowNodes"
-    :reports="reports"
-  >
+  <WorkspaceWorkbench :flow-title="flowTitle" :loading="isLoading" :nodes="flowNodes">
     <template #left>
       <div class="step-presentation">
         <Splitter layout="vertical" class="step-presentation-splitter" :gutter-size="4">

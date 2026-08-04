@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 import homeViewSource from './HomeView.vue?raw'
 
 describe('HomeView flow run integration', () => {
-  it('moves flow status, reports, and logs into the shared right workbench panel', () => {
+  it('moves flow status and logs into the shared right workbench panel', () => {
     expect(homeViewSource).toContain('flow-title="Flow status"')
-    expect(homeViewSource).toContain(':reports="reports"')
     expect(homeViewSource).toContain('<FlowLogPanel')
     expect(homeViewSource).toContain('<template #right-log>')
     expect(homeViewSource).toContain(

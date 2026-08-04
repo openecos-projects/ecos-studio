@@ -7,7 +7,6 @@ import {
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
   qorSummaryStatus,
-  reportFilesFromIndex,
 } from './dashboardData'
 
 describe('dashboard data presentation', () => {
@@ -65,7 +64,7 @@ describe('dashboard data presentation', () => {
     expect(qorSummaryStatus({ status: 'unknown' })).toBe('unavailable')
   })
 
-  it('keeps QoR and report entries associated with their flow step', () => {
+  it('keeps QoR entries associated with their flow step', () => {
     const index = {
       root: '/workspace',
       design: 'demo',
@@ -134,9 +133,6 @@ describe('dashboard data presentation', () => {
         reportCount: 1,
         runtime: '0:0:8',
       },
-    ])
-    expect(reportFilesFromIndex(index)).toMatchObject([
-      { stepLabel: 'route', label: 'route.db.rpt' },
     ])
   })
 })

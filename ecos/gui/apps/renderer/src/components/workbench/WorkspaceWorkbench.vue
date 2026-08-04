@@ -17,7 +17,6 @@
           </template>
         </FlowStatusStrip>
         <slot name="right-log" />
-        <FlowReportPanel :reports="reports" />
         <ChatInspectorPanel
           class="workspace-workbench-inspector"
           :toolbar-target="chatToolbarTarget"
@@ -32,8 +31,6 @@ import { ref } from 'vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
-import type { DashboardReport } from '@/components/home/dashboardData'
-import FlowReportPanel from './FlowReportPanel.vue'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
 import type { FlowStatusNode } from './flowStatus'
@@ -45,9 +42,8 @@ withDefaults(
     flowTitle: string
     loading?: boolean
     nodes: FlowStatusNode[]
-    reports?: DashboardReport[]
   }>(),
-  { loading: false, reports: () => [] },
+  { loading: false },
 )
 </script>
 
