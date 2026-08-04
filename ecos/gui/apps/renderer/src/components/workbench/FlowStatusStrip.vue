@@ -31,35 +31,12 @@
       </div>
       <div v-else class="flow-status-empty">No flow steps are available yet.</div>
     </div>
-
-    <div v-if="selectedNode" class="flow-status-detail" aria-live="polite">
-      <div class="flow-status-detail-title">
-        <i :class="[statusIcon(selectedNode.status), `is-${selectedNode.status}`]" />
-        <strong>{{ selectedNode.label }}</strong>
-        <span>{{ statusLabel(selectedNode.status) }}</span>
-      </div>
-      <dl>
-        <div>
-          <dt>Runtime</dt>
-          <dd>{{ selectedNode.runtime || '--' }}</dd>
-        </div>
-        <div>
-          <dt>Peak memory</dt>
-          <dd>{{ formatPeakMemory(selectedNode.peakMemoryMb) }}</dd>
-        </div>
-        <div v-if="selectedNode.detail" class="flow-status-detail-summary">
-          <dt>Latest update</dt>
-          <dd>{{ selectedNode.detail }}</dd>
-        </div>
-      </dl>
-    </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  formatPeakMemory,
   initialSelectedNodeId,
   statusIcon,
   statusLabel,
@@ -80,9 +57,6 @@ const emit = defineEmits<{
 }>()
 
 const selectedId = ref<string | null>(initialSelectedNodeId(props.nodes))
-const selectedNode = computed(
-  () => props.nodes.find((node) => node.id === selectedId.value) ?? null,
-)
 const trackStyle = computed(() => ({
   '--flow-step-count': String(Math.max(props.nodes.length, 1)),
 }))
@@ -122,8 +96,7 @@ function selectNode(id: string): void {
   padding: 8px 12px 6px;
 }
 
-.flow-status-heading,
-.flow-status-detail-title {
+.flow-status-heading {
   align-items: center;
   display: flex;
 }
@@ -146,10 +119,6 @@ function selectNode(id: string): void {
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 500;
-}
-
-.flow-status-detail-title i {
-  font-size: 13px;
 }
 
 .flow-status-track-shell {
@@ -286,92 +255,6 @@ function selectNode(id: string): void {
   flex: 1 1 auto;
   font-size: 11px;
   padding: 12px;
-}
-
-.flow-status-detail {
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-color);
-  min-width: 0;
-  padding: 7px 12px 8px;
-  user-select: text;
-}
-
-.flow-status-detail-title {
-  gap: 5px;
-  min-width: 0;
-}
-
-.flow-status-detail-title strong {
-  color: var(--text-primary);
-  font-size: 11px;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.flow-status-detail-title span {
-  color: var(--text-secondary);
-  font-size: 10px;
-}
-
-.flow-status-detail dl {
-  display: grid;
-  gap: 5px 12px;
-  grid-template-columns: repeat(2, minmax(0, max-content));
-  margin: 5px 0 0;
-}
-
-.flow-status-detail dl > div {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-}
-
-.flow-status-detail dt,
-.flow-status-detail dd {
-  font-size: 9px;
-  margin: 0;
-}
-
-.flow-status-detail dt {
-  color: var(--text-secondary);
-}
-
-.flow-status-detail dd {
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.flow-status-detail-summary {
-  grid-column: 1 / -1;
-}
-
-.flow-status-dialog-content {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  user-select: text;
-}
-
-.flow-status-dialog-content div {
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 7px;
-}
-
-.flow-status-dialog-content dt {
-  color: var(--text-secondary);
-  font-size: 10px;
-  margin-bottom: 3px;
-}
-
-.flow-status-dialog-content dd {
-  color: var(--text-primary);
-  font-size: 12px;
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 
 @container (max-width: 340px) {

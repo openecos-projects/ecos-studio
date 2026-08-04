@@ -337,6 +337,32 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+:deep(.cm-scroller) {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: var(--border-color) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+:deep(.cm-scroller::-webkit-scrollbar) {
+  width: 8px;
+}
+
+:deep(.cm-scroller::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:deep(.cm-scroller::-webkit-scrollbar-thumb) {
+  background: var(--border-color);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+:deep(.cm-scroller::-webkit-scrollbar-thumb:hover) {
+  background-color: var(--text-secondary);
+}
+
 .flow-log-context-menu {
   position: fixed;
   z-index: 20020;

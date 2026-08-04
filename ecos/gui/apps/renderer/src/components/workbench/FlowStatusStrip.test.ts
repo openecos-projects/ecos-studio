@@ -9,11 +9,10 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain('flow-status-run-control')
   })
 
-  it('provides a selected-step detail row with runtime and memory', () => {
-    expect(source).toContain('flow-status-detail')
-    expect(source).toContain('Runtime')
-    expect(source).toContain('Peak memory')
+  it('keeps node selection without a redundant selected-step detail row', () => {
     expect(source).toContain("emit('select', node)")
+    expect(source).not.toContain('flow-status-detail')
+    expect(source).not.toContain('formatPeakMemory')
   })
 
   it('keeps status selection in the card without extra header actions', () => {
