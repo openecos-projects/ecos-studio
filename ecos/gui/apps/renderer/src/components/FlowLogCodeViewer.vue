@@ -341,27 +341,35 @@ onUnmounted(() => {
   overflow-x: hidden;
   overflow-y: scroll;
   overscroll-behavior: contain;
-  scrollbar-color: var(--border-color) transparent;
-  scrollbar-gutter: stable both-edges;
-  scrollbar-width: thin;
+  /* Keep the log position discoverable even when Chromium uses overlay scrollbars. */
+  scrollbar-color: rgba(190, 196, 207, 0.86) var(--bg-secondary);
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
 }
 
 :deep(.cm-scroller::-webkit-scrollbar) {
-  width: 8px;
+  width: 12px;
 }
 
 :deep(.cm-scroller::-webkit-scrollbar-track) {
-  background: transparent;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
 }
 
 :deep(.cm-scroller::-webkit-scrollbar-thumb) {
-  background: var(--border-color);
-  border: 2px solid transparent;
+  min-height: 32px;
+  background-color: rgba(190, 196, 207, 0.86);
+  border: 2px solid var(--bg-secondary);
+  border-radius: 6px;
   background-clip: padding-box;
 }
 
 :deep(.cm-scroller::-webkit-scrollbar-thumb:hover) {
-  background-color: var(--text-secondary);
+  background-color: var(--accent-color);
+}
+
+:deep(.cm-scroller::-webkit-scrollbar-corner) {
+  background: var(--bg-secondary);
 }
 
 .flow-log-context-menu {
