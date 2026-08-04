@@ -9,4 +9,10 @@ describe('LeftSidebar workspace navigation', () => {
     expect(source).toContain('query: route.query')
     expect(source).not.toContain(`:to="'/workspace/' + stage.path"`)
   })
+
+  it('does not render the legacy flow overview or reserve its side panel', () => {
+    expect(source).not.toContain('Flow Overview')
+    expect(source).not.toContain('RTL to GDS Pipeline')
+    expect(source).not.toContain('w-[240px]')
+  })
 })

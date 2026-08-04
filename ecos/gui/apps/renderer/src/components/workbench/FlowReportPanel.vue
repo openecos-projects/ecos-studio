@@ -1,144 +1,309 @@
 <template>
-  <section
-    v-if="reports.length"
-    class="flow-report-panel"
-    aria-label="Available step reports"
-  >
-    <header>
-      <span>Reports</span>
-      <span>{{ reports.length }}</span>
-    </header>
-    <div class="flow-report-list">
-      <button
-        v-for="report in reports"
-        :key="report.id"
-        type="button"
-        :title="`${report.stepLabel}: ${report.label}`"
-        @click="openReport(report)"
-      >
-        <i class="ri-file-text-line" aria-hidden="true" />
-        <span>{{ report.stepLabel }}</span>
-        <i class="ri-fullscreen-line" aria-hidden="true" />
-      </button>
-    </div>
+  <section v-if="reportGroups.length" class="flow-report-panel" aria-label="Step reports">
+    <article v-for="group in reportGroups" :key="group.id" class="flow-report-card">
+      <header>
+        <div class="flow-report-card-title">
+          <i class="ri-file-text-line" aria-hidden="true" />
+          <strong>{{ group.stepLabel }}</strong>
+          <span
+            >{{ group.reports.length }} report{{
+              group.reports.length === 1 ? '' : 's'
+            }}</span
+          >
+        </div>
+        <div class="flow-report-card-actions">
+          <button
+            type="button"
+            :title="copiedGroupId === group.id ? 'Copied' : 'Copy report card'"
+            :aria-label="
+              copiedGroupId === group.id ? 'Copied report card' : 'Copy report card'
+            "
+            @click="copyReportGroup(group)"
+          >
+            <i
+              :class="copiedGroupId === group.id ? 'ri-check-line' : 'ri-file-copy-line'"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            title="Open report card"
+            aria-label="Open report card"
+            @click="openGroup(group)"
+          >
+            <i class="ri-fullscreen-line" aria-hidden="true" />
+          </button>
+        </div>
+      </header>
+
+      <div class="flow-report-card-content">
+        <section
+          v-for="report in group.reports"
+          :key="report.id"
+          class="flow-report-entry"
+        >
+          <div>
+            <span>{{ report.label }}</span>
+            <i
+              v-if="loadingById[report.id]"
+              class="ri-loader-4-line animate-spin"
+              aria-label="Loading report"
+            />
+          </div>
+          <pre>{{ contentById[report.id] || 'Report content is unavailable.' }}</pre>
+        </section>
+      </div>
+    </article>
   </section>
 
   <Dialog
-    v-model:visible="visible"
+    v-model:visible="dialogVisible"
     modal
     maximizable
-    :header="
-      selectedReport ? `${selectedReport.stepLabel}: ${selectedReport.label}` : 'Report'
-    "
+    :header="selectedGroup ? `${selectedGroup.stepLabel} Reports` : 'Reports'"
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
-    <pre v-if="content" class="flow-report-content">{{ content }}</pre>
-    <div v-else-if="loading" class="flow-report-loading">Loading report...</div>
-    <div v-else class="flow-report-loading">Report content is unavailable.</div>
+    <div v-if="selectedGroup" class="flow-report-dialog-content">
+      <section v-for="report in selectedGroup.reports" :key="report.id">
+        <h3>{{ report.label }}</h3>
+        <pre>{{ contentById[report.id] || 'Report content is unavailable.' }}</pre>
+      </section>
+    </div>
   </Dialog>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import type { DashboardReport } from '@/components/home/dashboardData'
 import { readOptionalProjectTextFile } from '@/utils/projectFiles'
 import { resolveProjectPathAccess } from '@/utils/projectFs'
 
-defineProps<{
+interface StepReportGroup {
+  id: string
+  reports: DashboardReport[]
+  stepLabel: string
+}
+
+const props = defineProps<{
   reports: DashboardReport[]
 }>()
 
-const visible = ref(false)
-const loading = ref(false)
-const content = ref('')
-const selectedReport = ref<DashboardReport | null>(null)
+const contentById = ref<Record<string, string>>({})
+const loadingById = ref<Record<string, boolean>>({})
+const copiedGroupId = ref<string | null>(null)
+const dialogVisible = ref(false)
+const selectedGroup = ref<StepReportGroup | null>(null)
+let copiedGroupTimer: ReturnType<typeof setTimeout> | null = null
 
-async function openReport(report: DashboardReport): Promise<void> {
-  selectedReport.value = report
-  content.value = ''
-  loading.value = true
-  visible.value = true
+const reportGroups = computed<StepReportGroup[]>(() => {
+  const groups = new Map<string, StepReportGroup>()
+  for (const report of props.reports) {
+    const current = groups.get(report.stepLabel)
+    if (current) {
+      current.reports.push(report)
+    } else {
+      groups.set(report.stepLabel, {
+        id: report.stepLabel,
+        reports: [report],
+        stepLabel: report.stepLabel,
+      })
+    }
+  }
+  return [...groups.values()]
+})
+
+async function ensureReportContent(report: DashboardReport): Promise<void> {
+  if (report.id in contentById.value || loadingById.value[report.id]) return
+  loadingById.value = { ...loadingById.value, [report.id]: true }
   try {
     const resolvedPath = await resolveProjectPathAccess(report.path)
-    content.value = resolvedPath
+    const content = resolvedPath
       ? ((await readOptionalProjectTextFile(resolvedPath)) ?? '')
       : ''
+    contentById.value = { ...contentById.value, [report.id]: content }
+  } catch {
+    contentById.value = { ...contentById.value, [report.id]: '' }
   } finally {
-    loading.value = false
+    loadingById.value = { ...loadingById.value, [report.id]: false }
   }
 }
+
+function groupText(group: StepReportGroup): string {
+  return group.reports
+    .map(
+      (report) =>
+        `${group.stepLabel}\n${report.label}\n${contentById.value[report.id] ?? ''}`,
+    )
+    .join('\n\n')
+}
+
+async function copyReportGroup(group: StepReportGroup): Promise<void> {
+  const text = groupText(group)
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedGroupId.value = group.id
+    if (copiedGroupTimer) clearTimeout(copiedGroupTimer)
+    copiedGroupTimer = setTimeout(() => {
+      copiedGroupId.value = null
+      copiedGroupTimer = null
+    }, 1200)
+  } catch {
+    copiedGroupId.value = null
+  }
+}
+
+function openGroup(group: StepReportGroup): void {
+  selectedGroup.value = group
+  dialogVisible.value = true
+}
+
+watch(
+  () => props.reports,
+  (reports) => {
+    void Promise.all(reports.map((report) => ensureReportContent(report)))
+  },
+  { deep: true, immediate: true },
+)
 </script>
 
 <style scoped>
 .flow-report-panel {
-  border-bottom: 1px solid var(--border-color);
-  min-width: 0;
-}
-
-.flow-report-panel header {
-  align-items: center;
-  color: var(--text-secondary);
-  display: flex;
-  font-size: 10px;
-  justify-content: space-between;
-  padding: 7px 12px 4px;
-}
-
-.flow-report-list {
   display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  padding: 0 12px 8px;
+  flex: 0 1 auto;
+  gap: 7px;
+  max-height: min(38vh, 360px);
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 7px 10px;
 }
 
-.flow-report-list button {
-  align-items: center;
+.flow-report-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: grid;
-  font-size: 10px;
-  gap: 4px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  border-radius: 6px;
   min-width: 0;
-  padding: 5px 6px;
-  text-align: left;
+  overflow: hidden;
 }
 
-.flow-report-list button:hover {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
+.flow-report-card header,
+.flow-report-card-title,
+.flow-report-card-actions,
+.flow-report-entry > div {
+  align-items: center;
+  display: flex;
 }
 
-.flow-report-list span {
+.flow-report-card header {
+  border-bottom: 1px solid var(--border-color);
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 31px;
+  padding: 4px 6px 4px 8px;
+}
+
+.flow-report-card-title {
+  color: var(--text-primary);
+  gap: 5px;
+  min-width: 0;
+}
+
+.flow-report-card-title strong {
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.flow-report-content {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+.flow-report-card-title span {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: 9px;
+}
+
+.flow-report-card-actions {
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.flow-report-card-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.flow-report-card-actions button:hover {
+  color: var(--accent-color);
+}
+
+.flow-report-card-content {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+  padding: 6px 8px 8px;
+  user-select: text;
+}
+
+.flow-report-entry {
+  min-width: 0;
+}
+
+.flow-report-entry > div {
+  color: var(--text-secondary);
+  font-size: 9px;
+  gap: 5px;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.flow-report-entry > div span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-report-entry pre,
+.flow-report-dialog-content pre {
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 10px;
+  line-height: 1.45;
   margin: 0;
-  max-height: min(70vh, 760px);
-  overflow: auto;
-  padding: 12px;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.flow-report-loading {
-  color: var(--text-secondary);
-  min-height: 120px;
-  padding: 28px;
-  text-align: center;
+.flow-report-dialog-content {
+  display: grid;
+  gap: 12px;
+  user-select: text;
+}
+
+.flow-report-dialog-content section {
+  border: 1px solid var(--border-color);
+  min-width: 0;
+  padding: 10px;
+}
+
+.flow-report-dialog-content h3 {
+  color: var(--text-primary);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.flow-report-dialog-content pre {
+  max-height: min(50vh, 560px);
+  overflow: auto;
 }
 </style>

@@ -6,6 +6,7 @@ describe('HomeView flow run integration', () => {
     expect(homeViewSource).toContain('flow-title="Flow status"')
     expect(homeViewSource).toContain(':reports="reports"')
     expect(homeViewSource).toContain('<FlowLogPanel')
+    expect(homeViewSource).toContain('<template #right-log>')
     expect(homeViewSource).toContain(
       ':execution-active="currentWorkspaceFlowExecutionActive"',
     )

@@ -6,40 +6,72 @@
         <span>{{ title }}</span>
         <span v-if="loading" class="flow-status-refreshing">Updating</span>
       </div>
-      <div class="flow-status-counts" aria-label="Flow status summary">
-        <span title="Succeeded"
-          ><i class="ri-checkbox-circle-fill is-succeeded" />{{ summary.succeeded }}</span
-        >
-        <span title="Running"
-          ><i class="ri-loader-4-line is-running" />{{ summary.running }}</span
-        >
-        <span title="Failed"
-          ><i class="ri-close-circle-fill is-failed" />{{ summary.failed }}</span
-        >
-        <span title="Queued"
-          ><i class="ri-time-line is-queued" />{{ summary.queued }}</span
-        >
+      <div class="flow-status-header-actions">
+        <div class="flow-status-counts" aria-label="Flow status summary">
+          <span title="Succeeded"
+            ><i class="ri-checkbox-circle-fill is-succeeded" />{{
+              summary.succeeded
+            }}</span
+          >
+          <span title="Running"
+            ><i class="ri-loader-4-line is-running" />{{ summary.running }}</span
+          >
+          <span title="Failed"
+            ><i class="ri-close-circle-fill is-failed" />{{ summary.failed }}</span
+          >
+          <span title="Queued"
+            ><i class="ri-time-line is-queued" />{{ summary.queued }}</span
+          >
+        </div>
+        <div class="flow-status-card-actions">
+          <button
+            type="button"
+            :title="copied ? 'Copied' : 'Copy flow status'"
+            :aria-label="copied ? 'Copied flow status' : 'Copy flow status'"
+            :disabled="!selectedNode"
+            @click="copyStatus"
+          >
+            <i
+              :class="copied ? 'ri-check-line' : 'ri-file-copy-line'"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            title="Open flow status"
+            aria-label="Open flow status"
+            :disabled="!selectedNode"
+            @click="dialogVisible = true"
+          >
+            <i class="ri-fullscreen-line" aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </header>
 
-    <div v-if="nodes.length" class="flow-status-track" :style="trackStyle">
-      <button
-        v-for="node in nodes"
-        :key="node.id"
-        type="button"
-        class="flow-status-node"
-        :class="[`is-${node.status}`, { 'is-selected': node.id === selectedId }]"
-        :aria-pressed="node.id === selectedId"
-        :title="`${node.label}: ${statusLabel(node.status)}`"
-        @click="selectNode(node.id)"
-      >
-        <span class="flow-status-node-mark" aria-hidden="true">
-          <i :class="statusIcon(node.status)" />
-        </span>
-        <span class="flow-status-node-label">{{ node.label }}</span>
-      </button>
+    <div class="flow-status-track-shell">
+      <div class="flow-status-run-control">
+        <slot name="actions" />
+      </div>
+      <div v-if="nodes.length" class="flow-status-track" :style="trackStyle">
+        <button
+          v-for="node in nodes"
+          :key="node.id"
+          type="button"
+          class="flow-status-node"
+          :class="[`is-${node.status}`, { 'is-selected': node.id === selectedId }]"
+          :aria-pressed="node.id === selectedId"
+          :title="`${node.label}: ${statusLabel(node.status)}`"
+          @click="selectNode(node.id)"
+        >
+          <span class="flow-status-node-mark" aria-hidden="true">
+            <i :class="statusIcon(node.status)" />
+          </span>
+          <span class="flow-status-node-label">{{ node.label }}</span>
+        </button>
+      </div>
+      <div v-else class="flow-status-empty">No flow steps are available yet.</div>
     </div>
-    <div v-else class="flow-status-empty">No flow steps are available yet.</div>
 
     <div v-if="selectedNode" class="flow-status-detail" aria-live="polite">
       <div class="flow-status-detail-title">
@@ -63,10 +95,38 @@
       </dl>
     </div>
   </section>
+
+  <Dialog
+    v-model:visible="dialogVisible"
+    modal
+    :header="selectedNode ? `${selectedNode.label} Flow Status` : 'Flow Status'"
+    :style="{ width: 'min(620px, calc(100vw - 32px))' }"
+    :draggable="false"
+  >
+    <dl v-if="selectedNode" class="flow-status-dialog-content">
+      <div>
+        <dt>Status</dt>
+        <dd>{{ statusLabel(selectedNode.status) }}</dd>
+      </div>
+      <div>
+        <dt>Runtime</dt>
+        <dd>{{ selectedNode.runtime || '--' }}</dd>
+      </div>
+      <div>
+        <dt>Peak memory</dt>
+        <dd>{{ formatPeakMemory(selectedNode.peakMemoryMb) }}</dd>
+      </div>
+      <div v-if="selectedNode.detail">
+        <dt>Latest update</dt>
+        <dd>{{ selectedNode.detail }}</dd>
+      </div>
+    </dl>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import Dialog from 'primevue/dialog'
 import {
   flowStatusSummary,
   formatPeakMemory,
@@ -90,6 +150,8 @@ const emit = defineEmits<{
 }>()
 
 const selectedId = ref<string | null>(initialSelectedNodeId(props.nodes))
+const dialogVisible = ref(false)
+const copied = ref(false)
 const summary = computed(() => flowStatusSummary(props.nodes))
 const selectedNode = computed(
   () => props.nodes.find((node) => node.id === selectedId.value) ?? null,
@@ -97,6 +159,7 @@ const selectedNode = computed(
 const trackStyle = computed(() => ({
   '--flow-step-count': String(Math.max(props.nodes.length, 1)),
 }))
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(
   () => props.nodes,
@@ -113,6 +176,34 @@ function selectNode(id: string): void {
   const node = props.nodes.find((item) => item.id === id)
   if (node) emit('select', node)
 }
+
+async function copyStatus(): Promise<void> {
+  if (!selectedNode.value) return
+  const node = selectedNode.value
+  const content = [
+    `${node.label}: ${statusLabel(node.status)}`,
+    `Runtime: ${node.runtime || '--'}`,
+    `Peak memory: ${formatPeakMemory(node.peakMemoryMb)}`,
+    node.detail ? `Latest update: ${node.detail}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+  try {
+    await navigator.clipboard.writeText(content)
+    copied.value = true
+    if (copiedTimer) clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => {
+      copied.value = false
+      copiedTimer = null
+    }, 1200)
+  } catch {
+    copied.value = false
+  }
+}
+
+onBeforeUnmount(() => {
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 </script>
 
 <style scoped>
@@ -121,7 +212,7 @@ function selectNode(id: string): void {
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-primary);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .flow-status-header {
@@ -134,8 +225,10 @@ function selectNode(id: string): void {
 }
 
 .flow-status-heading,
+.flow-status-header-actions,
 .flow-status-counts,
 .flow-status-counts span,
+.flow-status-card-actions,
 .flow-status-detail-title {
   align-items: center;
   display: flex;
@@ -147,6 +240,37 @@ function selectNode(id: string): void {
   font-weight: 700;
   gap: 6px;
   min-width: 0;
+}
+
+.flow-status-header-actions {
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.flow-status-card-actions {
+  gap: 2px;
+}
+
+.flow-status-card-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+
+.flow-status-card-actions button:hover:not(:disabled) {
+  color: var(--accent-color);
+}
+
+.flow-status-card-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .flow-status-heading span:not(.flow-status-refreshing) {
@@ -177,10 +301,28 @@ function selectNode(id: string): void {
   font-size: 13px;
 }
 
+.flow-status-track-shell {
+  align-items: stretch;
+  display: flex;
+  min-height: 48px;
+  overflow: visible;
+}
+
+.flow-status-run-control {
+  align-items: center;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  position: relative;
+  z-index: 3;
+}
+
 .flow-status-track {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: repeat(var(--flow-step-count), minmax(0, 1fr));
-  min-height: 48px;
+  min-width: 0;
   overflow: hidden;
   padding: 0 10px;
 }
@@ -290,6 +432,7 @@ function selectNode(id: string): void {
 
 .flow-status-empty {
   color: var(--text-secondary);
+  flex: 1 1 auto;
   font-size: 11px;
   padding: 12px;
 }
@@ -299,6 +442,7 @@ function selectNode(id: string): void {
   border-top: 1px solid var(--border-color);
   min-width: 0;
   padding: 7px 12px 8px;
+  user-select: text;
 }
 
 .flow-status-detail-title {
@@ -354,6 +498,31 @@ function selectNode(id: string): void {
   grid-column: 1 / -1;
 }
 
+.flow-status-dialog-content {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  user-select: text;
+}
+
+.flow-status-dialog-content div {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 7px;
+}
+
+.flow-status-dialog-content dt {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
+.flow-status-dialog-content dd {
+  color: var(--text-primary);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @container (max-width: 340px) {
   .flow-status-node-label {
     display: none;
@@ -361,6 +530,10 @@ function selectNode(id: string): void {
 
   .flow-status-track {
     min-height: 31px;
+  }
+
+  .flow-status-run-control {
+    padding: 0 4px;
   }
 
   .flow-status-node {

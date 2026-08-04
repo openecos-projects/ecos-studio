@@ -6,6 +6,7 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain('repeat(var(--flow-step-count), minmax(0, 1fr))')
     expect(source).toContain('overflow: hidden')
     expect(source).toContain('.flow-status-node-label')
+    expect(source).toContain('flow-status-run-control')
   })
 
   it('provides a selected-step detail row with runtime and memory', () => {
@@ -13,5 +14,11 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain('Runtime')
     expect(source).toContain('Peak memory')
     expect(source).toContain("emit('select', node)")
+  })
+
+  it('provides copy and full-screen actions for the status card', () => {
+    expect(source).toContain('copyStatus')
+    expect(source).toContain('ri-file-copy-line')
+    expect(source).toContain('ri-fullscreen-line')
   })
 })

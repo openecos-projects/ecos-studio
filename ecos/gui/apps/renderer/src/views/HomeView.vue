@@ -240,7 +240,7 @@
       </main>
     </template>
 
-    <template #right-extra>
+    <template #right-log>
       <FlowLogPanel
         :content-by-key="flowLogContentByKey"
         :ensure-content="ensureFlowLogSegmentContentLoaded"
@@ -481,6 +481,44 @@ function sourcePath(value: Record<string, unknown>): string {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.dashboard-section::before {
+  background:
+    radial-gradient(
+        circle at 0 0,
+        transparent 0 7px,
+        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
+        transparent 9.5px
+      )
+      top left / 19px 19px no-repeat,
+    radial-gradient(
+        circle at 100% 0,
+        transparent 0 7px,
+        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
+        transparent 9.5px
+      )
+      top right / 19px 19px no-repeat,
+    radial-gradient(
+        circle at 0 100%,
+        transparent 0 7px,
+        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
+        transparent 9.5px
+      )
+      bottom left / 19px 19px no-repeat,
+    radial-gradient(
+        circle at 100% 100%,
+        transparent 0 7px,
+        color-mix(in srgb, var(--success-color) 88%, transparent) 7.5px 9px,
+        transparent 9.5px
+      )
+      bottom right / 19px 19px no-repeat;
+  content: '';
+  inset: 3px;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
 }
 
 .dashboard-section-header {
