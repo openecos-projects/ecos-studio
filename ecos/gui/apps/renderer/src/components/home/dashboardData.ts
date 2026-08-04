@@ -9,6 +9,15 @@ export interface DashboardPieSlice {
   tone: DashboardTone
 }
 
+export interface DashboardStatusSummary {
+  total: number
+  passed: number
+  blocked: number
+  warning: number
+  unavailable: number
+  passingPercent: number | null
+}
+
 export interface MpcPort {
   name: string
   direction: string
@@ -107,6 +116,15 @@ export function checklistPieSlices(
   return slices.filter((slice) => slice.value > 0)
 }
 
+export function checklistStatusSummary(
+  items: readonly { state: string }[],
+): DashboardStatusSummary {
+  return summaryFromSlices(checklistPieSlices(items), {
+    blocked: 'failed',
+    warning: 'warning',
+  })
+}
+
 export function qorSummaryStatus(value: unknown): DashboardQorStep['status'] {
   const source = record(value)
   const status = stringValue(source?.quality_status || source?.status).toLowerCase()
@@ -133,6 +151,34 @@ export function qorPieSlices(steps: readonly DashboardQorStep[]): DashboardPieSl
     },
   ]
   return slices.filter((slice) => slice.value > 0)
+}
+
+export function qorStatusSummary(
+  steps: readonly DashboardQorStep[],
+): DashboardStatusSummary {
+  return summaryFromSlices(qorPieSlices(steps), {
+    blocked: 'blocked',
+    warning: 'incomplete',
+  })
+}
+
+function summaryFromSlices(
+  slices: readonly DashboardPieSlice[],
+  statusIds: { blocked: string; warning: string },
+): DashboardStatusSummary {
+  const count = (id: string): number =>
+    slices.find((slice) => slice.id === id)?.value ?? 0
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0)
+  const passed = count('pass')
+
+  return {
+    total,
+    passed,
+    blocked: count(statusIds.blocked),
+    warning: count(statusIds.warning),
+    unavailable: count('unavailable'),
+    passingPercent: total > 0 ? Math.round((passed / total) * 100) : null,
+  }
 }
 
 function flattenReportFiles(

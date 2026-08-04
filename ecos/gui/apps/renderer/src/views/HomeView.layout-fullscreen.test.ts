@@ -21,4 +21,11 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('filter: drop-shadow')
     expect(homeViewSource).not.toContain('radial-gradient(\n        circle at 0 0')
   })
+
+  it('keeps the QoR per-step statistics beside the new summary panels', () => {
+    expect(homeViewSource).toContain('Quality of Results')
+    expect(homeViewSource).toContain('class="qor-summary-content"')
+    expect(homeViewSource).toContain('class="qor-step-list"')
+    expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
+  })
 })

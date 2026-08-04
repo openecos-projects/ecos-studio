@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { WorkspaceResourceIndex } from '@ecos-studio/shared'
 import {
   checklistPieSlices,
+  checklistStatusSummary,
   dashboardMetrics,
   formatDashboardMetric,
   mpcConstraintsFromParameters,
   qorStepsFromIndex,
+  qorStatusSummary,
   qorSummaryStatus,
 } from './dashboardData'
 
@@ -37,6 +39,51 @@ describe('dashboard data presentation', () => {
       { id: 'pass', label: 'Pass', value: 2, tone: 'good' },
       { id: 'failed', label: 'Failed', value: 1, tone: 'bad' },
     ])
+  })
+
+  it('derives checklist and QoR summary values without inventing scores', () => {
+    expect(
+      checklistStatusSummary([
+        { state: 'pass' },
+        { state: 'pass' },
+        { state: 'failed' },
+        { state: 'warning' },
+      ]),
+    ).toMatchObject({
+      total: 4,
+      passed: 2,
+      blocked: 1,
+      warning: 1,
+      passingPercent: 50,
+    })
+    expect(
+      qorStatusSummary([
+        {
+          id: 'route',
+          label: 'Route',
+          metricsPath: null,
+          missing: [],
+          reportCount: 1,
+          runtime: '0:00:01',
+          status: 'pass',
+        },
+        {
+          id: 'rcx',
+          label: 'RCX',
+          metricsPath: null,
+          missing: [],
+          reportCount: 1,
+          runtime: '0:00:01',
+          status: 'incomplete',
+        },
+      ]),
+    ).toMatchObject({
+      total: 2,
+      passed: 1,
+      blocked: 0,
+      warning: 1,
+      passingPercent: 50,
+    })
   })
 
   it('maps current parameters and QoR metrics without using fallback numbers', () => {

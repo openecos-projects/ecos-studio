@@ -1,6 +1,12 @@
 <template>
   <div class="status-pie" :aria-label="label" role="img">
-    <div v-if="slices.length" ref="chartElement" class="status-pie-chart" />
+    <div v-if="slices.length" class="status-pie-chart-wrap">
+      <div ref="chartElement" class="status-pie-chart" />
+      <div v-if="centerPrimary" class="status-pie-center" aria-hidden="true">
+        <strong>{{ centerPrimary }}</strong>
+        <span v-if="centerSecondary">{{ centerSecondary }}</span>
+      </div>
+    </div>
     <div v-else class="status-pie-empty">No data</div>
   </div>
 </template>
@@ -18,6 +24,8 @@ echarts.use([PieChart, TooltipComponent, CanvasRenderer])
 const props = defineProps<{
   label: string
   slices: DashboardPieSlice[]
+  centerPrimary?: string
+  centerSecondary?: string
 }>()
 
 const chartElement = ref<HTMLElement | null>(null)
@@ -75,12 +83,48 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .status-pie,
-.status-pie-chart,
+.status-pie-chart-wrap,
 .status-pie-empty {
   height: 100%;
   min-height: 0;
   min-width: 0;
   width: 100%;
+}
+
+.status-pie-chart-wrap {
+  position: relative;
+}
+
+.status-pie-chart {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.status-pie-center {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+}
+
+.status-pie-center strong {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.status-pie-center span {
+  color: var(--text-secondary);
+  font-size: 8px;
+  line-height: 1.25;
+  margin-top: 2px;
 }
 
 .status-pie-empty {

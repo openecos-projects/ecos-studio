@@ -112,60 +112,88 @@
         <div class="home-dashboard-row home-dashboard-middle">
           <section class="dashboard-section status-card">
             <header class="dashboard-section-header">
-              <div>
-                <i class="ri-task-line" aria-hidden="true" />
-                <h2>Checklist</h2>
-              </div>
-              <button
-                type="button"
-                class="dashboard-icon-button"
-                title="View checklist details"
-                aria-label="View checklist details"
-                @click="showChecklist = true"
-              >
-                <i class="ri-arrow-right-up-line" aria-hidden="true" />
-              </button>
+              <div><h2>Checklist</h2></div>
             </header>
             <div class="status-card-content">
               <StatusPieChart
                 label="Checklist status distribution"
                 :slices="checklistSlices"
+                :center-primary="checklistCenterPrimary"
+                :center-secondary="checklistCenterSecondary"
               />
-              <ul class="status-legend">
-                <li
-                  v-for="slice in checklistSlices"
-                  :key="slice.id"
-                  :class="`is-${slice.tone}`"
+              <div class="status-summary-content">
+                <div>
+                  <strong class="status-summary-title">{{ checklistTitle }}</strong>
+                  <p>{{ checklistSummaryLabel }}</p>
+                </div>
+                <dl class="status-count-list">
+                  <div v-if="checklistSummary.total">
+                    <dt>Blocked</dt>
+                    <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
+                  </div>
+                  <div v-if="checklistSummary.total">
+                    <dt>Warning</dt>
+                    <dd>{{ checklistSummary.warning }}/{{ checklistSummary.total }}</dd>
+                  </div>
+                  <div v-if="checklistSummary.unavailable">
+                    <dt>Unavailable</dt>
+                    <dd>
+                      {{ checklistSummary.unavailable }}/{{ checklistSummary.total }}
+                    </dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  class="status-detail-link"
+                  title="View checklist details"
+                  @click="showChecklist = true"
                 >
-                  <span>{{ slice.label }}</span
-                  ><strong>{{ slice.value }}</strong>
-                </li>
-                <li v-if="!checklistSlices.length" class="is-neutral">
-                  <span>No checklist data</span>
-                </li>
-              </ul>
+                  Sign-off details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           </section>
 
           <section class="dashboard-section status-card qor-card">
             <header class="dashboard-section-header">
-              <div>
-                <i class="ri-pie-chart-2-line" aria-hidden="true" />
-                <h2>QoR</h2>
-              </div>
-              <button
-                type="button"
-                class="dashboard-icon-button"
-                title="View QoR details"
-                aria-label="View QoR details"
-                @click="showQor = true"
-              >
-                <i class="ri-arrow-right-up-line" aria-hidden="true" />
-              </button>
+              <div><h2>Quality of Results</h2></div>
             </header>
             <div class="qor-overview">
               <div class="qor-pie-wrap">
-                <StatusPieChart label="QoR status distribution" :slices="qorSlices" />
+                <StatusPieChart
+                  label="QoR status distribution"
+                  :slices="qorSlices"
+                  :center-primary="qorCenterPrimary"
+                  :center-secondary="qorCenterSecondary"
+                />
+              </div>
+              <div class="qor-summary-content">
+                <div>
+                  <strong class="status-summary-title">{{ qorTitle }}</strong>
+                  <p>{{ qorSummaryLabel }}</p>
+                </div>
+                <dl class="status-count-list">
+                  <div v-if="qorSummary.total">
+                    <dt>Blocked</dt>
+                    <dd>{{ qorSummary.blocked }}/{{ qorSummary.total }}</dd>
+                  </div>
+                  <div v-if="qorSummary.total">
+                    <dt>Warning</dt>
+                    <dd>{{ qorSummary.warning }}/{{ qorSummary.total }}</dd>
+                  </div>
+                  <div v-if="qorSummary.unavailable">
+                    <dt>Unavailable</dt>
+                    <dd>{{ qorSummary.unavailable }}/{{ qorSummary.total }}</dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  class="status-detail-link"
+                  title="View QoR details"
+                  @click="showQor = true"
+                >
+                  QoR details <i class="ri-arrow-right-up-line" aria-hidden="true" />
+                </button>
               </div>
               <div class="qor-step-list">
                 <div v-for="step in qorSteps" :key="step.id" class="qor-step-row">
@@ -353,8 +381,10 @@ import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flow
 import StatusPieChart from '@/components/home/StatusPieChart.vue'
 import {
   checklistPieSlices,
+  checklistStatusSummary,
   formatDashboardMetric,
   qorPieSlices,
+  qorStatusSummary,
 } from '@/components/home/dashboardData'
 import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useFlowStages } from '@/composables/useFlowStages'
@@ -402,6 +432,48 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
 )
 const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const qorSlices = computed(() => qorPieSlices(qorSteps.value))
+const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
+const qorSummary = computed(() => qorStatusSummary(qorSteps.value))
+const checklistCenterPrimary = computed(() =>
+  checklistSummary.value.passingPercent === null
+    ? '--'
+    : `${checklistSummary.value.passingPercent}%`,
+)
+const checklistCenterSecondary = computed(() =>
+  checklistSummary.value.total ? 'passing' : 'no data',
+)
+const qorCenterPrimary = computed(() =>
+  qorSummary.value.total ? `${qorSummary.value.passed}/${qorSummary.value.total}` : '--',
+)
+const qorCenterSecondary = computed(() => (qorSummary.value.total ? 'gates' : 'no data'))
+const checklistTitle = computed(() => {
+  if (!checklistSummary.value.total) return 'Checklist pending'
+  if (checklistSummary.value.blocked) return 'Sign-off blocked'
+  if (checklistSummary.value.warning) return 'Sign-off attention'
+  if (checklistSummary.value.unavailable) return 'Sign-off unavailable'
+  return 'Sign-off ready'
+})
+const qorTitle = computed(() => {
+  if (!qorSummary.value.total) return 'QoR pending'
+  if (qorSummary.value.blocked) return 'Gate blocked'
+  if (qorSummary.value.warning) return 'Gate attention'
+  if (qorSummary.value.unavailable) return 'Gate unavailable'
+  return 'Gate pass'
+})
+const checklistSummaryLabel = computed(() => {
+  if (!checklistSummary.value.total) return 'Run a flow step to populate checks'
+  if (checklistSummary.value.blocked) return 'Blocking checklist items need review'
+  if (checklistSummary.value.warning) return 'Checklist has warning items'
+  if (checklistSummary.value.unavailable) return 'Some checklist items are unavailable'
+  return 'All checklist items passed'
+})
+const qorSummaryLabel = computed(() => {
+  if (!qorSummary.value.total) return 'Run a flow step to populate gates'
+  if (qorSummary.value.blocked) return 'Blocking QoR gates need review'
+  if (qorSummary.value.warning) return 'QoR gates need attention'
+  if (qorSummary.value.unavailable) return 'Some QoR gates are unavailable'
+  return `All ${qorSummary.value.passed} gates passed`
+})
 const utilization = computed(() => `${(config.core.utilization * 100).toFixed(1)}%`)
 const currentCellCount = computed(
   () => keyMetrics.value.find((metric) => metric.id === 'instances')?.value ?? null,
@@ -440,7 +512,7 @@ function sourcePath(value: Record<string, unknown>): string {
   box-sizing: border-box;
   display: grid;
   gap: 8px;
-  grid-template-rows: minmax(180px, 2fr) minmax(138px, 1fr) minmax(180px, 2fr);
+  grid-template-rows: minmax(180px, 2fr) minmax(156px, 1.2fr) minmax(180px, 2fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -719,35 +791,96 @@ function sourcePath(value: Record<string, unknown>): string {
 
 .status-card-content,
 .qor-overview {
-  display: flex;
+  display: grid;
   flex: 1;
   min-height: 0;
   min-width: 0;
-  padding: 6px;
+  overflow: hidden;
+  padding: 0;
 }
-.status-card-content > :first-child {
-  flex: 0 0 48%;
+
+.status-card-content {
+  grid-template-columns: minmax(86px, 0.45fr) minmax(0, 1fr);
+}
+
+.status-card-content > .status-pie,
+.qor-pie-wrap {
+  border-right: 1px solid var(--border-color);
   min-width: 0;
+  padding: 8px;
 }
-.status-legend {
+
+.status-summary-content,
+.qor-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.status-summary-title {
+  color: var(--text-primary);
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.status-summary-content p,
+.qor-summary-content p {
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.3;
+  margin: 4px 0 0;
+}
+
+.status-count-list {
   display: grid;
-  gap: 4px;
-  list-style: none;
-  margin: auto 0;
+  gap: 3px;
+  margin: 0;
   min-width: 0;
-  padding: 0 6px;
-  width: 100%;
 }
-.status-legend li {
-  align-items: center;
+
+.status-count-list > div {
   color: var(--text-secondary);
   display: flex;
   font-size: 9px;
-  gap: 5px;
   justify-content: space-between;
   min-width: 0;
 }
-.status-legend li::before,
+
+.status-count-list dt,
+.status-count-list dd {
+  margin: 0;
+}
+
+.status-count-list dd {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-detail-link {
+  align-items: center;
+  align-self: flex-end;
+  background: transparent;
+  border: 0;
+  color: var(--accent-color);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 9px;
+  gap: 3px;
+  margin-top: auto;
+  padding: 0;
+}
+
+.status-detail-link:hover {
+  color: var(--text-primary);
+}
+
 .qor-step-status {
   background: var(--text-secondary);
   border-radius: 50%;
@@ -756,30 +889,31 @@ function sourcePath(value: Record<string, unknown>): string {
   height: 6px;
   width: 6px;
 }
-.status-legend .is-good::before,
 .qor-step-status.is-pass {
   background: var(--success-color);
 }
-.status-legend .is-warn::before,
 .qor-step-status.is-incomplete {
   background: var(--warn-color);
 }
-.status-legend .is-bad::before,
 .qor-step-status.is-blocked {
   background: var(--danger-color);
 }
 
-.qor-pie-wrap {
-  flex: 0 0 31%;
-  min-width: 0;
+.qor-overview {
+  grid-template-columns: minmax(86px, 0.34fr) minmax(132px, 0.55fr) minmax(0, 1fr);
 }
+
+.qor-summary-content {
+  border-right: 1px solid var(--border-color);
+}
+
 .qor-step-list {
   display: grid;
   flex: 1;
   gap: 1px;
   min-width: 0;
   overflow: auto;
-  padding-left: 6px;
+  padding: 7px 10px;
 }
 .qor-step-row {
   align-items: center;
@@ -970,6 +1104,24 @@ function sourcePath(value: Record<string, unknown>): string {
   }
   .dashboard-section {
     min-height: 180px;
+  }
+}
+
+@media (max-width: 720px) {
+  .qor-overview {
+    grid-template-columns: minmax(78px, 0.32fr) minmax(112px, 0.55fr) minmax(0, 1fr);
+  }
+  .status-summary-content,
+  .qor-summary-content,
+  .qor-step-list {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .qor-step-row {
+    gap: 3px;
+  }
+  .qor-step-row span:not(.qor-step-status) {
+    font-size: 7px;
   }
 }
 </style>
