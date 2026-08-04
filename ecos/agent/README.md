@@ -12,11 +12,37 @@ workspace、用户确认和固定 ECC RPC 调用；每次执行都有明确的�
 打包版 ECOS Studio 已包含 Agent 的 Python 运行时，但**不包含 Codex CLI、
 登录状态或任何凭据**。使用 Agent 前，请自行安装并完成 Codex CLI 认证。
 
-- 确保在启动 ECOS Studio 的用户环境中可以直接运行 `codex`。
-- 如 Codex 不在 `PATH` 中，可在用户环境中设置
-  `ECOS_AGENT_CODEX_BIN` 为 Codex 可执行文件路径。
-- Agent 启动时会检查 Codex CLI。检查失败时不会创建 workspace，也不会启动
-  ECC 流程。
+### 配置 Codex CLI（使 GUI 可识别）
+
+在终端执行以下命令安装、登录并检查 Codex CLI：
+
+```bash
+npm install -g @openai/codex
+codex login
+command -v codex
+codex --version
+codex app-server --help
+```
+
+从同一终端启动 ECOS Studio 时，下面的命令会将 Codex 的绝对路径和当前 `PATH`
+一同传给 GUI。请在 AppImage 所在目录执行：
+
+```bash
+ECOS_AGENT_CODEX_BIN="$(command -v codex)" ./ECOS-Studio_*.AppImage
+```
+
+若始终从桌面图标启动应用，请在使用 systemd 的 Linux 桌面环境中持久化 Codex
+绝对路径，然后注销并重新登录桌面会话，再启动 ECOS Studio：
+
+```bash
+codex_bin="$(command -v codex)" || exit 1
+mkdir -p "$HOME/.config/environment.d"
+printf 'ECOS_AGENT_CODEX_BIN=%s\n' "$codex_bin" \
+  > "$HOME/.config/environment.d/ecos-agent.conf"
+```
+
+Agent 仅接受可执行的 `ECOS_AGENT_CODEX_BIN`，否则回退到 GUI 进程 `PATH` 中的
+`codex`。启动检查失败时不会创建 workspace，也不会启动 ECC 流程。
 
 ## 在 ECOS Studio 中使用
 
@@ -69,9 +95,10 @@ Codex CLI 仅用于生成**只读、带类型约束的建议**，不会取得流
 
 **Agent 无法启动，提示需要 Codex CLI**
 
-确认 Codex CLI 已安装并完成认证，且桌面应用继承的环境能够找到 `codex`。如通过
-图形化启动器打开应用导致 `PATH` 不完整，请在用户环境中设置
-`ECOS_AGENT_CODEX_BIN` 后重新启动 ECOS Studio。
+按上文“配置 Codex CLI（使 GUI 可识别）”执行 `command -v codex`、
+`codex --version` 与 `codex app-server --help`。若终端检查通过而桌面应用仍失败，
+使用 `ECOS_AGENT_CODEX_BIN="$(command -v codex)"` 从该终端启动应用，或写入
+`~/.config/environment.d/ecos-agent.conf` 后注销并重新登录。
 
 **为什么不能任意选择重跑阶段？**
 
