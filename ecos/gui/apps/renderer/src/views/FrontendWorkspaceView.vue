@@ -2118,6 +2118,7 @@ import {
 import { CMDEnum, InfoEnum, StateEnum, getStepMetadata } from '@/api/type'
 import { runStepApi } from '@/api/flow'
 import { loadFrontendStepDetailApi } from '@/api/frontendDetail'
+import { resolveReviewStructuralStatus } from '@/views/frontendReviewPresentation'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { isFlowExecutionActiveForWorkspace } from '@/composables/useFlowRunner'
 import { useParameters } from '@/composables/useParameters'
@@ -3369,8 +3370,11 @@ const reviewStructuralQuality = computed(() => {
     ? (quality as Record<string, unknown>)
     : {}
 })
+const reviewStructuralStatusValue = computed(() =>
+  resolveReviewStructuralStatus(reviewStructuralProbe.value),
+)
 const reviewStructuralStatus = computed(() =>
-  titleCase(String(reviewStructuralProbe.value?.status || 'not run')),
+  titleCase(reviewStructuralStatusValue.value),
 )
 const reviewStructuralReason = computed(() =>
   String(reviewStructuralProbe.value?.reason || '').trim(),
@@ -3528,9 +3532,11 @@ const reviewStructuralQualityLabel = computed(() => {
   return `Gate: ${titleCase(gate || '--')} · Complexity: ${titleCase(complexity || '--')}`
 })
 const reviewStructuralTone = computed(() => {
-  const status = String(reviewStructuralProbe.value?.status || '').toLowerCase()
+  const status = reviewStructuralStatusValue.value
   if (status === 'success') return 'ok'
-  if (status === 'unavailable' || status === 'skipped') return 'muted'
+  if (status === 'unavailable' || status === 'skipped' || status === 'tool_limited') {
+    return 'muted'
+  }
   if (status === 'failed' || status === 'timeout') return 'warning'
   return 'muted'
 })
