@@ -22,12 +22,22 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain("buildChipViewerOpenRequest(projectPath, stage.path, 'view')")
   })
 
-  it('uses the latest saved geometry step when Harden completes the flow', () => {
-    expect(homeViewSource).toContain('latestSuccessfulGeometryStep')
-    expect(homeViewSource).toContain(
-      "latestCompletedStage.label.trim().toLowerCase() !== 'harden'",
-    )
-    expect(homeViewSource).toContain('dashboardResourceIndex.value?.flow.steps')
+  it('keeps Harden preview output while using STA for its ChipView render data', () => {
+    expect(homeViewSource).toContain('const layoutOutputStage = computed')
+    expect(homeViewSource).toContain('const layoutRenderStage = computed')
+    expect(homeViewSource).toContain("outputStage.label.trim().toLowerCase() !== 'harden'")
+    expect(homeViewSource).toContain("stage.path.trim().toLowerCase() === 'sta'")
+    expect(homeViewSource).toContain('const stage = layoutRenderStage.value')
+    expect(homeViewSource).not.toContain('latestSuccessfulGeometryStep')
+  })
+
+  it('loads the preview image from the latest successful step output', () => {
+    expect(homeViewSource).toContain('const layoutPreviewImage = computed')
+    expect(homeViewSource).toContain('resources.output.image')
+    expect(homeViewSource).toContain('const layoutPreviewUrl = computed')
+    expect(homeViewSource).toContain('readProjectBlobUrl(authorizedPath')
+    expect(homeViewSource).toContain('v-if="layoutPreviewUrl"')
+    expect(homeViewSource).toContain(':src="layoutPreviewUrl"')
   })
 
   it('lays Data Snapshot out as a responsive 4-by-6 thumbnail grid', () => {

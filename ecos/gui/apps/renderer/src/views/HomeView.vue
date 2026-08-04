@@ -108,13 +108,13 @@
               </button>
             </header>
             <button
-              v-if="layoutBlobUrl"
+              v-if="layoutPreviewUrl"
               type="button"
               class="layout-preview"
               title="Open layout preview"
-              @click="preview = { label: 'Layout preview', url: layoutBlobUrl }"
+              @click="preview = { label: 'Layout preview', url: layoutPreviewUrl }"
             >
-              <img :src="layoutBlobUrl" alt="Latest layout preview" />
+              <img :src="layoutPreviewUrl" alt="Latest layout preview" />
             </button>
             <div v-else class="dashboard-empty">
               <i class="ri-image-2-line" /><span>Waiting for layout data</span>
@@ -392,7 +392,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
@@ -402,7 +402,6 @@ import {
   checklistPieSlices,
   checklistStatusSummary,
   formatDashboardMetric,
-  latestSuccessfulGeometryStep,
   qorPieSlices,
   qorStatusSummary,
 } from '@/components/home/dashboardData'
@@ -413,6 +412,8 @@ import { useParameters } from '@/composables/useParameters'
 import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { getDesktopApi } from '@/platform/desktop'
+import { readProjectBlobUrl } from '@/utils/projectFiles'
+import { resolveProjectPathAccess } from '@/utils/projectFs'
 import {
   buildChipViewerOpenRequest,
   canOpenChipViewer,
@@ -444,8 +445,11 @@ const showChecklist = ref(false)
 const showQor = ref(false)
 const preview = ref<{ label: string; url: string } | null>(null)
 const layoutChipViewerBusy = ref(false)
+const layoutPreviewBlobUrl = ref('')
 const DATA_SNAPSHOT_ROWS = 4
 const DATA_SNAPSHOT_COLUMNS = 6
+let layoutPreviewLoadToken = 0
+let loadedLayoutPreviewSignature = ''
 const dataSnapshotCells = computed(() =>
   Array.from(
     { length: DATA_SNAPSHOT_ROWS * DATA_SNAPSHOT_COLUMNS },
@@ -473,34 +477,54 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
     })),
 )
 const layoutOutputStage = computed(() => {
-  const latestCompletedStage = [...flowStages.value]
-    .reverse()
-    .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded')
-  if (!latestCompletedStage || latestCompletedStage.label.trim().toLowerCase() !== 'harden') {
-    return latestCompletedStage ?? null
+  return (
+    [...flowStages.value]
+      .reverse()
+      .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded') ??
+    null
+  )
+})
+const layoutRenderStage = computed(() => {
+  const outputStage = layoutOutputStage.value
+  if (!outputStage || outputStage.label.trim().toLowerCase() !== 'harden') {
+    return outputStage
   }
 
-  const geometryStep = latestSuccessfulGeometryStep(
-    dashboardResourceIndex.value?.flow.steps ?? [],
-  )
-  if (!geometryStep) return null
   return (
     [...flowStages.value]
       .reverse()
       .find(
         (stage) =>
           stage.group === 'run' &&
-          stage.path.trim().toLowerCase() === geometryStep.name.trim().toLowerCase(),
+          stage.path.trim().toLowerCase() === 'sta' &&
+          flowNodeStatus(stage.state) === 'succeeded',
       ) ?? null
   )
 })
+const layoutPreviewImage = computed(() => {
+  const projectPath = currentProject.value?.path
+  const outputStage = layoutOutputStage.value
+  const resourceIndex = dashboardResourceIndex.value
+  if (!projectPath || resourceIndex?.root !== projectPath || !outputStage) return null
+
+  const stageKeys = new Set(
+    [outputStage.path, outputStage.label].map((value) => value.trim().toLowerCase()),
+  )
+  const image = resourceIndex.flow.steps.find((step) =>
+    stageKeys.has(step.name.trim().toLowerCase()),
+  )?.resources.output.image
+  return image?.exists ? image : null
+})
+const layoutPreviewUrl = computed(() =>
+  layoutPreviewImage.value ? layoutPreviewBlobUrl.value : layoutBlobUrl.value,
+)
 const layoutTitle = computed(() => {
   const stage = layoutOutputStage.value
   return `ChipView - ${stage?.label ?? '--'} - ${stage?.tool || '--'}`
 })
 const canOpenLayoutChipViewer = computed(() => {
-  const stage = layoutOutputStage.value
-  if (!stage || !layoutBlobUrl.value) return false
+  const stage = layoutRenderStage.value
+  if (!stage || !layoutPreviewUrl.value) return false
   return canOpenChipViewer({
     chipViewerBusy: layoutChipViewerBusy.value,
     chipViewerEditBusy: false,
@@ -508,6 +532,59 @@ const canOpenLayoutChipViewer = computed(() => {
     projectPath: currentProject.value?.path,
     step: stage.path,
   })
+})
+
+function clearLayoutPreviewBlobUrl(): void {
+  const previousUrl = layoutPreviewBlobUrl.value
+  layoutPreviewBlobUrl.value = ''
+  loadedLayoutPreviewSignature = ''
+  if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
+}
+
+async function loadLayoutPreviewImage(
+  image: { path: string; mtimeMs?: number; sizeBytes?: number } | null,
+): Promise<void> {
+  const projectPath = currentProject.value?.path
+  const token = ++layoutPreviewLoadToken
+  if (!image || !projectPath) {
+    clearLayoutPreviewBlobUrl()
+    return
+  }
+
+  const signature = `${image.path}:${image.mtimeMs ?? 0}:${image.sizeBytes ?? 0}`
+  if (signature === loadedLayoutPreviewSignature && layoutPreviewBlobUrl.value) return
+
+  try {
+    const authorizedPath = await resolveProjectPathAccess(image.path)
+    if (!authorizedPath) throw new Error(`Cannot access layout preview: ${image.path}`)
+    const nextBlobUrl = await readProjectBlobUrl(authorizedPath, { mimeType: 'image/png' })
+    if (token !== layoutPreviewLoadToken) {
+      if (nextBlobUrl.startsWith('blob:')) URL.revokeObjectURL(nextBlobUrl)
+      return
+    }
+
+    const previousUrl = layoutPreviewBlobUrl.value
+    layoutPreviewBlobUrl.value = nextBlobUrl
+    loadedLayoutPreviewSignature = signature
+    if (previousUrl.startsWith('blob:')) URL.revokeObjectURL(previousUrl)
+  } catch (error) {
+    if (token !== layoutPreviewLoadToken) return
+    console.error('Failed to load the selected layout preview:', error)
+    clearLayoutPreviewBlobUrl()
+  }
+}
+
+watch(
+  () => layoutPreviewImage.value,
+  (image) => {
+    void loadLayoutPreviewImage(image)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  layoutPreviewLoadToken += 1
+  clearLayoutPreviewBlobUrl()
 })
 const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const qorSlices = computed(() => qorPieSlices(qorSteps.value))
@@ -601,7 +678,7 @@ function statusTone(summary: {
 }
 
 async function openLayoutChipViewer(): Promise<void> {
-  const stage = layoutOutputStage.value
+  const stage = layoutRenderStage.value
   const projectPath = currentProject.value?.path
   if (!stage || !projectPath || !canOpenLayoutChipViewer.value) return
 

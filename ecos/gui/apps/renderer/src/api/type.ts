@@ -79,7 +79,7 @@ export const STEP_METADATA: Record<string, StepMetadata> = {
     label: 'Tech',
     icon: 'ri-database-2-line',
     path: 'tech',
-    showInSidebar: true,
+    showInSidebar: false,
     group: 'setup',
   },
   configure: {
