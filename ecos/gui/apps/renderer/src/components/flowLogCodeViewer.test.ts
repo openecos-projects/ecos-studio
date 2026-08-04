@@ -8,6 +8,7 @@ import {
   buildFlowLogViewerExtensions,
   computeFlowLogContextMenuStyle,
   flowLogVerticalScrollbarGeometry,
+  flowLogWheelDeltaPx,
   getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
@@ -52,6 +53,7 @@ function loadFlowLogCodeViewerComponent(vue: typeof import('vue')) {
         computeFlowLogContextMenuStyle,
         FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX: 16,
         flowLogVerticalScrollbarGeometry,
+        flowLogWheelDeltaPx,
         getFlowLogViewerSelectedText,
         isFlowLogViewerNearTail,
       }
@@ -686,6 +688,12 @@ describe('flowLogCodeViewer helpers', () => {
     })
   })
 
+  it('normalizes wheel scrolling into pixels for the log viewport', () => {
+    expect(flowLogWheelDeltaPx({ deltaY: 42, deltaMode: 0, clientHeight: 240 })).toBe(42)
+    expect(flowLogWheelDeltaPx({ deltaY: 3, deltaMode: 1, clientHeight: 240 })).toBe(54)
+    expect(flowLogWheelDeltaPx({ deltaY: 1, deltaMode: 2, clientHeight: 240 })).toBe(240)
+  })
+
   it('keeps the viewer full-height while reducing empty-state framing', () => {
     expect(flowLogCodeViewerSource).toContain('flow-log-viewer-shell')
     expect(flowLogCodeViewerSource).toContain('flow-log-viewer-editor')
@@ -694,8 +702,11 @@ describe('flowLogCodeViewer helpers', () => {
   it('exposes a fixed, draggable vertical scrollbar beside the log viewport', () => {
     expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar')
     expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar-thumb')
-    expect(flowLogCodeViewerSource).toContain('@pointerdown="onFlowLogScrollbarPointerDown"')
+    expect(flowLogCodeViewerSource).toContain('@pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"')
+    expect(flowLogCodeViewerSource).toContain('@wheel="onFlowLogWheel"')
     expect(flowLogCodeViewerSource).toContain('flowLogVerticalScrollbarGeometry(view.scrollDOM)')
+    expect(flowLogCodeViewerSource).toContain("window.addEventListener?.('pointermove', onFlowLogScrollbarPointerMove)")
+    expect(flowLogCodeViewerSource).toContain("window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)")
     expect(flowLogCodeViewerSource).toContain('width: 20px')
     expect(flowLogCodeViewerSource).toContain('background: rgba(166, 166, 176, 0.66)')
     expect(flowLogCodeViewerSource).toContain(':deep(.cm-scroller)')
@@ -828,6 +839,47 @@ describe('FlowLogCodeViewer async content behavior', () => {
     expect(container.querySelector('.flow-log-viewer-editor')).not.toBeNull()
     expect(container.querySelector('.cm-editor')).not.toBeNull()
     expect(codemirrorMocks.editorViewInstances).toHaveLength(1)
+
+    app.unmount()
+  })
+
+  it('scrolls the fixed log viewport when the mouse wheel moves over the text', async () => {
+    ensureDom()
+    const vue = await import('vue')
+    const FlowLogCodeViewer = loadFlowLogCodeViewerComponent(vue)
+
+    const Host = vue.defineComponent({
+      setup() {
+        return () =>
+          vue.h(FlowLogCodeViewer, {
+            content: 'first line\nsecond line',
+            live: false,
+            missing: false,
+            loading: false,
+          })
+      },
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const app = vue.createApp(Host)
+    app.mount(container as never)
+
+    const instance = codemirrorMocks.editorViewInstances[0]
+    instance.scrollDOM.clientHeight = 100
+    instance.scrollDOM.scrollHeight = 320
+    instance.scrollDOM.scrollTop = 0
+    const preventDefault = vi.fn()
+    const viewer = container.querySelector('.flow-log-viewer-editor-wrap')
+    ;(viewer as unknown as { dispatchEvent: (event: unknown) => boolean }).dispatchEvent({
+      type: 'wheel',
+      deltaY: 80,
+      deltaMode: 0,
+      preventDefault,
+      timeStamp: Date.now(),
+    })
+
+    expect(instance.scrollDOM.scrollTop).toBe(80)
+    expect(preventDefault).toHaveBeenCalledTimes(1)
 
     app.unmount()
   })

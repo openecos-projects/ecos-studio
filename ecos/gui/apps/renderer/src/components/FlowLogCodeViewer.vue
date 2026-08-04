@@ -7,6 +7,7 @@ import {
   computeFlowLogContextMenuStyle,
   FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX,
   flowLogVerticalScrollbarGeometry,
+  flowLogWheelDeltaPx,
   getFlowLogViewerSelectedText,
   isFlowLogViewerNearTail,
 } from './flowLogCodeViewer'
@@ -134,8 +135,7 @@ function clearFlowLogScrollbarBindings(): void {
   }
   flowLogScrollbarResizeObserver?.disconnect()
   flowLogScrollbarResizeObserver = null
-  flowLogScrollbarDrag = null
-  isFlowLogScrollbarDragging.value = false
+  stopFlowLogScrollbarDrag()
   flowLogVerticalScrollbar.value = {
     maxScrollTop: 0,
     thumbHeight: 0,
@@ -173,6 +173,26 @@ function setFlowLogScrollFromPointer(event: PointerEvent): void {
   syncFlowLogVerticalScrollbar()
 }
 
+function onFlowLogWheel(event: WheelEvent): void {
+  const scrollDOM = view?.scrollDOM
+  if (!scrollDOM) return
+
+  const delta = flowLogWheelDeltaPx({
+    deltaY: event.deltaY,
+    deltaMode: event.deltaMode,
+    clientHeight: scrollDOM.clientHeight,
+  })
+  if (delta === 0) return
+
+  const maxScrollTop = Math.max(0, scrollDOM.scrollHeight - scrollDOM.clientHeight)
+  const nextScrollTop = Math.max(0, Math.min(maxScrollTop, scrollDOM.scrollTop + delta))
+  if (nextScrollTop === scrollDOM.scrollTop) return
+
+  event.preventDefault()
+  scrollDOM.scrollTop = nextScrollTop
+  syncFlowLogVerticalScrollbar()
+}
+
 function onFlowLogScrollbarPointerDown(event: PointerEvent): void {
   const scrollbar = flowLogVerticalScrollbarRef.value
   if (!view || !scrollbar || flowLogVerticalScrollbar.value.thumbHeight === 0) return
@@ -191,6 +211,9 @@ function onFlowLogScrollbarPointerDown(event: PointerEvent): void {
   }
   isFlowLogScrollbarDragging.value = true
   scrollbar.setPointerCapture?.(event.pointerId)
+  window.addEventListener?.('pointermove', onFlowLogScrollbarPointerMove)
+  window.addEventListener?.('pointerup', stopFlowLogScrollbarDrag)
+  window.addEventListener?.('pointercancel', stopFlowLogScrollbarDrag)
   setFlowLogScrollFromPointer(event)
 }
 
@@ -205,6 +228,9 @@ function stopFlowLogScrollbarDrag(event?: PointerEvent): void {
   if (event && scrollbar?.hasPointerCapture?.(event.pointerId)) {
     scrollbar.releasePointerCapture?.(event.pointerId)
   }
+  window.removeEventListener?.('pointermove', onFlowLogScrollbarPointerMove)
+  window.removeEventListener?.('pointerup', stopFlowLogScrollbarDrag)
+  window.removeEventListener?.('pointercancel', stopFlowLogScrollbarDrag)
   flowLogScrollbarDrag = null
   isFlowLogScrollbarDragging.value = false
 }
@@ -375,6 +401,7 @@ onUnmounted(() => {
       class="flow-log-viewer-editor-wrap"
       :class="{ 'is-live': live }"
       @contextmenu="onViewerContextMenu"
+      @wheel="onFlowLogWheel"
     >
       <div ref="rootRef" class="flow-log-viewer-editor"></div>
       <div
@@ -382,10 +409,7 @@ onUnmounted(() => {
         class="flow-log-vertical-scrollbar"
         :class="{ 'is-dragging': isFlowLogScrollbarDragging }"
         title="Scroll log vertically"
-        @pointercancel="stopFlowLogScrollbarDrag"
-        @pointerdown="onFlowLogScrollbarPointerDown"
-        @pointermove="onFlowLogScrollbarPointerMove"
-        @pointerup="stopFlowLogScrollbarDrag"
+        @pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"
       >
         <span
           class="flow-log-vertical-scrollbar-thumb"
@@ -449,6 +473,7 @@ onUnmounted(() => {
 .flow-log-viewer-editor-wrap {
   position: relative;
   display: flex;
+  overflow: hidden;
 }
 
 .flow-log-viewer-editor {
@@ -465,7 +490,9 @@ onUnmounted(() => {
   border-left: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
   cursor: grab;
+  pointer-events: auto;
   touch-action: none;
+  user-select: none;
 }
 
 .flow-log-vertical-scrollbar.is-dragging {
@@ -490,6 +517,8 @@ onUnmounted(() => {
 }
 
 :deep(.cm-scroller) {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: scroll;
   overscroll-behavior: contain;
@@ -497,6 +526,11 @@ onUnmounted(() => {
   scrollbar-color: rgba(190, 196, 207, 0.86) var(--bg-secondary);
   scrollbar-gutter: stable;
   scrollbar-width: auto;
+}
+
+:deep(.cm-editor) {
+  height: 100%;
+  min-height: 0;
 }
 
 :deep(.cm-scroller::-webkit-scrollbar) {

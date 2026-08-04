@@ -269,6 +269,7 @@ onBeforeUnmount(() => {
 }
 
 .flow-log-viewer {
+  display: flex;
   flex: 1;
   overflow: hidden;
 }

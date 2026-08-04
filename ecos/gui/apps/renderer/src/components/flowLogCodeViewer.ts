@@ -5,6 +5,7 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 
 export const FLOW_LOG_VIEWER_TAIL_THRESHOLD_PX = 16
 export const FLOW_LOG_SCROLLBAR_MIN_THUMB_PX = 32
+export const FLOW_LOG_WHEEL_LINE_HEIGHT_PX = 18
 
 export type FlowLogViewerSelectionState = {
   selection: {
@@ -128,6 +129,16 @@ export function flowLogVerticalScrollbarGeometry(metrics: {
     thumbOffset:
       maxScrollTop === 0 ? 0 : (normalizedScrollTop / maxScrollTop) * thumbTravel,
   }
+}
+
+export function flowLogWheelDeltaPx(metrics: {
+  deltaY: number
+  deltaMode: number
+  clientHeight: number
+}): number {
+  if (metrics.deltaMode === 1) return metrics.deltaY * FLOW_LOG_WHEEL_LINE_HEIGHT_PX
+  if (metrics.deltaMode === 2) return metrics.deltaY * Math.max(1, metrics.clientHeight)
+  return metrics.deltaY
 }
 
 export function getFlowLogViewerSelectedText(state: FlowLogViewerSelectionState): string {

@@ -18,4 +18,8 @@ describe('FlowLogPanel embedded controls', () => {
     expect(source).not.toContain('aria-label="Select a flow step log"')
     expect(source).not.toContain('v-model="selectedKey"')
   })
+
+  it('keeps the embedded viewer constrained so its log text can scroll', () => {
+    expect(source).toContain('.flow-log-viewer {\n  display: flex;')
+  })
 })
