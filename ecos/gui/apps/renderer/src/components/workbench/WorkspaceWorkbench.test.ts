@@ -28,4 +28,11 @@ describe('WorkspaceWorkbench shared right panel', () => {
     expect(source).toContain('margin-top: auto')
     expect(source).toContain('height: auto !important')
   })
+
+  it('switches the right-panel node when flow execution advances to another step', () => {
+    expect(source).toContain('runningFlowNodeId')
+    expect(source).toContain('lastRunningNodeId')
+    expect(source).toContain('nextFlowNodeSelection')
+    expect(source).toContain('selectedFlowNode.value =')
+  })
 })

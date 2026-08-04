@@ -408,7 +408,6 @@ onUnmounted(() => {
         ref="flowLogVerticalScrollbarRef"
         class="flow-log-vertical-scrollbar"
         :class="{ 'is-dragging': isFlowLogScrollbarDragging }"
-        title="Scroll log vertically"
         @pointerdown.stop.prevent="onFlowLogScrollbarPointerDown"
       >
         <span

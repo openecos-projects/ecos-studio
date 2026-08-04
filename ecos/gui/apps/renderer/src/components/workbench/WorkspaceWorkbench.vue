@@ -34,7 +34,12 @@ import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
-import { initialSelectedNodeId, type FlowStatusNode } from './flowStatus'
+import {
+  initialSelectedNodeId,
+  nextFlowNodeSelection,
+  runningFlowNodeId,
+  type FlowStatusNode,
+} from './flowStatus'
 
 const chatToolbarTarget = ref<HTMLElement | null>(null)
 
@@ -48,13 +53,19 @@ const props = withDefaults(
 )
 
 const selectedFlowNode = ref<FlowStatusNode | null>(findInitialNode(props.nodes))
+let lastRunningNodeId = runningFlowNodeId(props.nodes)
 
 watch(
   () => props.nodes,
   (nodes) => {
+    const selection = nextFlowNodeSelection(
+      nodes,
+      selectedFlowNode.value?.id ?? null,
+      lastRunningNodeId,
+    )
+    lastRunningNodeId = selection.runningNodeId
     selectedFlowNode.value =
-      nodes.find((node) => node.id === selectedFlowNode.value?.id) ??
-      findInitialNode(nodes)
+      nodes.find((node) => node.id === selection.selectedNodeId) ?? findInitialNode(nodes)
   },
   { deep: true },
 )

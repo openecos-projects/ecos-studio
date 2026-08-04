@@ -1046,3 +1046,10 @@ describe('FlowLogCodeViewer async content behavior', () => {
     app.unmount()
   })
 })
+
+describe('FlowLogCodeViewer scrollbar presentation', () => {
+  it('keeps the vertical scrollbar without a redundant hover prompt', () => {
+    expect(flowLogCodeViewerSource).toContain('flow-log-vertical-scrollbar')
+    expect(flowLogCodeViewerSource).not.toContain('Scroll log vertically')
+  })
+})

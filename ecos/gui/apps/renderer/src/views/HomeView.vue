@@ -90,9 +90,22 @@
             <header class="dashboard-section-header">
               <div>
                 <i class="ri-layout-masonry-line" aria-hidden="true" />
-                <h2>Layout</h2>
+                <h2>{{ layoutTitle }}</h2>
               </div>
-              <span class="dashboard-muted">Latest output</span>
+              <button
+                type="button"
+                class="dashboard-icon-button"
+                :disabled="!canOpenLayoutChipViewer"
+                title="Open ChipView"
+                aria-label="Open ChipView"
+                @click="openLayoutChipViewer"
+              >
+                <i
+                  class="ri-cpu-line"
+                  :class="{ 'animate-pulse': layoutChipViewerBusy }"
+                  aria-hidden="true"
+                />
+              </button>
             </header>
             <button
               v-if="layoutBlobUrl"
@@ -121,21 +134,21 @@
                 :center-primary="checklistCenterPrimary"
                 :center-secondary="checklistCenterSecondary"
               />
-              <div class="status-summary-content">
+              <div class="status-summary-content" :class="`is-${checklistStatusTone}`">
                 <div>
                   <strong class="status-summary-title">{{ checklistTitle }}</strong>
                   <p>{{ checklistSummaryLabel }}</p>
                 </div>
                 <dl class="status-count-list">
-                  <div v-if="checklistSummary.total">
+                  <div v-if="checklistSummary.total" class="is-blocked">
                     <dt>Blocked</dt>
                     <dd>{{ checklistSummary.blocked }}/{{ checklistSummary.total }}</dd>
                   </div>
-                  <div v-if="checklistSummary.total">
+                  <div v-if="checklistSummary.total" class="is-warning">
                     <dt>Warning</dt>
                     <dd>{{ checklistSummary.warning }}/{{ checklistSummary.total }}</dd>
                   </div>
-                  <div v-if="checklistSummary.unavailable">
+                  <div v-if="checklistSummary.unavailable" class="is-unavailable">
                     <dt>Unavailable</dt>
                     <dd>
                       {{ checklistSummary.unavailable }}/{{ checklistSummary.total }}
@@ -167,21 +180,21 @@
                   :center-secondary="qorCenterSecondary"
                 />
               </div>
-              <div class="qor-summary-content">
+              <div class="qor-summary-content" :class="`is-${qorStatusTone}`">
                 <div>
                   <strong class="status-summary-title">{{ qorTitle }}</strong>
                   <p>{{ qorSummaryLabel }}</p>
                 </div>
                 <dl class="status-count-list">
-                  <div v-if="qorSummary.total">
+                  <div v-if="qorSummary.total" class="is-blocked">
                     <dt>Blocked</dt>
                     <dd>{{ qorSummary.blocked }}/{{ qorSummary.total }}</dd>
                   </div>
-                  <div v-if="qorSummary.total">
+                  <div v-if="qorSummary.total" class="is-warning">
                     <dt>Warning</dt>
                     <dd>{{ qorSummary.warning }}/{{ qorSummary.total }}</dd>
                   </div>
-                  <div v-if="qorSummary.unavailable">
+                  <div v-if="qorSummary.unavailable" class="is-unavailable">
                     <dt>Unavailable</dt>
                     <dd>{{ qorSummary.unavailable }}/{{ qorSummary.total }}</dd>
                   </div>
@@ -203,7 +216,7 @@
                     aria-hidden="true"
                   />
                   <strong>{{ step.label }}</strong>
-                  <span>{{ step.status }}</span>
+                  <span :class="`is-${step.status}`">{{ step.status }}</span>
                   <span>{{ step.reportCount }} reports</span>
                 </div>
                 <div v-if="!qorSteps.length" class="dashboard-empty compact">
@@ -396,8 +409,16 @@ import { useDashboardOverview } from '@/composables/useDashboardOverview'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useHomeData } from '@/composables/useHomeData'
 import { useParameters } from '@/composables/useParameters'
+import { isDesktopRuntime } from '@/composables/useDesktopRuntime'
+import { useWorkspace } from '@/composables/useWorkspace'
+import { getDesktopApi } from '@/platform/desktop'
+import {
+  buildChipViewerOpenRequest,
+  canOpenChipViewer,
+} from '@/components/drawingAreaChipViewer'
 
 const { config } = useParameters()
+const { currentProject } = useWorkspace()
 const { flowStages, isLoading: flowLoading } = useFlowStages()
 const {
   analysisCharts,
@@ -416,6 +437,7 @@ const showPorts = ref(false)
 const showChecklist = ref(false)
 const showQor = ref(false)
 const preview = ref<{ label: string; url: string } | null>(null)
+const layoutChipViewerBusy = ref(false)
 const DATA_SNAPSHOT_ROWS = 4
 const DATA_SNAPSHOT_COLUMNS = 6
 const dataSnapshotCells = computed(() =>
@@ -444,10 +466,33 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
         : null,
     })),
 )
+const layoutOutputStage = computed(() =>
+  [...flowStages.value]
+    .reverse()
+    .find((stage) => stage.group === 'run' && flowNodeStatus(stage.state) === 'succeeded') ??
+  null,
+)
+const layoutTitle = computed(() => {
+  const stage = layoutOutputStage.value
+  return `ChipView - ${stage?.label ?? '--'} - ${stage?.tool || '--'}`
+})
+const canOpenLayoutChipViewer = computed(() => {
+  const stage = layoutOutputStage.value
+  if (!stage || !layoutBlobUrl.value) return false
+  return canOpenChipViewer({
+    chipViewerBusy: layoutChipViewerBusy.value,
+    chipViewerEditBusy: false,
+    isDesktopRuntime: isDesktopRuntime(),
+    projectPath: currentProject.value?.path,
+    step: stage.path,
+  })
+})
 const checklistSlices = computed(() => checklistPieSlices(checklistItems.value))
 const qorSlices = computed(() => qorPieSlices(qorSteps.value))
 const checklistSummary = computed(() => checklistStatusSummary(checklistItems.value))
 const qorSummary = computed(() => qorStatusSummary(qorSteps.value))
+const checklistStatusTone = computed(() => statusTone(checklistSummary.value))
+const qorStatusTone = computed(() => statusTone(qorSummary.value))
 const checklistCenterPrimary = computed(() =>
   checklistSummary.value.passingPercent === null
     ? '--'
@@ -518,6 +563,37 @@ function valueOrDash(value: number | null): string {
 
 function sourcePath(value: Record<string, unknown>): string {
   return typeof value.path === 'string' ? value.path : '--'
+}
+
+function statusTone(summary: {
+  total: number
+  blocked: number
+  warning: number
+  unavailable: number
+}): 'pass' | 'warning' | 'blocked' | 'unavailable' {
+  if (!summary.total) return 'unavailable'
+  if (summary.blocked) return 'blocked'
+  if (summary.warning) return 'warning'
+  if (summary.unavailable) return 'unavailable'
+  return 'pass'
+}
+
+async function openLayoutChipViewer(): Promise<void> {
+  const stage = layoutOutputStage.value
+  const projectPath = currentProject.value?.path
+  if (!stage || !projectPath || !canOpenLayoutChipViewer.value) return
+
+  layoutChipViewerBusy.value = true
+  try {
+    const desktopApi = getDesktopApi()
+    await desktopApi.chipViewer.open(
+      buildChipViewerOpenRequest(projectPath, stage.path, 'view'),
+    )
+  } catch (error) {
+    console.error('Failed to open ChipView from Home:', error)
+  } finally {
+    layoutChipViewerBusy.value = false
+  }
 }
 </script>
 
@@ -686,6 +762,10 @@ function sourcePath(value: Record<string, unknown>): string {
 .dashboard-icon-button:hover {
   color: var(--accent-color);
 }
+.dashboard-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
 .dashboard-icon-button i {
   color: inherit;
 }
@@ -814,13 +894,17 @@ function sourcePath(value: Record<string, unknown>): string {
 }
 
 .status-card-content {
-  grid-template-columns: minmax(86px, 0.45fr) minmax(0, 1fr);
+  grid-template-columns: minmax(104px, 0.45fr) minmax(0, 1fr);
 }
 
 .status-card-content > .status-pie,
 .qor-pie-wrap {
+  align-self: stretch;
   border-right: 1px solid var(--border-color);
+  height: 100%;
+  min-height: 108px;
   min-width: 0;
+  overflow: hidden;
   padding: 8px;
 }
 
@@ -837,16 +921,16 @@ function sourcePath(value: Record<string, unknown>): string {
 .status-summary-title {
   color: var(--text-primary);
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .status-summary-content p,
 .qor-summary-content p {
   color: var(--text-secondary);
-  font-size: 9px;
-  line-height: 1.3;
+  font-size: 11px;
+  line-height: 1.4;
   margin: 4px 0 0;
 }
 
@@ -860,7 +944,7 @@ function sourcePath(value: Record<string, unknown>): string {
 .status-count-list > div {
   color: var(--text-secondary);
   display: flex;
-  font-size: 9px;
+  font-size: 11px;
   justify-content: space-between;
   min-width: 0;
 }
@@ -872,9 +956,35 @@ function sourcePath(value: Record<string, unknown>): string {
 
 .status-count-list dd {
   color: var(--text-primary);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.status-summary-content.is-pass .status-summary-title,
+.qor-summary-content.is-pass .status-summary-title {
+  color: var(--success-color);
+}
+.status-summary-content.is-warning .status-summary-title,
+.qor-summary-content.is-warning .status-summary-title {
+  color: var(--warn-color);
+}
+.status-summary-content.is-blocked .status-summary-title,
+.qor-summary-content.is-blocked .status-summary-title {
+  color: var(--danger-color);
+}
+.status-count-list > .is-blocked dt,
+.status-count-list > .is-blocked dd {
+  color: var(--danger-color);
+}
+.status-count-list > .is-warning dt,
+.status-count-list > .is-warning dd {
+  color: var(--warn-color);
+}
+.status-count-list > .is-unavailable dt,
+.status-count-list > .is-unavailable dd {
+  color: var(--text-secondary);
 }
 
 .status-detail-link {
@@ -885,7 +995,7 @@ function sourcePath(value: Record<string, unknown>): string {
   color: var(--accent-color);
   cursor: pointer;
   display: inline-flex;
-  font-size: 9px;
+  font-size: 10px;
   gap: 3px;
   margin-top: auto;
   padding: 0;
@@ -914,7 +1024,7 @@ function sourcePath(value: Record<string, unknown>): string {
 }
 
 .qor-overview {
-  grid-template-columns: minmax(86px, 0.34fr) minmax(132px, 0.55fr) minmax(0, 1fr);
+  grid-template-columns: minmax(104px, 0.34fr) minmax(132px, 0.55fr) minmax(0, 1fr);
 }
 
 .qor-summary-content {
@@ -939,15 +1049,28 @@ function sourcePath(value: Record<string, unknown>): string {
 }
 .qor-step-row strong {
   color: var(--text-primary);
-  font-size: 9px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .qor-step-row span:not(.qor-step-status) {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 10px;
   white-space: nowrap;
+}
+.qor-step-row span.is-pass {
+  color: var(--success-color);
+}
+.qor-step-row span.is-incomplete {
+  color: var(--warn-color);
+}
+.qor-step-row span.is-blocked {
+  color: var(--danger-color);
+}
+
+.status-card .dashboard-section-header h2 {
+  font-size: 13px;
 }
 
 .snapshot-grid {

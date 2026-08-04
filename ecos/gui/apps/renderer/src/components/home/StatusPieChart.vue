@@ -92,6 +92,7 @@ onBeforeUnmount(() => {
 }
 
 .status-pie-chart-wrap {
+  min-height: 92px;
   position: relative;
 }
 
@@ -115,14 +116,14 @@ onBeforeUnmount(() => {
 
 .status-pie-center strong {
   color: var(--text-primary);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1;
 }
 
 .status-pie-center span {
   color: var(--text-secondary);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.25;
   margin-top: 2px;
 }

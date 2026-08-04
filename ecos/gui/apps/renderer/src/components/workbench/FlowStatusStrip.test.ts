@@ -27,4 +27,10 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).not.toContain('flow-status-counts')
     expect(source).not.toContain('flowStatusSummary')
   })
+
+  it('selects a newly running step while preserving manual selection for the same step', () => {
+    expect(source).toContain('runningFlowNodeId')
+    expect(source).toContain('lastRunningNodeId')
+    expect(source).toContain('nextFlowNodeSelection')
+  })
 })

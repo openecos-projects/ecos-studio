@@ -14,6 +14,14 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('class="dashboard-image-preview"')
   })
 
+  it('labels the layout output and opens its matching ChipView step', () => {
+    expect(homeViewSource).toContain('ChipView - ${stage?.label ?? \'--\'} -')
+    expect(homeViewSource).not.toContain('Latest output')
+    expect(homeViewSource).toContain('openLayoutChipViewer')
+    expect(homeViewSource).toContain('desktopApi.chipViewer.open')
+    expect(homeViewSource).toContain("buildChipViewerOpenRequest(projectPath, stage.path, 'view')")
+  })
+
   it('lays Data Snapshot out as a responsive 4-by-6 thumbnail grid', () => {
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_ROWS = 4')
     expect(homeViewSource).toContain('const DATA_SNAPSHOT_COLUMNS = 6')
@@ -37,5 +45,21 @@ describe('HomeView workspace dashboard layout', () => {
     expect(homeViewSource).toContain('class="qor-summary-content"')
     expect(homeViewSource).toContain('class="qor-step-list"')
     expect(homeViewSource).toContain('border-right: 1px solid var(--border-color)')
+  })
+
+  it('uses readable summary text and semantic status colors', () => {
+    expect(homeViewSource).toContain('.status-card .dashboard-section-header h2')
+    expect(homeViewSource).toContain('font-size: 13px')
+    expect(homeViewSource).toContain('font-size: 14px')
+    expect(homeViewSource).toContain('font-size: 11px')
+    expect(homeViewSource).toContain('.status-summary-content.is-blocked')
+    expect(homeViewSource).toContain('.qor-step-row span.is-pass')
+  })
+
+  it('preserves both fixed-size checklist and QoR pie chart regions', () => {
+    expect(homeViewSource.match(/<StatusPieChart/g)?.length).toBe(2)
+    expect(homeViewSource).toContain('min-height: 108px')
+    expect(homeViewSource).toContain('grid-template-columns: minmax(104px, 0.45fr)')
+    expect(homeViewSource).toContain('grid-template-columns: minmax(104px, 0.34fr)')
   })
 })

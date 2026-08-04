@@ -38,6 +38,8 @@
 import { computed, ref, watch } from 'vue'
 import {
   initialSelectedNodeId,
+  nextFlowNodeSelection,
+  runningFlowNodeId,
   statusIcon,
   statusLabel,
   type FlowStatusNode,
@@ -57,6 +59,7 @@ const emit = defineEmits<{
 }>()
 
 const selectedId = ref<string | null>(initialSelectedNodeId(props.nodes))
+let lastRunningNodeId = runningFlowNodeId(props.nodes)
 const trackStyle = computed(() => ({
   '--flow-step-count': String(Math.max(props.nodes.length, 1)),
 }))
@@ -64,9 +67,9 @@ const trackStyle = computed(() => ({
 watch(
   () => props.nodes,
   (nodes) => {
-    if (!nodes.some((node) => node.id === selectedId.value)) {
-      selectedId.value = initialSelectedNodeId(nodes)
-    }
+    const selection = nextFlowNodeSelection(nodes, selectedId.value, lastRunningNodeId)
+    lastRunningNodeId = selection.runningNodeId
+    selectedId.value = selection.selectedNodeId
   },
   { deep: true },
 )

@@ -4,6 +4,8 @@ import {
   flowStatusSummary,
   formatPeakMemory,
   initialSelectedNodeId,
+  nextFlowNodeSelection,
+  runningFlowNodeId,
   type FlowStatusNode,
 } from './flowStatus'
 
@@ -32,6 +34,40 @@ describe('flow status presentation', () => {
       skipped: 1,
     })
     expect(initialSelectedNodeId(nodes)).toBe('b')
+    expect(runningFlowNodeId(nodes)).toBe('b')
+    expect(runningFlowNodeId([{ ...nodes[0]!, status: 'succeeded' }])).toBeNull()
+  })
+
+  it('follows a newly running step without overriding a manual log selection mid-step', () => {
+    const synthesis = {
+      id: 'synthesis',
+      label: 'Synthesis',
+      status: 'running' as const,
+      runtime: '',
+      peakMemoryMb: null,
+    }
+    const floorplan = {
+      id: 'floorplan',
+      label: 'Floorplan',
+      status: 'queued' as const,
+      runtime: '',
+      peakMemoryMb: null,
+    }
+
+    expect(nextFlowNodeSelection([synthesis, floorplan], 'floorplan', 'synthesis')).toEqual({
+      runningNodeId: 'synthesis',
+      selectedNodeId: 'floorplan',
+    })
+    expect(
+      nextFlowNodeSelection(
+        [{ ...synthesis, status: 'succeeded' }, { ...floorplan, status: 'running' }],
+        'synthesis',
+        'synthesis',
+      ),
+    ).toEqual({
+      runningNodeId: 'floorplan',
+      selectedNodeId: 'floorplan',
+    })
   })
 
   it('formats memory without inventing a missing value', () => {

@@ -17,6 +17,11 @@ export interface FlowStatusSummary {
   skipped: number
 }
 
+export interface FlowNodeSelectionUpdate {
+  runningNodeId: string | null
+  selectedNodeId: string | null
+}
+
 export function flowNodeStatus(value: string | null | undefined): FlowNodeStatus {
   switch (value?.trim().toLowerCase()) {
     case 'success':
@@ -90,5 +95,27 @@ export function formatPeakMemory(peakMemoryMb: number | null): string {
 }
 
 export function initialSelectedNodeId(nodes: readonly FlowStatusNode[]): string | null {
-  return nodes.find((node) => node.status === 'running')?.id ?? nodes[0]?.id ?? null
+  return runningFlowNodeId(nodes) ?? nodes[0]?.id ?? null
+}
+
+export function runningFlowNodeId(nodes: readonly FlowStatusNode[]): string | null {
+  return nodes.find((node) => node.status === 'running')?.id ?? null
+}
+
+export function nextFlowNodeSelection(
+  nodes: readonly FlowStatusNode[],
+  selectedNodeId: string | null,
+  previousRunningNodeId: string | null,
+): FlowNodeSelectionUpdate {
+  const runningNodeId = runningFlowNodeId(nodes)
+  if (runningNodeId && runningNodeId !== previousRunningNodeId) {
+    return { runningNodeId, selectedNodeId: runningNodeId }
+  }
+
+  return {
+    runningNodeId,
+    selectedNodeId: nodes.some((node) => node.id === selectedNodeId)
+      ? selectedNodeId
+      : initialSelectedNodeId(nodes),
+  }
 }
