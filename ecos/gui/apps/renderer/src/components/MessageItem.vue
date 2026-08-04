@@ -106,13 +106,17 @@
           <img
             :src="message.mapData.imageUrl"
             :alt="message.mapData.title"
-            class="map-image block h-auto max-h-[400px] w-full max-w-full min-w-0 object-contain"
+            :class="[
+              'map-image block h-auto w-full max-w-full min-w-0 object-contain',
+              message.mapData.compact ? 'max-h-[220px]' : 'max-h-[400px]',
+            ]"
             @load="handleMapImageLoad"
             @error="handleMapImageError"
           />
 
           <!-- 颜色条图例 -->
           <div
+            v-if="message.mapData.showLegend !== false"
             class="absolute right-3 bottom-3 flex flex-col items-end gap-1 rounded-lg border border-(--border-color)/50 bg-(--bg-secondary)/90 p-2"
           >
             <div
@@ -219,7 +223,10 @@
         <!-- JSON 格式 - 复杂对象 -->
         <div v-else-if="item.format === 'json'" class="overflow-hidden p-3">
           <pre
-            class="nested-report-scroll text-content-pre max-h-[400px] overflow-auto rounded bg-(--bg-primary) p-3 font-mono text-[11px] whitespace-pre"
+            :class="[
+              'nested-report-scroll text-content-pre overflow-auto rounded bg-(--bg-primary) p-3 font-mono text-[11px] whitespace-pre',
+              message.infoData.compact ? 'max-h-[220px]' : 'max-h-[400px]',
+            ]"
             @wheel="onNestedReportWheel"
           ><code>{{ JSON.stringify(item.content, null, 2) }}</code></pre>
         </div>
@@ -259,10 +266,16 @@
         <!-- HTML 报告：嵌入区缩小字号；全屏查阅见标题栏按钮 -->
         <div v-else-if="item.format === 'html'" class="overflow-hidden p-3">
           <div
-            class="max-h-[350px] overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)"
+            :class="[
+              'overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)',
+              message.infoData.compact ? 'max-h-[220px]' : 'max-h-[350px]',
+            ]"
           >
             <div
-              class="nested-report-scroll info-html-embed markdown-body info-html-embed--compact max-h-[350px] overflow-auto p-3"
+              :class="[
+                'nested-report-scroll info-html-embed markdown-body info-html-embed--compact overflow-auto p-3',
+                message.infoData.compact ? 'max-h-[220px]' : 'max-h-[350px]',
+              ]"
               @wheel="onNestedReportWheel"
               v-html="coerceHtmlString(item.content)"
             ></div>
@@ -272,10 +285,16 @@
         <!-- 文本格式：嵌入区缩小字号；全屏查阅见标题栏按钮 -->
         <div v-else class="overflow-hidden p-3">
           <div
-            class="max-h-[350px] overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)"
+            :class="[
+              'overflow-hidden rounded-lg border border-(--border-color)/30 bg-(--bg-primary)',
+              message.infoData.compact ? 'max-h-[220px]' : 'max-h-[350px]',
+            ]"
           >
             <pre
-              class="nested-report-scroll info-text-embed-compact text-content-pre max-h-[350px] overflow-auto rounded-none bg-(--bg-primary) p-3 font-mono whitespace-pre"
+              :class="[
+                'nested-report-scroll info-text-embed-compact text-content-pre overflow-auto rounded-none bg-(--bg-primary) p-3 font-mono whitespace-pre',
+                message.infoData.compact ? 'max-h-[220px]' : 'max-h-[350px]',
+              ]"
               @wheel="onNestedReportWheel"
             ><code>{{ item.content }}</code></pre>
           </div>

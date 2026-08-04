@@ -17,6 +17,7 @@ export interface InfoData {
   title: string
   step: string
   items: InfoItem[]
+  compact?: boolean
 }
 
 // Map 信息数据结构
@@ -33,6 +34,8 @@ export interface MapData {
   localPath: string
   info: string[]
   category?: string
+  compact?: boolean
+  showLegend?: boolean
 }
 
 export interface Message {

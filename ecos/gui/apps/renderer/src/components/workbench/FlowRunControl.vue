@@ -48,7 +48,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import Dialog from 'primevue/dialog'
+import { StateEnum } from '@/api/type'
 import { useCurrentStage } from '@/composables/useCurrentStage'
+import { useFlowRunArtifacts } from '@/composables/useFlowRunArtifacts'
 import { useFlowRunner } from '@/composables/useFlowRunner'
 import { useFlowStages } from '@/composables/useFlowStages'
 import { useSubflow } from '@/composables/useSubflow'
@@ -57,7 +59,8 @@ import { flowNodeStatus } from './flowStatus'
 
 const rerunConfirmationVisible = ref(false)
 const { currentStage } = useCurrentStage()
-const { isRunning, runFlow, runAllFlow } = useFlowRunner()
+const { isRunning, runFlow, runAllFlow, state: flowRunState } = useFlowRunner()
+const { startFlowRunArtifactCapture } = useFlowRunArtifacts()
 const {
   dynamicFlowStages,
   hasOngoingRunStage,
@@ -111,16 +114,35 @@ async function executeRun(rerun: boolean): Promise<void> {
     return
   }
 
-  if (isHomeStage.value) {
-    setFirstRunStepOngoing()
-    await runAllFlow({ rerun })
-    await refreshFlowStages()
-    return
-  }
+  const capture = await startFlowRunArtifactCapture({
+    stepNames: isHomeStage.value
+      ? dynamicFlowStages.value.map((stage) => stage.path)
+      : [currentStage.value],
+  })
 
-  setRunStepOngoingByPath(currentStage.value)
-  await runFlow({ rerun })
-  await Promise.all([refreshCurrentSubflow(), refreshFlowStages()])
+  try {
+    if (isHomeStage.value) {
+      setFirstRunStepOngoing()
+      await runAllFlow({ rerun })
+      await refreshFlowStages()
+      await capture.settle({
+        forceStepNames:
+          flowRunState.value === StateEnum.Success
+            ? dynamicFlowStages.value.map((stage) => stage.path)
+            : [],
+      })
+      return
+    }
+
+    setRunStepOngoingByPath(currentStage.value)
+    const result = await runFlow({ rerun })
+    await Promise.all([refreshCurrentSubflow(), refreshFlowStages()])
+    await capture.settle({
+      forceStepNames: result?.state === StateEnum.Success ? [currentStage.value] : [],
+    })
+  } finally {
+    capture.stop()
+  }
 }
 </script>
 

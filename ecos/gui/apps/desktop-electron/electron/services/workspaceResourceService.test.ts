@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { WorkspaceResourceFile } from '@ecos-studio/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkspaceResourceService } from './workspaceResourceService'
 
@@ -8,6 +9,17 @@ const tempDirectories: string[] = []
 type ProjectScopeProviderDouble = ConstructorParameters<
   typeof WorkspaceResourceService
 >[0]['projectScopeProvider']
+
+function isWorkspaceResourceFile(value: unknown): value is WorkspaceResourceFile {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'path' in value &&
+    typeof value.path === 'string' &&
+    'exists' in value &&
+    typeof value.exists === 'boolean'
+  )
+}
 
 async function tempWorkspace(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ecos-resource-resolver-'))
@@ -104,6 +116,43 @@ describe('WorkspaceResourceService', () => {
       exists: true,
       kind: 'layout-image',
     })
+  })
+
+  it('discovers every .rpt file below a step report directory', async () => {
+    const root = await tempWorkspace()
+    await writeWorkspace(root, [{ name: 'sta', tool: 'ecc' }])
+    const reportDirectory = join(root, 'sta_ecc', 'report')
+    await mkdir(join(reportDirectory, 'MAX_125', 'Cworst'), { recursive: true })
+    await writeFile(join(reportDirectory, 'sta.db.rpt'), 'summary', 'utf8')
+    await writeFile(
+      join(reportDirectory, 'MAX_125', 'Cworst', 'timing_max.rpt'),
+      'timing',
+      'utf8',
+    )
+    await writeFile(
+      join(reportDirectory, 'MAX_125', 'Cworst', 'ignored.json'),
+      '{}',
+      'utf8',
+    )
+
+    const service = new WorkspaceResourceService({ projectScopeProvider: provider(root) })
+    const index = await service.getIndex()
+    const reports = Object.values(index.flow.steps[0]!.resources.report).flatMap(
+      (resource) =>
+        isWorkspaceResourceFile(resource)
+          ? [resource]
+          : Object.values(resource).filter(isWorkspaceResourceFile),
+    )
+
+    expect(
+      reports.filter((resource) => resource.exists).map((resource) => resource.path),
+    ).toEqual(
+      expect.arrayContaining([
+        join(reportDirectory, 'sta.db.rpt'),
+        join(reportDirectory, 'MAX_125', 'Cworst', 'timing_max.rpt'),
+      ]),
+    )
+    expect(reports.some((resource) => resource.path.endsWith('ignored.json'))).toBe(false)
   })
 
   it('uses the sizer workspace directory convention for steps with spaces', async () => {

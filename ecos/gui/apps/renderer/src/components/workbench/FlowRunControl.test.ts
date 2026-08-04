@@ -8,6 +8,12 @@ describe('FlowRunControl', () => {
     expect(source).toContain("currentStage.value === 'home'")
   })
 
+  it('captures each successful run step output for the information panel', () => {
+    expect(source).toContain('useFlowRunArtifacts')
+    expect(source).toContain('startFlowRunArtifactCapture')
+    expect(source).toContain('capture.settle')
+  })
+
   it('asks before rerunning a completed flow or step instead of showing a run-mode menu', () => {
     expect(source).toContain('ri-play-fill')
     expect(source).toContain('rerunConfirmationVisible')
