@@ -4,11 +4,24 @@ import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import DrawingArea from '@/components/DrawingArea.vue'
 import ThumbnailGallery from '@/components/ThumbnailGallery.vue'
+import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'
 import WorkspaceWorkbench from '@/components/workbench/WorkspaceWorkbench.vue'
 import { flowNodeStatus, type FlowStatusNode } from '@/components/workbench/flowStatus'
+import { getStepMetadata } from '@/api/type'
+import { useHomeData } from '@/composables/useHomeData'
 import { useSubflow } from '@/composables/useSubflow'
+import { useRoute } from 'vue-router'
 
 const { currentStepTitle, isLoading, subflowSteps } = useSubflow()
+const route = useRoute()
+const {
+  currentWorkspaceFlowExecutionActive,
+  ensureFlowLogSegmentContentLoaded,
+  flowLogContentByKey,
+  flowLogError,
+  flowLogLoading,
+  flowLogSegments,
+} = useHomeData()
 
 let isResizing = false
 
@@ -23,6 +36,23 @@ const flowNodes = computed<FlowStatusNode[]>(() =>
   })),
 )
 const flowTitle = computed(() => `${currentStepTitle.value} subflow`)
+const currentStepLogNode = computed<FlowStatusNode | null>(() => {
+  const stepKey = typeof route.params.step === 'string' ? route.params.step : ''
+  if (!stepKey) return null
+
+  const metadata = getStepMetadata(stepKey)
+  const label = metadata?.label ?? stepKey
+  const segment = flowLogSegments.value.find(
+    (item) => item.stepName.trim().toLowerCase() === label.trim().toLowerCase(),
+  )
+  return {
+    id: `workspace-log:${metadata?.path ?? stepKey}`,
+    label: segment?.stepName ?? label,
+    status: flowNodeStatus(segment?.state),
+    runtime: '',
+    peakMemoryMb: null,
+  }
+})
 
 function handleMouseDown(event: MouseEvent): void {
   const target = event.target as HTMLElement
@@ -75,6 +105,17 @@ onUnmounted(() => {
           </SplitterPanel>
         </Splitter>
       </div>
+    </template>
+    <template #right-log>
+      <FlowLogPanel
+        :content-by-key="flowLogContentByKey"
+        :ensure-content="ensureFlowLogSegmentContentLoaded"
+        :error="flowLogError"
+        :execution-active="currentWorkspaceFlowExecutionActive"
+        :loading="flowLogLoading"
+        :selected-node="currentStepLogNode"
+        :segments="flowLogSegments"
+      />
     </template>
   </WorkspaceWorkbench>
 </template>

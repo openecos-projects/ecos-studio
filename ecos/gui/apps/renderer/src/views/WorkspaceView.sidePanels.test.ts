@@ -29,6 +29,16 @@ describe('WorkspaceView layout side panels', () => {
     expect(source).not.toContain('Create Workspace From Current Step')
     expect(source).not.toContain('createWorkspaceFromCurrentStep')
     expect(source).not.toContain('project-context-actions')
-    expect(source).not.toContain('useRoute')
+  })
+
+  it('renders the current flow step log with the same Home log panel', () => {
+    expect(source).toContain("import FlowLogPanel from '@/components/workbench/FlowLogPanel.vue'")
+    expect(source).toContain('useHomeData()')
+    expect(source).toContain('const currentStepLogNode')
+    expect(source).toContain('const stepKey = typeof route.params.step')
+    expect(source).toContain('getStepMetadata(stepKey)')
+    expect(source).toContain('<template #right-log>')
+    expect(source).toContain(':selected-node="currentStepLogNode"')
+    expect(source).toContain(':ensure-content="ensureFlowLogSegmentContentLoaded"')
   })
 })
