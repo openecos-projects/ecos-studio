@@ -16,10 +16,12 @@ describe('FlowStatusStrip compact flow layout', () => {
     expect(source).toContain("emit('select', node)")
   })
 
-  it('provides copy and full-screen actions for the status card', () => {
-    expect(source).toContain('copyStatus')
-    expect(source).toContain('ri-file-copy-line')
-    expect(source).toContain('ri-fullscreen-line')
+  it('keeps status selection in the card without extra header actions', () => {
+    expect(source).toContain("emit('select', node)")
+    expect(source).not.toContain('Copy flow status')
+    expect(source).not.toContain('Open flow status')
+    expect(source).not.toContain('ri-file-copy-line')
+    expect(source).not.toContain('ri-fullscreen-line')
   })
 
   it('does not reserve header space for aggregate status counts', () => {

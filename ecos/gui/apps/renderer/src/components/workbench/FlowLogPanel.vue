@@ -8,22 +8,9 @@
     <header>
       <div class="flow-log-title">
         <i class="ri-terminal-box-line" aria-hidden="true" />
-        <strong>Flow Step Log</strong>
+        <strong :title="logTitle">{{ logTitle }}</strong>
       </div>
       <div class="flow-log-actions">
-        <select
-          v-if="segments.length > 1"
-          v-model="selectedKey"
-          aria-label="Select a flow step log"
-        >
-          <option
-            v-for="segment in segments"
-            :key="keyFor(segment)"
-            :value="keyFor(segment)"
-          >
-            {{ segment.stepName }} - {{ segment.state }}
-          </option>
-        </select>
         <button
           type="button"
           :title="copied ? 'Copied' : 'Copy log'"
@@ -65,7 +52,13 @@
           :missing="selectedSegment.missing"
         />
       </div>
-      <div v-else class="flow-log-message">Waiting for the first flow step log.</div>
+      <div v-else class="flow-log-message">
+        {{
+          selectedNode
+            ? `No log is available for ${selectedNode.label}.`
+            : 'Waiting for the first flow step log.'
+        }}
+      </div>
     </div>
   </section>
 
@@ -73,7 +66,7 @@
     v-model:visible="dialogVisible"
     modal
     maximizable
-    :header="selectedSegment ? `${selectedSegment.stepName} Log` : 'Flow Step Log'"
+    :header="logTitle"
     :style="{ width: 'min(980px, calc(100vw - 32px))' }"
     :draggable="false"
   >
@@ -88,6 +81,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import FlowLogCodeViewer from '@/components/FlowLogCodeViewer.vue'
 import { copyFlowLogText } from '@/components/flowLogCopy'
+import { formatPeakMemory, type FlowStatusNode } from './flowStatus'
 import type { FlowLogSegment } from '@/composables/useHomeData'
 
 const props = defineProps<{
@@ -96,6 +90,7 @@ const props = defineProps<{
   error: string | null
   executionActive: boolean
   loading: boolean
+  selectedNode: FlowStatusNode | null
   segments: FlowLogSegment[]
 }>()
 
@@ -110,6 +105,13 @@ const selectedSegment = computed(
 const selectedContent = computed(() =>
   selectedSegment.value ? (props.contentByKey[keyFor(selectedSegment.value)] ?? '') : '',
 )
+const logTitle = computed(() => {
+  const node = props.selectedNode
+  if (!node) return 'Flow log'
+  return `${node.label} · Runtime ${node.runtime || '--'} · Peak memory ${formatPeakMemory(
+    node.peakMemoryMb,
+  )}`
+})
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 function keyFor(segment: FlowLogSegment): string {
@@ -129,15 +131,33 @@ async function copyLog(): Promise<void> {
   }
 }
 
+function selectSegmentForNode(): void {
+  const node = props.selectedNode
+  if (node) {
+    const matchingSegments = props.segments.filter(
+      (segment) =>
+        segment.stepName.trim().toLowerCase() === node.label.trim().toLowerCase(),
+    )
+    const segment = matchingSegments.find((item) => item.live) ?? matchingSegments[0]
+    selectedKey.value = segment ? keyFor(segment) : ''
+    return
+  }
+
+  const segment = props.segments.find((item) => item.live) ?? props.segments[0]
+  selectedKey.value = segment ? keyFor(segment) : ''
+}
+
+watch(
+  () => props.selectedNode?.id,
+  () => selectSegmentForNode(),
+  { immediate: true },
+)
+
 watch(
   () => props.segments,
   (segments) => {
     if (!segments.some((segment) => keyFor(segment) === selectedKey.value)) {
-      selectedKey.value = segments.find((segment) => segment.live)
-        ? keyFor(segments.find((segment) => segment.live)!)
-        : segments[0]
-          ? keyFor(segments[0])
-          : ''
+      selectSegmentForNode()
     }
   },
   { deep: true, immediate: true },
@@ -200,21 +220,17 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.flow-log-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .flow-log-actions {
   flex: 0 0 auto;
   gap: 2px;
   min-width: 0;
-}
-
-.flow-log-actions select {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  max-width: 130px;
-  min-width: 0;
-  padding: 3px 5px;
 }
 
 .flow-log-actions button {

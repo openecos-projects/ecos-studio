@@ -11,12 +11,13 @@
           :loading="loading"
           :nodes="nodes"
           :title="flowTitle"
+          @select="selectedFlowNode = $event"
         >
           <template #actions>
             <FlowRunControl />
           </template>
         </FlowStatusStrip>
-        <slot name="right-log" />
+        <slot name="right-log" :selected-node="selectedFlowNode" />
         <ChatInspectorPanel
           class="workspace-workbench-inspector"
           :toolbar-target="chatToolbarTarget"
@@ -27,17 +28,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import ChatInspectorPanel from '@/components/ChatInspectorPanel.vue'
 import FlowRunControl from './FlowRunControl.vue'
 import FlowStatusStrip from './FlowStatusStrip.vue'
-import type { FlowStatusNode } from './flowStatus'
+import { initialSelectedNodeId, type FlowStatusNode } from './flowStatus'
 
 const chatToolbarTarget = ref<HTMLElement | null>(null)
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     flowTitle: string
     loading?: boolean
@@ -45,6 +46,28 @@ withDefaults(
   }>(),
   { loading: false },
 )
+
+const selectedFlowNode = ref<FlowStatusNode | null>(findInitialNode(props.nodes))
+
+watch(
+  () => props.nodes,
+  (nodes) => {
+    selectedFlowNode.value =
+      nodes.find((node) => node.id === selectedFlowNode.value?.id) ??
+      findInitialNode(nodes)
+  },
+  { deep: true },
+)
+
+function findInitialNode(nodes: readonly FlowStatusNode[]): FlowStatusNode | null {
+  const id = initialSelectedNodeId(nodes)
+  return nodes.find((node) => node.id === id) ?? null
+}
+
+defineSlots<{
+  left(): unknown
+  'right-log'(props: { selectedNode: FlowStatusNode | null }): unknown
+}>()
 </script>
 
 <style scoped>

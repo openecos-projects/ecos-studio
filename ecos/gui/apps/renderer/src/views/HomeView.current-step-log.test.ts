@@ -9,11 +9,12 @@ describe('FlowLogPanel current-step viewer', () => {
     expect(flowLogPanelSource).toContain('<FlowLogCodeViewer')
   })
 
-  it('renders under the flow card during a run and supports selecting another step', () => {
+  it('renders under the flow card and changes with the selected flow step', () => {
     expect(flowLogPanelSource).toContain(
       'props.executionActive || props.segments.length > 0',
     )
-    expect(flowLogPanelSource).toContain('aria-label="Select a flow step log"')
-    expect(flowLogPanelSource).toContain('v-model="selectedKey"')
+    expect(flowLogPanelSource).toContain('selectSegmentForNode')
+    expect(flowLogPanelSource).toContain('props.selectedNode')
+    expect(flowLogPanelSource).not.toContain('aria-label="Select a flow step log"')
   })
 })

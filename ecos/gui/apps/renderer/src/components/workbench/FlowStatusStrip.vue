@@ -6,26 +6,6 @@
         <span>{{ title }}</span>
         <span v-if="loading" class="flow-status-refreshing">Updating</span>
       </div>
-      <div class="flow-status-card-actions">
-        <button
-          type="button"
-          :title="copied ? 'Copied' : 'Copy flow status'"
-          :aria-label="copied ? 'Copied flow status' : 'Copy flow status'"
-          :disabled="!selectedNode"
-          @click="copyStatus"
-        >
-          <i :class="copied ? 'ri-check-line' : 'ri-file-copy-line'" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          title="Open flow status"
-          aria-label="Open flow status"
-          :disabled="!selectedNode"
-          @click="dialogVisible = true"
-        >
-          <i class="ri-fullscreen-line" aria-hidden="true" />
-        </button>
-      </div>
     </header>
 
     <div class="flow-status-track-shell">
@@ -74,38 +54,10 @@
       </dl>
     </div>
   </section>
-
-  <Dialog
-    v-model:visible="dialogVisible"
-    modal
-    :header="selectedNode ? `${selectedNode.label} Flow Status` : 'Flow Status'"
-    :style="{ width: 'min(620px, calc(100vw - 32px))' }"
-    :draggable="false"
-  >
-    <dl v-if="selectedNode" class="flow-status-dialog-content">
-      <div>
-        <dt>Status</dt>
-        <dd>{{ statusLabel(selectedNode.status) }}</dd>
-      </div>
-      <div>
-        <dt>Runtime</dt>
-        <dd>{{ selectedNode.runtime || '--' }}</dd>
-      </div>
-      <div>
-        <dt>Peak memory</dt>
-        <dd>{{ formatPeakMemory(selectedNode.peakMemoryMb) }}</dd>
-      </div>
-      <div v-if="selectedNode.detail">
-        <dt>Latest update</dt>
-        <dd>{{ selectedNode.detail }}</dd>
-      </div>
-    </dl>
-  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import Dialog from 'primevue/dialog'
+import { computed, ref, watch } from 'vue'
 import {
   formatPeakMemory,
   initialSelectedNodeId,
@@ -128,15 +80,12 @@ const emit = defineEmits<{
 }>()
 
 const selectedId = ref<string | null>(initialSelectedNodeId(props.nodes))
-const dialogVisible = ref(false)
-const copied = ref(false)
 const selectedNode = computed(
   () => props.nodes.find((node) => node.id === selectedId.value) ?? null,
 )
 const trackStyle = computed(() => ({
   '--flow-step-count': String(Math.max(props.nodes.length, 1)),
 }))
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(
   () => props.nodes,
@@ -153,34 +102,6 @@ function selectNode(id: string): void {
   const node = props.nodes.find((item) => item.id === id)
   if (node) emit('select', node)
 }
-
-async function copyStatus(): Promise<void> {
-  if (!selectedNode.value) return
-  const node = selectedNode.value
-  const content = [
-    `${node.label}: ${statusLabel(node.status)}`,
-    `Runtime: ${node.runtime || '--'}`,
-    `Peak memory: ${formatPeakMemory(node.peakMemoryMb)}`,
-    node.detail ? `Latest update: ${node.detail}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
-  try {
-    await navigator.clipboard.writeText(content)
-    copied.value = true
-    if (copiedTimer) clearTimeout(copiedTimer)
-    copiedTimer = setTimeout(() => {
-      copied.value = false
-      copiedTimer = null
-    }, 1200)
-  } catch {
-    copied.value = false
-  }
-}
-
-onBeforeUnmount(() => {
-  if (copiedTimer) clearTimeout(copiedTimer)
-})
 </script>
 
 <style scoped>
@@ -202,7 +123,6 @@ onBeforeUnmount(() => {
 }
 
 .flow-status-heading,
-.flow-status-card-actions,
 .flow-status-detail-title {
   align-items: center;
   display: flex;
@@ -214,33 +134,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
   gap: 6px;
   min-width: 0;
-}
-
-.flow-status-card-actions {
-  flex: 0 0 auto;
-  gap: 2px;
-}
-
-.flow-status-card-actions button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: inline-flex;
-  height: 22px;
-  justify-content: center;
-  padding: 0;
-  width: 22px;
-}
-
-.flow-status-card-actions button:hover:not(:disabled) {
-  color: var(--accent-color);
-}
-
-.flow-status-card-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
 }
 
 .flow-status-heading span:not(.flow-status-refreshing) {

@@ -235,13 +235,14 @@
       </main>
     </template>
 
-    <template #right-log>
+    <template #right-log="{ selectedNode }">
       <FlowLogPanel
         :content-by-key="flowLogContentByKey"
         :ensure-content="ensureFlowLogSegmentContentLoaded"
         :error="flowLogError"
         :execution-active="currentWorkspaceFlowExecutionActive"
         :loading="flowLogLoading"
+        :selected-node="selectedNode"
         :segments="flowLogSegments"
       />
     </template>
